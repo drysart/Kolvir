@@ -43,28 +43,36 @@ public interface IXPlatApplicationBackend
     /// forwarded and this process should exit.
     /// </returns>
     /// <remarks>
-    /// Called once, from the <see cref="XPlatApplication"/> constructor, before any window exists and
-    /// before <see cref="Run"/>. The key to claim is <see cref="XPlatApplication.InstanceKey"/>; a
-    /// backend whose platform needs a different shape, such as GTK4's reverse-DNS application id,
-    /// converts it itself. A backend that forwards a launch raises <see cref="SecondInstance"/>.
+    /// Called once, from the <see cref="XPlatApplication"/> constructor, before any window exists
+    /// and before <see cref="Run"/>. The key to claim is <see
+    /// cref="XPlatApplication.InstanceKey"/>; a backend whose platform needs a different shape,
+    /// such as GTK4's reverse-DNS application id, converts it itself. A backend that forwards a
+    /// launch runs the handlers added by
+    /// <see cref="AddSecondInstanceHandler"/>.
     /// </remarks>
     bool TryClaimSingleInstance();
 
     /// <summary>
-    /// Raised when the platform asks the application to come forward without a new launch, such as a
-    /// click on the macOS Dock tile. May be raised on any thread.
+    /// Adds a handler that runs when the platform asks the application to come forward without a
+    /// new launch, such as a click on the macOS Dock tile. Handlers may run on any thread.
     /// </summary>
     /// <remarks>
     /// A backend whose platform cannot deliver this never raises it: on Windows the shell restores
     /// the window itself, and on GTK4 the request arrives as a forwarded command line instead.
     /// </remarks>
-    event EventHandler? Activated;
+    IDisposable AddActivatedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    void RemoveActivatedHandler(Action<object> handler);
 
     /// <summary>
-    /// Raised when another launch of the application was forwarded to this process, with that
-    /// launch's command line. May be raised on any thread.
+    /// Adds a handler that runs when another launch of the application was forwarded to this
+    /// process, with that launch's command line. Handlers may run on any thread.
     /// </summary>
-    event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler);
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler);
 
     /// <summary>Asks the loop to end with <paramref name="exitCode"/>. Safe to call from any thread.</summary>
     void Quit(int exitCode);

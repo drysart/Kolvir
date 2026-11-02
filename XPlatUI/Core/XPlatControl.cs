@@ -14,6 +14,25 @@ namespace XPlatUI;
 /// </remarks>
 public class XPlatControl : IDisposable
 {
+    private Action<object>? _click;
+    private Action<object, XPlatMouseEventArgs>? _mouseDown;
+    private Action<object, XPlatMouseEventArgs>? _mouseUp;
+    private Action<object, XPlatMouseEventArgs>? _mouseMove;
+    private Action<object>? _mouseEnter;
+    private Action<object>? _mouseLeave;
+    private Action<object, XPlatKeyEventArgs>? _keyDown;
+    private Action<object, XPlatKeyEventArgs>? _keyUp;
+    private Action<object, XPlatTextInputEventArgs>? _textInput;
+    private Action<object>? _gotFocus;
+    private Action<object>? _lostFocus;
+    private Action<object>? _boundsChanged;
+    private Action<object>? _textChanged;
+    private Action<object>? _visibleChanged;
+    private Action<object>? _enabledChanged;
+    private Action<object, XPlatDragEventArgs>? _dragEnter;
+    private Action<object, XPlatDragEventArgs>? _dragOver;
+    private Action<object>? _dragLeave;
+    private Action<object, XPlatDragEventArgs>? _dragDrop;
     private SKRect _bounds;
     private SKSize _desiredSize;
     private SKSize _minimumSize;
@@ -42,50 +61,278 @@ public class XPlatControl : IDisposable
         Name = GetType().Name;
     }
 
-    public event EventHandler? Click;
+    public IDisposable AddClickHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _click += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClickHandler, handler);
+    }
 
-    public event EventHandler<XPlatMouseEventArgs>? MouseDown;
+    /// <summary>Removes a handler that <see cref="AddClickHandler"/> added.</summary>
+    public void RemoveClickHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _click -= handler;
+    }
 
-    public event EventHandler<XPlatMouseEventArgs>? MouseUp;
+    public IDisposable AddMouseDownHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseDown += handler;
+        return new XPlatHandlerToken<Action<object, XPlatMouseEventArgs>>(RemoveMouseDownHandler, handler);
+    }
 
-    public event EventHandler<XPlatMouseEventArgs>? MouseMove;
+    /// <summary>Removes a handler that <see cref="AddMouseDownHandler"/> added.</summary>
+    public void RemoveMouseDownHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseDown -= handler;
+    }
 
-    public event EventHandler? MouseEnter;
+    public IDisposable AddMouseUpHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseUp += handler;
+        return new XPlatHandlerToken<Action<object, XPlatMouseEventArgs>>(RemoveMouseUpHandler, handler);
+    }
 
-    public event EventHandler? MouseLeave;
+    /// <summary>Removes a handler that <see cref="AddMouseUpHandler"/> added.</summary>
+    public void RemoveMouseUpHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseUp -= handler;
+    }
 
-    public event EventHandler<XPlatKeyEventArgs>? KeyDown;
+    public IDisposable AddMouseMoveHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseMove += handler;
+        return new XPlatHandlerToken<Action<object, XPlatMouseEventArgs>>(RemoveMouseMoveHandler, handler);
+    }
 
-    public event EventHandler<XPlatKeyEventArgs>? KeyUp;
+    /// <summary>Removes a handler that <see cref="AddMouseMoveHandler"/> added.</summary>
+    public void RemoveMouseMoveHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseMove -= handler;
+    }
 
-    public event EventHandler<XPlatTextInputEventArgs>? TextInput;
+    public IDisposable AddMouseEnterHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseEnter += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveMouseEnterHandler, handler);
+    }
 
-    public event EventHandler? GotFocus;
+    /// <summary>Removes a handler that <see cref="AddMouseEnterHandler"/> added.</summary>
+    public void RemoveMouseEnterHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseEnter -= handler;
+    }
 
-    public event EventHandler? LostFocus;
+    public IDisposable AddMouseLeaveHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseLeave += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveMouseLeaveHandler, handler);
+    }
 
-    public event EventHandler? BoundsChanged;
+    /// <summary>Removes a handler that <see cref="AddMouseLeaveHandler"/> added.</summary>
+    public void RemoveMouseLeaveHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseLeave -= handler;
+    }
 
-    public event EventHandler? TextChanged;
+    public IDisposable AddKeyDownHandler(Action<object, XPlatKeyEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _keyDown += handler;
+        return new XPlatHandlerToken<Action<object, XPlatKeyEventArgs>>(RemoveKeyDownHandler, handler);
+    }
 
-    public event EventHandler? VisibleChanged;
+    /// <summary>Removes a handler that <see cref="AddKeyDownHandler"/> added.</summary>
+    public void RemoveKeyDownHandler(Action<object, XPlatKeyEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _keyDown -= handler;
+    }
 
-    public event EventHandler? EnabledChanged;
+    public IDisposable AddKeyUpHandler(Action<object, XPlatKeyEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _keyUp += handler;
+        return new XPlatHandlerToken<Action<object, XPlatKeyEventArgs>>(RemoveKeyUpHandler, handler);
+    }
 
-    /// <summary>Raised when a drag enters the control. Only fires when <see cref="AllowDrop"/> is set.</summary>
-    public event EventHandler<XPlatDragEventArgs>? DragEnter;
+    /// <summary>Removes a handler that <see cref="AddKeyUpHandler"/> added.</summary>
+    public void RemoveKeyUpHandler(Action<object, XPlatKeyEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _keyUp -= handler;
+    }
 
-    /// <summary>Raised as a drag moves over the control. Only fires when <see cref="AllowDrop"/> is set.</summary>
-    public event EventHandler<XPlatDragEventArgs>? DragOver;
+    public IDisposable AddTextInputHandler(Action<object, XPlatTextInputEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _textInput += handler;
+        return new XPlatHandlerToken<Action<object, XPlatTextInputEventArgs>>(RemoveTextInputHandler, handler);
+    }
 
-    /// <summary>Raised when a drag leaves the control or the drag is cancelled.</summary>
-    public event EventHandler? DragLeave;
+    /// <summary>Removes a handler that <see cref="AddTextInputHandler"/> added.</summary>
+    public void RemoveTextInputHandler(Action<object, XPlatTextInputEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _textInput -= handler;
+    }
+
+    public IDisposable AddGotFocusHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _gotFocus += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveGotFocusHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddGotFocusHandler"/> added.</summary>
+    public void RemoveGotFocusHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _gotFocus -= handler;
+    }
+
+    public IDisposable AddLostFocusHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _lostFocus += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveLostFocusHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddLostFocusHandler"/> added.</summary>
+    public void RemoveLostFocusHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _lostFocus -= handler;
+    }
+
+    public IDisposable AddBoundsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _boundsChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveBoundsChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddBoundsChangedHandler"/> added.</summary>
+    public void RemoveBoundsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _boundsChanged -= handler;
+    }
+
+    public IDisposable AddTextChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _textChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveTextChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddTextChangedHandler"/> added.</summary>
+    public void RemoveTextChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _textChanged -= handler;
+    }
+
+    public IDisposable AddVisibleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _visibleChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveVisibleChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddVisibleChangedHandler"/> added.</summary>
+    public void RemoveVisibleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _visibleChanged -= handler;
+    }
+
+    public IDisposable AddEnabledChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _enabledChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveEnabledChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddEnabledChangedHandler"/> added.</summary>
+    public void RemoveEnabledChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _enabledChanged -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when a drag enters the control. It only runs when <see cref="AllowDrop"/> is set.</summary>
+    public IDisposable AddDragEnterHandler(Action<object, XPlatDragEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragEnter += handler;
+        return new XPlatHandlerToken<Action<object, XPlatDragEventArgs>>(RemoveDragEnterHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDragEnterHandler"/> added.</summary>
+    public void RemoveDragEnterHandler(Action<object, XPlatDragEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragEnter -= handler;
+    }
+
+    /// <summary>Adds a handler that runs as a drag moves over the control. It only runs when <see cref="AllowDrop"/> is set.</summary>
+    public IDisposable AddDragOverHandler(Action<object, XPlatDragEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragOver += handler;
+        return new XPlatHandlerToken<Action<object, XPlatDragEventArgs>>(RemoveDragOverHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDragOverHandler"/> added.</summary>
+    public void RemoveDragOverHandler(Action<object, XPlatDragEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragOver -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when a drag leaves the control or the drag is cancelled.</summary>
+    public IDisposable AddDragLeaveHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragLeave += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDragLeaveHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDragLeaveHandler"/> added.</summary>
+    public void RemoveDragLeaveHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragLeave -= handler;
+    }
 
     /// <summary>
-    /// Raised when the user releases a drag over the control. Only fires when
+    /// Adds a handler that runs when the user releases a drag over the control. It only runs when
     /// <see cref="AllowDrop"/> is set.
     /// </summary>
-    public event EventHandler<XPlatDragEventArgs>? DragDrop;
+    public IDisposable AddDragDropHandler(Action<object, XPlatDragEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragDrop += handler;
+        return new XPlatHandlerToken<Action<object, XPlatDragEventArgs>>(RemoveDragDropHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDragDropHandler"/> added.</summary>
+    public void RemoveDragDropHandler(Action<object, XPlatDragEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dragDrop -= handler;
+    }
 
     /// <summary>Diagnostic name; defaults to the type name.</summary>
     public string Name { get; set; }
@@ -150,7 +397,7 @@ public class XPlatControl : IDisposable
             }
 
             _text = value;
-            OnTextChanged(EventArgs.Empty);
+            OnTextChanged();
             Invalidate();
         }
     }
@@ -168,7 +415,7 @@ public class XPlatControl : IDisposable
             }
 
             _bounds = normalized;
-            OnBoundsChanged(EventArgs.Empty);
+            OnBoundsChanged();
         }
     }
 
@@ -264,7 +511,7 @@ public class XPlatControl : IDisposable
                 Host?.SetFocus(null);
             }
 
-            OnVisibleChanged(EventArgs.Empty);
+            OnVisibleChanged();
         }
     }
 
@@ -284,7 +531,7 @@ public class XPlatControl : IDisposable
                 Host?.SetFocus(null);
             }
 
-            OnEnabledChanged(EventArgs.Empty);
+            OnEnabledChanged();
         }
     }
 
@@ -536,7 +783,8 @@ public class XPlatControl : IDisposable
 
     /// <summary>
     /// Background painted while <see cref="BackColor"/> has never been assigned. The base control
-    /// is transparent; containers default to the theme surface and editable fields to the input fill.
+    /// is transparent; containers default to the theme surface and editable fields to the input
+    /// fill.
     /// </summary>
     protected virtual SKColor? DefaultBackColor => null;
 
@@ -694,18 +942,18 @@ public class XPlatControl : IDisposable
     /// animates never has to override <see cref="Dispose(bool)"/> just to release its clock.
     /// </summary>
     /// <param name="interval">The interval between ticks; must be positive.</param>
-    /// <param name="handler">The handler for the timer's <see cref="XPlatTimer.Tick"/> event.</param>
+    /// <param name="handler">The handler for the timer's <see cref="XPlatTimer.AddTickHandler"/> event.</param>
     /// <returns>The new timer, which starts out stopped.</returns>
     /// <remarks>
     /// Only run it while it is actually needed. A timer that keeps ticking for a control nobody is
     /// looking at is exactly the cost that makes a single application-wide tick a bad fit.
     /// </remarks>
-    protected internal XPlatTimer CreateTimer(TimeSpan interval, EventHandler handler)
+    protected internal XPlatTimer CreateTimer(TimeSpan interval, Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
 
         var timer = new XPlatTimer(interval);
-        timer.Tick += handler;
+        timer.AddTickHandler(handler);
         return Own(timer);
     }
 
@@ -771,7 +1019,7 @@ public class XPlatControl : IDisposable
         }
 
         IsMouseOver = true;
-        OnMouseEnter(EventArgs.Empty);
+        OnMouseEnter();
         Invalidate();
     }
 
@@ -783,7 +1031,7 @@ public class XPlatControl : IDisposable
         }
 
         IsMouseOver = false;
-        OnMouseLeave(EventArgs.Empty);
+        OnMouseLeave();
         Invalidate();
     }
 
@@ -834,7 +1082,7 @@ public class XPlatControl : IDisposable
     {
         if (Enabled)
         {
-            OnDragLeave(EventArgs.Empty);
+            OnDragLeave();
         }
     }
 
@@ -849,7 +1097,7 @@ public class XPlatControl : IDisposable
     internal void RaiseGotFocus()
     {
         IsFocused = true;
-        OnGotFocus(EventArgs.Empty);
+        OnGotFocus();
         Invalidate();
     }
 
@@ -857,7 +1105,7 @@ public class XPlatControl : IDisposable
     {
         IsFocused = false;
         IsPressed = false;
-        OnLostFocus(EventArgs.Empty);
+        OnLostFocus();
         Invalidate();
     }
 
@@ -917,58 +1165,58 @@ public class XPlatControl : IDisposable
         }
     }
 
-    protected virtual void OnMouseDown(XPlatMouseEventArgs e) => MouseDown?.Invoke(this, e);
+    protected virtual void OnMouseDown(XPlatMouseEventArgs e) => _mouseDown?.Invoke(this, e);
 
-    protected virtual void OnMouseUp(XPlatMouseEventArgs e) => MouseUp?.Invoke(this, e);
+    protected virtual void OnMouseUp(XPlatMouseEventArgs e) => _mouseUp?.Invoke(this, e);
 
-    protected virtual void OnMouseMove(XPlatMouseEventArgs e) => MouseMove?.Invoke(this, e);
+    protected virtual void OnMouseMove(XPlatMouseEventArgs e) => _mouseMove?.Invoke(this, e);
 
-    protected virtual void OnMouseEnter(EventArgs e) => MouseEnter?.Invoke(this, e);
+    protected virtual void OnMouseEnter() => _mouseEnter?.Invoke(this);
 
-    protected virtual void OnMouseLeave(EventArgs e) => MouseLeave?.Invoke(this, e);
+    protected virtual void OnMouseLeave() => _mouseLeave?.Invoke(this);
 
-    protected virtual void OnClick(EventArgs e) => Click?.Invoke(this, e);
+    protected virtual void OnClick() => _click?.Invoke(this);
 
-    protected virtual void OnKeyDown(XPlatKeyEventArgs e) => KeyDown?.Invoke(this, e);
+    protected virtual void OnKeyDown(XPlatKeyEventArgs e) => _keyDown?.Invoke(this, e);
 
-    protected virtual void OnKeyUp(XPlatKeyEventArgs e) => KeyUp?.Invoke(this, e);
+    protected virtual void OnKeyUp(XPlatKeyEventArgs e) => _keyUp?.Invoke(this, e);
 
-    protected virtual void OnTextInput(XPlatTextInputEventArgs e) => TextInput?.Invoke(this, e);
+    protected virtual void OnTextInput(XPlatTextInputEventArgs e) => _textInput?.Invoke(this, e);
 
-    protected virtual void OnDragEnter(XPlatDragEventArgs e) => DragEnter?.Invoke(this, e);
+    protected virtual void OnDragEnter(XPlatDragEventArgs e) => _dragEnter?.Invoke(this, e);
 
-    protected virtual void OnDragOver(XPlatDragEventArgs e) => DragOver?.Invoke(this, e);
+    protected virtual void OnDragOver(XPlatDragEventArgs e) => _dragOver?.Invoke(this, e);
 
-    protected virtual void OnDragLeave(EventArgs e) => DragLeave?.Invoke(this, e);
+    protected virtual void OnDragLeave() => _dragLeave?.Invoke(this);
 
-    protected virtual void OnDragDrop(XPlatDragEventArgs e) => DragDrop?.Invoke(this, e);
+    protected virtual void OnDragDrop(XPlatDragEventArgs e) => _dragDrop?.Invoke(this, e);
 
-    protected virtual void OnGotFocus(EventArgs e) => GotFocus?.Invoke(this, e);
+    protected virtual void OnGotFocus() => _gotFocus?.Invoke(this);
 
-    protected virtual void OnLostFocus(EventArgs e) => LostFocus?.Invoke(this, e);
+    protected virtual void OnLostFocus() => _lostFocus?.Invoke(this);
 
-    protected virtual void OnTextChanged(EventArgs e)
+    protected virtual void OnTextChanged()
     {
-        TextChanged?.Invoke(this, e);
+        _textChanged?.Invoke(this);
         Host?.Selection.Refresh();
         PerformLayout();
     }
 
-    protected virtual void OnVisibleChanged(EventArgs e)
+    protected virtual void OnVisibleChanged()
     {
-        VisibleChanged?.Invoke(this, e);
+        _visibleChanged?.Invoke(this);
         Invalidate();
     }
 
-    protected virtual void OnEnabledChanged(EventArgs e)
+    protected virtual void OnEnabledChanged()
     {
-        EnabledChanged?.Invoke(this, e);
+        _enabledChanged?.Invoke(this);
         Invalidate();
     }
 
-    protected virtual void OnBoundsChanged(EventArgs e)
+    protected virtual void OnBoundsChanged()
     {
-        BoundsChanged?.Invoke(this, e);
+        _boundsChanged?.Invoke(this);
         PerformLayout();
         Invalidate();
     }

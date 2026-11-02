@@ -2,7 +2,7 @@ using SkiaSharp;
 
 namespace XPlatUI;
 
-public class XPlatMouseEventArgs : EventArgs
+public class XPlatMouseEventArgs
 {
     public XPlatMouseEventArgs(
         SKPoint location,
@@ -28,7 +28,7 @@ public class XPlatMouseEventArgs : EventArgs
     public bool Handled { get; set; }
 }
 
-public class XPlatKeyEventArgs : EventArgs
+public class XPlatKeyEventArgs
 {
     public XPlatKeyEventArgs(XPlatKey key, XPlatModifiers modifiers = XPlatModifiers.None)
     {
@@ -43,7 +43,7 @@ public class XPlatKeyEventArgs : EventArgs
     public bool Handled { get; set; }
 }
 
-public class XPlatTextInputEventArgs : EventArgs
+public class XPlatTextInputEventArgs
 {
     public XPlatTextInputEventArgs(string text) => Text = text;
 

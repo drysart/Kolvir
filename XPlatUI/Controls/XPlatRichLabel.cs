@@ -32,6 +32,7 @@ namespace XPlatUI;
 /// </example>
 public class XPlatRichLabel : XPlatControl
 {
+    private Action<object, XPlatSpanEventArgs>? _spanClick;
     private enum FragmentKind
     {
         Word,
@@ -66,8 +67,20 @@ public class XPlatRichLabel : XPlatControl
         _spans.AddRange(spans);
     }
 
-    /// <summary>Raised when a span is clicked (pressed and released over the same span).</summary>
-    public event EventHandler<XPlatSpanEventArgs>? SpanClick;
+    /// <summary>Adds a handler that runs when a span is clicked (pressed and released over the same span).</summary>
+    public IDisposable AddSpanClickHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _spanClick += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSpanEventArgs>>(RemoveSpanClickHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSpanClickHandler"/> added.</summary>
+    public void RemoveSpanClickHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _spanClick -= handler;
+    }
 
     /// <summary>The formatted runs of this label, in flow order.</summary>
     public XPlatTextSpanCollection Spans => _spans;
@@ -169,7 +182,7 @@ public class XPlatRichLabel : XPlatControl
                 _spans.Add(new XPlatTextSpan(text));
             }
 
-            OnTextChanged(EventArgs.Empty);
+            OnTextChanged();
         }
     }
 
@@ -190,7 +203,7 @@ public class XPlatRichLabel : XPlatControl
 
         if (onClick is not null)
         {
-            span.Click += (_, e) => onClick(e.Span);
+            span.AddClickHandler((_, e) => onClick(e.Span));
         }
 
         return AddSpan(span);
@@ -324,7 +337,7 @@ public class XPlatRichLabel : XPlatControl
             {
                 var args = new XPlatSpanEventArgs(pressed, e.Location, e.Button, e.Modifiers, e.ClickCount);
                 pressed.RaiseClick(args);
-                SpanClick?.Invoke(this, args);
+                _spanClick?.Invoke(this, args);
             }
 
             Invalidate();
@@ -333,10 +346,10 @@ public class XPlatRichLabel : XPlatControl
         base.OnMouseUp(e);
     }
 
-    protected override void OnMouseLeave(EventArgs e)
+    protected override void OnMouseLeave()
     {
         SetHoverSpan(null);
-        base.OnMouseLeave(e);
+        base.OnMouseLeave();
     }
 
     internal override void OnControlAdded(XPlatControl control)
@@ -897,7 +910,8 @@ public class XPlatRichLabel : XPlatControl
 
     /// <summary>
     /// Fills the hover/press background once per run of adjacent fragments of the same span, so a
-    /// highlighted span reads as one continuous shape instead of one rounded box per word and space.
+    /// highlighted span reads as one continuous shape instead of one rounded box per word and
+    /// space.
     /// </summary>
     private void DrawSpanHighlights(SKCanvas canvas, Line line, SKPaint paint)
     {
@@ -980,9 +994,9 @@ public class XPlatRichLabel : XPlatControl
     }
 
     /// <summary>
-    /// Returns the index of the last fragment in the run of adjacent fragments belonging to the same
-    /// span as <paramref name="start"/>, along with the run's horizontal extent. Spaces inside a run
-    /// are part of it, so decorations and highlights continue across the gaps between words.
+    /// Returns the index of the last fragment in the run of adjacent fragments belonging to the
+    /// same span as <paramref name="start"/>, along with the run's horizontal extent. Spaces inside
+    /// a run are part of it, so decorations and highlights continue across the gaps between words.
     /// </summary>
     private static int FindRunEnd(List<Fragment> fragments, int start, out float left, out float right)
     {

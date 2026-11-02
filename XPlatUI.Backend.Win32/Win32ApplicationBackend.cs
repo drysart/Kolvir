@@ -25,6 +25,7 @@ namespace XPlatUI.Backend.Win32;
 /// </remarks>
 public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
 {
+    private Action<object, XPlatSecondInstanceEventArgs>? _secondInstance;
     private const string MessageWindowClass = "XPlatUI.MessageWindow";
 
     private readonly Queue<Action> _pending = new();
@@ -52,16 +53,16 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
     /// The Windows light/dark preference, as the application will see it.
     /// </summary>
     /// <remarks>
-    /// Exposed because the palette sometimes has to be right before an <see cref="XPlatApplication"/>
-    /// exists: the harness's headless <c>--render</c> mode paints through the headless backend,
-    /// which installs no system theme, so the host applies this one itself.
+    /// Exposed because the palette sometimes has to be right before an <see
+    /// cref="XPlatApplication"/> exists: the harness's headless <c>--render</c> mode paints through
+    /// the headless backend, which installs no system theme, so the host applies this one itself.
     /// </remarks>
     public IXPlatSystemTheme SystemTheme { get; } = new Win32SystemTheme();
 
     /// <summary>
-    /// True when the UI thread is in a single-threaded COM apartment, which the shell's file dialogs
-    /// require. False means <see cref="IXPlatDialogService.OpenFile"/> and friends will refuse rather
-    /// than hang; see <see cref="InitializeCom"/>.
+    /// True when the UI thread is in a single-threaded COM apartment, which the shell's file
+    /// dialogs require. False means <see cref="IXPlatDialogService.OpenFile"/> and friends will
+    /// refuse rather than hang; see <see cref="InitializeCom"/>.
     /// </summary>
     internal bool IsSingleThreadedApartment { get; private set; }
 
@@ -122,23 +123,40 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
             return false;
         }
 
-        _instanceLock.SecondInstance += (_, e) => SecondInstance?.Invoke(this, e);
+        _instanceLock.AddSecondInstanceHandler((_, e) => _secondInstance?.Invoke(this, e));
         return true;
     }
 
     /// <inheritdoc />
     /// <remarks>
-    /// Never raised: Windows activates a window from the shell itself, so the backend has no
-    /// re-activation to report.
+    /// The handler is never run and is not stored: Windows activates a window from the shell
+    /// itself, so the backend has no re-activation to report. The token still removes it, which
+    /// keeps the contract uniform for a caller that subscribes to every backend the same way.
     /// </remarks>
-    public event EventHandler? Activated
+    public IDisposable AddActivatedHandler(Action<object> handler)
     {
-        add { }
-        remove { }
+        ArgumentNullException.ThrowIfNull(handler);
+
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
     }
 
     /// <inheritdoc />
-    public event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    public void RemoveActivatedHandler(Action<object> handler) => ArgumentNullException.ThrowIfNull(handler);
+
+    /// <inheritdoc />
+    public IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
 
     /// <inheritdoc />
     public void Quit(int exitCode)

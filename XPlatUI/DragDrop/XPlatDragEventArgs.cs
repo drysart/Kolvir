@@ -11,7 +11,7 @@ namespace XPlatUI;
 /// narrows it (or sets <see cref="XPlatDragDropEffects.None"/> to refuse the drop) before the
 /// backend is told what to show in its drag cursor.
 /// </remarks>
-public class XPlatDragEventArgs : EventArgs
+public class XPlatDragEventArgs
 {
     /// <summary>Creates the arguments for one drag event.</summary>
     /// <param name="data">The payload being dragged.</param>

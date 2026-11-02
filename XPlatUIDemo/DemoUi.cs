@@ -54,7 +54,7 @@ public sealed class DemoUi
             ClientSize = new SKSize(width, height),
         };
 
-        window.Shown += (_, _) => backend.LastWindow!.SavePng(path);
+        window.AddShownHandler(_ => backend.LastWindow!.SavePng(path));
         window.Show();
         application.Run();
     }
@@ -79,7 +79,7 @@ public sealed class DemoUi
         // The whole window takes drops, so files dragged in from the desktop and text dragged from
         // any application land here unless the control under the pointer handles drops itself.
         root.AllowDrop = true;
-        root.DragDrop += (_, e) => OnRootDrop(e);
+        root.AddDragDropHandler((_, e) => OnRootDrop(e));
 
         return root;
     }
@@ -127,7 +127,8 @@ public sealed class DemoUi
 
     /// <summary>
     /// Swaps the palette. The library repaints on its own (the host listens to
-    /// <see cref="XPlatTheme.Changed"/>), so this is the whole of the application's dark mode story.
+    /// <see cref="XPlatTheme.AddChangedHandler"/>), so this is the whole of the application's dark mode
+    /// story.
     /// </summary>
     private XPlatButton BuildAppearanceButton()
     {
@@ -139,7 +140,7 @@ public sealed class DemoUi
             Margin = new XPlatThickness(8f, 20f, 28f, 0f),
         };
 
-        button.Click += (_, _) => SetAppearance(XPlatTheme.IsDarkMode ? XPlatPalette.Light : XPlatPalette.Dark);
+        button.AddClickHandler(_ => SetAppearance(XPlatTheme.IsDarkMode ? XPlatPalette.Light : XPlatPalette.Dark));
 
         return button;
     }
@@ -170,7 +171,7 @@ public sealed class DemoUi
             Margin = new XPlatThickness(8f, 20f, 8f, 0f),
         };
 
-        button.Click += (_, _) => ShowOwnedWindow();
+        button.AddClickHandler(_ => ShowOwnedWindow());
 
         return button;
     }
@@ -205,12 +206,12 @@ public sealed class DemoUi
             AutoSize = true,
             Margin = new XPlatThickness(8f, 16f, 28f, 16f),
         };
-        resetButton.Click += (_, _) =>
+        resetButton.AddClickHandler(_ =>
         {
             _clicks = 0;
             UpdateCounter();
             SetStatus("Counter reset.");
-        };
+        });
 
         var toggleButton = new XPlatButton("Disable primary")
         {
@@ -219,12 +220,12 @@ public sealed class DemoUi
             AutoSize = true,
             Margin = new XPlatThickness(8f, 16f, 0f, 16f),
         };
-        toggleButton.Click += (_, _) =>
+        toggleButton.AddClickHandler(_ =>
         {
             _primaryButton.Enabled = !_primaryButton.Enabled;
             toggleButton.Text = _primaryButton.Enabled ? "Disable primary" : "Enable primary";
             SetStatus(_primaryButton.Enabled ? "Primary action enabled." : "Primary action disabled.");
-        };
+        });
 
         footer.Controls.Add(_statusLabel);
         footer.Controls.Add(resetButton);
@@ -282,16 +283,16 @@ public sealed class DemoUi
             MaxLength = 24,
             AllowDrop = true,
         };
-        nameBox.TextChanged += (_, _) => SetStatus(nameBox.Text.Length == 0
+        nameBox.AddTextChangedHandler(_ => SetStatus(nameBox.Text.Length == 0
             ? "Name cleared."
-            : $"Name: {nameBox.Text} ({nameBox.Text.Length}/{nameBox.MaxLength})");
+            : $"Name: {nameBox.Text} ({nameBox.Text.Length}/{nameBox.MaxLength})"));
 
         var passwordBox = new XPlatTextBox
         {
             IsPassword = true,
             PlaceholderText = "Password",
         };
-        passwordBox.TextChanged += (_, _) => SetStatus($"Password length: {passwordBox.Text.Length}");
+        passwordBox.AddTextChangedHandler(_ => SetStatus($"Password length: {passwordBox.Text.Length}"));
 
         var readOnlyBox = new XPlatTextBox
         {
@@ -405,7 +406,7 @@ public sealed class DemoUi
             Style = XPlatButtonStyle.Secondary,
             Margin = new XPlatThickness(0f, 0f, 8f, 0f),
         };
-        button.Click += (_, _) => onClick();
+        button.AddClickHandler(_ => onClick());
         return button;
     }
 
@@ -547,7 +548,7 @@ public sealed class DemoUi
             Panel2MinSize = 180f,
             Margin = new XPlatThickness(0f, 6f, 0f, 0f),
         };
-        split.SplitterMoved += (_, _) => SetStatus($"Splitter moved: panel 1 is {split.SplitterDistance:0} px wide.");
+        split.AddSplitterMovedHandler(_ => SetStatus($"Splitter moved: panel 1 is {split.SplitterDistance:0} px wide."));
 
         split.Panel1.Controls.Add(Heading("Navigation"));
         split.Panel1.Controls.Add(DemoButton("Dashboard", () => SetStatus("Dashboard selected.")));
@@ -598,7 +599,7 @@ public sealed class DemoUi
             Style = XPlatButtonStyle.Secondary,
             Margin = new XPlatThickness(0f, 0f, 0f, 8f),
         };
-        button.Click += (_, _) => onClick();
+        button.AddClickHandler(_ => onClick());
         return button;
     }
 
@@ -745,8 +746,8 @@ public sealed class DemoUi
 
         var link = rich.AddLink("clickable link", span => SetStatus($"Link span clicked: \"{span.Text}\" (tag: {span.Tag ?? "none"})."));
         link.Tag = "demo";
-        link.MouseEnter += (_, _) => SetStatus("Pointer entered a link span - spans receive mouse events.");
-        link.MouseLeave += (_, _) => SetStatus("Pointer left the link span.");
+        link.AddMouseEnterHandler(_ => SetStatus("Pointer entered a link span - spans receive mouse events."));
+        link.AddMouseLeaveHandler(_ => SetStatus("Pointer left the link span."));
 
         rich.AddText(". Only the glyphs of a span are hit-tested.");
         rich.AddText("\nLive chips in the flow, aligned per line: ");
@@ -803,7 +804,7 @@ public sealed class DemoUi
             MinimumSize = new SKSize(0f, 26f),
             CornerRadius = 13f,
         };
-        chip.Click += (_, _) => SetStatus($"Inline chip '{text}' clicked.");
+        chip.AddClickHandler(_ => SetStatus($"Inline chip '{text}' clicked."));
         return chip;
     }
 
@@ -844,7 +845,7 @@ public sealed class DemoUi
             Margin = new XPlatThickness(0f, 0f, 0f, 6f),
             Selectable = true,
         };
-        whole.Click += (_, _) => SetStatus("Whole-control button clicked - a drag over it selects the button as one unit.");
+        whole.AddClickHandler(_ => SetStatus("Whole-control button clicked - a drag over it selects the button as one unit."));
         card.Controls.Add(whole);
 
         card.Controls.Add(new XPlatTextBox
@@ -879,12 +880,12 @@ public sealed class DemoUi
             Style = XPlatButtonStyle.Primary,
             Margin = new XPlatThickness(0f, 0f, 0f, 10f),
         };
-        _primaryButton.Click += (_, _) =>
+        _primaryButton.AddClickHandler(_ =>
         {
             _clicks++;
             UpdateCounter();
             SetStatus($"Primary action clicked {_clicks} time(s).");
-        };
+        });
         card.Controls.Add(_primaryButton);
 
         var secondary = new XPlatButton("Secondary action")
@@ -894,7 +895,7 @@ public sealed class DemoUi
             Style = XPlatButtonStyle.Secondary,
             Margin = new XPlatThickness(0f, 0f, 0f, 10f),
         };
-        secondary.Click += (_, _) => SetStatus("Secondary action clicked.");
+        secondary.AddClickHandler(_ => SetStatus("Secondary action clicked."));
         card.Controls.Add(secondary);
 
         var ghost = new XPlatButton("Ghost action")
@@ -904,7 +905,7 @@ public sealed class DemoUi
             Style = XPlatButtonStyle.Ghost,
             Margin = new XPlatThickness(0f, 0f, 0f, 10f),
         };
-        ghost.Click += (_, _) => SetStatus("Ghost action clicked.");
+        ghost.AddClickHandler(_ => SetStatus("Ghost action clicked."));
         card.Controls.Add(ghost);
 
         card.Controls.Add(new XPlatLabel("Tab moves focus between controls; Enter or Space activates the focused button.")

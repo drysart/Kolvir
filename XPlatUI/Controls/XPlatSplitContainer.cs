@@ -20,6 +20,9 @@ namespace XPlatUI;
 /// </remarks>
 public class XPlatSplitContainer : XPlatControl
 {
+    private Action<object>? _splitterMoving;
+    private Action<object>? _splitterMoved;
+    private Action<object>? _splitterDistanceChanged;
     private const float KeyboardStep = 8f;
 
     private XPlatOrientation _orientation = XPlatOrientation.Vertical;
@@ -44,14 +47,50 @@ public class XPlatSplitContainer : XPlatControl
         UpdateCursor();
     }
 
-    /// <summary>Raised while the splitter is being dragged.</summary>
-    public event EventHandler? SplitterMoving;
+    /// <summary>Adds a handler that runs while the splitter is being dragged.</summary>
+    public IDisposable AddSplitterMovingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _splitterMoving += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveSplitterMovingHandler, handler);
+    }
 
-    /// <summary>Raised when the user finishes dragging the splitter.</summary>
-    public event EventHandler? SplitterMoved;
+    /// <summary>Removes a handler that <see cref="AddSplitterMovingHandler"/> added.</summary>
+    public void RemoveSplitterMovingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _splitterMoving -= handler;
+    }
 
-    /// <summary>Raised whenever <see cref="SplitterDistance"/> changes programmatically or through the splitter.</summary>
-    public event EventHandler? SplitterDistanceChanged;
+    /// <summary>Adds a handler that runs when the user finishes dragging the splitter.</summary>
+    public IDisposable AddSplitterMovedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _splitterMoved += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveSplitterMovedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSplitterMovedHandler"/> added.</summary>
+    public void RemoveSplitterMovedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _splitterMoved -= handler;
+    }
+
+    /// <summary>Adds a handler that runs whenever <see cref="SplitterDistance"/> changes programmatically or through the splitter.</summary>
+    public IDisposable AddSplitterDistanceChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _splitterDistanceChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveSplitterDistanceChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSplitterDistanceChangedHandler"/> added.</summary>
+    public void RemoveSplitterDistanceChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _splitterDistanceChanged -= handler;
+    }
 
     /// <summary>The panel with the specified size. It sits left (vertical) or top (horizontal).</summary>
     public XPlatPanel Panel1 { get; }
@@ -266,7 +305,7 @@ public class XPlatSplitContainer : XPlatControl
         }
 
         SplitterDistance = _dragOriginDistance + (AxisCoordinate(e.Location) - _dragOrigin);
-        SplitterMoving?.Invoke(this, EventArgs.Empty);
+        _splitterMoving?.Invoke(this);
     }
 
     protected override void OnMouseUp(XPlatMouseEventArgs e)
@@ -279,7 +318,7 @@ public class XPlatSplitContainer : XPlatControl
         }
 
         EndDrag();
-        SplitterMoved?.Invoke(this, EventArgs.Empty);
+        _splitterMoved?.Invoke(this);
     }
 
     protected override void OnKeyDown(XPlatKeyEventArgs e)
@@ -309,35 +348,35 @@ public class XPlatSplitContainer : XPlatControl
         e.Handled = true;
     }
 
-    protected override void OnMouseEnter(EventArgs e)
+    protected override void OnMouseEnter()
     {
-        base.OnMouseEnter(e);
+        base.OnMouseEnter();
         Invalidate();
     }
 
-    protected override void OnMouseLeave(EventArgs e)
+    protected override void OnMouseLeave()
     {
-        base.OnMouseLeave(e);
+        base.OnMouseLeave();
         Invalidate();
     }
 
-    protected override void OnLostFocus(EventArgs e)
+    protected override void OnLostFocus()
     {
-        base.OnLostFocus(e);
+        base.OnLostFocus();
         EndDrag();
     }
 
-    protected override void OnEnabledChanged(EventArgs e)
+    protected override void OnEnabledChanged()
     {
         if (!Enabled)
         {
             EndDrag();
         }
 
-        base.OnEnabledChanged(e);
+        base.OnEnabledChanged();
     }
 
-    protected virtual void OnSplitterDistanceChanged() => SplitterDistanceChanged?.Invoke(this, EventArgs.Empty);
+    protected virtual void OnSplitterDistanceChanged() => _splitterDistanceChanged?.Invoke(this);
 
     private void EndDrag()
     {

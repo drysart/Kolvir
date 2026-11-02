@@ -23,9 +23,11 @@ public sealed class XPlatApplicationOptions
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The running instance learns about the launch through <see cref="XPlatApplication.SecondInstance"/>
-    /// and comes to the foreground. A second launch's <see cref="XPlatApplication.Run"/> returns 0
-    /// before <see cref="XPlatApplication.Startup"/> runs, so nothing is ever shown by it.
+    /// The running instance learns about the launch through a handler added with
+    /// <see cref="XPlatApplication.AddSecondInstanceHandler"/> and comes to the
+    /// foreground. A second launch's <see cref="XPlatApplication.Run"/> returns 0
+    /// before any handler added with <see cref="XPlatApplication.AddStartupHandler"/>
+    /// runs, so nothing is ever shown by it.
     /// </para>
     /// <para>
     /// Windows and a direct macOS launch get this from <see cref="XPlatInstanceLock"/>; GTK4 uses

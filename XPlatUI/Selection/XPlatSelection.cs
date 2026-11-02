@@ -12,6 +12,7 @@ namespace XPlatUI;
 /// </summary>
 public sealed class XPlatSelection
 {
+    private Action<object>? _changed;
     private readonly XPlatUiHost _host;
     private readonly List<XPlatControl> _order = new();
     private readonly List<XPlatSelectionRange> _ranges = new();
@@ -20,8 +21,20 @@ public sealed class XPlatSelection
 
     internal XPlatSelection(XPlatUiHost host) => _host = host;
 
-    /// <summary>Raised after the selection changed. The host repaints before raising it.</summary>
-    public event EventHandler? Changed;
+    /// <summary>Adds a handler that runs after the selection changed. The host repaints before raising it.</summary>
+    public IDisposable AddChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChangedHandler"/> added.</summary>
+    public void RemoveChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed -= handler;
+    }
 
     /// <summary>Where the drag started.</summary>
     public XPlatSelectionPosition Anchor => _anchor;
@@ -276,6 +289,6 @@ public sealed class XPlatSelection
     private void NotifyChanged()
     {
         _host.Invalidate();
-        Changed?.Invoke(this, EventArgs.Empty);
+        _changed?.Invoke(this);
     }
 }

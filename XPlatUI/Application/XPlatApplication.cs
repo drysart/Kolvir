@@ -23,6 +23,14 @@ namespace XPlatUI;
 /// </remarks>
 public sealed partial class XPlatApplication : IDisposable
 {
+    private Action<object>? _startup;
+    private Action<object, XPlatExitEventArgs>? _exiting;
+    private Action<object, XPlatWindowEventArgs>? _windowOpened;
+    private Action<object, XPlatWindowEventArgs>? _windowClosed;
+    private Action<object>? _themeChanged;
+    private Action<object, XPlatActivatedEventArgs>? _activated;
+    private Action<object, XPlatSecondInstanceEventArgs>? _secondInstance;
+    private Action<object, XPlatUnhandledExceptionEventArgs>? _unhandledException;
     /// <summary>The exit code a fault produces when nothing else has set one.</summary>
     private const int FaultExitCode = 1;
 
@@ -43,7 +51,7 @@ public sealed partial class XPlatApplication : IDisposable
     private int _uiThreadId;
     private int _exitCode;
     private bool _exitRequested;
-    private bool _exiting;
+    private bool _exitInProgress;
     private bool _running;
     private bool _runCalled;
     private bool _primaryInstance = true;
@@ -82,8 +90,8 @@ public sealed partial class XPlatApplication : IDisposable
 
         // Subscribed before the claim, so a launch forwarded while this process is still starting up
         // is queued behind the loop rather than lost.
-        backend.Activated += OnBackendActivated;
-        backend.SecondInstance += OnBackendSecondInstance;
+        backend.AddActivatedHandler(OnBackendActivated);
+        backend.AddSecondInstanceHandler(OnBackendSecondInstance);
 
         _primaryInstance = !options.SingleInstance || backend.TryClaimSingleInstance();
 
@@ -99,7 +107,7 @@ public sealed partial class XPlatApplication : IDisposable
         Services = _provider;
 
         InstallProcessServices();
-        XPlatTheme.Changed += OnThemeChanged;
+        XPlatTheme.AddChangedHandler(OnThemeChanged);
 
         // Resolved once for the life of the application: the same instances, in registration order,
         // at every phase, and nothing resolved while the application is tearing itself down.
@@ -155,7 +163,7 @@ public sealed partial class XPlatApplication : IDisposable
     /// </summary>
     /// <remarks>
     /// A forwarded launch does nothing: <see cref="Run"/> returns 0 without raising
-    /// <see cref="Startup"/> and without showing a window, so a second launch never flashes one.
+    /// <see cref="AddStartupHandler"/> and without showing a window, so a second launch never flashes one.
     /// </remarks>
     public bool IsPrimaryInstance => _primaryInstance;
 
@@ -187,77 +195,175 @@ public sealed partial class XPlatApplication : IDisposable
             "The backend registered no IXPlatDialogService. Every backend must register one; " +
             "see IXPlatApplicationBackend.RegisterServices.");
 
-    /// <summary>Raised inside <see cref="Run"/>, before any window is shown.</summary>
-    public event EventHandler? Startup;
+    /// <summary>Adds a handler that runs inside <see cref="Run"/>, before any window is shown.</summary>
+    public IDisposable AddStartupHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _startup += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveStartupHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddStartupHandler"/> added.</summary>
+    public void RemoveStartupHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _startup -= handler;
+    }
 
     /// <summary>
-    /// Raised once as the loop ends, before windows are closed.
+    /// Adds a handler that runs once as the loop ends, before windows are closed.
     /// <see cref="XPlatExitEventArgs.ExitCode"/> can be replaced here.
     /// </summary>
     /// <remarks>
     /// Not cancellable on purpose. By the time the loop has ended there is nothing to return to on
     /// any of the three platforms, so a cancel flag would be a lie; a window that wants to refuse a
-    /// shutdown does it from <see cref="XPlatWindow.Closing"/>, which is raised while the exit is
-    /// still being decided.
+    /// shutdown does it from <see cref="XPlatWindow.AddClosingHandler"/>, whose handlers run while
+    /// the exit is still being decided.
     /// </remarks>
-    public event EventHandler<XPlatExitEventArgs>? Exiting;
+    public IDisposable AddExitingHandler(Action<object, XPlatExitEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _exiting += handler;
+        return new XPlatHandlerToken<Action<object, XPlatExitEventArgs>>(RemoveExitingHandler, handler);
+    }
 
-    /// <summary>Raised after a window has been shown.</summary>
-    public event EventHandler<XPlatWindowEventArgs>? WindowOpened;
+    /// <summary>Removes a handler that <see cref="AddExitingHandler"/> added.</summary>
+    public void RemoveExitingHandler(Action<object, XPlatExitEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _exiting -= handler;
+    }
 
-    /// <summary>Raised after a window has closed and has left <see cref="Windows"/>.</summary>
-    public event EventHandler<XPlatWindowEventArgs>? WindowClosed;
+    /// <summary>Adds a handler that runs after a window has been shown.</summary>
+    public IDisposable AddWindowOpenedHandler(Action<object, XPlatWindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowOpened += handler;
+        return new XPlatHandlerToken<Action<object, XPlatWindowEventArgs>>(RemoveWindowOpenedHandler, handler);
+    }
 
-    /// <summary>Raised after <see cref="XPlatTheme.Palette"/> or <see cref="XPlatTheme.FontFamily"/> changed.</summary>
-    public event EventHandler? ThemeChanged;
+    /// <summary>Removes a handler that <see cref="AddWindowOpenedHandler"/> added.</summary>
+    public void RemoveWindowOpenedHandler(Action<object, XPlatWindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowOpened -= handler;
+    }
+
+    /// <summary>Adds a handler that runs after a window has closed and has left <see cref="Windows"/>.</summary>
+    public IDisposable AddWindowClosedHandler(Action<object, XPlatWindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowClosed += handler;
+        return new XPlatHandlerToken<Action<object, XPlatWindowEventArgs>>(RemoveWindowClosedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddWindowClosedHandler"/> added.</summary>
+    public void RemoveWindowClosedHandler(Action<object, XPlatWindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowClosed -= handler;
+    }
+
+    /// <summary>Adds a handler that runs after <see cref="XPlatTheme.Palette"/> or <see cref="XPlatTheme.FontFamily"/> changed.</summary>
+    public IDisposable AddThemeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _themeChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveThemeChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddThemeChangedHandler"/> added.</summary>
+    public void RemoveThemeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _themeChanged -= handler;
+    }
 
     /// <summary>
-    /// Raised when the platform asks the application to come to the foreground without a new launch,
-    /// such as a click on the macOS Dock tile. <see cref="Activate"/> is the default action.
+    /// Adds a handler that runs when the platform asks the application to come to the foreground
+    /// without a new launch, such as a click on the macOS Dock tile. <see cref="Activate"/> is the
+    /// default action.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Always raised on the UI thread, at a point where windows may be shown or closed. Set
+    /// Handlers always run on the UI thread, at a point where windows may be shown or closed. Set
     /// <see cref="XPlatActivatedEventArgs.Handled"/> to replace the default action, which is to
     /// bring <see cref="MainWindow"/> forward.
     /// </para>
     /// <para>
     /// Not every platform delivers this: on Windows the shell restores the window itself, and on
-    /// GTK4 a re-launch arrives as <see cref="SecondInstance"/> instead.
+    /// GTK4 a re-launch arrives as <see cref="AddSecondInstanceHandler"/> instead.
     /// </para>
     /// </remarks>
-    public event EventHandler<XPlatActivatedEventArgs>? Activated;
+    public IDisposable AddActivatedHandler(Action<object, XPlatActivatedEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object, XPlatActivatedEventArgs>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object, XPlatActivatedEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <summary>
-    /// Raised when another launch of the application was forwarded to this process because
+    /// Adds a handler that runs when another launch of the application was forwarded to this
+    /// process because
     /// <see cref="XPlatApplicationOptions.SingleInstance"/> is set.
     /// </summary>
     /// <remarks>
-    /// Always raised on the UI thread. <see cref="XPlatSecondInstanceEventArgs.Arguments"/> carries
-    /// the second launch's command line, so a launch can open a document or a window here. The
-    /// default action is to raise <see cref="Activated"/>; set
+    /// Handlers always run on the UI thread. <see cref="XPlatSecondInstanceEventArgs.Arguments"/>
+    /// carries the second launch's command line, so a launch can open a document or a window here.
+    /// The default action is to raise activation; set
     /// <see cref="XPlatSecondInstanceEventArgs.Handled"/> to replace it.
     /// </remarks>
-    public event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    public IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
 
     /// <summary>
-    /// Raised when an exception escapes application, window or control code on the UI thread,
-    /// instead of letting it unwind into the platform's message pump.
+    /// Adds a handler that runs when an exception escapes application, window or control code on
+    /// the UI thread, instead of letting it unwind into the platform's message pump.
     /// </summary>
     /// <remarks>
     /// The exception is fatal unless a handler sets
     /// <see cref="XPlatUnhandledExceptionEventArgs.Handled"/>: the application then shuts down
-    /// through the normal path - windows close, <see cref="Exiting"/> runs, services are disposed -
-    /// and <see cref="Run"/> rethrows it. A handled exception is swallowed and the loop keeps
-    /// running, unless the failure happened inside the platform's own loop, in which case there is
-    /// nothing left to run and the application exits with code 1.
+    /// through the normal path - windows close, <see cref="AddExitingHandler"/> runs, services are
+    /// disposed - and <see cref="Run"/> rethrows it. A handled exception is swallowed and the loop
+    /// keeps running, unless the failure happened inside the platform's own loop, in which case
+    /// there is nothing left to run and the application exits with code 1.
     /// </remarks>
-    public event EventHandler<XPlatUnhandledExceptionEventArgs>? UnhandledException;
+    public IDisposable AddUnhandledExceptionHandler(Action<object, XPlatUnhandledExceptionEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _unhandledException += handler;
+        return new XPlatHandlerToken<Action<object, XPlatUnhandledExceptionEventArgs>>(RemoveUnhandledExceptionHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddUnhandledExceptionHandler"/> added.</summary>
+    public void RemoveUnhandledExceptionHandler(Action<object, XPlatUnhandledExceptionEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _unhandledException -= handler;
+    }
 
     /// <summary>Runs the message loop and returns the exit code. Call it once.</summary>
     /// <returns>The process exit code.</returns>
     /// <exception cref="InvalidOperationException"><see cref="Run()"/> was already called.</exception>
-    /// <exception cref="Exception">An unhandled exception was raised through <see cref="UnhandledException"/> and not handled.</exception>
+    /// <exception cref="Exception">An unhandled exception reached <see cref="AddUnhandledExceptionHandler"/> and was not handled.</exception>
     public int Run()
     {
         if (_runCalled)
@@ -282,7 +388,7 @@ public sealed partial class XPlatApplication : IDisposable
         {
             if (!_exitRequested)
             {
-                Guard(() => Startup?.Invoke(this, EventArgs.Empty));
+                Guard(() => _startup?.Invoke(this));
 
                 // Windows shown before Run() become visible now, in the order they were created.
                 foreach (var window in _windows.ToArray())
@@ -326,18 +432,18 @@ public sealed partial class XPlatApplication : IDisposable
 
     /// <summary>
     /// Asks the application to exit. Every open window is closed first and any of them may refuse,
-    /// which aborts the exit; <see cref="Exiting"/> is raised by <see cref="Run"/> once the loop has
-    /// ended.
+    /// which aborts the exit; the handlers <see cref="AddExitingHandler"/> added run from
+    /// <see cref="Run"/> once the loop has ended.
     /// </summary>
     /// <param name="exitCode">The process exit code to return.</param>
     public void Exit(int exitCode)
     {
-        if (_tornDown || _exiting)
+        if (_tornDown || _exitInProgress)
         {
             return;
         }
 
-        _exiting = true;
+        _exitInProgress = true;
         try
         {
             _exitCode = exitCode;
@@ -359,15 +465,16 @@ public sealed partial class XPlatApplication : IDisposable
         }
         finally
         {
-            _exiting = false;
+            _exitInProgress = false;
         }
     }
 
     /// <summary>Brings <see cref="MainWindow"/> forward, or the first open window when there is none.</summary>
     /// <remarks>
-    /// The default action of <see cref="Activated"/> and <see cref="SecondInstance"/>. Does nothing
-    /// once the application has been torn down or when every window is closed, so it stays safe to
-    /// call from a platform callback that arrives during shutdown.
+    /// The default action of <see cref="AddActivatedHandler"/> and <see
+    /// cref="AddSecondInstanceHandler"/>. Does nothing once the application has been torn down or
+    /// when every window is closed, so it stays safe to call from a platform callback that arrives
+    /// during shutdown.
     /// </remarks>
     public void Activate()
     {
@@ -410,7 +517,7 @@ public sealed partial class XPlatApplication : IDisposable
     /// <param name="action">The work to queue.</param>
     /// <remarks>
     /// A queued action has no caller to report to, so an exception it throws is routed through
-    /// <see cref="UnhandledException"/> rather than allowed to unwind into the message pump, where
+    /// <see cref="AddUnhandledExceptionHandler"/> rather than allowed to unwind into the message pump, where
     /// a native frame would make it unrecoverable.
     /// </remarks>
     public void BeginInvoke(Action action)
@@ -439,7 +546,7 @@ public sealed partial class XPlatApplication : IDisposable
 
         Guard(() =>
         {
-            WindowClosed?.Invoke(this, new XPlatWindowEventArgs(window));
+            _windowClosed?.Invoke(this, new XPlatWindowEventArgs(window));
             CheckShutdownMode(window);
         });
     }
@@ -447,11 +554,11 @@ public sealed partial class XPlatApplication : IDisposable
     internal void NotifyWindowShown(XPlatWindow window)
     {
         MainWindow ??= window;
-        Guard(() => WindowOpened?.Invoke(this, new XPlatWindowEventArgs(window)));
+        Guard(() => _windowOpened?.Invoke(this, new XPlatWindowEventArgs(window)));
     }
 
     /// <summary>
-    /// Reports <paramref name="exception"/> through <see cref="UnhandledException"/>.
+    /// Reports <paramref name="exception"/> through <see cref="AddUnhandledExceptionHandler"/>.
     /// </summary>
     /// <param name="exception">The exception that escaped UI-thread code.</param>
     /// <returns>True when a handler claimed the exception.</returns>
@@ -459,7 +566,7 @@ public sealed partial class XPlatApplication : IDisposable
     {
         ArgumentNullException.ThrowIfNull(exception);
 
-        if (UnhandledException is not { } handlers)
+        if (_unhandledException is not { } handlers)
         {
             return false;
         }
@@ -470,7 +577,7 @@ public sealed partial class XPlatApplication : IDisposable
         {
             try
             {
-                ((EventHandler<XPlatUnhandledExceptionEventArgs>)handler)(this, args);
+                ((Action<object, XPlatUnhandledExceptionEventArgs>)handler)(this, args);
             }
             catch (Exception ex) when (IsCatchable(ex))
             {
@@ -501,7 +608,7 @@ public sealed partial class XPlatApplication : IDisposable
         return Assembly.GetEntryAssembly()?.GetName().Name ?? nameof(XPlatApplication);
     }
 
-    private void OnBackendActivated(object? sender, EventArgs e)
+    private void OnBackendActivated(object sender)
     {
         if (!CheckAccess())
         {
@@ -531,7 +638,7 @@ public sealed partial class XPlatApplication : IDisposable
         }
 
         var args = new XPlatActivatedEventArgs();
-        Guard(() => Activated?.Invoke(this, args));
+        Guard(() => _activated?.Invoke(this, args));
 
         if (!args.Handled)
         {
@@ -547,7 +654,7 @@ public sealed partial class XPlatApplication : IDisposable
         }
 
         var args = new XPlatSecondInstanceEventArgs(arguments);
-        Guard(() => SecondInstance?.Invoke(this, args));
+        Guard(() => _secondInstance?.Invoke(this, args));
 
         if (!args.Handled)
         {
@@ -601,7 +708,7 @@ public sealed partial class XPlatApplication : IDisposable
         }
     }
 
-    private void OnThemeChanged(object? sender, EventArgs e)
+    private void OnThemeChanged(object sender)
     {
         Guard(() =>
         {
@@ -611,7 +718,7 @@ public sealed partial class XPlatApplication : IDisposable
                 window.Host.Invalidate();
             }
 
-            ThemeChanged?.Invoke(this, EventArgs.Empty);
+            _themeChanged?.Invoke(this);
         });
     }
 
@@ -626,8 +733,9 @@ public sealed partial class XPlatApplication : IDisposable
     /// <para>
     /// A backend calls this from every callback it hands to the platform, because an exception that
     /// unwinds into a native frame is a fail-fast with no hook. Exceptions the model dispatches
-    /// itself - <see cref="Startup"/>, <see cref="WindowOpened"/>, <see cref="WindowClosed"/>,
-    /// <see cref="ThemeChanged"/>, <see cref="Exiting"/>, <see cref="BeginInvoke"/> work and the
+    /// itself - <see cref="AddStartupHandler"/>, <see cref="AddWindowOpenedHandler"/>, <see
+    /// cref="AddWindowClosedHandler"/>,
+    /// <see cref="AddThemeChangedHandler"/>, <see cref="AddExitingHandler"/>, <see cref="BeginInvoke"/> work and the
     /// tick - already go through it, so a backend only has to cover its own callbacks.
     /// </para>
     /// <para>
@@ -664,7 +772,7 @@ public sealed partial class XPlatApplication : IDisposable
 
     /// <summary>
     /// Runs work the model dispatches on the UI thread, so an exception reaches
-    /// <see cref="UnhandledException"/> instead of unwinding into the platform's message pump.
+    /// <see cref="AddUnhandledExceptionHandler"/> instead of unwinding into the platform's message pump.
     /// </summary>
     private void Guard(Action action)
     {
@@ -731,9 +839,9 @@ public sealed partial class XPlatApplication : IDisposable
     /// typed ones, reversing both layers for a descending phase.
     /// </summary>
     /// <remarks>
-    /// Reversing is what makes a pair of hooks nest: if <c>A</c> registers before <c>B</c>, <c>A</c>
-    /// sets up before <c>B</c> and tears down after it. A hook that throws reaches
-    /// <see cref="UnhandledException"/> and does not stop the hooks after it.
+    /// Reversing is what makes a pair of hooks nest: if <c>A</c> registers before <c>B</c>,
+    /// <c>A</c> sets up before <c>B</c> and tears down after it. A hook that throws reaches
+    /// <see cref="AddUnhandledExceptionHandler"/> and does not stop the hooks after it.
     /// </remarks>
     private void RaisePhase(XPlatApplicationPhase phase)
     {
@@ -785,7 +893,7 @@ public sealed partial class XPlatApplication : IDisposable
 
         _tornDown = true;
         _running = false;
-        XPlatTheme.Changed -= OnThemeChanged;
+        XPlatTheme.RemoveChangedHandler(OnThemeChanged);
 
         // A forwarded launch never entered the loop, so there is no exit to report.
         if (_runCalled && _primaryInstance)
@@ -793,7 +901,7 @@ public sealed partial class XPlatApplication : IDisposable
             RaisePhase(XPlatApplicationPhase.Stopping);
 
             var args = new XPlatExitEventArgs(_exitCode);
-            Guard(() => Exiting?.Invoke(this, args));
+            Guard(() => _exiting?.Invoke(this, args));
 
             // A fault is never reported as success, whatever Exiting left behind.
             _exitCode = args.ExitCode == 0 && _fault is not null ? FaultExitCode : args.ExitCode;

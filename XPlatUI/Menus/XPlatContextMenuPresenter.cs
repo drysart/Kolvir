@@ -34,11 +34,12 @@ public sealed class XPlatContextMenuRequest
 }
 
 /// <summary>
-/// Raised by <see cref="XPlatUiHost.ContextMenuOpening"/> before a context menu is shown, so an
-/// application can build a menu for a control that does not carry one. Assigning
+/// Handed to the handlers <see cref="XPlatUiHost.AddContextMenuOpeningHandler"/> added before a
+/// context menu is shown, so an application can build a menu for a control that does not carry one.
+/// Assigning
 /// <see cref="Menu"/> takes precedence over the host's default selection menu.
 /// </summary>
-public sealed class XPlatContextMenuEventArgs : EventArgs
+public sealed class XPlatContextMenuEventArgs
 {
     internal XPlatContextMenuEventArgs(XPlatControl? control, SKPoint location)
     {

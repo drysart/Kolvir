@@ -21,6 +21,8 @@ namespace XPlatUI.Backend.Headless;
 /// </remarks>
 public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
 {
+    private Action<object>? _activated;
+    private Action<object, XPlatSecondInstanceEventArgs>? _secondInstance;
     private readonly Queue<Action> _pending = new();
     private XPlatApplication? _application;
     private int _exitCode;
@@ -48,16 +50,41 @@ public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
 
     /// <inheritdoc />
     /// <remarks>
-    /// Always succeeds: a render or a test run has no desktop to be a second instance of, and taking
-    /// a process-wide claim would make two concurrent renders of the same application collide.
+    /// Always succeeds: a render or a test run has no desktop to be a second instance of, and
+    /// taking a process-wide claim would make two concurrent renders of the same application
+    /// collide.
     /// </remarks>
     public bool TryClaimSingleInstance() => true;
 
     /// <inheritdoc />
-    public event EventHandler? Activated;
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    public IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
 
     /// <inheritdoc />
     public void Quit(int exitCode) => _exitCode = exitCode;
@@ -118,20 +145,20 @@ public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <summary>
-    /// Raises <see cref="Activated"/> the way a desktop does, so a test can drive the re-activation
-    /// path without a display.
+    /// Runs the handlers <see cref="AddActivatedHandler"/> added, the way a desktop does, so a test
+    /// can drive the re-activation path without a display.
     /// </summary>
-    public void RaiseActivated() => Activated?.Invoke(this, EventArgs.Empty);
+    public void RaiseActivated() => _activated?.Invoke(this);
 
     /// <summary>
-    /// Raises <see cref="SecondInstance"/> the way a desktop does, so a test can drive the
-    /// second-launch path without a display.
+    /// Runs the handlers <see cref="AddSecondInstanceHandler"/> added, the way a desktop does, so a
+    /// test can drive the second-launch path without a display.
     /// </summary>
     /// <param name="arguments">The arguments the forwarded launch would have carried.</param>
     public void RaiseSecondInstance(IReadOnlyList<string> arguments)
     {
         ArgumentNullException.ThrowIfNull(arguments);
-        SecondInstance?.Invoke(this, new XPlatSecondInstanceEventArgs(arguments));
+        _secondInstance?.Invoke(this, new XPlatSecondInstanceEventArgs(arguments));
     }
 
     /// <summary>The application this backend drives, or null before <see cref="Initialize"/>.</summary>

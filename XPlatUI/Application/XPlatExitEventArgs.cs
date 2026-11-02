@@ -1,7 +1,7 @@
 namespace XPlatUI;
 
 /// <summary>Carries the exit code of an <see cref="XPlatApplication"/> that is shutting down.</summary>
-public sealed class XPlatExitEventArgs : EventArgs
+public sealed class XPlatExitEventArgs
 {
     /// <summary>Creates the arguments for an exit with <paramref name="exitCode"/>.</summary>
     public XPlatExitEventArgs(int exitCode) => ExitCode = exitCode;

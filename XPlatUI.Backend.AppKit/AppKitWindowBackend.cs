@@ -23,6 +23,14 @@ namespace XPlatUI.Backend.AppKit;
 /// </remarks>
 public sealed class AppKitWindowBackend : IXPlatWindowBackend
 {
+    private Action<object>? _shown;
+    private Action<object>? _closeRequested;
+    private Action<object>? _closed;
+    private Action<object>? _activated;
+    private Action<object>? _deactivated;
+    private Action<object>? _clientSizeChanged;
+    private Action<object>? _scaleChanged;
+    private Action<object>? _stateChanged;
     private readonly AppKitApplicationBackend _application;
     private readonly XPlatUiHost _host = new();
     private readonly WindowDelegate _delegate;
@@ -90,9 +98,9 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
 
     /// <inheritdoc />
     /// <remarks>
-    /// macOS has no per-window icon: a window's icon is the application's, shown in the Dock and the
-    /// app switcher. Setting this assigns <c>NSApplication.ApplicationIconImage</c>, so it changes
-    /// the whole process rather than this window alone.
+    /// macOS has no per-window icon: a window's icon is the application's, shown in the Dock and
+    /// the app switcher. Setting this assigns <c>NSApplication.ApplicationIconImage</c>, so it
+    /// changes the whole process rather than this window alone.
     /// </remarks>
     public XPlatIcon? Icon
     {
@@ -350,7 +358,7 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     {
         if (!_disposed)
         {
-            CloseRequested?.Invoke(this, EventArgs.Empty);
+            _closeRequested?.Invoke(this);
         }
     }
 
@@ -362,28 +370,124 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     }
 
     /// <inheritdoc />
-    public event EventHandler? Shown;
+    public IDisposable AddShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveShownHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddShownHandler"/> added.</summary>
+    public void RemoveShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? CloseRequested;
+    public IDisposable AddCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveCloseRequestedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddCloseRequestedHandler"/> added.</summary>
+    public void RemoveCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Closed;
+    public IDisposable AddClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClosedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClosedHandler"/> added.</summary>
+    public void RemoveClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Activated;
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Deactivated;
+    public IDisposable AddDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDeactivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDeactivatedHandler"/> added.</summary>
+    public void RemoveDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ClientSizeChanged;
+    public IDisposable AddClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClientSizeChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClientSizeChangedHandler"/> added.</summary>
+    public void RemoveClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ScaleChanged;
+    public IDisposable AddScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveScaleChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddScaleChangedHandler"/> added.</summary>
+    public void RemoveScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? StateChanged;
+    public IDisposable AddStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveStateChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddStateChangedHandler"/> added.</summary>
+    public void RemoveStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged -= handler;
+    }
 
     /// <inheritdoc />
     public void Dispose()
@@ -425,7 +529,7 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         view?.Dispose();
 
         _application.RemoveWindow(this);
-        Closed?.Invoke(this, EventArgs.Empty);
+        _closed?.Invoke(this);
     }
 
     /// <summary>Prints frame rate and memory use every few seconds when tracing is on.</summary>
@@ -516,13 +620,13 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
             NSRunningApplication.CurrentApplication?.Activate(NSApplicationActivationOptions.ActivateIgnoringOtherWindows);
         }
 
-        Shown?.Invoke(this, EventArgs.Empty);
+        _shown?.Invoke(this);
     }
 
     /// <summary>
-    /// Makes this window a child of its owner, or detaches it when the owner changed. A child window
-    /// is ordered above its parent and is ordered out with it, which is the whole of AppKit's
-    /// ownership model; closing is the model's job.
+    /// Makes this window a child of its owner, or detaches it when the owner changed. A child
+    /// window is ordered above its parent and is ordered out with it, which is the whole of
+    /// AppKit's ownership model; closing is the model's job.
     /// </summary>
     private void AttachOwner()
     {
@@ -632,7 +736,7 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         }
 
         _reportedState = state;
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        _stateChanged?.Invoke(this);
     }
 
     /// <summary>
@@ -659,13 +763,13 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         public override void DidBecomeKey(NSNotification notification)
         {
             _backend._application.NotifyWindowActivated(_backend);
-            _backend.Activated?.Invoke(_backend, EventArgs.Empty);
+            _backend._activated?.Invoke(_backend);
         }
 
         public override void DidResignKey(NSNotification notification)
         {
             _backend._application.NotifyWindowDeactivated(_backend);
-            _backend.Deactivated?.Invoke(_backend, EventArgs.Empty);
+            _backend._deactivated?.Invoke(_backend);
         }
 
         public override void DidResize(NSNotification notification)
@@ -676,7 +780,7 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
                 _backend._clientSize = new SKSize((float)content.Bounds.Width, (float)content.Bounds.Height);
             }
 
-            _backend.ClientSizeChanged?.Invoke(_backend, EventArgs.Empty);
+            _backend._clientSizeChanged?.Invoke(_backend);
             _backend.RaiseStateChangedIfNeeded();
         }
 
@@ -693,7 +797,7 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
             }
 
             _backend._scale = scale;
-            _backend.ScaleChanged?.Invoke(_backend, EventArgs.Empty);
+            _backend._scaleChanged?.Invoke(_backend);
         }
 
         public override void DidMiniaturize(NSNotification notification) => _backend.RaiseStateChangedIfNeeded();

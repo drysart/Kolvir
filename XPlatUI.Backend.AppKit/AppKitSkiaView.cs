@@ -88,9 +88,9 @@ internal sealed class AppKitSkiaView : NSView
         ArgumentNullException.ThrowIfNull(host);
 
         _host = host;
-        _host.Invalidated += OnHostInvalidated;
-        _host.CursorChanged += OnHostCursorChanged;
-        XPlatTheme.Changed += OnThemeChanged;
+        _host.AddInvalidatedHandler(OnHostInvalidated);
+        _host.AddCursorChangedHandler(OnHostCursorChanged);
+        XPlatTheme.AddChangedHandler(OnThemeChanged);
         _reportedAt = Environment.TickCount64;
 
         // Layer backed from the start, so AppKit never creates a backing store for this view and
@@ -473,8 +473,8 @@ internal sealed class AppKitSkiaView : NSView
     }
 
     /// <summary>
-    /// The parameterless <c>Dispose</c> on <see cref="NSObject"/> is sealed, so the teardown hook is
-    /// the protected overload every NSObject subclass overrides.
+    /// The parameterless <c>Dispose</c> on <see cref="NSObject"/> is sealed, so the teardown hook
+    /// is the protected overload every NSObject subclass overrides.
     /// </summary>
     protected override void Dispose(bool disposing)
     {
@@ -482,9 +482,9 @@ internal sealed class AppKitSkiaView : NSView
         {
             _disposed = true;
 
-            XPlatTheme.Changed -= OnThemeChanged;
-            _host.Invalidated -= OnHostInvalidated;
-            _host.CursorChanged -= OnHostCursorChanged;
+            XPlatTheme.RemoveChangedHandler(OnThemeChanged);
+            _host.RemoveInvalidatedHandler(OnHostInvalidated);
+            _host.RemoveCursorChangedHandler(OnHostCursorChanged);
 
             if (_trackingArea is not null)
             {
@@ -511,7 +511,7 @@ internal sealed class AppKitSkiaView : NSView
         ApplyCursor();
     }
 
-    private void OnHostInvalidated(object? sender, EventArgs e)
+    private void OnHostInvalidated(object sender)
     {
         if (_inDraw)
         {
@@ -555,9 +555,9 @@ internal sealed class AppKitSkiaView : NSView
     }
 
     /// <summary>Repaints whenever the palette is swapped, by the system or by the application.</summary>
-    private void OnThemeChanged(object? sender, EventArgs e) => NeedsDisplay = true;
+    private void OnThemeChanged(object sender) => NeedsDisplay = true;
 
-    private void OnHostCursorChanged(object? sender, EventArgs e) => ApplyCursor();
+    private void OnHostCursorChanged(object sender) => ApplyCursor();
 
     private void ApplyCursor()
     {
@@ -589,7 +589,8 @@ internal sealed class AppKitSkiaView : NSView
 
     /// <summary>
     /// Reads whatever the dragged pasteboard offers that the library understands. Files come first
-    /// because a file drag also carries its name as text, and the file is the more useful of the two.
+    /// because a file drag also carries its name as text, and the file is the more useful of the
+    /// two.
     /// </summary>
     /// <remarks>
     /// Only file URLs count as files. A web URL is also an <see cref="NSUrl"/>, and its

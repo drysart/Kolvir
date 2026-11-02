@@ -8,6 +8,7 @@ namespace XPlatUI;
 /// </summary>
 public class XPlatImage : XPlatControl
 {
+    private Action<object, Exception>? _loadFailed;
     private SKImage? _image;
     private bool _ownsImage;
     private XPlatSizeMode _sizeMode = XPlatSizeMode.Zoom;
@@ -17,8 +18,20 @@ public class XPlatImage : XPlatControl
         AutoSize = true;
     }
 
-    /// <summary>Raised when the image fails to load (for example a missing file).</summary>
-    public event EventHandler<Exception>? LoadFailed;
+    /// <summary>Adds a handler that runs when the image fails to load (for example a missing file).</summary>
+    public IDisposable AddLoadFailedHandler(Action<object, Exception> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _loadFailed += handler;
+        return new XPlatHandlerToken<Action<object, Exception>>(RemoveLoadFailedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddLoadFailedHandler"/> added.</summary>
+    public void RemoveLoadFailedHandler(Action<object, Exception> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _loadFailed -= handler;
+    }
 
     /// <summary>The image to display. Not disposed unless ownership was transferred.</summary>
     public SKImage? Image
@@ -67,7 +80,7 @@ public class XPlatImage : XPlatControl
         }
         catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
         {
-            LoadFailed?.Invoke(this, ex);
+            _loadFailed?.Invoke(this, ex);
             return false;
         }
     }
@@ -90,7 +103,7 @@ public class XPlatImage : XPlatControl
         }
         catch (Exception ex) when (ex is ArgumentException or InvalidOperationException)
         {
-            LoadFailed?.Invoke(this, ex);
+            _loadFailed?.Invoke(this, ex);
             return false;
         }
 

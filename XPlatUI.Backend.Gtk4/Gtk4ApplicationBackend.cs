@@ -24,6 +24,8 @@ namespace XPlatUI.Backend.Gtk4;
 /// </remarks>
 public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
 {
+    private Action<object>? _activated;
+    private Action<object, XPlatSecondInstanceEventArgs>? _secondInstance;
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
     private readonly Queue<Action> _pending = new();
@@ -59,9 +61,9 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
     /// The desktop's light/dark preference, as the application will see it.
     /// </summary>
     /// <remarks>
-    /// Exposed because the palette sometimes has to be right before an <see cref="XPlatApplication"/>
-    /// exists: the harness's headless <c>--render</c> mode paints through the headless backend,
-    /// which installs no system theme, so the host applies this one itself.
+    /// Exposed because the palette sometimes has to be right before an <see
+    /// cref="XPlatApplication"/> exists: the harness's headless <c>--render</c> mode paints through
+    /// the headless backend, which installs no system theme, so the host applies this one itself.
     /// </remarks>
     public IXPlatSystemTheme SystemTheme { get; } = new Gtk4SystemTheme();
 
@@ -100,7 +102,7 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
 
         if (SystemTheme is Gtk4SystemTheme theme)
         {
-            theme.Changed += OnSystemThemeChanged;
+            theme.AddChangedHandler(OnSystemThemeChanged);
             theme.Attach();
         }
 
@@ -169,13 +171,37 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
 
     /// <inheritdoc />
     /// <remarks>
-    /// Never raised here: a GTK application is brought forward by a forwarded command line, which
-    /// arrives through <see cref="SecondInstance"/> instead.
+    /// Never run here: a GTK application is brought forward by a forwarded command line, which
+    /// arrives through <see cref="AddSecondInstanceHandler"/> instead.
     /// </remarks>
-    public event EventHandler? Activated;
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    public IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
 
     /// <inheritdoc />
     public void Quit(int exitCode)
@@ -352,7 +378,7 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
 
         if (SystemTheme is Gtk4SystemTheme theme)
         {
-            theme.Changed -= OnSystemThemeChanged;
+            theme.RemoveChangedHandler(OnSystemThemeChanged);
         }
 
         Release();
@@ -526,7 +552,7 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
             }
 
             window?.Activate();
-            Activated?.Invoke(this, EventArgs.Empty);
+            _activated?.Invoke(this);
             return;
         }
 
@@ -547,8 +573,8 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <summary>
-    /// Handles the <c>command-line</c> signal, which GTK only emits when the application was created
-    /// with <see cref="Gio.ApplicationFlags.HandlesCommandLine"/>.
+    /// Handles the <c>command-line</c> signal, which GTK only emits when the application was
+    /// created with <see cref="Gio.ApplicationFlags.HandlesCommandLine"/>.
     /// </summary>
     /// <returns>
     /// One, meaning handled. GLib would otherwise follow the signal with an <c>activate</c>, which
@@ -570,7 +596,7 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
         {
             // Another launch was handed to this process: it is the primary's job to come forward,
             // and the launch that forwarded it is already on its way out.
-            SecondInstance?.Invoke(this, new XPlatSecondInstanceEventArgs(arguments));
+            _secondInstance?.Invoke(this, new XPlatSecondInstanceEventArgs(arguments));
         }
         else if (!_loopRunning)
         {
@@ -725,7 +751,7 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
         return true;
     }
 
-    private void OnSystemThemeChanged(object? sender, EventArgs e)
+    private void OnSystemThemeChanged(object sender)
     {
         // A forced palette is an explicit choice, so the system must not override it.
         if (Application?.Options.ForcedDarkMode is not null)

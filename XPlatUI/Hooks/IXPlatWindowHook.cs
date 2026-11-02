@@ -19,7 +19,7 @@ namespace XPlatUI;
 /// </para>
 /// <para>
 /// Hooks run on the UI thread. A hook that throws reaches
-/// <see cref="XPlatApplication.UnhandledException"/> rather than unwinding into a platform
+/// <see cref="XPlatApplication.AddUnhandledExceptionHandler"/> rather than unwinding into a platform
 /// callback.
 /// </para>
 /// </remarks>

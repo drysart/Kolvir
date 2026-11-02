@@ -26,6 +26,8 @@ namespace XPlatUI.Backend.AppKit;
 /// </remarks>
 public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
 {
+    private Action<object>? _activated;
+    private Action<object, XPlatSecondInstanceEventArgs>? _secondInstance;
     /// <summary>How often queued work is drained and the system appearance re-read.</summary>
     private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
 
@@ -54,9 +56,9 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
     /// The macOS light/dark preference, as the application will see it.
     /// </summary>
     /// <remarks>
-    /// Exposed because the palette sometimes has to be right before an <see cref="XPlatApplication"/>
-    /// exists: the harness's headless <c>--render</c> mode paints through the headless backend,
-    /// which installs no system theme, so the host applies this one itself.
+    /// Exposed because the palette sometimes has to be right before an <see
+    /// cref="XPlatApplication"/> exists: the harness's headless <c>--render</c> mode paints through
+    /// the headless backend, which installs no system theme, so the host applies this one itself.
     /// </remarks>
     public IXPlatSystemTheme SystemTheme { get; } = new AppKitSystemTheme();
 
@@ -92,7 +94,7 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
 
         if (SystemTheme is AppKitSystemTheme theme)
         {
-            theme.Changed += OnSystemThemeChanged;
+            theme.AddChangedHandler(OnSystemThemeChanged);
         }
 
         _initialized = true;
@@ -131,15 +133,39 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
             return false;
         }
 
-        _instanceLock.SecondInstance += (_, e) => SecondInstance?.Invoke(this, e);
+        _instanceLock.AddSecondInstanceHandler((_, e) => _secondInstance?.Invoke(this, e));
         return true;
     }
 
     /// <inheritdoc />
-    public event EventHandler? Activated;
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    public IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
 
     /// <inheritdoc />
     public void Quit(int exitCode)
@@ -342,7 +368,7 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
 
         if (SystemTheme is AppKitSystemTheme theme)
         {
-            theme.Changed -= OnSystemThemeChanged;
+            theme.RemoveChangedHandler(OnSystemThemeChanged);
         }
 
         if (_appDelegate is not null)
@@ -510,7 +536,7 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
             native.Unhide(native);
         }
 
-        Activated?.Invoke(this, EventArgs.Empty);
+        _activated?.Invoke(this);
     }
 
     internal void EnterModal() => _modalDepth++;
@@ -647,7 +673,7 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
         }
     }
 
-    private void OnSystemThemeChanged(object? sender, EventArgs e)
+    private void OnSystemThemeChanged(object sender)
     {
         // A forced palette is an explicit choice, so the system must not override it.
         if (Application?.Options.ForcedDarkMode is not null)
@@ -684,8 +710,8 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
         }
 
         /// <summary>
-        /// A Dock click or a Finder launch on an application that is already running. Returning true
-        /// lets AppKit do its own default work; the model decides what "come forward" means.
+        /// A Dock click or a Finder launch on an application that is already running. Returning
+        /// true lets AppKit do its own default work; the model decides what "come forward" means.
         /// </summary>
         public override bool ApplicationShouldHandleReopen(NSApplication sender, bool hasVisibleWindows)
         {

@@ -23,6 +23,14 @@ namespace XPlatUI;
 /// </remarks>
 public sealed partial class XPlatWindow : IDisposable
 {
+    private Action<object>? _shown;
+    private Action<object, CancelEventArgs>? _closing;
+    private Action<object>? _closed;
+    private Action<object>? _activated;
+    private Action<object>? _deactivated;
+    private Action<object>? _clientSizeChanged;
+    private Action<object>? _scaleChanged;
+    private Action<object>? _stateChanged;
     private readonly XPlatApplication _application;
     private readonly IServiceScope _scope;
     private readonly IXPlatWindowHook[] _windowHooks;
@@ -30,9 +38,9 @@ public sealed partial class XPlatWindow : IDisposable
     private XPlatMenuBar? _menuBar;
     private XPlatWindow? _owner;
     private bool _clientSizeSet;
-    private bool _shown;
+    private bool _isShown;
     private bool _shownRaised;
-    private bool _closed;
+    private bool _isClosed;
 
     /// <summary>Creates an untitled window with no content.</summary>
     /// <exception cref="InvalidOperationException">No <see cref="XPlatApplication"/> exists yet.</exception>
@@ -80,14 +88,14 @@ public sealed partial class XPlatWindow : IDisposable
             Content = content;
         }
 
-        Backend.Shown += OnBackendShown;
-        Backend.CloseRequested += OnBackendCloseRequested;
-        Backend.Closed += OnBackendClosed;
-        Backend.Activated += OnBackendActivated;
-        Backend.Deactivated += OnBackendDeactivated;
-        Backend.ClientSizeChanged += OnBackendClientSizeChanged;
-        Backend.ScaleChanged += OnBackendScaleChanged;
-        Backend.StateChanged += OnBackendStateChanged;
+        Backend.AddShownHandler(OnBackendShown);
+        Backend.AddCloseRequestedHandler(OnBackendCloseRequested);
+        Backend.AddClosedHandler(OnBackendClosed);
+        Backend.AddActivatedHandler(OnBackendActivated);
+        Backend.AddDeactivatedHandler(OnBackendDeactivated);
+        Backend.AddClientSizeChangedHandler(OnBackendClientSizeChanged);
+        Backend.AddScaleChangedHandler(OnBackendScaleChanged);
+        Backend.AddStateChangedHandler(OnBackendStateChanged);
 
         // Window-scoped, so each window gets its own instance and its own per-window state.
         _windowHooks = _scope.ServiceProvider.GetServices<IXPlatWindowHook>().ToArray();
@@ -198,9 +206,10 @@ public sealed partial class XPlatWindow : IDisposable
 
     /// <summary>True to keep the window above all others.</summary>
     /// <remarks>
-    /// Windows and macOS honour this. Linux does not: GTK4 removed the keep-above call it would need,
-    /// and Wayland leaves stacking to the compositor, so the value is recorded and otherwise ignored.
-    /// Treat it as best effort rather than as the only thing keeping a window in front - use
+    /// Windows and macOS honour this. Linux does not: GTK4 removed the keep-above call it would
+    /// need, and Wayland leaves stacking to the compositor, so the value is recorded and otherwise
+    /// ignored. Treat it as best effort rather than as the only thing keeping a window in front -
+    /// use
     /// <see cref="Owner"/> for that, and note that ownership is itself only a hint on Wayland.
     /// </remarks>
     public bool TopMost
@@ -218,7 +227,8 @@ public sealed partial class XPlatWindow : IDisposable
 
     /// <summary>
     /// The window this one is owned by, or null. An owned window always sits above its owner,
-    /// minimizes with it and is closed with it. Also the default owner for <see cref="ShowDialog()"/>.
+    /// minimizes with it and is closed with it. Also the default owner for <see
+    /// cref="ShowDialog()"/>.
     /// </summary>
     /// <remarks>
     /// Assigning an owner after the window is shown restacks the native window, so a window can be
@@ -274,43 +284,139 @@ public sealed partial class XPlatWindow : IDisposable
     public XPlatDialogResult DialogResult { get; set; } = XPlatDialogResult.Cancel;
 
     /// <summary>True once <see cref="Show()"/> has been called and before the window has closed.</summary>
-    public bool IsShown => _shown;
+    public bool IsShown => _isShown;
 
     /// <summary>True once the window has closed or been disposed.</summary>
-    public bool IsClosed => _closed;
+    public bool IsClosed => _isClosed;
 
-    /// <summary>Raised once the window is visible.</summary>
-    public event EventHandler? Shown;
+    /// <summary>Adds a handler that runs once the window is visible.</summary>
+    public IDisposable AddShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveShownHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddShownHandler"/> added.</summary>
+    public void RemoveShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown -= handler;
+    }
 
     /// <summary>
-    /// Raised when the window is about to close, whether from <see cref="Close"/>, a platform close
-    /// button or <see cref="XPlatApplication.Exit(int)"/>. Set
+    /// Adds a handler that runs when the window is about to close, whether from <see
+    /// cref="Close"/>, a platform close button or <see cref="XPlatApplication.Exit(int)"/>. Set
     /// <see cref="CancelEventArgs.Cancel"/> to keep it open.
     /// </summary>
-    public event EventHandler<CancelEventArgs>? Closing;
+    public IDisposable AddClosingHandler(Action<object, CancelEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closing += handler;
+        return new XPlatHandlerToken<Action<object, CancelEventArgs>>(RemoveClosingHandler, handler);
+    }
 
-    /// <summary>Raised after the window has closed and released its service scope.</summary>
-    public event EventHandler? Closed;
+    /// <summary>Removes a handler that <see cref="AddClosingHandler"/> added.</summary>
+    public void RemoveClosingHandler(Action<object, CancelEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closing -= handler;
+    }
 
-    /// <summary>Raised when the window becomes the active window.</summary>
-    public event EventHandler? Activated;
+    /// <summary>Adds a handler that runs after the window has closed and released its service scope.</summary>
+    public IDisposable AddClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClosedHandler, handler);
+    }
 
-    /// <summary>Raised when the window stops being the active window.</summary>
-    public event EventHandler? Deactivated;
+    /// <summary>Removes a handler that <see cref="AddClosedHandler"/> added.</summary>
+    public void RemoveClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed -= handler;
+    }
 
-    /// <summary>Raised when the client area changes size, including as a result of a DPI change.</summary>
-    public event EventHandler? ClientSizeChanged;
+    /// <summary>Adds a handler that runs when the window becomes the active window.</summary>
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
 
-    /// <summary>Raised when the window moves to a display with a different scale factor.</summary>
-    public event EventHandler? ScaleChanged;
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
-    /// <summary>Raised when <see cref="State"/> changes.</summary>
-    public event EventHandler? StateChanged;
+    /// <summary>Adds a handler that runs when the window stops being the active window.</summary>
+    public IDisposable AddDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDeactivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDeactivatedHandler"/> added.</summary>
+    public void RemoveDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when the client area changes size, including as a result of a DPI change.</summary>
+    public IDisposable AddClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClientSizeChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClientSizeChangedHandler"/> added.</summary>
+    public void RemoveClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when the window moves to a display with a different scale factor.</summary>
+    public IDisposable AddScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveScaleChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddScaleChangedHandler"/> added.</summary>
+    public void RemoveScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when <see cref="State"/> changes.</summary>
+    public IDisposable AddStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveStateChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddStateChangedHandler"/> added.</summary>
+    public void RemoveStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged -= handler;
+    }
 
     /// <summary>
-    /// Converts a point in this window's client space to screen coordinates in the same logical unit
-    /// as <see cref="Location"/>. A backend converts the result to physical pixels when it positions
-    /// a native popup.
+    /// Converts a point in this window's client space to screen coordinates in the same logical
+    /// unit as <see cref="Location"/>. A backend converts the result to physical pixels when it
+    /// positions a native popup.
     /// </summary>
     /// <param name="logical">The client-space point.</param>
     /// <returns>The point in logical screen coordinates.</returns>
@@ -319,9 +425,9 @@ public sealed partial class XPlatWindow : IDisposable
 
     /// <summary>Shows the window, owned by <see cref="Owner"/> when it is set.</summary>
     /// <remarks>
-    /// Legal before <see cref="XPlatApplication.Run"/>: the window is registered and becomes visible
-    /// once the loop starts, so <c>app.MainWindow = new XPlatWindow(...)</c> works inside an object
-    /// initialiser.
+    /// Legal before <see cref="XPlatApplication.Run"/>: the window is registered and becomes
+    /// visible once the loop starts, so <c>app.MainWindow = new XPlatWindow(...)</c> works inside
+    /// an object initialiser.
     /// </remarks>
     /// <exception cref="ObjectDisposedException">The window has been closed.</exception>
     public void Show() => ShowCore();
@@ -336,8 +442,8 @@ public sealed partial class XPlatWindow : IDisposable
     }
 
     /// <summary>
-    /// Shows the window modally and returns once it has closed. Disables the owner and re-enters the
-    /// platform loop for as long as the modal session lasts.
+    /// Shows the window modally and returns once it has closed. Disables the owner and re-enters
+    /// the platform loop for as long as the modal session lasts.
     /// </summary>
     /// <returns><see cref="DialogResult"/>, which defaults to <see cref="XPlatDialogResult.Cancel"/>.</returns>
     /// <exception cref="ObjectDisposedException">The window has been closed.</exception>
@@ -352,21 +458,23 @@ public sealed partial class XPlatWindow : IDisposable
     public void Activate() => Backend.Activate();
 
     /// <summary>
-    /// Closes the window. <see cref="Closing"/> may cancel it; otherwise the native window is
-    /// destroyed, the service scope is disposed and <see cref="Closed"/> is raised.
+    /// Closes the window. A handler added by <see cref="AddClosingHandler"/> may cancel it;
+    /// otherwise the native window is destroyed, the service scope is disposed and the handlers
+    /// added by
+    /// <see cref="AddClosedHandler"/> run.
     /// </summary>
     public void Close() => RequestClose();
 
     /// <summary>Closes the window and releases its service scope. Idempotent.</summary>
     public void Dispose()
     {
-        if (_closed)
+        if (_isClosed)
         {
             return;
         }
 
-        _closed = true;
-        _shown = false;
+        _isClosed = true;
+        _isShown = false;
 
         // Owned windows go with their owner, the way a Windows owner destroys its owned windows.
         // No platform does this for us - AppKit only orders children out, and an HWND owner keeps
@@ -379,19 +487,19 @@ public sealed partial class XPlatWindow : IDisposable
             }
         }
 
-        Backend.Shown -= OnBackendShown;
-        Backend.CloseRequested -= OnBackendCloseRequested;
-        Backend.Closed -= OnBackendClosed;
-        Backend.Activated -= OnBackendActivated;
-        Backend.Deactivated -= OnBackendDeactivated;
-        Backend.ClientSizeChanged -= OnBackendClientSizeChanged;
-        Backend.ScaleChanged -= OnBackendScaleChanged;
-        Backend.StateChanged -= OnBackendStateChanged;
+        Backend.RemoveShownHandler(OnBackendShown);
+        Backend.RemoveCloseRequestedHandler(OnBackendCloseRequested);
+        Backend.RemoveClosedHandler(OnBackendClosed);
+        Backend.RemoveActivatedHandler(OnBackendActivated);
+        Backend.RemoveDeactivatedHandler(OnBackendDeactivated);
+        Backend.RemoveClientSizeChangedHandler(OnBackendClientSizeChanged);
+        Backend.RemoveScaleChangedHandler(OnBackendScaleChanged);
+        Backend.RemoveStateChangedHandler(OnBackendStateChanged);
 
         Backend.Dispose();
 
         RaisePhase(XPlatWindowPhase.Closed);
-        Closed?.Invoke(this, EventArgs.Empty);
+        _closed?.Invoke(this);
         _application.UnregisterWindow(this);
 
         // The scope, and the hook instances in it, are still alive here; that is what makes this
@@ -403,12 +511,12 @@ public sealed partial class XPlatWindow : IDisposable
     /// <summary>Called by <see cref="XPlatApplication.Run"/> for a window shown before the loop started.</summary>
     internal void ShowNow()
     {
-        if (_shown || _closed)
+        if (_isShown || _isClosed)
         {
             return;
         }
 
-        _shown = true;
+        _isShown = true;
         ApplyDefaultSize();
         Backend.MenuBar = _menuBar ?? _application.Options.MenuBar;
         Backend.Owner = _owner?.Backend;
@@ -418,18 +526,18 @@ public sealed partial class XPlatWindow : IDisposable
     }
 
     /// <summary>
-    /// Raises <see cref="Closing"/> and, unless it is cancelled, closes the window. Returns false
-    /// when a handler cancelled the close.
+    /// Runs the handlers <see cref="AddClosingHandler"/> added and, unless one of them cancels it,
+    /// closes the window. Returns false when a handler cancelled the close.
     /// </summary>
     internal bool RequestClose()
     {
-        if (_closed)
+        if (_isClosed)
         {
             return true;
         }
 
         var args = new CancelEventArgs();
-        Closing?.Invoke(this, args);
+        _closing?.Invoke(this, args);
         if (args.Cancel)
         {
             return false;
@@ -442,7 +550,7 @@ public sealed partial class XPlatWindow : IDisposable
 
     private void ShowCore()
     {
-        ObjectDisposedException.ThrowIf(_closed, this);
+        ObjectDisposedException.ThrowIf(_isClosed, this);
         _application.RegisterWindow(this);
 
         if (_application.IsRunning)
@@ -453,7 +561,7 @@ public sealed partial class XPlatWindow : IDisposable
 
     private XPlatDialogResult ShowDialogCore(XPlatWindow? owner)
     {
-        ObjectDisposedException.ThrowIf(_closed, this);
+        ObjectDisposedException.ThrowIf(_isClosed, this);
 
         if (owner is not null)
         {
@@ -462,7 +570,7 @@ public sealed partial class XPlatWindow : IDisposable
 
         DialogResult = XPlatDialogResult.Cancel;
         _application.RegisterWindow(this);
-        _shown = true;
+        _isShown = true;
         ApplyDefaultSize();
         Backend.MenuBar = _menuBar ?? _application.Options.MenuBar;
         Backend.Owner = _owner?.Backend;
@@ -471,7 +579,7 @@ public sealed partial class XPlatWindow : IDisposable
         RaiseShown();
 
         // A backend that never reported the close would leave the window registered forever.
-        if (!_closed)
+        if (!_isClosed)
         {
             Dispose();
         }
@@ -519,7 +627,7 @@ public sealed partial class XPlatWindow : IDisposable
 
     private void RaiseShown()
     {
-        if (_shownRaised || _closed)
+        if (_shownRaised || _isClosed)
         {
             return;
         }
@@ -527,33 +635,33 @@ public sealed partial class XPlatWindow : IDisposable
         _shownRaised = true;
         _application.NotifyWindowShown(this);
         RaisePhase(XPlatWindowPhase.Shown);
-        Shown?.Invoke(this, EventArgs.Empty);
+        _shown?.Invoke(this);
     }
 
-    private void OnBackendShown(object? sender, EventArgs e) => Guard(RaiseShown);
+    private void OnBackendShown(object sender) => Guard(RaiseShown);
 
-    private void OnBackendCloseRequested(object? sender, EventArgs e) => Guard(() => RequestClose());
+    private void OnBackendCloseRequested(object sender) => Guard(() => RequestClose());
 
-    private void OnBackendClosed(object? sender, EventArgs e) => Guard(Dispose);
+    private void OnBackendClosed(object sender) => Guard(Dispose);
 
-    private void OnBackendActivated(object? sender, EventArgs e) =>
-        Guard(() => Activated?.Invoke(this, EventArgs.Empty));
+    private void OnBackendActivated(object sender) =>
+        Guard(() => _activated?.Invoke(this));
 
-    private void OnBackendDeactivated(object? sender, EventArgs e) =>
-        Guard(() => Deactivated?.Invoke(this, EventArgs.Empty));
+    private void OnBackendDeactivated(object sender) =>
+        Guard(() => _deactivated?.Invoke(this));
 
-    private void OnBackendClientSizeChanged(object? sender, EventArgs e) =>
-        Guard(() => ClientSizeChanged?.Invoke(this, EventArgs.Empty));
+    private void OnBackendClientSizeChanged(object sender) =>
+        Guard(() => _clientSizeChanged?.Invoke(this));
 
-    private void OnBackendScaleChanged(object? sender, EventArgs e) => Guard(() =>
+    private void OnBackendScaleChanged(object sender) => Guard(() =>
     {
         Host.PerformLayout();
         Host.Invalidate();
-        ScaleChanged?.Invoke(this, EventArgs.Empty);
+        _scaleChanged?.Invoke(this);
     });
 
-    private void OnBackendStateChanged(object? sender, EventArgs e) =>
-        Guard(() => StateChanged?.Invoke(this, EventArgs.Empty));
+    private void OnBackendStateChanged(object sender) =>
+        Guard(() => _stateChanged?.Invoke(this));
 
     /// <summary>
     /// Raises <paramref name="phase"/> on the portable hooks and then hands it to the backend's
@@ -562,7 +670,7 @@ public sealed partial class XPlatWindow : IDisposable
     /// <remarks>
     /// The same nesting rule as the application's phases: a hook registered first sets up first and
     /// tears down last. A hook that throws reaches
-    /// <see cref="XPlatApplication.UnhandledException"/> and does not stop the hooks after it.
+    /// <see cref="XPlatApplication.AddUnhandledExceptionHandler"/> and does not stop the hooks after it.
     /// </remarks>
     private void RaisePhase(XPlatWindowPhase phase)
     {
@@ -607,7 +715,7 @@ public sealed partial class XPlatWindow : IDisposable
 
     /// <summary>
     /// Runs work a backend raises from a platform callback, so a failure reaches
-    /// <see cref="XPlatApplication.UnhandledException"/> rather than unwinding into native code.
+    /// <see cref="XPlatApplication.AddUnhandledExceptionHandler"/> rather than unwinding into native code.
     /// </summary>
     private static void Guard(Action action)
     {

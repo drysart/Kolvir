@@ -21,7 +21,7 @@ namespace XPlatUI;
 /// </para>
 /// <para>
 /// Hooks run on the thread that constructs and runs the application, and a hook that throws reaches
-/// <see cref="XPlatApplication.UnhandledException"/> rather than aborting startup silently.
+/// <see cref="XPlatApplication.AddUnhandledExceptionHandler"/> rather than aborting startup silently.
 /// </para>
 /// </remarks>
 public interface IXPlatApplicationHook

@@ -49,10 +49,10 @@ internal static class Program
     /// stays trimmable and can be published with NativeAOT.
     /// </summary>
     /// <remarks>
-    /// The attribute is not decoration: the runtime reads it before <c>Main</c> runs and initializes
-    /// the thread as a single-threaded COM apartment, which is the only thing that can do so. Windows
-    /// needs it for the shell's file dialogs, whose <c>IFileDialog::Show</c> never returns on a
-    /// multi-threaded apartment. It is ignored on macOS and Linux.
+    /// The attribute is not decoration: the runtime reads it before <c>Main</c> runs and
+    /// initializes the thread as a single-threaded COM apartment, which is the only thing that can
+    /// do so. Windows needs it for the shell's file dialogs, whose <c>IFileDialog::Show</c> never
+    /// returns on a multi-threaded apartment. It is ignored on macOS and Linux.
     /// </remarks>
     [STAThread]
     private static int Main(string[] args)
@@ -123,15 +123,15 @@ window.MenuBar = CreateMenuBar(window, demo);
         application.MainWindow = window;
 
         // The window comes forward on its own; the status line says why it did.
-        application.SecondInstance += (_, e) => demo.SetStatus(
+        application.AddSecondInstanceHandler((_, e) => demo.SetStatus(
             e.Arguments.Count == 0
                 ? "A second launch was handed to this window."
-                : $"A second launch was handed to this window: {string.Join(' ', e.Arguments)}");
+                : $"A second launch was handed to this window: {string.Join(' ', e.Arguments)}"));
 
         // Activation is the other half of the multi-window story: the status line reports it, which
         // is also the easiest way to see that an owned window taking the focus deactivates this one.
-        window.Activated += (_, _) => demo.SetStatus("Window activated - it has the keyboard focus.");
-        window.Deactivated += (_, _) => demo.SetStatus("Window deactivated - another window has the focus.");
+        window.AddActivatedHandler(_ => demo.SetStatus("Window activated - it has the keyboard focus."));
+        window.AddDeactivatedHandler(_ => demo.SetStatus("Window deactivated - another window has the focus."));
 
         // Windows has no menu bar to hang these off yet, so the same two window features are also
         // reachable as flags: --topmost starts above everything, --owned opens a window owned by

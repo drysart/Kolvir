@@ -17,7 +17,7 @@ public enum XPlatDpiAwareness
 
     /// <summary>
     /// Every window tracks the scale factor of the display it is on. This is what
-    /// <see cref="XPlatWindow.ScaleFactor"/> and <see cref="XPlatWindow.ScaleChanged"/> assume, and
+    /// <see cref="XPlatWindow.ScaleFactor"/> and <see cref="XPlatWindow.AddScaleChangedHandler"/> assume, and
     /// it is the default.
     /// </summary>
     PerMonitor,

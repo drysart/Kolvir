@@ -85,7 +85,7 @@ table.RowStyles.Add(XPlatRowStyle.AutoSize());
 table.RowStyles.Add(XPlatRowStyle.Percent(100));
 
 var button = new XPlatButton("Say hello") { Dock = DockStyle.Fill };
-button.Click += (_, _) => Console.WriteLine("clicked");
+button.AddClickHandler(_ => Console.WriteLine("clicked"));
 
 table.Add(new XPlatLabel("Hello") { AutoSize = true }, 0, 0);
 table.Add(button, 1, 1);
@@ -107,8 +107,32 @@ host.ProcessKeyDown(XPlatKey.Tab);             // cycles focus
 host.ProcessTextInput("a");
 ```
 
-`host.Invalidated` tells the adapter to repaint; `host.CursorChanged` lets it update the
-native cursor.
+`host.AddInvalidatedHandler` tells the adapter to repaint; `host.AddCursorChangedHandler` lets it
+update the native cursor.
+
+### Handlers
+
+There are no C# events. Every notification is a pair of methods, `Add<Name>Handler` and
+`Remove<Name>Handler`, so a subscription is a plain method call and the delegate behind it stays
+private to the library:
+
+```csharp
+Action<object, XPlatMouseEventArgs> onDown = (sender, e) => Press(sender, e.Location);
+
+IDisposable subscription = control.AddMouseDownHandler(onDown);
+control.RemoveMouseDownHandler(onDown);      // the same callback: unsubscribes it
+subscription.Dispose();                      // or hand the token around instead
+```
+
+The handler's first argument is the object that raised it, which is the same object `Add` was called
+on. A second argument carries the payload where there is one: `Action<object>` when there is not,
+`Action<object, TPayload>` when there is, with the args class the WinForms event would have carried.
+Handlers run on the UI thread, in the order they were added, and a handler that throws stops the
+ones after it and reaches the `AddUnhandledExceptionHandler` handlers.
+
+`Add` returns an `IDisposable` token that removes the handler when it is disposed, so a scope can own
+a subscription without storing the callback. A caller that already holds the callback can pass it to
+`Remove` and skip the token.
 
 ### Split container
 
@@ -138,7 +162,7 @@ var split = new XPlatSplitContainer
 
 split.Panel1.Controls.Add(new XPlatLabel("Navigation"));
 split.Panel2.Controls.Add(content);
-split.SplitterMoved += (_, _) => Console.WriteLine($"panel 1 is now {split.SplitterDistance:0} px");
+split.AddSplitterMovedHandler(_ => Console.WriteLine($"panel 1 is now {split.SplitterDistance:0} px"));
 root.Controls.Add(split);
 ```
 
@@ -147,8 +171,8 @@ even when it strays over the panels or outside the control. The splitter highlig
 hover, drag and focus, and can be moved with the arrow keys (`Left`/`Right` for a vertical
 split, `Up`/`Down` for a horizontal one) when the container has keyboard focus. Set
 `IsSplitterFixed` to lock it, and `SplitterColor`/`ShowSplitterGrip` to restyle it.
-`SplitterMoving` fires continuously during a drag; `SplitterDistanceChanged` fires whenever
-the distance changes for any reason.
+`AddSplitterMovingHandler` runs continuously during a drag; `AddSplitterDistanceChangedHandler` runs
+whenever the distance changes for any reason.
 
 ### Rich label
 
@@ -165,7 +189,7 @@ events that make it behave like a hyperlink.
 | `WrapText` | Word wrap (default `true`); when `false` the label is as wide as its longest line |
 | `LineSpacing`, `TextAlign` | Extra leading between lines; nine-way block + line alignment |
 | `Text` | The flow as plain text; assigning replaces every span with one unstyled span |
-| `SpanClick`, `SpanAt(point)` | Click notification and hit testing; span-level `Click`/`MouseDown`/`MouseUp`/`MouseMove`/`MouseEnter`/`MouseLeave` fire too |
+| `AddSpanClickHandler`, `SpanAt(point)` | Click notification and hit testing; a span also takes `AddClickHandler`, `AddMouseDownHandler`, `AddMouseUpHandler`, `AddMouseMoveHandler`, `AddMouseEnterHandler` and `AddMouseLeaveHandler` |
 
 Span formatting: `Bold`, `Italic`, `Underline`, `Strikethrough`, `ForeColor`, `HoverBackColor`,
 `FontSize`, `FontFamily`, or a whole `Font` override. Decorations and the hover/press background
@@ -195,7 +219,7 @@ rich.AddInlineControl(new XPlatButton("Retry") { AutoSize = true }, XPlatInlineA
 rich.AddText(" ");
 rich.AddInlineControl(badge, XPlatInlineAlignment.Bottom);
 
-rich.SpanClick += (_, e) => Console.WriteLine($"clicked {e.Span.Text}");
+rich.AddSpanClickHandler((_, e) => Console.WriteLine($"clicked {e.Span.Text}"));
 ```
 
 Inline controls are measured like any other control (`AutoSize`, `Margin`, explicit sizes) and
@@ -210,7 +234,7 @@ placeholder text and horizontal scrolling are all implemented by the control its
 
 | Member | Behaviour |
 | --- | --- |
-| `Text`, `TextChanged` | Current value. Control characters (including line breaks) are stripped so the field stays single line |
+| `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line |
 | `CaretIndex`, `SelectionStart`, `SelectionLength`, `SelectedText`, `HasSelection` | Selection state; the caret is `0 … Text.Length` |
 | `Caret` | The `XPlatCaret` that draws and blinks the insertion point; its `BlinkInterval`, `Width` and `Color` can be changed |
 | `Select(start, length)`, `SelectAll()`, `ClearSelection()` | Programmatic selection |
@@ -234,7 +258,7 @@ var name = new XPlatTextBox
     PlaceholderText = "Type your name",
     MaxLength = 40,
 };
-name.TextChanged += (_, _) => Console.WriteLine(name.Text);
+name.AddTextChangedHandler(_ => Console.WriteLine(name.Text));
 
 var password = new XPlatTextBox { Dock = DockStyle.Top, IsPassword = true };
 var readOnly = new XPlatTextBox { Dock = DockStyle.Top, ReadOnly = true, Text = "fixed" };
@@ -270,7 +294,7 @@ When a selection is copied, every control it touches contributes its own piece i
 | `GetSelectionText(start, length)` | The plain-text piece for a slice; override to control what a copy pastes into a text target |
 | `GetSelectionHtml(start, length)` | The HTML piece for the same slice, or `null` (default) to fall back to the escaped plain text |
 | `host.CopySelection()` | Writes both flavours to `XPlatClipboard`; `host.SelectionTextSeparator` joins the pieces |
-| `host.ProcessContextMenu(point)` | Builds the menu: the control's own `ContextMenu`, then `ContextMenuOpening`, then a default **Copy** item |
+| `host.ProcessContextMenu(point)` | Builds the menu: the control's own `ContextMenu`, then the `AddContextMenuOpeningHandler` handlers, then a default **Copy** item |
 
 `XPlatRichLabel` overrides `GetSelectionHtml` so a copy keeps its formatting: `<b>`, `<i>`,
 `<u>`, `<s>` and a `<span style="...">` for colour and size overrides, wrapped around the
@@ -384,8 +408,8 @@ var accent = XPlatTheme.ColorOf(XPlatThemeColor.Accent);
 `Secondary` (`Hover`/`Pressed`), `FocusRing`, `Splitter` (`Hover`), `InputBackground`, `Selection`,
 `Caret`, `Placeholder` and `DisabledBackground`/`DisabledForeground` - so a custom theme is just
 `XPlatPalette.Light with { Accent = SKColors.Teal }`. Assigning the palette (or any single colour,
-e.g. `XPlatTheme.Accent = …`) raises `XPlatTheme.Changed` and the next frame picks it up: controls
-never snapshot a colour at construction time.
+e.g. `XPlatTheme.Accent = …`) runs the `XPlatTheme.AddChangedHandler` handlers and the next frame
+picks it up: controls never snapshot a colour at construction time.
 
 Controls resolve their colours while painting, so nothing has to be walked or re-applied:
 
@@ -470,29 +494,29 @@ using var application = new XPlatApplication(backend, options);
 
 if (application.IsPrimaryInstance)
 {
-    application.SecondInstance += (_, e) => window.Activate();
+    application.AddSecondInstanceHandler((_, e) => window.Activate());
 }
 
 application.Run();
 ```
 
-`SecondInstance` is always raised on the UI thread, with `e.Arguments` holding the second launch's
-command line (empty when it had none). Its default action is `Activate()`, which brings the main
-window forward - and raises `Activated`, so one handler covers both a re-launch and the user
-clicking the Dock icon or taskbar button:
+`AddSecondInstanceHandler` handlers always run on the UI thread, with `e.Arguments` holding the
+second launch's command line (empty when it had none). The default action is `Activate()`, which
+brings the main window forward - and runs the `Activated` handlers, so one handler covers both a
+re-launch and the user clicking the Dock icon or taskbar button:
 
 ```csharp
-application.Activated += (_, e) => { /* window came forward */ };
-application.SecondInstance += (_, e) =>
+application.AddActivatedHandler((_, e) => { /* window came forward */ });
+application.AddSecondInstanceHandler((_, e) =>
 {
     OpenDocument(e.Arguments[0]);
     e.Handled = true;               // suppress the default Activate()
-};
+});
 ```
 
-Setting `Handled` on either event replaces that event's default action; setting it on
-`SecondInstance` also skips the `Activated` it would otherwise raise. `InstanceKey` scopes the
-claim, so two different applications - or two profiles of one application - can run side by side.
+Setting `Handled` in either handler replaces that notification's default action; setting it in a
+second-instance handler also skips the activation it would otherwise perform. `InstanceKey` scopes
+the claim, so two different applications - or two profiles of one application - can run side by side.
 
 The three platforms get there differently, and only the first two are complete:
 
@@ -500,7 +524,7 @@ The three platforms get there differently, and only the first two are complete:
 | --- | --- | --- |
 | Windows | Named mutex plus a named-pipe listener in the first process; the second connects, writes its command line and exits | `Activate()` restores a minimized window and calls `SetForegroundWindow`, falling back to a taskbar flash when Windows refuses the foreground |
 | macOS | Same lock and pipe. Finder and `open -a` are already single-instance, so this covers a direct launch of the binary | `applicationShouldHandleReopen`; `Activate()` uses `activateIgnoringOtherApps` |
-| Linux (GTK4) | `Gio.Application` uniqueness over D-Bus, with a reverse-DNS id derived from `InstanceKey` | A forwarded launch arrives as GTK's `command-line` signal and is turned into `SecondInstance`; `Activate()` calls `gtk_window_present` |
+| Linux (GTK4) | `Gio.Application` uniqueness over D-Bus, with a reverse-DNS id derived from `InstanceKey` | A forwarded launch arrives as GTK's `command-line` signal and becomes a second-instance notification; `Activate()` calls `gtk_window_present` |
 
 GTK is the reason the claim is a backend member rather than something the library does itself: on
 Wayland only the toolkit's own D-Bus registration can raise another process's window, so the
@@ -510,14 +534,14 @@ when this process is the second one; the headless backend always returns true.
 ### Owned windows, topmost and activation
 
 `Owner` makes one window belong to another, `TopMost` floats a window above everything, and
-`Activated`/`Deactivated` report when a window gains or loses the foreground:
+`AddActivatedHandler`/`AddDeactivatedHandler` report when a window gains or loses the foreground:
 
 ```csharp
 var tool = new XPlatWindow("Tool", panel) { Owner = window };   // or: tool.Show(window);
 tool.TopMost = true;                                            // needs Owner == null
 
-window.Activated += (_, _) => status.Text = "Foreground";
-window.Deactivated += (_, _) => status.Text = "Background";
+window.AddActivatedHandler(_ => status.Text = "Foreground");
+window.AddDeactivatedHandler(_ => status.Text = "Background");
 ```
 
 An owned window sits above its owner, minimizes with it and closes with it. The close is a cascade
@@ -542,16 +566,16 @@ status line reports activation changes.
 ### Drag and drop
 
 Setting `AllowDrop` on a control makes it, and everything inside it, a drop target. The four drag
-events carry an `XPlatDragEventArgs`; the drop handler sets `Effect` to say what it did:
+handlers receive an `XPlatDragEventArgs`; the drop handler sets `Effect` to say what it did:
 
 ```csharp
 root.AllowDrop = true;
 
-root.DragEnter += (_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
+root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
     ? XPlatDragDropEffects.Copy
-    : XPlatDragDropEffects.None;
+    : XPlatDragDropEffects.None);
 
-root.DragDrop += (_, e) =>
+root.AddDragDropHandler((_, e) =>
 {
     foreach (var path in e.Data.GetFiles())
     {
@@ -559,11 +583,12 @@ root.DragDrop += (_, e) =>
     }
 
     e.Effect = XPlatDragDropEffects.Copy;
-};
+});
 ```
 
-`DragEnter`, `DragOver` and `DragDrop` share one argument type, so the same handler can serve all
-three. `DragLeave` has no arguments: by the time a drag has left, there is nothing left to say.
+`AddDragEnterHandler`, `AddDragOverHandler` and `AddDragDropHandler` share one argument type, so the
+same handler can serve all three. `AddDragLeaveHandler` takes a handler with no arguments: by the
+time a drag has left, there is nothing left to say.
 `Location` is in the control's own logical pixels, the same units `Paint` uses, and `Modifiers`
 reports the shift, control and alt keys held at that moment.
 
@@ -597,7 +622,7 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 1. `Initialize` gets the `XPlatApplication`; `Run` enters the platform loop and returns its exit
    code; `Quit` leaves it; `Invoke` marshals a callback onto the UI thread;
    `TryClaimSingleInstance` returns false when another process already owns the instance key, and
-   raises `SecondInstance` when a later launch is handed over.
+   runs the `AddSecondInstanceHandler` handlers when a later launch is handed over.
 2. `CreateWindow` returns an `IXPlatWindowBackend`. It creates the native window and an `SKSurface`
    (or a bitmap-backed surface) of its client size, and it creates and owns the `XPlatUiHost`.
 3. On resize: `Host.SetClientSize(width / scale, height / scale)`. On paint: `canvas.Scale(scale)`
@@ -605,8 +630,9 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 4. Forward pointer, key and text events into `Host.ProcessMouseMove/Down/Up/Leave`,
    `ProcessKeyDown/Up`, `ProcessTextInput` and `ProcessContextMenu`, dividing coordinates by the
    scale factor. There is no tick to forward: a control that needs time runs its own timer.
-5. Raise `Shown`, `CloseRequested`, `Closed`, `Activated`, `Deactivated`, `ClientSizeChanged`,
-   `ScaleChanged` and `StateChanged`; the model turns them into `XPlatWindow` events.
+5. Run the `Shown`, `CloseRequested`, `Closed`, `Activated`, `Deactivated`, `ClientSizeChanged`,
+   `ScaleChanged` and `StateChanged` handlers; the model forwards each to the matching
+   `XPlatWindow` method.
 6. `RegisterServices` adds the platform services to MEDI's `IServiceCollection` - the clipboard, the
    system theme, the dialog service and the context menu presenter. Doing it through one hook
    instead of a `Create*` member per service keeps adding a service from breaking every backend, and

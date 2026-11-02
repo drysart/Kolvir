@@ -385,17 +385,19 @@ Rules:
 - Handlers run on the UI thread in subscription order. A handler that throws stops the ones after it,
   as a C# event would, and the exception reaches `XPlatApplication.UnhandledException`.
 - The backing storage stays private and unchanged: one field per event, exactly as a field-like event
-  has today, so a core event costs no more than it does now. The new cost is one small allocation per
-  subscription for the returned token. A feature keeps its own subscriptions in its per-control state
-  (§5.3), which is trimmed along with the feature.
+  has today, so a core event costs no more than it does now. The field sits with its `Add` and
+  `Remove` at the top of the type, ahead of the members that use it, so a reader looking for what a
+  type can raise finds one block rather than a scattering among the methods. The new cost is one
+  small allocation per subscription for the returned token. A feature keeps its own subscriptions in
+  its per-control state (§5.3), which is trimmed along with the feature.
 - No `event` keyword anywhere, including interfaces and backend types. A review that finds one has
   found a bug in the convention.
 - The payload is whatever the event already carries. `XPlatDragEventArgs`, `XPlatMouseEventArgs` and
   friends stay as they are, and a feature that needs a payload defines its own type rather than
   wrapping a value in a generic one.
-- The `System.EventArgs` base on those classes is vestigial once nothing takes an `EventHandler`.
-  Dropping it is cosmetic, and belongs with the Phase 2 change that touches them rather than with a
-  feature.
+- The `System.EventArgs` base on those classes was vestigial once nothing took an `EventHandler`, and
+  Phase 2 dropped it. A payload class is now a plain class, so a feature that defines one has nothing
+  to inherit and no `EventArgs` naming to imitate.
 
 ### 5.5 When a member does belong on the control
 
@@ -1016,6 +1018,31 @@ it, and every later phase is judged against these three numbers.
 
 Measure: nothing. This phase is about shape, and the publish size should move only by the tokens it
 removes.
+
+Result: done. 96 declarations across 43 files became an `Add`/`Remove` pair, 68 of them payload-less
+(`Action<object>`) and 28 keeping the args class they already had. The ten payload classes that
+derived from `System.EventArgs` lost the base, because nothing in the library takes an `EventHandler`
+any more. Three backing fields were renamed on the way in, since `_exitInProgress` and its siblings
+would have collided with the property of the same name once they became fields. Every `Add` returns
+the same `XPlatHandlerToken<T>` from `XPlatUI/Core/`, rather than one token type per event.
+
+| Target | Phase 1 loose | Phase 2 loose | Delta |
+|---|---|---|---|
+| win-x64 | 3,202,048 | 3,202,048 | 0 |
+| linux-x64 | 4,215,120 | | |
+| osx-arm64 | 4,218,096 | | |
+
+The Windows image came out byte-identical, which is what the phase predicted: a handler list and a
+multicast delegate cost the same to store, and the accessors that replaced `add` and `remove` are the
+same count and shape. The dropped base classes remove nothing at runtime, because they never added a
+field. The two remaining rows are left unmeasured for the same reason no delta can appear: nothing
+about this change can vary by platform.
+
+Byte-identical is not the same as free. The Phase 1 seam is still in the image, and the convention
+still forces every event to have a field and two methods where the compiler used to write those for
+us. What the measurement shows is that this cost was already being paid, not that a new one was
+avoided. The one cost the phase does add is the token allocation per subscription, which §5.4
+already records.
 
 ### Phase 3: drag and drop as the first consumer
 

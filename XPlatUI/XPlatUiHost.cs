@@ -5,10 +5,13 @@ namespace XPlatUI;
 /// <summary>
 /// The platform-independent heart of the UI library. A host adapter (WinForms, WPF,
 /// Win32, Cocoa, X11, SDL, ...) owns an <see cref="XPlatUiHost"/>, forwards input and
-/// calls <see cref="Paint"/> whenever <see cref="Invalidated"/> fires.
+/// calls <see cref="Paint"/> whenever <see cref="AddInvalidatedHandler"/> fires.
 /// </summary>
 public sealed class XPlatUiHost
 {
+    private Action<object>? _invalidated;
+    private Action<object>? _cursorChanged;
+    private Action<object, XPlatContextMenuEventArgs>? _contextMenuOpening;
     private readonly XPlatSelection _selection;
     private XPlatControl? _root;
     private SKSize _clientSize;
@@ -25,17 +28,53 @@ public sealed class XPlatUiHost
 
     public XPlatUiHost() => _selection = new XPlatSelection(this);
 
-    /// <summary>Raised when the UI needs to be repainted.</summary>
-    public event EventHandler? Invalidated;
+    /// <summary>Adds a handler that runs when the UI needs to be repainted.</summary>
+    public IDisposable AddInvalidatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _invalidated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveInvalidatedHandler, handler);
+    }
 
-    /// <summary>Raised when the control under the pointer requests a different cursor.</summary>
-    public event EventHandler? CursorChanged;
+    /// <summary>Removes a handler that <see cref="AddInvalidatedHandler"/> added.</summary>
+    public void RemoveInvalidatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _invalidated -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when the control under the pointer requests a different cursor.</summary>
+    public IDisposable AddCursorChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _cursorChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveCursorChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddCursorChangedHandler"/> added.</summary>
+    public void RemoveCursorChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _cursorChanged -= handler;
+    }
 
     /// <summary>
-    /// Raised before a context menu is shown, so an application can supply one for a control
-    /// that carries no <see cref="XPlatControl.ContextMenu"/> of its own.
+    /// Adds a handler that runs before a context menu is shown, so an application can supply one
+    /// for a control that carries no <see cref="XPlatControl.ContextMenu"/> of its own.
     /// </summary>
-    public event EventHandler<XPlatContextMenuEventArgs>? ContextMenuOpening;
+    public IDisposable AddContextMenuOpeningHandler(Action<object, XPlatContextMenuEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _contextMenuOpening += handler;
+        return new XPlatHandlerToken<Action<object, XPlatContextMenuEventArgs>>(RemoveContextMenuOpeningHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddContextMenuOpeningHandler"/> added.</summary>
+    public void RemoveContextMenuOpeningHandler(Action<object, XPlatContextMenuEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _contextMenuOpening -= handler;
+    }
 
     /// <summary>The root of the control tree.</summary>
     public XPlatControl? Root
@@ -178,12 +217,12 @@ public sealed class XPlatUiHost
         });
     }
 
-    public void Invalidate() => Invalidated?.Invoke(this, EventArgs.Empty);
+    public void Invalidate() => _invalidated?.Invoke(this);
 
     /// <summary>
-    /// Re-reads the platform's light/dark preference through <see cref="XPlatSystemTheme"/> and, when
-    /// it no longer matches the palette, switches the palette and repaints. Backends call this once
-    /// at startup and again from their theme-changed notification (<c>WM_SETTINGCHANGE</c> and
+    /// Re-reads the platform's light/dark preference through <see cref="XPlatSystemTheme"/> and,
+    /// when it no longer matches the palette, switches the palette and repaints. Backends call this
+    /// once at startup and again from their theme-changed notification (<c>WM_SETTINGCHANGE</c> and
     /// <c>WM_THEMECHANGED</c> on Windows).
     /// </summary>
     /// <returns>True when the appearance changed.</returns>
@@ -319,7 +358,8 @@ public sealed class XPlatUiHost
 
     /// <summary>
     /// Routes a drag move and returns the effect the target accepts. A backend that reports only
-    /// moves still produces a <see cref="XPlatControl.DragEnter"/> when the target changes.
+    /// moves still produces a <see cref="XPlatControl.AddDragEnterHandler"/> when the target
+    /// changes.
     /// </summary>
     /// <param name="location">The pointer in host coordinates.</param>
     /// <param name="data">The payload being dragged.</param>
@@ -338,7 +378,7 @@ public sealed class XPlatUiHost
 
     /// <summary>
     /// Routes the end of a drag and returns the effect the target performed. The target gets
-    /// <see cref="XPlatControl.DragDrop"/> when it accepts drops at <paramref name="location"/>.
+    /// <see cref="XPlatControl.AddDragDropHandler"/> when it accepts drops at <paramref name="location"/>.
     /// </summary>
     /// <param name="location">The pointer in host coordinates.</param>
     /// <param name="data">The payload being dropped.</param>
@@ -375,10 +415,10 @@ public sealed class XPlatUiHost
     /// presenter.
     /// </summary>
     /// <remarks>
-    /// The menu comes from the hit control's <see cref="XPlatControl.ContextMenu"/> (or the
-    /// nearest ancestor that has one), then from <see cref="ContextMenuOpening"/>, and finally
-    /// from the current selection, which offers Copy. Right-clicking never changes the
-    /// selection, so a menu can act on what the user already selected.
+    /// The menu comes from the hit control's <see cref="XPlatControl.ContextMenu"/> (or the nearest
+    /// ancestor that has one), then from <see cref="AddContextMenuOpeningHandler"/>, and finally
+    /// from the current selection, which offers Copy. Right-clicking never changes the selection,
+    /// so a menu can act on what the user already selected.
     /// </remarks>
     public bool ProcessContextMenu(SKPoint location) => Guard(() =>
     {
@@ -388,7 +428,7 @@ public sealed class XPlatUiHost
         if (menu is null || menu.IsEmpty)
         {
             var args = new XPlatContextMenuEventArgs(hit, location);
-            ContextMenuOpening?.Invoke(this, args);
+            _contextMenuOpening?.Invoke(this, args);
             menu = args.Menu;
         }
 
@@ -619,7 +659,7 @@ public sealed class XPlatUiHost
 
     /// <summary>
     /// Runs an entry point that a backend calls from a platform callback, so a failure reaches
-    /// <see cref="XPlatApplication.UnhandledException"/> instead of unwinding into the native frame
+    /// <see cref="XPlatApplication.AddUnhandledExceptionHandler"/> instead of unwinding into the native frame
     /// that called it. With no application the exception is rethrown to the caller, which is what a
     /// standalone host has always done.
     /// </summary>
@@ -794,7 +834,7 @@ public sealed class XPlatUiHost
         }
 
         _cursor = cursor;
-        CursorChanged?.Invoke(this, EventArgs.Empty);
+        _cursorChanged?.Invoke(this);
     }
 
     private void MoveFocus(int direction)

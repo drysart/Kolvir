@@ -7,7 +7,7 @@ namespace XPlatUI;
 /// The arguments are the ones <see cref="XPlatApplicationOptions.CommandLine"/> supplies, so a
 /// launcher that appends its own switches should strip them before the application sees them.
 /// </remarks>
-public sealed class XPlatSecondInstanceEventArgs : EventArgs
+public sealed class XPlatSecondInstanceEventArgs
 {
     /// <summary>Creates the event data for a forwarded launch.</summary>
     /// <param name="arguments">The second launch's command line arguments, without the executable path.</param>
@@ -23,8 +23,8 @@ public sealed class XPlatSecondInstanceEventArgs : EventArgs
     public IReadOnlyList<string> Arguments { get; }
 
     /// <summary>
-    /// Set to true in a <see cref="XPlatApplication.SecondInstance"/> handler to stop the default
-    /// action, which is to raise <see cref="XPlatApplication.Activated"/>.
+    /// Set to true in a <see cref="XPlatApplication.AddSecondInstanceHandler"/> handler to stop the
+    /// default action, which is to raise activation.
     /// </summary>
     public bool Handled { get; set; }
 }

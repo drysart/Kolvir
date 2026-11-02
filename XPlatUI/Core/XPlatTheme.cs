@@ -5,7 +5,7 @@ namespace XPlatUI;
 /// <summary>
 /// The palette and fonts the built-in controls draw with. Controls read these values while
 /// they paint, so assigning <see cref="Palette"/> recolours the whole UI on the next frame;
-/// <see cref="Changed"/> tells a backend that a frame is due.
+/// <see cref="AddChangedHandler"/> tells a backend that a frame is due.
 /// </summary>
 /// <remarks>
 /// The palette is process-wide, the way branding usually is. To follow the operating system's
@@ -14,10 +14,23 @@ namespace XPlatUI;
 /// </remarks>
 public static class XPlatTheme
 {
+    private static Action<object>? _changed;
     private static XPlatPalette _palette = XPlatPalette.Light;
 
-    /// <summary>Raised after <see cref="Palette"/> was assigned a different palette.</summary>
-    public static event EventHandler? Changed;
+    /// <summary>Adds a handler that runs after <see cref="Palette"/> was given a different palette.</summary>
+    public static IDisposable AddChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChangedHandler"/> added.</summary>
+    public static void RemoveChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed -= handler;
+    }
 
     /// <summary>
     /// The colours in use. Assign <see cref="XPlatPalette.Light"/>, <see cref="XPlatPalette.Dark"/>
@@ -229,7 +242,9 @@ public static class XPlatTheme
 
             _fontFamily = value;
             RebuildFonts();
-            Changed?.Invoke(null, EventArgs.Empty);
+
+            // A static event has no instance to name as the sender.
+            _changed?.Invoke(null!);
         }
     }
 
@@ -255,6 +270,6 @@ public static class XPlatTheme
     private static void Assign(XPlatPalette palette)
     {
         _palette = palette;
-        Changed?.Invoke(null, EventArgs.Empty);
+        _changed?.Invoke(null!);
     }
 }

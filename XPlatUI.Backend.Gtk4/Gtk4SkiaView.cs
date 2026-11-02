@@ -31,6 +31,7 @@ namespace XPlatUI.Backend.Gtk4;
 /// </remarks>
 public sealed class Gtk4SkiaView : IDisposable
 {
+    private Action<object>? _metricsChanged;
     /// <summary>
     /// A control that invalidates while it is being painted would otherwise keep the drawing area
     /// permanently dirty, so repaints requested during a paint are deferred and capped.
@@ -110,15 +111,27 @@ public sealed class Gtk4SkiaView : IDisposable
         _root.SetChild(_picture);
         _root.AddOverlay(_area);
 
-        Host.Invalidated += OnHostInvalidated;
-        Host.CursorChanged += OnHostCursorChanged;
-        XPlatTheme.Changed += OnThemeChanged;
+        Host.AddInvalidatedHandler(OnHostInvalidated);
+        Host.AddCursorChangedHandler(OnHostCursorChanged);
+        XPlatTheme.AddChangedHandler(OnThemeChanged);
 
         AttachInput();
     }
 
-    /// <summary>Raised after a paint when the widget's size or scale factor changed.</summary>
-    public event EventHandler? MetricsChanged;
+    /// <summary>Adds a handler that runs after a paint when the widget's size or scale factor changed.</summary>
+    public IDisposable AddMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _metricsChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveMetricsChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddMetricsChangedHandler"/> added.</summary>
+    public void RemoveMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _metricsChanged -= handler;
+    }
 
     /// <summary>The GTK widget that shows the UI tree.</summary>
     public Gtk.Widget Widget => _root;
@@ -194,9 +207,9 @@ public sealed class Gtk4SkiaView : IDisposable
 
         _disposed = true;
 
-        XPlatTheme.Changed -= OnThemeChanged;
-        Host.Invalidated -= OnHostInvalidated;
-        Host.CursorChanged -= OnHostCursorChanged;
+        XPlatTheme.RemoveChangedHandler(OnThemeChanged);
+        Host.RemoveInvalidatedHandler(OnHostInvalidated);
+        Host.RemoveCursorChangedHandler(OnHostCursorChanged);
 
         if (_fileDropTarget is not null)
         {
@@ -354,7 +367,7 @@ public sealed class Gtk4SkiaView : IDisposable
 
         if (!_disposed)
         {
-            MetricsChanged?.Invoke(this, EventArgs.Empty);
+            _metricsChanged?.Invoke(this);
         }
 
         return false;
@@ -667,7 +680,7 @@ public sealed class Gtk4SkiaView : IDisposable
         }
     }
 
-    private void OnHostInvalidated(object? sender, EventArgs e)
+    private void OnHostInvalidated(object sender)
     {
         if (_disposed)
         {
@@ -702,7 +715,7 @@ public sealed class Gtk4SkiaView : IDisposable
         return false;
     }
 
-    private void OnHostCursorChanged(object? sender, EventArgs e) =>
+    private void OnHostCursorChanged(object sender) =>
         _area.SetCursorFromName(Host.Cursor switch
         {
             XPlatCursor.Hand => "pointer",
@@ -715,7 +728,7 @@ public sealed class Gtk4SkiaView : IDisposable
         });
 
     /// <summary>Repaints whenever the palette is swapped, by the system or by the application.</summary>
-    private void OnThemeChanged(object? sender, EventArgs e) => OnHostInvalidated(sender, e);
+    private void OnThemeChanged(object sender) => OnHostInvalidated(sender);
 
     private static void Trace(string message)
     {

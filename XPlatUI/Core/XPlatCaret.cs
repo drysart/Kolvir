@@ -15,8 +15,8 @@ namespace XPlatUI;
 /// </para>
 /// <para>
 /// The caret knows nothing about text. A control works out where the caret belongs and hands that
-/// rectangle to <see cref="Draw(SKCanvas, SKRect)"/>, which paints nothing while the caret is in its
-/// hidden blink phase, so a paint method never has to test the blink state itself.
+/// rectangle to <see cref="Draw(SKCanvas, SKRect)"/>, which paints nothing while the caret is in
+/// its hidden blink phase, so a paint method never has to test the blink state itself.
 /// </para>
 /// </remarks>
 public sealed class XPlatCaret : IDisposable
@@ -35,8 +35,8 @@ public sealed class XPlatCaret : IDisposable
 
     /// <summary>Creates a caret for a control and registers it to be disposed with that control.</summary>
     /// <param name="owner">
-    /// The control the caret belongs to: the caret follows its focus and enabled state and repaints it
-    /// when it blinks.
+    /// The control the caret belongs to: the caret follows its focus and enabled state and repaints
+    /// it when it blinks.
     /// </param>
     /// <param name="blinkInterval">How often the caret toggles. Defaults to <see cref="DefaultBlinkInterval"/>.</param>
     /// <exception cref="ArgumentNullException"><paramref name="owner"/> is null.</exception>
@@ -48,9 +48,9 @@ public sealed class XPlatCaret : IDisposable
         _owner = owner;
         _timer = owner.CreateTimer(blinkInterval ?? DefaultBlinkInterval, OnTick);
 
-        owner.GotFocus += OnOwnerGotFocus;
-        owner.LostFocus += OnOwnerLostFocus;
-        owner.EnabledChanged += OnOwnerEnabledChanged;
+        owner.AddGotFocusHandler(OnOwnerGotFocus);
+        owner.AddLostFocusHandler(OnOwnerLostFocus);
+        owner.AddEnabledChangedHandler(OnOwnerEnabledChanged);
         owner.Own(this);
     }
 
@@ -66,8 +66,8 @@ public sealed class XPlatCaret : IDisposable
     public float Width { get; set; } = DefaultWidth;
 
     /// <summary>
-    /// The caret's color, or null (the default) to follow <see cref="XPlatTheme.Caret"/> so the caret
-    /// tracks the theme.
+    /// The caret's color, or null (the default) to follow <see cref="XPlatTheme.Caret"/> so the
+    /// caret tracks the theme.
     /// </summary>
     public SKColor? Color { get; set; }
 
@@ -81,14 +81,14 @@ public sealed class XPlatCaret : IDisposable
     public bool IsVisible => _visible;
 
     /// <summary>
-    /// Whether a paint should draw the caret: it is active, in its visible phase, and its control is
-    /// focused and enabled.
+    /// Whether a paint should draw the caret: it is active, in its visible phase, and its control
+    /// is focused and enabled.
     /// </summary>
     public bool ShouldPaint => _active && _visible && _owner.IsFocused && _owner.Enabled;
 
     /// <summary>
-    /// Takes the caret and restarts the blink, so it appears solid the moment the user starts editing
-    /// instead of vanishing under the first keystroke.
+    /// Takes the caret and restarts the blink, so it appears solid the moment the user starts
+    /// editing instead of vanishing under the first keystroke.
     /// </summary>
     public void Activate()
     {
@@ -110,8 +110,8 @@ public sealed class XPlatCaret : IDisposable
     }
 
     /// <summary>
-    /// Shows the caret solidly and restarts its blink. Every edit and every caret move does this, so
-    /// the caret is never mid-blink when the user is looking for it.
+    /// Shows the caret solidly and restarts its blink. Every edit and every caret move does this,
+    /// so the caret is never mid-blink when the user is looking for it.
     /// </summary>
     public void ResetBlink()
     {
@@ -141,8 +141,8 @@ public sealed class XPlatCaret : IDisposable
     }
 
     /// <summary>
-    /// Draws a caret <see cref="Width"/> wide at <paramref name="x"/>, spanning <paramref name="height"/>
-    /// down from <paramref name="top"/>.
+    /// Draws a caret <see cref="Width"/> wide at <paramref name="x"/>, spanning <paramref
+    /// name="height"/> down from <paramref name="top"/>.
     /// </summary>
     /// <param name="canvas">The canvas to paint on.</param>
     /// <param name="x">The left edge of the caret.</param>
@@ -163,16 +163,16 @@ public sealed class XPlatCaret : IDisposable
         _disposed = true;
         _active = false;
 
-        _owner.GotFocus -= OnOwnerGotFocus;
-        _owner.LostFocus -= OnOwnerLostFocus;
-        _owner.EnabledChanged -= OnOwnerEnabledChanged;
+        _owner.RemoveGotFocusHandler(OnOwnerGotFocus);
+        _owner.RemoveLostFocusHandler(OnOwnerLostFocus);
+        _owner.RemoveEnabledChangedHandler(OnOwnerEnabledChanged);
 
         _timer.Dispose();
     }
 
-    private void OnOwnerGotFocus(object? sender, EventArgs e) => Activate();
+    private void OnOwnerGotFocus(object sender) => Activate();
 
-    private void OnOwnerLostFocus(object? sender, EventArgs e)
+    private void OnOwnerLostFocus(object sender)
     {
         // Losing focus does not give the caret up - the control may get focus back without the user
         // having moved anywhere - but the blink stops and the caret comes back solid.
@@ -180,10 +180,10 @@ public sealed class XPlatCaret : IDisposable
         _timer.Stop();
     }
 
-    private void OnOwnerEnabledChanged(object? sender, EventArgs e) =>
+    private void OnOwnerEnabledChanged(object sender) =>
         _timer.Enabled = _active && _owner.IsFocused && _owner.Enabled;
 
-    private void OnTick(object? sender, EventArgs e)
+    private void OnTick(object sender)
     {
         // The control tree belongs to the caller, so this timer can outlive the application. Once
         // that happens XPlatTimer ticks inline on a pool thread, which must not touch the UI.

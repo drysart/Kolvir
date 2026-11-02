@@ -18,9 +18,9 @@ namespace XPlatUI;
 /// </para>
 /// <para>
 /// The mutex is the claim, so a crashed instance does not wedge the application: the next launch
-/// finds an abandoned mutex, takes it over and becomes the owner. The pipe only carries the payload,
-/// so an owner that cannot be reached leaves the second launch to exit quietly rather than starting
-/// a competing process.
+/// finds an abandoned mutex, takes it over and becomes the owner. The pipe only carries the
+/// payload, so an owner that cannot be reached leaves the second launch to exit quietly rather than
+/// starting a competing process.
 /// </para>
 /// <para>
 /// The name is scoped per user and the claim itself is machine-wide, so two users signed in at once
@@ -30,6 +30,7 @@ namespace XPlatUI;
 /// </remarks>
 public sealed class XPlatInstanceLock : IDisposable
 {
+    private Action<object, XPlatSecondInstanceEventArgs>? _secondInstance;
     /// <summary>How long a second launch waits for the owning process to answer.</summary>
     private static readonly TimeSpan ConnectTimeout = TimeSpan.FromSeconds(3);
 
@@ -56,10 +57,22 @@ public sealed class XPlatInstanceLock : IDisposable
     }
 
     /// <summary>
-    /// Raised on a background thread when another launch of the application was forwarded to this
-    /// one, with that launch's command line arguments.
+    /// Adds a handler that runs on a background thread when another launch of the application was
+    /// forwarded to this one, with that launch's command line arguments.
     /// </summary>
-    public event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    public IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
 
     /// <summary>
     /// Claims <paramref name="key"/> for this process, or forwards <paramref name="arguments"/> to
@@ -204,7 +217,7 @@ public sealed class XPlatInstanceLock : IDisposable
                 server.WaitForConnection();
 
                 var payload = ReadAll(server);
-                SecondInstance?.Invoke(this, new XPlatSecondInstanceEventArgs(Split(payload)));
+                _secondInstance?.Invoke(this, new XPlatSecondInstanceEventArgs(Split(payload)));
             }
             catch (Exception ex) when (ex is IOException or ObjectDisposedException or UnauthorizedAccessException)
             {
