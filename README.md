@@ -56,7 +56,10 @@ default backend. It is a project that multi-targets and references exactly one b
 framework, so referencing *it* is enough: the framework the application builds for decides which
 backend it gets, and a publish carries only that one. `XPlatUIBackend.CreateDefault()` returns the
 backend and loads the embedded Skia library on the way, so `Main` names no platform and no graphics
-library. `XPlatUI.Minimal` is written that way. `XPlatUIDemo.App` keeps its own factory, because it
+library. `XPlatUI.Minimal` is written that way. The selector's framework list is unconditional,
+because a selector that offered only the host's framework could not be packed for the others;
+restoring it therefore evaluates all three, and building the fixture needs the macOS workload on
+every platform, not just on the Mac.
 has to read `--classic-menus` before it can build a backend.
 
 ## Design

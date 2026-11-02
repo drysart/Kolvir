@@ -991,6 +991,13 @@ Windows, nothing measurable on Linux or macOS, and it does not change the loose 
 at all. Its value is that the fixture's `Program.cs` contains no `#if` and names no platform, which
 is what a consumer of the two packages should be able to write.
 
+The selector declares all three frameworks unconditionally, for the same reason the feature project
+does: it exists to turn a framework into a backend, and a list that named only the host's would be a
+build that cannot produce the others. Restore therefore evaluates all three, so publishing the
+fixture needs the macOS workload on every platform rather than only on the Mac. That is a
+prerequisite this procedure did not have before, and `-p:TargetFramework=` is how a local build
+skips it.
+
 Later phases are measured against the loose rows, 3,191,808, 4,210,736 and 4,218,096, because
 that is where the library's own contribution is visible without the blob swamping it.
 

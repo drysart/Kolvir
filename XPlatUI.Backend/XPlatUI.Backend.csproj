@@ -1,14 +1,17 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- This project exists to turn a target framework into a backend, so it has to offer a framework
-         for every supported platform. An application only ever needs the one it runs on, though, so
-         the default is the host's platform and the packing pipeline asks for the whole set by setting
-         XPlatUIBackendAllPlatforms. -->
-    <TargetFrameworks Condition="'$(XPlatUIBackendAllPlatforms)' == 'true'">net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
-    <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('windows'))">net10.0-windows</TargetFrameworks>
-    <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('osx'))">net10.0-macos</TargetFrameworks>
-    <TargetFrameworks Condition="'$(TargetFrameworks)' == ''">net10.0</TargetFrameworks>
+    <!-- Every platform the selector can resolve, unconditionally. Its whole job is to turn a target
+         framework into a backend, so it has to offer one for each platform the library supports; a
+         list that named only the host's would be a build that cannot produce the others, which is
+         how a package ends up missing a `lib/` folder. An application still compiles and publishes
+         only the inner build its own framework can use. Restore does evaluate all three, though, so
+         anything that references this project needs the macOS workload and the Windows reference
+         pack, the same requirement the development solution and XPlatUI.Feature.DragDrop carry.
+         Narrow one inner build for local work with `-p:TargetFramework=net10.0`; the plural
+         `-p:TargetFrameworks=...` does not work as a switch, because the list arrives as a single
+         target framework and the build stops with NETSDK1046. -->
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <RootNamespace>XPlatUI.Backend</RootNamespace>
@@ -19,8 +22,9 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
-  <!-- Exactly one of these is in any given build. That is the whole point: an application that
-       targets net10.0-windows never sees, restores or publishes the other two. -->
+  <!-- Exactly one of these is in any given build, and it is the one whose platform can use it. That
+       is the whole point: an application that targets net10.0-windows compiles Win32 and publishes
+       it, and compiles and publishes neither of the other two. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <ProjectReference Include="..\XPlatUI.Backend.Win32\XPlatUI.Backend.Win32.csproj" />
   </ItemGroup>
