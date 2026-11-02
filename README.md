@@ -253,10 +253,12 @@ captured control, or the control under the pointer, and walks up the parent chai
 claims the turn, so a wheel event over a nested list scrolls the list and only reaches the panel
 around it once the list is at its end. `XPlatMouseEventArgs.Delta` is the distance in logical
 pixels, positive toward the start of the content (up or left); a backend that reports a wheel in
-detents multiplies by `XPlatUiHost.WheelPixelsPerDetent`, and one that reports precise deltas (a
-touchpad) passes them straight through. A panel scrolls vertically unless `Shift` is held and
-horizontal scrolling is possible, and falls back to the other axis when the preferred one cannot
-move. A standalone `XPlatScrollBar` moves three `SmallChange` steps per detent.
+detents multiplies by `XPlatUiHost.WheelPixelsPerDetent`, one that reports lines multiplies by its
+own platform's line height - macOS reports a wheel in lines of ten points, which is exactly what
+AppKit's scrollers use - and one that reports precise deltas (a touchpad) passes them straight
+through. A panel scrolls vertically unless `Shift` is held and horizontal scrolling is possible, and
+falls back to the other axis when the preferred one cannot move. A standalone `XPlatScrollBar` moves
+three `SmallChange` steps per detent.
 
 ```csharp
 list.AddMouseWheelHandler((sender, e) =>
