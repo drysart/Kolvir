@@ -17,6 +17,13 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
+  <!-- The drag and drop feature package owns the opt-in, but the native half of that feature needs
+       this backend's internals: a view's drop targets are installed by a hook that calls into the
+       view. The feature is the only friend assembly. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- The GTK4 binding (GtkSharp itself is GTK3 only). -->
     <PackageReference Include="GirCore.Gtk-4.0" Version="0.8.1" />

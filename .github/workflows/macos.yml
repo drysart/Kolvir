@@ -18,7 +18,7 @@ on:
       - 'XPlatUIDemo.App/**'
       - 'XPlatUI/**'
       - 'XPlatUI.Backend.*/**'
-      - 'XPlatUIDemo/**'
+      - 'XPlatUI.Feature.*/**'
   workflow_dispatch:
 
 concurrency:

@@ -1110,9 +1110,9 @@ public class XPlatControl : IDisposable
     protected virtual void OnTextInput(XPlatTextInputEventArgs e) => _textInput?.Invoke(this, e);
 
     /// <summary>
-    /// Lets the control itself decide what to do with a drag entering it. The drag and drop feature
-    /// calls this after the handlers subscribed with <c>AddDragEnterHandler</c>, so a control that
-    /// overrides it has the last word on <see cref="XPlatDragEventArgs.Effect"/>.
+    /// Lets the control itself decide what to do with a drag entering it. The host calls this after
+    /// the drag and drop feature has run the handlers subscribed with <c>AddDragEnterHandler</c>, so
+    /// a control that overrides it has the last word on <see cref="XPlatDragEventArgs.Effect"/>.
     /// </summary>
     /// <param name="e">The event data.</param>
     protected virtual void OnDragEnter(XPlatDragEventArgs e)

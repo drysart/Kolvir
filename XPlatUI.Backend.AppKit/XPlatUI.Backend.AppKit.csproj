@@ -19,6 +19,13 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
+  <!-- The drag and drop feature package owns the opt-in, but the native half of that feature needs
+       this backend's internals: a view's dragged-type registration is done by a hook that calls
+       into the view. The feature is the only friend assembly. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- SkiaSharp itself only ships Win32 natives; macOS needs the separate native package. The
          library references it so a host application never has to remember to. -->

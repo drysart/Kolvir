@@ -162,10 +162,11 @@ public sealed class XPlatUiHost
     /// installs one per window at <see cref="XPlatWindowPhase.Created"/>.
     /// </summary>
     /// <remarks>
-    /// The host finds the control under the pointer and tracks which one the drag is over; the
-    /// router decides which controls accept drops and delivers the phases to them. Nothing the host
-    /// retains names the feature's implementation, so an application that never installs a router
-    /// publishes without the feature, and a host with no router accepts nothing.
+    /// The host finds the control under the pointer, tracks which one the drag is over, and runs the
+    /// control's own <c>OnDrag...</c> handling; the router decides which controls accept drops and
+    /// runs the handlers subscribed to them, just before that. Nothing the host retains names the
+    /// feature's implementation, so an application that never installs a router publishes without
+    /// the feature, and a host with no router accepts nothing.
     /// </remarks>
     public IXPlatDragDropRouter? DragDropRouter { get; set; }
 
@@ -410,7 +411,12 @@ public sealed class XPlatUiHost
         }
 
         var args = new XPlatDragEventArgs(data, ToLocal(target, location), allowedEffects, modifiers);
-        DragDropRouter?.DragDrop(target, args);
+        if (DragDropRouter is { } router)
+        {
+            router.DragDrop(target, args);
+            target.RaiseDragDrop(args);
+        }
+
         _dropTarget = null;
         return args.Effect & allowedEffects;
     }, XPlatDragDropEffects.None);
@@ -635,6 +641,7 @@ public sealed class XPlatUiHost
             {
                 var over = new XPlatDragEventArgs(data, ToLocal(control, location), allowedEffects, modifiers);
                 router.DragOver(control, over);
+                control.RaiseDragOver(over);
                 effect = over.Effect & allowedEffects;
                 if (effect != XPlatDragDropEffects.None)
                 {
@@ -647,6 +654,7 @@ public sealed class XPlatUiHost
 
             var enter = new XPlatDragEventArgs(data, ToLocal(control, location), allowedEffects, modifiers);
             router.DragEnter(control, enter);
+            control.RaiseDragEnter(enter);
             var accepted = enter.Effect & allowedEffects;
             if (accepted == XPlatDragDropEffects.None)
             {
@@ -672,7 +680,12 @@ public sealed class XPlatUiHost
         }
 
         _dropTarget = null;
-        DragDropRouter?.DragLeave(previous);
+
+        if (DragDropRouter is { } router)
+        {
+            router.DragLeave(previous);
+            previous.RaiseDragLeave();
+        }
     }
 
     /// <summary>

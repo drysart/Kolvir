@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application calls AddDragDrop(). -->
+  <PropertyGroup>
+    <!-- One framework per host by default, the way XPlatUI.Backend resolves a target framework, so a
+         contributor builds the one their application can use. The pack pipeline asks for all three,
+         which is the only build that needs the Windows reference pack on a Mac and the macOS
+         workload anywhere. -->
+    <TargetFrameworks Condition="'$(XPlatUIFeatureAllPlatforms)' == 'true'">net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('windows'))">net10.0-windows</TargetFrameworks>
+    <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('osx'))">net10.0-macos</TargetFrameworks>
+    <TargetFrameworks Condition="'$(TargetFrameworks)' == ''">net10.0</TargetFrameworks>
+    <RootNamespace>XPlatUI</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- The feature is AOT compatible for the same reason the library is: an application that opts
+         in publishes the same way whether it did or not. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Drag and drop for XPlatUI: AllowDrop, the four drag handlers and the per-platform opt-in.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
+  </ItemGroup>
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="win\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- Exactly one of these is in any given build, and it is the one whose platform can use it. A
+       platform-only dependency is what makes the package safe to publish as a single artifact: the
+       dependency groups of section 4 are selected by target framework, so a Windows application never
+       restores the Linux backend. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="win\**\*.cs" />
+    <ProjectReference Include="..\XPlatUI.Backend.Win32\XPlatUI.Backend.Win32.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+    <ProjectReference Include="..\XPlatUI.Backend.AppKit\XPlatUI.Backend.AppKit.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+    <ProjectReference Include="..\XPlatUI.Backend.Gtk4\XPlatUI.Backend.Gtk4.csproj" />
+  </ItemGroup>
+
+</Project>

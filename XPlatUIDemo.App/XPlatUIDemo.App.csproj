@@ -8,9 +8,9 @@
     <TargetFramework Condition="$([MSBuild]::IsOSPlatform('osx'))">net10.0-macos</TargetFramework>
     <TargetFramework Condition="$([MSBuild]::IsOSPlatform('linux'))">net10.0</TargetFramework>
     <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
-    <!-- The macOS SDK names the bundle after the assembly, and XPlatUIDemo is already the shared
-         sample library, so the two would collide. XPlatUIDemoApp keeps XPlatUIDemo.app and
-         XPlatUIDemo.dll apart. -->
+    <!-- The macOS SDK names the bundle after the assembly, so this decides what the bundle is
+         called. XPlatUIDemoApp predates the sample UI moving into this project, and it stays
+         because Info.plist, app.manifest, the platform workflows and README.md all name it. -->
     <AssemblyName>XPlatUIDemoApp</AssemblyName>
     <RootNamespace>XPlatUI.Demo.App</RootNamespace>
     <Nullable>enable</Nullable>
@@ -48,20 +48,24 @@
   <ItemGroup>
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
     <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
-    <ProjectReference Include="..\XPlatUIDemo\XPlatUIDemo.csproj" />
   </ItemGroup>
 
-  <!-- Exactly one backend per TFM, and only the one that TFM can actually use. -->
+  <!-- Exactly one backend and one feature per TFM, and only the ones that TFM can actually use. The
+       feature is a package like any other: leaving it out still compiles, and the window simply
+       never becomes a drop target. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <ProjectReference Include="..\XPlatUI.Backend.Win32\XPlatUI.Backend.Win32.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.DragDrop\XPlatUI.Feature.DragDrop.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
     <ProjectReference Include="..\XPlatUI.Backend.AppKit\XPlatUI.Backend.AppKit.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.DragDrop\XPlatUI.Feature.DragDrop.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <ProjectReference Include="..\XPlatUI.Backend.Gtk4\XPlatUI.Backend.Gtk4.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.DragDrop\XPlatUI.Feature.DragDrop.csproj" />
   </ItemGroup>
 
   <!-- The SkiaSharp native library is embedded in an AOT publish by XPlatUI's own build assets
