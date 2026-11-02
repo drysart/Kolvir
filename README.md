@@ -283,6 +283,73 @@ another selectable control, ends the selection.
 What is still missing is the overlay style: an overlay scrollbar floats over the content and does
 not take a gutter. The bars are classic until that lands.
 
+### Invalidation and partial painting
+
+`Invalidate` says what changed, and the host keeps the answer as a region rather than a single
+rectangle, so two distant changes cost two small areas instead of the box around them. Every
+overload takes coordinates in the control's own space and drops anything outside its client area:
+
+| Call | Repaints |
+| --- | --- |
+| `Invalidate()` | The whole control, including its children |
+| `Invalidate(invalidateChildren: false)` | The whole control, but not the children |
+| `Invalidate(SKRect)` | An area of the control, including its children |
+| `Invalidate(SKRect, invalidateChildren)` | An area of the control, with the children left in or out |
+| `Invalidate(SKRegion)` | A set of areas of the control, including its children |
+| `Invalidate(SKRegion, invalidateChildren)` | A set of areas of the control, with the children left in or out |
+
+`invalidateChildren: false` subtracts the visible children from the area, so a control that changed
+its own appearance without moving anything does not make the paint visit the children at all. It is
+the difference between a caret blink costing one column of one text box and costing the whole
+window:
+
+```csharp
+// The caret blinks by repainting its own column, not the control around it.
+caret.Invalidate(XPlatGeometry.Inflate(bounds, 1f), invalidateChildren: false);
+```
+
+The paint itself is region-exact. `XPlatUiHost.Paint` clips to the dirty region - through its
+boundary path when the region is not a plain rectangle, so scattered invalidations do not repaint
+the gaps between them - clears that area and renders the tree into it. `XPlatControl.Render` calls
+`canvas.QuickReject` on its own bounds before doing any work, so a subtree that cannot reach the
+clip is not walked at all. That is where most of the saving is, and it applies on every backend
+whether or not the backend can present part of a frame.
+
+Moving or resizing a control repaints the area it vacated as well as the area it covers, without
+being asked. Without that a control that moved would leave a copy of itself behind, which is
+exactly what culling would otherwise make permanent.
+
+A backend opts into partial presentation with `XPlatUiHost.PartialUpdates`. It is off by default
+because a backend that rasterizes the whole surface every frame - GTK4 and the headless renderer
+both do - would be left with blank patches where the retained content should be:
+
+| Backend | Presents |
+| --- | --- |
+| Win32 | The painted area, blitted out of the retained DIB |
+| AppKit | The painted area, through the layer's `CGImage` |
+| GTK4 | The whole surface every frame |
+| Headless | The whole surface, so `--render` is always complete |
+
+`Paint` returns the `SKRectI` it covered, `PendingUpdateBounds` reports what the next paint will
+cover before it happens, and `IsUpdatePending` says whether anything has been invalidated at all -
+enough for a backend to skip asking the platform for a frame it would only redraw identically.
+`IncludeInNextPaint` adds an area to the next frame *without* raising the invalidated event, which
+is what a backend uses for a rectangle the platform reported stale, and what the framework uses
+when a control moves out of an area.
+
+```csharp
+// A backend that keeps its surface between frames.
+_host.PartialUpdates = true;
+
+void OnPaint()
+{
+    if (!_host.IsUpdatePending) return;
+
+    var area = _host.Paint(_canvas);
+    Present(area);              // present only what was painted
+}
+```
+
 ### Rich label
 
 `XPlatRichLabel` flows styled runs of text into a wrapping paragraph. Formatting lives on
@@ -834,7 +901,12 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 2. `CreateWindow` returns an `IXPlatWindowBackend`. It creates the native window and an `SKSurface`
    (or a bitmap-backed surface) of its client size, and it creates and owns the `XPlatUiHost`.
 3. On resize: `Host.SetClientSize(width / scale, height / scale)`. On paint: `canvas.Scale(scale)`
-   then `Host.Paint(canvas)`.
+   then `Host.Paint(canvas)`, which paints everything unless the backend has opted into
+   `PartialUpdates`. A backend that keeps its surface between frames sets `PartialUpdates = true`,
+   uses the returned area to present just what was painted, and calls
+   `Host.IncludeInNextPaint(rect)` with any rectangle the platform reports stale. A surface that was
+   just reallocated holds garbage, so the first paint into it has to be `Host.Paint(canvas, full:
+   true)`.
 4. Forward pointer, key and text events into `Host.ProcessMouseMove/Down/Up/Leave`,
    `ProcessKeyDown/Up`, `ProcessTextInput` and `ProcessContextMenu`, dividing coordinates by the
    scale factor. There is no tick to forward: a control that needs time runs its own timer.

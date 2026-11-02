@@ -73,6 +73,8 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private int _bufferWidth;
     private int _bufferHeight;
     private SKSurface? _skia;
+    private int _bufferGeneration;
+    private int _paintedGeneration;
 
     private bool _trackingLeave;
     private long _lastClickTime;
@@ -97,6 +99,10 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         _host.AddInvalidatedHandler(_ => Invalidate());
         _host.AddCursorChangedHandler(_ => ApplyCursor());
         XPlatTheme.AddChangedHandler(OnThemeChanged);
+
+        // The window keeps a drawing buffer between frames and copies it to the screen with
+        // BitBlt, so only the part that changed has to be painted and copied.
+        _host.PartialUpdates = true;
     }
 
     /// <inheritdoc />
@@ -1162,8 +1168,17 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         {
             if (_skia is not null && _memoryDc != IntPtr.Zero)
             {
-                Render();
-                NativeMethods.BitBlt(hdc, 0, 0, _bufferWidth, _bufferHeight, _memoryDc, 0, 0, NativeMethods.SrcCopy);
+                // The update region is everything Windows thinks is stale, which covers what the
+                // UI asked for and also things it cannot know about - an uncovered window, a
+                // resize - so it is added to the paint rather than trusted on its own.
+                _host.IncludeInNextPaint(new SKRect(
+                    paint.rcPaint.Left / _scale,
+                    paint.rcPaint.Top / _scale,
+                    paint.rcPaint.Right / _scale,
+                    paint.rcPaint.Bottom / _scale));
+
+                var area = Render();
+                Blit(hdc, area);
             }
         }
         finally
@@ -1179,23 +1194,60 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             return;
         }
 
-        Render();
-        NativeMethods.BitBlt(hdc, 0, 0, _bufferWidth, _bufferHeight, _memoryDc, 0, 0, NativeMethods.SrcCopy);
+        // Printing and the like copy the window into a fresh surface that holds no previous frame,
+        // so everything has to be painted and copied.
+        Blit(hdc, Render(full: true));
     }
 
-    private void Render()
+    /// <summary>Copies an area of the drawing buffer to a device context.</summary>
+    /// <param name="hdc">The context to copy to.</param>
+    /// <param name="area">The area to copy, in logical pixels.</param>
+    private void Blit(IntPtr hdc, SKRectI area)
+    {
+        var left = (int)MathF.Floor(area.Left * _scale);
+        var top = (int)MathF.Floor(area.Top * _scale);
+        var right = (int)MathF.Ceiling(area.Right * _scale);
+        var bottom = (int)MathF.Ceiling(area.Bottom * _scale);
+
+        left = Math.Max(left, 0);
+        top = Math.Max(top, 0);
+        right = Math.Min(right, _bufferWidth);
+        bottom = Math.Min(bottom, _bufferHeight);
+
+        if (right <= left || bottom <= top)
+        {
+            return;
+        }
+
+        NativeMethods.BitBlt(hdc, left, top, right - left, bottom - top, _memoryDc, left, top, NativeMethods.SrcCopy);
+    }
+
+    /// <summary>Paints the part of the UI that changed into the drawing buffer.</summary>
+    /// <param name="full">Paint everything, whatever the UI asked for.</param>
+    /// <returns>The area that was painted, in logical pixels.</returns>
+    private SKRectI Render(bool full = false)
     {
         if (_skia is null)
         {
-            return;
+            return SKRectI.Empty;
+        }
+
+        // A buffer that was just allocated holds whatever was in that memory, so the frame it
+        // starts with has to cover all of it.
+        if (_paintedGeneration != _bufferGeneration)
+        {
+            _paintedGeneration = _bufferGeneration;
+            full = true;
         }
 
         var canvas = _skia.Canvas;
         canvas.Save();
         canvas.Scale(_scale);
-        _host.Paint(canvas);
+        var area = _host.Paint(canvas, full);
         canvas.Restore();
         canvas.Flush();
+
+        return area;
     }
 
     private void OnSize(int width, int height, uint sizeType)
@@ -1577,6 +1629,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         _bufferWidth = width;
         _bufferHeight = height;
+        _bufferGeneration++;
     }
 
     private void ReleaseBuffer()

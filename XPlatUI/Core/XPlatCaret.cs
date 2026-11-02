@@ -32,6 +32,7 @@ public sealed class XPlatCaret : IDisposable
     private bool _active;
     private bool _visible = true;
     private bool _disposed;
+    private SKRect _bounds;
 
     /// <summary>Creates a caret for a control and registers it to be disposed with that control.</summary>
     /// <param name="owner">
@@ -132,6 +133,10 @@ public sealed class XPlatCaret : IDisposable
     {
         ArgumentNullException.ThrowIfNull(canvas);
 
+        // Remembered so a blink only has to repaint the column the caret occupies rather than the
+        // whole control, which on a long document is most of the window.
+        _bounds = bounds;
+
         if (!ShouldPaint || bounds.Width <= 0f || bounds.Height <= 0f)
         {
             return;
@@ -195,6 +200,16 @@ public sealed class XPlatCaret : IDisposable
         }
 
         _visible = !_visible;
-        _owner.Invalidate();
+
+        // The caret's own column, widened by a pixel on each side for the antialiased edges, so a
+        // blink does not repaint the control around it.
+        if (_bounds.Width > 0f && _bounds.Height > 0f)
+        {
+            _owner.Invalidate(XPlatGeometry.Inflate(_bounds, 1f), invalidateChildren: false);
+        }
+        else
+        {
+            _owner.Invalidate();
+        }
     }
 }

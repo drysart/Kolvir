@@ -30,6 +30,9 @@ public sealed class XPlatUiHost
     private bool _selecting;
     private bool _draggingSelection;
     private SKColor? _clearColor;
+    private SKRegion _dirty = new();
+    private SKRegion _painting = new();
+    private bool _dirtyAll = true;
 
     public XPlatUiHost() => _selection = new XPlatSelection(this);
 
@@ -203,20 +206,146 @@ public sealed class XPlatUiHost
         _root.PerformLayout();
     }
 
-    /// <summary>Clears the surface and paints the whole control tree.</summary>
+    /// <summary>
+    /// Whether the backend keeps the pixels of the previous frame between paints, so a paint only
+    /// has to cover the area that was invalidated. Off by default, because a backend that
+    /// rasterizes the whole surface every frame - GTK4 and the headless renderer both do - would
+    /// be left with blank patches where the retained content should be. Turn it on only when
+    /// <see cref="Paint"/> draws into a surface that outlives the frame.
+    /// </summary>
+    public bool PartialUpdates { get; set; }
+
+    /// <summary>The area the next paint will cover, in logical pixels.</summary>
+    /// <remarks>
+    /// A backend that can present part of its surface uses this to ask for a repaint of just that
+    /// area. It covers everything when nothing has been invalidated since the last paint, so a
+    /// paint always produces a complete frame even when the backend asks for one unprompted.
+    /// </remarks>
+    public SKRectI PendingUpdateBounds =>
+        _dirtyAll || _dirty.IsEmpty ? SurfaceBounds : _dirty.Bounds;
+
+    /// <summary>
+    /// Whether anything has been invalidated since the last paint. Lets a backend skip the work of
+    /// asking the platform for a repaint when it would only be handed a complete frame back.
+    /// </summary>
+    public bool IsUpdatePending => _dirtyAll || !_dirty.IsEmpty;
+
+    /// <summary>The whole drawable area, rounded out to whole pixels.</summary>
+    private SKRectI SurfaceBounds =>
+        new(0, 0, (int)MathF.Ceiling(_clientSize.Width), (int)MathF.Ceiling(_clientSize.Height));
+
+    /// <summary>Paints the part of the control tree that was invalidated.</summary>
     /// <param name="canvas">Canvas whose transform maps logical pixels to device pixels.</param>
-    public void Paint(SKCanvas canvas)
+    /// <param name="full">Paint everything, whatever has been invalidated.</param>
+    /// <returns>The area that was painted, in logical pixels.</returns>
+    /// <remarks>
+    /// The area is cleared and then repainted, so a backend with a retained surface can present
+    /// just that part of it and leave the rest of the frame alone. The tree is still walked from
+    /// the root; children that cannot reach the clip are culled as it goes.
+    /// </remarks>
+    public SKRectI Paint(SKCanvas canvas, bool full = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
 
+        var whole = full || !PartialUpdates || _dirtyAll || _dirty.IsEmpty;
+        var area = whole ? SurfaceBounds : _dirty.Bounds;
+
+        // The paint takes the dirty region with it. Anything invalidated from inside the paint - a
+        // control that repaints itself, a layout that moves something - belongs to the next frame,
+        // so it must land in an empty region rather than be cleared along with this one.
+        var region = _dirty;
+        _dirty = _painting;
+        _painting = region;
+        _dirty.SetEmpty();
+        _dirtyAll = false;
+
         Guard(() =>
         {
-            canvas.Clear(ClearColor);
+            canvas.Save();
+
+            // A scaled canvas means the region - which is in logical pixels - cannot be handed to
+            // ClipRegion, which ignores the transform and expects device space. The boundary path
+            // goes through the transform like every other clip.
+            if (whole || region.IsRect)
+            {
+                var bounds = whole ? area : region.Bounds;
+                canvas.ClipRect(new SKRect(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom));
+            }
+            else
+            {
+                using var boundary = region.GetBoundaryPath();
+                canvas.ClipPath(boundary, SKClipOperation.Intersect, false);
+            }
+
+            // DrawPaint rather than Clear: both fill the clip, but only DrawPaint is documented to
+            // fill the clip *region*, and the region the dirty area came from can have holes in it.
+            using var clear = new SKPaint { Color = ClearColor, BlendMode = SKBlendMode.Src };
+            canvas.DrawPaint(clear);
+
             _root?.Render(canvas);
+            canvas.Restore();
         });
+
+        return area;
     }
 
-    public void Invalidate() => _invalidated?.Invoke(this);
+    /// <summary>Requests a repaint of the whole surface.</summary>
+    public void Invalidate()
+    {
+        _dirtyAll = true;
+        _dirty.SetEmpty();
+        _invalidated?.Invoke(this);
+    }
+
+    /// <summary>Requests a repaint of an area, in logical pixels.</summary>
+    /// <param name="rect">The area to repaint.</param>
+    public void Invalidate(SKRect rect)
+    {
+        if (rect.Width > 0f && rect.Height > 0f && !_dirtyAll)
+        {
+            _dirty.Op(ToRectI(rect), SKRegionOperation.Union);
+        }
+
+        _invalidated?.Invoke(this);
+    }
+
+    /// <summary>Requests a repaint of a region, in logical pixels.</summary>
+    /// <param name="region">The area to repaint.</param>
+    public void Invalidate(SKRegion region)
+    {
+        ArgumentNullException.ThrowIfNull(region);
+
+        if (!_dirtyAll && !region.IsEmpty)
+        {
+            _dirty.Op(region, SKRegionOperation.Union);
+        }
+
+        _invalidated?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Adds an area to the next paint without asking for a frame.
+    /// </summary>
+    /// <param name="rect">The area to add, in logical pixels.</param>
+    /// <remarks>
+    /// For a backend that has been told to repaint by the platform rather than by the UI: the
+    /// area the platform reports stale is not necessarily one the UI knows about, and it has to be
+    /// added to what the paint covers without asking for a frame from inside the frame.
+    /// </remarks>
+    public void IncludeInNextPaint(SKRect rect)
+    {
+        if (!_dirtyAll && rect.Width > 0f && rect.Height > 0f)
+        {
+            _dirty.Op(ToRectI(rect), SKRegionOperation.Union);
+        }
+    }
+
+    /// <summary>Rounds a rectangle out to the whole pixels that cover it.</summary>
+    private static SKRectI ToRectI(SKRect rect) => new(
+        (int)MathF.Floor(rect.Left),
+        (int)MathF.Floor(rect.Top),
+        (int)MathF.Ceiling(rect.Right),
+        (int)MathF.Ceiling(rect.Bottom));
 
     /// <summary>
     /// Re-reads the platform's light/dark preference through <see cref="XPlatSystemTheme"/> and,
@@ -698,7 +827,7 @@ public sealed class XPlatUiHost
     }
 
     /// <summary>Maps a rectangle from a control's coordinate space to the host's.</summary>
-    private static SKRect ToHost(XPlatControl control, SKRect rect)
+    internal static SKRect ToHost(XPlatControl control, SKRect rect)
     {
         var origin = ToHost(control, SKPoint.Empty);
         return new SKRect(

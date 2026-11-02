@@ -68,6 +68,8 @@ internal sealed class AppKitSkiaView : NSView
     private int _width;
     private int _height;
     private int _scale;
+    private int _bufferGeneration;
+    private int _paintedGeneration;
     private long _lastSizeChange;
     private bool _disposed;
 
@@ -92,6 +94,10 @@ internal sealed class AppKitSkiaView : NSView
         _host.AddCursorChangedHandler(OnHostCursorChanged);
         XPlatTheme.AddChangedHandler(OnThemeChanged);
         _reportedAt = Environment.TickCount64;
+
+        // Frames are painted into a buffer that outlives them and handed to the layer as it stands,
+        // so only the part of it that changed has to be repainted.
+        _host.PartialUpdates = true;
 
         // Layer backed from the start, so AppKit never creates a backing store for this view and
         // the first frame already goes through the layer instead of the window's context.
@@ -251,7 +257,8 @@ internal sealed class AppKitSkiaView : NSView
             // wipe all the headroom. This is after the scale because the clip is in the same
             // logical units the UI paints in, not in pixels.
             canvas.ClipRect(new SKRect(0, 0, _width, _height));
-            _host.Paint(canvas);
+            _host.Paint(canvas, full: _paintedGeneration != _bufferGeneration);
+            _paintedGeneration = _bufferGeneration;
             canvas.Restore();
             canvas.Flush();
         }
@@ -793,6 +800,10 @@ internal sealed class AppKitSkiaView : NSView
             _scale = scale;
             _bufferError = null;
             _buffersAllocated++;
+
+            // The new pixels hold whatever was in that memory, so the frame they start with has
+            // to cover all of them.
+            _bufferGeneration++;
         }
         catch (Exception ex)
         {
