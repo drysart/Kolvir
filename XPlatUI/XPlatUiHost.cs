@@ -34,6 +34,7 @@ public sealed class XPlatUiHost
     private SKRegion _painting = new();
     private bool _dirtyAll = true;
     private bool _debugHoldingContent;
+    private System.Threading.Timer? _debugFrameTimer;
 
     public XPlatUiHost() => _selection = new XPlatSelection(this);
 
@@ -277,9 +278,10 @@ public sealed class XPlatUiHost
         {
             // Two frames per repaint: the area in flat red, then the content that replaces it. The
             // red frame leaves the dirty region alone, so the content frame covers exactly the same
-            // area. The hold belongs to the start of the content frame rather than the end of the
-            // red one, because the red frame is not on screen until the backend has presented it,
-            // which happens after this method returns.
+            // area. The wait between them belongs out here rather than inside the content frame: a
+            // backend that only shows what it drew when the message loop turns - AppKit does - has
+            // the next paint overwrite the red frame before it is ever on screen, so waiting inside
+            // the paint is what hid the red frame entirely on macOS.
             if (!_debugHoldingContent)
             {
                 _debugHoldingContent = true;
@@ -297,16 +299,12 @@ public sealed class XPlatUiHost
                 // bounds that take in everything between them, and asking for that would make the
                 // content frame repaint the gap as well - which is the over-painting the debug mode
                 // exists to expose.
-                using (var pending = new SKRegion(_dirty))
-                {
-                    Invalidate(pending);
-                }
+                ScheduleDebugContentFrame(new SKRegion(_dirty));
 
                 return area;
             }
 
             _debugHoldingContent = false;
-            Thread.Sleep(DebugPaintHoldMs);
         }
         else
         {
@@ -337,6 +335,47 @@ public sealed class XPlatUiHost
         });
 
         return area;
+    }
+
+    /// <summary>Asks for the frame that paints over the red debug frame, once it has been seen.</summary>
+    /// <param name="region">The area the red frame covers, in logical pixels. It is disposed here.</param>
+    private void ScheduleDebugContentFrame(SKRegion region)
+    {
+        if (XPlatApplication.Current is not { } application)
+        {
+            // A host painted on its own has no loop to turn, so there is nothing to wait for and the
+            // content frame runs straight after the red one.
+            using (region)
+            {
+                Invalidate(region);
+            }
+
+            return;
+        }
+
+        _debugFrameTimer?.Dispose();
+        _debugFrameTimer = new System.Threading.Timer(
+            _ =>
+            {
+                try
+                {
+                    application.BeginInvoke(() =>
+                    {
+                        using (region)
+                        {
+                            Invalidate(region);
+                        }
+                    });
+                }
+                catch (ObjectDisposedException)
+                {
+                    // The application shut down while the red frame was held.
+                    region.Dispose();
+                }
+            },
+            null,
+            DebugPaintHoldMs,
+            System.Threading.Timeout.Infinite);
     }
 
     /// <summary>Clips a canvas to the area a paint covers, in logical pixels.</summary>

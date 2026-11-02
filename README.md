@@ -388,8 +388,16 @@ The red frame covers exactly the region the paint was given - the same clip, the
 and leaves the dirty region alone, so the frame that follows paints that same area and nothing else.
 A whole-surface paint is never tinted: startup, a resize and a full `Invalidate()` repaint
 everything anyway, so a flash of red would only hide the result instead of pointing at it. The
-variable is read once per process, so it has to be set before launch, and the hold runs on the UI
-thread - it is a debugging aid, not something to leave switched on.
+variable is read once per process, so it has to be set before launch.
+
+The content frame is scheduled for after the hold rather than painted straight away, so the hold
+does not block the UI thread - it only delays the second frame. Painting both frames in one pass
+would not work on a backend that shows what it drew only once the message loop turns, which is what
+macOS does: the content frame would overwrite the red one before either was on screen.
+
+`--focus` focuses the first text box on startup. A blinking caret invalidates a five pixel column
+every 530 ms, which makes a steady supply of small partial repaints to watch - handy when the
+machine driving the demo is not the machine looking at it.
 
 ### Rich label
 

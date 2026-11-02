@@ -146,6 +146,11 @@ window.MenuBar = CreateMenuBar(window, demo);
 
         window.Show();
 
+        if (Array.IndexOf(args, "--focus") >= 0)
+        {
+            demo.FocusFirstTextBox();
+        }
+
         if (Array.IndexOf(args, "--owned") >= 0)
         {
             demo.ShowOwnedWindow();

@@ -31,6 +31,28 @@ public sealed class DemoUi
     /// <returns>The root of a new sample tree.</returns>
     public static XPlatControl CreateRoot() => new DemoUi().Root;
 
+    /// <summary>Puts the caret in the first text field, which then blinks.</summary>
+    public void FocusFirstTextBox()
+    {
+        var pending = new Stack<XPlatControl>();
+        pending.Push(Root);
+
+        while (pending.Count > 0)
+        {
+            var control = pending.Pop();
+            if (control is XPlatTextBox box)
+            {
+                box.Focus();
+                return;
+            }
+
+            foreach (var child in control.Controls)
+            {
+                pending.Push(child);
+            }
+        }
+    }
+
     /// <summary>
     /// Renders the sample UI to a PNG without opening a window. Useful for visual regression tests
     /// and for verifying the render pipeline on CI.
