@@ -39,10 +39,11 @@ public interface IXPlatWindowBackend : IDisposable
     /// The window's icon, or null to keep the platform's generic application icon.
     /// </summary>
     /// <remarks>
-    /// What an icon <em>is</em> differs per platform, so each backend applies it its own way: Windows
-    /// sets the small icon for the title bar and the big one for the taskbar and Alt-Tab, both sized
-    /// from the window's DPI; macOS has no per-window icon and sets the application icon instead;
-    /// GTK4 uses <see cref="XPlatIcon.Name"/> because the theme, not the application, owns the pixels.
+    /// What an icon <em>is</em> differs per platform, so each backend applies it its own way:
+    /// Windows sets the small icon for the title bar and the big one for the taskbar and Alt-Tab,
+    /// both sized from the window's DPI; macOS has no per-window icon and sets the application icon
+    /// instead; GTK4 uses <see cref="XPlatIcon.Name"/> because the theme, not the application, owns
+    /// the pixels.
     /// </remarks>
     XPlatIcon? Icon { get; set; }
 
@@ -103,8 +104,9 @@ public interface IXPlatWindowBackend : IDisposable
     void Activate();
 
     /// <summary>
-    /// Requests a close. The backend reports it through <see cref="CloseRequested"/> rather than
-    /// destroying the window, so the model can raise its cancellable closing event first.
+    /// Requests a close. The backend reports it through <see cref="AddCloseRequestedHandler"/>
+    /// rather than destroying the window, so the model can raise its cancellable closing event
+    /// first.
     /// </summary>
     void Close();
 
@@ -114,27 +116,76 @@ public interface IXPlatWindowBackend : IDisposable
     /// </summary>
     void SetTitleBarAppearance(bool dark);
 
-    /// <summary>Raised once the native window is visible.</summary>
-    event EventHandler? Shown;
+    /// <summary>Adds a handler that runs once the native window is visible.</summary>
+    IDisposable AddShownHandler(Action<object> handler);
 
-    /// <summary>Raised when the user asks to close the window, including from the title bar's close button.</summary>
-    event EventHandler? CloseRequested;
+    /// <summary>Removes a handler that <see cref="AddShownHandler"/> added.</summary>
+    void RemoveShownHandler(Action<object> handler);
 
-    /// <summary>Raised after the native window has been destroyed.</summary>
-    event EventHandler? Closed;
+    /// <summary>Adds a handler that runs when the user asks to close the window, including from the title bar's close button.</summary>
+    IDisposable AddCloseRequestedHandler(Action<object> handler);
 
-    /// <summary>Raised when the window becomes the active window.</summary>
-    event EventHandler? Activated;
+    /// <summary>Removes a handler that <see cref="AddCloseRequestedHandler"/> added.</summary>
+    void RemoveCloseRequestedHandler(Action<object> handler);
 
-    /// <summary>Raised when the window stops being the active window.</summary>
-    event EventHandler? Deactivated;
+    /// <summary>Adds a handler that runs after the native window has been destroyed.</summary>
+    IDisposable AddClosedHandler(Action<object> handler);
 
-    /// <summary>Raised when the client area changes size, including as a result of a DPI change.</summary>
-    event EventHandler? ClientSizeChanged;
+    /// <summary>Removes a handler that <see cref="AddClosedHandler"/> added.</summary>
+    void RemoveClosedHandler(Action<object> handler);
 
-    /// <summary>Raised when the window moves to a display with a different scale factor.</summary>
-    event EventHandler? ScaleChanged;
+    /// <summary>Adds a handler that runs when the window becomes the active window.</summary>
+    IDisposable AddActivatedHandler(Action<object> handler);
 
-    /// <summary>Raised when <see cref="State"/> changes.</summary>
-    event EventHandler? StateChanged;
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    void RemoveActivatedHandler(Action<object> handler);
+
+    /// <summary>Adds a handler that runs when the window stops being the active window.</summary>
+    IDisposable AddDeactivatedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddDeactivatedHandler"/> added.</summary>
+    void RemoveDeactivatedHandler(Action<object> handler);
+
+    /// <summary>Adds a handler that runs when the client area changes size, including as a result of a DPI change.</summary>
+    IDisposable AddClientSizeChangedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddClientSizeChangedHandler"/> added.</summary>
+    void RemoveClientSizeChangedHandler(Action<object> handler);
+
+    /// <summary>Adds a handler that runs when the window moves to a display with a different scale factor.</summary>
+    IDisposable AddScaleChangedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddScaleChangedHandler"/> added.</summary>
+    void RemoveScaleChangedHandler(Action<object> handler);
+
+    /// <summary>Adds a handler that runs when <see cref="State"/> changes.</summary>
+    IDisposable AddStateChangedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddStateChangedHandler"/> added.</summary>
+    void RemoveStateChangedHandler(Action<object> handler);
+
+    /// <summary>
+    /// Runs the backend's own typed window hooks for <paramref name="phase"/>.
+    /// </summary>
+    /// <param name="phase">The phase the window has just entered.</param>
+    /// <param name="window">The window it belongs to.</param>
+    /// <remarks>
+    /// <para>
+    /// The model calls this once per phase, after the portable <see cref="IXPlatWindowHook"/>s in
+    /// an ascending phase and before them in a descending one, so a typed hook always tears down
+    /// before the portable hook that set it up. The backend resolves its own
+    /// <c>IXPlat&lt;Platform&gt;WindowHook</c> services from <paramref name="window"/> and runs them
+    /// in registration order, reversed for a descending phase.
+    /// </para>
+    /// <para>
+    /// An empty body is the correct implementation for a backend with no typed hooks; see
+    /// <see cref="IXPlatApplicationBackend.RunApplicationHooks"/> for why the member exists anyway.
+    /// </para>
+    /// <para>
+    /// <b>This member outlives <see cref="IDisposable.Dispose"/>.</b>
+    /// <see cref="XPlatWindowPhase.Disposed"/> is raised after the model has disposed the backend, so
+    /// an implementation must touch nothing native and must not assume the window still exists.
+    /// </para>
+    /// </remarks>
+    void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window);
 }

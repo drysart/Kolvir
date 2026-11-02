@@ -13,6 +13,14 @@ namespace XPlatUI.Backend.Headless;
 /// </remarks>
 public sealed class HeadlessWindowBackend : IXPlatWindowBackend
 {
+    private Action<object>? _shown;
+    private Action<object>? _closeRequested;
+    private Action<object>? _closed;
+    private Action<object>? _activated;
+    private Action<object>? _deactivated;
+    private Action<object>? _clientSizeChanged;
+    private Action<object>? _scaleChanged;
+    private Action<object>? _stateChanged;
     private readonly XPlatScreen _screen;
     private SKSize _clientSize;
     private SKSize _minimumClientSize;
@@ -66,7 +74,7 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
 
             _clientSize = value;
             Host.SetClientSize(value.Width, value.Height);
-            ClientSizeChanged?.Invoke(this, EventArgs.Empty);
+            _clientSizeChanged?.Invoke(this);
         }
     }
 
@@ -105,7 +113,7 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
             }
 
             _state = value;
-            StateChanged?.Invoke(this, EventArgs.Empty);
+            _stateChanged?.Invoke(this);
         }
     }
 
@@ -125,7 +133,7 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
     public void Show()
     {
         IsVisible = true;
-        Shown?.Invoke(this, EventArgs.Empty);
+        _shown?.Invoke(this);
     }
 
     /// <inheritdoc />
@@ -137,7 +145,7 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
     {
         if (!_disposed)
         {
-            Activated?.Invoke(this, EventArgs.Empty);
+            _activated?.Invoke(this);
         }
     }
 
@@ -146,7 +154,7 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
     {
         if (!_disposed)
         {
-            CloseRequested?.Invoke(this, EventArgs.Empty);
+            _closeRequested?.Invoke(this);
         }
     }
 
@@ -154,32 +162,32 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
     public void SetTitleBarAppearance(bool dark) => TitleBarIsDark = dark;
 
     /// <summary>
-    /// Raises <see cref="Deactivated"/>. There is no window manager to move focus away, so a test
-    /// that needs the event asks for it.
+    /// Runs the handlers <see cref="AddDeactivatedHandler"/> added. There is no window manager to
+    /// move focus away, so a test that needs them asks for them.
     /// </summary>
     public void SimulateDeactivate()
     {
         if (!_disposed)
         {
-            Deactivated?.Invoke(this, EventArgs.Empty);
+            _deactivated?.Invoke(this);
         }
     }
 
     /// <summary>
-    /// Raises <see cref="ScaleChanged"/>, standing in for a window dragged onto a display with a
-    /// different scale factor.
+    /// Runs the handlers <see cref="AddScaleChangedHandler"/> added, standing in for a window
+    /// dragged onto a display with a different scale factor.
     /// </summary>
     public void SimulateScaleChange()
     {
         if (!_disposed)
         {
-            ScaleChanged?.Invoke(this, EventArgs.Empty);
+            _scaleChanged?.Invoke(this);
         }
     }
 
     /// <summary>
-    /// Paints the control tree into <paramref name="canvas"/> at the current client size, exactly as
-    /// a native backend would paint it into its framebuffer.
+    /// Paints the control tree into <paramref name="canvas"/> at the current client size, exactly
+    /// as a native backend would paint it into its framebuffer.
     /// </summary>
     /// <param name="canvas">The canvas to paint into.</param>
     public void RenderTo(SKCanvas canvas)
@@ -217,30 +225,132 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
 
         _disposed = true;
         IsVisible = false;
-        Closed?.Invoke(this, EventArgs.Empty);
+        _closed?.Invoke(this);
     }
 
     /// <inheritdoc />
-    public event EventHandler? Shown;
+    public IDisposable AddShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveShownHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddShownHandler"/> added.</summary>
+    public void RemoveShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? CloseRequested;
+    public IDisposable AddCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveCloseRequestedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddCloseRequestedHandler"/> added.</summary>
+    public void RemoveCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Closed;
+    public IDisposable AddClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClosedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClosedHandler"/> added.</summary>
+    public void RemoveClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Activated;
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Deactivated;
+    public IDisposable AddDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDeactivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDeactivatedHandler"/> added.</summary>
+    public void RemoveDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ClientSizeChanged;
+    public IDisposable AddClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClientSizeChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClientSizeChangedHandler"/> added.</summary>
+    public void RemoveClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ScaleChanged;
+    public IDisposable AddScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveScaleChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddScaleChangedHandler"/> added.</summary>
+    public void RemoveScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? StateChanged;
+    public IDisposable AddStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveStateChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddStateChangedHandler"/> added.</summary>
+    public void RemoveStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged -= handler;
+    }
+
+    /// <inheritdoc />
+    public void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window)
+    {
+        // Empty on purpose: this backend declares no typed window hooks yet.
+    }
 }

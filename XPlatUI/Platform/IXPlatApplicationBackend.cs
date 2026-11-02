@@ -43,28 +43,36 @@ public interface IXPlatApplicationBackend
     /// forwarded and this process should exit.
     /// </returns>
     /// <remarks>
-    /// Called once, from the <see cref="XPlatApplication"/> constructor, before any window exists and
-    /// before <see cref="Run"/>. The key to claim is <see cref="XPlatApplication.InstanceKey"/>; a
-    /// backend whose platform needs a different shape, such as GTK4's reverse-DNS application id,
-    /// converts it itself. A backend that forwards a launch raises <see cref="SecondInstance"/>.
+    /// Called once, from the <see cref="XPlatApplication"/> constructor, before any window exists
+    /// and before <see cref="Run"/>. The key to claim is <see
+    /// cref="XPlatApplication.InstanceKey"/>; a backend whose platform needs a different shape,
+    /// such as GTK4's reverse-DNS application id, converts it itself. A backend that forwards a
+    /// launch runs the handlers added by
+    /// <see cref="AddSecondInstanceHandler"/>.
     /// </remarks>
     bool TryClaimSingleInstance();
 
     /// <summary>
-    /// Raised when the platform asks the application to come forward without a new launch, such as a
-    /// click on the macOS Dock tile. May be raised on any thread.
+    /// Adds a handler that runs when the platform asks the application to come forward without a
+    /// new launch, such as a click on the macOS Dock tile. Handlers may run on any thread.
     /// </summary>
     /// <remarks>
     /// A backend whose platform cannot deliver this never raises it: on Windows the shell restores
     /// the window itself, and on GTK4 the request arrives as a forwarded command line instead.
     /// </remarks>
-    event EventHandler? Activated;
+    IDisposable AddActivatedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    void RemoveActivatedHandler(Action<object> handler);
 
     /// <summary>
-    /// Raised when another launch of the application was forwarded to this process, with that
-    /// launch's command line. May be raised on any thread.
+    /// Adds a handler that runs when another launch of the application was forwarded to this
+    /// process, with that launch's command line. Handlers may run on any thread.
     /// </summary>
-    event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+    IDisposable AddSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler);
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    void RemoveSecondInstanceHandler(Action<object, XPlatSecondInstanceEventArgs> handler);
 
     /// <summary>Asks the loop to end with <paramref name="exitCode"/>. Safe to call from any thread.</summary>
     void Quit(int exitCode);
@@ -96,4 +104,27 @@ public interface IXPlatApplicationBackend
 
     /// <summary>Releases the loop's resources once <see cref="Run"/> has returned.</summary>
     void Shutdown();
+
+    /// <summary>
+    /// Runs the backend's own typed application hooks for <paramref name="phase"/>.
+    /// </summary>
+    /// <param name="phase">The phase the application has just entered.</param>
+    /// <param name="application">The application it belongs to.</param>
+    /// <remarks>
+    /// <para>
+    /// The model calls this once per phase, after the portable
+    /// <see cref="IXPlatApplicationHook"/>s in an ascending phase and before them in a descending
+    /// one, so a typed hook always tears down before the portable hook that set it up. The backend
+    /// resolves its own <c>IXPlat&lt;Platform&gt;ApplicationHook</c> services from
+    /// <paramref name="application"/> and runs them in registration order, reversed for a
+    /// descending phase.
+    /// </para>
+    /// <para>
+    /// An empty body is the correct implementation for a backend with no typed hooks: nothing
+    /// registers them unless a feature or the application does, and a hook nobody registers is
+    /// trimmed away with its registration. The member exists so a feature can add a typed hook
+    /// without the always-on path naming it.
+    /// </para>
+    /// </remarks>
+    void RunApplicationHooks(XPlatApplicationPhase phase, XPlatApplication application);
 }

@@ -6,11 +6,12 @@ namespace XPlatUI;
 /// </summary>
 /// <remarks>
 /// Without a handler the exception is fatal: the application shuts down through the normal path -
-/// windows close, <see cref="XPlatApplication.Exiting"/> runs, services are disposed - and then
+/// windows close, <see cref="XPlatApplication.AddExitingHandler"/> runs, services are disposed -
+/// and then
 /// <see cref="XPlatApplication.Run"/> rethrows it, so the failure is neither swallowed nor left to
 /// unwind through a native message pump.
 /// </remarks>
-public sealed class XPlatUnhandledExceptionEventArgs : EventArgs
+public sealed class XPlatUnhandledExceptionEventArgs
 {
     /// <summary>Creates the arguments for <paramref name="exception"/>.</summary>
     /// <param name="exception">The exception that escaped UI-thread code.</param>
@@ -29,8 +30,8 @@ public sealed class XPlatUnhandledExceptionEventArgs : EventArgs
     /// </summary>
     /// <remarks>
     /// A handled exception is swallowed and the loop keeps running, which is only honest when the
-    /// loop is still alive: if the failure happened inside the platform's own message loop, the loop
-    /// has already ended and the application shuts down regardless - with exit code 1 unless a
+    /// loop is still alive: if the failure happened inside the platform's own message loop, the
+    /// loop has already ended and the application shuts down regardless - with exit code 1 unless a
     /// handler set one through <see cref="XPlatApplication.Exit(int)"/>.
     /// </remarks>
     public bool Handled { get; set; }

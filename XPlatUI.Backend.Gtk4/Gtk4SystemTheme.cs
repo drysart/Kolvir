@@ -8,6 +8,7 @@ namespace XPlatUI.Backend.Gtk4;
 /// </summary>
 public sealed class Gtk4SystemTheme : IXPlatSystemTheme
 {
+    private Action<object>? _changed;
     private const string GnomeInterfaceSchema = "org.gnome.desktop.interface";
     private const string ColorSchemeKey = "color-scheme";
     private const string ThemeKey = "gtk-theme";
@@ -20,8 +21,20 @@ public sealed class Gtk4SystemTheme : IXPlatSystemTheme
         _desktop = TryOpenDesktopSettings();
     }
 
-    /// <summary>Raised when the desktop reports that the appearance preference changed.</summary>
-    public event EventHandler? Changed;
+    /// <summary>Adds a handler that runs when the desktop reports that the appearance preference changed.</summary>
+    public IDisposable AddChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChangedHandler"/> added.</summary>
+    public void RemoveChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed -= handler;
+    }
 
     public bool IsDarkMode
     {
@@ -121,7 +134,7 @@ public sealed class Gtk4SystemTheme : IXPlatSystemTheme
     {
         if (args.Key is ColorSchemeKey or ThemeKey)
         {
-            Changed?.Invoke(this, EventArgs.Empty);
+            _changed?.Invoke(this);
         }
     }
 
@@ -129,7 +142,7 @@ public sealed class Gtk4SystemTheme : IXPlatSystemTheme
     {
         if (args.Pspec?.GetName() is "gtk-application-prefer-dark-theme" or "gtk-theme-name" or "gtk-font-name")
         {
-            Changed?.Invoke(this, EventArgs.Empty);
+            _changed?.Invoke(this);
         }
     }
 

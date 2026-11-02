@@ -42,11 +42,17 @@ public class XPlatSpanEventArgs : XPlatMouseEventArgs
 /// </summary>
 /// <remarks>
 /// A span can raise mouse events, which is what makes links possible: give it a
-/// <see cref="Cursor"/> and handle <see cref="Click"/>. Spans are not controls; they are
+/// <see cref="Cursor"/> and handle <see cref="AddClickHandler"/>. Spans are not controls; they are
 /// lightweight value holders owned by the rich label they are added to.
 /// </remarks>
 public sealed class XPlatTextSpan
 {
+    private Action<object, XPlatSpanEventArgs>? _click;
+    private Action<object, XPlatSpanEventArgs>? _mouseDown;
+    private Action<object, XPlatSpanEventArgs>? _mouseUp;
+    private Action<object, XPlatSpanEventArgs>? _mouseMove;
+    private Action<object>? _mouseEnter;
+    private Action<object>? _mouseLeave;
     private string _text = string.Empty;
     private bool _bold;
     private bool _italic;
@@ -69,18 +75,90 @@ public sealed class XPlatTextSpan
 
     public XPlatTextSpan(string? text) => _text = text ?? string.Empty;
 
-    /// <summary>Raised on mouse release over the span, after a press that started on it.</summary>
-    public event EventHandler<XPlatSpanEventArgs>? Click;
+    /// <summary>Adds a handler that runs on mouse release over the span, after a press that started on it.</summary>
+    public IDisposable AddClickHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _click += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSpanEventArgs>>(RemoveClickHandler, handler);
+    }
 
-    public event EventHandler<XPlatSpanEventArgs>? MouseDown;
+    /// <summary>Removes a handler that <see cref="AddClickHandler"/> added.</summary>
+    public void RemoveClickHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _click -= handler;
+    }
 
-    public event EventHandler<XPlatSpanEventArgs>? MouseUp;
+    public IDisposable AddMouseDownHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseDown += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSpanEventArgs>>(RemoveMouseDownHandler, handler);
+    }
 
-    public event EventHandler<XPlatSpanEventArgs>? MouseMove;
+    /// <summary>Removes a handler that <see cref="AddMouseDownHandler"/> added.</summary>
+    public void RemoveMouseDownHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseDown -= handler;
+    }
 
-    public event EventHandler? MouseEnter;
+    public IDisposable AddMouseUpHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseUp += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSpanEventArgs>>(RemoveMouseUpHandler, handler);
+    }
 
-    public event EventHandler? MouseLeave;
+    /// <summary>Removes a handler that <see cref="AddMouseUpHandler"/> added.</summary>
+    public void RemoveMouseUpHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseUp -= handler;
+    }
+
+    public IDisposable AddMouseMoveHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseMove += handler;
+        return new XPlatHandlerToken<Action<object, XPlatSpanEventArgs>>(RemoveMouseMoveHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddMouseMoveHandler"/> added.</summary>
+    public void RemoveMouseMoveHandler(Action<object, XPlatSpanEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseMove -= handler;
+    }
+
+    public IDisposable AddMouseEnterHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseEnter += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveMouseEnterHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddMouseEnterHandler"/> added.</summary>
+    public void RemoveMouseEnterHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseEnter -= handler;
+    }
+
+    public IDisposable AddMouseLeaveHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseLeave += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveMouseLeaveHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddMouseLeaveHandler"/> added.</summary>
+    public void RemoveMouseLeaveHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseLeave -= handler;
+    }
 
     /// <summary>Creates a span that places <paramref name="control"/> in the text flow.</summary>
     public static XPlatTextSpan ForControl(XPlatControl control, XPlatInlineAlignment alignment = XPlatInlineAlignment.Bottom)
@@ -305,7 +383,7 @@ public sealed class XPlatTextSpan
     }
 
     /// <summary>True when the span handles mouse input and should therefore advertise itself as clickable.</summary>
-    public bool IsInteractive => Click is not null || MouseDown is not null || MouseUp is not null;
+    public bool IsInteractive => _click is not null || _mouseDown is not null || _mouseUp is not null;
 
     /// <summary>Arbitrary user data associated with the span.</summary>
     public object? Tag { get; set; }
@@ -319,17 +397,17 @@ public sealed class XPlatTextSpan
     /// <summary>The label this span belongs to, if any.</summary>
     public XPlatRichLabel? Owner { get; internal set; }
 
-    internal void RaiseClick(XPlatSpanEventArgs e) => Click?.Invoke(this, e);
+    internal void RaiseClick(XPlatSpanEventArgs e) => _click?.Invoke(this, e);
 
-    internal void RaiseMouseDown(XPlatSpanEventArgs e) => MouseDown?.Invoke(this, e);
+    internal void RaiseMouseDown(XPlatSpanEventArgs e) => _mouseDown?.Invoke(this, e);
 
-    internal void RaiseMouseUp(XPlatSpanEventArgs e) => MouseUp?.Invoke(this, e);
+    internal void RaiseMouseUp(XPlatSpanEventArgs e) => _mouseUp?.Invoke(this, e);
 
-    internal void RaiseMouseMove(XPlatSpanEventArgs e) => MouseMove?.Invoke(this, e);
+    internal void RaiseMouseMove(XPlatSpanEventArgs e) => _mouseMove?.Invoke(this, e);
 
-    internal void RaiseMouseEnter() => MouseEnter?.Invoke(this, EventArgs.Empty);
+    internal void RaiseMouseEnter() => _mouseEnter?.Invoke(this);
 
-    internal void RaiseMouseLeave() => MouseLeave?.Invoke(this, EventArgs.Empty);
+    internal void RaiseMouseLeave() => _mouseLeave?.Invoke(this);
 
     private void Set(ref bool field, bool value)
     {

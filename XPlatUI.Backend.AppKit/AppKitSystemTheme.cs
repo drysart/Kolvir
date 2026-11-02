@@ -11,6 +11,7 @@ namespace XPlatUI.Backend.AppKit;
 /// </summary>
 public sealed class AppKitSystemTheme : IXPlatSystemTheme
 {
+    private Action<object>? _changed;
     private const string Aqua = "NSAppearanceNameAqua";
     private const string DarkAqua = "NSAppearanceNameDarkAqua";
 
@@ -19,8 +20,20 @@ public sealed class AppKitSystemTheme : IXPlatSystemTheme
     /// <summary>Reads the current system appearance.</summary>
     public AppKitSystemTheme() => _isDarkMode = Query();
 
-    /// <summary>Raised when <see cref="Poll"/> notices the system appearance has changed.</summary>
-    public event EventHandler? Changed;
+    /// <summary>Adds a handler that runs when <see cref="Poll"/> notices the system appearance has changed.</summary>
+    public IDisposable AddChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChangedHandler"/> added.</summary>
+    public void RemoveChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed -= handler;
+    }
 
     /// <inheritdoc />
     public bool IsDarkMode => _isDarkMode;
@@ -38,7 +51,7 @@ public sealed class AppKitSystemTheme : IXPlatSystemTheme
         }
 
         _isDarkMode = dark;
-        Changed?.Invoke(this, EventArgs.Empty);
+        _changed?.Invoke(this);
         return true;
     }
 

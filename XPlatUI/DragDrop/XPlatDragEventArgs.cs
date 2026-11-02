@@ -3,15 +3,15 @@ using SkiaSharp;
 namespace XPlatUI;
 
 /// <summary>
-/// Carries the data being dragged and where the pointer is, for the drag events a control receives
-/// while <see cref="XPlatControl.AllowDrop"/> is set.
+/// Carries the data being dragged and where the pointer is, for the drag phases a control receives
+/// while its <c>AllowDrop</c> is set.
 /// </summary>
 /// <remarks>
 /// <see cref="Effect"/> starts out as the most useful action the source allows, and a handler
 /// narrows it (or sets <see cref="XPlatDragDropEffects.None"/> to refuse the drop) before the
 /// backend is told what to show in its drag cursor.
 /// </remarks>
-public class XPlatDragEventArgs : EventArgs
+public class XPlatDragEventArgs
 {
     /// <summary>Creates the arguments for one drag event.</summary>
     /// <param name="data">The payload being dragged.</param>

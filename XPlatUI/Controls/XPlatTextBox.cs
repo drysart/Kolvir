@@ -588,8 +588,8 @@ public class XPlatTextBox : XPlatControl
     }
 
     /// <summary>
-    /// Inserts the dropped text where the pointer is, so a drop lands where it was aimed rather than
-    /// at wherever the caret happened to be.
+    /// Inserts the dropped text where the pointer is, so a drop lands where it was aimed rather
+    /// than at wherever the caret happened to be.
     /// </summary>
     protected override void OnDragDrop(XPlatDragEventArgs e)
     {
@@ -618,26 +618,26 @@ public class XPlatTextBox : XPlatControl
     private bool Accepts(XPlatDataObject data) =>
         !ReadOnly && Sanitize(data.GetText()).Length > 0;
 
-    protected override void OnTextChanged(EventArgs e)
+    protected override void OnTextChanged()
     {
         _caretIndex = Math.Clamp(_caretIndex, 0, Text.Length);
         _anchor = Math.Clamp(_anchor, 0, Text.Length);
         ClampScroll();
 
-        base.OnTextChanged(e);
+        base.OnTextChanged();
     }
 
-    protected override void OnGotFocus(EventArgs e)
+    protected override void OnGotFocus()
     {
-        base.OnGotFocus(e);
+        base.OnGotFocus();
         ActivateCaret();
         EnsureCaretVisible();
         Invalidate();
     }
 
-    protected override void OnLostFocus(EventArgs e)
+    protected override void OnLostFocus()
     {
-        base.OnLostFocus(e);
+        base.OnLostFocus();
         _selecting = false;
         Invalidate();
     }
@@ -649,13 +649,13 @@ public class XPlatTextBox : XPlatControl
         _anchor = _caretIndex;
     }
 
-    protected override void OnBoundsChanged(EventArgs e)
+    protected override void OnBoundsChanged()
     {
-        base.OnBoundsChanged(e);
+        base.OnBoundsChanged();
         EnsureCaretVisible();
     }
 
-    protected override void OnEnabledChanged(EventArgs e)
+    protected override void OnEnabledChanged()
     {
         if (!Enabled)
         {
@@ -663,7 +663,7 @@ public class XPlatTextBox : XPlatControl
             ReleaseMouseCapture();
         }
 
-        base.OnEnabledChanged(e);
+        base.OnEnabledChanged();
     }
 
     private string DisplayText =>

@@ -4,8 +4,7 @@ A tiny, AOT-friendly, cross-platform UI layer that borrows the WinForms/WPF prog
 model (controls, docking, table layout, events) but draws everything with
 [SkiaSharp](https://github.com/mono/SkiaSharp). The library itself has no OS dependency: a backend
 supplies the window, the input, the clipboard, the dialogs and the system appearance, and the
-controls draw themselves on top of it. The same sample UI from the shared `XPlatUIDemo` project runs
-on all three platforms.
+controls draw themselves on top of it. The same sample UI runs on all three platforms.
 
 ```
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
@@ -17,28 +16,53 @@ XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompa
   Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
   Selection/              text selection and its clipboard plumbing
   Services/               window-scoped service helpers
+  Native/                 SkiaNativeLoader.cs - unpacks the embedded Skia library in an AOT build
+  buildTransitive/        the MSBuild that embeds it, shipped with the package
   XPlatUiHost.cs          platform-neutral host: layout, painting, input routing, focus
-XPlatUIDemo/              the sample control tree, shared by every platform
-  DemoUi.cs               the demo layout, plus RenderToPng for headless renders
-  DemoIcon.cs             the sample icon, drawn in code so no binary asset is needed
 XPlatUIDemo.App/          the one application: net10.0-windows, net10.0-macos or net10.0
   Program.cs              pick a backend, describe a window, run
-  Native/                 SkiaNativeLoader.cs - unpacks the embedded Skia library after an AOT publish
+  DemoUi.cs               the sample layout, plus RenderToPng for headless renders
+  DemoIcon.cs             the sample icon, drawn in code so no binary asset is needed
   app.manifest            per-monitor v2 DPI awareness (Windows)
   Info.plist              the bundle identity (macOS)
 XPlatUI.Backend.Win32/    net10.0-windows backend over raw Win32 (no WinForms, no System.Drawing)
 XPlatUI.Backend.AppKit/   net10.0-macos backend over AppKit
 XPlatUI.Backend.Gtk4/     net10.0 backend over GTK4
 XPlatUI.Backend.Headless/ net10.0 backend that paints offscreen; what --render and the tests use
+XPlatUI.Backend/          multi-targeting selector: the backend for whichever TFM you built for
+XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one TFM per platform
+  common/                 the portable half: AllowDrop, the handler pairs, the router
+  windows/                the opt-in, its hook and the OLE IDropTarget they register
+  linux/                  the opt-in, its hook and the GtkDropTarget controllers they add
+  macos/                  the opt-in and its hook; the AppKit half stays in the backend (below)
+XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
 ```
 
 `XPlatUIDemo.App` builds exactly **one** target framework per operating system, chosen by
 `$([MSBuild]::IsOSPlatform(...))`: `net10.0-windows` on Windows, `net10.0-macos` on macOS and
-`net10.0` on Linux. That is deliberate rather than tidy. `net10.0-macos` needs the macOS workload
-and Xcode, which only exist on a Mac, so it must never appear in a TFM list that Windows has to
-evaluate; and a portable `net10.0` build *on a Mac* defines neither `WINDOWS` nor `MACOS`, so it
-would silently compile the GTK4 branch and produce a Linux binary. One TFM per OS is what keeps
-`Program.cs`'s `#if` blocks honest. See [On macOS (AppKit)](#on-macos-appkit).
+`net10.0` on Linux. That is deliberate rather than tidy. `net10.0-macos` needs the macOS workload,
+and the `.app` it produces needs a Mac with the matching Xcode, so it must never appear in a TFM
+list that Windows has to evaluate; and a portable `net10.0` build *on a Mac* defines neither
+`WINDOWS` nor `MACOS`, so it would silently compile the GTK4 branch and produce a Linux binary.
+One TFM per OS is what keeps `Program.cs`'s `#if` blocks honest.
+See [On macOS (AppKit)](#on-macos-appkit).
+
+Building `WinFormsApp3.slnx` needs the macOS workload, because the solution lists
+`XPlatUI.Backend.AppKit` and `XPlatUI.Feature.DragDrop`, which both target `net10.0-macos`.
+`dotnet workload install macos` satisfies it where it is not already present; a build without it
+stops with `NETSDK1147`. Nothing else in the solution needs a workload, and an application that
+references either project still builds only the one inner build its own framework can use.
+
+`XPlatUI.Backend` is the way out of that `#if` for an application that wants nothing more than a
+default backend. It is a project that multi-targets and references exactly one backend per target
+framework, so referencing *it* is enough: the framework the application builds for decides which
+backend it gets, and a publish carries only that one. `XPlatUIBackend.CreateDefault()` returns the
+backend and loads the embedded Skia library on the way, so `Main` names no platform and no graphics
+library. `XPlatUI.Minimal` is written that way. The selector's framework list is unconditional,
+because a selector that offered only the host's framework could not be packed for the others;
+restoring it therefore evaluates all three, and building the fixture needs the macOS workload on
+every platform, not just on the Mac.
+has to read `--classic-menus` before it can build a backend.
 
 ## Design
 
@@ -57,6 +81,12 @@ would silently compile the GTK4 branch and produce a Linux binary. One TFM per O
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
 
+Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
+does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
+construction where it can, by an opt-in registration where it cannot, and by its own package where
+neither is practical; §8 of the policy has the measured sizes, including what opting into drag and
+drop costs on each platform.
+
 Everything is drawn in **logical (96 DPI) coordinates**; the host adapter is responsible
 for scaling the canvas and the incoming pointer coordinates (the Win32 backend uses
 `GetDpiForWindow() / 96f`).
@@ -74,7 +104,7 @@ table.RowStyles.Add(XPlatRowStyle.AutoSize());
 table.RowStyles.Add(XPlatRowStyle.Percent(100));
 
 var button = new XPlatButton("Say hello") { Dock = DockStyle.Fill };
-button.Click += (_, _) => Console.WriteLine("clicked");
+button.AddClickHandler(_ => Console.WriteLine("clicked"));
 
 table.Add(new XPlatLabel("Hello") { AutoSize = true }, 0, 0);
 table.Add(button, 1, 1);
@@ -96,8 +126,32 @@ host.ProcessKeyDown(XPlatKey.Tab);             // cycles focus
 host.ProcessTextInput("a");
 ```
 
-`host.Invalidated` tells the adapter to repaint; `host.CursorChanged` lets it update the
-native cursor.
+`host.AddInvalidatedHandler` tells the adapter to repaint; `host.AddCursorChangedHandler` lets it
+update the native cursor.
+
+### Handlers
+
+There are no C# events. Every notification is a pair of methods, `Add<Name>Handler` and
+`Remove<Name>Handler`, so a subscription is a plain method call and the delegate behind it stays
+private to the library:
+
+```csharp
+Action<object, XPlatMouseEventArgs> onDown = (sender, e) => Press(sender, e.Location);
+
+IDisposable subscription = control.AddMouseDownHandler(onDown);
+control.RemoveMouseDownHandler(onDown);      // the same callback: unsubscribes it
+subscription.Dispose();                      // or hand the token around instead
+```
+
+The handler's first argument is the object that raised it, which is the same object `Add` was called
+on. A second argument carries the payload where there is one: `Action<object>` when there is not,
+`Action<object, TPayload>` when there is, with the args class the WinForms event would have carried.
+Handlers run on the UI thread, in the order they were added, and a handler that throws stops the
+ones after it and reaches the `AddUnhandledExceptionHandler` handlers.
+
+`Add` returns an `IDisposable` token that removes the handler when it is disposed, so a scope can own
+a subscription without storing the callback. A caller that already holds the callback can pass it to
+`Remove` and skip the token.
 
 ### Split container
 
@@ -127,7 +181,7 @@ var split = new XPlatSplitContainer
 
 split.Panel1.Controls.Add(new XPlatLabel("Navigation"));
 split.Panel2.Controls.Add(content);
-split.SplitterMoved += (_, _) => Console.WriteLine($"panel 1 is now {split.SplitterDistance:0} px");
+split.AddSplitterMovedHandler(_ => Console.WriteLine($"panel 1 is now {split.SplitterDistance:0} px"));
 root.Controls.Add(split);
 ```
 
@@ -136,8 +190,8 @@ even when it strays over the panels or outside the control. The splitter highlig
 hover, drag and focus, and can be moved with the arrow keys (`Left`/`Right` for a vertical
 split, `Up`/`Down` for a horizontal one) when the container has keyboard focus. Set
 `IsSplitterFixed` to lock it, and `SplitterColor`/`ShowSplitterGrip` to restyle it.
-`SplitterMoving` fires continuously during a drag; `SplitterDistanceChanged` fires whenever
-the distance changes for any reason.
+`AddSplitterMovingHandler` runs continuously during a drag; `AddSplitterDistanceChangedHandler` runs
+whenever the distance changes for any reason.
 
 ### Rich label
 
@@ -154,7 +208,7 @@ events that make it behave like a hyperlink.
 | `WrapText` | Word wrap (default `true`); when `false` the label is as wide as its longest line |
 | `LineSpacing`, `TextAlign` | Extra leading between lines; nine-way block + line alignment |
 | `Text` | The flow as plain text; assigning replaces every span with one unstyled span |
-| `SpanClick`, `SpanAt(point)` | Click notification and hit testing; span-level `Click`/`MouseDown`/`MouseUp`/`MouseMove`/`MouseEnter`/`MouseLeave` fire too |
+| `AddSpanClickHandler`, `SpanAt(point)` | Click notification and hit testing; a span also takes `AddClickHandler`, `AddMouseDownHandler`, `AddMouseUpHandler`, `AddMouseMoveHandler`, `AddMouseEnterHandler` and `AddMouseLeaveHandler` |
 
 Span formatting: `Bold`, `Italic`, `Underline`, `Strikethrough`, `ForeColor`, `HoverBackColor`,
 `FontSize`, `FontFamily`, or a whole `Font` override. Decorations and the hover/press background
@@ -184,7 +238,7 @@ rich.AddInlineControl(new XPlatButton("Retry") { AutoSize = true }, XPlatInlineA
 rich.AddText(" ");
 rich.AddInlineControl(badge, XPlatInlineAlignment.Bottom);
 
-rich.SpanClick += (_, e) => Console.WriteLine($"clicked {e.Span.Text}");
+rich.AddSpanClickHandler((_, e) => Console.WriteLine($"clicked {e.Span.Text}"));
 ```
 
 Inline controls are measured like any other control (`AutoSize`, `Margin`, explicit sizes) and
@@ -199,7 +253,7 @@ placeholder text and horizontal scrolling are all implemented by the control its
 
 | Member | Behaviour |
 | --- | --- |
-| `Text`, `TextChanged` | Current value. Control characters (including line breaks) are stripped so the field stays single line |
+| `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line |
 | `CaretIndex`, `SelectionStart`, `SelectionLength`, `SelectedText`, `HasSelection` | Selection state; the caret is `0 … Text.Length` |
 | `Caret` | The `XPlatCaret` that draws and blinks the insertion point; its `BlinkInterval`, `Width` and `Color` can be changed |
 | `Select(start, length)`, `SelectAll()`, `ClearSelection()` | Programmatic selection |
@@ -223,7 +277,7 @@ var name = new XPlatTextBox
     PlaceholderText = "Type your name",
     MaxLength = 40,
 };
-name.TextChanged += (_, _) => Console.WriteLine(name.Text);
+name.AddTextChangedHandler(_ => Console.WriteLine(name.Text));
 
 var password = new XPlatTextBox { Dock = DockStyle.Top, IsPassword = true };
 var readOnly = new XPlatTextBox { Dock = DockStyle.Top, ReadOnly = true, Text = "fixed" };
@@ -259,7 +313,7 @@ When a selection is copied, every control it touches contributes its own piece i
 | `GetSelectionText(start, length)` | The plain-text piece for a slice; override to control what a copy pastes into a text target |
 | `GetSelectionHtml(start, length)` | The HTML piece for the same slice, or `null` (default) to fall back to the escaped plain text |
 | `host.CopySelection()` | Writes both flavours to `XPlatClipboard`; `host.SelectionTextSeparator` joins the pieces |
-| `host.ProcessContextMenu(point)` | Builds the menu: the control's own `ContextMenu`, then `ContextMenuOpening`, then a default **Copy** item |
+| `host.ProcessContextMenu(point)` | Builds the menu: the control's own `ContextMenu`, then the `AddContextMenuOpeningHandler` handlers, then a default **Copy** item |
 
 `XPlatRichLabel` overrides `GetSelectionHtml` so a copy keeps its formatting: `<b>`, `<i>`,
 `<u>`, `<s>` and a `<span style="...">` for colour and size overrides, wrapped around the
@@ -373,8 +427,8 @@ var accent = XPlatTheme.ColorOf(XPlatThemeColor.Accent);
 `Secondary` (`Hover`/`Pressed`), `FocusRing`, `Splitter` (`Hover`), `InputBackground`, `Selection`,
 `Caret`, `Placeholder` and `DisabledBackground`/`DisabledForeground` - so a custom theme is just
 `XPlatPalette.Light with { Accent = SKColors.Teal }`. Assigning the palette (or any single colour,
-e.g. `XPlatTheme.Accent = …`) raises `XPlatTheme.Changed` and the next frame picks it up: controls
-never snapshot a colour at construction time.
+e.g. `XPlatTheme.Accent = …`) runs the `XPlatTheme.AddChangedHandler` handlers and the next frame
+picks it up: controls never snapshot a colour at construction time.
 
 Controls resolve their colours while painting, so nothing has to be walked or re-applied:
 
@@ -459,29 +513,29 @@ using var application = new XPlatApplication(backend, options);
 
 if (application.IsPrimaryInstance)
 {
-    application.SecondInstance += (_, e) => window.Activate();
+    application.AddSecondInstanceHandler((_, e) => window.Activate());
 }
 
 application.Run();
 ```
 
-`SecondInstance` is always raised on the UI thread, with `e.Arguments` holding the second launch's
-command line (empty when it had none). Its default action is `Activate()`, which brings the main
-window forward - and raises `Activated`, so one handler covers both a re-launch and the user
-clicking the Dock icon or taskbar button:
+`AddSecondInstanceHandler` handlers always run on the UI thread, with `e.Arguments` holding the
+second launch's command line (empty when it had none). The default action is `Activate()`, which
+brings the main window forward - and runs the `Activated` handlers, so one handler covers both a
+re-launch and the user clicking the Dock icon or taskbar button:
 
 ```csharp
-application.Activated += (_, e) => { /* window came forward */ };
-application.SecondInstance += (_, e) =>
+application.AddActivatedHandler((_, e) => { /* window came forward */ });
+application.AddSecondInstanceHandler((_, e) =>
 {
     OpenDocument(e.Arguments[0]);
     e.Handled = true;               // suppress the default Activate()
-};
+});
 ```
 
-Setting `Handled` on either event replaces that event's default action; setting it on
-`SecondInstance` also skips the `Activated` it would otherwise raise. `InstanceKey` scopes the
-claim, so two different applications - or two profiles of one application - can run side by side.
+Setting `Handled` in either handler replaces that notification's default action; setting it in a
+second-instance handler also skips the activation it would otherwise perform. `InstanceKey` scopes
+the claim, so two different applications - or two profiles of one application - can run side by side.
 
 The three platforms get there differently, and only the first two are complete:
 
@@ -489,7 +543,7 @@ The three platforms get there differently, and only the first two are complete:
 | --- | --- | --- |
 | Windows | Named mutex plus a named-pipe listener in the first process; the second connects, writes its command line and exits | `Activate()` restores a minimized window and calls `SetForegroundWindow`, falling back to a taskbar flash when Windows refuses the foreground |
 | macOS | Same lock and pipe. Finder and `open -a` are already single-instance, so this covers a direct launch of the binary | `applicationShouldHandleReopen`; `Activate()` uses `activateIgnoringOtherApps` |
-| Linux (GTK4) | `Gio.Application` uniqueness over D-Bus, with a reverse-DNS id derived from `InstanceKey` | A forwarded launch arrives as GTK's `command-line` signal and is turned into `SecondInstance`; `Activate()` calls `gtk_window_present` |
+| Linux (GTK4) | `Gio.Application` uniqueness over D-Bus, with a reverse-DNS id derived from `InstanceKey` | A forwarded launch arrives as GTK's `command-line` signal and becomes a second-instance notification; `Activate()` calls `gtk_window_present` |
 
 GTK is the reason the claim is a backend member rather than something the library does itself: on
 Wayland only the toolkit's own D-Bus registration can raise another process's window, so the
@@ -499,14 +553,14 @@ when this process is the second one; the headless backend always returns true.
 ### Owned windows, topmost and activation
 
 `Owner` makes one window belong to another, `TopMost` floats a window above everything, and
-`Activated`/`Deactivated` report when a window gains or loses the foreground:
+`AddActivatedHandler`/`AddDeactivatedHandler` report when a window gains or loses the foreground:
 
 ```csharp
 var tool = new XPlatWindow("Tool", panel) { Owner = window };   // or: tool.Show(window);
 tool.TopMost = true;                                            // needs Owner == null
 
-window.Activated += (_, _) => status.Text = "Foreground";
-window.Deactivated += (_, _) => status.Text = "Background";
+window.AddActivatedHandler(_ => status.Text = "Foreground");
+window.AddDeactivatedHandler(_ => status.Text = "Background");
 ```
 
 An owned window sits above its owner, minimizes with it and closes with it. The close is a cascade
@@ -530,10 +584,94 @@ status line reports activation changes.
 
 ### Drag and drop
 
-Setting `AllowDrop` on a control makes it, and everything inside it, a drop target. The four drag
-events carry an `XPlatDragEventArgs`; the drop handler sets `Effect` to say what it did:
+Drag and drop is a package of its own, `XPlatUI.Feature.DragDrop`, because most applications never
+accept a drop and the ones that do not should not carry the code that makes one possible. Reference
+the package and then opt in: until the application asks for it, a window registers no drop target,
+which is what keeps OLE, the COM target, the pasteboard types and the GTK controllers out of the
+build. Asking for it is one line:
 
 ```csharp
+using XPlatUI.DragDrop;
+
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddDragDrop(),
+};
+```
+
+With that in place, setting `AllowDrop` on a control makes it, and everything inside it, a drop
+target. Both `AllowDrop` and the four handlers come from `XPlatUI.DragDrop`. The four drag handlers
+receive an `XPlatDragEventArgs`; the drop handler sets `Effect` to say what it did:
+
+```csharp
+root.AllowDrop = true;
+
+root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
+    ? XPlatDragDropEffects.Copy
+    : XPlatDragDropEffects.None);
+
+root.AddDragDropHandler((_, e) =>
+{
+    foreach (var path in e.Data.GetFiles())
+    {
+        status.Text = $"Dropped {Path.GetFileName(path)}";
+    }
+
+    e.Effect = XPlatDragDropEffects.Copy;
+});
+```
+
+The opt-in is per application, and it is coarse on purpose: once it is called, every window gets a
+drop target, whether or not any control ever sets `AllowDrop`. `AllowDrop` can be turned on and off
+on a control that is already inside a shown window, so there is no correct moment at which the
+native registration could depend on it. Leaving the call out is not an error: the code above still
+compiles and runs, nothing simply ever arrives. What the feature costs an application that never
+references the package is measured in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §8.
+
+`AddDragEnterHandler`, `AddDragOverHandler` and `AddDragDropHandler` share one argument type, so the
+same handler can serve all three. `AddDragLeaveHandler` takes a handler with no arguments: by the
+time a drag has left, there is nothing left to say.
+`Location` is in the control's own logical pixels, the same units `Paint` uses, and `Modifiers`
+reports the shift, control and alt keys held at that moment.
+
+The data on offer is an `XPlatDataObject`: a bag of values keyed by `XPlatDataFormat`. `Text`,
+`Html` and `FileDrop` are the formats the backends fill in themselves; `XPlatDataFormats.Custom` is
+there for a drag this library is not the only participant in. `GetFiles` returns absolute paths.
+
+| Platform | Mechanism | What a drag carries |
+| --- | --- | --- |
+| Windows | A hand-built `IDropTarget` COM object registered with `RegisterDragDrop`, since a source-generated `ComWrappers` one is not a valid call target under the loader lock OLE calls it from. It lives in the feature package, which duplicates the few OLE imports it needs | `CF_HDROP`, `CF_UNICODETEXT`, `HTML Format` |
+| macOS | The view registers `public.file-url` and `public.utf8-plain-text` and implements `NSDraggingDestination` | `NSPasteboard` file URLs (a web URL is not a file, so an image dragged out of a browser is refused), plain text |
+| Linux (GTK4) | One `GtkDropTarget` per kind of drag, both typed as text, with preload so the payload is in hand before the drop; the feature package adds them to the view's drawing area | File paths, read from the text form of the drag since a `GdkFileList` cannot be read without a portal round trip; strings |
+
+The mechanisms themselves live in the package wherever the platform allows it, so a backend assembly
+that no application opted into carries no drag and drop code at all. Windows and Linux are in that
+category: the COM target is an object registered against a window handle, and a `GtkDropTarget` is a
+controller added to a widget, so both moved out of `XPlatUI.Backend.Win32` and
+`XPlatUI.Backend.Gtk4` and only a generic slot for releasing them when the window goes remains.
+macOS is the exception, because AppKit delivers a drag to the `NSView` that registered for the
+dragged types, through `NSDraggingDestination` methods on that view's own class; there is no separate
+destination object to hand the window, so the implementation cannot leave `AppKitSkiaView`.
+
+A drop is routed by hit testing, then by walking up the parents, so an `AllowDrop` panel accepts a
+drop anywhere inside it and a child that does not want the drop passes it to its parent. A control
+counts as wanting the drop when its `DragEnter` or `DragOver` answers with something other than
+`None`, so a text box that takes text but not files lets a file drop land on the panel behind it.
+The host clamps whatever `Effect` a handler sets to the effects the drag source allowed, so a
+control cannot claim a move the source never offered.
+
+The demo turns the whole window into a drop target: dropping files prints their names on the status
+line, and dropping text prints the first sixty characters.
+
+#### Migrating from the old surface
+
+Setting `AllowDrop` and subscribing to the four drag handlers used to be members of `XPlatControl`.
+They are extension members in `XPlatUI.DragDrop` now, and the events are `Add`/`Remove` handler
+pairs like every other notification, so the two things an application does with the feature look
+like this:
+
+```csharp
+// before: members of the control, registered unconditionally at window creation
 root.AllowDrop = true;
 
 root.DragEnter += (_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
@@ -551,30 +689,41 @@ root.DragDrop += (_, e) =>
 };
 ```
 
-`DragEnter`, `DragOver` and `DragDrop` share one argument type, so the same handler can serve all
-three. `DragLeave` has no arguments: by the time a drag has left, there is nothing left to say.
-`Location` is in the control's own logical pixels, the same units `Paint` uses, and `Modifiers`
-reports the shift, control and alt keys held at that moment.
+```csharp
+// after: the same handlers, from the feature's namespace, plus one line at startup
+using XPlatUI.DragDrop;
 
-The data on offer is an `XPlatDataObject`: a bag of values keyed by `XPlatDataFormat`. `Text`,
-`Html` and `FileDrop` are the formats the backends fill in themselves; `XPlatDataFormats.Custom` is
-there for a drag this library is not the only participant in. `GetFiles` returns absolute paths.
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddDragDrop(),
+};
 
-| Platform | Mechanism | What a drag carries |
-| --- | --- | --- |
-| Windows | A hand-built `IDropTarget` COM object registered with `RegisterDragDrop`, since a source-generated `ComWrappers` one is not a valid call target under the loader lock OLE calls it from | `CF_HDROP`, `CF_UNICODETEXT`, `HTML Format` |
-| macOS | The view registers `public.file-url` and `public.utf8-plain-text` and implements `NSDraggingDestination` | `NSPasteboard` file URLs (a web URL is not a file, so an image dragged out of a browser is refused), plain text |
-| Linux (GTK4) | One `GtkDropTarget` per kind of drag, both typed as text, with preload so the payload is in hand before the drop | File paths, read from the text form of the drag since a `GdkFileList` cannot be read without a portal round trip; strings |
+// unchanged: a control still accepts a drop by saying so
+root.AllowDrop = true;
 
-A drop is routed by hit testing, then by walking up the parents, so an `AllowDrop` panel accepts a
-drop anywhere inside it and a child that does not want the drop passes it to its parent. A control
-counts as wanting the drop when its `DragEnter` or `DragOver` answers with something other than
-`None`, so a text box that takes text but not files lets a file drop land on the panel behind it.
-The host clamps whatever `Effect` a handler sets to the effects the drag source allowed, so a
-control cannot claim a move the source never offered.
+root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
+    ? XPlatDragDropEffects.Copy
+    : XPlatDragDropEffects.None);
 
-The demo turns the whole window into a drop target: dropping files prints their names on the status
-line, and dropping text prints the first sixty characters.
+root.AddDragDropHandler((_, e) =>
+{
+    foreach (var path in e.Data.GetFiles())
+    {
+        status.Text = $"Dropped {Path.GetFileName(path)}";
+    }
+
+    e.Effect = XPlatDragDropEffects.Copy;
+});
+```
+
+`e` is the same `XPlatDragEventArgs` in both, and `Effect`, `Data`, `GetFiles()` and `Modifiers` are
+unchanged, so a handler body moves across untouched: `+=` becomes `Add<Name>Handler` and `-=`
+becomes `Remove<Name>Handler`, as it did for every other notification. `DragLeave` is the one that
+lost its payload, so `root.DragLeave += (_, _) => Reset();` becomes
+`root.AddDragLeaveHandler(_ => Reset());`. The package reference and the `AddDragDrop()` call are
+the only two lines with no counterpart. Leaving out the call still compiles and runs - the window
+simply never becomes a drop target - while leaving out the package removes the members the rest of
+this code is written against, which is the point of it being a package.
 
 ## Writing a backend
 
@@ -586,7 +735,7 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 1. `Initialize` gets the `XPlatApplication`; `Run` enters the platform loop and returns its exit
    code; `Quit` leaves it; `Invoke` marshals a callback onto the UI thread;
    `TryClaimSingleInstance` returns false when another process already owns the instance key, and
-   raises `SecondInstance` when a later launch is handed over.
+   runs the `AddSecondInstanceHandler` handlers when a later launch is handed over.
 2. `CreateWindow` returns an `IXPlatWindowBackend`. It creates the native window and an `SKSurface`
    (or a bitmap-backed surface) of its client size, and it creates and owns the `XPlatUiHost`.
 3. On resize: `Host.SetClientSize(width / scale, height / scale)`. On paint: `canvas.Scale(scale)`
@@ -594,8 +743,9 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 4. Forward pointer, key and text events into `Host.ProcessMouseMove/Down/Up/Leave`,
    `ProcessKeyDown/Up`, `ProcessTextInput` and `ProcessContextMenu`, dividing coordinates by the
    scale factor. There is no tick to forward: a control that needs time runs its own timer.
-5. Raise `Shown`, `CloseRequested`, `Closed`, `Activated`, `Deactivated`, `ClientSizeChanged`,
-   `ScaleChanged` and `StateChanged`; the model turns them into `XPlatWindow` events.
+5. Run the `Shown`, `CloseRequested`, `Closed`, `Activated`, `Deactivated`, `ClientSizeChanged`,
+   `ScaleChanged` and `StateChanged` handlers; the model forwards each to the matching
+   `XPlatWindow` method.
 6. `RegisterServices` adds the platform services to MEDI's `IServiceCollection` - the clipboard, the
    system theme, the dialog service and the context menu presenter. Doing it through one hook
    instead of a `Create*` member per service keeps adding a service from breaking every backend, and
@@ -621,9 +771,9 @@ dotnet publish XPlatUIDemo.App\XPlatUIDemo.App.csproj -p:PublishProfile=FolderPr
 ```
 
 or right-click **Publish** in Visual Studio. The result is a **single** self-contained
-`XPlatUIDemoApp.exe` (~8.4 MB, of which ~5.2 MB is the compressed Skia native binary) and an optional
-`XPlatUIDemoApp.pdb` for debugging. Nothing else is needed to run it - the AOT build opens the real
-window and renders the demo.
+`XPlatUIDemoApp.exe` (9,270,272 bytes, 8.84 MiB, of which 5.2 MiB is the compressed Skia native
+binary) and an optional `XPlatUIDemoApp.pdb` for debugging. Nothing else is needed to run it - the
+AOT build opens the real window and renders the demo.
 
 On Windows this needs the MSVC linker (`link.exe`). The profile switches to
 `IlcUseEnvironmentalTools` automatically once a VC environment is initialized, so the most
@@ -645,23 +795,35 @@ package carries its own toolchain.
 dotnet publish XPlatUIDemo.App/XPlatUIDemo.App.csproj -c Release -r linux-x64 -p:PublishAot=true
 ```
 
-The result is a **single** `publish/XPlatUIDemoApp` (~8.9 MB, a stripped ELF executable) plus an
-optional `XPlatUIDemoApp.dbg`. It is genuinely standalone - copy just that one file anywhere and it
-runs, window and all.
+The result is a **single** `publish/XPlatUIDemoApp` (9,537,712 bytes, 9.10 MiB, a stripped ELF
+executable) plus an optional `XPlatUIDemoApp.dbg`. It is genuinely standalone - copy just that one
+file anywhere and it runs, window and all.
+
+`XPlatUI.Minimal` is the measurement fixture: one window, one label, no features. It publishes to
+8,527,872 bytes (8.13 MiB) on Windows and 8,867,296 (8.46 MiB) on Linux, so everything the demo
+demonstrates costs about 0.7 MB on Windows and 0.6 MB on Linux over the floor an application starts
+from. [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §8 records the baseline that every feature is
+measured against.
 
 SkiaSharp only ships a dynamic `libSkiaSharp.dll`/`libSkiaSharp.so`, so a native executable cannot
-simply link it. When `PublishAot` is on, `XPlatUIDemo.App.csproj` gzips the RID-specific native
-library and embeds it in the assembly as the manifest resource
-`XPlatUI.Native.libSkiaSharp.dll.gz` (or `...libSkiaSharp.so.gz`); `Native/SkiaNativeLoader.cs`
-extracts it on first use to `%LOCALAPPDATA%\XPlatUI\native\<version>-<size>\libSkiaSharp.dll`
+simply link it. When `PublishAot` is on, XPlatUI's own build assets (`buildTransitive/` in the
+package, which `Directory.Build.targets` imports for this repository's projects) gzip the
+RID-specific native library and embed it in the application as the manifest resource
+`XPlatUI.Native.libSkiaSharp.dll.gz` (or `...libSkiaSharp.so.gz`); `SkiaNativeLoader`, in the
+library, extracts it on first use to `%LOCALAPPDATA%\XPlatUI\native\<version>-<size>\libSkiaSharp.dll`
 (`~/.local/share/XPlatUI/native/<version>-<size>/libSkiaSharp.so` on Linux, honouring
 `XDG_DATA_HOME`), which is cached so later runs just load it, and redirects SkiaSharp's P/Invoke at it
 before the first call into Skia. The redirect is not optional on Linux: `libSkiaSharp.so` carries no
-`SONAME`, so a library loaded by full path is not what `dlopen("libSkiaSharp.so")` resolves to. A
-regular (non-AOT) build is untouched: the native library is resolved the usual way (from the package
-cache, or copied next to the executable for a RID-specific build) and the loader does nothing. If you
-would rather ship a loose native library, set `EmbedSkiaSharpNative` to `false` - the publish then
-emits the executable and `libSkiaSharp.dll`/`libSkiaSharp.so` side by side again.
+`SONAME`, so a library loaded by full path is not what `dlopen("libSkiaSharp.so")` resolves to. The
+resource belongs to the application's assembly, because the copy to embed is the one the
+application's build resolved for its platform. `XPlatUIBackend.CreateDefault()` names it for you: it
+calls `SkiaNativeLoader.EnsureLoaded(Assembly.GetEntryAssembly())` before it returns the backend, so
+an application's `Main` never mentions SkiaSharp at all. Calling `EnsureLoaded` yourself as well is
+harmless; it is idempotent. A regular (non-AOT) build is untouched:
+the native library is resolved the usual way (from the package cache, or copied next to the
+executable for a RID-specific build) and the loader does nothing. If you would rather ship a loose
+native library, set `EmbedSkiaSharpNative` to `false` - the publish then emits the executable and
+`libSkiaSharp.dll`/`libSkiaSharp.so` side by side again.
 
 The Skia embedding targets run for the Windows and Linux target frameworks - the two that are
 published with AOT. macOS is deliberately left out: an `.app` bundle already carries its native
@@ -755,8 +917,8 @@ The macOS build of `XPlatUIDemo.App` is a native macOS application. It targets `
 uses Apple's AppKit bindings, so the window, its title bar, the menu bar, the context menus and the
 clipboard are all the real thing; only the contents of the window are drawn by the library.
 
-That target framework is why the macOS build has to happen on a Mac: it needs the macOS workload,
-which cannot be installed on Windows. `Program.cs` selects it with
+That target framework is why the macOS build has to happen on a Mac: it needs the macOS workload and
+the Xcode tools that bundle and sign the `.app`. `Program.cs` selects it with
 `$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `WinFormsApp3.slnx` on every platform
 and simply resolves to a different target framework on each. Build it on a Mac, or let the
 `macOS build` GitHub Actions workflow do it - that workflow runs on pull requests against `master`
@@ -930,3 +1092,27 @@ would not make the deliverable any smaller, only less debuggable. Windows and Li
 The `macOS build` workflow publishes all three link modes, renders each bundle with `--render`,
 compares the *decoded* bitmaps (`sips` to BMP plus `cmp`, because a one pixel change rewrites most of
 a PNG) and reports the numbers in the job summary.
+
+## Contributing a feature
+
+New features are held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md). A pull request that adds
+one says, in its description:
+
+* which rung of §4 the feature sits on, and why it could not sit on a lower one;
+* the published size of an application that does not use it, measured on every platform the change
+  affects and quoted against the same application before the change;
+* anything in the §9 checklist that needed a judgement call, and the judgement.
+
+§9 is the review checklist itself. A reviewer works through it line by line and asks for the answer
+rather than inferring it, because the failures it catches are silent ones: a registration that runs
+whether or not anything uses it, a `net10.0` assembly that lands in the wrong application, a
+reflection path that only fails under AOT. The short form is that nothing new appears on an
+always-retained type, nothing runs unless the application opted in, and the pull request carries a
+number instead of an assurance.
+
+A feature that ships as its own package needs no multi-platform build. The `Feature pack` workflow
+packs every `XPlatUI.Feature.*` project on a macOS runner - `EnableWindowsTargeting=true` brings the
+Windows reference pack with it - then opens each package and fails unless it carries a `lib/` folder
+and a dependency group for every platform. That check exists because both omissions are silent in
+NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. §4 of the
+policy has the details.

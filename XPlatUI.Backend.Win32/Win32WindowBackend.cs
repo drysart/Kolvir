@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
 namespace XPlatUI.Backend.Win32;
@@ -25,8 +26,16 @@ namespace XPlatUI.Backend.Win32;
 /// and a per-window class is the only way to give two windows different icons or styles.
 /// </para>
 /// </remarks>
-internal sealed class Win32WindowBackend : IXPlatWindowBackend
+public sealed class Win32WindowBackend : IXPlatWindowBackend
 {
+    private Action<object>? _shown;
+    private Action<object>? _closeRequested;
+    private Action<object>? _closed;
+    private Action<object>? _activated;
+    private Action<object>? _deactivated;
+    private Action<object>? _clientSizeChanged;
+    private Action<object>? _scaleChanged;
+    private Action<object>? _stateChanged;
     private static int _nextClassId;
 
     private readonly XPlatUiHost _host = new();
@@ -65,7 +74,6 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     private SKSurface? _skia;
 
     private bool _trackingLeave;
-    private Win32DropTarget? _dropTarget;
     private long _lastClickTime;
     private int _clickCount;
     private int _lastClickX;
@@ -85,9 +93,9 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         // Dispose would otherwise pull the class out from under a sibling window.
         _className = "XPlatUI.Window." + Interlocked.Increment(ref _nextClassId).ToString(CultureInfo.InvariantCulture);
 
-        _host.Invalidated += (_, _) => Invalidate();
-        _host.CursorChanged += (_, _) => ApplyCursor();
-        XPlatTheme.Changed += OnThemeChanged;
+        _host.AddInvalidatedHandler(_ => Invalidate());
+        _host.AddCursorChangedHandler(_ => ApplyCursor());
+        XPlatTheme.AddChangedHandler(OnThemeChanged);
     }
 
     /// <inheritdoc />
@@ -290,6 +298,14 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     /// <summary>The native window handle, or <see cref="IntPtr.Zero"/> before the window is shown.</summary>
     internal IntPtr Handle => _hwnd;
 
+    /// <summary>
+    /// Something to dispose while the native window still exists, or null when nothing needs it.
+    /// A feature that registers a native object with the window puts it here, because the object
+    /// stays callable until the window is destroyed and so has to be released first, and because
+    /// that release must not be skipped when a window is disposed without ever being closed.
+    /// </summary>
+    internal IDisposable? NativeTeardown { get; set; }
+
     /// <inheritdoc />
     public IXPlatWindowBackend? Owner
     {
@@ -409,7 +425,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     {
         if (!_disposed)
         {
-            CloseRequested?.Invoke(this, EventArgs.Empty);
+            _closeRequested?.Invoke(this);
         }
     }
 
@@ -417,28 +433,124 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     public void SetTitleBarAppearance(bool dark) => NativeMethods.SetDarkTitleBar(_hwnd, dark);
 
     /// <inheritdoc />
-    public event EventHandler? Shown;
+    public IDisposable AddShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveShownHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddShownHandler"/> added.</summary>
+    public void RemoveShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? CloseRequested;
+    public IDisposable AddCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveCloseRequestedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddCloseRequestedHandler"/> added.</summary>
+    public void RemoveCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Closed;
+    public IDisposable AddClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClosedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClosedHandler"/> added.</summary>
+    public void RemoveClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Activated;
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Deactivated;
+    public IDisposable AddDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDeactivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDeactivatedHandler"/> added.</summary>
+    public void RemoveDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ClientSizeChanged;
+    public IDisposable AddClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClientSizeChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClientSizeChangedHandler"/> added.</summary>
+    public void RemoveClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ScaleChanged;
+    public IDisposable AddScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveScaleChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddScaleChangedHandler"/> added.</summary>
+    public void RemoveScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? StateChanged;
+    public IDisposable AddStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveStateChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddStateChangedHandler"/> added.</summary>
+    public void RemoveStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged -= handler;
+    }
 
     /// <inheritdoc />
     public void Dispose()
@@ -450,11 +562,12 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
 
         _disposed = true;
 
-        XPlatTheme.Changed -= OnThemeChanged;
+        XPlatTheme.RemoveChangedHandler(OnThemeChanged);
 
-        // The drop target has to be revoked while the window still exists: OLE keeps calling into
-        // it for as long as the window is registered.
-        _dropTarget?.Revoke(_hwnd);
+        // Whatever the window registered natively has to let go while the window still exists: the
+        // platform keeps calling into a registered object for as long as the window is alive.
+        NativeTeardown?.Dispose();
+        NativeTeardown = null;
 
         if (_hwnd != IntPtr.Zero)
         {
@@ -476,7 +589,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         _cursors.Clear();
 
         _application.RemoveWindow(this);
-        Closed?.Invoke(this, EventArgs.Empty);
+        _closed?.Invoke(this);
     }
 
     /// <summary>Forwards a key press to the tree; returns true when the UI consumed it.</summary>
@@ -570,11 +683,6 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         ApplyResizable();
         ApplyIcon();
 
-        // Accepting drops is free when nothing is dragged, so it is unconditional: the shell only
-        // calls into the target while a drag is in progress.
-        _dropTarget = new Win32DropTarget(this);
-        _dropTarget.Register(_hwnd);
-
         UpdateHostSize();
         return true;
     }
@@ -593,7 +701,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         // the window is visible - which is why it is not done when the window is created.
         ApplyTopMost();
 
-        Shown?.Invoke(this, EventArgs.Empty);
+        _shown?.Invoke(this);
     }
 
     /// <summary>
@@ -673,8 +781,8 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
 
     /// <summary>
     /// Rebuilds the window's two icon handles, each sized from the window's DPI, and hands them to
-    /// the shell: the small one is the title bar, the big one the taskbar and Alt-Tab. A window with
-    /// no icon of its own keeps the window class's generic application icon.
+    /// the shell: the small one is the title bar, the big one the taskbar and Alt-Tab. A window
+    /// with no icon of its own keeps the window class's generic application icon.
     /// </summary>
     private void ApplyIcon()
     {
@@ -884,11 +992,11 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
             case NativeMethods.WmActivate:
                 if (NativeMethods.LowWord(wParam) == 0)
                 {
-                    Deactivated?.Invoke(this, EventArgs.Empty);
+                    _deactivated?.Invoke(this);
                 }
                 else
                 {
-                    Activated?.Invoke(this, EventArgs.Empty);
+                    _activated?.Invoke(this);
                 }
 
                 return IntPtr.Zero;
@@ -962,7 +1070,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
 
             case NativeMethods.WmClose:
                 // The model decides: Closing may cancel, in which case the window stays up.
-                CloseRequested?.Invoke(this, EventArgs.Empty);
+                _closeRequested?.Invoke(this);
                 return IntPtr.Zero;
 
             case NativeMethods.WmDestroy:
@@ -977,7 +1085,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     /// Repaints whenever the palette is swapped - by the system appearance changing, or by the
     /// application assigning <see cref="XPlatTheme.Palette"/> - and keeps the title bar in step.
     /// </summary>
-    private void OnThemeChanged(object? sender, EventArgs e)
+    private void OnThemeChanged(object sender)
     {
         NativeMethods.SetDarkTitleBar(_hwnd, XPlatTheme.IsDarkMode);
         Invalidate();
@@ -1054,7 +1162,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         }
 
         _state = state;
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        _stateChanged?.Invoke(this);
     }
 
     private void OnDpiChanged(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
@@ -1082,7 +1190,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         // WM_SIZE above ran against the old scale; re-measure so the host sees logical pixels.
         UpdateHostSize();
         ApplyIcon();
-        ScaleChanged?.Invoke(this, EventArgs.Empty);
+        _scaleChanged?.Invoke(this);
     }
 
     private void OnGetMinMaxInfo(IntPtr lParam)
@@ -1178,36 +1286,6 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         _host.ProcessTextInput(character.ToString());
     }
 
-    /// <summary>
-    /// Routes the start of an OLE drag into the control tree. The point is in screen pixels, because
-    /// the shell does not know where this window's client area is.
-    /// </summary>
-    internal XPlatDragDropEffects OnDragEnter(
-        NativeMethods.POINT screen,
-        XPlatDataObject data,
-        XPlatDragDropEffects allowedEffects,
-        XPlatModifiers modifiers) =>
-        _host.ProcessDragEnter(ScreenToLogical(screen), data, allowedEffects, modifiers);
-
-    /// <summary>Routes a drag move into the control tree.</summary>
-    internal XPlatDragDropEffects OnDragOver(
-        NativeMethods.POINT screen,
-        XPlatDataObject data,
-        XPlatDragDropEffects allowedEffects,
-        XPlatModifiers modifiers) =>
-        _host.ProcessDragOver(ScreenToLogical(screen), data, allowedEffects, modifiers);
-
-    /// <summary>Tells the control tree that the drag left the window without being dropped.</summary>
-    internal void OnDragLeave() => _host.ProcessDragLeave();
-
-    /// <summary>Routes a drop into the control tree.</summary>
-    internal XPlatDragDropEffects OnDrop(
-        NativeMethods.POINT screen,
-        XPlatDataObject data,
-        XPlatDragDropEffects allowedEffects,
-        XPlatModifiers modifiers) =>
-        _host.ProcessDragDrop(ScreenToLogical(screen), data, allowedEffects, modifiers);
-
     private void UpdateHostSize()
     {
         if (_hwnd == IntPtr.Zero)
@@ -1232,7 +1310,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         }
 
         _host.SetClientSize(size.Width, size.Height);
-        ClientSizeChanged?.Invoke(this, EventArgs.Empty);
+        _clientSizeChanged?.Invoke(this);
     }
 
     private void Invalidate()
@@ -1246,7 +1324,7 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     private SKPoint ToLogical(IntPtr lParam) =>
         new(NativeMethods.LowWord(lParam) / _scale, NativeMethods.HighWord(lParam) / _scale);
 
-    private SKPoint ScreenToLogical(NativeMethods.POINT point)
+    internal SKPoint ScreenToLogical(NativeMethods.POINT point)
     {
         NativeMethods.ScreenToClient(_hwnd, ref point);
         return new SKPoint(point.X / _scale, point.Y / _scale);
@@ -1433,5 +1511,16 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         _dibBits = IntPtr.Zero;
         _bufferWidth = 0;
         _bufferHeight = 0;
+    }
+
+    /// <inheritdoc />
+    public void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        foreach (var hook in window.Services.GetServices<IXPlatWin32WindowHook>())
+        {
+            hook.OnPhase(phase, window, this);
+        }
     }
 }

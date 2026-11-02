@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
 namespace XPlatUI.Backend.Gtk4;
@@ -21,6 +22,14 @@ namespace XPlatUI.Backend.Gtk4;
 /// </remarks>
 public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 {
+    private Action<object>? _shown;
+    private Action<object>? _closeRequested;
+    private Action<object>? _closed;
+    private Action<object>? _activated;
+    private Action<object>? _deactivated;
+    private Action<object>? _clientSizeChanged;
+    private Action<object>? _scaleChanged;
+    private Action<object>? _stateChanged;
     private readonly Gtk4ApplicationBackend _application;
     private readonly XPlatUiHost _host = new();
 
@@ -94,9 +103,9 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     /// <inheritdoc />
     /// <remarks>
     /// GTK4 takes an icon by name from the desktop's theme and has no binding that accepts a bitmap
-    /// for a window, so only <see cref="XPlatIcon.Name"/> reaches the title bar; a pixel-only icon is
-    /// stored and ignored. X11 window managers honour the name, and a Wayland compositor takes the
-    /// icon from the application's desktop entry instead.
+    /// for a window, so only <see cref="XPlatIcon.Name"/> reaches the title bar; a pixel-only icon
+    /// is stored and ignored. X11 window managers honour the name, and a Wayland compositor takes
+    /// the icon from the application's desktop entry instead.
     /// </remarks>
     public XPlatIcon? Icon
     {
@@ -343,7 +352,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     {
         if (!_disposed)
         {
-            CloseRequested?.Invoke(this, EventArgs.Empty);
+            _closeRequested?.Invoke(this);
         }
     }
 
@@ -391,9 +400,14 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         presenter?.Dismiss();
 
+        // Whatever the window registered natively has to let go while the window still exists: the
+        // platform keeps calling into a registered object for as long as the window is alive.
+        NativeTeardown?.Dispose();
+        NativeTeardown = null;
+
         if (view is not null)
         {
-            view.MetricsChanged -= OnViewMetricsChanged;
+            view.RemoveMetricsChangedHandler(OnViewMetricsChanged);
             view.Dispose();
         }
 
@@ -406,7 +420,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
 
         _application.RemoveWindow(this);
-        Closed?.Invoke(this, EventArgs.Empty);
+        _closed?.Invoke(this);
     }
 
     /// <summary>Called by the application backend once the main loop exists.</summary>
@@ -433,6 +447,17 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         RaiseStateChangedIfNeeded();
     }
 
+    /// <summary>The view that shows the host, or null before the window has been shown.</summary>
+    internal Gtk4SkiaView? View => _view;
+
+    /// <summary>
+    /// Something to dispose while the native window still exists, or null when nothing needs it.
+    /// A feature that registers a native object with the window puts it here, because the object
+    /// stays callable until the window is destroyed and so has to be released first, and because
+    /// that release must not be skipped when a window is disposed without ever being closed.
+    /// </summary>
+    internal IDisposable? NativeTeardown { get; set; }
+
     internal void RaiseActivatedIfNeeded(bool active)
     {
         if (_active == active)
@@ -453,37 +478,133 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             }
 
             _application.NotifyWindowActivated(this);
-            Activated?.Invoke(this, EventArgs.Empty);
+            _activated?.Invoke(this);
             return;
         }
 
         _application.NotifyWindowDeactivated(this);
-        Deactivated?.Invoke(this, EventArgs.Empty);
+        _deactivated?.Invoke(this);
     }
 
     /// <inheritdoc />
-    public event EventHandler? Shown;
+    public IDisposable AddShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveShownHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddShownHandler"/> added.</summary>
+    public void RemoveShownHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _shown -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? CloseRequested;
+    public IDisposable AddCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveCloseRequestedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddCloseRequestedHandler"/> added.</summary>
+    public void RemoveCloseRequestedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closeRequested -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Closed;
+    public IDisposable AddClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClosedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClosedHandler"/> added.</summary>
+    public void RemoveClosedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _closed -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Activated;
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? Deactivated;
+    public IDisposable AddDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDeactivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDeactivatedHandler"/> added.</summary>
+    public void RemoveDeactivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _deactivated -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ClientSizeChanged;
+    public IDisposable AddClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveClientSizeChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddClientSizeChangedHandler"/> added.</summary>
+    public void RemoveClientSizeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _clientSizeChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? ScaleChanged;
+    public IDisposable AddScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveScaleChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddScaleChangedHandler"/> added.</summary>
+    public void RemoveScaleChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _scaleChanged -= handler;
+    }
 
     /// <inheritdoc />
-    public event EventHandler? StateChanged;
+    public IDisposable AddStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveStateChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddStateChangedHandler"/> added.</summary>
+    public void RemoveStateChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _stateChanged -= handler;
+    }
 
     private bool EnsureCreated()
     {
@@ -518,7 +639,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         window.OnNotify += OnWindowNotify;
 
-        view.MetricsChanged += OnViewMetricsChanged;
+        view.AddMetricsChangedHandler(OnViewMetricsChanged);
 
         _window = window;
         _container = container;
@@ -555,7 +676,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
 
         _view?.Focus();
-        Shown?.Invoke(this, EventArgs.Empty);
+        _shown?.Invoke(this);
     }
 
     private void SetTransient(IXPlatWindowBackend? owner)
@@ -630,7 +751,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
     }
 
-    private void OnViewMetricsChanged(object? sender, EventArgs e)
+    private void OnViewMetricsChanged(object sender)
     {
         if (_view is null || _disposed)
         {
@@ -653,12 +774,12 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         if (sizeChanged)
         {
-            ClientSizeChanged?.Invoke(this, EventArgs.Empty);
+            _clientSizeChanged?.Invoke(this);
         }
 
         if (scaleChanged)
         {
-            ScaleChanged?.Invoke(this, EventArgs.Empty);
+            _scaleChanged?.Invoke(this);
         }
 
         RaiseStateChangedIfNeeded();
@@ -707,8 +828,19 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
 
         _reportedState = state;
-        StateChanged?.Invoke(this, EventArgs.Empty);
+        _stateChanged?.Invoke(this);
     }
 
     private static int ToPixels(float value) => (int)MathF.Round(MathF.Max(value, 0f));
+
+    /// <inheritdoc />
+    public void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        foreach (var hook in window.Services.GetServices<IXPlatGtk4WindowHook>())
+        {
+            hook.OnPhase(phase, window, this);
+        }
+    }
 }

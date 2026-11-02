@@ -1,8 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
+using XPlatUI.Backend.Win32;
 
-namespace XPlatUI.Backend.Win32;
+namespace XPlatUI.DragDrop;
 
 /// <summary>
 /// The OLE drop target of one Win32 window: the COM object the shell calls into while something is
@@ -68,7 +69,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         // apartment. WinForms only does that for its own clipboard and drag support, so a window
         // created by this backend has to ask for it. The call is idempotent per thread and reports
         // S_FALSE once the apartment exists.
-        NativeMethods.OleInitialize(IntPtr.Zero);
+        Win32DropNativeMethods.OleInitialize(IntPtr.Zero);
 
         var instance = GCHandle.Alloc(this, GCHandleType.Normal);
         var comObject = (nint*)NativeMemory.Alloc(ObjectSize, (nuint)sizeof(nint));
@@ -77,7 +78,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         comObject[HandleOffset] = GCHandle.ToIntPtr(instance);
         _object = comObject;
 
-        var registerHr = NativeMethods.RegisterDragDrop(hwnd, (IntPtr)comObject);
+        var registerHr = Win32DropNativeMethods.RegisterDragDrop(hwnd, (IntPtr)comObject);
         if (registerHr == NativeMethods.SOk)
         {
             return true;
@@ -96,7 +97,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         if (hwnd != IntPtr.Zero)
         {
-            NativeMethods.RevokeDragDrop(hwnd);
+            Win32DropNativeMethods.RevokeDragDrop(hwnd);
         }
 
         ReleaseObject();
@@ -123,14 +124,14 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         {
             _data = Read(dataObject);
             effect = _data is null
-                ? NativeMethods.DropEffectNone
-                : (uint)_window.OnDragEnter(point, _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                ? Win32DropNativeMethods.DropEffectNone
+                : (uint)_window.Host.ProcessDragEnter(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
         }
         catch (Exception ex)
         {
             XPlatApplication.HandleNativeBoundary(ex);
             _data = null;
-            effect = NativeMethods.DropEffectNone;
+            effect = Win32DropNativeMethods.DropEffectNone;
         }
 
         return NativeMethods.SOk;
@@ -143,17 +144,17 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         {
             if (_data is null)
             {
-                effect = NativeMethods.DropEffectNone;
+                effect = Win32DropNativeMethods.DropEffectNone;
             }
             else
             {
-                effect = (uint)_window.OnDragOver(point, _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                effect = (uint)_window.Host.ProcessDragOver(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
             }
         }
         catch (Exception ex)
         {
             XPlatApplication.HandleNativeBoundary(ex);
-            effect = NativeMethods.DropEffectNone;
+            effect = Win32DropNativeMethods.DropEffectNone;
         }
 
         return NativeMethods.SOk;
@@ -164,7 +165,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         try
         {
-            _window.OnDragLeave();
+            _window.Host.ProcessDragLeave();
         }
         catch (Exception ex)
         {
@@ -184,13 +185,13 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             // whatever was cached at DragEnter, which a source is allowed to have replaced.
             var data = Read(dataObject) ?? _data;
             effect = data is null
-                ? NativeMethods.DropEffectNone
-                : (uint)_window.OnDrop(point, data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                ? Win32DropNativeMethods.DropEffectNone
+                : (uint)_window.Host.ProcessDragDrop(_window.ScreenToLogical(point), data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
         }
         catch (Exception ex)
         {
             XPlatApplication.HandleNativeBoundary(ex);
-            effect = NativeMethods.DropEffectNone;
+            effect = Win32DropNativeMethods.DropEffectNone;
         }
 
         _data = null;
@@ -372,17 +373,17 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         var modifiers = XPlatModifiers.None;
 
-        if ((keyState & NativeMethods.MkShift) != 0)
+        if ((keyState & Win32DropNativeMethods.MkShift) != 0)
         {
             modifiers |= XPlatModifiers.Shift;
         }
 
-        if ((keyState & NativeMethods.MkControl) != 0)
+        if ((keyState & Win32DropNativeMethods.MkControl) != 0)
         {
             modifiers |= XPlatModifiers.Control;
         }
 
-        if ((keyState & NativeMethods.MkAlt) != 0)
+        if ((keyState & Win32DropNativeMethods.MkAlt) != 0)
         {
             modifiers |= XPlatModifiers.Alt;
         }
@@ -434,7 +435,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     /// <summary>Reads the dropped files, if the source offers any.</summary>
     private static string[] ReadFiles(IComDataObject com)
     {
-        var format = FormatOf(NativeMethods.CfHDrop);
+        var format = FormatOf(Win32DropNativeMethods.CfHDrop);
 
         if (com.GetData(format, out var medium) != NativeMethods.SOk)
         {
@@ -448,7 +449,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
                 return [];
             }
 
-            var count = NativeMethods.DragQueryFileW(medium.Handle, Win32DropInterfaces.DragQueryFileCount, null, 0);
+            var count = Win32DropNativeMethods.DragQueryFileW(medium.Handle, Win32DropInterfaces.DragQueryFileCount, null, 0);
             if (count == 0)
             {
                 return [];
@@ -459,14 +460,14 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
 
             for (uint index = 0; index < count; index++)
             {
-                var length = NativeMethods.DragQueryFileW(medium.Handle, index, null, 0);
+                var length = Win32DropNativeMethods.DragQueryFileW(medium.Handle, index, null, 0);
                 if (length == 0)
                 {
                     continue;
                 }
 
                 var buffer = new char[length + 1];
-                if (NativeMethods.DragQueryFileW(medium.Handle, index, buffer, (uint)buffer.Length) == 0)
+                if (Win32DropNativeMethods.DragQueryFileW(medium.Handle, index, buffer, (uint)buffer.Length) == 0)
                 {
                     continue;
                 }
@@ -478,7 +479,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
         finally
         {
-            NativeMethods.ReleaseStgMedium(ref medium);
+            Win32DropNativeMethods.ReleaseStgMedium(ref medium);
         }
     }
 
@@ -516,7 +517,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
         finally
         {
-            NativeMethods.ReleaseStgMedium(ref medium);
+            Win32DropNativeMethods.ReleaseStgMedium(ref medium);
         }
     }
 

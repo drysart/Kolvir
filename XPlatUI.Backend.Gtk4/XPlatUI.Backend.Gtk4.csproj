@@ -17,6 +17,13 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
+  <!-- The drag and drop feature package owns the drop targets as well as the opt-in that installs
+       them, so what it needs here is the drawing area they attach to and the slot it releases them
+       through. The feature is the only friend assembly. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop" />
+  </ItemGroup>
+
   <ItemGroup>
     <!-- The GTK4 binding (GtkSharp itself is GTK3 only). -->
     <PackageReference Include="GirCore.Gtk-4.0" Version="0.8.1" />

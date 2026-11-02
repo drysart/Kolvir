@@ -1,23 +1,24 @@
 namespace XPlatUI;
 
 /// <summary>
-/// A repeating timer whose <see cref="Tick"/> always runs on the UI thread, so handlers may touch
-/// controls without marshalling.
+/// A repeating timer whose <see cref="AddTickHandler"/> always runs on the UI thread, so handlers
+/// may touch controls without marshalling.
 /// </summary>
 /// <remarks>
 /// <para>
-/// The wait itself happens on a pool thread; only the <see cref="Tick"/> callback is moved to the UI
-/// thread, through <see cref="XPlatApplication.BeginInvoke"/>. That keeps the message loop free of
-/// any timer bookkeeping and gives every platform the same behaviour.
+/// The wait itself happens on a pool thread; only the <see cref="AddTickHandler"/> callback is
+/// moved to the UI thread, through <see cref="XPlatApplication.BeginInvoke"/>. That keeps the
+/// message loop free of any timer bookkeeping and gives every platform the same behaviour.
 /// </para>
 /// <para>
-/// Ticks are not queued up: if the loop is busy for longer than <see cref="Interval"/>, missed ticks
-/// are dropped rather than replayed. Before any <see cref="XPlatApplication"/> exists - or once it
-/// has been disposed - ticks run inline on the pool thread.
+/// Ticks are not queued up: if the loop is busy for longer than <see cref="Interval"/>, missed
+/// ticks are dropped rather than replayed. Before any <see cref="XPlatApplication"/> exists - or
+/// once it has been disposed - ticks run inline on the pool thread.
 /// </para>
 /// </remarks>
 public sealed class XPlatTimer : IDisposable
 {
+    private Action<object>? _tick;
     private readonly System.Threading.Timer _timer;
     private TimeSpan _interval;
     private bool _enabled;
@@ -80,8 +81,20 @@ public sealed class XPlatTimer : IDisposable
     /// <summary>True once the timer has been disposed.</summary>
     public bool IsDisposed => _disposed;
 
-    /// <summary>Raised on the UI thread every <see cref="Interval"/>.</summary>
-    public event EventHandler? Tick;
+    /// <summary>Adds a handler that runs on the UI thread every <see cref="Interval"/>.</summary>
+    public IDisposable AddTickHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _tick += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveTickHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddTickHandler"/> added.</summary>
+    public void RemoveTickHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _tick -= handler;
+    }
 
     /// <summary>Starts the timer, or restarts it when it is already running.</summary>
     public void Start()
@@ -153,7 +166,7 @@ public sealed class XPlatTimer : IDisposable
         {
             if (!_disposed && _enabled)
             {
-                Tick?.Invoke(this, EventArgs.Empty);
+                _tick?.Invoke(this);
             }
         }
         finally

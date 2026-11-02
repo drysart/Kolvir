@@ -17,7 +17,7 @@ public enum XPlatButtonStyle
 
 /// <summary>
 /// A push button with hover, pressed, focused and disabled states. It raises
-/// <see cref="XPlatControl.Click"/> on mouse release inside the button or on
+/// <see cref="XPlatControl.AddClickHandler"/> on mouse release inside the button or on
 /// Enter/Space while focused.
 /// </summary>
 public class XPlatButton : XPlatControl
@@ -136,19 +136,19 @@ public class XPlatButton : XPlatControl
 
         if (wasPressed && XPlatGeometry.Contains(ClientRect, e.Location))
         {
-            OnClick(EventArgs.Empty);
+            OnClick();
         }
     }
 
-    protected override void OnMouseEnter(EventArgs e)
+    protected override void OnMouseEnter()
     {
-        base.OnMouseEnter(e);
+        base.OnMouseEnter();
         Invalidate();
     }
 
-    protected override void OnMouseLeave(EventArgs e)
+    protected override void OnMouseLeave()
     {
-        base.OnMouseLeave(e);
+        base.OnMouseLeave();
 
         if (IsPressed)
         {
@@ -180,24 +180,24 @@ public class XPlatButton : XPlatControl
             IsPressed = false;
             e.Handled = true;
             Invalidate();
-            OnClick(EventArgs.Empty);
+            OnClick();
         }
     }
 
-    protected override void OnGotFocus(EventArgs e)
+    protected override void OnGotFocus()
     {
-        base.OnGotFocus(e);
+        base.OnGotFocus();
         Invalidate();
     }
 
-    protected override void OnLostFocus(EventArgs e)
+    protected override void OnLostFocus()
     {
-        base.OnLostFocus(e);
+        base.OnLostFocus();
         IsPressed = false;
         Invalidate();
     }
 
-    protected override void OnEnabledChanged(EventArgs e)
+    protected override void OnEnabledChanged()
     {
         if (!Enabled)
         {
@@ -205,7 +205,7 @@ public class XPlatButton : XPlatControl
             ReleaseMouseCapture();
         }
 
-        base.OnEnabledChanged(e);
+        base.OnEnabledChanged();
     }
 
     private (SKColor? Fill, SKColor Text) ResolveColors()

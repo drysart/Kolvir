@@ -1,6 +1,7 @@
 using SkiaSharp;
 using XPlatUI;
 using XPlatUI.Demo;
+using XPlatUI.DragDrop;
 
 #if WINDOWS
 using XPlatUI.Backend.Win32;
@@ -49,18 +50,19 @@ internal static class Program
     /// stays trimmable and can be published with NativeAOT.
     /// </summary>
     /// <remarks>
-    /// The attribute is not decoration: the runtime reads it before <c>Main</c> runs and initializes
-    /// the thread as a single-threaded COM apartment, which is the only thing that can do so. Windows
-    /// needs it for the shell's file dialogs, whose <c>IFileDialog::Show</c> never returns on a
-    /// multi-threaded apartment. It is ignored on macOS and Linux.
+    /// The attribute is not decoration: the runtime reads it before <c>Main</c> runs and
+    /// initializes the thread as a single-threaded COM apartment, which is the only thing that can
+    /// do so. Windows needs it for the shell's file dialogs, whose <c>IFileDialog::Show</c> never
+    /// returns on a multi-threaded apartment. It is ignored on macOS and Linux.
     /// </remarks>
     [STAThread]
     private static int Main(string[] args)
     {
         // Must happen before anything touches SkiaSharp: an AOT publish carries the native Skia
         // library inside the executable instead of next to it. On macOS the library stays in the
-        // bundle, so the loader finds it where it expects it and does nothing.
-        SkiaNativeLoader.EnsureLoaded();
+        // bundle, so the loader finds it where it expects it and does nothing. The resource is
+        // embedded in this assembly by XPlatUI's build assets, which is why it is named here.
+        SkiaNativeLoader.EnsureLoaded(typeof(Program).Assembly);
 
         // Headless render of the sample UI, handy for visual checks and CI. It paints through the
         // headless backend rather than the window one, so it needs no window, no message loop and no
@@ -99,6 +101,11 @@ internal static class Program
             // a second one, which is what makes "open a file with this application" work on all
             // three platforms.
             SingleInstance = true,
+
+            // The sample takes drops on its root panel and on a text box, so it opts into the drag
+            // and drop feature. This is the only place the feature is named, and leaving it out is
+            // what keeps it out of an application that does not want it.
+            ConfigureServices = services => services.AddDragDrop(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,
@@ -122,15 +129,15 @@ window.MenuBar = CreateMenuBar(window, demo);
         application.MainWindow = window;
 
         // The window comes forward on its own; the status line says why it did.
-        application.SecondInstance += (_, e) => demo.SetStatus(
+        application.AddSecondInstanceHandler((_, e) => demo.SetStatus(
             e.Arguments.Count == 0
                 ? "A second launch was handed to this window."
-                : $"A second launch was handed to this window: {string.Join(' ', e.Arguments)}");
+                : $"A second launch was handed to this window: {string.Join(' ', e.Arguments)}"));
 
         // Activation is the other half of the multi-window story: the status line reports it, which
         // is also the easiest way to see that an owned window taking the focus deactivates this one.
-        window.Activated += (_, _) => demo.SetStatus("Window activated - it has the keyboard focus.");
-        window.Deactivated += (_, _) => demo.SetStatus("Window deactivated - another window has the focus.");
+        window.AddActivatedHandler(_ => demo.SetStatus("Window activated - it has the keyboard focus."));
+        window.AddDeactivatedHandler(_ => demo.SetStatus("Window deactivated - another window has the focus."));
 
         // Windows has no menu bar to hang these off yet, so the same two window features are also
         // reachable as flags: --topmost starts above everything, --owned opens a window owned by
