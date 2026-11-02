@@ -837,9 +837,10 @@ PNGs comparable between runs.
 ### 6.3 Where the sample apps land
 
 The three harnesses become **three thin wrappers over the model** during the migration (§11) and are
-eventually deleted, replaced by one `XPlatUIDemo.App` project that is multi-TFM per §6.1.
-`XPlatUIDemo` (the shared sample control tree + `RenderToPng`) is already the cross-platform content
-and does not change.
+eventually deleted, replaced by one `XPlatUIDemo.App` project that is multi-TFM per §6.1. The shared
+sample control tree and `RenderToPng` are already the cross-platform content and do not change; they
+ended up inside `XPlatUIDemo.App` itself rather than in a project of their own, because a
+platform-neutral sample library resolves a feature package to its Linux folder even on Windows.
 
 ---
 
@@ -1381,9 +1382,11 @@ Three things follow from that, and each was load-bearing rather than cosmetic:
   jobs build one project" true rather than aspirational.
 
 `AssemblyName` is `XPlatUIDemoApp`, not `XPlatUIDemo`: the macOS SDK names the `.app` bundle after the
-assembly, and `XPlatUIDemo` is already the shared sample library. `Info.plist` uses
-`CFBundleExecutable` `XPlatUIDemoApp` and `CFBundleIdentifier` `com.xplatui.demo`, and `app.manifest`
-keeps the PerMonitorV2 DPI declaration that used to live in `WinFormsApp3`.
+assembly, and the name was chosen when the sample control tree was a separate `XPlatUIDemo` library
+that would have collided with it. That library has since been folded into `XPlatUIDemo.App`, but the
+name stays because `Info.plist`, `app.manifest` and the platform workflows all use it.
+`Info.plist` uses `CFBundleExecutable` `XPlatUIDemoApp` and `CFBundleIdentifier` `com.xplatui.demo`,
+and `app.manifest` keeps the PerMonitorV2 DPI declaration that used to live in `WinFormsApp3`.
 
 The three harnesses did not agree on the design client size and the difference is real, not drift.
 Windows and macOS use **1280x820** (minimum 820x716); GTK uses **1280x760** (minimum 820x660) because

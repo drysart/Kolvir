@@ -4,8 +4,7 @@ A tiny, AOT-friendly, cross-platform UI layer that borrows the WinForms/WPF prog
 model (controls, docking, table layout, events) but draws everything with
 [SkiaSharp](https://github.com/mono/SkiaSharp). The library itself has no OS dependency: a backend
 supplies the window, the input, the clipboard, the dialogs and the system appearance, and the
-controls draw themselves on top of it. The same sample UI from the shared `XPlatUIDemo` project runs
-on all three platforms.
+controls draw themselves on top of it. The same sample UI runs on all three platforms.
 
 ```
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
@@ -20,11 +19,10 @@ XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompa
   Native/                 SkiaNativeLoader.cs - unpacks the embedded Skia library in an AOT build
   buildTransitive/        the MSBuild that embeds it, shipped with the package
   XPlatUiHost.cs          platform-neutral host: layout, painting, input routing, focus
-XPlatUIDemo/              the sample control tree, shared by every platform
-  DemoUi.cs               the demo layout, plus RenderToPng for headless renders
-  DemoIcon.cs             the sample icon, drawn in code so no binary asset is needed
 XPlatUIDemo.App/          the one application: net10.0-windows, net10.0-macos or net10.0
   Program.cs              pick a backend, describe a window, run
+  DemoUi.cs               the sample layout, plus RenderToPng for headless renders
+  DemoIcon.cs             the sample icon, drawn in code so no binary asset is needed
   app.manifest            per-monitor v2 DPI awareness (Windows)
   Info.plist              the bundle identity (macOS)
 XPlatUI.Backend.Win32/    net10.0-windows backend over raw Win32 (no WinForms, no System.Drawing)
@@ -32,6 +30,9 @@ XPlatUI.Backend.AppKit/   net10.0-macos backend over AppKit
 XPlatUI.Backend.Gtk4/     net10.0 backend over GTK4
 XPlatUI.Backend.Headless/ net10.0 backend that paints offscreen; what --render and the tests use
 XPlatUI.Backend/          multi-targeting selector: the backend for whichever TFM you built for
+XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one TFM per platform
+  common/                 the portable half: AllowDrop, the handler pairs, the router
+  windows/ linux/ macos/  the opt-in that pairs it with the backend's native half
 XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
 ```
 
@@ -571,9 +572,11 @@ status line reports activation changes.
 
 ### Drag and drop
 
-Drag and drop is opt-in. Until the application asks for it, a window registers no drop target,
-which is what keeps OLE, the COM target, the pasteboard types and the GTK controllers out of an
-application that never accepts a drop. Asking for it is one line:
+Drag and drop is a package of its own, `XPlatUI.Feature.DragDrop`, because most applications never
+accept a drop and the ones that do not should not carry the code that makes one possible. Reference
+the package and then opt in: until the application asks for it, a window registers no drop target,
+which is what keeps OLE, the COM target, the pasteboard types and the GTK controllers out of the
+build. Asking for it is one line:
 
 ```csharp
 using XPlatUI.DragDrop;
@@ -610,8 +613,8 @@ The opt-in is per application, and it is coarse on purpose: once it is called, e
 drop target, whether or not any control ever sets `AllowDrop`. `AllowDrop` can be turned on and off
 on a control that is already inside a shown window, so there is no correct moment at which the
 native registration could depend on it. Leaving the call out is not an error: the code above still
-compiles and runs, nothing simply ever arrives. What leaving it out saves is measured in
-[FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §10.
+compiles and runs, nothing simply ever arrives. What the feature costs an application that never
+references the package is measured in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §10.
 
 `AddDragEnterHandler`, `AddDragOverHandler` and `AddDragDropHandler` share one argument type, so the
 same handler can serve all three. `AddDragLeaveHandler` takes a handler with no arguments: by the
@@ -696,8 +699,10 @@ root.AddDragDropHandler((_, e) =>
 unchanged, so a handler body moves across untouched: `+=` becomes `Add<Name>Handler` and `-=`
 becomes `Remove<Name>Handler`, as it did for every other notification. `DragLeave` is the one that
 lost its payload, so `root.DragLeave += (_, _) => Reset();` becomes
-`root.AddDragLeaveHandler(_ => Reset());`. The `AddDragDrop()` call is the only line with no
-counterpart, and leaving it out compiles and runs; the window simply never becomes a drop target.
+`root.AddDragLeaveHandler(_ => Reset());`. The package reference and the `AddDragDrop()` call are
+the only two lines with no counterpart. Leaving out the call still compiles and runs - the window
+simply never becomes a drop target - while leaving out the package removes the members the rest of
+this code is written against, which is the point of it being a package.
 
 ## Writing a backend
 

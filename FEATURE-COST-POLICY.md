@@ -147,11 +147,13 @@ chooses a folder by the operating system being supported, and which backend that
 follows from the framework, since `net10.0-windows` can only mean Win32.
 
 Sharing is a folder, not an assembly. `common/` compiles into each platform's output, so nothing has
-to be `public` for the sake of another platform, there is no `InternalsVisibleTo`, and there is no
-second assembly to place in each `lib/` folder. `#if` is still available inside `common/` for
-differences too small to justify a file in each platform folder, and a feature with nothing portable
-simply has an empty `common/`. The same `$(TargetFramework)` condition is how a platform's
-`PackageReference` is applied, which is what produces the per-platform dependency groups below.
+to be `public` for the sake of another platform, the folders need no `InternalsVisibleTo` between
+them, and there is no second assembly to place in each `lib/` folder. `#if` is still available inside
+`common/` for differences too small to justify a file in each platform folder, and a feature with
+nothing portable simply has an empty `common/`. The same `$(TargetFramework)` condition is how a
+platform's `PackageReference` is applied, which is what produces the per-platform dependency groups
+below. A feature that drives its backend's internals is the one case that does need a friend
+assembly, and §10's Phase 5 record covers what that costs and why it is the cheaper answer.
 
 A consuming solution is simpler than either alternative. The project reference is one unconditional
 line, and MSBuild builds only the inner build that matches the consuming project, so there is no
@@ -168,14 +170,19 @@ workload is actually a workload, so one macOS machine packs the whole package:
 `-p:EnableWindowsTargeting=true` brings the Windows reference pack to it, and the Linux framework
 needs nothing extra. Verified on a Mac with a three-framework project: without the property the
 `net10.0-windows` inner build stops with `NETSDK1100`, and with it one `dotnet pack` writes all
-three `lib/` folders. For local work, `dotnet build -p:TargetFrameworks=net10.0-windows` narrows the
-build to one platform without editing the file, and `-p:TargetFramework=net10.0` narrows it to one
-framework. Both verified.
+three `lib/` folders. For local work, `-p:TargetFramework=net10.0-windows` builds one inner build
+without editing the file; the plural `-p:TargetFrameworks=...` does not work as a narrowing switch,
+because a global property reaches the restore graph but not the referenced projects' own builds, so
+those build the frameworks they declare against assets restored for one, and the build stops with
+`NETSDK1005`. Verified both ways.
 
 Pin the macOS target framework version rather than writing the floating `net10.0-macos`. The packed
 `lib/` folder name carries whatever platform version the build machine's workload supplies, and an
 unpinned build produced `lib/net10.0-macos26.0/`. A consumer on an older workload then resolves to a
-lower platform version and does not match the folder.
+lower platform version and does not match the folder. The drag and drop project writes the floating
+form anyway, because its `ProjectReference` to `XPlatUI.Backend.AppKit` has to name that backend's
+framework, so the pinned folder name is a publishing decision that arrives with the first published
+package rather than a decision this project can make alone.
 
 #### Shipping: one pack
 
@@ -892,7 +899,7 @@ members are retained with them, and the per-window native registration happens f
 Target state: an application that never calls the opt-in publishes without OLE initialisation,
 without a COM drop target, without registered pasteboard types and without GTK controllers. The
 shared payload types can stay where they are: they are small and inert, and they cost nothing until
-something calls them.
+something calls them. Phase 5 has since done this, and §10 records what it cost and what it forced.
 
 `AllowDrop` and the four events are a different matter, and moving them is not a judgement call.
 Their surface becomes `using XPlatUI.DragDrop;`, `AllowDrop` as an extension property, and
@@ -1089,34 +1096,34 @@ types and the GTK controllers, and the size must return to the Phase 0 baseline.
 This phase is also the proof that the pattern works, so it should be done before any new feature is
 held to the policy.
 
-Result: done, with the packaging deferred. The feature lives in `XPlatUI` and the three backends for
-now, so opting in is a namespace import and one `ConfigureServices` line rather than a package
-What this phase proves is the shape: that a feature can be lifted off the always-on path
-behind typed hooks, a same-named extension and an extension-member surface, and that the library
-does not notice it has gone. The four-folder feature project of §4 is a build change on top of a
-shape that now exists, and it needs the macOS workload, so it belongs with the pipeline job in
-Phase 4.
+Result: done, with the packaging deferred to Phase 5. The feature lived inside `XPlatUI` and the
+three backends for this phase, so opting in was a namespace import and one `ConfigureServices` line
+rather than a package reference. What the phase proves is the shape: that a feature can be lifted
+off the always-on path behind typed hooks, a same-named extension and an extension-member surface,
+and that the library does not notice it has gone. The four-folder feature project of §4 is a build
+change on top of a shape that now exists, and it needs the macOS workload, so it belongs with the
+pipeline job in Phase 4 and with the move in Phase 5.
 
-One thing will have to change when the feature does move. `XPlatUiHost` holds the
-`IXPlatDragDropRouter` that the feature installs, and core cannot reference a feature package
-without making the feature mandatory, so either the router contract stays in `XPlatUI` while its
-implementation travels, or the host grows a payload-agnostic hook that the feature fills in. Both
-are small and contained, and which one is right depends on the packaging, so it was left unproven
-rather than guessed at.
+One thing had to change when the feature moved, and Phase 5 records how it did. `XPlatUiHost` holds
+the `IXPlatDragDropRouter` that the feature installs, and core cannot reference a feature package
+without making the feature mandatory, so the contract stayed in `XPlatUI` while only its
+implementation travelled - and the host, not the router, runs each control's own `OnDrag...`
+method, so a derived control's handling never depends on the feature being referenced.
 
-The portable half is `XPlatUI/DragDrop/`. `AllowDrop` and the four handler pairs are one
-`extension(XPlatControl)` block, which cannot add fields, so the per-control state lives in a
-`ConditionalWeakTable` keyed by the control. `IXPlatDragDropRouter` and `XPlatDragDropRouter` are
-what the host routes to, which is how `XPlatUiHost` stops naming the feature: with no router
-installed, a host accepts nothing. `XPlatDragDropWindowHook` installs the router at `Created` and
-clears it at `Closing` and `Disposed`.
+The portable half was `XPlatUI/DragDrop/`, and Phase 5 split it in two. `AllowDrop` and the four
+handler pairs are one `extension(XPlatControl)` block, which cannot add fields, so the per-control
+state lives in a `ConditionalWeakTable` keyed by the control. `XPlatDragDropRouter` is what the host
+routes to, which is how `XPlatUiHost` stops naming the feature: with no router installed, a host
+accepts nothing. `XPlatDragDropWindowHook` installs the router at `Created` and clears it at
+`Closing` and `Disposed`.
 
 The native half is one typed window hook per backend, `IXPlatWin32WindowHook`,
 `IXPlatAppKitWindowHook` and `IXPlatGtk4WindowHook`, each registered through
 `AddXPlat<Platform>WindowHook<THook>()` and each running from that backend's `RunWindowHooks` after
-the portable hooks. `AddDragDrop()` is a same-named extension in each backend's `XPlatUI.DragDrop`
-namespace, so a backend that forgets it fails to compile. `Win32WindowBackend` became public,
-because a typed hook names its backend by its concrete type.
+the portable hooks. `AddDragDrop()` was a same-named extension in each backend's `XPlatUI.DragDrop`
+namespace for this phase, so a backend that forgot it failed to compile; in Phase 5 the three of
+them moved into the feature package's own per-platform folders, and the same rule holds there.
+`Win32WindowBackend` became public, because a typed hook names its backend by its concrete type.
 
 Three things differ from the plan above:
 
@@ -1195,7 +1202,113 @@ contain and names §11 as the checklist a reviewer works through. §4 records th
 macOS runner is enough, what the layout check refuses, and that both were rehearsed rather than
 assumed.
 
-### Phase 5: hold new work to it
+### Phase 5: the move
+
+- Lift `XPlatUI/DragDrop/` and the three backends' `AddDragDrop()` extensions into
+  `XPlatUI.Feature.DragDrop`, in the four folders of §4.
+- Measure the no-opt-in fixture on all three platforms again, and the opt-in pair on Windows and
+  Linux.
+- Record what the packaging forced the API to be.
+
+The portable half moved unchanged into `common/`, and each backend's `AddDragDrop()` into the folder
+that can use it: `windows/` holds the Win32 one, `linux/` the Gtk4 one and `macos/` the AppKit one.
+`common/` is compiled into all three assemblies by the default glob, and the project removes the
+three platform folders from that glob and re-includes exactly one per target framework. Without the
+removal every framework compiles all three, which fails with `CS0234` on the two backends it does not
+reference. The error names a missing namespace, so the fix is not obvious from it, and it is worth
+knowing that the layout needs the `Compile Remove` as much as the conditional includes.
+
+The project multi-targets all three platforms, as §4 specifies, and stays out of `WinFormsApp3.slnx`
+because a build of the project itself needs the macOS workload. That costs the development loop
+nothing: an application that references it builds only the one inner build its own target framework
+can use, so `dotnet build WinFormsApp3.slnx` on Windows builds `net10.0-windows` and no other. The
+measurement fixture does not reference the feature at all, which is the point of it.
+
+Two things had to change shape, and both are the rung-3 price rather than a choice:
+
+- **The router contract stayed in core.** `IXPlatDragDropRouter` is what `XPlatUiHost` routes to, and
+  core cannot reference a feature package without making the feature mandatory, so the interface
+  stayed in `XPlatUI/DragDrop/` while `XPlatDragDropRouter` and everything behind it travelled. A
+  host with no router installed accepts nothing, so the core is unchanged when the package is absent.
+  The alternative, a payload-agnostic hook on the host that the feature fills in, is the same
+  interface with a less specific name.
+- **The host runs each control's own handling.** `XPlatDragDropRouter` runs only the handlers the
+  application subscribed; `XPlatUiHost` then calls the control's own `OnDrag...` method. Keeping that
+  call in the host rather than in the router is what stops a derived control's handling from
+  depending on the package: a control that overrides `OnDragEnter` still runs, in the same order
+  relative to the subscribed handlers, in an application that never referenced the feature.
+
+The native halves needed one more thing, `InternalsVisibleTo`. Each drives its backend's internals,
+`Win32WindowBackend.DropTargetLease`, `Gtk4WindowBackend.EnableDragDrop` and
+`AppKitWindowBackend.EnableDragDrop`, and the alternative is making those members public, which would
+put the feature's shape into an always-retained type and defeat the point of moving it. So each
+backend names `XPlatUI.Feature.DragDrop` as its only friend assembly. §4's claim that the folders
+need no `InternalsVisibleTo` is about sharing between a feature's own folders, which still needs
+none; a feature that needs a backend's internals is the one case that does.
+
+`XPlatUIDemo` was folded into `XPlatUIDemo.App` at the same time. A platform-neutral sample library
+resolves a multi-targeting project reference to its `net10.0` build whatever platform the application
+is on, so the sample UI had to move into the project that carries the platform. That is a general
+rule rather than a demo detail: a sample, a test or any other library that consumes a feature belongs
+in a project that names a platform.
+
+#### The numbers
+
+The fixture does not reference the feature, so these rows are the floor after the move:
+
+| Target | Phase 3 loose | Phase 5 loose | Delta |
+|---|---|---|---|
+| win-x64 | 3,070,976 | 3,070,976 | 0 |
+| linux-x64 | 4,062,688 | 4,062,688 | 0 |
+| osx-arm64 | 4,234,528 | 4,234,528 | 0 |
+
+Byte-identical on all three, which is the expected result rather than a lucky one: in Phase 3 the
+portable half was already in an assembly the trimmer removed, so moving it into an assembly the
+application does not reference removes the same bytes a different way. What stays in the image either
+way is the contract and one field on the host, which is the seam §6 describes rather than anything
+this phase added. The move is therefore free for an application that does not use the feature, on
+every platform, which is the claim the policy makes for rung 3.
+
+The opt-in pair does change, because the feature is now an assembly of its own:
+
+| Target | Phase 3, in core | Phase 5, package | Delta |
+|---|---|---|---|
+| win-x64 | 3,213,824 | 3,211,776 | -2,048 |
+| linux-x64 | 4,227,600 | 4,227,552 | -48 |
+
+Both moved slightly down, which is linker alignment rather than a saving: an assembly boundary is not
+free, but at these sizes what it costs is below what two publishes of the same tree can resolve. The
+number that matters is the distance from the floor, 140,800 bytes on Windows and 164,864 on Linux for
+an application that accepts drops, and that is unchanged from Phase 3 to within the same noise.
+
+macOS has no opt-in pair, for the reason the Phase 3 record gives: AppKit keeps the view's
+`NSDraggingDestination` exports whether or not anything registers, so there is no platform half for
+the package to add there.
+
+#### The package
+
+`dotnet pack` on the real project produced what §4 promised, on the first attempt and with no merge
+step:
+
+| `lib/` folder | dependency group |
+|---|---|
+| `net10.0/` | `XPlatUI`, `XPlatUI.Backend.Gtk4` |
+| `net10.0-windows7.0/` | `XPlatUI`, `XPlatUI.Backend.Win32` |
+| `net10.0-macos26.0/` | `XPlatUI`, `XPlatUI.Backend.AppKit` |
+
+`.github/scripts/check-feature-package.py` passes on it, reporting the three platforms and both
+columns. Two details are worth recording:
+
+- The macOS folder is `net10.0-macos26.0/` rather than `net10.0-macos/`, which is the pinning warning
+  of §4 arriving in practice. The folder name carries the platform version the packing machine's
+  workload supplied, and the project cannot pin it while its `ProjectReference` to
+  `XPlatUI.Backend.AppKit` has to name that backend's framework.
+- Each group names the platform's backend as well as `XPlatUI`, because the feature references it. An
+  application already references its backend, so the dependency is redundant for that application,
+  but it is what makes the feature's own dependency graph correct rather than assumed, and it is
+  never restored on the two platforms it does not belong to.
+
+### Phase 6: hold new work to it
 
 Every subsequent feature states, in its pull request, which rung it sits on, why it could not sit
 lower, and the measured cost for an application that does not use it.
@@ -1280,8 +1393,10 @@ lower, and the measured cost for an application that does not use it.
   feature, referenced deliberately and unconditionally, and it is also where a feature goes when it
   is simply too rare to belong in the main package. The feature is one multi-targeted project with
   four folders, `common/`, `windows/`, `macos/` and `linux/`, of which each inner build compiles
-  `common/` plus one platform folder; sharing is a folder rather than an assembly, so there is no
-  `InternalsVisibleTo` and nothing to copy between `lib/` folders. One `dotnet pack` produces the
+  `common/` plus one platform folder; sharing is a folder rather than an assembly, so the folders
+  need no `InternalsVisibleTo` between them and there is nothing to copy between `lib/` folders. A
+  feature that drives a backend's internals does need one friend declaration, and that is the
+  backend's choice rather than the layout's. One `dotnet pack` produces the
   package, because the SDK writes one `lib/` folder and one dependency group per target framework.
   Building it needs the macOS workload, so the project stays out of the development solution. A
   platform-only NuGet dependency is tolerable because dependencies are grouped per platform and
@@ -1314,10 +1429,12 @@ lower, and the measured cost for an application that does not use it.
   the native window does not exist until the backend is asked to show it, and unregisters through
   whatever the backend disposes while the window still exists rather than through `Closing`, because
   a window can be disposed without ever closing. See §10.
-- **Feature packaging deferred.** Drag and drop ships inside `XPlatUI` and the three backends until
-  the feature project of §4 exists. The seam, the typed hooks, the same-named extensions and the
-  extension surface are all in place, so the deferral is a build change and not an API one, and it
-  waits for the pipeline job that can build all three platforms. See §10 and §11.
+- **Feature packaging, in this phase rather than a later one.** Drag and drop ships in
+  `XPlatUI.Feature.DragDrop`, with the four-folder layout of §4, and the development solution does
+  not reference it. The move cost an application that does not use the feature nothing measurable on
+  any platform, and it forced the two API shapes §10's Phase 5 records: the router contract stays in
+  core because a feature cannot be referenced by it, and the host rather than the router runs each
+  control's own handling. See §4 and §10.
 - **Rung 3 is a per-platform claim.** A feature can only be rung 3 where the platform lets its
   native half be trimmed away. macOS keeps AppKit's `NSDraggingDestination` exports alive through
   the registrar, so drag and drop is rung 2 there: the no-opt-in image grew by 16,432 bytes instead
