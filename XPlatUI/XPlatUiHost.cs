@@ -33,6 +33,7 @@ public sealed class XPlatUiHost
     private SKRegion _dirty = new();
     private SKRegion _painting = new();
     private bool _dirtyAll = true;
+    private bool _debugHoldingContent;
 
     public XPlatUiHost() => _selection = new XPlatSelection(this);
 
@@ -234,6 +235,28 @@ public sealed class XPlatUiHost
     private SKRectI SurfaceBounds =>
         new(0, 0, (int)MathF.Ceiling(_clientSize.Width), (int)MathF.Ceiling(_clientSize.Height));
 
+    /// <summary>How long a red debug frame stays on screen before its content is painted over it.</summary>
+    private const int DefaultDebugPaintHoldMs = 80;
+
+    /// <summary>
+    /// Set <c>XPLATUI_DEBUG_PAINT=1</c> to paint every invalidated area in flat red for one frame
+    /// before painting its content, which shows what a partial repaint actually covers. A number
+    /// sets how long the red frame is held, in milliseconds.
+    /// </summary>
+    private static readonly int DebugPaintHoldMs = ReadDebugPaintHold();
+
+    private static int ReadDebugPaintHold()
+    {
+        var value = Environment.GetEnvironmentVariable("XPLATUI_DEBUG_PAINT");
+
+        if (string.IsNullOrEmpty(value) || value is "0" or "false")
+        {
+            return 0;
+        }
+
+        return int.TryParse(value, out var hold) && hold > 0 ? hold : DefaultDebugPaintHoldMs;
+    }
+
     /// <summary>Paints the part of the control tree that was invalidated.</summary>
     /// <param name="canvas">Canvas whose transform maps logical pixels to device pixels.</param>
     /// <param name="full">Paint everything, whatever has been invalidated.</param>
@@ -250,6 +273,38 @@ public sealed class XPlatUiHost
         var whole = full || !PartialUpdates || _dirtyAll || _dirty.IsEmpty;
         var area = whole ? SurfaceBounds : _dirty.Bounds;
 
+        if (DebugPaintHoldMs > 0 && !whole)
+        {
+            // Two frames per repaint: the area in flat red, then the content that replaces it. The
+            // red frame leaves the dirty region alone, so the content frame covers exactly the same
+            // area. The hold belongs to the start of the content frame rather than the end of the
+            // red one, because the red frame is not on screen until the backend has presented it,
+            // which happens after this method returns.
+            if (!_debugHoldingContent)
+            {
+                _debugHoldingContent = true;
+
+                Guard(() =>
+                {
+                    canvas.Save();
+                    ClipToPaintArea(canvas, _dirty, false, area);
+                    using var red = new SKPaint { Color = SKColors.Red, BlendMode = SKBlendMode.Src };
+                    canvas.DrawPaint(red);
+                    canvas.Restore();
+                });
+
+                Invalidate(area);
+                return area;
+            }
+
+            _debugHoldingContent = false;
+            Thread.Sleep(DebugPaintHoldMs);
+        }
+        else
+        {
+            _debugHoldingContent = false;
+        }
+
         // The paint takes the dirty region with it. Anything invalidated from inside the paint - a
         // control that repaints itself, a layout that moves something - belongs to the next frame,
         // so it must land in an empty region rather than be cleared along with this one.
@@ -262,20 +317,7 @@ public sealed class XPlatUiHost
         Guard(() =>
         {
             canvas.Save();
-
-            // A scaled canvas means the region - which is in logical pixels - cannot be handed to
-            // ClipRegion, which ignores the transform and expects device space. The boundary path
-            // goes through the transform like every other clip.
-            if (whole || region.IsRect)
-            {
-                var bounds = whole ? area : region.Bounds;
-                canvas.ClipRect(new SKRect(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom));
-            }
-            else
-            {
-                using var boundary = region.GetBoundaryPath();
-                canvas.ClipPath(boundary, SKClipOperation.Intersect, false);
-            }
+            ClipToPaintArea(canvas, region, whole, area);
 
             // DrawPaint rather than Clear: both fill the clip, but only DrawPaint is documented to
             // fill the clip *region*, and the region the dirty area came from can have holes in it.
@@ -287,6 +329,24 @@ public sealed class XPlatUiHost
         });
 
         return area;
+    }
+
+    /// <summary>Clips a canvas to the area a paint covers, in logical pixels.</summary>
+    private static void ClipToPaintArea(SKCanvas canvas, SKRegion region, bool whole, SKRectI area)
+    {
+        // A scaled canvas means the region - which is in logical pixels - cannot be handed to
+        // ClipRegion, which ignores the transform and expects device space. The boundary path goes
+        // through the transform like every other clip.
+        if (whole || region.IsRect)
+        {
+            var bounds = whole ? area : region.Bounds;
+            canvas.ClipRect(new SKRect(bounds.Left, bounds.Top, bounds.Right, bounds.Bottom));
+        }
+        else
+        {
+            using var boundary = region.GetBoundaryPath();
+            canvas.ClipPath(boundary, SKClipOperation.Intersect, false);
+        }
     }
 
     /// <summary>Requests a repaint of the whole surface.</summary>

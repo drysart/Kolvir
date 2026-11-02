@@ -96,7 +96,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         // Dispose would otherwise pull the class out from under a sibling window.
         _className = "XPlatUI.Window." + Interlocked.Increment(ref _nextClassId).ToString(CultureInfo.InvariantCulture);
 
-        _host.AddInvalidatedHandler(_ => Invalidate());
+        _host.AddInvalidatedHandler(_ => InvalidatePending());
         _host.AddCursorChangedHandler(_ => ApplyCursor());
         XPlatTheme.AddChangedHandler(OnThemeChanged);
 
@@ -1455,6 +1455,39 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         {
             NativeMethods.InvalidateRect(_hwnd, IntPtr.Zero, false);
         }
+    }
+
+    /// <summary>Asks Windows to repaint just the part of the window the UI invalidated.</summary>
+    /// <remarks>
+    /// Invalidating the whole window would make every frame a whole frame, because the update
+    /// region is added to the paint: Windows would hand back the entire client area on the next
+    /// WM_PAINT, so the part that changed could never be smaller than everything.
+    /// </remarks>
+    private void InvalidatePending()
+    {
+        if (_hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var pending = _host.PendingUpdateBounds;
+        var rect = new NativeMethods.RECT
+        {
+            Left = Math.Clamp((int)MathF.Floor(pending.Left * _scale), 0, _bufferWidth),
+            Top = Math.Clamp((int)MathF.Floor(pending.Top * _scale), 0, _bufferHeight),
+            Right = Math.Clamp((int)MathF.Ceiling(pending.Right * _scale), 0, _bufferWidth),
+            Bottom = Math.Clamp((int)MathF.Ceiling(pending.Bottom * _scale), 0, _bufferHeight),
+        };
+
+        if (rect.Right > rect.Left && rect.Bottom > rect.Top)
+        {
+            NativeMethods.InvalidateRect(_hwnd, ref rect, false);
+            return;
+        }
+
+        // Nothing has been measured yet, so there is no area to aim at. Losing the frame would be
+        // worse than repainting the window.
+        NativeMethods.InvalidateRect(_hwnd, IntPtr.Zero, false);
     }
 
     private SKPoint ToLogical(IntPtr lParam) =>

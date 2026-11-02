@@ -386,6 +386,9 @@ internal static class NativeMethods
     internal static extern bool InvalidateRect(IntPtr hwnd, IntPtr lpRect, bool bErase);
 
     [DllImport("user32.dll")]
+    internal static extern bool InvalidateRect(IntPtr hwnd, ref RECT lpRect, bool bErase);
+
+    [DllImport("user32.dll")]
     internal static extern bool ValidateRect(IntPtr hwnd, IntPtr lpRect);
 
     [DllImport("user32.dll")]

@@ -337,6 +337,11 @@ enough for a backend to skip asking the platform for a frame it would only redra
 is what a backend uses for a rectangle the platform reported stale, and what the framework uses
 when a control moves out of an area.
 
+The request the platform is given has to be aimed at the same area. A backend that invalidates its
+whole window on every request gets its whole client area handed back on the next frame, and since
+that rectangle is added with `IncludeInNextPaint` the part that changed can never be smaller than
+everything. The Win32 backend therefore invalidates `PendingUpdateBounds` rather than the window.
+
 ```csharp
 // A backend that keeps its surface between frames.
 _host.PartialUpdates = true;
@@ -349,6 +354,24 @@ void OnPaint()
     Present(area);              // present only what was painted
 }
 ```
+
+### Seeing what gets repainted
+
+Set `XPLATUI_DEBUG_PAINT` to paint every invalidated area flat red for one frame before painting its
+content over it. Partial repaints are invisible by design, which is what makes them hard to trust:
+this makes each one announce itself.
+
+```powershell
+$env:XPLATUI_DEBUG_PAINT = '1'      # hold the red frame for the default 80 ms
+$env:XPLATUI_DEBUG_PAINT = '500'    # hold it for half a second
+```
+
+The red frame covers exactly the region the paint was given - the same clip, the same holes in it -
+and leaves the dirty region alone, so the frame that follows paints that same area and nothing else.
+A whole-surface paint is never tinted: startup, a resize and a full `Invalidate()` repaint
+everything anyway, so a flash of red would only hide the result instead of pointing at it. The
+variable is read once per process, so it has to be set before launch, and the hold runs on the UI
+thread - it is a debugging aid, not something to leave switched on.
 
 ### Rich label
 
