@@ -243,8 +243,28 @@ internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatDragDropRouter 
     }
 
     /// <summary>Reads the modifier keys that are down right now, as the drag controller sees them.</summary>
-    private static XPlatModifiers CurrentModifiers(Gtk.DropTarget sender) =>
-        Gtk4KeyMap.MapModifiers(sender.GetCurrentEventState());
+    private static XPlatModifiers CurrentModifiers(Gtk.DropTarget sender)
+    {
+        var state = sender.GetCurrentEventState();
+        var modifiers = XPlatModifiers.None;
+
+        if ((state & Gdk.ModifierType.ShiftMask) != 0)
+        {
+            modifiers |= XPlatModifiers.Shift;
+        }
+
+        if ((state & Gdk.ModifierType.ControlMask) != 0)
+        {
+            modifiers |= XPlatModifiers.Control;
+        }
+
+        if ((state & Gdk.ModifierType.AltMask) != 0)
+        {
+            modifiers |= XPlatModifiers.Alt;
+        }
+
+        return modifiers;
+    }
 
     /// <summary>Translates the effect the UI accepted into the action GTK shows for it.</summary>
     private static Gdk.DragAction ToAction(XPlatDragDropEffects effect)

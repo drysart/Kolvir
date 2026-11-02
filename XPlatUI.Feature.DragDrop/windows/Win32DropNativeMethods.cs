@@ -17,6 +17,9 @@ internal static class Win32DropNativeMethods
     /// <summary><c>CF_HDROP</c>: the format a drag of files is offered as.</summary>
     internal const uint CfHDrop = 15;
 
+    /// <summary><c>CF_UNICODETEXT</c>: the format a drag of text is offered as.</summary>
+    internal const uint CfUnicodeText = 13;
+
     /// <summary><c>DROPEFFECT_NONE</c>: the target will not take the drop.</summary>
     internal const uint DropEffectNone = 0x00000000;
 
@@ -24,6 +27,20 @@ internal static class Win32DropNativeMethods
     internal const uint MkShift = 0x0004;
     internal const uint MkControl = 0x0008;
     internal const uint MkAlt = 0x0020;
+
+    // The HRESULTs the IDropTarget entry points return.
+    internal const int SOk = 0;
+    internal const int ENoInterface = unchecked((int)0x80004002);
+    internal const int EPointer = unchecked((int)0x80004003);
+    internal const int EInvalidArgument = unchecked((int)0x80070057);
+
+    /// <summary><c>POINT</c>: a location in screen pixels, as the OLE entry points receive it.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct POINT
+    {
+        public int X;
+        public int Y;
+    }
 
     /// <summary>
     /// <c>STGMEDIUM</c>: the transfer medium <c>IDataObject.GetData</c> returns. The middle field
@@ -54,4 +71,11 @@ internal static class Win32DropNativeMethods
 
     [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     internal static extern uint DragQueryFileW(IntPtr hDrop, uint index, [Out] char[]? fileName, uint cch);
+
+    // Pins the block a text drag was handed over in while it is read out of the medium.
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    internal static extern IntPtr GlobalLock(IntPtr hMem);
+
+    [DllImport("kernel32.dll", ExactSpelling = true)]
+    internal static extern bool GlobalUnlock(IntPtr hMem);
 }

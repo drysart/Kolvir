@@ -99,11 +99,11 @@ internal sealed class AppKitSkiaView : NSView
     }
 
     /// <summary>
-    /// The drag and drop feature's half of the view, or null when the application has not opted in.
-    /// A view that is never given a sink never registers for a dragged type, so AppKit never sends
-    /// it a drag at all.
+    /// The sink that receives the drags the view is registered for, or null when there is none. A
+    /// view that is never given a sink never registers for a dragged type, so AppKit never sends it
+    /// a drag at all.
     /// </summary>
-    internal IAppKitDragSink? DragSink
+    public IAppKitDragSink? DragSink
     {
         get => _dragSink;
         set

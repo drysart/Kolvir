@@ -83,7 +83,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         _object = comObject;
 
         var registerHr = Win32DropNativeMethods.RegisterDragDrop(hwnd, (IntPtr)comObject);
-        if (registerHr == NativeMethods.SOk)
+        if (registerHr == Win32DropNativeMethods.SOk)
         {
             return true;
         }
@@ -122,14 +122,14 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     }
 
     /// <inheritdoc />
-    public int DragEnter(IntPtr dataObject, uint keyState, NativeMethods.POINT point, ref uint effect)
+    public int DragEnter(IntPtr dataObject, uint keyState, Win32DropNativeMethods.POINT point, ref uint effect)
     {
         try
         {
             _data = Read(dataObject);
             effect = _data is null
                 ? Win32DropNativeMethods.DropEffectNone
-                : (uint)_router.DragEnter(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                : (uint)_router.DragEnter(_window.ScreenToLogical(point.X, point.Y), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
         }
         catch (Exception ex)
         {
@@ -138,11 +138,11 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             effect = Win32DropNativeMethods.DropEffectNone;
         }
 
-        return NativeMethods.SOk;
+        return Win32DropNativeMethods.SOk;
     }
 
     /// <inheritdoc />
-    public int DragOver(uint keyState, NativeMethods.POINT point, ref uint effect)
+    public int DragOver(uint keyState, Win32DropNativeMethods.POINT point, ref uint effect)
     {
         try
         {
@@ -152,7 +152,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             }
             else
             {
-                effect = (uint)_router.DragOver(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                effect = (uint)_router.DragOver(_window.ScreenToLogical(point.X, point.Y), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
             }
         }
         catch (Exception ex)
@@ -161,7 +161,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             effect = Win32DropNativeMethods.DropEffectNone;
         }
 
-        return NativeMethods.SOk;
+        return Win32DropNativeMethods.SOk;
     }
 
     /// <inheritdoc />
@@ -177,11 +177,11 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
 
         _data = null;
-        return NativeMethods.SOk;
+        return Win32DropNativeMethods.SOk;
     }
 
     /// <inheritdoc />
-    public int Drop(IntPtr dataObject, uint keyState, NativeMethods.POINT point, ref uint effect)
+    public int Drop(IntPtr dataObject, uint keyState, Win32DropNativeMethods.POINT point, ref uint effect)
     {
         try
         {
@@ -190,7 +190,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             var data = Read(dataObject) ?? _data;
             effect = data is null
                 ? Win32DropNativeMethods.DropEffectNone
-                : (uint)_router.DragDrop(_window.ScreenToLogical(point), data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                : (uint)_router.DragDrop(_window.ScreenToLogical(point.X, point.Y), data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
         }
         catch (Exception ex)
         {
@@ -199,7 +199,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
 
         _data = null;
-        return NativeMethods.SOk;
+        return Win32DropNativeMethods.SOk;
     }
 
     /// <summary>Returns the vtable shared by every drop target in the process, building it once.</summary>
@@ -223,10 +223,10 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
                 table[0] = (nint)(delegate* unmanaged[MemberFunction]<void*, Guid*, void**, int>)&QueryInterface;
                 table[1] = (nint)(delegate* unmanaged[MemberFunction]<void*, uint>)&AddRef;
                 table[2] = (nint)(delegate* unmanaged[MemberFunction]<void*, uint>)&Release;
-                table[3] = (nint)(delegate* unmanaged[MemberFunction]<void*, nint, uint, NativeMethods.POINT, uint*, int>)&DragEnterCallback;
-                table[4] = (nint)(delegate* unmanaged[MemberFunction]<void*, uint, NativeMethods.POINT, uint*, int>)&DragOverCallback;
+                table[3] = (nint)(delegate* unmanaged[MemberFunction]<void*, nint, uint, Win32DropNativeMethods.POINT, uint*, int>)&DragEnterCallback;
+                table[4] = (nint)(delegate* unmanaged[MemberFunction]<void*, uint, Win32DropNativeMethods.POINT, uint*, int>)&DragOverCallback;
                 table[5] = (nint)(delegate* unmanaged[MemberFunction]<void*, int>)&DragLeaveCallback;
-                table[6] = (nint)(delegate* unmanaged[MemberFunction]<void*, nint, uint, NativeMethods.POINT, uint*, int>)&DropCallback;
+                table[6] = (nint)(delegate* unmanaged[MemberFunction]<void*, nint, uint, Win32DropNativeMethods.POINT, uint*, int>)&DropCallback;
                 s_vtable = table;
             }
         }
@@ -265,24 +265,24 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         if (result is null)
         {
-            return NativeMethods.EPointer;
+            return Win32DropNativeMethods.EPointer;
         }
 
         *result = null;
 
         if (interfaceId is null)
         {
-            return NativeMethods.EInvalidArgument;
+            return Win32DropNativeMethods.EInvalidArgument;
         }
 
         if (*interfaceId != Win32DropInterfaces.DropTargetId && *interfaceId != Win32DropInterfaces.UnknownId)
         {
-            return NativeMethods.ENoInterface;
+            return Win32DropNativeMethods.ENoInterface;
         }
 
         *result = self;
         AddRefCore(self);
-        return NativeMethods.SOk;
+        return Win32DropNativeMethods.SOk;
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
@@ -296,13 +296,13 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         void* self,
         nint dataObject,
         uint keyState,
-        NativeMethods.POINT point,
+        Win32DropNativeMethods.POINT point,
         uint* effect)
     {
         var target = FromSelf(self);
         if (target is null)
         {
-            return NativeMethods.EPointer;
+            return Win32DropNativeMethods.EPointer;
         }
 
         var requested = effect is null ? 0u : *effect;
@@ -320,13 +320,13 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     private static int DragOverCallback(
         void* self,
         uint keyState,
-        NativeMethods.POINT point,
+        Win32DropNativeMethods.POINT point,
         uint* effect)
     {
         var target = FromSelf(self);
         if (target is null)
         {
-            return NativeMethods.EPointer;
+            return Win32DropNativeMethods.EPointer;
         }
 
         var requested = effect is null ? 0u : *effect;
@@ -344,7 +344,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     private static int DragLeaveCallback(void* self)
     {
         var target = FromSelf(self);
-        return target is null ? NativeMethods.EPointer : target.DragLeave();
+        return target is null ? Win32DropNativeMethods.EPointer : target.DragLeave();
     }
 
     [UnmanagedCallersOnly(CallConvs = [typeof(CallConvMemberFunction)])]
@@ -352,13 +352,13 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         void* self,
         nint dataObject,
         uint keyState,
-        NativeMethods.POINT point,
+        Win32DropNativeMethods.POINT point,
         uint* effect)
     {
         var target = FromSelf(self);
         if (target is null)
         {
-            return NativeMethods.EPointer;
+            return Win32DropNativeMethods.EPointer;
         }
 
         var requested = effect is null ? 0u : *effect;
@@ -441,7 +441,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         var format = FormatOf(Win32DropNativeMethods.CfHDrop);
 
-        if (com.GetData(format, out var medium) != NativeMethods.SOk)
+        if (com.GetData(format, out var medium) != Win32DropNativeMethods.SOk)
         {
             return [];
         }
@@ -490,9 +490,9 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     /// <summary>Reads the dragged text, if the source offers any.</summary>
     private static string? ReadText(IComDataObject com)
     {
-        var format = FormatOf(NativeMethods.CfUnicodeText);
+        var format = FormatOf(Win32DropNativeMethods.CfUnicodeText);
 
-        if (com.GetData(format, out var medium) != NativeMethods.SOk)
+        if (com.GetData(format, out var medium) != Win32DropNativeMethods.SOk)
         {
             return null;
         }
@@ -504,7 +504,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
                 return null;
             }
 
-            var pointer = NativeMethods.GlobalLock(medium.Handle);
+            var pointer = Win32DropNativeMethods.GlobalLock(medium.Handle);
             if (pointer == IntPtr.Zero)
             {
                 return null;
@@ -516,7 +516,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             }
             finally
             {
-                NativeMethods.GlobalUnlock(medium.Handle);
+                Win32DropNativeMethods.GlobalUnlock(medium.Handle);
             }
         }
         finally

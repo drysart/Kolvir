@@ -537,11 +537,11 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     internal void ReportStatistics() => _view?.ReportStatistics();
 
     /// <summary>
-    /// Makes the window a drag destination, and takes it back out again when set to null. Only the
-    /// drag and drop feature sets it, once the application has opted in; a window that is never
-    /// given a sink is never registered for any dragged type.
+    /// Makes the window a drag destination, and takes it back out again when set to null. A window
+    /// that is never given a sink is never registered for any dragged type, which is what keeps the
+    /// cost of being a drag destination off an application that never asked for one.
     /// </summary>
-    internal IAppKitDragSink? DragSink
+    public IAppKitDragSink? DragSink
     {
         get => _view?.DragSink;
         set

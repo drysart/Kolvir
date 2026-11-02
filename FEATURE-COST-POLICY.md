@@ -157,9 +157,15 @@ them, and there is no second assembly for each `lib/` folder. `#if` is still ava
 `common/` for differences too small to justify a file in each platform folder, and a feature with
 nothing portable simply has an empty `common/`. The same `$(TargetFramework)` condition is how a
 platform's `PackageReference` is applied, which is what produces the per-platform dependency groups
-below. A feature that drives its backend's internals is the one case that does need a friend
-assembly: each backend names `XPlatUI.Feature.<feature>` in `InternalsVisibleTo` rather than making
-the members public, which would put the feature's shape into an always-retained type.
+below.
+
+A feature that drives native code the backend owns is the one case that crosses an assembly
+boundary, and it crosses it through a public seam rather than a friend assembly. No backend declares
+`InternalsVisibleTo`, so no feature needs special access to one: what the backend keeps is a handful
+of public members whose names describe the platform facility - the window handle, the widget input
+arrives on, the window's own native teardown, a coordinate conversion - and the feature builds on
+those the way any consumer would. §6.5 lists exactly what each platform keeps and why it cannot
+move.
 
 A consuming solution is simpler than either alternative. The project reference is one unconditional
 line, and MSBuild builds only the inner build that matches the consuming project, so there is no
@@ -328,7 +334,8 @@ same compiler. They are, because the library targets `net10.0`.
 - **Access.** An extension block in the same assembly can read and write `internal` members of the
   extended type; it cannot reach `private` ones. That is enough for a rung 1 feature, which lives in
   `XPlatUI` and can use internal seams instead of widening the public API. A feature that has to
-  live in its own assembly (rung 3) needs public accessors or `InternalsVisibleTo`.
+  live in its own assembly (rung 3) uses the backend's public seam (§6.5) and nothing else: it gets
+  no friend access, and no backend names it.
 - **State.** Extension members cannot add fields to the control, so per-control state belongs to the
   feature: a lazily created state object, or a `ConditionalWeakTable<XPlatControl, TState>` keyed
   on the control. Both are trimmed with the feature, but both cost a lookup per access, so a hot
@@ -797,11 +804,11 @@ the backend or from a package that referenced the backend.
 What changes is only where the hook and its registration live. A backend must not reference a
 feature package, so the hook moves into the feature's platform folder and the same-named
 `Add<Feature>()` extension follows it there, declared in each platform folder (§4). The native
-primitives the hook drives stay behind in the backend as `internal` members, reached through
-`InternalsVisibleTo` to the feature assembly; that direction is safe, because a backend never names
-a feature type and the feature package is the only thing that names the primitive. The application
-still references one package per feature, unconditionally, and forgetting a platform is still a
-compile error on that platform.
+primitives the hook drives stay behind in the backend, as public members that describe the platform
+facility rather than the feature: the feature is the only thing that names them, but it names them
+the way any consumer would, so no backend declares `InternalsVisibleTo` and no feature needs special
+access to one. The application still references one package per feature, unconditionally, and
+forgetting a platform is still a compile error on that platform.
 
 **Everything the feature owns moves, not just the hook.** A hook that called into a backend member
 named after the feature would leave the feature in the backend, and the backend is the assembly
@@ -811,16 +818,17 @@ well, and what stays behind is a seam whose names say nothing about the feature:
 | What stays in the backend | Why it cannot move |
 |---|---|
 | `Handle`, `Host`, `View`, `InputArea` | The native window and the widget input arrives on are the backend's, and every feature needs them |
-| `NativeTeardown` | Something to release while the native window still exists, which is a property of window lifetime rather than of any one feature |
+| `RegisterNativeTeardown` | Something to release while the native window still exists, which is a property of window lifetime rather than of any one feature |
 | `ScreenToLogical` | The backend owns the scale factor and the window origin |
 
-`NativeTeardown` is the interesting one. A native object a feature registers with the window stays
-callable until the window is destroyed, so it must be released before that, and it must also be
-released when a window is disposed without ever being closed. The backend already disposes at
-exactly that point, so it offers one slot of type `IDisposable` and the feature puts its object
-there. The member is a window-lifetime facility that any feature can use, and its name contains no
-feature type, so a backend that no application has opted into retains an `IDisposable` property and
-nothing else.
+`RegisterNativeTeardown` is the interesting one. A native object a feature registers with the
+window stays callable until the window is destroyed, so it must be released before that, and it must
+also be released when a window is disposed without ever being closed. The backend already disposes
+at exactly that point, so it takes an `IDisposable` and hands back a registration the caller can
+dispose early. The caller holds the registration rather than the window holding one slot, so the
+window keeps a list and two features cannot displace each other. The member is a window-lifetime
+facility that any feature can use, and its name contains no feature type, so a backend that no
+application has opted into retains a list of `IDisposable` and nothing else.
 
 **One platform can be an exception, and the reason has to be structural.** AppKit dispatches a drag
 to the `NSView` that registered for the dragged types, through `NSDraggingDestination` overrides on
@@ -829,9 +837,11 @@ Windows and GTK. The five overrides therefore cannot leave the view subclass, an
 keeps them in `AppKitSkiaView`. What they *mean* still moves: the view names nothing from the
 feature, hands over an `AppKitDragPayload` and asks an `IAppKitDragSink` for an `AppKitDragEffect`,
 both of which are backend types. The feature's hook implements that sink and translates, so the
-backend assembly contains no feature type. A view that is never given a sink never registers for a
-dragged type, which is what keeps the cost off an application that did not opt in. This is the bar
-for an exception: not "it was easier there", but "the platform's API puts the code on a type the
+backend assembly contains no feature type. The sink, its payload and its effect are public for the
+same reason the other seams are: the implementation lives in a feature package, and a public type in
+the backend is the only thing the two can share. A view that is never given a sink never registers
+for a dragged type, which is what keeps the cost off an application that did not opt in. This is the
+bar for an exception: not "it was easier there", but "the platform's API puts the code on a type the
 feature cannot supply". Windows and GTK pass it, because an OLE drop target is an object registered
 against a handle and a `Gtk.DropTarget` is a controller added to a widget, so both moved in full.
 
@@ -908,14 +918,17 @@ content. macOS moved by nothing measurable, because its arm64 image is linked in
 seam fits in the slack of the pages it already had.
 
 The opt-in half has one worked example, the only feature measured end to end so far. An application
-that registers the drag and drop hook publishes at 3,213,824 bytes on win-x64 against 3,070,976
-without it, so the feature costs 142,848 bytes when it is actually used. The same feature measured
+that registers the drag and drop hook publishes at 3,222,016 bytes on win-x64 against 3,070,976
+without it, so the feature costs 151,040 bytes when it is actually used. The same feature measured
 4,223,456 on linux-x64 and 4,234,544 on osx-arm64 against 4,062,656 and 4,234,528 without it while
 its types still lived in the core assembly; moving them into `XPlatUI.Feature.DragDrop` changed no
 code, only the assembly each type is compiled into, and Windows moved by 3,584 bytes from linker
-layout alone. On osx-arm64 the feature is rung 2 rather than rung 1 by the letter of the rule: the
-arm64 image is quantised to 16 KB pages, the retained types fit in slack the linker had already paid
-for, and opting in costs 16 bytes.
+layout alone. Replacing the backends' friend assemblies with the public seam of §6.5 added a further
+8,192 bytes on win-x64: the teardown registration list, the per-window lease dictionary the two
+window hooks now keep, and the handful of interop declarations the Windows half carries itself
+instead of borrowing from the backend. On osx-arm64 the feature is rung 2 rather than rung 1 by the
+letter of the rule: the arm64 image is quantised to 16 KB pages, the retained types fit in slack the
+linker had already paid for, and opting in costs 16 bytes.
 
 That last measurement is also why the types no longer live in the core assembly. While they did, an
 application that never opted in still paid 16,432 bytes for them on osx-arm64, because a member on

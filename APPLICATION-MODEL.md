@@ -1437,7 +1437,7 @@ choices worth recording are these:
 - **`XPlatApplication.HandleNativeBoundary` is static, and the instance method behind it is private.**
   A backend has to be able to report a fault when no application exists - `--render` drives a bare
   `XPlatUiHost` - and in that case it rethrows to its caller. Making the entry point static means the
-  backends need no null check and no `InternalsVisibleTo`.
+  backends need no null check and no special access to the core assembly.
 - **`XPlatUiHost` and `XPlatWindow` are guarded in the core, not per backend.** `ProcessMouseMove`,
   `ProcessMouseDown`, `ProcessMouseUp`, `ProcessMouseLeave`, `ProcessContextMenu`, `ProcessKeyDown`,
   `ProcessKeyUp`, `ProcessTextInput`, `Paint` and the `XPlatWindow.OnBackend*` handlers

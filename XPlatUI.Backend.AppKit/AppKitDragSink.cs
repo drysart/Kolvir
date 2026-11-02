@@ -7,7 +7,7 @@ namespace XPlatUI.Backend.AppKit;
 /// the assembly can describe a drag without naming any type from the drag and drop feature.
 /// </summary>
 [Flags]
-internal enum AppKitDragEffect
+public enum AppKitDragEffect
 {
     /// <summary>Nothing: the view refuses the drag and AppKit shows a "no drop" cursor.</summary>
     None = 0,
@@ -30,7 +30,7 @@ internal enum AppKitDragEffect
 /// AppKit hands the payload over once, at the moment the drag enters, and the later calls only move
 /// it. The pointer is therefore passed alongside this on every call rather than held here.
 /// </remarks>
-internal readonly struct AppKitDragPayload
+public readonly struct AppKitDragPayload
 {
     /// <summary>Creates a payload.</summary>
     /// <param name="files">The full paths of the files the drag carries, or an empty array.</param>
@@ -69,8 +69,15 @@ internal readonly struct AppKitDragPayload
 /// The overrides AppKit sends a drag to have to live on the view itself, so the view cannot shed
 /// them; what it can shed is everything they mean. A view with no sink never registers for a
 /// dragged type, which is what keeps an application that does not use the feature free of it.
+/// <para>
+/// The sink is public because its implementation lives in a feature package, and a backend must
+/// not reference a feature package. A public type in the backend is the only thing the two can
+/// share, so this is the seam: the view speaks it, the feature implements it, and neither names the
+/// other. Nothing here is named after a feature, so an application that never opted in carries the
+/// interface and never an implementation of it.
+/// </para>
 /// </remarks>
-internal interface IAppKitDragSink
+public interface IAppKitDragSink
 {
     /// <summary>Reports a drag entering the view, and what a drop there would do.</summary>
     /// <param name="location">The pointer, in the view's own coordinates.</param>

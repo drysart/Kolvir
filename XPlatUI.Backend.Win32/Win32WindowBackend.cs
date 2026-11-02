@@ -48,6 +48,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private IntPtr _moduleHandle;
     private bool _classRegistered;
     private bool _disposed;
+    private List<NativeTeardownRegistration>? _nativeTeardowns;
 
     private string _title = string.Empty;
     private SKSize _clientSize = new(800f, 600f);
@@ -296,15 +297,71 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>The native window handle, or <see cref="IntPtr.Zero"/> before the window is shown.</summary>
-    internal IntPtr Handle => _hwnd;
+    public IntPtr Handle => _hwnd;
 
     /// <summary>
-    /// Something to dispose while the native window still exists, or null when nothing needs it.
-    /// A feature that registers a native object with the window puts it here, because the object
-    /// stays callable until the window is destroyed and so has to be released first, and because
-    /// that release must not be skipped when a window is disposed without ever being closed.
+    /// Registers a native object that has to be released while the native window still exists.
     /// </summary>
-    internal IDisposable? NativeTeardown { get; set; }
+    /// <param name="teardown">The object to dispose. It is disposed exactly once.</param>
+    /// <returns>
+    /// A registration that releases <paramref name="teardown"/> early when it is disposed, and that
+    /// is harmless to dispose more than once. A caller that never disposes it leaves the release to
+    /// the window's own disposal, which is the one point that still runs when a window is disposed
+    /// without ever being closed.
+    /// </returns>
+    /// <remarks>
+    /// The platform keeps calling into a registered native object for as long as the window is
+    /// alive, so it has to be released before the window is destroyed. This is how a feature takes
+    /// part in that without the backend knowing what it registered: the object is an
+    /// <see cref="IDisposable"/> and nothing here is named after the feature that put it there.
+    /// Registrations are released last in, first out.
+    /// </remarks>
+    public IDisposable RegisterNativeTeardown(IDisposable teardown)
+    {
+        ArgumentNullException.ThrowIfNull(teardown);
+
+        var registration = new NativeTeardownRegistration(this, teardown);
+        (_nativeTeardowns ??= []).Add(registration);
+        return registration;
+    }
+
+    /// <summary>Releases everything registered with <see cref="RegisterNativeTeardown"/>.</summary>
+    private void ReleaseNativeTeardowns()
+    {
+        var registrations = _nativeTeardowns;
+        _nativeTeardowns = null;
+
+        if (registrations is null)
+        {
+            return;
+        }
+
+        // What was layered on the window comes off in the reverse of the order it went on.
+        for (var index = registrations.Count - 1; index >= 0; index--)
+        {
+            registrations[index].Dispose();
+        }
+    }
+
+    /// <summary>One entry in the window's list, releasable early and harmless to dispose twice.</summary>
+    private sealed class NativeTeardownRegistration(Win32WindowBackend owner, IDisposable teardown) : IDisposable
+    {
+        private IDisposable? _teardown = teardown;
+
+        public void Dispose()
+        {
+            var current = _teardown;
+            _teardown = null;
+
+            if (current is null)
+            {
+                return;
+            }
+
+            owner._nativeTeardowns?.Remove(this);
+            current.Dispose();
+        }
+    }
 
     /// <inheritdoc />
     public IXPlatWindowBackend? Owner
@@ -566,8 +623,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         // Whatever the window registered natively has to let go while the window still exists: the
         // platform keeps calling into a registered object for as long as the window is alive.
-        NativeTeardown?.Dispose();
-        NativeTeardown = null;
+        ReleaseNativeTeardowns();
 
         if (_hwnd != IntPtr.Zero)
         {
@@ -1272,7 +1328,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             return false;
         }
 
-        return _host.ProcessContextMenu(ScreenToLogical(screen));
+        return _host.ProcessContextMenu(ScreenToLogical(screen.X, screen.Y));
     }
 
     private void OnChar(IntPtr wParam)
@@ -1324,8 +1380,18 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private SKPoint ToLogical(IntPtr lParam) =>
         new(NativeMethods.LowWord(lParam) / _scale, NativeMethods.HighWord(lParam) / _scale);
 
-    internal SKPoint ScreenToLogical(NativeMethods.POINT point)
+    /// <summary>Converts a point in screen pixels to the window's own logical pixels.</summary>
+    /// <param name="screenX">The x coordinate, in screen pixels.</param>
+    /// <param name="screenY">The y coordinate, in screen pixels.</param>
+    /// <returns>The point relative to the window's top left corner, in logical pixels.</returns>
+    /// <remarks>
+    /// The window owns both halves of this: the origin it sits at and the scale factor it is drawn
+    /// at. Two integers rather than a point type keep the conversion from publishing a piece of the
+    /// backend's interop surface along with it.
+    /// </remarks>
+    public SKPoint ScreenToLogical(int screenX, int screenY)
     {
+        var point = new NativeMethods.POINT { X = screenX, Y = screenY };
         NativeMethods.ScreenToClient(_hwnd, ref point);
         return new SKPoint(point.X / _scale, point.Y / _scale);
     }
