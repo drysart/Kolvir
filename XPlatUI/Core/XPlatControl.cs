@@ -295,6 +295,14 @@ public class XPlatControl : IDisposable
     /// <summary>True when at least one child is attached. Avoids creating the collection for leaves.</summary>
     internal bool HasChildren => _controls is { Count: > 0 };
 
+    /// <summary>
+    /// The extra translation this control applies to one of its children when painting and hit
+    /// testing it, on top of the child's <see cref="Bounds"/>. A scrolling container returns the
+    /// negative scroll offset here; every other control returns <see cref="SKPoint.Empty"/>.
+    /// </summary>
+    /// <param name="child">The child about to be painted or hit tested.</param>
+    protected internal virtual SKPoint GetChildOffset(XPlatControl child) => SKPoint.Empty;
+
     public XPlatControl? Parent { get; internal set; }
 
     /// <summary>The host this control is attached to, if any (resolved through the parent chain).</summary>
@@ -797,7 +805,13 @@ public class XPlatControl : IDisposable
         {
             for (int i = _controls.Count - 1; i >= 0; i--)
             {
-                var hit = _controls[i].HitTest(local);
+                var child = _controls[i];
+                var offset = GetChildOffset(child);
+                var childPoint = offset.X == 0f && offset.Y == 0f
+                    ? local
+                    : new SKPoint(local.X - offset.X, local.Y - offset.Y);
+
+                var hit = child.HitTest(childPoint);
                 if (hit is not null)
                 {
                     return hit;

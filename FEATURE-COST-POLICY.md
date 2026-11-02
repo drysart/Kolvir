@@ -935,6 +935,19 @@ application that never opted in still paid 16,432 bytes for them on osx-arm64, b
 `XPlatUiHost` and virtuals on `XPlatControl` made them reachable from types that are always
 retained. Nothing in `XPlatUI` may name a feature type, on any platform, for exactly this reason.
 
+Scrolling is the rung 1 worked example. `XPlatScrollBar` and the scrolling half of `XPlatPanel` are
+reached only by an application that names them, and the fixture publishes at 3,070,976 bytes with
+them in the tree - the same number as before they existed. The one always-retained member is
+`XPlatControl.GetChildOffset`, a `protected internal virtual` returning `SKPoint.Empty` that
+`HitTest` and the host's coordinate mapping consult, and it is there because a scrolling container
+has to tell the framework where it painted its children; that is the exception §9 asks a feature to
+state. It is stated here, and it is the reason the fixture's zero is a weaker claim than it looks:
+the fixture has no panel, so what the number actually covers is the retained virtual, not the
+scrolling code behind it. Two pieces of the feature are deferred rather than done. The mouse wheel
+needs an input path in `XPlatUiHost` and a delta on `XPlatMouseEventArgs`, both always-retained
+types, so it waits for its own justification; and the overlay scrollbar style is a later phase, so
+`XPlatPanel` draws classic non-overlay bars only.
+
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
 

@@ -635,6 +635,12 @@ public sealed class XPlatUiHost
         for (var current = control; current is not null; current = current.Parent)
         {
             point = new SKPoint(point.X + current.Left, point.Y + current.Top);
+
+            if (current.Parent is { } parent)
+            {
+                var offset = parent.GetChildOffset(current);
+                point = new SKPoint(point.X + offset.X, point.Y + offset.Y);
+            }
         }
 
         return point;
@@ -724,6 +730,12 @@ public sealed class XPlatUiHost
         for (var current = control; current is not null; current = current.Parent)
         {
             local = new SKPoint(local.X - current.Left, local.Y - current.Top);
+
+            if (current.Parent is { } parent)
+            {
+                var offset = parent.GetChildOffset(current);
+                local = new SKPoint(local.X - offset.X, local.Y - offset.Y);
+            }
         }
 
         return local;
