@@ -889,8 +889,9 @@ whether any application ever sets it. Per-control opt-in is a nice ergonomic lay
 a substitute for an application-level opt-in.
 
 The opt-in is coarse in the other direction too, and deliberately so. Once an application calls
-`AddDragDrop()`, every window gets its drop target in the `Created` phase whether or not any control
+`AddDragDrop()`, every window gets its drop target in the `Shown` phase whether or not any control
 ever sets `AllowDrop`, and nothing in the backend reads `AllowDrop` to decide whether to register.
+(`Shown` rather than `Created`, because the native window does not exist yet at `Created`; §10.)
 `AllowDrop` can be set, cleared and set again on a control that is already inside a shown window, so
 there is no correct moment at which the native registration could be made conditional on it. Gating
 on it would buy a per-window saving in exchange for a feature that stops working the first time
@@ -1067,6 +1068,76 @@ types and the GTK controllers, and the size must return to the Phase 0 baseline.
 This phase is also the proof that the pattern works, so it should be done before any new feature is
 held to the policy.
 
+Result: done, with the packaging deferred. The feature lives in `XPlatUI` and the three backends for
+now, so opting in is a namespace import and one `ConfigureServices` line rather than a package
+What this phase proves is the shape: that a feature can be lifted off the always-on path
+behind typed hooks, a same-named extension and an extension-member surface, and that the library
+does not notice it has gone. The four-folder feature project of §4 is a build change on top of a
+shape that now exists, and it needs all three workloads, so it belongs with the pipeline job in
+Phase 4.
+
+One thing will have to change when the feature does move. `XPlatUiHost` holds the
+`IXPlatDragDropRouter` that the feature installs, and core cannot reference a feature package
+without making the feature mandatory, so either the router contract stays in `XPlatUI` while its
+implementation travels, or the host grows a payload-agnostic hook that the feature fills in. Both
+are small and contained, and which one is right depends on the packaging, so it was left unproven
+rather than guessed at.
+
+The portable half is `XPlatUI/DragDrop/`. `AllowDrop` and the four handler pairs are one
+`extension(XPlatControl)` block, which cannot add fields, so the per-control state lives in a
+`ConditionalWeakTable` keyed by the control. `IXPlatDragDropRouter` and `XPlatDragDropRouter` are
+what the host routes to, which is how `XPlatUiHost` stops naming the feature: with no router
+installed, a host accepts nothing. `XPlatDragDropWindowHook` installs the router at `Created` and
+clears it at `Closing` and `Disposed`.
+
+The native half is one typed window hook per backend, `IXPlatWin32WindowHook`,
+`IXPlatAppKitWindowHook` and `IXPlatGtk4WindowHook`, each registered through
+`AddXPlat<Platform>WindowHook<THook>()` and each running from that backend's `RunWindowHooks` after
+the portable hooks. `AddDragDrop()` is a same-named extension in each backend's `XPlatUI.DragDrop`
+namespace, so a backend that forgets it fails to compile. `Win32WindowBackend` became public,
+because a typed hook names its backend by its concrete type.
+
+Three things differ from the plan above:
+
+- Registration runs at `Shown`, not `Created`. `Created` is raised at the end of the `XPlatWindow`
+  constructor, and the native window does not exist until the backend is asked to show it, so there
+  is nothing to register with at `Created`.
+- The revoke is not the Win32 hook's `Closing`. A window can be disposed without closing, and the
+  OLE target has to be revoked before the window is destroyed either way, so the hook hands the
+  backend an `IDisposable` lease (`Win32WindowBackend.DropTargetLease`) that `Dispose` runs while
+  the window still exists.
+- AppKit and Gtk4 needed `EnableDragDrop()`/`DisableDragDrop()` on their views, because what they
+  used to do unconditionally was a constructor call and an `AttachInput` call, neither of which is a
+  phase.
+
+The demo keeps its sample, so it opts in: `DemoUi.cs` imports `XPlatUI.DragDrop`, and
+`XPlatUIDemo.App/Program.cs` passes `ConfigureServices = services => services.AddDragDrop()`.
+
+| Target | Phase 2 loose | Phase 3 loose | Delta |
+|---|---|---|---|
+| win-x64 | 3,202,048 | 3,070,976 | -131,072 |
+
+Both rows come from the same command on the same machine, and the Phase 2 figure was reproduced from
+that commit's tree before the Phase 3 figure was trusted, because the two were measured weeks apart.
+The 131,072 bytes are 128 KB exactly, and the entry points that left the image are the ones the
+feature named: `OleInitialize`, `RegisterDragDrop` and `RevokeDragDrop` are gone, while the
+runtime's own COM calls (`CoInitializeEx`, `CoWaitForMultipleHandles`, `CoTaskMemFree`) stay.
+Nothing else moved.
+
+The plan said the size would return to the Phase 0 baseline. It goes below it, and the plan was
+wrong: Phase 0 paid for drag and drop because the registration was unconditional, so taking it out
+has to save more than the seam and the portable half add back. 3,070,976 is the floor now, and the
+Phase 0 row in this document is history rather than a target.
+
+Opting in costs 142,848 bytes. The same fixture with `AddDragDrop()` and a label that sets
+`AllowDrop` publishes at 3,213,824, which is 11,776 more than the Phase 2 image where the feature
+cost every application something, and 142,848 more than the floor. That pair is the policy's claim
+in one line: 3.07 MB for an application that does not accept drops, 3.21 MB for one that does.
+
+The Linux and macOS rows are unmeasured. The saving is Windows-shaped in size but the same in kind,
+and nothing in the portable half varies by platform, so there is no reason to expect a different
+shape.
+
 ### Phase 4: documentation and review
 
 - Point `README.md` at this policy from the drag and drop section and from wherever features are
@@ -1194,6 +1265,14 @@ lower, and the measured cost for an application that does not use it.
   against §5's ergonomics: a rung-3 feature ships in its own assembly, and an assembly cannot add
   members to a type declared in another assembly, so the extension surface is what makes the rung
   possible in the first place. See §9 and §10.
+- **Native registration moment.** A native window hook registers at `Shown`, not `Created`, because
+  the native window does not exist until the backend is asked to show it, and unregisters through
+  whatever the backend disposes while the window still exists rather than through `Closing`, because
+  a window can be disposed without ever closing. See §10.
+- **Feature packaging deferred.** Drag and drop ships inside `XPlatUI` and the three backends until
+  the feature project of §4 exists. The seam, the typed hooks, the same-named extensions and the
+  extension surface are all in place, so the deferral is a build change and not an API one, and it
+  waits for the pipeline job that can build all three platforms. See §10 and §11.
 
 ### Open
 

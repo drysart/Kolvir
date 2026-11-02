@@ -38,6 +38,26 @@ public static partial class XPlatServiceCollectionExtensions
         services.AddXPlatApplicationHook(XPlatApplicationPhase.Creating, startupHookFunc);
 
     /// <summary>
+    /// Registers a window hook type, creating one instance per window.
+    /// </summary>
+    /// <typeparam name="THook">The hook to register.</typeparam>
+    /// <param name="services">The collection being built.</param>
+    /// <remarks>
+    /// This is what a feature uses to install itself: the hook type is named only by the feature's
+    /// own registration method, so an application that never calls that method never names the type
+    /// and the trimmer drops it along with everything only it reaches. A hook that needs services
+    /// can register itself with <see cref="AddWindowScoped{TService}"/> instead, which passes the
+    /// window and the scope's provider to a factory.
+    /// </remarks>
+    public static IServiceCollection AddXPlatWindowHook<THook>(this IServiceCollection services)
+        where THook : class, IXPlatWindowHook, new()
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        return services.AddWindowScoped<IXPlatWindowHook>((_, _) => new THook());
+    }
+
+    /// <summary>
     /// Registers a window hook that runs one callback per phase, skipping the phases left null.
     /// </summary>
     /// <param name="services">The collection being built.</param>

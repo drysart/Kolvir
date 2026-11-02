@@ -29,10 +29,6 @@ public class XPlatControl : IDisposable
     private Action<object>? _textChanged;
     private Action<object>? _visibleChanged;
     private Action<object>? _enabledChanged;
-    private Action<object, XPlatDragEventArgs>? _dragEnter;
-    private Action<object, XPlatDragEventArgs>? _dragOver;
-    private Action<object>? _dragLeave;
-    private Action<object, XPlatDragEventArgs>? _dragDrop;
     private SKRect _bounds;
     private SKSize _desiredSize;
     private SKSize _minimumSize;
@@ -271,69 +267,6 @@ public class XPlatControl : IDisposable
         _enabledChanged -= handler;
     }
 
-    /// <summary>Adds a handler that runs when a drag enters the control. It only runs when <see cref="AllowDrop"/> is set.</summary>
-    public IDisposable AddDragEnterHandler(Action<object, XPlatDragEventArgs> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragEnter += handler;
-        return new XPlatHandlerToken<Action<object, XPlatDragEventArgs>>(RemoveDragEnterHandler, handler);
-    }
-
-    /// <summary>Removes a handler that <see cref="AddDragEnterHandler"/> added.</summary>
-    public void RemoveDragEnterHandler(Action<object, XPlatDragEventArgs> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragEnter -= handler;
-    }
-
-    /// <summary>Adds a handler that runs as a drag moves over the control. It only runs when <see cref="AllowDrop"/> is set.</summary>
-    public IDisposable AddDragOverHandler(Action<object, XPlatDragEventArgs> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragOver += handler;
-        return new XPlatHandlerToken<Action<object, XPlatDragEventArgs>>(RemoveDragOverHandler, handler);
-    }
-
-    /// <summary>Removes a handler that <see cref="AddDragOverHandler"/> added.</summary>
-    public void RemoveDragOverHandler(Action<object, XPlatDragEventArgs> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragOver -= handler;
-    }
-
-    /// <summary>Adds a handler that runs when a drag leaves the control or the drag is cancelled.</summary>
-    public IDisposable AddDragLeaveHandler(Action<object> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragLeave += handler;
-        return new XPlatHandlerToken<Action<object>>(RemoveDragLeaveHandler, handler);
-    }
-
-    /// <summary>Removes a handler that <see cref="AddDragLeaveHandler"/> added.</summary>
-    public void RemoveDragLeaveHandler(Action<object> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragLeave -= handler;
-    }
-
-    /// <summary>
-    /// Adds a handler that runs when the user releases a drag over the control. It only runs when
-    /// <see cref="AllowDrop"/> is set.
-    /// </summary>
-    public IDisposable AddDragDropHandler(Action<object, XPlatDragEventArgs> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragDrop += handler;
-        return new XPlatHandlerToken<Action<object, XPlatDragEventArgs>>(RemoveDragDropHandler, handler);
-    }
-
-    /// <summary>Removes a handler that <see cref="AddDragDropHandler"/> added.</summary>
-    public void RemoveDragDropHandler(Action<object, XPlatDragEventArgs> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _dragDrop -= handler;
-    }
-
     /// <summary>Diagnostic name; defaults to the type name.</summary>
     public string Name { get; set; }
 
@@ -534,13 +467,6 @@ public class XPlatControl : IDisposable
             OnEnabledChanged();
         }
     }
-
-    /// <summary>
-    /// True to let the user drop data on this control, which makes the control a candidate for the
-    /// drag events. When a control under the pointer does not accept drops, the nearest ancestor
-    /// that does gets the events instead, so a panel can accept drops for everything it contains.
-    /// </summary>
-    public bool AllowDrop { get; set; }
 
     /// <summary>When true, containers size the control to its <see cref="DesiredSize"/>.</summary>
     public bool AutoSize
@@ -1183,13 +1109,32 @@ public class XPlatControl : IDisposable
 
     protected virtual void OnTextInput(XPlatTextInputEventArgs e) => _textInput?.Invoke(this, e);
 
-    protected virtual void OnDragEnter(XPlatDragEventArgs e) => _dragEnter?.Invoke(this, e);
+    /// <summary>
+    /// Lets the control itself decide what to do with a drag entering it. The drag and drop feature
+    /// calls this after the handlers subscribed with <c>AddDragEnterHandler</c>, so a control that
+    /// overrides it has the last word on <see cref="XPlatDragEventArgs.Effect"/>.
+    /// </summary>
+    /// <param name="e">The event data.</param>
+    protected virtual void OnDragEnter(XPlatDragEventArgs e)
+    {
+    }
 
-    protected virtual void OnDragOver(XPlatDragEventArgs e) => _dragOver?.Invoke(this, e);
+    /// <summary>Lets the control itself answer a drag moving over it.</summary>
+    /// <param name="e">The event data.</param>
+    protected virtual void OnDragOver(XPlatDragEventArgs e)
+    {
+    }
 
-    protected virtual void OnDragLeave() => _dragLeave?.Invoke(this);
+    /// <summary>Lets the control itself react to a drag leaving it or being cancelled.</summary>
+    protected virtual void OnDragLeave()
+    {
+    }
 
-    protected virtual void OnDragDrop(XPlatDragEventArgs e) => _dragDrop?.Invoke(this, e);
+    /// <summary>Lets the control itself act on data dropped on it.</summary>
+    /// <param name="e">The event data.</param>
+    protected virtual void OnDragDrop(XPlatDragEventArgs e)
+    {
+    }
 
     protected virtual void OnGotFocus() => _gotFocus?.Invoke(this);
 

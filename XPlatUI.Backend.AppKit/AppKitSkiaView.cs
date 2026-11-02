@@ -96,10 +96,16 @@ internal sealed class AppKitSkiaView : NSView
         // Layer backed from the start, so AppKit never creates a backing store for this view and
         // the first frame already goes through the layer instead of the window's context.
         WantsLayer = true;
-
-        // AppKit only sends a drag here when the pasteboard offers one of these types.
-        RegisterForDraggedTypes(DragTypes);
     }
+
+    /// <summary>
+    /// Starts accepting drags, which is what the drag and drop feature calls once the application
+    /// has opted in. A view that is never registered here never sees a drag at all.
+    /// </summary>
+    internal void EnableDragDrop() => RegisterForDraggedTypes(DragTypes);
+
+    /// <summary>Stops accepting drags.</summary>
+    internal void DisableDragDrop() => UnregisterDraggedTypes();
 
     /// <summary>
     /// A layer backed view is not marked dirty when it is resized: AppKit's default is to leave the

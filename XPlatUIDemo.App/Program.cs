@@ -1,6 +1,7 @@
 using SkiaSharp;
 using XPlatUI;
 using XPlatUI.Demo;
+using XPlatUI.DragDrop;
 
 #if WINDOWS
 using XPlatUI.Backend.Win32;
@@ -100,6 +101,11 @@ internal static class Program
             // a second one, which is what makes "open a file with this application" work on all
             // three platforms.
             SingleInstance = true,
+
+            // The sample takes drops on its root panel and on a text box, so it opts into the drag
+            // and drop feature. This is the only place the feature is named, and leaving it out is
+            // what keeps it out of an application that does not want it.
+            ConfigureServices = services => services.AddDragDrop(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,

@@ -3,8 +3,8 @@ using SkiaSharp;
 namespace XPlatUI;
 
 /// <summary>
-/// Carries the data being dragged and where the pointer is, for the drag events a control receives
-/// while <see cref="XPlatControl.AllowDrop"/> is set.
+/// Carries the data being dragged and where the pointer is, for the drag phases a control receives
+/// while its <c>AllowDrop</c> is set.
 /// </summary>
 /// <remarks>
 /// <see cref="Effect"/> starts out as the most useful action the source allows, and a handler

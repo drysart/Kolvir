@@ -1,6 +1,7 @@
 using AppKit;
 using CoreGraphics;
 using Foundation;
+using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
 namespace XPlatUI.Backend.AppKit;
@@ -535,6 +536,15 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     /// <summary>Prints frame rate and memory use every few seconds when tracing is on.</summary>
     internal void ReportStatistics() => _view?.ReportStatistics();
 
+    /// <summary>
+    /// Makes the window a drag destination. Only the drag and drop feature calls this, once the
+    /// application has opted in; without it the view is never registered for any dragged type.
+    /// </summary>
+    internal void EnableDragDrop() => _view?.EnableDragDrop();
+
+    /// <summary>Stops the window being a drag destination.</summary>
+    internal void DisableDragDrop() => _view?.DisableDragDrop();
+
     private bool EnsureCreated()
     {
         if (_window is not null)
@@ -810,6 +820,11 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     /// <inheritdoc />
     public void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window)
     {
-        // Empty on purpose: this backend declares no typed window hooks yet.
+        ArgumentNullException.ThrowIfNull(window);
+
+        foreach (var hook in window.Services.GetServices<IXPlatAppKitWindowHook>())
+        {
+            hook.OnPhase(phase, window, this);
+        }
     }
 }

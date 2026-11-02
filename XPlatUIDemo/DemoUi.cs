@@ -1,6 +1,7 @@
 using SkiaSharp;
 using XPlatUI;
 using XPlatUI.Backend.Headless;
+using XPlatUI.DragDrop;
 using XDock = XPlatUI.DockStyle;
 
 namespace XPlatUI.Demo;

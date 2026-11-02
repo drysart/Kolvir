@@ -1,3 +1,4 @@
+using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
 namespace XPlatUI.Backend.Gtk4;
@@ -441,6 +442,15 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         RaiseStateChangedIfNeeded();
     }
 
+    /// <summary>
+    /// Makes the window a drag destination. Only the drag and drop feature calls this, once the
+    /// application has opted in; without it the view installs no drop targets at all.
+    /// </summary>
+    internal void EnableDragDrop() => _view?.EnableDragDrop();
+
+    /// <summary>Stops the window being a drag destination.</summary>
+    internal void DisableDragDrop() => _view?.DisableDragDrop();
+
     internal void RaiseActivatedIfNeeded(bool active)
     {
         if (_active == active)
@@ -819,6 +829,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     /// <inheritdoc />
     public void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window)
     {
-        // Empty on purpose: this backend declares no typed window hooks yet.
+        ArgumentNullException.ThrowIfNull(window);
+
+        foreach (var hook in window.Services.GetServices<IXPlatGtk4WindowHook>())
+        {
+            hook.OnPhase(phase, window, this);
+        }
     }
 }

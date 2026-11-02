@@ -1,5 +1,6 @@
 using System.Globalization;
 using System.Runtime.InteropServices;
+using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
 namespace XPlatUI.Backend.Win32;
@@ -25,7 +26,7 @@ namespace XPlatUI.Backend.Win32;
 /// and a per-window class is the only way to give two windows different icons or styles.
 /// </para>
 /// </remarks>
-internal sealed class Win32WindowBackend : IXPlatWindowBackend
+public sealed class Win32WindowBackend : IXPlatWindowBackend
 {
     private Action<object>? _shown;
     private Action<object>? _closeRequested;
@@ -73,7 +74,6 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     private SKSurface? _skia;
 
     private bool _trackingLeave;
-    private Win32DropTarget? _dropTarget;
     private long _lastClickTime;
     private int _clickCount;
     private int _lastClickX;
@@ -297,6 +297,13 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
 
     /// <summary>The native window handle, or <see cref="IntPtr.Zero"/> before the window is shown.</summary>
     internal IntPtr Handle => _hwnd;
+
+    /// <summary>
+    /// Something to dispose while the native window still exists, or null when nothing needs it.
+    /// The drag and drop feature uses it to revoke its OLE drop target, which has to happen before
+    /// the window is destroyed and must not be skipped when a window is disposed without closing.
+    /// </summary>
+    internal IDisposable? DropTargetLease { get; set; }
 
     /// <inheritdoc />
     public IXPlatWindowBackend? Owner
@@ -556,9 +563,10 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
 
         XPlatTheme.RemoveChangedHandler(OnThemeChanged);
 
-        // The drop target has to be revoked while the window still exists: OLE keeps calling into
-        // it for as long as the window is registered.
-        _dropTarget?.Revoke(_hwnd);
+        // Whatever holds native resources has to let go of them while the window still exists: OLE
+        // keeps calling into a drop target for as long as the window is registered.
+        DropTargetLease?.Dispose();
+        DropTargetLease = null;
 
         if (_hwnd != IntPtr.Zero)
         {
@@ -673,11 +681,6 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
         PlaceInitially();
         ApplyResizable();
         ApplyIcon();
-
-        // Accepting drops is free when nothing is dragged, so it is unconditional: the shell only
-        // calls into the target while a drag is in progress.
-        _dropTarget = new Win32DropTarget(this);
-        _dropTarget.Register(_hwnd);
 
         UpdateHostSize();
         return true;
@@ -1542,6 +1545,11 @@ internal sealed class Win32WindowBackend : IXPlatWindowBackend
     /// <inheritdoc />
     public void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window)
     {
-        // Empty on purpose: this backend declares no typed window hooks yet.
+        ArgumentNullException.ThrowIfNull(window);
+
+        foreach (var hook in window.Services.GetServices<IXPlatWin32WindowHook>())
+        {
+            hook.OnPhase(phase, window, this);
+        }
     }
 }

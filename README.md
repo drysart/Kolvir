@@ -565,8 +565,22 @@ status line reports activation changes.
 
 ### Drag and drop
 
-Setting `AllowDrop` on a control makes it, and everything inside it, a drop target. The four drag
-handlers receive an `XPlatDragEventArgs`; the drop handler sets `Effect` to say what it did:
+Drag and drop is opt-in. Until the application asks for it, a window registers no drop target,
+which is what keeps OLE, the COM target, the pasteboard types and the GTK controllers out of an
+application that never accepts a drop. Asking for it is one line:
+
+```csharp
+using XPlatUI.DragDrop;
+
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddDragDrop(),
+};
+```
+
+With that in place, setting `AllowDrop` on a control makes it, and everything inside it, a drop
+target. Both `AllowDrop` and the four handlers come from `XPlatUI.DragDrop`. The four drag handlers
+receive an `XPlatDragEventArgs`; the drop handler sets `Effect` to say what it did:
 
 ```csharp
 root.AllowDrop = true;
@@ -585,6 +599,13 @@ root.AddDragDropHandler((_, e) =>
     e.Effect = XPlatDragDropEffects.Copy;
 });
 ```
+
+The opt-in is per application, and it is coarse on purpose: once it is called, every window gets a
+drop target, whether or not any control ever sets `AllowDrop`. `AllowDrop` can be turned on and off
+on a control that is already inside a shown window, so there is no correct moment at which the
+native registration could depend on it. Leaving the call out is not an error: the code above still
+compiles and runs, nothing simply ever arrives. What leaving it out saves is measured in
+[FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §10.
 
 `AddDragEnterHandler`, `AddDragOverHandler` and `AddDragDropHandler` share one argument type, so the
 same handler can serve all three. `AddDragLeaveHandler` takes a handler with no arguments: by the

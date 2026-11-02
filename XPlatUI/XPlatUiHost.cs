@@ -1,4 +1,5 @@
 using SkiaSharp;
+using XPlatUI.DragDrop;
 
 namespace XPlatUI;
 
@@ -155,6 +156,18 @@ public sealed class XPlatUiHost
     /// The control currently receiving drag events, or null when no drag is over the host.
     /// </summary>
     public XPlatControl? DropTarget => _dropTarget;
+
+    /// <summary>
+    /// The drag and drop feature's router, or null when the application has not opted in. A feature
+    /// installs one per window at <see cref="XPlatWindowPhase.Created"/>.
+    /// </summary>
+    /// <remarks>
+    /// The host finds the control under the pointer and tracks which one the drag is over; the
+    /// router decides which controls accept drops and delivers the phases to them. Nothing the host
+    /// retains names the feature's implementation, so an application that never installs a router
+    /// publishes without the feature, and a host with no router accepts nothing.
+    /// </remarks>
+    public IXPlatDragDropRouter? DragDropRouter { get; set; }
 
     public XPlatCursor Cursor => _cursor;
 
@@ -335,11 +348,10 @@ public sealed class XPlatUiHost
     /// the backend shows in its drag cursor.
     /// </summary>
     /// <remarks>
-    /// The control under the pointer receives the events when its
-    /// <see cref="XPlatControl.AllowDrop"/> is set; otherwise the nearest ancestor that accepts
-    /// drops does, so a panel can accept drops across its whole area without every child opting in.
-    /// A control that has <see cref="XPlatControl.AllowDrop"/> but refuses this payload passes the
-    /// drag to its parent as well.
+    /// The control under the pointer receives the events when its <c>AllowDrop</c> is set; otherwise
+    /// the nearest ancestor that accepts drops does, so a panel can accept drops across its whole
+    /// area without every child opting in. A control that has <c>AllowDrop</c> but refuses this
+    /// payload passes the drag to its parent as well.
     /// </remarks>
     /// <param name="location">The pointer in host coordinates.</param>
     /// <param name="data">The payload being dragged.</param>
@@ -358,8 +370,7 @@ public sealed class XPlatUiHost
 
     /// <summary>
     /// Routes a drag move and returns the effect the target accepts. A backend that reports only
-    /// moves still produces a <see cref="XPlatControl.AddDragEnterHandler"/> when the target
-    /// changes.
+    /// moves still produces a <c>AddDragEnterHandler</c> when the target changes.
     /// </summary>
     /// <param name="location">The pointer in host coordinates.</param>
     /// <param name="data">The payload being dragged.</param>
@@ -378,7 +389,7 @@ public sealed class XPlatUiHost
 
     /// <summary>
     /// Routes the end of a drag and returns the effect the target performed. The target gets
-    /// <see cref="XPlatControl.AddDragDropHandler"/> when it accepts drops at <paramref name="location"/>.
+    /// <c>AddDragDropHandler</c> when it accepts drops at <paramref name="location"/>.
     /// </summary>
     /// <param name="location">The pointer in host coordinates.</param>
     /// <param name="data">The payload being dropped.</param>
@@ -399,7 +410,7 @@ public sealed class XPlatUiHost
         }
 
         var args = new XPlatDragEventArgs(data, ToLocal(target, location), allowedEffects, modifiers);
-        target.RaiseDragDrop(args);
+        DragDropRouter?.DragDrop(target, args);
         _dropTarget = null;
         return args.Effect & allowedEffects;
     }, XPlatDragDropEffects.None);
@@ -586,13 +597,13 @@ public sealed class XPlatUiHost
 
     /// <summary>
     /// The control that accepts a drop at <paramref name="location"/>: the hit control when it has
-    /// <see cref="XPlatControl.AllowDrop"/>, otherwise the nearest ancestor that has it.
+    /// <c>AllowDrop</c>, otherwise the nearest ancestor that has it.
     /// </summary>
     /// <remarks>
-    /// <see cref="XPlatControl.AllowDrop"/> alone does not make a control the target: a control that
-    /// declines the payload with <see cref="XPlatDragDropEffects.None"/> is passed over and the
-    /// search continues with its parent. That is what lets a drop land on the panel behind a child
-    /// that only accepts some kinds of drag, such as a text box that takes text but not files.
+    /// <c>AllowDrop</c> alone does not make a control the target: a control that declines the
+    /// payload with <see cref="XPlatDragDropEffects.None"/> is passed over and the search continues
+    /// with its parent. That is what lets a drop land on the panel behind a child that only accepts
+    /// some kinds of drag, such as a text box that takes text but not files.
     /// </remarks>
     /// <returns>The control that accepted the drag, or null when nothing wanted it.</returns>
     private XPlatControl? UpdateDropTarget(
@@ -606,9 +617,16 @@ public sealed class XPlatUiHost
 
         effect = XPlatDragDropEffects.None;
 
+        var router = DragDropRouter;
+        if (router is null)
+        {
+            ClearDropTarget();
+            return null;
+        }
+
         for (var control = HitTest(location); control is not null; control = control.Parent)
         {
-            if (!control.AllowDrop)
+            if (!router.IsDropTarget(control))
             {
                 continue;
             }
@@ -616,7 +634,7 @@ public sealed class XPlatUiHost
             if (ReferenceEquals(control, _dropTarget))
             {
                 var over = new XPlatDragEventArgs(data, ToLocal(control, location), allowedEffects, modifiers);
-                control.RaiseDragOver(over);
+                router.DragOver(control, over);
                 effect = over.Effect & allowedEffects;
                 if (effect != XPlatDragDropEffects.None)
                 {
@@ -628,7 +646,7 @@ public sealed class XPlatUiHost
             }
 
             var enter = new XPlatDragEventArgs(data, ToLocal(control, location), allowedEffects, modifiers);
-            control.RaiseDragEnter(enter);
+            router.DragEnter(control, enter);
             var accepted = enter.Effect & allowedEffects;
             if (accepted == XPlatDragDropEffects.None)
             {
@@ -654,7 +672,7 @@ public sealed class XPlatUiHost
         }
 
         _dropTarget = null;
-        previous.RaiseDragLeave();
+        DragDropRouter?.DragLeave(previous);
     }
 
     /// <summary>

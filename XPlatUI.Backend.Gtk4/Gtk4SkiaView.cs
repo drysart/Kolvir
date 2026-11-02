@@ -391,8 +391,36 @@ public sealed class Gtk4SkiaView : IDisposable
         key.OnKeyPressed += OnKeyPressed;
         key.OnKeyReleased += OnKeyReleased;
         _area.AddController(key);
+    }
+
+    /// <summary>
+    /// Starts accepting drags, which is what the drag and drop feature calls once the application
+    /// has opted in. Nothing here runs otherwise, so the trimmer drops the whole drag path.
+    /// </summary>
+    internal void EnableDragDrop()
+    {
+        if (_disposed || _fileDropTarget is not null)
+        {
+            return;
+        }
 
         AttachDrop();
+    }
+
+    /// <summary>Stops accepting drags, and forgets any payload the last one left behind.</summary>
+    internal void DisableDragDrop()
+    {
+        if (_fileDropTarget is not null)
+        {
+            _area.RemoveController(_fileDropTarget);
+            _fileDropTarget = null;
+        }
+
+        if (_textDropTarget is not null)
+        {
+            _area.RemoveController(_textDropTarget);
+            _textDropTarget = null;
+        }
     }
 
     /// <summary>Wires up the drop targets, which is how GTK4 delivers a drag from another app.</summary>
