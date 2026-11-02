@@ -51,8 +51,8 @@ jobs:
         run: |
           set -euo pipefail
           shopt -s nullglob
-          # Feature projects live at the repository root and are deliberately absent from
-          # WinFormsApp3.slnx, so the development solution never needs the macOS workload.
+          # Feature projects live at the repository root. The development solution lists them, but
+          # this job is what builds all three frameworks of each and packs the result.
           projects=(XPlatUI.Feature.*/*.csproj)
           if [ ${#projects[@]} -eq 0 ]; then
             echo "::error::No XPlatUI.Feature.*/*.csproj in this tree, so there is nothing to pack."

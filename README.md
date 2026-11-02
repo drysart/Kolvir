@@ -38,11 +38,18 @@ XPlatUI.Minimal/          the measurement fixture: one window, one label, no fea
 
 `XPlatUIDemo.App` builds exactly **one** target framework per operating system, chosen by
 `$([MSBuild]::IsOSPlatform(...))`: `net10.0-windows` on Windows, `net10.0-macos` on macOS and
-`net10.0` on Linux. That is deliberate rather than tidy. `net10.0-macos` needs the macOS workload
-and Xcode, which only exist on a Mac, so it must never appear in a TFM list that Windows has to
-evaluate; and a portable `net10.0` build *on a Mac* defines neither `WINDOWS` nor `MACOS`, so it
-would silently compile the GTK4 branch and produce a Linux binary. One TFM per OS is what keeps
-`Program.cs`'s `#if` blocks honest. See [On macOS (AppKit)](#on-macos-appkit).
+`net10.0` on Linux. That is deliberate rather than tidy. `net10.0-macos` needs the macOS workload,
+and the `.app` it produces needs a Mac with the matching Xcode, so it must never appear in a TFM
+list that Windows has to evaluate; and a portable `net10.0` build *on a Mac* defines neither
+`WINDOWS` nor `MACOS`, so it would silently compile the GTK4 branch and produce a Linux binary.
+One TFM per OS is what keeps `Program.cs`'s `#if` blocks honest.
+See [On macOS (AppKit)](#on-macos-appkit).
+
+Building `WinFormsApp3.slnx` needs the macOS workload, because the solution lists
+`XPlatUI.Backend.AppKit` and `XPlatUI.Feature.DragDrop`, which both target `net10.0-macos`.
+`dotnet workload install macos` satisfies it where it is not already present; a build without it
+stops with `NETSDK1147`. Nothing else in the solution needs a workload, and an application that
+references either project still builds only the one inner build its own framework can use.
 
 `XPlatUI.Backend` is the way out of that `#if` for an application that wants nothing more than a
 default backend. It is a project that multi-targets and references exactly one backend per target
@@ -895,8 +902,8 @@ The macOS build of `XPlatUIDemo.App` is a native macOS application. It targets `
 uses Apple's AppKit bindings, so the window, its title bar, the menu bar, the context menus and the
 clipboard are all the real thing; only the contents of the window are drawn by the library.
 
-That target framework is why the macOS build has to happen on a Mac: it needs the macOS workload,
-which cannot be installed on Windows. `Program.cs` selects it with
+That target framework is why the macOS build has to happen on a Mac: it needs the macOS workload and
+the Xcode tools that bundle and sign the `.app`. `Program.cs` selects it with
 `$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `WinFormsApp3.slnx` on every platform
 and simply resolves to a different target framework on each. Build it on a Mac, or let the
 `macOS build` GitHub Actions workflow do it - that workflow runs on pull requests against `master`

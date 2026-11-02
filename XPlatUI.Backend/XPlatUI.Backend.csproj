@@ -2,10 +2,9 @@
 
   <PropertyGroup>
     <!-- This project exists to turn a target framework into a backend, so it has to offer a framework
-         for every supported platform. An application only ever needs the one it runs on, though, and
-         a contributor should not have to install the macOS workload to build on Windows, so the
-         default is the host's platform and the packing pipeline asks for the whole set by setting
-         XPlatUIBackendAllPlatforms. See README.md, "The backend selector". -->
+         for every supported platform. An application only ever needs the one it runs on, though, so
+         the default is the host's platform and the packing pipeline asks for the whole set by setting
+         XPlatUIBackendAllPlatforms. -->
     <TargetFrameworks Condition="'$(XPlatUIBackendAllPlatforms)' == 'true'">net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
     <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('windows'))">net10.0-windows</TargetFrameworks>
     <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('osx'))">net10.0-macos</TargetFrameworks>

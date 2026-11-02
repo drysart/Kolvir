@@ -162,11 +162,14 @@ build enumerates all three, which matters in one case: a direct or solution buil
 needs the macOS workload, because that is the one platform whose reference assemblies do not come
 with the SDK.
 
-The `macos` workload is therefore a build requirement for this project. It is installed here and the
-`macos` inner build succeeds, but a Windows machine without it fails with `NETSDK1147`, which is why
-`XPlatUI.Backend.AppKit` is absent from `WinFormsApp3.slnx`. A feature project follows the same
-rule: it stays out of the development solution, and the pack pipeline builds it. Only the macOS
-workload is actually a workload, so one macOS machine packs the whole package:
+The `macos` workload is therefore a build requirement for this project, and for anything that builds
+it directly. It is installed here and the `macos` inner build succeeds; a machine without it fails
+with `NETSDK1147`. The development solution lists both this project and `XPlatUI.Backend.AppKit`,
+which carries the same requirement, so the workload is a prerequisite for building the solution and
+a contributor meets it once with `dotnet workload install macos`. That is a deliberate trade: the
+feature and the backend are visible in the IDE and compiled by the ordinary build, at the cost of one
+prerequisite, rather than being reachable only through the pack pipeline. Only the macOS workload is
+actually a workload, so one macOS machine packs the whole package:
 `-p:EnableWindowsTargeting=true` brings the Windows reference pack to it, and the Linux framework
 needs nothing extra. Verified on a Mac with a three-framework project: without the property the
 `net10.0-windows` inner build stops with `NETSDK1100`, and with it one `dotnet pack` writes all
@@ -1218,11 +1221,11 @@ removal every framework compiles all three, which fails with `CS0234` on the two
 reference. The error names a missing namespace, so the fix is not obvious from it, and it is worth
 knowing that the layout needs the `Compile Remove` as much as the conditional includes.
 
-The project multi-targets all three platforms, as §4 specifies, and stays out of `WinFormsApp3.slnx`
-because a build of the project itself needs the macOS workload. That costs the development loop
-nothing: an application that references it builds only the one inner build its own target framework
-can use, so `dotnet build WinFormsApp3.slnx` on Windows builds `net10.0-windows` and no other. The
-measurement fixture does not reference the feature at all, which is the point of it.
+The project multi-targets all three platforms, as §4 specifies, so a build of the project itself
+needs the macOS workload, and so does the solution that lists it. A consuming application pays
+nothing for that: it builds only the one inner build its own target framework can use, so a Windows
+build of `XPlatUIDemo.App` compiles `net10.0-windows` and no other. The measurement fixture does not
+reference the feature at all, which is the point of it.
 
 Two things had to change shape, and both are the rung-3 price rather than a choice:
 
@@ -1398,7 +1401,7 @@ lower, and the measured cost for an application that does not use it.
   feature that drives a backend's internals does need one friend declaration, and that is the
   backend's choice rather than the layout's. One `dotnet pack` produces the
   package, because the SDK writes one `lib/` folder and one dependency group per target framework.
-  Building it needs the macOS workload, so the project stays out of the development solution. A
+  Building it needs the macOS workload, which the development solution requires as well. A
   platform-only NuGet dependency is tolerable because dependencies are grouped per platform and
   selected by target framework, so a macOS-only package is never restored by a Windows application;
   every platform therefore gets a group, empty if it needs nothing, since a missing group falls back
@@ -1430,11 +1433,11 @@ lower, and the measured cost for an application that does not use it.
   whatever the backend disposes while the window still exists rather than through `Closing`, because
   a window can be disposed without ever closing. See §10.
 - **Feature packaging, in this phase rather than a later one.** Drag and drop ships in
-  `XPlatUI.Feature.DragDrop`, with the four-folder layout of §4, and the development solution does
-  not reference it. The move cost an application that does not use the feature nothing measurable on
-  any platform, and it forced the two API shapes §10's Phase 5 records: the router contract stays in
-  core because a feature cannot be referenced by it, and the host rather than the router runs each
-  control's own handling. See §4 and §10.
+  `XPlatUI.Feature.DragDrop`, with the four-folder layout of §4, and the development solution lists
+  the project so the ordinary build compiles it. The move cost an application that does not use the
+  feature nothing measurable on any platform, and it forced the two API shapes §10's Phase 5 records:
+  the router contract stays in core because a feature cannot be referenced by it, and the host rather
+  than the router runs each control's own handling. See §4 and §10.
 - **Rung 3 is a per-platform claim.** A feature can only be rung 3 where the platform lets its
   native half be trimmed away. macOS keeps AppKit's `NSDraggingDestination` exports alive through
   the registrar, so drag and drop is rung 2 there: the no-opt-in image grew by 16,432 bytes instead
