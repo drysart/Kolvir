@@ -1012,7 +1012,7 @@ it, and every later phase is judged against these three numbers.
   four backends and the demo.
 - Payload-less events, which are most of them, become `Action<object>`. The rest become
   `Action<object, TPayload>` with the args class they already have. No new payload types.
-- There are 95 declarations and roughly a hundred subscription sites today, so this is one change
+- There are 96 declarations and roughly a hundred subscription sites today, so this is one change
   rather than a rolling one: half converted leaves two shapes in the API.
 - No behaviour change: same order, same thread, same exception path.
 
@@ -1022,9 +1022,9 @@ removes.
 Result: done. 96 declarations across 43 files became an `Add`/`Remove` pair, 68 of them payload-less
 (`Action<object>`) and 28 keeping the args class they already had. The ten payload classes that
 derived from `System.EventArgs` lost the base, because nothing in the library takes an `EventHandler`
-any more. Three backing fields were renamed on the way in, since `_exitInProgress` and its siblings
-would have collided with the property of the same name once they became fields. Every `Add` returns
-the same `XPlatHandlerToken<T>` from `XPlatUI/Core/`, rather than one token type per event.
+any more. Three private state fields were renamed because the handler field took their name:
+`_shown` and `_closed` in `XPlatWindow`, `_exiting` in `XPlatApplication`. Every `Add` returns the
+same `XPlatHandlerToken<T>` from `XPlatUI/Core/`, rather than one token type per event.
 
 | Target | Phase 1 loose | Phase 2 loose | Delta |
 |---|---|---|---|
