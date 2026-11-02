@@ -402,6 +402,24 @@ internal sealed class AppKitSkiaView : NSView
 
     public override void OtherMouseDragged(NSEvent theEvent) => MoveTo(theEvent);
 
+    /// <summary>
+    /// Forwards a wheel turn.
+    /// </summary>
+    /// <remarks>
+    /// A mouse wheel reports whole lines and a trackpad reports points, and AppKit says which
+    /// through <see cref="NSEvent.HasPreciseScrollingDeltas"/>. Both are converted to logical
+    /// pixels here. AppKit's sign already matches the host's convention, where a positive delta
+    /// scrolls toward the start of the content.
+    /// </remarks>
+    public override void ScrollWheel(NSEvent theEvent)
+    {
+        var delta = theEvent.HasPreciseScrollingDeltas
+            ? (float)theEvent.ScrollingDeltaY
+            : (float)theEvent.DeltaY * XPlatUiHost.WheelPixelsPerDetent;
+
+        _host.ProcessMouseWheel(PointFrom(theEvent), delta, ModifiersFrom(theEvent));
+    }
+
     public override void KeyDown(NSEvent theEvent)
     {
         var modifiers = ModifiersFrom(theEvent);

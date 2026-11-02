@@ -186,6 +186,21 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>
+    /// Delivers a wheel turn, standing in for a real one. There is no pointer to route by, so the
+    /// location is given explicitly.
+    /// </summary>
+    /// <param name="location">Where the pointer is, in logical client coordinates.</param>
+    /// <param name="delta">
+    /// How far to scroll, in logical pixels; positive scrolls toward the start of the content.
+    /// </param>
+    /// <param name="modifiers">The modifier keys held at the time.</param>
+    /// <returns><c>true</c> if a control consumed the turn.</returns>
+    public bool SimulateMouseWheel(SKPoint location, float delta, XPlatModifiers modifiers = XPlatModifiers.None)
+    {
+        return !_disposed && Host.ProcessMouseWheel(location, delta, modifiers);
+    }
+
+    /// <summary>
     /// Paints the control tree into <paramref name="canvas"/> at the current client size, exactly
     /// as a native backend would paint it into its framebuffer.
     /// </summary>

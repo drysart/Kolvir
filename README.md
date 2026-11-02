@@ -248,11 +248,33 @@ made (`AddScrollHandler`, raised by the arrows, the track, the thumb and the key
 application made (`AddValueChangedHandler`, raised by any change at all). Setting `Value` from code
 moves the thumb and raises only the second.
 
-Two things are deliberately not there yet. The mouse wheel needs an input path through
-`XPlatUiHost` and a delta on the mouse event arguments, both of which are always-retained types, so
-it is waiting on its own justification under the feature cost policy. And the bars are classic
-rather than overlay: an overlay style, which floats over the content and does not take a gutter,
-belongs to a later phase.
+The mouse wheel scrolls the control under the pointer. `XPlatUiHost.ProcessMouseWheel` starts at the
+captured control, or the control under the pointer, and walks up the parent chain until something
+claims the turn, so a wheel event over a nested list scrolls the list and only reaches the panel
+around it once the list is at its end. `XPlatMouseEventArgs.Delta` is the distance in logical
+pixels, positive toward the start of the content (up or left); a backend that reports a wheel in
+detents multiplies by `XPlatUiHost.WheelPixelsPerDetent`, and one that reports precise deltas (a
+touchpad) passes them straight through. A panel scrolls vertically unless `Shift` is held and
+horizontal scrolling is possible, and falls back to the other axis when the preferred one cannot
+move. A standalone `XPlatScrollBar` moves three `SmallChange` steps per detent.
+
+```csharp
+list.AddMouseWheelHandler((sender, e) =>
+{
+    if (e.Handled) return;                  // an ancestor already dealt with it
+    Console.WriteLine($"wheel by {e.Delta}px");
+});
+```
+
+The bars a panel creates for itself are not focusable: they take clicks, drags and the wheel, but
+`Focusable` is `false`, so clicking one leaves the focus where the user was working, `Focus()` on it
+does nothing and `Tab` never lands on it. That is what `XPlatControl.Focusable` is for in general -
+it gates click-to-focus, `Focus()` and the tab order without affecting mouse interaction. A
+standalone `XPlatScrollBar` is still `TabStop` and `Focusable`, so it can be driven from the
+keyboard as before.
+
+What is still missing is the overlay style: an overlay scrollbar floats over the content and does
+not take a gutter. The bars are classic until that lands.
 
 ### Rich label
 

@@ -18,6 +18,7 @@ public class XPlatControl : IDisposable
     private Action<object, XPlatMouseEventArgs>? _mouseDown;
     private Action<object, XPlatMouseEventArgs>? _mouseUp;
     private Action<object, XPlatMouseEventArgs>? _mouseMove;
+    private Action<object, XPlatMouseEventArgs>? _mouseWheel;
     private Action<object>? _mouseEnter;
     private Action<object>? _mouseLeave;
     private Action<object, XPlatKeyEventArgs>? _keyDown;
@@ -39,6 +40,7 @@ public class XPlatControl : IDisposable
     private bool _visible = true;
     private bool _enabled = true;
     private bool _autoSize;
+    private bool _focusable = true;
     private bool _selectable;
     private XPlatSelectionStyle _selectionStyle = XPlatSelectionStyle.Whole;
     private bool _disposed;
@@ -111,6 +113,25 @@ public class XPlatControl : IDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
         _mouseMove -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when the wheel turns over the control.</summary>
+    /// <remarks>
+    /// Set <see cref="XPlatMouseEventArgs.Handled"/> to keep the turn from travelling on to the
+    /// container above the control, which is what a control that scrolls its own content does.
+    /// </remarks>
+    public IDisposable AddMouseWheelHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseWheel += handler;
+        return new XPlatHandlerToken<Action<object, XPlatMouseEventArgs>>(RemoveMouseWheelHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddMouseWheelHandler"/> added.</summary>
+    public void RemoveMouseWheelHandler(Action<object, XPlatMouseEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _mouseWheel -= handler;
     }
 
     public IDisposable AddMouseEnterHandler(Action<object> handler)
@@ -528,6 +549,34 @@ public class XPlatControl : IDisposable
     /// <summary>True when the control participates in Tab navigation.</summary>
     public bool TabStop { get; set; }
 
+    /// <summary>True when the control may hold keyboard focus. Defaults to true.</summary>
+    /// <remarks>
+    /// A control that sets this to false is still an ordinary mouse target - it takes clicks,
+    /// drags and wheel turns, and it can capture the mouse - it simply never becomes the focused
+    /// control: pressing it does not focus it, <see cref="Focus"/> does nothing, and Tab skips it.
+    /// That is what the scrollbars an <see cref="XPlatPanel"/> creates for itself need, because the
+    /// focus belongs to whatever the user is actually working in and a scrollbar must not take it
+    /// away. A standalone <see cref="XPlatScrollBar"/> leaves this alone so it can be driven from
+    /// the keyboard like any other slider.
+    /// </remarks>
+    public bool Focusable
+    {
+        get => _focusable;
+        set
+        {
+            if (_focusable == value)
+            {
+                return;
+            }
+
+            _focusable = value;
+            if (!value && IsFocused)
+            {
+                Host?.SetFocus(null);
+            }
+        }
+    }
+
     public int TabIndex { get; set; }
 
     public bool IsFocused { get; private set; }
@@ -854,8 +903,14 @@ public class XPlatControl : IDisposable
         canvas.Restore();
     }
 
-    /// <summary>Moves keyboard focus to this control.</summary>
-    public void Focus() => Host?.SetFocus(this);
+    /// <summary>Moves keyboard focus to this control, unless it is not <see cref="Focusable"/>.</summary>
+    public void Focus()
+    {
+        if (Focusable)
+        {
+            Host?.SetFocus(this);
+        }
+    }
 
     /// <summary>Routes all mouse input to this control until the capture is released.</summary>
     public void CaptureMouse() => Host?.CaptureMouse(this);
@@ -949,6 +1004,17 @@ public class XPlatControl : IDisposable
         {
             OnMouseMove(e);
         }
+    }
+
+    /// <summary>Delivers a wheel turn. Returns true when the control consumed it.</summary>
+    internal bool RaiseMouseWheel(XPlatMouseEventArgs e)
+    {
+        if (Enabled)
+        {
+            OnMouseWheel(e);
+        }
+
+        return e.Handled;
     }
 
     internal void RaiseMouseEnter()
@@ -1078,6 +1144,14 @@ public class XPlatControl : IDisposable
     protected virtual void OnMouseUp(XPlatMouseEventArgs e) => _mouseUp?.Invoke(this, e);
 
     protected virtual void OnMouseMove(XPlatMouseEventArgs e) => _mouseMove?.Invoke(this, e);
+
+    /// <summary>
+    /// Called when the wheel turns over the control. The default raises
+    /// <see cref="AddMouseWheelHandler"/>. A control that scrolls content of its own overrides
+    /// this, moves, and leaves <see cref="XPlatMouseEventArgs.Handled"/> set - and leaves it clear
+    /// when it has nothing left to give, so the turn can travel to the container above it.
+    /// </summary>
+    protected virtual void OnMouseWheel(XPlatMouseEventArgs e) => _mouseWheel?.Invoke(this, e);
 
     protected virtual void OnMouseEnter() => _mouseEnter?.Invoke(this);
 

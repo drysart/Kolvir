@@ -22,6 +22,9 @@ public class XPlatScrollBar : XPlatControl
     private const float MinimumThumbLength = 24f;
     private const float ThumbInset = 3f;
 
+    /// <summary>One wheel detent moves the bar as far as this many arrow presses would.</summary>
+    private const float WheelLinesPerDetent = 3f;
+
     private Action<object>? _scroll;
     private Action<object>? _valueChanged;
 
@@ -358,6 +361,28 @@ public class XPlatScrollBar : XPlatControl
         }
 
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// A wheel turn moves the bar as far as a few arrow presses would, so a bar can be scrolled
+    /// without focusing it first. The bar only claims the turn when the value actually moved,
+    /// which leaves a bar at either end free to pass it to the container around it.
+    /// </summary>
+    protected override void OnMouseWheel(XPlatMouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+
+        if (e.Handled || !IsScrollable)
+        {
+            return;
+        }
+
+        var before = _value;
+
+        // A positive delta scrolls toward the start of the content, which is a smaller value.
+        var steps = e.Delta / XPlatUiHost.WheelPixelsPerDetent * WheelLinesPerDetent;
+        ScrollBy(-steps * _smallChange);
+        e.Handled = MathF.Abs(_value - before) > 0.001f;
     }
 
     protected override void OnLostFocus()

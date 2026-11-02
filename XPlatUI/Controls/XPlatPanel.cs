@@ -299,6 +299,41 @@ public class XPlatPanel : XPlatControl
         return base.HitTest(pointInParent);
     }
 
+    /// <summary>
+    /// Scrolls the axis the wheel is asking for: vertical by default, horizontal when Shift is
+    /// held, and whichever axis can still move when the preferred one cannot. The panel claims the
+    /// turn only when it actually moved, so a panel already at its end hands the rest of the turn
+    /// to the container around it.
+    /// </summary>
+    protected override void OnMouseWheel(XPlatMouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+
+        if (e.Handled || _viewport.Width <= 0f || _viewport.Height <= 0f)
+        {
+            return;
+        }
+
+        var shift = (e.Modifiers & XPlatModifiers.Shift) != 0;
+        var canScrollVertically = MaxVerticalOffset > ScrollEpsilon;
+        var canScrollHorizontally = MaxHorizontalOffset > ScrollEpsilon;
+
+        if (canScrollVertically && !(shift && canScrollHorizontally))
+        {
+            var before = _verticalOffset;
+            ScrollBy(0f, -e.Delta);
+            e.Handled = MathF.Abs(_verticalOffset - before) > ScrollEpsilon;
+            return;
+        }
+
+        if (canScrollHorizontally)
+        {
+            var before = _horizontalOffset;
+            ScrollBy(-e.Delta, 0f);
+            e.Handled = MathF.Abs(_horizontalOffset - before) > ScrollEpsilon;
+        }
+    }
+
     /// <summary>Clips the scrolled children to the viewport, then paints the scrollbars on top.</summary>
     protected override void RenderChildren(SKCanvas canvas)
     {
@@ -505,6 +540,10 @@ public class XPlatPanel : XPlatControl
             {
                 Name = orientation == XPlatOrientation.Vertical ? "VerticalScrollBar" : "HorizontalScrollBar",
                 Orientation = orientation,
+
+                // The bar belongs to the panel, so the focus belongs to whatever the user is
+                // working in. It still takes clicks and wheel turns, just never the focus.
+                Focusable = false,
                 Parent = this,
             };
 

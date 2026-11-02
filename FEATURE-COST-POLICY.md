@@ -943,10 +943,23 @@ them in the tree - the same number as before they existed. The one always-retain
 has to tell the framework where it painted its children; that is the exception §9 asks a feature to
 state. It is stated here, and it is the reason the fixture's zero is a weaker claim than it looks:
 the fixture has no panel, so what the number actually covers is the retained virtual, not the
-scrolling code behind it. Two pieces of the feature are deferred rather than done. The mouse wheel
-needs an input path in `XPlatUiHost` and a delta on `XPlatMouseEventArgs`, both always-retained
-types, so it waits for its own justification; and the overlay scrollbar style is a later phase, so
-`XPlatPanel` draws classic non-overlay bars only.
+scrolling code behind it.
+
+Mouse wheel input is the second worked example, and it is the case where the exception had to be
+taken. A wheel turn has to reach whichever control is under the pointer, and no opt-in hook can
+carry it there, because the control that wants it is a panel the application created rather than a
+feature it registered. So four members are always retained: `XPlatMouseEventArgs.Delta` (a float
+and a property on an args class that is already retained), `XPlatControl.OnMouseWheel` plus its
+`AddMouseWheelHandler`/`RemoveMouseWheelHandler` pair, and `XPlatUiHost.ProcessMouseWheel`, which
+each backend forwards to. `XPlatControl.Focusable` is retained alongside them for the same reason:
+the bars a panel creates for itself must not be focusable, and gating that per-instance needs a
+property on the base class rather than a flag the panel can keep privately. The fixture publishes at
+3,072,000 bytes with all four, against 3,070,976 without them: 1,024 bytes, one image-alignment step,
+measured on win-x64 only. This is exception 1 of §5.5 rather than the rule - a container that cannot
+be scrolled by the wheel is not a working container - and the additions are portable managed code
+with no per-platform surface, so the Linux and macOS images, which are quantised to larger pages,
+were not re-measured. The overlay scrollbar style is still a later phase, so `XPlatPanel` draws
+classic non-overlay bars only.
 
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
