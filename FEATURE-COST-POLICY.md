@@ -961,6 +961,22 @@ with no per-platform surface, so the Linux and macOS images, which are quantised
 were not re-measured. The overlay scrollbar style is still a later phase, so `XPlatPanel` draws
 classic non-overlay bars only.
 
+Invalidation is the third worked example, and the first one whose cost every platform pays. The
+`Invalidate` overloads, `PartialUpdates`, `PendingUpdateBounds`, `IsUpdatePending` and
+`IncludeInNextPaint` are members of always-retained types, because a control that cannot say which
+part of itself changed cannot be partially painted, and the framework has to ask that question of
+every control including the ones an application wrote. Alongside them the paint loop gained the
+subtree culling that makes the answer worth having, and each backend gained the few lines that
+present only the painted area. The fixture publishes at 3,085,824 bytes on win-x64 against 3,072,512
+at `4b8e8c2`, so 13,312 bytes; 4,079,936 against 4,062,768 on linux-x64, so 17,168 bytes; and
+4,234,576 against 4,218,064 on osx-arm64, so 16,512 bytes. Each pair was published from a worktree
+of the baseline commit rather than compared against the table above, whose rows predate the
+scrolling and wheel work. All three platforms pay about the same, which is what a change made of
+portable managed code plus a per-backend presentation call should look like; nothing new runs at
+startup, and `PartialUpdates` defaults to off so a backend that rasterizes whole surfaces is
+unaffected. This is exception 1 of §5.5, and the exception is the point: partial painting is a
+property of the framework's paint loop rather than a capability a control opts into.
+
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
 

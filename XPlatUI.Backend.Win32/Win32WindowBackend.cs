@@ -73,6 +73,8 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private int _bufferWidth;
     private int _bufferHeight;
     private SKSurface? _skia;
+    private int _bufferGeneration;
+    private int _paintedGeneration;
 
     private bool _trackingLeave;
     private long _lastClickTime;
@@ -94,9 +96,13 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         // Dispose would otherwise pull the class out from under a sibling window.
         _className = "XPlatUI.Window." + Interlocked.Increment(ref _nextClassId).ToString(CultureInfo.InvariantCulture);
 
-        _host.AddInvalidatedHandler(_ => Invalidate());
+        _host.AddInvalidatedHandler(_ => InvalidatePending());
         _host.AddCursorChangedHandler(_ => ApplyCursor());
         XPlatTheme.AddChangedHandler(OnThemeChanged);
+
+        // The window keeps a drawing buffer between frames and copies it to the screen with
+        // BitBlt, so only the part that changed has to be painted and copied.
+        _host.PartialUpdates = true;
     }
 
     /// <inheritdoc />
@@ -1160,11 +1166,37 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         var hdc = NativeMethods.BeginPaint(hwnd, out var paint);
         try
         {
-            if (_skia is not null && _memoryDc != IntPtr.Zero)
+            if (_skia is null || _memoryDc == IntPtr.Zero)
             {
-                Render();
-                NativeMethods.BitBlt(hdc, 0, 0, _bufferWidth, _bufferHeight, _memoryDc, 0, 0, NativeMethods.SrcCopy);
+                return;
             }
+
+            // The update region is everything Windows thinks is stale, which covers what the UI
+            // asked for and also things it cannot know about - an uncovered window, a resize. The
+            // buffer still holds the pixels of those, so they are copied back out of it rather than
+            // added to the paint. Adding them would grow the paint to the whole update region, and
+            // Windows reports that region as a single rectangle: two small changes at opposite ends
+            // of a row would repaint everything between them.
+            var stale = new SKRectI(
+                (int)MathF.Floor(paint.rcPaint.Left / _scale),
+                (int)MathF.Floor(paint.rcPaint.Top / _scale),
+                (int)MathF.Ceiling(paint.rcPaint.Right / _scale),
+                (int)MathF.Ceiling(paint.rcPaint.Bottom / _scale));
+
+            // A buffer that was just allocated holds whatever was in that memory, so the frame it
+            // starts with has to be painted in full even when the UI asked for nothing.
+            if (!_host.IsUpdatePending && _paintedGeneration == _bufferGeneration)
+            {
+                Blit(hdc, stale);
+                return;
+            }
+
+            var area = Render();
+            Blit(hdc, new SKRectI(
+                Math.Min(stale.Left, area.Left),
+                Math.Min(stale.Top, area.Top),
+                Math.Max(stale.Right, area.Right),
+                Math.Max(stale.Bottom, area.Bottom)));
         }
         finally
         {
@@ -1179,23 +1211,60 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             return;
         }
 
-        Render();
-        NativeMethods.BitBlt(hdc, 0, 0, _bufferWidth, _bufferHeight, _memoryDc, 0, 0, NativeMethods.SrcCopy);
+        // Printing and the like copy the window into a fresh surface that holds no previous frame,
+        // so everything has to be painted and copied.
+        Blit(hdc, Render(full: true));
     }
 
-    private void Render()
+    /// <summary>Copies an area of the drawing buffer to a device context.</summary>
+    /// <param name="hdc">The context to copy to.</param>
+    /// <param name="area">The area to copy, in logical pixels.</param>
+    private void Blit(IntPtr hdc, SKRectI area)
+    {
+        var left = (int)MathF.Floor(area.Left * _scale);
+        var top = (int)MathF.Floor(area.Top * _scale);
+        var right = (int)MathF.Ceiling(area.Right * _scale);
+        var bottom = (int)MathF.Ceiling(area.Bottom * _scale);
+
+        left = Math.Max(left, 0);
+        top = Math.Max(top, 0);
+        right = Math.Min(right, _bufferWidth);
+        bottom = Math.Min(bottom, _bufferHeight);
+
+        if (right <= left || bottom <= top)
+        {
+            return;
+        }
+
+        NativeMethods.BitBlt(hdc, left, top, right - left, bottom - top, _memoryDc, left, top, NativeMethods.SrcCopy);
+    }
+
+    /// <summary>Paints the part of the UI that changed into the drawing buffer.</summary>
+    /// <param name="full">Paint everything, whatever the UI asked for.</param>
+    /// <returns>The area that was painted, in logical pixels.</returns>
+    private SKRectI Render(bool full = false)
     {
         if (_skia is null)
         {
-            return;
+            return SKRectI.Empty;
+        }
+
+        // A buffer that was just allocated holds whatever was in that memory, so the frame it
+        // starts with has to cover all of it.
+        if (_paintedGeneration != _bufferGeneration)
+        {
+            _paintedGeneration = _bufferGeneration;
+            full = true;
         }
 
         var canvas = _skia.Canvas;
         canvas.Save();
         canvas.Scale(_scale);
-        _host.Paint(canvas);
+        var area = _host.Paint(canvas, full);
         canvas.Restore();
         canvas.Flush();
+
+        return area;
     }
 
     private void OnSize(int width, int height, uint sizeType)
@@ -1405,6 +1474,39 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         }
     }
 
+    /// <summary>Asks Windows to repaint just the part of the window the UI invalidated.</summary>
+    /// <remarks>
+    /// Invalidating the whole window would make every frame a whole frame, because the update
+    /// region is added to the paint: Windows would hand back the entire client area on the next
+    /// WM_PAINT, so the part that changed could never be smaller than everything.
+    /// </remarks>
+    private void InvalidatePending()
+    {
+        if (_hwnd == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var pending = _host.PendingUpdateBounds;
+        var rect = new NativeMethods.RECT
+        {
+            Left = Math.Clamp((int)MathF.Floor(pending.Left * _scale), 0, _bufferWidth),
+            Top = Math.Clamp((int)MathF.Floor(pending.Top * _scale), 0, _bufferHeight),
+            Right = Math.Clamp((int)MathF.Ceiling(pending.Right * _scale), 0, _bufferWidth),
+            Bottom = Math.Clamp((int)MathF.Ceiling(pending.Bottom * _scale), 0, _bufferHeight),
+        };
+
+        if (rect.Right > rect.Left && rect.Bottom > rect.Top)
+        {
+            NativeMethods.InvalidateRect(_hwnd, ref rect, false);
+            return;
+        }
+
+        // Nothing has been measured yet, so there is no area to aim at. Losing the frame would be
+        // worse than repainting the window.
+        NativeMethods.InvalidateRect(_hwnd, IntPtr.Zero, false);
+    }
+
     private SKPoint ToLogical(IntPtr lParam) =>
         new(NativeMethods.LowWord(lParam) / _scale, NativeMethods.HighWord(lParam) / _scale);
 
@@ -1577,6 +1679,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         _bufferWidth = width;
         _bufferHeight = height;
+        _bufferGeneration++;
     }
 
     private void ReleaseBuffer()

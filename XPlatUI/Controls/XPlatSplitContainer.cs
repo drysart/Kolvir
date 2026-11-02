@@ -292,7 +292,7 @@ public class XPlatSplitContainer : XPlatControl
         _dragOrigin = AxisCoordinate(e.Location);
         _dragOriginDistance = _splitterDistance;
         CaptureMouse();
-        Invalidate();
+        InvalidateSplitter();
     }
 
     protected override void OnMouseMove(XPlatMouseEventArgs e)
@@ -351,13 +351,13 @@ public class XPlatSplitContainer : XPlatControl
     protected override void OnMouseEnter()
     {
         base.OnMouseEnter();
-        Invalidate();
+        InvalidateSplitter();
     }
 
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
-        Invalidate();
+        InvalidateSplitter();
     }
 
     protected override void OnLostFocus()
@@ -387,7 +387,20 @@ public class XPlatSplitContainer : XPlatControl
 
         _isDragging = false;
         ReleaseMouseCapture();
-        Invalidate();
+        InvalidateSplitter();
+    }
+
+    /// <summary>
+    /// Repaints the splitter band alone. Hovering it, dragging it and focusing the container change
+    /// nothing but the band's colour and grip, so repainting the container - and with it both
+    /// panels, which can hold whole trees of their own - would be far more than the change needs.
+    /// </summary>
+    private void InvalidateSplitter()
+    {
+        if (_splitterRect.Width > 0f && _splitterRect.Height > 0f)
+        {
+            Invalidate(_splitterRect, false);
+        }
     }
 
     private void DrawGrip(SKCanvas canvas, bool highlight)

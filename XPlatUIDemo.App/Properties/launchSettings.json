@@ -1,0 +1,13 @@
+{
+  "profiles": {
+    "XPlatUIDemo.App": {
+      "commandName": "Project"
+    },
+    "Demo (Debug Paint)": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "XPLATUI_DEBUG_PAINT": "1"
+      }
+    }
+  }
+}

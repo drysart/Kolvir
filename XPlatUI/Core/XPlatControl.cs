@@ -376,8 +376,20 @@ public class XPlatControl : IDisposable
                 return;
             }
 
+            // A control paints nothing outside its own bounds, so whatever it covers now is not
+            // what it covered a moment ago: the area it is leaving has to be repainted as well, or
+            // a control that moved or shrank leaves a copy of itself behind.
+            var previous = Host is null
+                ? SKRect.Empty
+                : XPlatUiHost.ToHost(this, ClientRect);
+
             _bounds = normalized;
             OnBoundsChanged();
+
+            if (previous.Width > 0f && previous.Height > 0f && Host is { } host)
+            {
+                host.IncludeInNextPaint(previous);
+            }
         }
     }
 
@@ -881,6 +893,14 @@ public class XPlatControl : IDisposable
             return;
         }
 
+        // Nothing this control or anything inside it paints can leave its own bounds - the clip
+        // below takes care of that - so a control that does not reach the clip is a whole subtree
+        // that does not have to be walked.
+        if (canvas.QuickReject(_bounds))
+        {
+            return;
+        }
+
         canvas.Save();
         canvas.Translate(_bounds.Left, _bounds.Top);
 
@@ -952,19 +972,99 @@ public class XPlatControl : IDisposable
         return Own(timer);
     }
 
-    /// <summary>Requests a repaint of the surface hosting this control.</summary>
-    public void Invalidate()
+    /// <summary>Requests a repaint of this control and everything it contains.</summary>
+    public void Invalidate() => Invalidate(ClientRect, true);
+
+    /// <summary>Requests a repaint of this control.</summary>
+    /// <param name="invalidateChildren">
+    /// True to repaint the controls inside it as well. False repaints only this control, which is
+    /// what a control that changed its own appearance but not its layout wants: the children are
+    /// left out of the area, so the paint does not have to visit them.
+    /// </param>
+    public void Invalidate(bool invalidateChildren) => Invalidate(ClientRect, invalidateChildren);
+
+    /// <summary>Requests a repaint of an area of this control, in its own coordinates.</summary>
+    /// <param name="rect">The area to repaint. Anything outside the client area is dropped.</param>
+    public void Invalidate(SKRect rect) => Invalidate(rect, true);
+
+    /// <summary>Requests a repaint of an area of this control, in its own coordinates.</summary>
+    /// <param name="rect">The area to repaint. Anything outside the client area is dropped.</param>
+    /// <param name="invalidateChildren">True to repaint the controls inside the area as well.</param>
+    public void Invalidate(SKRect rect, bool invalidateChildren)
     {
+        using var region = new SKRegion(ToRectI(XPlatGeometry.Normalize(rect)));
+        Invalidate(region, invalidateChildren);
+    }
+
+    /// <summary>Requests a repaint of a region of this control, in its own coordinates.</summary>
+    /// <param name="region">The area to repaint. Anything outside the client area is dropped.</param>
+    public void Invalidate(SKRegion region) => Invalidate(region, true);
+
+    /// <summary>Requests a repaint of a region of this control, in its own coordinates.</summary>
+    /// <param name="region">The area to repaint. Anything outside the client area is dropped.</param>
+    /// <param name="invalidateChildren">True to repaint the controls inside the area as well.</param>
+    public void Invalidate(SKRegion region, bool invalidateChildren)
+    {
+        ArgumentNullException.ThrowIfNull(region);
+
         var host = Host;
-        if (host is not null)
-        {
-            host.Invalidate();
-        }
-        else
+        if (host is null)
         {
             Parent?.Invalidate();
+            return;
         }
+
+        if (region.IsEmpty)
+        {
+            return;
+        }
+
+        // A hidden control is not painted, but the area it covers still belongs to the parent's
+        // background, so it has to be repainted both when a control disappears and when one comes
+        // back - which is why visibility does not take part in this.
+        //
+        // The control is clipped to its client area, so nothing outside it can have changed, and a
+        // child is painted over its own bounds, so its area can be taken back out again.
+        using var area = new SKRegion(region);
+        area.Op(ToRectI(ClientRect), SKRegionOperation.Intersect);
+
+        if (!invalidateChildren && _controls is not null)
+        {
+            foreach (var child in _controls)
+            {
+                if (child.Visible)
+                {
+                    area.Op(ToRectI(child.Bounds), SKRegionOperation.Difference);
+                }
+            }
+        }
+
+        if (area.IsEmpty)
+        {
+            return;
+        }
+
+        // A region is whole pixels, so each rectangle is mapped and rounded out on its own rather
+        // than translating the region by a rounded origin, which would lose a pixel off an edge
+        // every time the control sits at a fractional offset.
+        using var hostArea = new SKRegion();
+        using var rects = area.CreateRectIterator();
+
+        while (rects.Next(out var rect))
+        {
+            var mapped = XPlatUiHost.ToHost(this, new SKRect(rect.Left, rect.Top, rect.Right, rect.Bottom));
+            hostArea.Op(ToRectI(mapped), SKRegionOperation.Union);
+        }
+
+        host.Invalidate(hostArea);
     }
+
+    /// <summary>Rounds a rectangle out to the whole pixels that cover it.</summary>
+    private static SKRectI ToRectI(SKRect rect) => new(
+        (int)MathF.Floor(rect.Left),
+        (int)MathF.Floor(rect.Top),
+        (int)MathF.Ceiling(rect.Right),
+        (int)MathF.Ceiling(rect.Bottom));
 
     internal void AttachHost(XPlatUiHost? host) => _host = host;
 
@@ -1025,8 +1125,14 @@ public class XPlatControl : IDisposable
         }
 
         IsMouseOver = true;
+
+        // Hover is only worth a repaint for a control whose appearance depends on it, so the
+        // repaint belongs to the control rather than here: a label, a panel or a table looks the
+        // same whether or not the pointer is over it, and repainting one anyway widens the next
+        // frame by its whole bounds - a title label invalidated on its way past would take in
+        // everything between it and whatever else changed. Controls with a hover look override
+        // OnMouseEnter/OnMouseLeave and invalidate what they draw.
         OnMouseEnter();
-        Invalidate();
     }
 
     internal void RaiseMouseLeave()
@@ -1038,7 +1144,6 @@ public class XPlatControl : IDisposable
 
         IsMouseOver = false;
         OnMouseLeave();
-        Invalidate();
     }
 
     /// <summary>Delivers a key press. Returns true when the control consumed the key.</summary>
