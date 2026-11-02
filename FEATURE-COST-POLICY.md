@@ -157,13 +157,18 @@ A consuming solution is simpler than either alternative. The project reference i
 line, and MSBuild builds only the inner build that matches the consuming project, so there is no
 host detection and no condition choosing which platform to reference. Only the feature project's own
 build enumerates all three, which matters in one case: a direct or solution build of the project
-needs every platform's workload.
+needs the macOS workload, because that is the one platform whose reference assemblies do not come
+with the SDK.
 
 The `macos` workload is therefore a build requirement for this project. It is installed here and the
 `macos` inner build succeeds, but a Windows machine without it fails with `NETSDK1147`, which is why
 `XPlatUI.Backend.AppKit` is absent from `WinFormsApp3.slnx`. A feature project follows the same
-rule: it stays out of the development solution, and the pack pipeline builds it on a machine with
-all three workloads. For local work, `dotnet build -p:TargetFrameworks=net10.0-windows` narrows the
+rule: it stays out of the development solution, and the pack pipeline builds it. Only the macOS
+workload is actually a workload, so one macOS machine packs the whole package:
+`-p:EnableWindowsTargeting=true` brings the Windows reference pack to it, and the Linux framework
+needs nothing extra. Verified on a Mac with a three-framework project: without the property the
+`net10.0-windows` inner build stops with `NETSDK1100`, and with it one `dotnet pack` writes all
+three `lib/` folders. For local work, `dotnet build -p:TargetFrameworks=net10.0-windows` narrows the
 build to one platform without editing the file, and `-p:TargetFramework=net10.0` narrows it to one
 framework. Both verified.
 
@@ -209,6 +214,22 @@ application ships the Linux assembly. Verified: a `net10.0-windows` consumer of 
 Windows folder compiled and printed the marker string from the `net10.0` assembly. A project that
 multi-targets cannot produce that shape by accident, because each folder is written by the same
 inner build that the `TargetFrameworks` list requires.
+
+#### The pack job
+
+Both of those failures are silent, so the pipeline does not take `dotnet pack`'s exit code as the
+answer. `.github/workflows/feature-pack.yml` packs every `XPlatUI.Feature.*` project on a macOS
+runner with `EnableWindowsTargeting=true`, then hands each package to
+`.github/scripts/check-feature-package.py`, which reads the `.nuspec` out of the archive, lists the
+`lib/` folders, and fails if a folder has no dependency group of the same name or a group has no
+folder. The check reports the layout as a table in the job summary, so a review sees the platforms
+the package covers without downloading it.
+
+Verified against a package with its `lib/net10.0-windows7.0/` folder removed: the check fails with
+the missing platform named, where NuGet itself would have compiled the Windows consumer against the
+Linux assembly. The whole job was rehearsed on a Mac against a three-framework project - discovery,
+pack, check, summary and the failure path - because a workflow that only runs on a pull request is
+otherwise first exercised by the first feature author to use it.
 
 #### The `net10.0` fallback guard
 
@@ -1073,7 +1094,7 @@ now, so opting in is a namespace import and one `ConfigureServices` line rather 
 What this phase proves is the shape: that a feature can be lifted off the always-on path
 behind typed hooks, a same-named extension and an extension-member surface, and that the library
 does not notice it has gone. The four-folder feature project of §4 is a build change on top of a
-shape that now exists, and it needs all three workloads, so it belongs with the pipeline job in
+shape that now exists, and it needs the macOS workload, so it belongs with the pipeline job in
 Phase 4.
 
 One thing will have to change when the feature does move. `XPlatUiHost` holds the
@@ -1162,8 +1183,17 @@ to record the floor it raises rather than promise a saving that cannot arrive.
 - Add the checklist in §11 to the review expectations for feature work.
 - Keep the package layout in §4 current, so a feature's pull request can name the folder it belongs
   in rather than inventing one.
-- Add the feature pack job to the pipeline, on a machine with the Windows, macOS and Linux
-  workloads, so no feature author has to arrange a multi-platform build.
+- Add the feature pack job to the pipeline, on a macOS runner, so no feature author has to arrange a
+  multi-platform build.
+
+Phase 4 is done, and it changed no application's deliverable, so there is nothing to measure. The
+`README.md` control table now links this document, so the policy is reachable from where the
+controls are listed rather than only from the drag and drop section. The drag and drop section
+carries the migration as two code blocks, before and after, and names the one line that has no
+counterpart. A new "Contributing a feature" section states what a feature's pull request has to
+contain and names §11 as the checklist a reviewer works through. §4 records the pack job: why one
+macOS runner is enough, what the layout check refuses, and that both were rehearsed rather than
+assumed.
 
 ### Phase 5: hold new work to it
 
@@ -1253,7 +1283,7 @@ lower, and the measured cost for an application that does not use it.
   `common/` plus one platform folder; sharing is a folder rather than an assembly, so there is no
   `InternalsVisibleTo` and nothing to copy between `lib/` folders. One `dotnet pack` produces the
   package, because the SDK writes one `lib/` folder and one dependency group per target framework.
-  Building it needs all three workloads, so the project stays out of the development solution. A
+  Building it needs the macOS workload, so the project stays out of the development solution. A
   platform-only NuGet dependency is tolerable because dependencies are grouped per platform and
   selected by target framework, so a macOS-only package is never restored by a Windows application;
   every platform therefore gets a group, empty if it needs nothing, since a missing group falls back

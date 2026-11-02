@@ -68,6 +68,12 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
 
+Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
+does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
+construction where it can, by an opt-in registration where it cannot, and by its own package where
+neither is practical; §10 of the policy has the measured sizes, including what opting into drag and
+drop costs on each platform.
+
 Everything is drawn in **logical (96 DPI) coordinates**; the host adapter is responsible
 for scaling the canvas and the incoming pointer coordinates (the Win32 backend uses
 `GetDpiForWindow() / 96f`).
@@ -633,6 +639,66 @@ control cannot claim a move the source never offered.
 The demo turns the whole window into a drop target: dropping files prints their names on the status
 line, and dropping text prints the first sixty characters.
 
+#### Migrating from the old surface
+
+Setting `AllowDrop` and subscribing to the four drag handlers used to be members of `XPlatControl`.
+They are extension members in `XPlatUI.DragDrop` now, and the events are `Add`/`Remove` handler
+pairs like every other notification, so the two things an application does with the feature look
+like this:
+
+```csharp
+// before: members of the control, registered unconditionally at window creation
+root.AllowDrop = true;
+
+root.DragEnter += (_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
+    ? XPlatDragDropEffects.Copy
+    : XPlatDragDropEffects.None;
+
+root.DragDrop += (_, e) =>
+{
+    foreach (var path in e.Data.GetFiles())
+    {
+        status.Text = $"Dropped {Path.GetFileName(path)}";
+    }
+
+    e.Effect = XPlatDragDropEffects.Copy;
+};
+```
+
+```csharp
+// after: the same handlers, from the feature's namespace, plus one line at startup
+using XPlatUI.DragDrop;
+
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddDragDrop(),
+};
+
+// unchanged: a control still accepts a drop by saying so
+root.AllowDrop = true;
+
+root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
+    ? XPlatDragDropEffects.Copy
+    : XPlatDragDropEffects.None);
+
+root.AddDragDropHandler((_, e) =>
+{
+    foreach (var path in e.Data.GetFiles())
+    {
+        status.Text = $"Dropped {Path.GetFileName(path)}";
+    }
+
+    e.Effect = XPlatDragDropEffects.Copy;
+});
+```
+
+`e` is the same `XPlatDragEventArgs` in both, and `Effect`, `Data`, `GetFiles()` and `Modifiers` are
+unchanged, so a handler body moves across untouched: `+=` becomes `Add<Name>Handler` and `-=`
+becomes `Remove<Name>Handler`, as it did for every other notification. `DragLeave` is the one that
+lost its payload, so `root.DragLeave += (_, _) => Reset();` becomes
+`root.AddDragLeaveHandler(_ => Reset());`. The `AddDragDrop()` call is the only line with no
+counterpart, and leaving it out compiles and runs; the window simply never becomes a drop target.
+
 ## Writing a backend
 
 A backend is two interfaces plus one registration hook. `IXPlatApplicationBackend` owns the platform
@@ -999,3 +1065,27 @@ would not make the deliverable any smaller, only less debuggable. Windows and Li
 The `macOS build` workflow publishes all three link modes, renders each bundle with `--render`,
 compares the *decoded* bitmaps (`sips` to BMP plus `cmp`, because a one pixel change rewrites most of
 a PNG) and reports the numbers in the job summary.
+
+## Contributing a feature
+
+New features are held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md). A pull request that adds
+one says, in its description:
+
+* which rung of §4 the feature sits on, and why it could not sit on a lower one;
+* the published size of an application that does not use it, measured on every platform the change
+  affects and quoted against the same application before the change;
+* anything in the §11 checklist that needed a judgement call, and the judgement.
+
+§11 is the review checklist itself. A reviewer works through it line by line and asks for the answer
+rather than inferring it, because the failures it catches are silent ones: a registration that runs
+whether or not anything uses it, a `net10.0` assembly that lands in the wrong application, a
+reflection path that only fails under AOT. The short form is that nothing new appears on an
+always-retained type, nothing runs unless the application opted in, and the pull request carries a
+number instead of an assurance.
+
+A feature that ships as its own package needs no multi-platform build. The `Feature pack` workflow
+packs every `XPlatUI.Feature.*` project on a macOS runner - `EnableWindowsTargeting=true` brings the
+Windows reference pack with it - then opens each package and fails unless it carries a `lib/` folder
+and a dependency group for every platform. That check exists because both omissions are silent in
+NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. §4 of the
+policy has the details.
