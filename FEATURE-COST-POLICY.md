@@ -1030,14 +1030,14 @@ same `XPlatHandlerToken<T>` from `XPlatUI/Core/`, rather than one token type per
 | Target | Phase 1 loose | Phase 2 loose | Delta |
 |---|---|---|---|
 | win-x64 | 3,202,048 | 3,202,048 | 0 |
-| linux-x64 | 4,215,120 | | |
-| osx-arm64 | 4,218,096 | | |
+| linux-x64 | 4,215,120 | 4,215,152 | +32 |
+| osx-arm64 | 4,218,096 | 4,218,096 | 0 |
 
-The Windows image came out byte-identical, which is what the phase predicted: a handler list and a
-multicast delegate cost the same to store, and the accessors that replaced `add` and `remove` are the
-same count and shape. The dropped base classes remove nothing at runtime, because they never added a
-field. The two remaining rows are left unmeasured for the same reason no delta can appear: nothing
-about this change can vary by platform.
+The Windows and macOS images came out byte-identical, which is what the phase predicted: a handler
+list and a multicast delegate cost the same to store, and the accessors that replaced `add` and
+`remove` are the same count and shape. The dropped base classes remove nothing at runtime, because
+they never added a field. Linux moved by 32 bytes, which is alignment rather than a per-event cost,
+because the same change on the other two platforms moved nothing.
 
 Byte-identical is not the same as free. The Phase 1 seam is still in the image, and the convention
 still forces every event to have a field and two methods where the compiler used to write those for
@@ -1116,27 +1116,42 @@ The demo keeps its sample, so it opts in: `DemoUi.cs` imports `XPlatUI.DragDrop`
 | Target | Phase 2 loose | Phase 3 loose | Delta |
 |---|---|---|---|
 | win-x64 | 3,202,048 | 3,070,976 | -131,072 |
+| linux-x64 | 4,215,152 | 4,062,688 | -152,464 |
+| osx-arm64 | 4,218,096 | 4,234,528 | +16,432 |
 
-Both rows come from the same command on the same machine, and the Phase 2 figure was reproduced from
-that commit's tree before the Phase 3 figure was trusted, because the two were measured weeks apart.
-The 131,072 bytes are 128 KB exactly, and the entry points that left the image are the ones the
-feature named: `OleInitialize`, `RegisterDragDrop` and `RevokeDragDrop` are gone, while the
-runtime's own COM calls (`CoInitializeEx`, `CoWaitForMultipleHandles`, `CoTaskMemFree`) stay.
-Nothing else moved.
+Every row comes from the same command on the same machine, and every Phase 2 figure was reproduced
+from that commit's tree in a separate worktree before the Phase 3 figure was trusted, because the
+two sets of numbers were taken weeks apart. On Windows the 131,072 bytes are 128 KB exactly, and the
+entry points that left the image are the ones the feature named: `OleInitialize`, `RegisterDragDrop`
+and `RevokeDragDrop` are gone, while the runtime's own COM calls (`CoInitializeEx`,
+`CoWaitForMultipleHandles`, `CoTaskMemFree`) stay. Nothing else moved.
 
-The plan said the size would return to the Phase 0 baseline. It goes below it, and the plan was
-wrong: Phase 0 paid for drag and drop because the registration was unconditional, so taking it out
-has to save more than the seam and the portable half add back. 3,070,976 is the floor now, and the
-Phase 0 row in this document is history rather than a target.
+The plan said the size would return to the Phase 0 baseline. On Windows and Linux it goes below it,
+and the plan was wrong: Phase 0 paid for drag and drop because the registration was unconditional,
+so taking it out has to save more than the seam and the portable half add back. 3,070,976 and
+4,062,688 are the floors now, and the Phase 0 rows in this document are history rather than a
+target. Linux saves 21,392 more than Windows; the two halves are different amounts of code, and only
+the Win32 one was checked entry point by entry point.
 
-Opting in costs 142,848 bytes. The same fixture with `AddDragDrop()` and a label that sets
-`AllowDrop` publishes at 3,213,824, which is 11,776 more than the Phase 2 image where the feature
-cost every application something, and 142,848 more than the floor. That pair is the policy's claim
-in one line: 3.07 MB for an application that does not accept drops, 3.21 MB for one that does.
+macOS is the exception, and it is worth recording rather than smoothing over: the image grows by
+16,432 bytes. The AppKit half is not removable. `AppKitSkiaView` is a registered `NSView` subclass
+and its `NSDraggingDestination` exports (`DraggingEntered`, `DraggingUpdated`, `DraggingExited`,
+`PrepareForDragOperation`, `PerformDragOperation`) are rooted by the registrar whether or not
+anything registers for dragged types, so what the trimmer can drop there is only the portable half.
+Phase 3's no-opt-in image keeps the view's drag path and pays a few kilobytes for the router the
+host now holds. The opt-in itself is then free: 4,234,544 against 4,234,528 is 16 bytes, inside the
+linker's alignment noise.
 
-The Linux and macOS rows are unmeasured. The saving is Windows-shaped in size but the same in kind,
-and nothing in the portable half varies by platform, so there is no reason to expect a different
-shape.
+Opting in costs 142,848 bytes on Windows and 164,912 on Linux. The same fixture with `AddDragDrop()`
+and a label that sets `AllowDrop` publishes at 3,213,824 and 4,227,600, which on Windows is 11,776
+more than the Phase 2 image where the feature cost every application something, and 142,848 more
+than the floor. That pair is the policy's claim in one line: 3.07 MB for an application that does
+not accept drops, 3.21 MB for one that does. macOS has no such pair to report, for the reason above.
+
+The macOS row says something the policy has to admit: a feature can only be rung 3 where the
+platform lets its native half be dropped. Where a registrar, a protocol conformance or a loader
+keeps it, the feature is rung 2 on that platform whatever its package says, and the honest thing is
+to record the floor it raises rather than promise a saving that cannot arrive.
 
 ### Phase 4: documentation and review
 
@@ -1273,6 +1288,13 @@ lower, and the measured cost for an application that does not use it.
   the feature project of §4 exists. The seam, the typed hooks, the same-named extensions and the
   extension surface are all in place, so the deferral is a build change and not an API one, and it
   waits for the pipeline job that can build all three platforms. See §10 and §11.
+- **Rung 3 is a per-platform claim.** A feature can only be rung 3 where the platform lets its
+  native half be trimmed away. macOS keeps AppKit's `NSDraggingDestination` exports alive through
+  the registrar, so drag and drop is rung 2 there: the no-opt-in image grew by 16,432 bytes instead
+  of shrinking, and opting in then costs 16 bytes because the platform half was never removable in
+  the first place. The package layout does not change, but a measurement row does not get to claim a
+  saving the platform's loader will not deliver, and the next feature that touches a registered
+  platform type is measured rather than assumed. See §10.
 
 ### Open
 

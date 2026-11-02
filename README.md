@@ -679,7 +679,7 @@ dotnet publish XPlatUIDemo.App\XPlatUIDemo.App.csproj -p:PublishProfile=FolderPr
 ```
 
 or right-click **Publish** in Visual Studio. The result is a **single** self-contained
-`XPlatUIDemoApp.exe` (9,241,600 bytes, 8.81 MiB, of which 5.2 MiB is the compressed Skia native
+`XPlatUIDemoApp.exe` (9,270,272 bytes, 8.84 MiB, of which 5.2 MiB is the compressed Skia native
 binary) and an optional `XPlatUIDemoApp.pdb` for debugging. Nothing else is needed to run it - the
 AOT build opens the real window and renders the demo.
 
@@ -703,14 +703,14 @@ package carries its own toolchain.
 dotnet publish XPlatUIDemo.App/XPlatUIDemo.App.csproj -c Release -r linux-x64 -p:PublishAot=true
 ```
 
-The result is a **single** `publish/XPlatUIDemoApp` (9,516,656 bytes, 9.08 MiB, a stripped ELF
+The result is a **single** `publish/XPlatUIDemoApp` (9,537,712 bytes, 9.10 MiB, a stripped ELF
 executable) plus an optional `XPlatUIDemoApp.dbg`. It is genuinely standalone - copy just that one
 file anywhere and it runs, window and all.
 
 `XPlatUI.Minimal` is the measurement fixture: one window, one label, no features. It publishes to
-8,649,216 bytes (8.25 MiB) on Windows and 9,015,344 (8.60 MiB) on Linux, so everything the demo
-demonstrates costs about 0.6 MB over the floor an application starts from. The full table, including
-macOS, is in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §10.
+8,527,872 bytes (8.13 MiB) on Windows and 8,867,296 (8.46 MiB) on Linux, so everything the demo
+demonstrates costs about 0.7 MB on Windows and 0.6 MB on Linux over the floor an application starts
+from. The full table, including macOS, is in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §10.
 
 SkiaSharp only ships a dynamic `libSkiaSharp.dll`/`libSkiaSharp.so`, so a native executable cannot
 simply link it. When `PublishAot` is on, XPlatUI's own build assets (`buildTransitive/` in the
