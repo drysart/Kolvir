@@ -1,9 +1,9 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
-  <!-- The measurement fixture for FEATURE-COST-POLICY.md, Phase 0: one window, one label, no
-       features. It exists to be published and weighed, so it stays deliberately smaller than any
-       real application - no menu bar, no icon, no headless render path, no single-instance handling.
-       Adding anything here changes the floor that every later phase is measured against.
+  <!-- The measurement fixture for FEATURE-COST-POLICY.md §8: one window, one label, no features. It
+       exists to be published and weighed, so it stays deliberately smaller than any real
+       application - no menu bar, no icon, no headless render path, no single-instance handling.
+       Adding anything here changes the floor that every feature is measured against.
 
        Each OS builds exactly one TFM: net10.0-macos needs the macOS workload and Xcode, which only
        exist on a Mac, so it must never appear in a TFM list that Windows has to evaluate. -->

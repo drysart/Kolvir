@@ -82,7 +82,7 @@ has to read `--classic-menus` before it can build a backend.
 Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
 does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
 construction where it can, by an opt-in registration where it cannot, and by its own package where
-neither is practical; §10 of the policy has the measured sizes, including what opting into drag and
+neither is practical; §8 of the policy has the measured sizes, including what opting into drag and
 drop costs on each platform.
 
 Everything is drawn in **logical (96 DPI) coordinates**; the host adapter is responsible
@@ -624,7 +624,7 @@ drop target, whether or not any control ever sets `AllowDrop`. `AllowDrop` can b
 on a control that is already inside a shown window, so there is no correct moment at which the
 native registration could depend on it. Leaving the call out is not an error: the code above still
 compiles and runs, nothing simply ever arrives. What the feature costs an application that never
-references the package is measured in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §10.
+references the package is measured in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §8.
 
 `AddDragEnterHandler`, `AddDragOverHandler` and `AddDragDropHandler` share one argument type, so the
 same handler can serve all three. `AddDragLeaveHandler` takes a handler with no arguments: by the
@@ -791,7 +791,8 @@ file anywhere and it runs, window and all.
 `XPlatUI.Minimal` is the measurement fixture: one window, one label, no features. It publishes to
 8,527,872 bytes (8.13 MiB) on Windows and 8,867,296 (8.46 MiB) on Linux, so everything the demo
 demonstrates costs about 0.7 MB on Windows and 0.6 MB on Linux over the floor an application starts
-from. The full table, including macOS, is in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §10.
+from. [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §8 records the baseline that every feature is
+measured against.
 
 SkiaSharp only ships a dynamic `libSkiaSharp.dll`/`libSkiaSharp.so`, so a native executable cannot
 simply link it. When `PublishAot` is on, XPlatUI's own build assets (`buildTransitive/` in the
@@ -1089,9 +1090,9 @@ one says, in its description:
 * which rung of §4 the feature sits on, and why it could not sit on a lower one;
 * the published size of an application that does not use it, measured on every platform the change
   affects and quoted against the same application before the change;
-* anything in the §11 checklist that needed a judgement call, and the judgement.
+* anything in the §9 checklist that needed a judgement call, and the judgement.
 
-§11 is the review checklist itself. A reviewer works through it line by line and asks for the answer
+§9 is the review checklist itself. A reviewer works through it line by line and asks for the answer
 rather than inferring it, because the failures it catches are silent ones: a registration that runs
 whether or not anything uses it, a `net10.0` assembly that lands in the wrong application, a
 reflection path that only fails under AOT. The short form is that nothing new appears on an

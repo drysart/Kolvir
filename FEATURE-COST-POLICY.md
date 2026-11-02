@@ -2,8 +2,8 @@
 
 How XPlatUI adds features without taxing the applications that do not use them.
 
-Status: policy proposed on `feature/opt-in-features`. This document is the first and, so far, only
-change on that branch; the implementation plan in §10 has not been started.
+Status: in force. Every new feature states, in its pull request, which rung it sits on, why it could
+not sit lower, and the measured cost for an application that does not use it.
 
 ---
 
@@ -111,6 +111,13 @@ separate assembly cannot add members to a type declared in `XPlatUI`. §5's shap
 not a preference here but the only option, and a feature that genuinely needs a member on a core
 type cannot take this rung at all.
 
+Rung 3 is a per-platform claim, not a property of the feature. A platform whose loader keeps a
+registered type's exports alive can make a feature's native half unremovable no matter which package
+it ships in; on macOS, AppKit keeps `NSDraggingDestination` exports whether or not anything
+registers. The package layout is the same either way, but a measurement row does not get to claim a
+saving the platform's loader will not deliver, and a feature that touches a registered platform type
+is measured rather than assumed.
+
 #### The project layout
 
 One project, four folders:
@@ -139,53 +146,48 @@ The project multi-targets every platform the feature supports, and each inner bu
 </ItemGroup>
 ```
 
-Verified with a planted error in each platform folder in turn: a build narrowed to
-`net10.0-windows` reported neither the `macos/` nor the `linux/` error, and a `net10.0` build
-reported the `linux/` one and not the `windows/` one. Each folder is compiled on its own branch and
-no other. The folders are named after the platform rather than the backend, so a feature author
-chooses a folder by the operating system being supported, and which backend that folder targets
-follows from the framework, since `net10.0-windows` can only mean Win32.
+Each folder is compiled on its own branch and no other. The folders are named after the platform
+rather than the backend, so a feature author chooses a folder by the operating system being
+supported, and which backend that folder targets follows from the framework, since `net10.0-windows`
+can only mean Win32.
 
 Sharing is a folder, not an assembly. `common/` compiles into each platform's output, so nothing has
 to be `public` for the sake of another platform, the folders need no `InternalsVisibleTo` between
-them, and there is no second assembly to place in each `lib/` folder. `#if` is still available inside
+them, and there is no second assembly for each `lib/` folder. `#if` is still available inside
 `common/` for differences too small to justify a file in each platform folder, and a feature with
 nothing portable simply has an empty `common/`. The same `$(TargetFramework)` condition is how a
 platform's `PackageReference` is applied, which is what produces the per-platform dependency groups
 below. A feature that drives its backend's internals is the one case that does need a friend
-assembly, and §10's Phase 5 record covers what that costs and why it is the cheaper answer.
+assembly: each backend names `XPlatUI.Feature.<feature>` in `InternalsVisibleTo` rather than making
+the members public, which would put the feature's shape into an always-retained type.
 
 A consuming solution is simpler than either alternative. The project reference is one unconditional
 line, and MSBuild builds only the inner build that matches the consuming project, so there is no
 host detection and no condition choosing which platform to reference. Only the feature project's own
 build enumerates all three, which matters in one case: a direct or solution build of the project
 needs the macOS workload, because that is the one platform whose reference assemblies do not come
-with the SDK.
+with the SDK. A machine without it fails with `NETSDK1147`. The development solution lists the
+feature project and `XPlatUI.Backend.AppKit`, which carries the same requirement, so the workload is
+a prerequisite for building the solution and a contributor meets it once with
+`dotnet workload install macos`. That is a deliberate trade: the feature and the backend are visible
+in the IDE and compiled by the ordinary build, at the cost of one prerequisite, rather than being
+reachable only through the pack pipeline.
 
-The `macos` workload is therefore a build requirement for this project, and for anything that builds
-it directly. It is installed here and the `macos` inner build succeeds; a machine without it fails
-with `NETSDK1147`. The development solution lists both this project and `XPlatUI.Backend.AppKit`,
-which carries the same requirement, so the workload is a prerequisite for building the solution and
-a contributor meets it once with `dotnet workload install macos`. That is a deliberate trade: the
-feature and the backend are visible in the IDE and compiled by the ordinary build, at the cost of one
-prerequisite, rather than being reachable only through the pack pipeline. Only the macOS workload is
-actually a workload, so one macOS machine packs the whole package:
+Only the macOS workload is actually a workload, so one macOS machine packs the whole package:
 `-p:EnableWindowsTargeting=true` brings the Windows reference pack to it, and the Linux framework
-needs nothing extra. Verified on a Mac with a three-framework project: without the property the
-`net10.0-windows` inner build stops with `NETSDK1100`, and with it one `dotnet pack` writes all
-three `lib/` folders. For local work, `-p:TargetFramework=net10.0-windows` builds one inner build
-without editing the file; the plural `-p:TargetFrameworks=...` does not work as a narrowing switch,
-because a global property reaches the restore graph but not the referenced projects' own builds, so
-those build the frameworks they declare against assets restored for one, and the build stops with
-`NETSDK1005`. Verified both ways.
+needs nothing extra. Without the property the `net10.0-windows` inner build stops with `NETSDK1100`.
+For local work, `-p:TargetFramework=net10.0-windows` builds one inner build without editing the
+file; the plural `-p:TargetFrameworks=...` does not work as a narrowing switch, because a global
+property reaches the restore graph but not the referenced projects' own builds, so those build the
+frameworks they declare against assets restored for one, and the build stops with `NETSDK1005`.
 
 Pin the macOS target framework version rather than writing the floating `net10.0-macos`. The packed
 `lib/` folder name carries whatever platform version the build machine's workload supplies, and an
-unpinned build produced `lib/net10.0-macos26.0/`. A consumer on an older workload then resolves to a
-lower platform version and does not match the folder. The drag and drop project writes the floating
-form anyway, because its `ProjectReference` to `XPlatUI.Backend.AppKit` has to name that backend's
-framework, so the pinned folder name is a publishing decision that arrives with the first published
-package rather than a decision this project can make alone.
+unpinned build produces `lib/net10.0-macos26.0/`. A consumer on an older workload then resolves to a
+lower platform version and does not match the folder. A feature project whose `ProjectReference` to
+`XPlatUI.Backend.AppKit` has to name that backend's framework cannot pin it, so the pin is a
+publishing decision that arrives with the first published package rather than a rule the project can
+keep on its own.
 
 #### Shipping: one pack
 
@@ -197,33 +199,24 @@ own `lib/` folder and its own dependency group:
 2. One dependency group per platform, naming `XPlatUI` plus whatever feed packages that platform
    needs, generated from the same `$(TargetFramework)` conditions that selected the source folder.
 
-Verified with the four-folder project above, carrying one `PackageReference` conditioned on the
-Windows framework: one `dotnet pack` produced `lib/net10.0/`, `lib/net10.0-windows7.0/` and
-`lib/net10.0-macos26.0/`, with an empty group for `net10.0`, an empty group for the macOS framework,
-and a Windows group. No merge step, no hand-written groups, no `SuppressDependenciesWhenPacking`,
-and no `NU5128`.
+No merge step, no hand-written groups, no `SuppressDependenciesWhenPacking`, and no `NU5128`.
 
 A dependency group per platform is what makes a platform-only package tolerable. Dependencies are
 selected by the same nearest-framework rule as assemblies, so a macOS-only package listed in the
-macOS group is never restored by a Windows application. Verified with a package carrying three
-groups: a `net10.0-windows` consumer restored only the Windows dependency, a `net10.0` consumer only
-the Linux one, and a `net10.0-macos` consumer only the macOS one.
+macOS group is never restored by a Windows application.
 
 What makes that safe is that every platform gets a group, even an empty one. When the matching group
 is absent NuGet falls back to a compatible one, and `net10.0` is always compatible with
 `net10.0-windows`, so a missing Windows group silently hands a Windows application the Linux
-dependencies. Verified: a package with no Windows group restored the Linux dependency into a
-`net10.0-windows` consumer, while an empty `<group targetFramework="net10.0-windows7.0" />`
-restored nothing. Each group must also be the platform's whole closure rather than its extras,
-because nothing is inherited from the `net10.0` group once a platform group is chosen.
+dependencies. Each group must also be the platform's whole closure rather than its extras, because
+nothing is inherited from the `net10.0` group once a platform group is chosen.
 
 The same rule governs the `lib/` folders, where the failure is worse because it is silent. NuGet
 chooses one `lib/` folder per package per target framework, so a missing Windows folder is not an
 error: the `net10.0-windows` consumer compiles against the `net10.0` folder instead, and a Windows
-application ships the Linux assembly. Verified: a `net10.0-windows` consumer of a package with no
-Windows folder compiled and printed the marker string from the `net10.0` assembly. A project that
-multi-targets cannot produce that shape by accident, because each folder is written by the same
-inner build that the `TargetFrameworks` list requires.
+application ships the Linux assembly. A project that multi-targets cannot produce that shape by
+accident, because each folder is written by the same inner build that the `TargetFrameworks` list
+requires.
 
 #### The pack job
 
@@ -234,12 +227,6 @@ runner with `EnableWindowsTargeting=true`, then hands each package to
 `lib/` folders, and fails if a folder has no dependency group of the same name or a group has no
 folder. The check reports the layout as a table in the job summary, so a review sees the platforms
 the package covers without downloading it.
-
-Verified against a package with its `lib/net10.0-windows7.0/` folder removed: the check fails with
-the missing platform named, where NuGet itself would have compiled the Windows consumer against the
-Linux assembly. The whole job was rehearsed on a Mac against a three-framework project - discovery,
-pack, check, summary and the failure path - because a workflow that only runs on a pull request is
-otherwise first exercised by the first feature author to use it.
 
 #### The `net10.0` fallback guard
 
@@ -272,20 +259,10 @@ internal static class PlatformGuard
 application can handle. The alternative is a feature that misbehaves somewhere unrelated, and an
 exception can be caught and masked. The process dies with a distinctive exit code and the message on
 standard error. `OperatingSystem.IsLinux()` is a constant check with no reflection, so it is safe
-under trimming and AOT.
-
-Verified, with the guard deliberately set to fire:
-
-| Build | Behaviour |
-|---|---|
-| framework-dependent | runs before `Main`, stack shows `<Module>..cctor()`, exit `0x80131623` |
-| `PublishTrimmed` | runs before `Main`, exit `0x80131623` |
-| `PublishAot` | runs during startup, stack shows `RunModuleInitializers`, exit `0xC0000409` |
-
-The analyzer warns `CA2255`, that module initializers are intended for application code. That is the
-intended use here, so it is suppressed at the attribute with a comment. The guard's own cost is one
-method and one string in the Linux assembly, inside a package the application has already chosen to
-reference.
+under trimming and AOT. The analyzer warns `CA2255`, that module initializers are intended for
+application code; that is the intended use, so it is suppressed at the attribute with a comment.
+The guard's own cost is one method and one string in the Linux assembly, inside a package the
+application has already chosen to reference.
 
 The guard is a detector, not the guarantee. The guarantee is target framework selection, which is a
 build-time decision; the guard exists because the failure it detects is otherwise silent. Two limits
@@ -293,10 +270,8 @@ are worth knowing:
 
 - A module initializer does not keep its own assembly alive. If trimming inlines away everything
   reachable in the assembly, the assembly and its initializer are deleted together and the guard
-  never runs. Verified: a library whose only used method returned a constant was eliminated and the
-  guard did not fire, while the same library with one non-inlinable member survived and fired. A
-  real feature assembly is not in danger, but the guard should not be the only code in its folder,
-  and a test that exercises it is worth having.
+  never runs. A real feature assembly is not in danger, but the guard should not be the only code in
+  its folder, and a test that exercises it is worth having.
 - The guard runs when the assembly is loaded, which in a framework-dependent build is the first use
   of the feature. An application that never touches the feature never loads the assembly, and has
   nothing to guard.
@@ -325,10 +300,9 @@ type: no new member, no vtable slot, no interface implementation, no instance fi
 member that nothing calls is trimmed, one member at a time, which is finer granularity than a member
 of a retained type ever gets.
 
-For contrast, `AllowDrop` plus the four drag events on `XPlatControl` are real members of a retained
-type. The events are field-like, so every control instance in every application carries four
-delegate fields (32 bytes on 64-bit) whether or not anything ever drags, and the accessors stay with
-the type.
+For contrast, a field-like event on a retained type is a real member: every instance in every
+application carries a delegate field (8 bytes on 64-bit) whether or not anything ever raises it, and
+the accessors stay with the type.
 
 Converting an event to the `Add`/`Remove` pair in §5.4 does not change that cost for a core event,
 which still needs its backing field. What the pair buys is that the same shape works for a feature,
@@ -364,10 +338,10 @@ same compiler. They are, because the library targets `net10.0`.
 
 ### 5.4 Events: `Add` and `Remove` handler methods
 
-Extension members cannot be events: `CS9282`, "This member is not allowed in an extension block", for
-`event`, `add` and `remove` alike. Rather than work around that with a helper object, which makes the
-feature read as bolted on, the library does not use the C# `event` keyword at all. Every event is a
-pair of methods taking an `Action`:
+Extension members cannot be events: `CS9282`, "This member is not allowed in an extension block",
+for `event`, `add` and `remove` alike. Rather than work around that with a helper object, which
+makes the feature read as bolted on, the library does not use the C# `event` keyword at all. Every
+event is a pair of methods taking an `Action`:
 
 ```csharp
 public IDisposable AddDroppedHandler(Action<object, XPlatDragEventArgs> handler);
@@ -394,9 +368,6 @@ using var subscription = control.AddDroppedHandler((sender, e) => { ... });
 control.RemoveDroppedHandler(handler);
 ```
 
-Verified in a throwaway project: the pair works as extension members, both arities resolve, and
-disposing the token unsubscribes.
-
 This is a codebase-wide convention rather than a rule for opt-in features only. Core events on
 `XPlatControl`, `XPlatWindow`, `XPlatApplication` and the backend interfaces use the same shape, so
 there is one way to subscribe to anything.
@@ -405,17 +376,17 @@ Rules:
 
 - The name is `Add` or `Remove`, then the event name, then `Handler`: `AddDroppedHandler`. The event
   name is the part that appears in documentation, so it keeps a normal event name.
-- `AddXHandler` returns an `IDisposable` that removes the handler when disposed, so a scope can own a
-  subscription without holding the handler itself. Disposing twice is a no-op, and so is disposing a
+- `AddXHandler` returns an `IDisposable` that removes the handler on dispose, so a scope can own a
+  subscription without holding the handler itself.
   subscription whose owner has already been torn down.
 - `RemoveXHandler` stays alongside the token, because the two suit different call sites. A consumer
   that already holds the handler callback can pass it again rather than storing a token next to it,
   and a handler registered from a place with no natural scope has no obvious owner for a token
   anyway. The pair is also what makes the shape look like the event it replaces; a lone `Add` would
   read as a subscription that can only be ended by holding a token. Both are one line per event.
-- Handlers run on the UI thread in subscription order. A handler that throws stops the ones after it,
+- Handlers run on the UI thread in subscription order. A handler that throws stops those after it,
   as a C# event would, and the exception reaches `XPlatApplication.UnhandledException`.
-- The backing storage stays private and unchanged: one field per event, exactly as a field-like event
+- The backing storage is private and unchanged: one field per event, exactly as a field-like event
   has today, so a core event costs no more than it does now. The field sits with its `Add` and
   `Remove` at the top of the type, ahead of the members that use it, so a reader looking for what a
   type can raise finds one block rather than a scattering among the methods. The new cost is one
@@ -426,9 +397,8 @@ Rules:
 - The payload is whatever the event already carries. `XPlatDragEventArgs`, `XPlatMouseEventArgs` and
   friends stay as they are, and a feature that needs a payload defines its own type rather than
   wrapping a value in a generic one.
-- The `System.EventArgs` base on those classes was vestigial once nothing took an `EventHandler`, and
-  Phase 2 dropped it. A payload class is now a plain class, so a feature that defines one has nothing
-  to inherit and no `EventArgs` naming to imitate.
+- A payload class is a plain class with no base type, so a feature that defines one has nothing to
+  inherit and no `EventArgs` naming to imitate.
 
 ### 5.5 When a member does belong on the control
 
@@ -450,13 +420,13 @@ Three exceptions, each of which has to be stated in the pull request:
 - Extension classes are named for the type they extend plus the feature:
   `XPlatControlDragDropExtensions`.
 - Handler methods follow §5.4: `AddDragDropHandler`, `RemoveDragDropHandler`.
-- A feature that needs per-control state keeps it behind an extension property or an extension method
-  on the control, never behind an object the application has to hold on to.
+- A feature that needs per-control state keeps it behind an extension property or an extension
+  method on the control, never behind an object the application has to hold on to.
 
 ## 6. The opt-in mechanism
 
-The shape below is a sketch of the intended design, not a settled API. Names, signatures and the
-exact hook points will be decided when we implement Phase 1.
+A feature that has to run code is turned on by a service registration, and the framework runs it
+through a hook.
 
 ### 6.1 Two phases, because services and work happen at different times
 
@@ -464,10 +434,10 @@ exact hook points will be decided when we implement Phase 1.
 need two distinct things:
 
 1. **Contribute services**, before `BuildServiceProvider`. This already exists as
-   `XPlatApplicationOptions.ConfigureServices`, which receives MEDI's own `IServiceCollection` and is
+   `XPlatApplicationOptions.ConfigureServices`, which receives MEDI's `IServiceCollection` and is
    documented to stay inside the AOT-safe subset (generic `AddSingleton<TService, TImpl>()`, factory
    overloads, `AddWindowScoped<T>`; no assembly scanning).
-2. **Run work**, after the container exists, at one of the phases in §6.3. This is the new hook.
+2. **Run work**, after the container exists, at one of the phases in §6.3. This is the hook.
 
 A feature that needs both registers a service and a hook, in the same opt-in call.
 
@@ -576,12 +546,10 @@ registration order like every other phase. A hook that still implements `IDispos
 reasons is disposed by the container afterwards, windows before the application.
 
 The phases are the teardown order, and it is the nesting order. A window's `Disposed` fires before
-its scope is disposed (`XPlatWindow.cs:400`), and every window is disposed at
-`XPlatApplication.cs:802-805`, before the application's `Stopped` (`:813`) and `Disposed` (`:819`).
-So window teardown always precedes application teardown, and the application's `Disposed` precedes
-the root provider's (`:821`) and the backend's shutdown (`:828`). A hook that needs it the other way
-round says so in its own `Stopping` or `Stopped` callback rather than relying on `Dispose`
-ordering.
+its scope is disposed, and every window is disposed before the application's `Stopped` and
+`Disposed`. Window teardown always precedes application teardown, and the application's `Disposed`
+precedes the root provider's and the backend's shutdown. A hook that needs it the other way round
+says so in its own `Stopping` or `Stopped` callback rather than relying on `Dispose` ordering.
 
 The trim property that makes this work: `GetServices<T>()` on a service nobody registered returns an
 empty sequence, and the only thing retained is the interface itself. The concrete hook type is
@@ -602,13 +570,13 @@ instance serves every phase and a feature normally cares about more than one of 
 
 #### Application phases
 
-| Phase | When it fires | Direction | Where |
+| Phase | When it fires | Direction | Raised from |
 |---|---|---|---|
-| `Creating` | The container exists, the process services are installed, and no window exists yet. | Ascending | End of the `XPlatApplication` constructor, `XPlatApplication.cs:106-107` |
-| `Created` | Every window shown before `Run()` is visible, and the loop is about to start. | Ascending | `XPlatApplication.cs:300` |
-| `Stopping` | The loop has returned. Every window, the backend and every service are still alive. | Descending | Start of `TearDown`, `XPlatApplication.cs:793` |
-| `Stopped` | Every window is gone, and the services are about to be. | Descending | `XPlatApplication.cs:813` |
-| `Disposed` | The container is about to be disposed. Raised on every teardown path, including one that never ran a loop. | Descending | `XPlatApplication.cs:819` |
+| `Creating` | The container exists, the process services are installed, and no window exists yet. | Ascending | The end of the `XPlatApplication` constructor |
+| `Created` | Every window shown before `Run()` is visible, and the loop is about to start. | Ascending | Immediately before `Backend.Run()` |
+| `Stopping` | The loop has returned. Every window, the backend and every service are still alive. | Descending | The start of `TearDown` |
+| `Stopped` | Every window is gone, and the services are about to be. | Descending | Inside `TearDown`, after the windows are disposed |
+| `Disposed` | The container is about to be disposed. Raised on every teardown path, including one that never ran a loop. | Descending | Immediately before the provider is disposed |
 
 The splits are placed where they carry information:
 
@@ -622,18 +590,17 @@ The splits are placed where they carry information:
   next.
 - **`Disposed` after `Stopped`** is the one teardown that always happens. It is the mirror of the
   window's `Disposed`: the hook and every service it can resolve are still alive, and the container
-  goes immediately afterwards (`XPlatApplication.cs:821`). The backend shuts down after that
-  (`:828`), so no phase ever sees a shut-down backend.
+  goes immediately afterwards. The backend shuts down after that, so no phase ever sees a shut-down
+  backend.
 
 `Disposed` is therefore the last phase, and the one to use for work that has to happen exactly once
 per launch. A hook that implements `IDisposable` for its own reasons is still disposed by the
 container, after the phase has run.
 
-`Stopping` and `Stopped` are raised only when a loop ran, matching the guard `Exiting` already has
-(`XPlatApplication.cs:791`). A forwarded second instance returns from `Run()` without entering one
-(`:270-276`), so it sees `Creating` and `Disposed` and nothing else. **`Creating` is therefore
-paired with `Disposed`, not with `Stopping`:** the two are not guaranteed to both happen, and
-`Disposed` is the only teardown that is.
+`Stopping` and `Stopped` are raised only when a loop ran, matching the guard `Exiting` already has.
+A forwarded second instance returns from `Run()` without entering one, so it sees `Creating` and
+`Disposed` and nothing else. **`Creating` is therefore paired with `Disposed`, not `Stopping`:**
+the two are not guaranteed to both happen, and `Disposed` is the only teardown that is.
 
 #### Window phases
 
@@ -679,22 +646,20 @@ arrive in. The rule holds at application level as well, where the two hooks may 
 same assembly.
 
 The window lifetime already exists, so this costs nothing new. `XPlatWindow` creates an
-`IServiceScope` in its constructor (`XPlatWindow.cs:61`), exposes it as `Services` (`:120`), and
-disposes it when the window closes (`:400`). `AddWindowScoped<T>` (`XPlatWindowScope.cs:32`) is
-`AddScoped` with the window handed to the factory, and `XPlatWindowAccessor` is how a scoped service
-reaches its window. A window hook is therefore registered like this, and one window's instance is
-nobody else's:
+`IServiceScope` in its constructor, exposes it as `Services`, and disposes it when it closes.
+`AddWindowScoped<T>` is `AddScoped` with the window handed to the factory, and `XPlatWindowAccessor`
+is how a scoped service reaches its window. A window hook is therefore registered like this, and one
+window's instance is nobody else's:
 
 ```csharp
 services.AddWindowScoped<IXPlatWindowHook>((window, provider) => new DragDropWindowHook(window));
 ```
 
-The ordering matters and is easy to get wrong. `XPlatWindow` disposes the backend at `:391`, raises
-`Closed` at `:393` and disposes the scope at `:400`. `Closing` therefore fires while the native
-handle is alive and `Closed` after it is gone, which is the split a feature needs: revoking a drop
-target before the window is destroyed belongs in `Closing`, and releasing managed bookkeeping
-belongs in `Closed` or `Disposed`. A scoped hook's own `Dispose` runs last of all, after the native
-window is gone.
+The ordering matters and is easy to get wrong. `XPlatWindow` disposes the backend, then raises
+`Closed`, then disposes the scope. `Closing` therefore fires while the native handle is alive and
+`Closed` after it is gone, which is the split a feature needs: revoking a drop target before the
+window is destroyed belongs in `Closing`, and releasing managed bookkeeping belongs in `Closed` or
+`Disposed`. A scoped hook's own `Dispose` runs last of all, after the native window is gone.
 
 `Disposed` is the last point at which a hook can still reach other scoped services, and it fires
 after the backend is disposed. Two consequences, both rules in §6.4: a typed `Disposed` callback is
@@ -702,8 +667,8 @@ managed-only, and the backend's phase entry point has to stay callable once it h
 
 The window phases take the window so a portable hook can reach the native handle through
 `window.Backend` without the model having to expose anything new. A control-level "attached to tree"
-point is deliberately out of scope for now; the window phases are enough for every feature currently
-on the roadmap, and each added point is permanent cost in the seam.
+point is deliberately out of scope: the window phases are enough for the features on the roadmap,
+and each added point is permanent cost in the seam.
 
 ### 6.4 Rules for hook implementations
 
@@ -728,23 +693,26 @@ on the roadmap, and each added point is permanent cost in the seam.
 - **Resolve from the right provider.** Application hooks come from the root provider; window hooks
   come from `window.Services`. Resolving a scoped hook from the root is the trap: MEDI either throws
   under scope validation or hands back a single instance that outlives every window.
-- **Dependencies point one way.**
-  singleton must never hold a window hook, because that would keep one window's instance alive for
-  the life of the process.
+- **Dependencies point one way.** A singleton must never hold a window hook, because that would keep
+  one window's instance alive for the life of the process.
 - **Portable hooks are the outer layer.** They run before a backend's typed hooks (§6.5) in an
   ascending phase and after them in a descending one, so a typed hook always tears down before the
   portable hook that set it up.
 - **Typed hooks never derive from portable ones.** An `IXPlatWin32WindowHook` that also implemented
   `IXPlatWindowHook` would be found by both loops and invoked twice.
 - **A backend's window phase entry point survives its own `Dispose`.** The window's `Disposed` phase
-  fires after `Backend.Dispose()` (`XPlatWindow.cs:391`) and before the scope goes (`:400`), so
-  `RunWindowHooks` must touch nothing native by then and must not assume the backend is alive.
+  fires after the backend is disposed and before the scope goes, so `RunWindowHooks` must touch
+  nothing native by then and must not assume the backend is alive.
 - **Use `Disposed` for teardown, not `IDisposable`.** An application hook and a window hook both
   have a `Disposed` phase, raised while the hook and the services it can resolve are still alive, so
   a hook releases in the phase and does not need to implement `IDisposable` at all. `Disposed` is
   also the only application phase every launch reaches, so it is where anything that must happen
   exactly once belongs; `Stopping` and `Stopped` are for work that needs the loop's exit code or the
   window tree, and they are the only phases that can be skipped.
+- **Register native work at `Shown`, not `Created`.** The native window does not exist until the
+  backend is asked to show it, so a hook that needs the handle registers at `Shown` and releases
+  through whatever the backend disposes while the window still exists, rather than through
+  `Closing`, because a window can be disposed without ever closing.
 
 ### 6.5 Platform-specific hooks
 
@@ -757,8 +725,8 @@ A feature that is native on every platform is three layers, and only the middle 
 | Selection: which implementation exists | The backend project reference in the app's project file | None |
 
 Core never references a backend, and an application references exactly one backend per target
-framework (`XPlatUIDemo.App.csproj`, "Exactly one backend per TFM"). The choice is therefore made
-when the application is compiled: no runtime dispatch, no reflection, no operating system check.
+framework. The choice is therefore made when the application is compiled: no runtime dispatch, no
+reflection, no operating system check.
 
 **The registration call site has one name.** Each backend declares the same extension method, in the
 feature's namespace, so the application calls it without knowing which platform it is on:
@@ -832,8 +800,8 @@ and forgetting a platform is still a compile error on that platform.
 
 **A platform that cannot support a feature still declares it.** The extension method exists
 everywhere so application code compiles, and the platform-neutral service reports `IsSupported` or
-throws `PlatformNotSupportedException` from the operation. A silent no-op is how the macOS image
-drag ended up arriving as its own URL string and reading as success.
+throws `PlatformNotSupportedException` from the operation. A silent no-op is how a feature ends up
+appearing to succeed while doing nothing.
 
 ## 7. The seam is an accepted cost
 
@@ -849,10 +817,9 @@ another. What the seam gets instead is a stability promise and a shape rule:
   as an extension member (§5) is recorded in the pull request.
 
 The seam's cost is still reported (§8), because a number that only ever grows unnoticed is how a
-small seam becomes a large one. It is a trend to watch, not a threshold to pass, and the number it
-starts from is 10,240 bytes on Windows and 4,384 on Linux (§10).
+small seam becomes a large one. It is a trend to watch, not a threshold to pass.
 
-Two of the seam's types are retained whether or not anything uses them, deliberately:
+Two things in the seam are retained whether or not anything uses them, deliberately:
 
 - The action wrappers from §6.2 are seam types, so they are retained even when no application calls
   the overload. One class and one method each is the price of not forcing a class on a one-line
@@ -867,7 +834,7 @@ Claims about cost are worth nothing without a number. Every feature lands with:
 
 1. **A size measurement.** Publish a minimal application that does not use the feature with
    `PublishTrimmed` and `PublishAot`, on `win-x64`, `linux-x64` and `osx-arm64`, and compare against
-   the previous commit. The delta is quoted in the pull request.
+   the baseline below. The delta is quoted in the pull request.
 2. **A warning review.** Build with `-p:TrimmerSingleWarn=false` and read the IL2xxx/IL3xxx output
    for the new code. That is where accidental rooting shows up first.
 3. **A startup check.** Confirm that an application which does not use the feature performs no new
@@ -875,457 +842,46 @@ Claims about cost are worth nothing without a number. Every feature lands with:
    allocations. The seam itself is the one accepted exception: every application performs an empty
    `GetServices` lookup for each hook kind, once for the application and once per window. That is
    the cost §7 accepts, and it does not grow with the number of features.
-4. **A use check.** Confirm that an application which does use the feature still gets it, still
+4. **A use check.** Confirm that an application that does use the feature still gets it, still
    publishes cleanly, and still trims.
 
-This needs a stable measurement fixture: a minimal app (one window, one label, nothing else) kept in
-the repository and published by the same commands every time. Without a fixed fixture the numbers
-are not comparable and the policy becomes folklore.
+This needs a stable measurement fixture: `XPlatUI.Minimal`, one window and one label, kept in the
+repository and published by the same command every time. Without a fixed fixture the numbers are not
+comparable and the policy becomes folklore.
 
-## 9. Case study: drag and drop as merged
+```
+dotnet publish XPlatUI.Minimal/XPlatUI.Minimal.csproj -c Release -r <rid> -p:EmbedSkiaSharpNative=false
+```
 
-Drag and drop is the first feature that fails this policy, and it is worth writing down exactly how,
-because it is the template for the fix.
-
-What every application pays today, whether or not it sets `AllowDrop`:
-
-| Platform | Cost | Where |
-|---|---|---|
-| Windows | `OleInitialize`, a COM drop-target object, and `RegisterDragDrop`, per window | `XPlatUI.Backend.Win32/Win32WindowBackend.cs:575-576`, `Win32DropTarget.cs:71,80` |
-| macOS | `RegisterForDraggedTypes` on every view | `XPlatUI.Backend.AppKit/AppKitSkiaView.cs:101` |
-| GTK4 | Two `Gtk.DropTarget` controllers per view | `XPlatUI.Backend.Gtk4/Gtk4SkiaView.cs:76-77` |
-| Shared | `XPlatDataObject`, `XPlatDataFormat`, `XPlatDragEventArgs`, the host routing in `XPlatUiHost`, and `AllowDrop` plus four events on `XPlatControl` | `XPlatUI/DragDrop/`, `XPlatUI/XPlatUiHost.cs`, `XPlatUI/Core/XPlatControl.cs` |
-
-None of it is conditional on anything. The backend view types are always retained, so their drag
-members are retained with them, and the per-window native registration happens for every window.
-
-Target state: an application that never calls the opt-in publishes without OLE initialisation,
-without a COM drop target, without registered pasteboard types and without GTK controllers. The
-shared payload types can stay where they are: they are small and inert, and they cost nothing until
-something calls them. Phase 5 has since done this, and §10 records what it cost and what it forced.
-
-`AllowDrop` and the four events are a different matter, and moving them is not a judgement call.
-Their surface becomes `using XPlatUI.DragDrop;`, `AllowDrop` as an extension property, and
-`AddDragEnterHandler`, `AddDragOverHandler`, `AddDragLeaveHandler` and `AddDragDropHandler` as
-extension methods, which takes those members off `XPlatControl` altogether.
-
-Rung 3 forces it. A feature package is a different assembly, and an extension member is the only way
-one assembly can add a member to a type declared in another, so the members cannot stay on
-`XPlatControl` and still ship separately. The breaking change is a precondition of the rung rather
-than a cost weighed against the benefit of §5's shape. See the drag and drop surface entry in §12.
-
-Note the trap: making `AllowDrop` the opt-in would *not* achieve this. `AllowDrop` lives on
-`XPlatControl`, which is always retained, so the code behind it is reachable and kept regardless of
-whether any application ever sets it. Per-control opt-in is a nice ergonomic layer on top; it is not
-a substitute for an application-level opt-in.
-
-The opt-in is coarse in the other direction too, and deliberately so. Once an application calls
-`AddDragDrop()`, every window gets its drop target in the `Shown` phase whether or not any control
-ever sets `AllowDrop`, and nothing in the backend reads `AllowDrop` to decide whether to register.
-(`Shown` rather than `Created`, because the native window does not exist yet at `Created`; §10.)
-`AllowDrop` can be set, cleared and set again on a control that is already inside a shown window, so
-there is no correct moment at which the native registration could be made conditional on it. Gating
-on it would buy a per-window saving in exchange for a feature that stops working the first time
-someone toggles the property.
-
-## 10. Implementation plan
-
-### Phase 0: the measurement fixture
-
-Add a minimal application (one window, one label, no features) and the publish commands for the
-three platforms, and record its AOT sizes in this document. Everything after this phase is judged
-against those numbers. Nothing else is meaningful until this exists.
-
-The SkiaSharp and NativeAOT scaffolding every AOT application needs lives in XPlatUI's own
-`buildTransitive/` assets, so the fixture is an ordinary small project rather than a copy of the
-demo's project file. It names no platform and no graphics library: it calls
-`XPlatUIBackend.CreateDefault()`, which loads the embedded SkiaSharp archive and returns the backend
-for the target framework. The fixture's project file therefore references one project, `XPlatUI`,
-and one more, `XPlatUI.Backend`, whose only job is to reference the right backend per framework.
-
-#### The numbers
-
-`dotnet publish -c Release -r <rid>` on .NET 10, NativeAOT, no publish profile, one machine per
-platform. Windows is `win-x64`, Linux `linux-x64`, macOS `osx-arm64` on an Apple Silicon Mac. On
-Windows that command needs the MSVC toolset, so it runs from a Developer prompt; nothing else
-differs between the three.
+The fixture is NativeAOT with no publish profile, so `-c Release -r <rid>` is the whole
+configuration. `-p:EmbedSkiaSharpNative=false` produces the loose row, which is the one features are
+measured on, because it is where the library's own contribution is visible; the default publish
+embeds the Skia blob and that fixed cost swamps it. Restore walks the backend selector's three
+frameworks, so the publishing machine needs the macOS workload.
 
 | Measurement | win-x64 | linux-x64 | osx-arm64 |
 |---|---|---|---|
-| Bare AOT console app | 1,106,944 | 1,270,784 | 1,236,088 |
-| Minimal app, Skia embedded | 8,649,216 | 9,015,344 | not applicable |
-| Minimal app, Skia loose | 3,191,808 | 4,210,736 | 4,218,096 |
-| Embedded Skia blob | 5,457,408 | 4,804,608 | not applicable |
-| XPlatUI plus its backend | 2,084,864 | 2,939,952 | 2,982,008 |
-| Delivered footprint | 8,649,216 | 9,015,344 | 21,420,244 |
-
-The fixture is 8.25 MiB on Windows and the full demo publishes to 8.81 MiB, so the demo's menu bar,
-icon, headless render path, single-instance handling and every control in the library together cost
-592,384 bytes, or 501,312 on Linux. The rest of both numbers is the runtime, the backend and
-SkiaSharp. That is the shape the policy predicted: the floor is high and mostly fixed, and features
-are cheap on top of it.
-
-The embedded blob is 5,457,408 of the Windows total, 63 percent of it. SkiaSharp's own IL is only
-about 109 KB; the blob is the native rasteriser, gzipped. It is a fixed cost of the graphics choice
-rather than of the library's design, and it is the one number here that no phase can move. It is
-also why `EmbedSkiaSharpNative` exists: turning it off trades 5,457,408 bytes of executable for a
-12,903,776-byte `libSkiaSharp.dll` beside it, which is a deployment decision rather than a size one.
-
-XPlatUI plus its backend is 2,084,864 bytes on Windows but 2,939,952 on Linux and 2,982,008 on
-macOS. The two generated-binding backends cost about 0.9 MiB more than the hand-written Win32 one,
-and the library core is identical in all three. So later phases have to be measured per platform. A
-change that adds 40 KB adds it everywhere, but the platforms do not start from the same place, and
-comparing across them answers a different question.
-
-macOS has no embedded row because the gate excludes it: a `.app` bundle already carries loose native
-libraries, so embedding Skia there would only duplicate one. Its delivered footprint is the whole
-21,420,244-byte bundle, of which 15,804,304 is `libSkiaSharp.dylib` and 1,391,392 is .NET's own
-native shims, and its loose row is not comparable with the other two.
-
-Debug symbols are excluded throughout: 14,569,472 bytes of `.pdb` on Windows, 6,701,824 of `.dbg` on
-Linux, and dSYM bundles on macOS. They are not shipped to users.
-
-The backend selector is part of these numbers rather than a separate measurement. It is one more
-assembly in the graph, but the trimmed image absorbs it almost completely: it costs 512 bytes on
-Windows, nothing measurable on Linux or macOS, and it does not change the loose Windows executable
-at all. Its value is that the fixture's `Program.cs` contains no `#if` and names no platform, which
-is what a consumer of the two packages should be able to write.
-
-The selector declares all three frameworks unconditionally, for the same reason the feature project
-does: it exists to turn a framework into a backend, and a list that named only the host's would be a
-build that cannot produce the others. Restore therefore evaluates all three, so publishing the
-fixture needs the macOS workload on every platform rather than only on the Mac. That is a
-prerequisite this procedure did not have before, and `-p:TargetFramework=` is how a local build
-skips it. The list itself costs nothing: republished after the change, the fixture measures
-3,070,976 bytes on win-x64, 4,062,688 on linux-x64 and 4,234,528 on osx-arm64, identical to the
-loose rows above.
-
-Later phases are measured against the loose rows, 3,191,808, 4,210,736 and 4,218,096, because
-that is where the library's own contribution is visible without the blob swamping it.
-
-### Phase 1: the seam
-
-- Add `IXPlatApplicationHook` and `XPlatApplicationPhase`, and raise the five phases from
-  `XPlatApplication`: `Creating` at the end of the constructor, `Created` immediately before
-  `Backend.Run()`, `Stopping` at the start of `TearDown`, `Stopped` once every window is gone, and
-  `Disposed` immediately before `_provider.Dispose()`. The last one is unconditional, so it is the
-  only teardown a forwarded launch or a headless render sees.
-- Add `IXPlatWindowHook` and `XPlatWindowPhase` around the window lifecycle, raising the six phases
-  the model can raise today.
-- Add the registration helpers `AddXPlatApplicationHook`, `AddXPlatApplicationStartupHook` and
-  `AddXPlatWindowHook`, so a feature that is one lambda does not need a class of its own.
-- Add the two typed-phase seam members, `IXPlatApplicationBackend.RunApplicationHooks` and
-  `IXPlatWindowBackend.RunWindowHooks`, with empty bodies in every backend, so the platform half of
-  §6.5 exists before any feature needs it.
-- Keep every hook implementation-free: the seam names no feature.
-
-Measure: the seam's own delta on the minimal app, and record it as the baseline for later phases.
-There is no target to compare it against (§7); it is the reference point that shows whether the seam
-is growing.
-
-#### The seam's cost
-
-Re-publishing the fixture with the seam in place, from the same three machines:
-
-| Measurement | win-x64 | linux-x64 | osx-arm64 |
-|---|---|---|---|
-| Minimal app, Skia embedded | 8,658,944 | 9,019,728 | not applicable |
-| Minimal app, Skia loose | 3,202,048 | 4,215,120 | 4,218,096 |
-| Seam delta, loose | 10,240 | 4,384 | 0 |
-
-The seam is 10,240 bytes on Windows and 4,384 on Linux, 0.32 and 0.10 percent of the fixture. The
-two are the same portable code, so the difference between them is layout rather than content: two
-linkers pad, deduplicate and order the same methods differently. Windows moved by more in absolute
-terms even though its backend is the smaller of the two, which is why Phase 0 insisted on measuring
-per platform rather than scaling one number to the others.
-
-macOS is byte-for-byte unchanged, executable and bundle both. Its arm64 image is linked in 16 KB
-pages and the seam fits in the slack of the pages it already had, so the honest reading is not that
-the seam is free there but that it is below what this measurement can resolve.
-
-Ten kilobytes for the whole extensibility model is the shape §7 accepted: it is a fixed cost that
-no feature adds to, because a feature is measured on top of the baseline rather than folded into
-it, and every later phase is judged against these three numbers.
-
-### Phase 2: the event convention
-
-- Replace every `event` declaration with an `Add`/`Remove` handler pair (§5.4), across `XPlatUI`, the
-  four backends and the demo.
-- Payload-less events, which are most of them, become `Action<object>`. The rest become
-  `Action<object, TPayload>` with the args class they already have. No new payload types.
-- There are 96 declarations and roughly a hundred subscription sites today, so this is one change
-  rather than a rolling one: half converted leaves two shapes in the API.
-- No behaviour change: same order, same thread, same exception path.
-
-Measure: nothing. This phase is about shape, and the publish size should move only by the tokens it
-removes.
-
-Result: done. 96 declarations across 43 files became an `Add`/`Remove` pair, 68 of them payload-less
-(`Action<object>`) and 28 keeping the args class they already had. The ten payload classes that
-derived from `System.EventArgs` lost the base, because nothing in the library takes an `EventHandler`
-any more. Three private state fields were renamed because the handler field took their name:
-`_shown` and `_closed` in `XPlatWindow`, `_exiting` in `XPlatApplication`. Every `Add` returns the
-same `XPlatHandlerToken<T>` from `XPlatUI/Core/`, rather than one token type per event.
-
-| Target | Phase 1 loose | Phase 2 loose | Delta |
-|---|---|---|---|
-| win-x64 | 3,202,048 | 3,202,048 | 0 |
-| linux-x64 | 4,215,120 | 4,215,152 | +32 |
-| osx-arm64 | 4,218,096 | 4,218,096 | 0 |
-
-The Windows and macOS images came out byte-identical, which is what the phase predicted: a handler
-list and a multicast delegate cost the same to store, and the accessors that replaced `add` and
-`remove` are the same count and shape. The dropped base classes remove nothing at runtime, because
-they never added a field. Linux moved by 32 bytes, which is alignment rather than a per-event cost,
-because the same change on the other two platforms moved nothing.
-
-Byte-identical is not the same as free. The Phase 1 seam is still in the image, and the convention
-still forces every event to have a field and two methods where the compiler used to write those for
-us. What the measurement shows is that this cost was already being paid, not that a new one was
-avoided. The one cost the phase does add is the token allocation per subscription, which §5.4
-already records.
-
-### Phase 3: drag and drop as the first consumer
-
-- Add the opt-in as a same-named extension in each backend (§6.5), registering whatever services and
-  typed hooks the feature needs.
-- Move `Win32DropTarget` construction and registration (`Win32WindowBackend.cs:575-576`) behind the
-  Win32 window hook's `Created` phase, and its revoke (`:457`) behind `Closing`.
-- Move `RegisterForDraggedTypes` (`AppKitSkiaView.cs:101`) behind the AppKit window hook's `Created`
-  phase.
-- Move `Gtk.DropTarget` construction (`Gtk4SkiaView.cs:409-410`) and removal (`:201-210`) behind the
-  Gtk4 window hook's `Created` and `Closing` phases.
-- Leave the payload types and the host routing where they are.
-- Move `AllowDrop` and the four handler pairs off `XPlatControl` into `XPlatUI.DragDrop` extensions.
-  This is the one breaking change in the plan, and rung 3 requires it: an assembly cannot add
-  members to a type declared in another assembly. See §12.
-- Do not gate any of the above on `AllowDrop`. The window hook registers unconditionally, and
-  `AllowDrop` only decides whether the control accepts what arrives.
-
-Measure: an application that does not call the opt-in must lose OLE, the COM target, the pasteboard
-types and the GTK controllers, and the size must return to the Phase 0 baseline.
-
-This phase is also the proof that the pattern works, so it should be done before any new feature is
-held to the policy.
-
-Result: done, with the packaging deferred to Phase 5. The feature lived inside `XPlatUI` and the
-three backends for this phase, so opting in was a namespace import and one `ConfigureServices` line
-rather than a package reference. What the phase proves is the shape: that a feature can be lifted
-off the always-on path behind typed hooks, a same-named extension and an extension-member surface,
-and that the library does not notice it has gone. The four-folder feature project of §4 is a build
-change on top of a shape that now exists, and it needs the macOS workload, so it belongs with the
-pipeline job in Phase 4 and with the move in Phase 5.
-
-One thing had to change when the feature moved, and Phase 5 records how it did. `XPlatUiHost` holds
-the `IXPlatDragDropRouter` that the feature installs, and core cannot reference a feature package
-without making the feature mandatory, so the contract stayed in `XPlatUI` while only its
-implementation travelled - and the host, not the router, runs each control's own `OnDrag...`
-method, so a derived control's handling never depends on the feature being referenced.
-
-The portable half was `XPlatUI/DragDrop/`, and Phase 5 split it in two. `AllowDrop` and the four
-handler pairs are one `extension(XPlatControl)` block, which cannot add fields, so the per-control
-state lives in a `ConditionalWeakTable` keyed by the control. `XPlatDragDropRouter` is what the host
-routes to, which is how `XPlatUiHost` stops naming the feature: with no router installed, a host
-accepts nothing. `XPlatDragDropWindowHook` installs the router at `Created` and clears it at
-`Closing` and `Disposed`.
-
-The native half is one typed window hook per backend, `IXPlatWin32WindowHook`,
-`IXPlatAppKitWindowHook` and `IXPlatGtk4WindowHook`, each registered through
-`AddXPlat<Platform>WindowHook<THook>()` and each running from that backend's `RunWindowHooks` after
-the portable hooks. `AddDragDrop()` was a same-named extension in each backend's `XPlatUI.DragDrop`
-namespace for this phase, so a backend that forgot it failed to compile; in Phase 5 the three of
-them moved into the feature package's own per-platform folders, and the same rule holds there.
-`Win32WindowBackend` became public, because a typed hook names its backend by its concrete type.
-
-Three things differ from the plan above:
-
-- Registration runs at `Shown`, not `Created`. `Created` is raised at the end of the `XPlatWindow`
-  constructor, and the native window does not exist until the backend is asked to show it, so there
-  is nothing to register with at `Created`.
-- The revoke is not the Win32 hook's `Closing`. A window can be disposed without closing, and the
-  OLE target has to be revoked before the window is destroyed either way, so the hook hands the
-  backend an `IDisposable` lease (`Win32WindowBackend.DropTargetLease`) that `Dispose` runs while
-  the window still exists.
-- AppKit and Gtk4 needed `EnableDragDrop()`/`DisableDragDrop()` on their views, because what they
-  used to do unconditionally was a constructor call and an `AttachInput` call, neither of which is a
-  phase.
-
-The demo keeps its sample, so it opts in: `DemoUi.cs` imports `XPlatUI.DragDrop`, and
-`XPlatUIDemo.App/Program.cs` passes `ConfigureServices = services => services.AddDragDrop()`.
-
-| Target | Phase 2 loose | Phase 3 loose | Delta |
-|---|---|---|---|
-| win-x64 | 3,202,048 | 3,070,976 | -131,072 |
-| linux-x64 | 4,215,152 | 4,062,688 | -152,464 |
-| osx-arm64 | 4,218,096 | 4,234,528 | +16,432 |
-
-Every row comes from the same command on the same machine, and every Phase 2 figure was reproduced
-from that commit's tree in a separate worktree before the Phase 3 figure was trusted, because the
-two sets of numbers were taken weeks apart. On Windows the 131,072 bytes are 128 KB exactly, and the
-entry points that left the image are the ones the feature named: `OleInitialize`, `RegisterDragDrop`
-and `RevokeDragDrop` are gone, while the runtime's own COM calls (`CoInitializeEx`,
-`CoWaitForMultipleHandles`, `CoTaskMemFree`) stay. Nothing else moved.
-
-The plan said the size would return to the Phase 0 baseline. On Windows and Linux it goes below it,
-and the plan was wrong: Phase 0 paid for drag and drop because the registration was unconditional,
-so taking it out has to save more than the seam and the portable half add back. 3,070,976 and
-4,062,688 are the floors now, and the Phase 0 rows in this document are history rather than a
-target. Linux saves 21,392 more than Windows; the two halves are different amounts of code, and only
-the Win32 one was checked entry point by entry point.
-
-macOS is the exception, and it is worth recording rather than smoothing over: the image grows by
-16,432 bytes. The AppKit half is not removable. `AppKitSkiaView` is a registered `NSView` subclass
-and its `NSDraggingDestination` exports (`DraggingEntered`, `DraggingUpdated`, `DraggingExited`,
-`PrepareForDragOperation`, `PerformDragOperation`) are rooted by the registrar whether or not
-anything registers for dragged types, so what the trimmer can drop there is only the portable half.
-Phase 3's no-opt-in image keeps the view's drag path and pays a few kilobytes for the router the
-host now holds. The opt-in itself is then free: 4,234,544 against 4,234,528 is 16 bytes, inside the
-linker's alignment noise.
-
-Opting in costs 142,848 bytes on Windows and 164,912 on Linux. The same fixture with `AddDragDrop()`
-and a label that sets `AllowDrop` publishes at 3,213,824 and 4,227,600, which on Windows is 11,776
-more than the Phase 2 image where the feature cost every application something, and 142,848 more
-than the floor. That pair is the policy's claim in one line: 3.07 MB for an application that does
-not accept drops, 3.21 MB for one that does. macOS has no such pair to report, for the reason above.
-
-The macOS row says something the policy has to admit: a feature can only be rung 3 where the
-platform lets its native half be dropped. Where a registrar, a protocol conformance or a loader
-keeps it, the feature is rung 2 on that platform whatever its package says, and the honest thing is
-to record the floor it raises rather than promise a saving that cannot arrive.
-
-### Phase 4: documentation and review
-
-- Point `README.md` at this policy from the drag and drop section and from wherever features are
-  listed.
-- Carry the migration for the surface move in `README.md`, as a before-and-after of the two things
-  an application does with the feature: setting `AllowDrop` and subscribing to the four events.
-- Add the checklist in §11 to the review expectations for feature work.
-- Keep the package layout in §4 current, so a feature's pull request can name the folder it belongs
-  in rather than inventing one.
-- Add the feature pack job to the pipeline, on a macOS runner, so no feature author has to arrange a
-  multi-platform build.
-
-Phase 4 is done, and it changed no application's deliverable, so there is nothing to measure. The
-`README.md` control table now links this document, so the policy is reachable from where the
-controls are listed rather than only from the drag and drop section. The drag and drop section
-carries the migration as two code blocks, before and after, and names the one line that has no
-counterpart. A new "Contributing a feature" section states what a feature's pull request has to
-contain and names §11 as the checklist a reviewer works through. §4 records the pack job: why one
-macOS runner is enough, what the layout check refuses, and that both were rehearsed rather than
-assumed.
-
-### Phase 5: the move
-
-- Lift `XPlatUI/DragDrop/` and the three backends' `AddDragDrop()` extensions into
-  `XPlatUI.Feature.DragDrop`, in the four folders of §4.
-- Measure the no-opt-in fixture on all three platforms again, and the opt-in pair on Windows and
-  Linux.
-- Record what the packaging forced the API to be.
-
-The portable half moved unchanged into `common/`, and each backend's `AddDragDrop()` into the folder
-that can use it: `windows/` holds the Win32 one, `linux/` the Gtk4 one and `macos/` the AppKit one.
-`common/` is compiled into all three assemblies by the default glob, and the project removes the
-three platform folders from that glob and re-includes exactly one per target framework. Without the
-removal every framework compiles all three, which fails with `CS0234` on the two backends it does not
-reference. The error names a missing namespace, so the fix is not obvious from it, and it is worth
-knowing that the layout needs the `Compile Remove` as much as the conditional includes.
-
-The project multi-targets all three platforms, as §4 specifies, so a build of the project itself
-needs the macOS workload, and so does the solution that lists it. A consuming application pays
-nothing for that: it builds only the one inner build its own target framework can use, so a Windows
-build of `XPlatUIDemo.App` compiles `net10.0-windows` and no other. The measurement fixture does not
-reference the feature at all, which is the point of it.
-
-Two things had to change shape, and both are the rung-3 price rather than a choice:
-
-- **The router contract stayed in core.** `IXPlatDragDropRouter` is what `XPlatUiHost` routes to, and
-  core cannot reference a feature package without making the feature mandatory, so the interface
-  stayed in `XPlatUI/DragDrop/` while `XPlatDragDropRouter` and everything behind it travelled. A
-  host with no router installed accepts nothing, so the core is unchanged when the package is absent.
-  The alternative, a payload-agnostic hook on the host that the feature fills in, is the same
-  interface with a less specific name.
-- **The host runs each control's own handling.** `XPlatDragDropRouter` runs only the handlers the
-  application subscribed; `XPlatUiHost` then calls the control's own `OnDrag...` method. Keeping that
-  call in the host rather than in the router is what stops a derived control's handling from
-  depending on the package: a control that overrides `OnDragEnter` still runs, in the same order
-  relative to the subscribed handlers, in an application that never referenced the feature.
-
-The native halves needed one more thing, `InternalsVisibleTo`. Each drives its backend's internals,
-`Win32WindowBackend.DropTargetLease`, `Gtk4WindowBackend.EnableDragDrop` and
-`AppKitWindowBackend.EnableDragDrop`, and the alternative is making those members public, which would
-put the feature's shape into an always-retained type and defeat the point of moving it. So each
-backend names `XPlatUI.Feature.DragDrop` as its only friend assembly. §4's claim that the folders
-need no `InternalsVisibleTo` is about sharing between a feature's own folders, which still needs
-none; a feature that needs a backend's internals is the one case that does.
-
-`XPlatUIDemo` was folded into `XPlatUIDemo.App` at the same time. A platform-neutral sample library
-resolves a multi-targeting project reference to its `net10.0` build whatever platform the application
-is on, so the sample UI had to move into the project that carries the platform. That is a general
-rule rather than a demo detail: a sample, a test or any other library that consumes a feature belongs
-in a project that names a platform.
-
-#### The numbers
-
-The fixture does not reference the feature, so these rows are the floor after the move:
-
-| Target | Phase 3 loose | Phase 5 loose | Delta |
-|---|---|---|---|
-| win-x64 | 3,070,976 | 3,070,976 | 0 |
-| linux-x64 | 4,062,688 | 4,062,688 | 0 |
-| osx-arm64 | 4,234,528 | 4,234,528 | 0 |
-
-Byte-identical on all three, which is the expected result rather than a lucky one: in Phase 3 the
-portable half was already in an assembly the trimmer removed, so moving it into an assembly the
-application does not reference removes the same bytes a different way. What stays in the image either
-way is the contract and one field on the host, which is the seam §6 describes rather than anything
-this phase added. The move is therefore free for an application that does not use the feature, on
-every platform, which is the claim the policy makes for rung 3.
-
-The opt-in pair does change, because the feature is now an assembly of its own:
-
-| Target | Phase 3, in core | Phase 5, package | Delta |
-|---|---|---|---|
-| win-x64 | 3,213,824 | 3,211,776 | -2,048 |
-| linux-x64 | 4,227,600 | 4,227,552 | -48 |
-
-Both moved slightly down, which is linker alignment rather than a saving: an assembly boundary is not
-free, but at these sizes what it costs is below what two publishes of the same tree can resolve. The
-number that matters is the distance from the floor, 140,800 bytes on Windows and 164,864 on Linux for
-an application that accepts drops, and that is unchanged from Phase 3 to within the same noise.
-
-macOS has no opt-in pair, for the reason the Phase 3 record gives: AppKit keeps the view's
-`NSDraggingDestination` exports whether or not anything registers, so there is no platform half for
-the package to add there.
-
-#### The package
-
-`dotnet pack` on the real project produced what §4 promised, on the first attempt and with no merge
-step:
-
-| `lib/` folder | dependency group |
-|---|---|
-| `net10.0/` | `XPlatUI`, `XPlatUI.Backend.Gtk4` |
-| `net10.0-windows7.0/` | `XPlatUI`, `XPlatUI.Backend.Win32` |
-| `net10.0-macos26.0/` | `XPlatUI`, `XPlatUI.Backend.AppKit` |
-
-`.github/scripts/check-feature-package.py` passes on it, reporting the three platforms and both
-columns. Two details are worth recording:
-
-- The macOS folder is `net10.0-macos26.0/` rather than `net10.0-macos/`, which is the pinning warning
-  of §4 arriving in practice. The folder name carries the platform version the packing machine's
-  workload supplied, and the project cannot pin it while its `ProjectReference` to
-  `XPlatUI.Backend.AppKit` has to name that backend's framework.
-- Each group names the platform's backend as well as `XPlatUI`, because the feature references it. An
-  application already references its backend, so the dependency is redundant for that application,
-  but it is what makes the feature's own dependency graph correct rather than assumed, and it is
-  never restored on the two platforms it does not belong to.
-
-### Phase 6: hold new work to it
-
-Every subsequent feature states, in its pull request, which rung it sits on, why it could not sit
-lower, and the measured cost for an application that does not use it.
-
-## 11. Checklist for a new feature
+| Minimal fixture, Skia loose | 3,070,976 | 4,062,688 | 4,234,528 |
+| Seam delta over the fixture without the seam | 10,240 | 4,384 | 0 |
+
+The seam delta is the two interfaces, two enums and two dispatch loops of §7, measured by publishing
+the fixture before and after they were added. It is 0.32 percent of the fixture on Windows and 0.10
+percent on Linux; the two are the same portable code, so the difference is linker layout rather than
+content. macOS moved by nothing measurable, because its arm64 image is linked in 16 KB pages and the
+seam fits in the slack of the pages it already had.
+
+The opt-in half has one worked example, the only feature measured end to end so far. An application
+that registers the drag and drop hook publishes at 3,211,776 bytes on win-x64 and 4,227,552 on
+linux-x64, against 3,070,976 and 4,062,688 without it, so the feature costs 140,800 bytes on
+Windows and 164,864 on Linux when it is actually used. On osx-arm64 the same feature is rung 2
+rather than rung 1 by the letter of the rule: the no-opt-in image grew by 16,432 bytes and opting in
+then costs 16, because the arm64 image is quantised to 16 KB pages and the retained types fit in
+slack the linker had already paid for.
+
+Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
+macOS. They are not shipped to users.
+
+## 9. Checklist for a new feature
 
 - [ ] Does any always-retained type (a control, a backend view, `XPlatUiHost`, `XPlatApplication`)
 	  gain a member or an interface implementation? If so, why is that unavoidable?
@@ -1359,116 +915,12 @@ lower, and the measured cost for an application that does not use it.
 	  is it in a platform folder with other code rather than alone?
 - [ ] If it needs per-control state, where does that state live, and what does each access cost?
 
-## 12. Decisions and open questions
+## 10. Non-goals
 
-### Decided
-
-- **Hook scoping.** Application hooks are singletons resolved from the root provider. Window hooks
-  are window-scoped services resolved from `window.Services`, which gives each window its own
-  instance and disposes it with the window. See §6.3 and §6.4.
-- **Hook shape.** Marker interfaces resolved with `GetServices<T>()`, not a builder method on the
-  application. `application.Enable<T>()` cannot be the whole opt-in, because the container is built
-  in the `XPlatApplication` constructor (`XPlatApplication.cs:89-97`) and there is no moment when an
-  application exists and services can still be registered. The call site is a named
-  `services.AddX()` extension, and the `AddXPlatApplicationHook` overload covers hooks that are one
-  line, with `AddXPlatApplicationStartupHook` as its `Creating` shorthand. See §6.2.
-- **Hook teardown.** Both phases and `IDisposable` exist, and a hook should prefer the phase: an
-  application hook has `Disposed` and a window hook has `Disposed`, both raised while the hook and
-  the services it can resolve are still alive. Neither registration helper takes an `onDispose`,
-  because registering the same lambda at `Disposed` is the same thing with one mechanism instead of
-  two and keeps teardown in registration order. `IDisposable` still works, and the container runs it
-  afterwards, windows before the application. See §6.2, §6.3 and §6.4.
-- **Platform-specific hooks.** Contract in core, implementation in each backend, selection by the
-  project reference. The registration is a same-named extension in the feature's namespace, which
-  makes a backend that forgets it a compile error rather than a missing feature. `Headless`
-  declares none. See §6.5.
-- **Typed hooks.** Each backend declares its own application and window hook interfaces naming its
-  backend by its concrete type, and runs them from its own loop after the portable hooks. The
-  portable and typed interfaces are unrelated types. See §6.5.
-- **Application phases.** Creating, Created, Stopping, Stopped and Disposed, raised from the
-  constructor, the entry to the loop, and three points inside `TearDown`. `Stopping` is split from
-  `Stopped` for ordering, `Creating` from `Created` so a feature can run before the first window
-  exists, and `Disposed` from `Stopped` because it is the only teardown that every launch reaches:
-  `Stopping` and `Stopped` are guarded by the loop having run, `Disposed` is not. See §6.3.
-- **Window phases.** Created, Showing, Shown, Hiding, Hidden, Closing, Closed and Disposed, with
-  Hiding and Hidden reserved until `Visible` and `Hide` exist. Ascending phases run hooks in
-  registration order and descending phases in reverse. See §6.3.
-- **Hook callback shape.** One method taking the phase, not one method per phase. A no-op base class
-  can be added later for ergonomics without changing the interface.
-- **Event shape.** `AddXHandler`/`RemoveXHandler` pairs taking `Action<object, TPayload>`, or
-  `Action<object>` when the event carries no payload. No `event` keyword, and no generic args
-  wrapper: the payload is the type the event already has, or there is none. Both halves are kept,
-  because a consumer holding the callback can remove by identity instead of storing the token. See
-  §5.4.
-- **Packaging.** `XPlatUI` plus `XPlatUI.Backend.<platform>` is the whole requirement for an
-  application using the common controls. Rung 3 is one `XPlatUI.Feature.<feature>` package per
-  feature, referenced deliberately and unconditionally, and it is also where a feature goes when it
-  is simply too rare to belong in the main package. The feature is one multi-targeted project with
-  four folders, `common/`, `windows/`, `macos/` and `linux/`, of which each inner build compiles
-  `common/` plus one platform folder; sharing is a folder rather than an assembly, so the folders
-  need no `InternalsVisibleTo` between them and there is nothing to copy between `lib/` folders. A
-  feature that drives a backend's internals does need one friend declaration, and that is the
-  backend's choice rather than the layout's. One `dotnet pack` produces the
-  package, because the SDK writes one `lib/` folder and one dependency group per target framework.
-  Building it needs the macOS workload, which the development solution requires as well. A
-  platform-only NuGet dependency is tolerable because dependencies are grouped per platform and
-  selected by target framework, so a macOS-only package is never restored by a Windows application;
-  every platform therefore gets a group, empty if it needs nothing, since a missing group falls back
-  to the `net10.0` one, and a missing `lib/` folder silently ships the wrong assembly. The Linux
-  assembly carries a module-initializer guard that fails the process if it loads on another
-  platform. Namespaces do not change with the packaging. See §4.
-- **Seam cost.** The hook seam is accepted rather than budgeted, because it is what makes the
-  extensibility points possible. There is no byte target, and no hook point is rejected on size
-  alone; the seam keeps a stability promise and a shape rule instead, and the types it retains
-  unconditionally are named. Its cost is still measured so that growth is visible: 10,240 bytes on
-  Windows and 4,384 on Linux against the minimal fixture, and nothing measurable on macOS. See §7
-  and §10.
-- **Opt-in granularity.** Opting in is a per-application decision, and it buys the whole feature:
-  once it is called, every window gets the feature's per-window setup regardless of any runtime
-  value such as `AllowDrop`, because such a value can change after the window is shown and there is
-  no correct moment to gate on it. An application that opts in and then never uses the feature pays
-  for it, and that is accepted. See §4 and §9.
-- **Retrofitting.** Drag and drop is the only feature being moved onto the policy. It is the case
-  study, so it carries the work of proving the mechanism. Menus, dialogs, timers and single instance
-  all predate the policy and stay as they are; they may be moved later, but nothing is planned for
-  them and no part of Phases 0 to 5 is sized for them. See §10 and §13.
-- **Drag and drop surface.** `AllowDrop` and the four events leave `XPlatControl` and become
-  extension members in `XPlatUI.DragDrop`, and that breaking change is accepted. It is not a trade
-  against §5's ergonomics: a rung-3 feature ships in its own assembly, and an assembly cannot add
-  members to a type declared in another assembly, so the extension surface is what makes the rung
-  possible in the first place. See §9 and §10.
-- **Native registration moment.** A native window hook registers at `Shown`, not `Created`, because
-  the native window does not exist until the backend is asked to show it, and unregisters through
-  whatever the backend disposes while the window still exists rather than through `Closing`, because
-  a window can be disposed without ever closing. See §10.
-- **Feature packaging, in this phase rather than a later one.** Drag and drop ships in
-  `XPlatUI.Feature.DragDrop`, with the four-folder layout of §4, and the development solution lists
-  the project so the ordinary build compiles it. The move cost an application that does not use the
-  feature nothing measurable on any platform, and it forced the two API shapes §10's Phase 5 records:
-  the router contract stays in core because a feature cannot be referenced by it, and the host rather
-  than the router runs each control's own handling. See §4 and §10.
-- **Rung 3 is a per-platform claim.** A feature can only be rung 3 where the platform lets its
-  native half be trimmed away. macOS keeps AppKit's `NSDraggingDestination` exports alive through
-  the registrar, so drag and drop is rung 2 there: the no-opt-in image grew by 16,432 bytes instead
-  of shrinking, and opting in then costs 16 bytes because the platform half was never removable in
-  the first place. The package layout does not change, but a measurement row does not get to claim a
-  saving the platform's loader will not deliver, and the next feature that touches a registered
-  platform type is measured rather than assumed. See §10.
-
-### Open
-
-None. Every question raised while writing this document has been answered, and the answers are
-above. A new one goes here when it arises, rather than being settled silently in a review thread.
-
-## 13. Non-goals
-
-- Retrofitting everything at once. The policy applies to new work, and drag and drop is the only
-  existing feature being moved onto it, because it is the case study. Menus, dialogs, timers and
-  single instance keep their current shape until there is a reason to revisit them.
-- Source compatibility for the drag and drop surface. It moves to extensions because rung 3 requires
-  it, and the migration is documented rather than avoided.
-- Making an API awkward to hit a byte target. If the zero-cost shape would hurt the API, say so, take
+- Retrofitting existing features. The policy applies to new work; menus, dialogs, timers and single
+  instance keep their current shape until there is a reason to revisit them.
+- Making an API awkward to hit a byte target. If the zero-cost shape hurts the API, say so, take
   rung 2 or 3, and record the reason.
 - A promise of literally zero cost. The standard is bare minimal, measured, and justified.
-- A trimming/AOT test suite. The checks in §8 are a publish comparison and a warning review, run when
-  a feature lands, not a new CI project.
+- A trimming/AOT test suite. The checks in §8 are a publish comparison and a warning review run as
+  each feature lands, not a new CI project.
