@@ -27,7 +27,7 @@ internal sealed class Win32DragDropWindowHook : IXPlatWin32WindowHook
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(backend);
 
-        if (phase != XPlatWindowPhase.Shown || backend.DropTargetLease is not null)
+        if (phase != XPlatWindowPhase.Shown || backend.NativeTeardown is not null)
         {
             return;
         }
@@ -39,7 +39,7 @@ internal sealed class Win32DragDropWindowHook : IXPlatWin32WindowHook
         // window already has a target. The window then simply never sees a drop.
         if (target.Register(handle))
         {
-            backend.DropTargetLease = new Win32DropTargetLease(target, handle);
+            backend.NativeTeardown = new Win32DropTargetLease(target, handle);
         }
     }
 

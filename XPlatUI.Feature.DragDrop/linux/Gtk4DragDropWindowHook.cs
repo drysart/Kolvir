@@ -15,7 +15,9 @@ namespace XPlatUI.DragDrop;
 /// <para>
 /// Installation happens at <see cref="XPlatWindowPhase.Shown"/> rather than
 /// <see cref="XPlatWindowPhase.Created"/>, because the drawing area does not exist until the
-/// backend has shown the window.
+/// backend has shown the window. What was installed is parked in the backend's teardown slot, which
+/// a hook instance cannot do for itself: one hook serves every window, and the targets belong to the
+/// window rather than to the hook.
 /// </para>
 /// </remarks>
 internal sealed class Gtk4DragDropWindowHook : IXPlatGtk4WindowHook
@@ -28,12 +30,16 @@ internal sealed class Gtk4DragDropWindowHook : IXPlatGtk4WindowHook
 
         switch (phase)
         {
-            case XPlatWindowPhase.Shown:
-                backend.EnableDragDrop();
+            case XPlatWindowPhase.Shown when backend.NativeTeardown is null &&
+                backend.View is { } view:
+                var targets = new Gtk4DropTargets(view.InputArea, view.Host);
+                targets.Attach();
+                backend.NativeTeardown = targets;
                 break;
 
             case XPlatWindowPhase.Closing:
-                backend.DisableDragDrop();
+                backend.NativeTeardown?.Dispose();
+                backend.NativeTeardown = null;
                 break;
         }
     }

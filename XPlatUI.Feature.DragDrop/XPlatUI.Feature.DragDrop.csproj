@@ -42,6 +42,12 @@
     <ProjectReference Include="..\XPlatUI.Backend.Win32\XPlatUI.Backend.Win32.csproj" />
   </ItemGroup>
 
+  <!-- The Windows half hands the shell a COM object and builds its vtable by hand, which needs
+       unsafe code; nothing on the other two platforms does. -->
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
     <Compile Include="macos\**\*.cs" />
     <ProjectReference Include="..\XPlatUI.Backend.AppKit\XPlatUI.Backend.AppKit.csproj" />

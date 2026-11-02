@@ -32,7 +32,9 @@ XPlatUI.Backend.Headless/ net10.0 backend that paints offscreen; what --render a
 XPlatUI.Backend/          multi-targeting selector: the backend for whichever TFM you built for
 XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one TFM per platform
   common/                 the portable half: AllowDrop, the handler pairs, the router
-  windows/ linux/ macos/  the opt-in and its per-window hook, over the backend's native half
+  windows/                the opt-in, its hook and the OLE IDropTarget they register
+  linux/                  the opt-in, its hook and the GtkDropTarget controllers they add
+  macos/                  the opt-in and its hook; the AppKit half stays in the backend (below)
 XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
 ```
 
@@ -638,9 +640,18 @@ there for a drag this library is not the only participant in. `GetFiles` returns
 
 | Platform | Mechanism | What a drag carries |
 | --- | --- | --- |
-| Windows | A hand-built `IDropTarget` COM object registered with `RegisterDragDrop`, since a source-generated `ComWrappers` one is not a valid call target under the loader lock OLE calls it from | `CF_HDROP`, `CF_UNICODETEXT`, `HTML Format` |
+| Windows | A hand-built `IDropTarget` COM object registered with `RegisterDragDrop`, since a source-generated `ComWrappers` one is not a valid call target under the loader lock OLE calls it from. It lives in the feature package, which duplicates the few OLE imports it needs | `CF_HDROP`, `CF_UNICODETEXT`, `HTML Format` |
 | macOS | The view registers `public.file-url` and `public.utf8-plain-text` and implements `NSDraggingDestination` | `NSPasteboard` file URLs (a web URL is not a file, so an image dragged out of a browser is refused), plain text |
-| Linux (GTK4) | One `GtkDropTarget` per kind of drag, both typed as text, with preload so the payload is in hand before the drop | File paths, read from the text form of the drag since a `GdkFileList` cannot be read without a portal round trip; strings |
+| Linux (GTK4) | One `GtkDropTarget` per kind of drag, both typed as text, with preload so the payload is in hand before the drop; the feature package adds them to the view's drawing area | File paths, read from the text form of the drag since a `GdkFileList` cannot be read without a portal round trip; strings |
+
+The mechanisms themselves live in the package wherever the platform allows it, so a backend assembly
+that no application opted into carries no drag and drop code at all. Windows and Linux are in that
+category: the COM target is an object registered against a window handle, and a `GtkDropTarget` is a
+controller added to a widget, so both moved out of `XPlatUI.Backend.Win32` and
+`XPlatUI.Backend.Gtk4` and only a generic slot for releasing them when the window goes remains.
+macOS is the exception, because AppKit delivers a drag to the `NSView` that registered for the
+dragged types, through `NSDraggingDestination` methods on that view's own class; there is no separate
+destination object to hand the window, so the implementation cannot leave `AppKitSkiaView`.
 
 A drop is routed by hit testing, then by walking up the parents, so an `AllowDrop` panel accepts a
 drop anywhere inside it and a child that does not want the drop passes it to its parent. A control

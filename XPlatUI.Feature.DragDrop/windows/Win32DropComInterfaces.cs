@@ -1,7 +1,8 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
+using XPlatUI.Backend.Win32;
 
-namespace XPlatUI.Backend.Win32;
+namespace XPlatUI.DragDrop;
 
 /// <summary>
 /// The OLE drag and drop interfaces, declared so that they work under NativeAOT.
@@ -111,14 +112,14 @@ internal partial interface IComDataObject
     /// <param name="medium">Receives the data.</param>
     /// <returns><c>S_OK</c> on success, <c>DV_E_FORMATETC</c> if the format is not available.</returns>
     [PreserveSig]
-    int GetData(in FORMATETC format, out NativeMethods.STGMEDIUM medium);
+    int GetData(in FORMATETC format, out Win32DropNativeMethods.STGMEDIUM medium);
 
     /// <summary>Retrieves the data in place; not used by this backend.</summary>
     /// <param name="format">The representation to retrieve.</param>
     /// <param name="medium">Receives the data.</param>
     /// <returns>An HRESULT.</returns>
     [PreserveSig]
-    int GetDataHere(in FORMATETC format, ref NativeMethods.STGMEDIUM medium);
+    int GetDataHere(in FORMATETC format, ref Win32DropNativeMethods.STGMEDIUM medium);
 
     /// <summary>Reports whether the data object can supply a representation.</summary>
     /// <param name="format">The representation to test for.</param>
@@ -139,7 +140,7 @@ internal partial interface IComDataObject
     /// <param name="release">Whether the data object owns the medium.</param>
     /// <returns>An HRESULT.</returns>
     [PreserveSig]
-    int SetData(in FORMATETC format, in NativeMethods.STGMEDIUM medium, int release);
+    int SetData(in FORMATETC format, in Win32DropNativeMethods.STGMEDIUM medium, int release);
 
     /// <summary>Asks the data object for the formats it can supply.</summary>
     /// <param name="direction">Whether to read from or write to the enumerator; unused here.</param>

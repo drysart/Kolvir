@@ -300,10 +300,11 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     /// <summary>
     /// Something to dispose while the native window still exists, or null when nothing needs it.
-    /// The drag and drop feature uses it to revoke its OLE drop target, which has to happen before
-    /// the window is destroyed and must not be skipped when a window is disposed without closing.
+    /// A feature that registers a native object with the window puts it here, because the object
+    /// stays callable until the window is destroyed and so has to be released first, and because
+    /// that release must not be skipped when a window is disposed without ever being closed.
     /// </summary>
-    internal IDisposable? DropTargetLease { get; set; }
+    internal IDisposable? NativeTeardown { get; set; }
 
     /// <inheritdoc />
     public IXPlatWindowBackend? Owner
@@ -563,10 +564,10 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         XPlatTheme.RemoveChangedHandler(OnThemeChanged);
 
-        // Whatever holds native resources has to let go of them while the window still exists: OLE
-        // keeps calling into a drop target for as long as the window is registered.
-        DropTargetLease?.Dispose();
-        DropTargetLease = null;
+        // Whatever the window registered natively has to let go while the window still exists: the
+        // platform keeps calling into a registered object for as long as the window is alive.
+        NativeTeardown?.Dispose();
+        NativeTeardown = null;
 
         if (_hwnd != IntPtr.Zero)
         {
@@ -1285,36 +1286,6 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         _host.ProcessTextInput(character.ToString());
     }
 
-    /// <summary>
-    /// Routes the start of an OLE drag into the control tree. The point is in screen pixels,
-    /// because the shell does not know where this window's client area is.
-    /// </summary>
-    internal XPlatDragDropEffects OnDragEnter(
-        NativeMethods.POINT screen,
-        XPlatDataObject data,
-        XPlatDragDropEffects allowedEffects,
-        XPlatModifiers modifiers) =>
-        _host.ProcessDragEnter(ScreenToLogical(screen), data, allowedEffects, modifiers);
-
-    /// <summary>Routes a drag move into the control tree.</summary>
-    internal XPlatDragDropEffects OnDragOver(
-        NativeMethods.POINT screen,
-        XPlatDataObject data,
-        XPlatDragDropEffects allowedEffects,
-        XPlatModifiers modifiers) =>
-        _host.ProcessDragOver(ScreenToLogical(screen), data, allowedEffects, modifiers);
-
-    /// <summary>Tells the control tree that the drag left the window without being dropped.</summary>
-    internal void OnDragLeave() => _host.ProcessDragLeave();
-
-    /// <summary>Routes a drop into the control tree.</summary>
-    internal XPlatDragDropEffects OnDrop(
-        NativeMethods.POINT screen,
-        XPlatDataObject data,
-        XPlatDragDropEffects allowedEffects,
-        XPlatModifiers modifiers) =>
-        _host.ProcessDragDrop(ScreenToLogical(screen), data, allowedEffects, modifiers);
-
     private void UpdateHostSize()
     {
         if (_hwnd == IntPtr.Zero)
@@ -1353,7 +1324,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private SKPoint ToLogical(IntPtr lParam) =>
         new(NativeMethods.LowWord(lParam) / _scale, NativeMethods.HighWord(lParam) / _scale);
 
-    private SKPoint ScreenToLogical(NativeMethods.POINT point)
+    internal SKPoint ScreenToLogical(NativeMethods.POINT point)
     {
         NativeMethods.ScreenToClient(_hwnd, ref point);
         return new SKPoint(point.X / _scale, point.Y / _scale);

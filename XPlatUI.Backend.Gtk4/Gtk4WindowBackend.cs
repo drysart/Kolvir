@@ -400,6 +400,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         presenter?.Dismiss();
 
+        // Whatever the window registered natively has to let go while the window still exists: the
+        // platform keeps calling into a registered object for as long as the window is alive.
+        NativeTeardown?.Dispose();
+        NativeTeardown = null;
+
         if (view is not null)
         {
             view.RemoveMetricsChangedHandler(OnViewMetricsChanged);
@@ -442,14 +447,16 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         RaiseStateChangedIfNeeded();
     }
 
-    /// <summary>
-    /// Makes the window a drag destination. Only the drag and drop feature calls this, once the
-    /// application has opted in; without it the view installs no drop targets at all.
-    /// </summary>
-    internal void EnableDragDrop() => _view?.EnableDragDrop();
+    /// <summary>The view that shows the host, or null before the window has been shown.</summary>
+    internal Gtk4SkiaView? View => _view;
 
-    /// <summary>Stops the window being a drag destination.</summary>
-    internal void DisableDragDrop() => _view?.DisableDragDrop();
+    /// <summary>
+    /// Something to dispose while the native window still exists, or null when nothing needs it.
+    /// A feature that registers a native object with the window puts it here, because the object
+    /// stays callable until the window is destroyed and so has to be released first, and because
+    /// that release must not be skipped when a window is disposed without ever being closed.
+    /// </summary>
+    internal IDisposable? NativeTeardown { get; set; }
 
     internal void RaiseActivatedIfNeeded(bool active)
     {

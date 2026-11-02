@@ -20,8 +20,9 @@
   </ItemGroup>
 
   <!-- The drag and drop feature package owns the opt-in and its hook, but the native half of that
-       feature needs this backend's internals: a view's dragged-type registration is done by the
-       hook, which calls into the view. The feature is the only friend assembly. -->
+       feature cannot leave this backend: AppKit delivers a drag to the view that registered for the
+       dragged types, so the destination methods are overrides on AppKitSkiaView. The hook reaches
+       them through EnableDragDrop. The feature is the only friend assembly. -->
   <ItemGroup>
     <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop" />
   </ItemGroup>

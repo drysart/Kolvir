@@ -803,6 +803,35 @@ a feature type and the feature package is the only thing that names the primitiv
 still references one package per feature, unconditionally, and forgetting a platform is still a
 compile error on that platform.
 
+**Everything the feature owns moves, not just the hook.** A hook that called into a backend member
+named after the feature would leave the feature in the backend, and the backend is the assembly
+every application of that platform ships whether it opted in or not. So the implementation moves as
+well, and what stays behind is a seam whose names say nothing about the feature:
+
+| What stays in the backend | Why it cannot move |
+|---|---|
+| `Handle`, `Host`, `View`, `InputArea` | The native window and the widget input arrives on are the backend's, and every feature needs them |
+| `NativeTeardown` | Something to release while the native window still exists, which is a property of window lifetime rather than of any one feature |
+| `ScreenToLogical` | The backend owns the scale factor and the window origin |
+
+`NativeTeardown` is the interesting one. A native object a feature registers with the window stays
+callable until the window is destroyed, so it must be released before that, and it must also be
+released when a window is disposed without ever being closed. The backend already disposes at
+exactly that point, so it offers one slot of type `IDisposable` and the feature puts its object
+there. The member is a window-lifetime facility that any feature can use, and its name contains no
+feature type, so a backend that no application has opted into retains an `IDisposable` property and
+nothing else.
+
+**One platform can be an exception, and the reason has to be structural.** AppKit dispatches a drag
+to the `NSView` that registered for the dragged types, through `NSDraggingDestination` overrides on
+that view's own class; there is no separate destination object to hand the window, as there is on
+Windows and GTK. The implementation therefore cannot leave the view subclass, and the AppKit backend
+keeps it, with `EnableDragDrop`, the five overrides and the pasteboard readers in
+`AppKitSkiaView`. This is the bar for an exception: not "it was easier there", but "the platform's
+API puts the code on a type the feature cannot supply". Windows and GTK pass it, because an OLE drop
+target is an object registered against a handle and a `Gtk.DropTarget` is a controller added to a
+widget, so both moved in full.
+
 **A platform that cannot support a feature still declares it.** The extension method exists
 everywhere so application code compiles, and the platform-neutral service reports `IsSupported` or
 throws `PlatformNotSupportedException` from the operation. A silent no-op is how a feature ends up
@@ -876,8 +905,8 @@ content. macOS moved by nothing measurable, because its arm64 image is linked in
 seam fits in the slack of the pages it already had.
 
 The opt-in half has one worked example, the only feature measured end to end so far. An application
-that registers the drag and drop hook publishes at 3,211,776 bytes on win-x64 and 4,227,552 on
-linux-x64, against 3,070,976 and 4,062,688 without it, so the feature costs 140,800 bytes on
+that registers the drag and drop hook publishes at 3,210,240 bytes on win-x64 and 4,227,552 on
+linux-x64, against 3,070,976 and 4,062,688 without it, so the feature costs 139,264 bytes on
 Windows and 164,864 on Linux when it is actually used. On osx-arm64 the same feature is rung 2
 rather than rung 1 by the letter of the rule: the no-opt-in image grew by 16,432 bytes and opting in
 then costs 16, because the arm64 image is quantised to 16 KB pages and the retained types fit in
