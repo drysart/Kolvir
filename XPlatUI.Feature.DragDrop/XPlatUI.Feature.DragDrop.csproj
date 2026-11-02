@@ -5,14 +5,14 @@
        use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
        platform. Nothing in this assembly runs unless an application calls AddDragDrop(). -->
   <PropertyGroup>
-    <!-- One framework per host by default, the way XPlatUI.Backend resolves a target framework, so a
-         contributor builds the one their application can use. The pack pipeline asks for all three,
-         which is the only build that needs the Windows reference pack on a Mac and the macOS
-         workload anywhere. -->
-    <TargetFrameworks Condition="'$(XPlatUIFeatureAllPlatforms)' == 'true'">net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
-    <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('windows'))">net10.0-windows</TargetFrameworks>
-    <TargetFrameworks Condition="'$(TargetFrameworks)' == '' and $([MSBuild]::IsOSPlatform('osx'))">net10.0-macos</TargetFrameworks>
-    <TargetFrameworks Condition="'$(TargetFrameworks)' == ''">net10.0</TargetFrameworks>
+    <!-- Every platform the feature supports, unconditionally: `dotnet pack` is what makes the package
+         and it needs all three in one build, so a build of this project on its own needs the macOS
+         workload, which is why it is not in WinFormsApp3.slnx. Narrow one inner build for local work
+         with `-p:TargetFramework=net10.0-windows`; the plural `-p:TargetFrameworks=...` does not work
+         as a switch, because it reaches the restore graph and not the referenced projects' builds.
+         An application that references this project still builds only the inner build its own
+         framework can use. -->
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
     <RootNamespace>XPlatUI</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -30,7 +30,7 @@
        and each platform folder only into the one framework that can use it. A file added to
        `common/` needs no build change, which is the point of doing it by folder. -->
   <ItemGroup>
-    <Compile Remove="win\**;linux\**;macos\**" />
+    <Compile Remove="windows\**;linux\**;macos\**" />
   </ItemGroup>
 
   <!-- Exactly one of these is in any given build, and it is the one whose platform can use it. A
@@ -38,7 +38,7 @@
        dependency groups of section 4 are selected by target framework, so a Windows application never
        restores the Linux backend. -->
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
-    <Compile Include="win\**\*.cs" />
+    <Compile Include="windows\**\*.cs" />
     <ProjectReference Include="..\XPlatUI.Backend.Win32\XPlatUI.Backend.Win32.csproj" />
   </ItemGroup>
 
