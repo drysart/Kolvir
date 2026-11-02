@@ -334,6 +334,20 @@ public class XPlatTextBox : XPlatControl
             });
     }
 
+    /// <summary>The border takes the hover colour, so the box has to repaint when the pointer arrives or leaves.</summary>
+    protected override void OnMouseEnter()
+    {
+        base.OnMouseEnter();
+        Invalidate();
+    }
+
+    /// <summary>The border takes the hover colour, so the box has to repaint when the pointer arrives or leaves.</summary>
+    protected override void OnMouseLeave()
+    {
+        base.OnMouseLeave();
+        Invalidate();
+    }
+
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? XPlatTheme.InputBackground : XPlatTheme.DisabledBackground;

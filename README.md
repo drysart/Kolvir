@@ -319,6 +319,14 @@ Moving or resizing a control repaints the area it vacated as well as the area it
 being asked. Without that a control that moved would leave a copy of itself behind, which is
 exactly what culling would otherwise make permanent.
 
+Hovering is not a repaint on its own. A control that draws itself differently under the pointer
+says so, by invalidating from its own `OnMouseEnter`/`OnMouseLeave`; the base `XPlatControl` only
+tracks `IsMouseOver` and raises the events. Repainting every control the pointer crosses is what a
+whole-window renderer gets away with, because the frame it would have drawn anyway costs the same:
+here it would put a title label's whole bounds into the next region, and with it everything
+between the label and whatever else changed. A label, a panel, a table and an image look the same
+hovered as not, so they are left out of it.
+
 A backend opts into partial presentation with `XPlatUiHost.PartialUpdates`. It is off by default
 because a backend that rasterizes the whole surface every frame - GTK4 and the headless renderer
 both do - would be left with blank patches where the retained content should be:
@@ -333,25 +341,35 @@ both do - would be left with blank patches where the retained content should be:
 `Paint` returns the `SKRectI` it covered, `PendingUpdateBounds` reports what the next paint will
 cover before it happens, and `IsUpdatePending` says whether anything has been invalidated at all -
 enough for a backend to skip asking the platform for a frame it would only redraw identically.
-`IncludeInNextPaint` adds an area to the next frame *without* raising the invalidated event, which
-is what a backend uses for a rectangle the platform reported stale, and what the framework uses
-when a control moves out of an area.
+`IncludeInNextPaint` adds an area to the next frame *without* raising the invalidated event. The
+framework uses it when a control moves out of an area; a backend does not need it.
 
 The request the platform is given has to be aimed at the same area. A backend that invalidates its
-whole window on every request gets its whole client area handed back on the next frame, and since
-that rectangle is added with `IncludeInNextPaint` the part that changed can never be smaller than
-everything. The Win32 backend therefore invalidates `PendingUpdateBounds` rather than the window.
+whole window on every request gets its whole client area handed back as stale on the next frame,
+and presenting that means copying the whole surface out of the buffer for nothing. The Win32
+backend therefore invalidates `PendingUpdateBounds` rather than the window.
+
+What the platform reports as stale is not the same set as what the UI asked for. Windows keeps a
+single update rectangle, so two small changes at opposite ends of a row arrive as the box around
+both - and adding that box to the paint would repaint everything between them, which is exactly
+the over-painting the region exists to avoid. A backend that keeps its surface between frames
+answers it the way WinForms does: copy the stale rectangle straight out of the retained buffer,
+and let `Paint` cover only what was really invalidated.
 
 ```csharp
 // A backend that keeps its surface between frames.
 _host.PartialUpdates = true;
 
-void OnPaint()
+void OnPaint(SKRectI stale)     // the platform's update rectangle
 {
-    if (!_host.IsUpdatePending) return;
+    if (!_host.IsUpdatePending)
+    {
+        PresentFromBuffer(stale);   // nothing new to draw: copy what is already there
+        return;
+    }
 
     var area = _host.Paint(_canvas);
-    Present(area);              // present only what was painted
+    PresentFromBuffer(SKRectI.Union(stale, area));
 }
 ```
 
@@ -926,10 +944,11 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 3. On resize: `Host.SetClientSize(width / scale, height / scale)`. On paint: `canvas.Scale(scale)`
    then `Host.Paint(canvas)`, which paints everything unless the backend has opted into
    `PartialUpdates`. A backend that keeps its surface between frames sets `PartialUpdates = true`,
-   uses the returned area to present just what was painted, and calls
-   `Host.IncludeInNextPaint(rect)` with any rectangle the platform reports stale. A surface that was
-   just reallocated holds garbage, so the first paint into it has to be `Host.Paint(canvas, full:
-   true)`.
+   uses the returned area to present just what was painted, and copies any rectangle the platform
+   reports stale out of its retained surface rather than adding it to the paint - the platform's
+   update rectangle is a box around everything it thinks changed, which is usually wider than what
+   actually did. A surface that was just reallocated holds garbage, so the first paint into it has
+   to be `Host.Paint(canvas, full: true)`.
 4. Forward pointer, key and text events into `Host.ProcessMouseMove/Down/Up/Leave`,
    `ProcessKeyDown/Up`, `ProcessTextInput` and `ProcessContextMenu`, dividing coordinates by the
    scale factor. There is no tick to forward: a control that needs time runs its own timer.

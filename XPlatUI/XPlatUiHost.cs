@@ -293,7 +293,15 @@ public sealed class XPlatUiHost
                     canvas.Restore();
                 });
 
-                Invalidate(area);
+                // The region rather than its bounds: a paint that covers two separate controls has
+                // bounds that take in everything between them, and asking for that would make the
+                // content frame repaint the gap as well - which is the over-painting the debug mode
+                // exists to expose.
+                using (var pending = new SKRegion(_dirty))
+                {
+                    Invalidate(pending);
+                }
+
                 return area;
             }
 

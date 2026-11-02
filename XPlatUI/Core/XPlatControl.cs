@@ -1125,8 +1125,14 @@ public class XPlatControl : IDisposable
         }
 
         IsMouseOver = true;
+
+        // Hover is only worth a repaint for a control whose appearance depends on it, so the
+        // repaint belongs to the control rather than here: a label, a panel or a table looks the
+        // same whether or not the pointer is over it, and repainting one anyway widens the next
+        // frame by its whole bounds - a title label invalidated on its way past would take in
+        // everything between it and whatever else changed. Controls with a hover look override
+        // OnMouseEnter/OnMouseLeave and invalidate what they draw.
         OnMouseEnter();
-        Invalidate();
     }
 
     internal void RaiseMouseLeave()
@@ -1138,7 +1144,6 @@ public class XPlatControl : IDisposable
 
         IsMouseOver = false;
         OnMouseLeave();
-        Invalidate();
     }
 
     /// <summary>Delivers a key press. Returns true when the control consumed the key.</summary>

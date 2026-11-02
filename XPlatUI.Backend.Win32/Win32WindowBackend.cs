@@ -1166,20 +1166,37 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         var hdc = NativeMethods.BeginPaint(hwnd, out var paint);
         try
         {
-            if (_skia is not null && _memoryDc != IntPtr.Zero)
+            if (_skia is null || _memoryDc == IntPtr.Zero)
             {
-                // The update region is everything Windows thinks is stale, which covers what the
-                // UI asked for and also things it cannot know about - an uncovered window, a
-                // resize - so it is added to the paint rather than trusted on its own.
-                _host.IncludeInNextPaint(new SKRect(
-                    paint.rcPaint.Left / _scale,
-                    paint.rcPaint.Top / _scale,
-                    paint.rcPaint.Right / _scale,
-                    paint.rcPaint.Bottom / _scale));
-
-                var area = Render();
-                Blit(hdc, area);
+                return;
             }
+
+            // The update region is everything Windows thinks is stale, which covers what the UI
+            // asked for and also things it cannot know about - an uncovered window, a resize. The
+            // buffer still holds the pixels of those, so they are copied back out of it rather than
+            // added to the paint. Adding them would grow the paint to the whole update region, and
+            // Windows reports that region as a single rectangle: two small changes at opposite ends
+            // of a row would repaint everything between them.
+            var stale = new SKRectI(
+                (int)MathF.Floor(paint.rcPaint.Left / _scale),
+                (int)MathF.Floor(paint.rcPaint.Top / _scale),
+                (int)MathF.Ceiling(paint.rcPaint.Right / _scale),
+                (int)MathF.Ceiling(paint.rcPaint.Bottom / _scale));
+
+            // A buffer that was just allocated holds whatever was in that memory, so the frame it
+            // starts with has to be painted in full even when the UI asked for nothing.
+            if (!_host.IsUpdatePending && _paintedGeneration == _bufferGeneration)
+            {
+                Blit(hdc, stale);
+                return;
+            }
+
+            var area = Render();
+            Blit(hdc, new SKRectI(
+                Math.Min(stale.Left, area.Left),
+                Math.Min(stale.Top, area.Top),
+                Math.Max(stale.Right, area.Right),
+                Math.Max(stale.Bottom, area.Bottom)));
         }
         finally
         {
