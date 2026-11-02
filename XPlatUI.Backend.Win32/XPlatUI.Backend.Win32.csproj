@@ -15,9 +15,10 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
-  <!-- The drag and drop feature package owns the opt-in, but the native half of that feature needs
-       this backend's internals: the OLE drop target and the lease that revokes it. The feature is
-       the only friend assembly, and it is why this backend has no drag-and-drop-named public API. -->
+  <!-- The drag and drop feature package owns the opt-in and its hook, but the native half of that
+       feature needs this backend's internals: the OLE drop target and the lease that revokes it.
+       The feature is the only friend assembly, and it is why this backend has no
+       drag-and-drop-named public API. -->
   <ItemGroup>
     <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop" />
   </ItemGroup>

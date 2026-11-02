@@ -19,7 +19,7 @@
     <!-- The feature is AOT compatible for the same reason the library is: an application that opts
          in publishes the same way whether it did or not. -->
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Drag and drop for XPlatUI: AllowDrop, the four drag handlers and the per-platform opt-in.</Description>
+    <Description>Drag and drop for XPlatUI: AllowDrop, the four drag handlers, and the per-platform hook and opt-in.</Description>
   </PropertyGroup>
 
   <ItemGroup>

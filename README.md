@@ -32,7 +32,7 @@ XPlatUI.Backend.Headless/ net10.0 backend that paints offscreen; what --render a
 XPlatUI.Backend/          multi-targeting selector: the backend for whichever TFM you built for
 XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one TFM per platform
   common/                 the portable half: AllowDrop, the handler pairs, the router
-  windows/ linux/ macos/  the opt-in that pairs it with the backend's native half
+  windows/ linux/ macos/  the opt-in and its per-window hook, over the backend's native half
 XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
 ```
 

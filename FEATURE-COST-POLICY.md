@@ -721,7 +721,7 @@ A feature that is native on every platform is three layers, and only the middle 
 | Layer | Lives in | Cost when the feature is unused |
 |---|---|---|
 | Contract: service interface, event args, control extension members | `XPlatUI`, in the feature's namespace | Trimmed per member |
-| Implementation: `Win32DragDrop`, `AppKitDragDrop`, `Gtk4DragDrop` | The matching backend assembly | Trimmed, unless something retained names it |
+| Implementation: `Win32DragDropWindowHook`, `AppKitDragDropWindowHook`, `Gtk4DragDropWindowHook` | The feature's platform folder, or the backend assembly for a rung-2 feature | Trimmed, unless something retained names it |
 | Selection: which implementation exists | The backend project reference in the app's project file | None |
 
 Core never references a backend, and an application references exactly one backend per target
@@ -737,11 +737,12 @@ using XPlatUI.DragDrop;
 options.ConfigureServices = services => services.AddDragDrop();
 ```
 
-That method is the opt-in, so it must be the only thing in the backend that names the
-implementation. If a backend's window creation path mentioned `Win32DropTarget`, the whole COM
-implementation would be retained in every Win32 application that never drags anything. It does not:
-the hook does the per-window wiring, so the always-on path contains no feature code and there is
-nothing to gate, look up or branch on.
+That method is the opt-in, so it must be the only thing that names the implementation. If a
+backend's window creation path mentioned `Win32DropTarget`, the whole COM implementation would be
+retained in every Win32 application that never drags anything. It does not: the hook does the
+per-window wiring, so the always-on path contains no feature code and there is nothing to gate, look
+up or branch on. For a rung-3 feature the backend does not name the hook either, because the hook
+lives in the feature package, so the retained backend contains no feature type at all.
 
 The contract across backends is a naming convention, and a backend that forgets it fails at compile
 time on that platform, which is the failure we want. `Headless` declares no feature extensions: it
@@ -793,10 +794,14 @@ the backend package, implements `IXPlatWin32WindowHook` there, and registers its
 `Add<Feature>()`. The backend's loop finds it in the container whether the implementation came from
 the backend or from a package that referenced the backend.
 
-What changes is only where the registration lives. A backend must not reference a feature package,
-so the same-named `Add<Feature>()` extension belongs to the feature instead, declared in each
-platform folder (§4). The application still references one package per feature, unconditionally,
-and forgetting a platform is still a compile error on that platform.
+What changes is only where the hook and its registration live. A backend must not reference a
+feature package, so the hook moves into the feature's platform folder and the same-named
+`Add<Feature>()` extension follows it there, declared in each platform folder (§4). The native
+primitives the hook drives stay behind in the backend as `internal` members, reached through
+`InternalsVisibleTo` to the feature assembly; that direction is safe, because a backend never names
+a feature type and the feature package is the only thing that names the primitive. The application
+still references one package per feature, unconditionally, and forgetting a platform is still a
+compile error on that platform.
 
 **A platform that cannot support a feature still declares it.** The extension method exists
 everywhere so application code compiles, and the platform-neutral service reports `IsSupported` or
