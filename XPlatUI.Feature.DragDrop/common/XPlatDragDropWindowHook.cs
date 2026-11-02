@@ -12,7 +12,7 @@ namespace XPlatUI.DragDrop;
 /// the part they can build.
 /// </para>
 /// <para>
-/// The router is installed at <see cref="XPlatWindowPhase.Created"/> and removed at
+/// The router is installed at <see cref="XPlatWindowPhase.Created"/> and released at
 /// <see cref="XPlatWindowPhase.Closing"/>, because a host outlives its window's visible life and
 /// nothing should route a drag into a window that is going away.
 /// </para>
@@ -27,12 +27,12 @@ public sealed class XPlatDragDropWindowHook : IXPlatWindowHook
         switch (phase)
         {
             case XPlatWindowPhase.Created:
-                window.Host.DragDropRouter = new XPlatDragDropRouter();
+                _ = XPlatDragDropRouter.For(window);
                 break;
 
             case XPlatWindowPhase.Closing:
             case XPlatWindowPhase.Disposed:
-                window.Host.DragDropRouter = null;
+                XPlatDragDropRouter.Release(window);
                 break;
         }
     }

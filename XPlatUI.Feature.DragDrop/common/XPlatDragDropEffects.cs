@@ -1,4 +1,4 @@
-namespace XPlatUI;
+namespace XPlatUI.DragDrop;
 
 /// <summary>
 /// What a drag source allows a drop target to do, and what the target decided to do with the data.

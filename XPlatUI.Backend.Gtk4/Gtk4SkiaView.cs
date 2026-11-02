@@ -132,7 +132,7 @@ public sealed class Gtk4SkiaView : IDisposable
     public XPlatUiHost Host { get; }
 
     /// <summary>The drawing area input arrives on, which is where a controller has to be added.</summary>
-    internal Gtk.DrawingArea InputArea => _area;
+    public Gtk.DrawingArea InputArea => _area;
 
     /// <summary>The widget's width in logical pixels.</summary>
     public int Width => _metricsWidth > 0 ? _metricsWidth : _area.GetWidth();

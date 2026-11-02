@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace XPlatUI;
+namespace XPlatUI.DragDrop;
 
 /// <summary>
 /// Carries the data being dragged and where the pointer is, for the drag phases a control receives

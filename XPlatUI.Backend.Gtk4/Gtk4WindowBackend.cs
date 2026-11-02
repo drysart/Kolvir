@@ -58,6 +58,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     private bool _disposed;
     private bool _presentPending;
     private bool _menuBarAttached;
+    private List<NativeTeardownRegistration>? _nativeTeardowns;
     private bool _active;
 
     internal Gtk4WindowBackend(Gtk4ApplicationBackend application, XPlatWindow window)
@@ -402,8 +403,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         // Whatever the window registered natively has to let go while the window still exists: the
         // platform keeps calling into a registered object for as long as the window is alive.
-        NativeTeardown?.Dispose();
-        NativeTeardown = null;
+        ReleaseNativeTeardowns();
 
         if (view is not null)
         {
@@ -448,15 +448,71 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>The view that shows the host, or null before the window has been shown.</summary>
-    internal Gtk4SkiaView? View => _view;
+    public Gtk4SkiaView? View => _view;
 
     /// <summary>
-    /// Something to dispose while the native window still exists, or null when nothing needs it.
-    /// A feature that registers a native object with the window puts it here, because the object
-    /// stays callable until the window is destroyed and so has to be released first, and because
-    /// that release must not be skipped when a window is disposed without ever being closed.
+    /// Registers a native object that has to be released while the native window still exists.
     /// </summary>
-    internal IDisposable? NativeTeardown { get; set; }
+    /// <param name="teardown">The object to dispose. It is disposed exactly once.</param>
+    /// <returns>
+    /// A registration that releases <paramref name="teardown"/> early when it is disposed, and that
+    /// is harmless to dispose more than once. A caller that never disposes it leaves the release to
+    /// the window's own disposal, which is the one point that still runs when a window is disposed
+    /// without ever being closed.
+    /// </returns>
+    /// <remarks>
+    /// The platform keeps calling into a registered native object for as long as the window is
+    /// alive, so it has to be released before the window is destroyed. This is how a feature takes
+    /// part in that without the backend knowing what it registered: the object is an
+    /// <see cref="IDisposable"/> and nothing here is named after the feature that put it there.
+    /// Registrations are released last in, first out.
+    /// </remarks>
+    public IDisposable RegisterNativeTeardown(IDisposable teardown)
+    {
+        ArgumentNullException.ThrowIfNull(teardown);
+
+        var registration = new NativeTeardownRegistration(this, teardown);
+        (_nativeTeardowns ??= []).Add(registration);
+        return registration;
+    }
+
+    /// <summary>Releases everything registered with <see cref="RegisterNativeTeardown"/>.</summary>
+    private void ReleaseNativeTeardowns()
+    {
+        var registrations = _nativeTeardowns;
+        _nativeTeardowns = null;
+
+        if (registrations is null)
+        {
+            return;
+        }
+
+        // What was layered on the window comes off in the reverse of the order it went on.
+        for (var index = registrations.Count - 1; index >= 0; index--)
+        {
+            registrations[index].Dispose();
+        }
+    }
+
+    /// <summary>One entry in the window's list, releasable early and harmless to dispose twice.</summary>
+    private sealed class NativeTeardownRegistration(Gtk4WindowBackend owner, IDisposable teardown) : IDisposable
+    {
+        private IDisposable? _teardown = teardown;
+
+        public void Dispose()
+        {
+            var current = _teardown;
+            _teardown = null;
+
+            if (current is null)
+            {
+                return;
+            }
+
+            owner._nativeTeardowns?.Remove(this);
+            current.Dispose();
+        }
+    }
 
     internal void RaiseActivatedIfNeeded(bool active)
     {

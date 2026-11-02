@@ -50,8 +50,7 @@ internal sealed class AppKitSkiaView : NSView
     private const string PlainTextType = "public.utf8-plain-text";
 
     /// <summary>The effects a drop offers the drag source.</summary>
-    private const XPlatDragDropEffects DragEffects =
-        XPlatDragDropEffects.Copy | XPlatDragDropEffects.Move;
+    private const AppKitDragEffect DragEffects = AppKitDragEffect.Copy | AppKitDragEffect.Move;
 
     /// <summary>The pasteboard types this view is registered to receive as a drag destination.</summary>
     private static readonly string[] DragTypes = [FileUrlType, PlainTextType];
@@ -75,7 +74,8 @@ internal sealed class AppKitSkiaView : NSView
     private bool _inDraw;
     private bool _invalidationDuringDraw;
     private int _deferredRepaints;
-    private XPlatDataObject? _dragData;
+    private AppKitDragPayload? _dragPayload;
+    private IAppKitDragSink? _dragSink;
 
     private long _frames;
     private long _buffersAllocated;
@@ -99,13 +99,33 @@ internal sealed class AppKitSkiaView : NSView
     }
 
     /// <summary>
-    /// Starts accepting drags, which is what the drag and drop feature calls once the application
-    /// has opted in. A view that is never registered here never sees a drag at all.
+    /// The sink that receives the drags the view is registered for, or null when there is none. A
+    /// view that is never given a sink never registers for a dragged type, so AppKit never sends it
+    /// a drag at all.
     /// </summary>
-    internal void EnableDragDrop() => RegisterForDraggedTypes(DragTypes);
+    public IAppKitDragSink? DragSink
+    {
+        get => _dragSink;
+        set
+        {
+            if (ReferenceEquals(_dragSink, value))
+            {
+                return;
+            }
 
-    /// <summary>Stops accepting drags.</summary>
-    internal void DisableDragDrop() => UnregisterDraggedTypes();
+            _dragSink = value;
+
+            if (value is null)
+            {
+                _dragPayload = null;
+                UnregisterDraggedTypes();
+            }
+            else
+            {
+                RegisterForDraggedTypes(DragTypes);
+            }
+        }
+    }
 
     /// <summary>
     /// A layer backed view is not marked dirty when it is resized: AppKit's default is to leave the
@@ -426,56 +446,55 @@ internal sealed class AppKitSkiaView : NSView
     /// <summary>Called when a drag enters the view, and says whether the view would take the drop.</summary>
     public override NSDragOperation DraggingEntered(INSDraggingInfo sender)
     {
-        var data = ReadDragData(sender);
-        if (data is null)
+        var payload = ReadDragPayload(sender);
+        if (payload is null || _dragSink is null)
         {
-            _dragData = null;
+            _dragPayload = null;
             return NSDragOperation.None;
         }
 
-        _dragData = data;
-        return ToOperation(_host.ProcessDragEnter(PointFrom(sender), data, DragEffects, DragModifiers()));
+        _dragPayload = payload;
+        return ToOperation(_dragSink.DragEntered(PointFrom(sender), payload.Value));
     }
 
     /// <summary>Called as a drag moves over the view, and says what a drop there would do.</summary>
     public override NSDragOperation DraggingUpdated(INSDraggingInfo sender)
     {
-        if (_dragData is null)
+        if (_dragPayload is not { } payload || _dragSink is null)
         {
             return NSDragOperation.None;
         }
 
-        return ToOperation(_host.ProcessDragOver(PointFrom(sender), _dragData, DragEffects, DragModifiers()));
+        return ToOperation(_dragSink.DragUpdated(PointFrom(sender), payload));
     }
 
     /// <summary>Called when the drag leaves the view without being dropped.</summary>
     public override void DraggingExited(INSDraggingInfo? sender)
     {
-        if (_dragData is null)
+        if (_dragPayload is null)
         {
             return;
         }
 
-        _dragData = null;
-        _host.ProcessDragLeave();
+        _dragPayload = null;
+        _dragSink?.DragExited();
     }
 
     /// <summary>Called when the drag is released over the view; true says the drop will be taken.</summary>
-    public override bool PrepareForDragOperation(INSDraggingInfo sender) => _dragData is not null;
+    public override bool PrepareForDragOperation(INSDraggingInfo sender) => _dragPayload is not null;
 
     /// <summary>Called when the drag is released over the view, and routes the drop.</summary>
     public override bool PerformDragOperation(INSDraggingInfo sender)
     {
-        var data = ReadDragData(sender) ?? _dragData;
-        _dragData = null;
+        var payload = ReadDragPayload(sender) ?? _dragPayload;
+        _dragPayload = null;
 
-        if (data is null)
+        if (payload is not { } drop || _dragSink is null)
         {
             return false;
         }
 
-        return _host.ProcessDragDrop(PointFrom(sender), data, DragEffects, DragModifiers()) !=
-            XPlatDragDropEffects.None;
+        return _dragSink.Dropped(PointFrom(sender), drop) != AppKitDragEffect.None;
     }
 
     /// <summary>
@@ -603,7 +622,7 @@ internal sealed class AppKitSkiaView : NSView
     /// <see cref="NSUrl.Path"/> is the URL's path rather than anything on disk, so an image dragged
     /// out of a browser would otherwise arrive as a "file" called <c>/images/logo.png</c>.
     /// </remarks>
-    private static XPlatDataObject? ReadDragData(INSDraggingInfo sender)
+    private static AppKitDragPayload? ReadDragPayload(INSDraggingInfo sender)
     {
         try
         {
@@ -622,13 +641,11 @@ internal sealed class AppKitSkiaView : NSView
 
             if (paths.Length > 0)
             {
-                XPlatDataObject fromFiles = new();
-                fromFiles.SetFiles(paths);
-                return fromFiles;
+                return new AppKitDragPayload(paths, null, DragEffects, DragModifiers());
             }
 
             return pasteboard.GetStringForType(PlainTextType) is { Length: > 0 } text
-                ? XPlatDataObject.FromText(text)
+                ? new AppKitDragPayload([], text, DragEffects, DragModifiers())
                 : null;
         }
         catch (Exception ex)
@@ -645,14 +662,14 @@ internal sealed class AppKitSkiaView : NSView
             : XPlatModifiers.None;
 
     /// <summary>Translates the effect the UI accepted into the operation AppKit shows for it.</summary>
-    private static NSDragOperation ToOperation(XPlatDragDropEffects effect)
+    private static NSDragOperation ToOperation(AppKitDragEffect effect)
     {
-        if (effect.HasFlag(XPlatDragDropEffects.Move))
+        if ((effect & AppKitDragEffect.Move) != 0)
         {
             return NSDragOperation.Move;
         }
 
-        return effect.HasFlag(XPlatDragDropEffects.Copy) ? NSDragOperation.Copy : NSDragOperation.None;
+        return (effect & AppKitDragEffect.Copy) != 0 ? NSDragOperation.Copy : NSDragOperation.None;
     }
 
     private static XPlatModifiers ModifiersFrom(NSEvent theEvent) => AppKitKeyMap.ToModifiers(theEvent.ModifierFlags);

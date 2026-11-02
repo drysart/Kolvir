@@ -1064,7 +1064,7 @@ Tier 1 **is** the v1 scope (D12, D13).
 | Accelerator/shortcut dispatch | Done: `XPlatShortcut` on `XPlatMenuItem`, dispatched by the window's menu bar before the focused control sees the key (§4.3). |
 | Drag & drop + file open | OS-level, per platform, frequently requested. Done for drop: `AllowDrop` plus `DragEnter`/`DragOver`/`DragDrop`/`DragLeave` and `XPlatDataObject`; drag *out* is not started by the library yet. |
 | Clipboard image/file formats | `XPlatClipboard` handles text today. |
-| Native file-drop on window | Done: `IDropTarget` on Windows, `NSDraggingDestination` on macOS, `Gtk.DropTarget` on GTK4, all routed through `XPlatUiHost` (`README.md`, "Drag and drop"). |
+| Native file-drop on window | Done: `IDropTarget` on Windows, `NSDraggingDestination` on macOS, `Gtk.DropTarget` on GTK4, all routed by the feature's own `XPlatDragDropRouter`; the core library names none of it (`README.md`, "Drag and drop"). |
 | IME / dead keys / composed input | Text boxes are unusable for CJK and accented input without it. |
 | Notification / tray / dock badge | Deferred; the API shape is obvious and the payoff is small. |
 | Accessibility (UIA / NSAccessibility / AT-SPI) | Large, and worth designing separately. |
@@ -1437,7 +1437,7 @@ choices worth recording are these:
 - **`XPlatApplication.HandleNativeBoundary` is static, and the instance method behind it is private.**
   A backend has to be able to report a fault when no application exists - `--render` drives a bare
   `XPlatUiHost` - and in that case it rethrows to its caller. Making the entry point static means the
-  backends need no null check and no `InternalsVisibleTo`.
+  backends need no null check and no special access to the core assembly.
 - **`XPlatUiHost` and `XPlatWindow` are guarded in the core, not per backend.** `ProcessMouseMove`,
   `ProcessMouseDown`, `ProcessMouseUp`, `ProcessMouseLeave`, `ProcessContextMenu`, `ProcessKeyDown`,
   `ProcessKeyUp`, `ProcessTextInput`, `Paint` and the `XPlatWindow.OnBackend*` handlers

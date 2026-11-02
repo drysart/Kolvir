@@ -15,12 +15,4 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
-  <!-- The drag and drop feature package owns the OLE drop target as well as the opt-in that
-       registers it, so what it needs here is the window's handle, its host and the slot it releases
-       the target through. The feature is the only friend assembly, and it is why this backend has no
-       drag-and-drop-named public API. -->
-  <ItemGroup>
-    <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop" />
-  </ItemGroup>
-
 </Project>

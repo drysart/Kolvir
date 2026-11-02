@@ -28,14 +28,14 @@ namespace XPlatUI.DragDrop;
 /// read the payload.
 /// </para>
 /// </remarks>
-internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatUiHost host) : IDisposable
+internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatDragDropRouter router) : IDisposable
 {
     /// <summary>The effects a drop target offers the drag source.</summary>
     private const XPlatDragDropEffects DragEffects =
         XPlatDragDropEffects.Copy | XPlatDragDropEffects.Move;
 
     private readonly Gtk.DrawingArea _area = area;
-    private readonly XPlatUiHost _host = host;
+    private readonly XPlatDragDropRouter _router = router;
 
     private Gtk.DropTarget? _fileDropTarget;
     private Gtk.DropTarget? _textDropTarget;
@@ -124,7 +124,7 @@ internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatUiHost host) : 
             }
 
             var point = new SKPoint((float)args.X, (float)args.Y);
-            return ToAction(_host.ProcessDragEnter(point, _dragData, DragEffects, CurrentModifiers(sender)));
+            return ToAction(_router.DragEnter(point, _dragData, DragEffects, CurrentModifiers(sender)));
         }
         catch (Exception ex)
         {
@@ -145,7 +145,7 @@ internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatUiHost host) : 
             }
 
             var point = new SKPoint((float)args.X, (float)args.Y);
-            return ToAction(_host.ProcessDragOver(point, _dragData, DragEffects, CurrentModifiers(sender)));
+            return ToAction(_router.DragOver(point, _dragData, DragEffects, CurrentModifiers(sender)));
         }
         catch (Exception ex)
         {
@@ -163,7 +163,7 @@ internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatUiHost host) : 
         }
 
         _dragData = null;
-        _host.ProcessDragLeave();
+        _router.DragLeave();
     }
 
     /// <summary>Routes the drop into the control tree.</summary>
@@ -180,7 +180,7 @@ internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatUiHost host) : 
             }
 
             var point = new SKPoint((float)args.X, (float)args.Y);
-            return _host.ProcessDragDrop(point, data, DragEffects, CurrentModifiers(sender)) !=
+            return _router.DragDrop(point, data, DragEffects, CurrentModifiers(sender)) !=
                 XPlatDragDropEffects.None;
         }
         catch (Exception ex)
@@ -243,8 +243,28 @@ internal sealed class Gtk4DropTargets(Gtk.DrawingArea area, XPlatUiHost host) : 
     }
 
     /// <summary>Reads the modifier keys that are down right now, as the drag controller sees them.</summary>
-    private static XPlatModifiers CurrentModifiers(Gtk.DropTarget sender) =>
-        Gtk4KeyMap.MapModifiers(sender.GetCurrentEventState());
+    private static XPlatModifiers CurrentModifiers(Gtk.DropTarget sender)
+    {
+        var state = sender.GetCurrentEventState();
+        var modifiers = XPlatModifiers.None;
+
+        if ((state & Gdk.ModifierType.ShiftMask) != 0)
+        {
+            modifiers |= XPlatModifiers.Shift;
+        }
+
+        if ((state & Gdk.ModifierType.ControlMask) != 0)
+        {
+            modifiers |= XPlatModifiers.Control;
+        }
+
+        if ((state & Gdk.ModifierType.AltMask) != 0)
+        {
+            modifiers |= XPlatModifiers.Alt;
+        }
+
+        return modifiers;
+    }
 
     /// <summary>Translates the effect the UI accepted into the action GTK shows for it.</summary>
     private static Gdk.DragAction ToAction(XPlatDragDropEffects effect)

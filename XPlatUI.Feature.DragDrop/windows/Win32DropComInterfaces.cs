@@ -1,6 +1,5 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
-using XPlatUI.Backend.Win32;
 
 namespace XPlatUI.DragDrop;
 
@@ -78,14 +77,14 @@ internal interface IDropTarget
     /// <param name="point">The pointer position, in screen pixels.</param>
     /// <param name="effect">The effects the source allows; set to the effect to display.</param>
     /// <returns><c>S_OK</c> to accept the drag, a failure code to refuse it outright.</returns>
-    int DragEnter(IntPtr dataObject, uint keyState, NativeMethods.POINT point, ref uint effect);
+    int DragEnter(IntPtr dataObject, uint keyState, Win32DropNativeMethods.POINT point, ref uint effect);
 
     /// <summary>Called as the pointer moves while the data is over the window.</summary>
     /// <param name="keyState">The mouse button and modifier keys held down.</param>
     /// <param name="point">The pointer position, in screen pixels.</param>
     /// <param name="effect">The effects the source allows; set to the effect to display.</param>
     /// <returns><c>S_OK</c> to keep accepting the drag.</returns>
-    int DragOver(uint keyState, NativeMethods.POINT point, ref uint effect);
+    int DragOver(uint keyState, Win32DropNativeMethods.POINT point, ref uint effect);
 
     /// <summary>Called when the data leaves the window without being dropped.</summary>
     /// <returns><c>S_OK</c>.</returns>
@@ -97,7 +96,7 @@ internal interface IDropTarget
     /// <param name="point">The pointer position, in screen pixels.</param>
     /// <param name="effect">The effects the source allows; set to the effect that was performed.</param>
     /// <returns><c>S_OK</c>.</returns>
-    int Drop(IntPtr dataObject, uint keyState, NativeMethods.POINT point, ref uint effect);
+    int Drop(IntPtr dataObject, uint keyState, Win32DropNativeMethods.POINT point, ref uint effect);
 }
 
 /// <summary>

@@ -988,38 +988,6 @@ public class XPlatControl : IDisposable
         }
     }
 
-    internal void RaiseDragEnter(XPlatDragEventArgs e)
-    {
-        if (Enabled)
-        {
-            OnDragEnter(e);
-        }
-    }
-
-    internal void RaiseDragOver(XPlatDragEventArgs e)
-    {
-        if (Enabled)
-        {
-            OnDragOver(e);
-        }
-    }
-
-    internal void RaiseDragLeave()
-    {
-        if (Enabled)
-        {
-            OnDragLeave();
-        }
-    }
-
-    internal void RaiseDragDrop(XPlatDragEventArgs e)
-    {
-        if (Enabled)
-        {
-            OnDragDrop(e);
-        }
-    }
-
     internal void RaiseGotFocus()
     {
         IsFocused = true;
@@ -1108,33 +1076,6 @@ public class XPlatControl : IDisposable
     protected virtual void OnKeyUp(XPlatKeyEventArgs e) => _keyUp?.Invoke(this, e);
 
     protected virtual void OnTextInput(XPlatTextInputEventArgs e) => _textInput?.Invoke(this, e);
-
-    /// <summary>
-    /// Lets the control itself decide what to do with a drag entering it. The host calls this after
-    /// the drag and drop feature has run the handlers subscribed with <c>AddDragEnterHandler</c>, so
-    /// a control that overrides it has the last word on <see cref="XPlatDragEventArgs.Effect"/>.
-    /// </summary>
-    /// <param name="e">The event data.</param>
-    protected virtual void OnDragEnter(XPlatDragEventArgs e)
-    {
-    }
-
-    /// <summary>Lets the control itself answer a drag moving over it.</summary>
-    /// <param name="e">The event data.</param>
-    protected virtual void OnDragOver(XPlatDragEventArgs e)
-    {
-    }
-
-    /// <summary>Lets the control itself react to a drag leaving it or being cancelled.</summary>
-    protected virtual void OnDragLeave()
-    {
-    }
-
-    /// <summary>Lets the control itself act on data dropped on it.</summary>
-    /// <param name="e">The event data.</param>
-    protected virtual void OnDragDrop(XPlatDragEventArgs e)
-    {
-    }
 
     protected virtual void OnGotFocus() => _gotFocus?.Invoke(this);
 
