@@ -275,6 +275,7 @@ public sealed class XPlatUiHost
     {
         var hit = HitTest(location);
         _captured = hit;
+        var takesFocus = hit is null || (hit.TabStop && hit.Focusable);
 
         if (button == XPlatMouseButtons.Left)
         {
@@ -283,7 +284,15 @@ public sealed class XPlatUiHost
             {
                 _selecting = false;
                 _draggingSelection = false;
-                ClearSelection();
+
+                // A press that cannot move the focus - the scrollbar a panel owns for itself, a
+                // plain label - leaves the selection and the caret of the focused text box alone.
+                // Clearing them here would take the caret away from a control that still has the
+                // focus and is still receiving what the user types.
+                if (takesFocus)
+                {
+                    ClearSelection();
+                }
             }
             else
             {
@@ -300,7 +309,7 @@ public sealed class XPlatUiHost
             return;
         }
 
-        if (hit.TabStop && hit.Focusable)
+        if (takesFocus)
         {
             SetFocus(hit);
         }

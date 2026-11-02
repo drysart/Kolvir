@@ -273,6 +273,11 @@ it gates click-to-focus, `Focus()` and the tab order without affecting mouse int
 standalone `XPlatScrollBar` is still `TabStop` and `Focusable`, so it can be driven from the
 keyboard as before.
 
+A press that cannot move the focus also leaves the selection alone. Dragging a scrollbar, or
+clicking a plain label, therefore keeps the caret of a focused text box blinking and the text box
+keeps taking what the user types; only a press that actually moves the focus, or one that lands on
+another selectable control, ends the selection.
+
 What is still missing is the overlay style: an overlay scrollbar floats over the content and does
 not take a gutter. The bars are classic until that lands.
 

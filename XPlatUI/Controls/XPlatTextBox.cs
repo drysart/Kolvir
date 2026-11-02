@@ -598,8 +598,15 @@ public class XPlatTextBox : XPlatControl
     protected override void OnSelectionCleared(EventArgs e)
     {
         base.OnSelectionCleared(e);
-        _caret.Deactivate();
         _anchor = _caretIndex;
+
+        // The host dropping the selection is not the box giving up the insertion point. While the
+        // focus is still here the caret keeps blinking, so a press that never moved the focus
+        // cannot leave a focused box looking as if it had lost it.
+        if (!IsFocused)
+        {
+            _caret.Deactivate();
+        }
     }
 
     protected override void OnBoundsChanged()
