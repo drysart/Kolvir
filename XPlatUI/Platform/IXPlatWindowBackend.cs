@@ -16,9 +16,10 @@ namespace XPlatUI;
 /// <para>
 /// <b>Input does not pass through the model.</b> The backend forwards pointer, key and text events
 /// straight into <c>Host.ProcessMouseMove</c>, <c>ProcessMouseDown</c>, <c>ProcessMouseUp</c>,
-/// <c>ProcessMouseLeave</c>, <c>ProcessKeyDown</c>, <c>ProcessKeyUp</c>, <c>ProcessTextInput</c>,
-/// <c>ProcessContextMenu</c> and <c>SetClientSize</c>, exactly as the harnesses do today. The model
-/// adds lifecycle, services and the loop around that; it never interposes on input.
+/// <c>ProcessMouseLeave</c>, <c>ProcessMouseWheel</c>, <c>ProcessKeyDown</c>, <c>ProcessKeyUp</c>,
+/// <c>ProcessTextInput</c>, <c>ProcessContextMenu</c> and <c>SetClientSize</c>, exactly as the
+/// harnesses do today. The model adds lifecycle, services and the loop around that; it never
+/// interposes on input.
 /// </para>
 /// </remarks>
 public interface IXPlatWindowBackend : IDisposable

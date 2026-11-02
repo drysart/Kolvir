@@ -402,6 +402,36 @@ internal sealed class AppKitSkiaView : NSView
 
     public override void OtherMouseDragged(NSEvent theEvent) => MoveTo(theEvent);
 
+    /// <summary>
+    /// How far one line of wheel scroll moves, in points. AppKit's own line height is ten points -
+    /// an event's <c>DeltaY</c> is its <c>ScrollingDeltaY</c> over ten - but a line is scaled up by
+    /// half again here, because at ten points a wheel scrolls noticeably slower than the same wheel
+    /// does on Windows and Linux. At fifteen, the three lines a typical wheel reports land on
+    /// forty-five points, all but matching the forty-eight pixel detent the other backends use.
+    /// </summary>
+    private const float WheelLineHeight = 15f;
+
+    /// <summary>
+    /// Forwards a wheel turn.
+    /// </summary>
+    /// <remarks>
+    /// A trackpad reports points and a wheel reports whole lines, and AppKit says which through
+    /// <see cref="NSEvent.HasPreciseScrollingDeltas"/>. A point is already a logical pixel, so
+    /// those pass straight through; a line is converted with <see cref="WheelLineHeight"/>. A
+    /// line is not a detent - treating it as one scrolls the wheel nearly five times too fast -
+    /// and the delta the system reports already carries the user's scroll speed, so no further
+    /// acceleration belongs here. AppKit's sign already matches the host's convention, where a
+    /// positive delta scrolls toward the start of the content.
+    /// </remarks>
+    public override void ScrollWheel(NSEvent theEvent)
+    {
+        var delta = (float)theEvent.ScrollingDeltaY * (theEvent.HasPreciseScrollingDeltas
+            ? 1f
+            : WheelLineHeight);
+
+        _host.ProcessMouseWheel(PointFrom(theEvent), delta, ModifiersFrom(theEvent));
+    }
+
     public override void KeyDown(NSEvent theEvent)
     {
         var modifiers = ModifiersFrom(theEvent);

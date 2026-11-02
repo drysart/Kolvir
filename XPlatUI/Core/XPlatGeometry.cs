@@ -25,8 +25,15 @@ public static class XPlatGeometry
     public static SKRect Deflate(SKRect rect, float amount) =>
         Deflate(rect, new XPlatThickness(amount));
 
+    public static SKRect Inflate(SKRect rect, XPlatThickness thickness) =>
+        Normalize(new SKRect(
+            rect.Left - thickness.Left,
+            rect.Top - thickness.Top,
+            rect.Right + thickness.Right,
+            rect.Bottom + thickness.Bottom));
+
     public static SKRect Inflate(SKRect rect, float amount) =>
-        Normalize(new SKRect(rect.Left - amount, rect.Top - amount, rect.Right + amount, rect.Bottom + amount));
+        Inflate(rect, new XPlatThickness(amount));
 
     public static bool Contains(SKRect rect, SKPoint point) =>
         point.X >= rect.Left && point.X < rect.Right && point.Y >= rect.Top && point.Y < rect.Bottom;

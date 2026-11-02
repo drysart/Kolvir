@@ -9,6 +9,12 @@ namespace XPlatUI;
 /// </summary>
 public sealed class XPlatUiHost
 {
+    /// <summary>
+    /// How far one wheel detent scrolls, in logical pixels. A backend converts its native wheel
+    /// units with this, so a detent moves the same distance on every platform.
+    /// </summary>
+    public const float WheelPixelsPerDetent = 48f;
+
     private Action<object>? _invalidated;
     private Action<object>? _cursorChanged;
     private Action<object, XPlatContextMenuEventArgs>? _contextMenuOpening;
@@ -269,6 +275,7 @@ public sealed class XPlatUiHost
     {
         var hit = HitTest(location);
         _captured = hit;
+        var takesFocus = hit is null || (hit.TabStop && hit.Focusable);
 
         if (button == XPlatMouseButtons.Left)
         {
@@ -277,7 +284,15 @@ public sealed class XPlatUiHost
             {
                 _selecting = false;
                 _draggingSelection = false;
-                ClearSelection();
+
+                // A press that cannot move the focus - the scrollbar a panel owns for itself, a
+                // plain label - leaves the selection and the caret of the focused text box alone.
+                // Clearing them here would take the caret away from a control that still has the
+                // focus and is still receiving what the user types.
+                if (takesFocus)
+                {
+                    ClearSelection();
+                }
             }
             else
             {
@@ -294,7 +309,7 @@ public sealed class XPlatUiHost
             return;
         }
 
-        if (hit.TabStop)
+        if (takesFocus)
         {
             SetFocus(hit);
         }
@@ -322,6 +337,42 @@ public sealed class XPlatUiHost
         _hovered = null;
         SetCursor(XPlatCursor.Default);
     });
+
+    /// <summary>
+    /// Routes a wheel turn to the control under the pointer. Returns true when something consumed
+    /// it, which tells the adapter the platform has nothing left to do with the event.
+    /// </summary>
+    /// <param name="location">The pointer position, in logical client pixels.</param>
+    /// <param name="delta">
+    /// How far to scroll, in logical pixels. Positive scrolls toward the start of the content (up
+    /// or left). Fractions are expected: a touchpad reports a fraction of a detent.
+    /// </param>
+    /// <param name="modifiers">The modifier keys held while the wheel turned.</param>
+    /// <remarks>
+    /// The turn starts at the control under the pointer and travels up the parent chain until one
+    /// consumes it, so a wheel over a label inside a scrolling panel scrolls the panel. A control
+    /// that cannot move any further in the direction asked for leaves the event alone, which hands
+    /// the rest of the turn to the container around it.
+    /// </remarks>
+    public bool ProcessMouseWheel(SKPoint location, float delta, XPlatModifiers modifiers = XPlatModifiers.None) => Guard(() =>
+    {
+        if (delta == 0f)
+        {
+            return false;
+        }
+
+        var target = _captured ?? HitTest(location);
+
+        for (var control = target; control is not null; control = control.Parent)
+        {
+            if (control.RaiseMouseWheel(new XPlatMouseEventArgs(ToLocal(control, location), modifiers: modifiers, delta: delta)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }, false);
 
     /// <summary>
     /// Shows the context menu for <paramref name="location"/>. Adapters call this from the
@@ -396,7 +447,7 @@ public sealed class XPlatUiHost
             return;
         }
 
-        if (control is { Enabled: false })
+        if (control is { Enabled: false } || control is { Focusable: false })
         {
             return;
         }
@@ -635,6 +686,12 @@ public sealed class XPlatUiHost
         for (var current = control; current is not null; current = current.Parent)
         {
             point = new SKPoint(point.X + current.Left, point.Y + current.Top);
+
+            if (current.Parent is { } parent)
+            {
+                var offset = parent.GetChildOffset(current);
+                point = new SKPoint(point.X + offset.X, point.Y + offset.Y);
+            }
         }
 
         return point;
@@ -704,7 +761,7 @@ public sealed class XPlatUiHost
             return;
         }
 
-        if (control.TabStop)
+        if (control.TabStop && control.Focusable)
         {
             output.Add(control);
         }
@@ -724,6 +781,12 @@ public sealed class XPlatUiHost
         for (var current = control; current is not null; current = current.Parent)
         {
             local = new SKPoint(local.X - current.Left, local.Y - current.Top);
+
+            if (current.Parent is { } parent)
+            {
+                var offset = parent.GetChildOffset(current);
+                local = new SKPoint(local.X - offset.X, local.Y - offset.Y);
+            }
         }
 
         return local;

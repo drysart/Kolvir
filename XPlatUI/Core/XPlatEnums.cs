@@ -21,6 +21,22 @@ public enum XPlatOrientation
     Vertical = 1,
 }
 
+/// <summary>
+/// Whether a scrolling container shows a scrollbar along one axis. Each axis of an
+/// <see cref="XPlatPanel"/> is configured separately.
+/// </summary>
+public enum XPlatScrollStyle
+{
+    /// <summary>No scrollbar. Content outside the viewport is clipped and cannot be reached.</summary>
+    None = 0,
+
+    /// <summary>The scrollbar appears only while the content is larger than the viewport.</summary>
+    Automatic = 1,
+
+    /// <summary>The scrollbar is always shown, and is disabled while the content fits.</summary>
+    Always = 2,
+}
+
 /// <summary>Nine-way content alignment (text, images inside a control).</summary>
 public enum XPlatContentAlignment
 {

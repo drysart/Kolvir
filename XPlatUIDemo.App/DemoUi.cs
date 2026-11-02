@@ -618,9 +618,9 @@ public sealed class DemoUi
             CellPadding = new XPlatThickness(8f),
         };
 
-        for (int column = 0; column < 5; column++)
+        for (int column = 0; column < 6; column++)
         {
-            table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.Percent, 20f));
+            table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.Percent, 100f / 6f));
         }
 
         table.RowStyles.Add(new XPlatRowStyle(XPlatSizeType.AutoSize, 0f));
@@ -631,12 +631,14 @@ public sealed class DemoUi
         table.Add(SectionLabel("Rich text"), 2, 0);
         table.Add(SectionLabel("Images and layout"), 3, 0);
         table.Add(SectionLabel("Selection and clipboard"), 4, 0);
+        table.Add(SectionLabel("Scrolling"), 5, 0);
 
         table.Add(BuildLabelsCard(), 0, 1);
         table.Add(BuildButtonsCard(), 1, 1);
         table.Add(BuildRichTextCard(), 2, 1);
         table.Add(BuildImagesCard(), 3, 1);
         table.Add(BuildSelectionCard(), 4, 1);
+        table.Add(BuildScrollingCard(), 5, 1);
 
         return table;
     }
@@ -868,6 +870,87 @@ public sealed class DemoUi
         });
 
         return card;
+    }
+
+    private XPlatPanel BuildScrollingCard()
+    {
+        var card = Card();
+
+        card.Controls.Add(ScrollCaption("VerticalScroll = Automatic"));
+        card.Controls.Add(BuildAutoScrollList());
+        card.Controls.Add(ScrollCaption("HorizontalScroll = Always"));
+        card.Controls.Add(BuildAlwaysScrollStrip());
+
+        return card;
+    }
+
+    private static XPlatLabel ScrollCaption(string text) => new(text)
+    {
+        Dock = XDock.Top,
+        AutoSize = false,
+        Height = 16f,
+        Font = XPlatTheme.CaptionFont,
+        ForeColorRole = XPlatThemeColor.MutedForeground,
+        TextAlign = XPlatContentAlignment.BottomLeft,
+        Margin = new XPlatThickness(0f, 0f, 0f, 2f),
+    };
+
+    /// <summary>
+    /// An <see cref="XPlatScrollStyle.Automatic"/> panel: the vertical bar appears only because the
+    /// rows overflow. Only children with <see cref="DockStyle.None"/> scroll, so each row is placed
+    /// explicitly instead of being docked.
+    /// </summary>
+    private XPlatPanel BuildAutoScrollList()
+    {
+        var list = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 90f,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            Padding = new XPlatThickness(4f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        for (int i = 0; i < 10; i++)
+        {
+            var row = new XPlatButton($"Row {i + 1}")
+            {
+                AutoSize = false,
+                Style = XPlatButtonStyle.Secondary,
+                Bounds = new SKRect(4f, 4f + (i * 24f), 128f, 26f + (i * 24f)),
+            };
+            row.AddClickHandler(_ => SetStatus($"Row {i + 1} clicked - hit testing follows the scroll offset."));
+            list.Controls.Add(row);
+        }
+
+        return list;
+    }
+
+    /// <summary>An <see cref="XPlatScrollStyle.Always"/> panel: the bar is shown even when it fits.</summary>
+    private XPlatPanel BuildAlwaysScrollStrip()
+    {
+        var strip = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 36f,
+            HorizontalScroll = XPlatScrollStyle.Always,
+            Padding = new XPlatThickness(4f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        for (int i = 0; i < 10; i++)
+        {
+            strip.Controls.Add(new XPlatLabel($"Chip {i + 1}")
+            {
+                AutoSize = false,
+                BackColor = XPlatTheme.Secondary,
+                ForeColorRole = XPlatThemeColor.MutedForeground,
+                TextAlign = XPlatContentAlignment.MiddleCenter,
+                Bounds = new SKRect(4f + (i * 92f), 4f, 88f + (i * 92f), 16f),
+            });
+        }
+
+        return strip;
     }
 
     private XPlatPanel BuildButtonsCard()

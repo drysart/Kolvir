@@ -70,6 +70,12 @@ public sealed class Gtk4SkiaView : IDisposable
     private int _deferredRepaints;
     private bool _disposed;
 
+    /// <summary>
+    /// The last pointer position GTK reported. The scroll signal carries a delta but no position,
+    /// so the wheel has to be routed to wherever the pointer was last seen.
+    /// </summary>
+    private SKPoint _pointer;
+
     private long _frames;
     private long _reportedAt;
     private long _reportedFrames;
@@ -370,6 +376,11 @@ public sealed class Gtk4SkiaView : IDisposable
         motion.OnLeave += OnLeave;
         _area.AddController(motion);
 
+        // Both axes, so a tilt wheel and a horizontal touchpad swipe arrive here too.
+        var scroll = Gtk.EventControllerScroll.New(Gtk.EventControllerScrollFlags.BothAxes);
+        scroll.OnScroll += OnScroll;
+        _area.AddController(scroll);
+
         var key = Gtk.EventControllerKey.New();
         key.OnKeyPressed += OnKeyPressed;
         key.OnKeyReleased += OnKeyReleased;
@@ -386,8 +397,9 @@ public sealed class Gtk4SkiaView : IDisposable
 
         // Clicking anywhere inside the view takes keyboard focus, exactly like a Win32 window.
         _area.GrabFocus();
+        _pointer = new SKPoint((float)args.X, (float)args.Y);
         Host.ProcessMouseDown(
-            new SKPoint((float)args.X, (float)args.Y),
+            _pointer,
             button,
             Gtk4KeyMap.MapModifiers(gesture.GetCurrentEventState()),
             Math.Max(args.NPress, 1));
@@ -412,10 +424,34 @@ public sealed class Gtk4SkiaView : IDisposable
         }
     }
 
-    private void OnMotion(Gtk.EventControllerMotion sender, Gtk.EventControllerMotion.MotionSignalArgs args) =>
-        Host.ProcessMouseMove(new SKPoint((float)args.X, (float)args.Y));
+    private void OnMotion(Gtk.EventControllerMotion sender, Gtk.EventControllerMotion.MotionSignalArgs args)
+    {
+        _pointer = new SKPoint((float)args.X, (float)args.Y);
+        Host.ProcessMouseMove(_pointer);
+    }
 
     private void OnLeave(Gtk.EventControllerMotion sender, EventArgs args) => Host.ProcessMouseLeave();
+
+    /// <summary>
+    /// Forwards a wheel turn or a touchpad swipe; returns true when the UI consumed it.
+    /// </summary>
+    /// <remarks>
+    /// GTK reports a wheel in whole detents and a touchpad in pixels, and says which through the
+    /// controller's unit. Its positive deltas point down and right, which is the opposite of the
+    /// host's convention, so both are negated on the way through.
+    /// </remarks>
+    private bool OnScroll(Gtk.EventControllerScroll sender, Gtk.EventControllerScroll.ScrollSignalArgs args)
+    {
+        var scale = sender.GetUnit() == Gdk.ScrollUnit.Wheel ? XPlatUiHost.WheelPixelsPerDetent : 1f;
+
+        var delta = (float)-args.Dy * scale;
+        if (MathF.Abs(delta) < 0.01f)
+        {
+            delta = (float)-args.Dx * scale;
+        }
+
+        return Host.ProcessMouseWheel(_pointer, delta, Gtk4KeyMap.MapModifiers(sender.GetCurrentEventState()));
+    }
 
     /// <summary>Forwards a key press; returns true when the UI consumed it.</summary>
     private bool OnKeyPressed(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyPressedSignalArgs args)

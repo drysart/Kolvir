@@ -1096,6 +1096,14 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
                 OnMouseUp(lParam, XPlatMouseButtons.Middle);
                 return IntPtr.Zero;
 
+            case NativeMethods.WmMouseWheel:
+                OnMouseWheel(wParam, lParam, horizontal: false);
+                return IntPtr.Zero;
+
+            case NativeMethods.WmMouseHWheel:
+                OnMouseWheel(wParam, lParam, horizontal: true);
+                return IntPtr.Zero;
+
             case NativeMethods.WmKeyUp:
                 OnKeyUp(wParam);
                 return IntPtr.Zero;
@@ -1297,6 +1305,26 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     {
         _host.ProcessMouseUp(ToLogical(lParam), button, CurrentModifiers());
         NativeMethods.ReleaseCapture();
+    }
+
+    /// <summary>
+    /// Forwards a wheel turn. The delta sits in the high word of <paramref name="wParam"/> in
+    /// 120ths of a detent, and - unlike every other mouse message - the position is in screen
+    /// pixels rather than client ones.
+    /// </summary>
+    private void OnMouseWheel(IntPtr wParam, IntPtr lParam, bool horizontal)
+    {
+        var detents = NativeMethods.HighWord(wParam) / 120f;
+        var pixels = detents * XPlatUiHost.WheelPixelsPerDetent;
+
+        // A tilt wheel's positive delta points right; the host measures toward the start.
+        if (horizontal)
+        {
+            pixels = -pixels;
+        }
+
+        var location = ScreenToLogical(NativeMethods.LowWord(lParam), NativeMethods.HighWord(lParam));
+        _host.ProcessMouseWheel(location, pixels, CurrentModifiers());
     }
 
     private void OnKeyUp(IntPtr wParam)

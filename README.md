@@ -10,7 +10,7 @@ controls draw themselves on top of it. The same sample UI runs on all three plat
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
   Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatImage
+  Controls/               XPlatPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatImage
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
   Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
@@ -70,9 +70,10 @@ has to read `--classic-menus` before it can build a backend.
 | --- | --- | --- |
 | `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled`, colours, focus, mouse/keyboard events; any control can host children |
 | `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
-| `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome |
+| `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
 | `XPlatSplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
+| `XPlatScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
 | `XPlatLabel` | `Label` | Nine-way alignment, optional word wrap |
 | `XPlatRichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
 | `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
@@ -192,6 +193,95 @@ split, `Up`/`Down` for a horizontal one) when the container has keyboard focus. 
 `IsSplitterFixed` to lock it, and `SplitterColor`/`ShowSplitterGrip` to restyle it.
 `AddSplitterMovingHandler` runs continuously during a drag; `AddSplitterDistanceChangedHandler` runs
 whenever the distance changes for any reason.
+
+### Scrolling
+
+`XPlatPanel` scrolls each axis independently. `HorizontalScroll` and `VerticalScroll` take an
+`XPlatScrollStyle`, and both default to `None`, so a panel that does not ask for scrolling pays
+nothing for it:
+
+| Style | Layout | Behaviour |
+| --- | --- | --- |
+| `None` | No gutter | Children outside the client area are clipped and cannot be reached |
+| `Automatic` | Gutter appears only when needed | Shown while the content is larger than the viewport |
+| `Always` | Gutter always reserved | The bar is shown even when the content fits, and is disabled |
+
+The bar is the classic, non-overlay style: it takes a `ScrollBarThickness` (16 px by default)
+gutter out of the client area, and the remaining area is `ViewportRect`. Content is measured from
+the top-left of the viewport into `ScrollExtent`, and the visible bars are `HorizontalScrollBar` /
+`VerticalScrollBar` if you need to restyle or drive them.
+
+```csharp
+var list = new XPlatPanel
+{
+    Dock = DockStyle.Fill,
+    VerticalScroll = XPlatScrollStyle.Automatic,
+    Padding = new XPlatThickness(4f),
+};
+
+for (int i = 0; i < 20; i++)
+{
+    list.Controls.Add(new XPlatButton($"Row {i}")
+    {
+        Bounds = new SKRect(4f, 4f + (i * 28f), 200f, 32f + (i * 28f)),
+    });
+}
+
+list.ScrollTo(0f, 120f);                    // absolute, clamped to the reachable range
+list.ScrollBy(0f, -16f);                    // relative
+list.ScrollControlIntoView(list.Controls[7]);
+root.Controls.Add(list);
+```
+
+Scrolling is a paint-time translation, so children keep the `Bounds` you gave them and a scrolled
+panel moves them as a whole: hit testing, focus, selection and drag and drop all follow, because
+`XPlatUiHost` maps coordinates through the same offset. Two rules follow from that:
+
+- Only children whose `Dock` is `DockStyle.None` contribute to `ScrollExtent`. A docked child is
+  pinned to the viewport and never scrolls, which is what you want for a header or a filter row.
+- Content is measured from the top-left of the viewport, so a child positioned to the left of or
+  above it is clipped rather than scrolled to. Lay content out from the origin.
+
+`XPlatScrollBar` is also usable on its own, exactly like the WinForms `ScrollBar`. It reports
+`Minimum`, `Maximum`, `Value`, `SmallChange` and `LargeChange`, and distinguishes a change the user
+made (`AddScrollHandler`, raised by the arrows, the track, the thumb and the keyboard) from one the
+application made (`AddValueChangedHandler`, raised by any change at all). Setting `Value` from code
+moves the thumb and raises only the second.
+
+The mouse wheel scrolls the control under the pointer. `XPlatUiHost.ProcessMouseWheel` starts at the
+captured control, or the control under the pointer, and walks up the parent chain until something
+claims the turn, so a wheel event over a nested list scrolls the list and only reaches the panel
+around it once the list is at its end. `XPlatMouseEventArgs.Delta` is the distance in logical
+pixels, positive toward the start of the content (up or left); a backend that reports a wheel in
+detents multiplies by `XPlatUiHost.WheelPixelsPerDetent`, one that reports lines multiplies by its
+own platform's line height - macOS reports a wheel in ten-point lines and scales a line up by half
+again, so a typical three-line notch moves much the same distance as a detent - and one that reports
+precise deltas (a touchpad) passes them straight through. A panel scrolls vertically unless `Shift`
+is held and horizontal scrolling is possible, and falls back to the other axis when the preferred one
+cannot move. A standalone `XPlatScrollBar` moves three `SmallChange` steps per detent.
+
+```csharp
+list.AddMouseWheelHandler((sender, e) =>
+{
+    if (e.Handled) return;                  // an ancestor already dealt with it
+    Console.WriteLine($"wheel by {e.Delta}px");
+});
+```
+
+The bars a panel creates for itself are not focusable: they take clicks, drags and the wheel, but
+`Focusable` is `false`, so clicking one leaves the focus where the user was working, `Focus()` on it
+does nothing and `Tab` never lands on it. That is what `XPlatControl.Focusable` is for in general -
+it gates click-to-focus, `Focus()` and the tab order without affecting mouse interaction. A
+standalone `XPlatScrollBar` is still `TabStop` and `Focusable`, so it can be driven from the
+keyboard as before.
+
+A press that cannot move the focus also leaves the selection alone. Dragging a scrollbar, or
+clicking a plain label, therefore keeps the caret of a focused text box blinking and the text box
+keeps taking what the user types; only a press that actually moves the focus, or one that lands on
+another selectable control, ends the selection.
+
+What is still missing is the overlay style: an overlay scrollbar floats over the content and does
+not take a gutter. The bars are classic until that lands.
 
 ### Rich label
 

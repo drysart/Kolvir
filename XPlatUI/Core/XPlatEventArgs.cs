@@ -8,12 +8,14 @@ public class XPlatMouseEventArgs
         SKPoint location,
         XPlatMouseButtons button = XPlatMouseButtons.None,
         XPlatModifiers modifiers = XPlatModifiers.None,
-        int clickCount = 1)
+        int clickCount = 1,
+        float delta = 0f)
     {
         Location = location;
         Button = button;
         Modifiers = modifiers;
         ClickCount = clickCount;
+        Delta = delta;
     }
 
     /// <summary>Mouse position in the receiving control's coordinate space.</summary>
@@ -24,6 +26,16 @@ public class XPlatMouseEventArgs
     public XPlatModifiers Modifiers { get; }
 
     public int ClickCount { get; }
+
+    /// <summary>
+    /// How far a wheel turn scrolls, in logical pixels, with a positive value scrolling toward the
+    /// start of the content (up or left). Always zero for an event that is not a wheel turn.
+    /// </summary>
+    /// <remarks>
+    /// A wheel reports whole detents and a touchpad reports fractions of one, so the value is
+    /// fractional rather than a count of anything.
+    /// </remarks>
+    public float Delta { get; }
 
     public bool Handled { get; set; }
 }
