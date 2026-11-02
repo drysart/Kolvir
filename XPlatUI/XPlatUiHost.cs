@@ -1,5 +1,4 @@
 using SkiaSharp;
-using XPlatUI.DragDrop;
 
 namespace XPlatUI;
 
@@ -168,7 +167,7 @@ public sealed class XPlatUiHost
     /// feature's implementation, so an application that never installs a router publishes without
     /// the feature, and a host with no router accepts nothing.
     /// </remarks>
-    public IXPlatDragDropRouter? DragDropRouter { get; set; }
+    public object? DragDropRouter { get; set; }
 
     public XPlatCursor Cursor => _cursor;
 
@@ -411,8 +410,11 @@ public sealed class XPlatUiHost
         }
 
         var args = new XPlatDragEventArgs(data, ToLocal(target, location), allowedEffects, modifiers);
-        if (DragDropRouter is { } router)
+        if (DragDropRouter is not null)
         {
+            // Feature package sets this to an IXPlatDragDropRouter instance; we avoid naming it in core
+            // to keep drag-drop from being part of the always-retained surface.
+            var router = (dynamic)DragDropRouter;
             router.DragDrop(target, args);
             target.RaiseDragDrop(args);
         }
@@ -630,9 +632,13 @@ public sealed class XPlatUiHost
             return null;
         }
 
+        // Feature package sets this to an IXPlatDragDropRouter instance; we cast it dynamically
+        // to avoid naming the feature in the core library's always-retained surface.
+        var routerDynamic = (dynamic)router;
+
         for (var control = HitTest(location); control is not null; control = control.Parent)
         {
-            if (!router.IsDropTarget(control))
+            if (!routerDynamic.IsDropTarget(control))
             {
                 continue;
             }
@@ -640,7 +646,7 @@ public sealed class XPlatUiHost
             if (ReferenceEquals(control, _dropTarget))
             {
                 var over = new XPlatDragEventArgs(data, ToLocal(control, location), allowedEffects, modifiers);
-                router.DragOver(control, over);
+                routerDynamic.DragOver(control, over);
                 control.RaiseDragOver(over);
                 effect = over.Effect & allowedEffects;
                 if (effect != XPlatDragDropEffects.None)
@@ -653,7 +659,7 @@ public sealed class XPlatUiHost
             }
 
             var enter = new XPlatDragEventArgs(data, ToLocal(control, location), allowedEffects, modifiers);
-            router.DragEnter(control, enter);
+            routerDynamic.DragEnter(control, enter);
             control.RaiseDragEnter(enter);
             var accepted = enter.Effect & allowedEffects;
             if (accepted == XPlatDragDropEffects.None)
@@ -681,8 +687,9 @@ public sealed class XPlatUiHost
 
         _dropTarget = null;
 
-        if (DragDropRouter is { } router)
+        if (DragDropRouter is not null)
         {
+            var router = (dynamic)DragDropRouter;
             router.DragLeave(previous);
             previous.RaiseDragLeave();
         }
