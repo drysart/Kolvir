@@ -895,7 +895,7 @@ frameworks, so the publishing machine needs the macOS workload.
 
 | Measurement | win-x64 | linux-x64 | osx-arm64 |
 |---|---|---|---|
-| Minimal fixture, Skia loose | 3,070,976 | 4,062,688 | 4,234,528 |
+| Minimal fixture, Skia loose | 3,070,976 | 4,062,656 | 4,234,528 |
 | Seam delta over the fixture without the seam | 10,240 | 4,384 | 0 |
 
 The seam delta is the two interfaces, two enums and two dispatch loops of §7, measured by publishing
@@ -905,12 +905,12 @@ content. macOS moved by nothing measurable, because its arm64 image is linked in
 seam fits in the slack of the pages it already had.
 
 The opt-in half has one worked example, the only feature measured end to end so far. An application
-that registers the drag and drop hook publishes at 3,210,240 bytes on win-x64 and 4,227,552 on
-linux-x64, against 3,070,976 and 4,062,688 without it, so the feature costs 139,264 bytes on
-Windows and 164,864 on Linux when it is actually used. On osx-arm64 the same feature is rung 2
-rather than rung 1 by the letter of the rule: the no-opt-in image grew by 16,432 bytes and opting in
-then costs 16, because the arm64 image is quantised to 16 KB pages and the retained types fit in
-slack the linker had already paid for.
+that registers the drag and drop hook publishes at 3,210,240 bytes on win-x64, 4,223,456 on
+linux-x64 and 4,234,544 on osx-arm64, against 3,070,976, 4,062,656 and 4,234,528 without it, so the
+feature costs 139,264 bytes on Windows and 160,800 on Linux when it is actually used. On osx-arm64
+the same feature is rung 2 rather than rung 1 by the letter of the rule: the no-opt-in image grew by
+16,432 bytes and opting in then costs 16, because the arm64 image is quantised to 16 KB pages and
+the retained types fit in slack the linker had already paid for.
 
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
