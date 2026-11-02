@@ -34,7 +34,7 @@ XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one
   common/                 the portable half: AllowDrop, the handler pairs, the router
   windows/                the opt-in, its hook and the OLE IDropTarget they register
   linux/                  the opt-in, its hook and the GtkDropTarget controllers they add
-  macos/                  the opt-in and its hook; the AppKit half stays in the backend (below)
+  macos/                  the opt-in, its hook, and the sink it installs on the view (below)
 XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
 ```
 
@@ -651,14 +651,19 @@ controller added to a widget, so both moved out of `XPlatUI.Backend.Win32` and
 `XPlatUI.Backend.Gtk4` and only a generic slot for releasing them when the window goes remains.
 macOS is the exception, because AppKit delivers a drag to the `NSView` that registered for the
 dragged types, through `NSDraggingDestination` methods on that view's own class; there is no separate
-destination object to hand the window, so the implementation cannot leave `AppKitSkiaView`.
+destination object to hand the window, so the five overrides cannot leave `AppKitSkiaView`. What they
+mean still does: the view names nothing from the package, it hands over an `AppKitDragPayload` and
+asks an `IAppKitDragSink` for an `AppKitDragEffect`, and the feature's hook implements that sink and
+translates. A view that is never given a sink never registers for a dragged type, so an AppKit
+application that did not opt in still carries nothing of the feature.
 
 A drop is routed by hit testing, then by walking up the parents, so an `AllowDrop` panel accepts a
 drop anywhere inside it and a child that does not want the drop passes it to its parent. A control
 counts as wanting the drop when its `DragEnter` or `DragOver` answers with something other than
 `None`, so a text box that takes text but not files lets a file drop land on the panel behind it.
-The host clamps whatever `Effect` a handler sets to the effects the drag source allowed, so a
-control cannot claim a move the source never offered.
+The feature clamps whatever `Effect` a handler sets to the effects the drag source allowed, so a
+control cannot claim a move the source never offered. All of that routing lives in the package's own
+`XPlatDragDropRouter`, one per window: the library names none of it and keeps no state for it.
 
 The demo turns the whole window into a drop target: dropping files prints their names on the status
 line, and dropping text prints the first sixty characters.

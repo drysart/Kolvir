@@ -9,7 +9,7 @@ namespace XPlatUI.DragDrop;
 /// <remarks>
 /// <para>
 /// This is the native half of drag and drop. The portable half is
-/// <see cref="XPlatDragDropWindowHook"/>, which installs the router the host routes drags through;
+/// <see cref="XPlatDragDropWindowHook"/>, which installs the router the drags are routed through;
 /// this half is what makes Windows send those drags in the first place.
 /// </para>
 /// <para>
@@ -33,7 +33,7 @@ internal sealed class Win32DragDropWindowHook : IXPlatWin32WindowHook
         }
 
         var handle = backend.Handle;
-        var target = new Win32DropTarget(backend);
+        var target = new Win32DropTarget(backend, XPlatDragDropRouter.For(window));
 
         // A refusal here is not an error: the thread is not in a single-threaded apartment, or the
         // window already has a target. The window then simply never sees a drop.

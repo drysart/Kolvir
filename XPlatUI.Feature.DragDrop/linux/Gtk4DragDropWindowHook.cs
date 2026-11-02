@@ -9,7 +9,7 @@ namespace XPlatUI.DragDrop;
 /// <remarks>
 /// <para>
 /// This is the native half of drag and drop. The portable half is
-/// <see cref="XPlatDragDropWindowHook"/>, which installs the router the host routes drags through;
+/// <see cref="XPlatDragDropWindowHook"/>, which installs the router the drags are routed through;
 /// this half is what makes GTK4 send those drags in the first place.
 /// </para>
 /// <para>
@@ -32,7 +32,7 @@ internal sealed class Gtk4DragDropWindowHook : IXPlatGtk4WindowHook
         {
             case XPlatWindowPhase.Shown when backend.NativeTeardown is null &&
                 backend.View is { } view:
-                var targets = new Gtk4DropTargets(view.InputArea, view.Host);
+                var targets = new Gtk4DropTargets(view.InputArea, XPlatDragDropRouter.For(window));
                 targets.Attach();
                 backend.NativeTeardown = targets;
                 break;

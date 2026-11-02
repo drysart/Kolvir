@@ -2,7 +2,7 @@ namespace XPlatUI;
 
 /// <summary>
 /// Per-window work that has to run at a point in a window's life that no event covers, such as
-/// registering a native drop target once the handle exists and revoking it before the handle dies.
+/// attaching a native handle once it exists and detaching it before the handle dies.
 /// </summary>
 /// <remarks>
 /// <para>

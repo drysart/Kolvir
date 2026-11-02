@@ -1,4 +1,4 @@
-namespace XPlatUI;
+namespace XPlatUI.DragDrop;
 
 /// <summary>
 /// Names one representation of the content being dragged or dropped.

@@ -38,16 +38,20 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     private static nint* s_vtable;
 
     private readonly Win32WindowBackend _window;
+    private readonly XPlatDragDropRouter _router;
 
     private nint* _object;
     private XPlatDataObject? _data;
 
     /// <summary>Creates the drop target of a window.</summary>
     /// <param name="window">The window the target belongs to.</param>
-    public Win32DropTarget(Win32WindowBackend window)
+    /// <param name="router">The router that turns what the shell reports into control events.</param>
+    public Win32DropTarget(Win32WindowBackend window, XPlatDragDropRouter router)
     {
         ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(router);
         _window = window;
+        _router = router;
     }
 
     /// <summary>Registers the target with the window, so the shell starts sending it drags.</summary>
@@ -125,7 +129,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             _data = Read(dataObject);
             effect = _data is null
                 ? Win32DropNativeMethods.DropEffectNone
-                : (uint)_window.Host.ProcessDragEnter(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                : (uint)_router.DragEnter(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
         }
         catch (Exception ex)
         {
@@ -148,7 +152,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             }
             else
             {
-                effect = (uint)_window.Host.ProcessDragOver(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                effect = (uint)_router.DragOver(_window.ScreenToLogical(point), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
             }
         }
         catch (Exception ex)
@@ -165,7 +169,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         try
         {
-            _window.Host.ProcessDragLeave();
+            _router.DragLeave();
         }
         catch (Exception ex)
         {
@@ -186,7 +190,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             var data = Read(dataObject) ?? _data;
             effect = data is null
                 ? Win32DropNativeMethods.DropEffectNone
-                : (uint)_window.Host.ProcessDragDrop(_window.ScreenToLogical(point), data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
+                : (uint)_router.DragDrop(_window.ScreenToLogical(point), data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
         }
         catch (Exception ex)
         {

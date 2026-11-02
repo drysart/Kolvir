@@ -1,4 +1,4 @@
-namespace XPlatUI;
+namespace XPlatUI.DragDrop;
 
 /// <summary>
 /// The payload of a drag: one or more representations of the same content, so that a target can

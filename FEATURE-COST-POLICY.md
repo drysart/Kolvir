@@ -825,12 +825,15 @@ nothing else.
 **One platform can be an exception, and the reason has to be structural.** AppKit dispatches a drag
 to the `NSView` that registered for the dragged types, through `NSDraggingDestination` overrides on
 that view's own class; there is no separate destination object to hand the window, as there is on
-Windows and GTK. The implementation therefore cannot leave the view subclass, and the AppKit backend
-keeps it, with `EnableDragDrop`, the five overrides and the pasteboard readers in
-`AppKitSkiaView`. This is the bar for an exception: not "it was easier there", but "the platform's
-API puts the code on a type the feature cannot supply". Windows and GTK pass it, because an OLE drop
-target is an object registered against a handle and a `Gtk.DropTarget` is a controller added to a
-widget, so both moved in full.
+Windows and GTK. The five overrides therefore cannot leave the view subclass, and the AppKit backend
+keeps them in `AppKitSkiaView`. What they *mean* still moves: the view names nothing from the
+feature, hands over an `AppKitDragPayload` and asks an `IAppKitDragSink` for an `AppKitDragEffect`,
+both of which are backend types. The feature's hook implements that sink and translates, so the
+backend assembly contains no feature type. A view that is never given a sink never registers for a
+dragged type, which is what keeps the cost off an application that did not opt in. This is the bar
+for an exception: not "it was easier there", but "the platform's API puts the code on a type the
+feature cannot supply". Windows and GTK pass it, because an OLE drop target is an object registered
+against a handle and a `Gtk.DropTarget` is a controller added to a widget, so both moved in full.
 
 **A platform that cannot support a feature still declares it.** The extension method exists
 everywhere so application code compiles, and the platform-neutral service reports `IsSupported` or
@@ -905,12 +908,19 @@ content. macOS moved by nothing measurable, because its arm64 image is linked in
 seam fits in the slack of the pages it already had.
 
 The opt-in half has one worked example, the only feature measured end to end so far. An application
-that registers the drag and drop hook publishes at 3,210,240 bytes on win-x64, 4,223,456 on
-linux-x64 and 4,234,544 on osx-arm64, against 3,070,976, 4,062,656 and 4,234,528 without it, so the
-feature costs 139,264 bytes on Windows and 160,800 on Linux when it is actually used. On osx-arm64
-the same feature is rung 2 rather than rung 1 by the letter of the rule: the no-opt-in image grew by
-16,432 bytes and opting in then costs 16, because the arm64 image is quantised to 16 KB pages and
-the retained types fit in slack the linker had already paid for.
+that registers the drag and drop hook publishes at 3,213,824 bytes on win-x64 against 3,070,976
+without it, so the feature costs 142,848 bytes when it is actually used. The same feature measured
+4,223,456 on linux-x64 and 4,234,544 on osx-arm64 against 4,062,656 and 4,234,528 without it while
+its types still lived in the core assembly; moving them into `XPlatUI.Feature.DragDrop` changed no
+code, only the assembly each type is compiled into, and Windows moved by 3,584 bytes from linker
+layout alone. On osx-arm64 the feature is rung 2 rather than rung 1 by the letter of the rule: the
+arm64 image is quantised to 16 KB pages, the retained types fit in slack the linker had already paid
+for, and opting in costs 16 bytes.
+
+That last measurement is also why the types no longer live in the core assembly. While they did, an
+application that never opted in still paid 16,432 bytes for them on osx-arm64, because a member on
+`XPlatUiHost` and virtuals on `XPlatControl` made them reachable from types that are always
+retained. Nothing in `XPlatUI` may name a feature type, on any platform, for exactly this reason.
 
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
