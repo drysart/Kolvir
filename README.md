@@ -1192,23 +1192,29 @@ dotnet run --project XPlatUIDemo.App
 ```
 
 `Program.cs` is the whole program: it picks the backend for the platform this build is for, describes
-one `XPlatWindow` around `DemoUi.CreateRoot()`, and runs the `XPlatApplication`. Everything else lives
+one `XPlatWindow` around `new DemoUi().Root`, and runs the `XPlatApplication`. Everything else lives
 behind the backend - `Win32WindowBackend` creates the window with raw `user32` P/Invoke, owns a 32-bit
 DIB section that Skia draws into, blits it on `WM_PAINT`, and forwards mouse/keyboard messages to the
 `XPlatUiHost`.
+
+The sample is organised as a navigation list down the left and a stage on the right that shows one
+demo at a time, so adding a demo is a row in `DemoUi.Demos` rather than another crowded card. Every
+page is built once and kept, and switching pages re-parents one control into the stage.
 
 To render the same sample UI headlessly (useful for visual checks in CI):
 
 ```
 XPlatUIDemoApp.exe --render out.png 1280 820
+XPlatUIDemoApp.exe --render out.png 1280 820 --page 3
 ```
 
 Add `--light` or `--dark` to either mode to force an appearance instead of using the system one; the
-header's **Switch appearance** button flips it at runtime. `--classic-menus` forces the old
+header's **Switch appearance** button flips it at runtime. `--page` picks a stage page by index in
+both modes, which is what makes a single page renderable on its own. `--classic-menus` forces the old
 `TrackPopupMenuEx` context menus. The sample UI is laid out for a 1280 x 820 client area at 96 DPI
 points and the backend scales the Skia canvas by `GetDpiForWindow(hwnd) / 96`, sizing its client
 area to `1280 x 820` multiplied by that scale (clamped to the monitor work area) so the demo is
-never cropped on a high-DPI monitor. The **Selection and clipboard** card is the one to try:
+never cropped on a high-DPI monitor. The **Selection and clipboard** page is the one to try:
 drag down from its label, over the whole-control button and into the text box, then right-click
 the selection.
 

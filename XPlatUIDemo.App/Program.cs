@@ -146,6 +146,8 @@ window.MenuBar = CreateMenuBar(window, demo);
 
         window.Show();
 
+        demo.SelectPage(PageArgument(args));
+
         if (Array.IndexOf(args, "--focus") >= 0)
         {
             demo.FocusFirstTextBox();
@@ -249,7 +251,7 @@ window.MenuBar = CreateMenuBar(window, demo);
 #endif
         ApplyAppearanceOverride(args);
 
-        DemoUi.RenderToPng(path, width, height);
+        DemoUi.RenderToPng(path, width, height, PageArgument(args));
         Console.WriteLine($"Rendered {width}x{height} sample UI to {path}");
         // Printing what the render actually used makes it possible to tell a real visual difference
         // from a changed font or appearance when comparing renders from two builds.
@@ -257,6 +259,13 @@ window.MenuBar = CreateMenuBar(window, demo);
             $"Font: {XPlatTheme.FontFamily ?? "<SkiaSharp default>"}; " +
             $"appearance: {(XPlatTheme.IsDarkMode ? "dark" : "light")}");
         return 0;
+    }
+
+    /// <summary>The value of <c>--page</c>, or -1 when the sample should show its first page.</summary>
+    private static int PageArgument(string[] args)
+    {
+        int index = Array.IndexOf(args, "--page");
+        return index >= 0 && index + 1 < args.Length && int.TryParse(args[index + 1], out var page) ? page : -1;
     }
 
     /// <summary>
