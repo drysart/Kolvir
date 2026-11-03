@@ -192,9 +192,9 @@ public class XPlatScrollBar : XPlatControl
     /// <summary>The rectangle the track is painted into, in control coordinates.</summary>
     public SKRect TrackRect => _trackRect;
 
-    public override void PerformLayout()
+    protected override void OnLayout()
     {
-        base.PerformLayout();
+        base.OnLayout();
         UpdateGeometry();
     }
 

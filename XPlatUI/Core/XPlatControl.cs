@@ -44,6 +44,9 @@ public class XPlatControl : IDisposable
     private bool _focusable = true;
     private bool _selectable;
     private XPlatSelectionStyle _selectionStyle = XPlatSelectionStyle.Whole;
+    private int _layoutSuspends;
+    private bool _layoutPending;
+    private bool _invalidateDeferred;
     private bool _disposed;
     private XPlatUiHost? _host;
     private XPlatControlCollection? _controls;
@@ -890,9 +893,75 @@ public class XPlatControl : IDisposable
     /// </summary>
     protected virtual SKSize MeasureContent(SKSize availableSize) => SKSize.Empty;
 
-    /// <summary>Arranges this control's children. Containers override this.</summary>
-    public virtual void PerformLayout()
+    /// <summary>Arranges this control's children, unless layout is suspended.</summary>
+    /// <remarks>
+    /// Suspending is what makes adding many children at once affordable: every child added lays its
+    /// parent out again and asks for a repaint, so filling a panel one control at a time costs a
+    /// pass over a growing child list and a walk up the parent chain each time.
+    /// <see cref="SuspendLayout"/> folds those into the one pass and the one repaint that
+    /// <see cref="ResumeLayout()"/> does at the end.
+    /// </remarks>
+    public void PerformLayout()
     {
+        if (_layoutSuspends > 0)
+        {
+            _layoutPending = true;
+            return;
+        }
+
+        OnLayout();
+    }
+
+    /// <summary>Arranges this control's children. Containers override this.</summary>
+    protected virtual void OnLayout()
+    {
+    }
+
+    /// <summary>Defers layout and repainting until <see cref="ResumeLayout()"/>, nesting with every call.</summary>
+    /// <remarks>
+    /// Both are deferred because a batch that adds or removes many children asks for both per
+    /// child, and neither can take effect before the batch ends. What the batch asked for is
+    /// dropped or done once, when the outermost <see cref="ResumeLayout()"/> runs.
+    /// </remarks>
+    public void SuspendLayout() => _layoutSuspends++;
+
+    /// <summary>Ends a <see cref="SuspendLayout"/> and lays the control out if anything asked it to.</summary>
+    public void ResumeLayout() => ResumeLayout(true);
+
+    /// <summary>Ends a <see cref="SuspendLayout"/>.</summary>
+    /// <param name="performLayout">
+    /// False to drop the layout that was deferred, which is what a caller that is about to arrange
+    /// the control itself wants.
+    /// </param>
+    public void ResumeLayout(bool performLayout)
+    {
+        if (_layoutSuspends == 0)
+        {
+            throw new InvalidOperationException("ResumeLayout was called without a matching SuspendLayout.");
+        }
+
+        _layoutSuspends--;
+
+        if (_layoutSuspends > 0)
+        {
+            return;
+        }
+
+        bool pending = _layoutPending;
+        _layoutPending = false;
+
+        if (performLayout && pending)
+        {
+            OnLayout();
+        }
+
+        // The repaints the batch deferred happen after the layout, because arranging the children
+        // is what decides where they are.
+        if (_invalidateDeferred)
+        {
+            _invalidateDeferred = false;
+            Invalidate();
+        }
     }
 
     /// <summary>Returns the deepest visible, enabled control containing the point.</summary>
@@ -1075,6 +1144,15 @@ public class XPlatControl : IDisposable
 
         if (region.IsEmpty)
         {
+            return;
+        }
+
+        // A batch that is changing the tree in bulk asks for a repaint per child it touches, and
+        // no frame can be painted until the batch is done, so the requests are folded into the one
+        // ResumeLayout makes rather than walked up the parent chain one at a time.
+        if (_layoutSuspends > 0)
+        {
+            _invalidateDeferred = true;
             return;
         }
 

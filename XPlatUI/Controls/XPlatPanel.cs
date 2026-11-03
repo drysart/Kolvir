@@ -130,7 +130,7 @@ public class XPlatPanel : XPlatControl
     }
 
     /// <summary>Arranges the docked children and then the scrollable content.</summary>
-    public override void PerformLayout()
+    protected override void OnLayout()
     {
         if (_layingOut)
         {

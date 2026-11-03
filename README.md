@@ -291,6 +291,42 @@ placement, the offset clamping, `ScrollRectIntoView`, the wheel and the invalida
 scrolling control only has to say how big its content is - `XPlatPanel` measures its children, the
 list box multiplies its row count by the row height - and the helper does the rest.
 
+### Adding many children at once
+
+Adding a child lays its parent out again and asks for a repaint, which is the right thing when a
+control is added one at a time and the wrong thing when a container is filled in a loop: laying out
+`n` children that way costs a pass over a growing child list and a walk up the parent chain per
+child, so filling a panel with ten thousand of them spends most of its time re-arranging the ones
+already there. `SuspendLayout` and `ResumeLayout` fold the batch into one pass and one repaint:
+
+```csharp
+panel.SuspendLayout();
+try
+{
+    panel.Controls.Clear();
+    for (int i = 0; i < count; i++)
+    {
+        panel.Controls.Add(new XPlatButton($"Button {i}") { Location = new SKPoint(0f, i * 36f) });
+    }
+}
+finally
+{
+    panel.ResumeLayout();
+}
+```
+
+`SuspendLayout` nests, and the outermost `ResumeLayout` does the work, in this order: the layout the
+batch asked for, then a single `Invalidate` if anything asked for a repaint while it was suspended.
+Nothing can be painted in between, because a frame is driven by the host's loop and the batch runs
+inside one turn of it, so folding the repaints costs nothing and saves the parent chain walk per
+child. `ResumeLayout(false)` drops the deferred layout - for a caller that is about to arrange the
+container itself - but still repaints.
+
+`PerformLayout` is public and safe to call at any time; it is what a container does to itself when
+something changes that only it can resolve. `OnLayout` is the protected hook a container overrides.
+Neither of them is how a caller arranges children: set `Dock`, `Bounds` or `Location` and let the
+control do it.
+
 ### List box
 
 `XPlatListBox` is the WinForms list box: a vertical list of rows with a selection, keyboard
@@ -499,6 +535,44 @@ macOS does: the content frame would overwrite the red one before either was on s
 `--focus` focuses the first text box on startup. A blinking caret invalidates a five pixel column
 every 530 ms, which makes a steady supply of small partial repaints to watch - handy when the
 machine driving the demo is not the machine looking at it.
+
+### Frame timing
+
+`XPlatUiHost` times the frames it paints, which is enough to see what a partial repaint buys
+without reaching for a profiler:
+
+| Member | Reports |
+| --- | --- |
+| `LastFrameTime` | Library time spent on the last frame: clipping, clearing and walking the tree |
+| `LastFrameArea` | The `SKRectI` that frame covered, in logical pixels - the surface or the dirty region |
+| `FrameCount` | How many frames have been painted |
+| `AddFramePaintedHandler` | A handler that runs after a frame, for a readout of the last one |
+
+The time is the library's own work, so it leaves out whatever the backend spends presenting the
+frame: that part belongs to the platform and the library cannot see it. The debug paint's red frame
+is not counted either - the content frame that replaces it is.
+
+The stats are published after the tree has drawn, so a control that reads them while painting shows
+the frame *before* its own. That is what a readout of the last frame has to say, and it keeps the
+readout from invalidating itself on every frame:
+
+```csharp
+host.AddFramePaintedHandler(_ =>
+    caption.Text = $"Last frame {host.LastFrameTime.TotalMilliseconds:0.0} ms");
+```
+
+The handler runs after the paint has taken the dirty region, so the invalidation its assignment
+causes belongs to the next frame instead of being lost. That is also why a readout on a live page
+should assign only a changed string: otherwise it paints a frame that changes it again, forever.
+
+The sample has two **Performance** pages, and the pair is the point. Both load 1 to 100,000 entries
+and report the last frame beside them; one fills a list box with rows, the other fills a panel with
+real buttons. Scrolling the list stays flat in the item count, because it paints only the rows that
+are on screen, and moves with the size of the *area* instead - which is what the area half of the
+readout is for. The controls page has nothing virtualised: every button is a control, so the panel
+arranges and walks all of them on every scroll and a hit test has all of them to sift. That is the
+cost the list page avoids, and the reason to have both. On GTK4 both report whole-surface frames,
+because that backend presents the whole surface every frame.
 
 ### Rich label
 
@@ -1216,7 +1290,9 @@ points and the backend scales the Skia canvas by `GetDpiForWindow(hwnd) / 96`, s
 area to `1280 x 820` multiplied by that scale (clamped to the monitor work area) so the demo is
 never cropped on a high-DPI monitor. The **Selection and clipboard** page is the one to try:
 drag down from its label, over the whole-control button and into the text box, then right-click
-the selection.
+the selection. The two **Performance** pages are the ones to watch scroll: **Performance: list box**
+loads 1 to 100,000 rows into a list, **Performance: controls** stacks 1 to 100,000 buttons in a
+panel, and both report what the last frame cost to draw them.
 
 ### On Linux (GTK4)
 

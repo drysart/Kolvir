@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SkiaSharp;
 
 namespace XPlatUI;
@@ -16,6 +17,7 @@ public sealed class XPlatUiHost
     public const float WheelPixelsPerDetent = 48f;
 
     private Action<object>? _invalidated;
+    private Action<object>? _framePainted;
     private Action<object>? _cursorChanged;
     private Action<object, XPlatContextMenuEventArgs>? _contextMenuOpening;
     private readonly XPlatSelection _selection;
@@ -51,6 +53,28 @@ public sealed class XPlatUiHost
     {
         ArgumentNullException.ThrowIfNull(handler);
         _invalidated -= handler;
+    }
+
+    /// <summary>Adds a handler that runs once a frame has been painted.</summary>
+    /// <remarks>
+    /// The handler is told about the frame that has just finished, so it reads
+    /// <see cref="LastFrameTime"/>, <see cref="LastFrameArea"/> and <see cref="FrameCount"/> to see
+    /// what that frame cost and covered. The paint has already taken the dirty region by then, so
+    /// anything the handler invalidates is painted by the next frame rather than lost - which is
+    /// what lets a control display the cost of the frame that drew it.
+    /// </remarks>
+    public IDisposable AddFramePaintedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _framePainted += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveFramePaintedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddFramePaintedHandler"/> added.</summary>
+    public void RemoveFramePaintedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _framePainted -= handler;
     }
 
     /// <summary>Adds a handler that runs when the control under the pointer requests a different cursor.</summary>
@@ -236,6 +260,20 @@ public sealed class XPlatUiHost
     private SKRectI SurfaceBounds =>
         new(0, 0, (int)MathF.Ceiling(_clientSize.Width), (int)MathF.Ceiling(_clientSize.Height));
 
+    /// <summary>How long the last painted frame took to draw.</summary>
+    /// <remarks>
+    /// Measured around the library's own work - clipping, clearing and walking the tree - so it
+    /// leaves out whatever the backend spends presenting the frame, which the library cannot see.
+    /// The debug paint's red frame is not counted; the content frame that replaces it is.
+    /// </remarks>
+    public TimeSpan LastFrameTime { get; private set; }
+
+    /// <summary>The area the last painted frame covered, in logical pixels.</summary>
+    public SKRectI LastFrameArea { get; private set; }
+
+    /// <summary>How many frames have been painted.</summary>
+    public long FrameCount { get; private set; }
+
     /// <summary>How long a red debug frame stays on screen before its content is painted over it.</summary>
     private const int DefaultDebugPaintHoldMs = 80;
 
@@ -320,6 +358,8 @@ public sealed class XPlatUiHost
         _dirty.SetEmpty();
         _dirtyAll = false;
 
+        var started = Stopwatch.GetTimestamp();
+
         Guard(() =>
         {
             canvas.Save();
@@ -333,6 +373,18 @@ public sealed class XPlatUiHost
             _root?.Render(canvas);
             canvas.Restore();
         });
+
+        // Published after the tree has drawn rather than before it, so a control that reads these
+        // while painting shows the frame before its own. That is what a readout of the last frame
+        // has to say, and it keeps the readout from invalidating itself on every frame.
+        LastFrameTime = Stopwatch.GetElapsedTime(started);
+        LastFrameArea = area;
+        FrameCount++;
+
+        if (_framePainted is { } framePainted)
+        {
+            Guard(() => framePainted(this));
+        }
 
         return area;
     }

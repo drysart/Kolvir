@@ -221,7 +221,7 @@ public class XPlatSplitContainer : XPlatControl
             : new SKSize(MathF.Max(first.Width, second.Width), _splitterDistance + _splitterWidth + second.Height);
     }
 
-    public override void PerformLayout()
+    protected override void OnLayout()
     {
         var content = ContentRect;
         var available = AxisLength(content);
