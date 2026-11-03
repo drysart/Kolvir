@@ -422,7 +422,7 @@ public class XPlatListBox : XPlatControl
         var previous = _selected.ToArray();
         _selected.Clear();
         _anchor = -1;
-        _lead = -1;
+        SetLead(-1);
         InvalidateSelectionChange(previous);
         RaiseSelectedIndexChanged();
     }
@@ -971,6 +971,28 @@ public class XPlatListBox : XPlatControl
         return (first, last);
     }
 
+    /// <summary>
+    /// Moves the focus rectangle to a row and repaints the row it leaves behind.
+    /// </summary>
+    /// <remarks>
+    /// The lead is what the rectangle follows, and it is not the selection: in
+    /// <see cref="XPlatSelectionMode.None"/> it is the only thing a click moves. A row draws its
+    /// rectangle from the lead, so changing the lead without repainting the old row leaves a
+    /// rectangle behind on a row that no longer has one.
+    /// </remarks>
+    private void SetLead(int index)
+    {
+        if (_lead == index)
+        {
+            return;
+        }
+
+        int previous = _lead;
+        _lead = index;
+        InvalidateRow(previous);
+        InvalidateRow(index);
+    }
+
     /// <summary>Repaints one row, clipped to the part of it that is on screen.</summary>
     private void InvalidateRow(int index)
     {
@@ -1049,7 +1071,7 @@ public class XPlatListBox : XPlatControl
         if (_selected.Count == 1 && _selected[0] == index)
         {
             _anchor = index;
-            _lead = index;
+            SetLead(index);
             EnsureVisible(index);
             return;
         }
@@ -1058,7 +1080,7 @@ public class XPlatListBox : XPlatControl
         _selected.Clear();
         _selected.Add(index);
         _anchor = index;
-        _lead = index;
+        SetLead(index);
 
         InvalidateSelectionChange(previous);
         RaiseSelectedIndexChanged();
@@ -1086,12 +1108,12 @@ public class XPlatListBox : XPlatControl
         int at = _selected.BinarySearch(index);
         if (at >= 0)
         {
-            _lead = index;
+            SetLead(index);
             return;
         }
 
         _selected.Insert(~at, index);
-        _lead = index;
+        SetLead(index);
         InvalidateRow(index);
         RaiseSelectedIndexChanged();
     }
@@ -1153,7 +1175,7 @@ public class XPlatListBox : XPlatControl
     {
         if (_selectionMode == XPlatSelectionMode.None)
         {
-            _lead = index;
+            SetLead(index);
             return;
         }
 
@@ -1163,7 +1185,7 @@ public class XPlatListBox : XPlatControl
         if (_selectionMode == XPlatSelectionMode.MultiExtended && shift && _anchor >= 0)
         {
             SelectRange(_anchor, index);
-            _lead = index;
+            SetLead(index);
             return;
         }
 
@@ -1203,7 +1225,7 @@ public class XPlatListBox : XPlatControl
         }
 
         _anchor = index;
-        _lead = index;
+        SetLead(index);
     }
 
     private void DragTo(SKPoint point)
@@ -1222,7 +1244,7 @@ public class XPlatListBox : XPlatControl
         if (_selectionMode == XPlatSelectionMode.MultiExtended && _anchor >= 0)
         {
             SelectRange(_anchor, index);
-            _lead = index;
+            SetLead(index);
         }
         else
         {
@@ -1254,10 +1276,7 @@ public class XPlatListBox : XPlatControl
 
         if (cursorOnly)
         {
-            int previous = _lead;
-            _lead = index;
-            InvalidateRow(previous);
-            InvalidateRow(index);
+            SetLead(index);
             EnsureVisible(index);
             return;
         }
@@ -1278,7 +1297,7 @@ public class XPlatListBox : XPlatControl
                 if (shift && _anchor >= 0)
                 {
                     SelectRange(_anchor, index);
-                    _lead = index;
+                    SetLead(index);
                 }
                 else
                 {

@@ -349,7 +349,9 @@ landed on whole, and never sideways, so a list the user has scrolled across stay
 
 Selection is stored as a sorted list of indices, so membership is a binary search rather than a
 scan. A change repaints only the rows whose state actually differed, clipped to the viewport, which
-is why hovering and selecting stay cheap on a long list.
+is why hovering and selecting stay cheap on a long list. The row the focus rectangle is on counts
+as a change in its own right, so moving it repaints the row it leaves as well as the row it lands
+on - in `None` mode, where nothing is ever selected, that rectangle is the only thing a click moves.
 
 ### Invalidation and partial painting
 
