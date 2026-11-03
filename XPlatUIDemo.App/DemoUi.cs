@@ -17,6 +17,10 @@ public sealed class DemoUi
     private XPlatLabel _counterLabel = null!;
     private XPlatButton _primaryButton = null!;
     private XPlatButton _dialogAnchor = null!;
+    private XPlatListBox _navList = null!;
+    private XPlatPanel _stage = null!;
+    private XPlatControl[] _pages = null!;
+    private XPlatControl? _shownPage;
     private int _clicks;
 
     public DemoUi()
@@ -27,29 +31,51 @@ public sealed class DemoUi
     /// <summary>The root of the sample control tree.</summary>
     public XPlatControl Root { get; }
 
-    /// <summary>Builds a fresh sample control tree, for hosts that only need the controls.</summary>
-    /// <returns>The root of a new sample tree.</returns>
-    public static XPlatControl CreateRoot() => new DemoUi().Root;
-
-    /// <summary>Puts the caret in the first text field, which then blinks.</summary>
+    /// <summary>Shows the page that holds the first text field and puts the caret in it, which then blinks.</summary>
     public void FocusFirstTextBox()
     {
+        for (int index = 0; index < _pages.Length; index++)
+        {
+            if (FindTextBox(_pages[index]) is not { } box)
+            {
+                continue;
+            }
+
+            _navList.SelectedIndex = index;
+            box.Focus();
+            return;
+        }
+    }
+
+    private static XPlatTextBox? FindTextBox(XPlatControl control)
+    {
         var pending = new Stack<XPlatControl>();
-        pending.Push(Root);
+        pending.Push(control);
 
         while (pending.Count > 0)
         {
-            var control = pending.Pop();
-            if (control is XPlatTextBox box)
+            var current = pending.Pop();
+            if (current is XPlatTextBox box)
             {
-                box.Focus();
-                return;
+                return box;
             }
 
-            foreach (var child in control.Controls)
+            foreach (var child in current.Controls)
             {
                 pending.Push(child);
             }
+        }
+
+        return null;
+    }
+
+    /// <summary>Switches the stage to the page at <paramref name="index"/>; an index outside the pages is ignored.</summary>
+    /// <param name="index">The page to show, in the order the navigation lists them.</param>
+    public void SelectPage(int index)
+    {
+        if (index >= 0 && index < _pages.Length)
+        {
+            _navList.SelectedIndex = index;
         }
     }
 
@@ -66,13 +92,17 @@ public sealed class DemoUi
     /// <param name="path">The file to write.</param>
     /// <param name="width">Client width in logical pixels.</param>
     /// <param name="height">Client height in logical pixels.</param>
-    public static void RenderToPng(string path, int width, int height)
+    /// <param name="page">The page to show, or -1 for the first one.</param>
+    public static void RenderToPng(string path, int width, int height, int page = -1)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
+        var demo = new DemoUi();
+        demo.SelectPage(page);
+
         var backend = new HeadlessApplicationBackend();
         using var application = new XPlatApplication(backend);
-        var window = new XPlatWindow("XPlatUI sample", CreateRoot())
+        var window = new XPlatWindow("XPlatUI sample", demo.Root)
         {
             ClientSize = new SKSize(width, height),
         };
@@ -256,9 +286,38 @@ public sealed class DemoUi
         return footer;
     }
 
+    /// <summary>
+    /// The stage pages, in the order the navigation lists them. The row text and the builder sit
+    /// together, so a page cannot be added without a row to select it by.
+    /// </summary>
+    private static readonly (string Title, Func<DemoUi, XPlatControl> Build)[] Demos =
+    {
+        ("Split container", demo => Page(demo.BuildSplitDemo())),
+        ("Text input", demo => Page(demo.BuildTextInputDemo())),
+        ("Dialogs", demo => Page(demo.BuildDialogDemo())),
+        ("Table layout", demo => Page(demo.BuildTableLayoutDemo())),
+        ("Labels and text", demo => Page(demo.BuildLabelsCard())),
+        ("Buttons and input", demo => Page(demo.BuildButtonsCard())),
+        ("Rich text", demo => Page(demo.BuildRichTextCard())),
+        ("Images and layout", demo => Page(BuildImagesCard())),
+        ("Selection and clipboard", demo => Page(demo.BuildSelectionCard())),
+        ("Scrolling", demo => Page(demo.BuildScrollingCard())),
+        ("Lists", demo => Page(demo.BuildListBoxCard())),
+    };
+
+    /// <summary>
+    /// A navigation list down the left and one page at a time on the right. The splitter between
+    /// them is draggable, so the navigation can be widened when a demo name does not fit.
+    /// </summary>
     private XPlatControl BuildContent()
     {
-        var content = new XPlatPanel
+        _pages = new XPlatControl[Demos.Length];
+        for (int index = 0; index < Demos.Length; index++)
+        {
+            _pages[index] = Demos[index].Build(this);
+        }
+
+        _stage = new XPlatPanel
         {
             Dock = XDock.Fill,
             ShowFrame = false,
@@ -269,36 +328,126 @@ public sealed class DemoUi
             Padding = new XPlatThickness(0f),
         };
 
-        content.Controls.Add(BuildSplitDemo());
-        content.Controls.Add(BuildTextInputDemo());
-        content.Controls.Add(BuildDialogDemo());
-        content.Controls.Add(BuildCardTable());
+        _navList = new XPlatListBox
+        {
+            Dock = XDock.Fill,
+            SelectionMode = XPlatSelectionMode.One,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            HorizontalScroll = XPlatScrollStyle.None,
+            BorderWidth = 0f,
+            ItemHeight = 32f,
+        };
 
-        return content;
+        foreach (var demo in Demos)
+        {
+            _navList.Items.Add(demo.Title);
+        }
+
+        _navList.AddSelectedIndexChangedHandler(_ => ShowPage(_navList.SelectedIndex));
+
+        var nav = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(20f, 16f, 12f, 16f),
+        };
+        nav.Controls.Add(_navList);
+
+        // The navigation is window chrome rather than a demo, so it keeps no tab stop of its own:
+        // Tab goes straight from the header into the list. The splitter still drags with the mouse.
+        var split = new XPlatSplitContainer
+        {
+            Dock = XDock.Fill,
+            Orientation = XPlatOrientation.Vertical,
+            SplitterDistance = 210f,
+            Panel1MinSize = 150f,
+            Panel1MaxSize = 400f,
+            Panel2MinSize = 400f,
+            TabStop = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+        };
+
+        foreach (var panel in new[] { split.Panel1, split.Panel2 })
+        {
+            panel.ShowFrame = false;
+            panel.IsCard = false;
+            panel.BackColor = null;
+            panel.BorderWidth = 0f;
+            panel.CornerRadius = 0f;
+            panel.Padding = new XPlatThickness(0f);
+        }
+
+        split.Panel1.Controls.Add(nav);
+        split.Panel2.Controls.Add(_stage);
+
+        _navList.SelectedIndex = 0;
+        return split;
+    }
+
+    /// <summary>
+    /// Wraps a page body in the inset every page shares, so a page is only ever its content and
+    /// the space around it is decided in one place.
+    /// </summary>
+    private static XPlatPanel Page(XPlatControl body)
+    {
+        var page = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(20f, 16f, 20f, 16f),
+        };
+        page.Controls.Add(body);
+        return page;
+    }
+
+    /// <summary>Swaps the page on the stage. Every page is built once and kept, so returning to one costs a re-parent.</summary>
+    private void ShowPage(int index)
+    {
+        if (index < 0 || index >= _pages.Length)
+        {
+            return;
+        }
+
+        var page = _pages[index];
+        if (ReferenceEquals(page, _shownPage))
+        {
+            return;
+        }
+
+        if (_shownPage is not null)
+        {
+            _stage.Controls.Remove(_shownPage);
+        }
+
+        _shownPage = page;
+        _stage.Controls.Add(page);
     }
 
     private XPlatPanel BuildTextInputDemo()
     {
         var section = new XPlatPanel
         {
-            Dock = XDock.Bottom,
-            Height = 92f,
+            // A row of fields is a caption plus a field tall, so the stage below it stays empty
+            // rather than stretching the inputs to the height of the window.
+            Dock = XDock.Top,
+            Height = 54f,
             ShowFrame = false,
             IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
-            Padding = new XPlatThickness(20f, 0f, 20f, 12f),
+            Padding = new XPlatThickness(0f),
         };
-
-        section.Controls.Add(new XPlatLabel("Text input")
-        {
-            Dock = XDock.Top,
-            AutoSize = false,
-            Height = 26f,
-            Font = XPlatTheme.SectionFont,
-            TextAlign = XPlatContentAlignment.BottomLeft,
-        });
 
         var nameBox = new XPlatTextBox
         {
@@ -375,18 +524,18 @@ public sealed class DemoUi
 
     private XPlatPanel BuildDialogDemo()
     {
-        // One row rather than the label-above-content shape the other strips use, because the card
-        // table below is the part of the sample worth the vertical space.
         var section = new XPlatPanel
         {
-            Dock = XDock.Bottom,
-            Height = 56f,
+            // The buttons are as tall as a button is, so the row keeps a height of its own rather
+            // than stretching to the height of the stage.
+            Dock = XDock.Top,
+            Height = 44f,
             ShowFrame = false,
             IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
-            Padding = new XPlatThickness(20f, 0f, 20f, 12f),
+            Padding = new XPlatThickness(0f),
         };
 
         var row = new XPlatPanel
@@ -400,21 +549,13 @@ public sealed class DemoUi
             Padding = new XPlatThickness(0f),
         };
 
-        row.Controls.Add(new XPlatLabel("Dialogs")
-        {
-            Dock = XDock.Left,
-            AutoSize = false,
-            Width = 92f,
-            Font = XPlatTheme.SectionFont,
-            TextAlign = XPlatContentAlignment.MiddleLeft,
-        });
-
-        row.Controls.Add(DialogButton("Message box", () => ShowMessageBox()));
+        var messageBox = DialogButton("Message box", () => ShowMessageBox());
+        row.Controls.Add(messageBox);
         row.Controls.Add(DialogButton("Open file", () => ShowFileDialog(DialogKind.Open)));
         row.Controls.Add(DialogButton("Save file", () => ShowFileDialog(DialogKind.Save)));
         row.Controls.Add(DialogButton("Pick folder", () => ShowFileDialog(DialogKind.Folder)));
 
-        _dialogAnchor = (XPlatButton)row.Controls[1];
+        _dialogAnchor = messageBox;
 
         section.Controls.Add(row);
         return section;
@@ -542,24 +683,14 @@ public sealed class DemoUi
     {
         var section = new XPlatPanel
         {
-            Dock = XDock.Bottom,
-            Height = 232f,
+            Dock = XDock.Fill,
             ShowFrame = false,
             IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
-            Padding = new XPlatThickness(20f, 0f, 20f, 12f),
+            Padding = new XPlatThickness(0f),
         };
-
-        section.Controls.Add(new XPlatLabel("Split container")
-        {
-            Dock = XDock.Top,
-            AutoSize = false,
-            Height = 26f,
-            Font = XPlatTheme.SectionFont,
-            TextAlign = XPlatContentAlignment.BottomLeft,
-        });
 
         var split = new XPlatSplitContainer
         {
@@ -569,7 +700,6 @@ public sealed class DemoUi
             Panel1MinSize = 140f,
             Panel1MaxSize = 420f,
             Panel2MinSize = 180f,
-            Margin = new XPlatThickness(0f, 6f, 0f, 0f),
         };
         split.AddSplitterMovedHandler(_ => SetStatus($"Splitter moved: panel 1 is {split.SplitterDistance:0} px wide."));
 
@@ -626,7 +756,12 @@ public sealed class DemoUi
         return button;
     }
 
-    private XPlatControl BuildCardTable()
+    /// <summary>
+    /// One of each sizing style, so the difference between them is visible rather than described:
+    /// column 0 is a fixed width, column 1 takes a percentage and column 2 sizes to its content,
+    /// and the three rows do the same. The cells are outlined so the tracks can be read off.
+    /// </summary>
+    private XPlatPanel BuildTableLayoutDemo()
     {
         var table = new XPlatTableLayoutPanel
         {
@@ -636,43 +771,55 @@ public sealed class DemoUi
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
-            Padding = new XPlatThickness(20f, 4f, 20f, 12f),
+            Padding = new XPlatThickness(0f),
             CellPadding = new XPlatThickness(8f),
         };
 
-        for (int column = 0; column < 7; column++)
-        {
-            table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.Percent, 100f / 7f));
-        }
+        table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.Absolute, 160f));
+        table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.Percent, 100f));
+        table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.AutoSize, 0f));
 
         table.RowStyles.Add(new XPlatRowStyle(XPlatSizeType.AutoSize, 0f));
         table.RowStyles.Add(new XPlatRowStyle(XPlatSizeType.Percent, 100f));
+        table.RowStyles.Add(new XPlatRowStyle(XPlatSizeType.Absolute, 90f));
 
-        table.Add(SectionLabel("Labels and text"), 0, 0);
-        table.Add(SectionLabel("Buttons and input"), 1, 0);
-        table.Add(SectionLabel("Rich text"), 2, 0);
-        table.Add(SectionLabel("Images and layout"), 3, 0);
-        table.Add(SectionLabel("Selection and clipboard"), 4, 0);
-        table.Add(SectionLabel("Scrolling"), 5, 0);
-        table.Add(SectionLabel("Lists"), 6, 0);
+        table.Add(Cell("Absolute column\n160 px"), 0, 0);
+        table.Add(Cell("Percent column\nall the space the other two leave"), 1, 0);
+        table.Add(Cell("AutoSize column\nfollows its content"), 2, 0);
 
-        table.Add(BuildLabelsCard(), 0, 1);
-        table.Add(BuildButtonsCard(), 1, 1);
-        table.Add(BuildRichTextCard(), 2, 1);
-        table.Add(BuildImagesCard(), 3, 1);
-        table.Add(BuildSelectionCard(), 4, 1);
-        table.Add(BuildScrollingCard(), 5, 1);
-        table.Add(BuildListBoxCard(), 6, 1);
+        table.Add(Cell("AutoSize row\nfollows its content"), 0, 1);
+        table.Add(Cell("The percent row and the percent column absorb whatever the fixed and AutoSize tracks leave over, which is why this cell is the one that grows and shrinks with the window."), 1, 1);
+        table.Add(Cell("Drag the splitter, or resize the window, and only this column keeps its width."), 2, 1);
+
+        table.Add(Cell("Absolute row\n90 px"), 0, 2);
+        table.Add(Cell("Percent row, percent column"), 1, 2);
+        table.Add(Cell("AutoSize\nboth ways"), 2, 2);
 
         return table;
     }
 
-    private static XPlatLabel SectionLabel(string text) => new(text)
+    private static XPlatPanel Cell(string caption)
     {
-        Font = XPlatTheme.SectionFont,
-        AutoSize = true,
-        TextAlign = XPlatContentAlignment.BottomLeft,
-    };
+        var cell = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(10f),
+        };
+
+        cell.Controls.Add(new XPlatLabel(caption)
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return cell;
+    }
 
     private static XPlatPanel Card() => new()
     {
