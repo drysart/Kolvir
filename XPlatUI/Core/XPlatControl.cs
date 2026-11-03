@@ -1007,27 +1007,20 @@ public class XPlatControl : IDisposable
     {
         ArgumentNullException.ThrowIfNull(region);
 
-        var host = Host;
-        if (host is null)
-        {
-            Parent?.Invalidate();
-            return;
-        }
-
         if (region.IsEmpty)
         {
             return;
         }
 
-        // A hidden control is not painted, but the area it covers still belongs to the parent's
-        // background, so it has to be repainted both when a control disappears and when one comes
-        // back - which is why visibility does not take part in this.
-        //
-        // The control is clipped to its client area, so nothing outside it can have changed, and a
-        // child is painted over its own bounds, so its area can be taken back out again.
+        // A control paints nothing outside its own client area, so nothing it can ask for lies
+        // outside it either. Clipping here is what stops a child from reaching past itself, and
+        // every level of the chain applies its own on the way up.
         using var area = new SKRegion(region);
         area.Op(ToRectI(ClientRect), SKRegionOperation.Intersect);
 
+        // A hidden control is not painted, but the area it covers still belongs to the parent's
+        // background, so it has to be repainted both when a control disappears and when one comes
+        // back - which is why visibility does not take part in this.
         if (!invalidateChildren && _controls is not null)
         {
             foreach (var child in _controls)
@@ -1044,23 +1037,74 @@ public class XPlatControl : IDisposable
             return;
         }
 
-        // A region is whole pixels, so each rectangle is mapped and rounded out on its own rather
-        // than translating the region by a rounded origin, which would lose a pixel off an edge
-        // every time the control sits at a fractional offset.
-        using var hostArea = new SKRegion();
-        using var rects = area.CreateRectIterator();
+        // The control does not talk to the host. It asks its parent, which decides what a repaint
+        // of this child means and passes the answer on up; only the root of the tree, which has no
+        // parent, hands the area to the host.
+        using var parentArea = TranslateToParent(area);
+
+        if (Parent is { } parent)
+        {
+            parent.ChildInvalidate(this, parentArea);
+        }
+        else
+        {
+            Host?.Invalidate(parentArea);
+        }
+    }
+
+    /// <summary>
+    /// Called by a child when part of it needs repainting, so this control can decide what that
+    /// means before the area goes any further up the tree.
+    /// </summary>
+    /// <param name="child">The child the area came from.</param>
+    /// <param name="region">
+    /// The area to repaint, in this control's coordinates. It has already been clipped to the
+    /// child's own bounds; the callee may narrow it in place.
+    /// </param>
+    /// <remarks>
+    /// The default narrows the area to this control's client area and passes it on, which is what
+    /// every container that merely contains its children wants. A container that arranges or clips
+    /// them itself overrides this: <see cref="XPlatPanel"/> clips the area to the viewport, so
+    /// content scrolled out of sight asks for nothing, and anything else the container knows - a
+    /// border it draws around the child, a sibling that covers it - can be taken into account the
+    /// same way before calling the base method. Widening the area is allowed too, and is how a
+    /// container that decorates a child asks for the decoration to be repainted with it.
+    /// </remarks>
+    protected internal virtual void ChildInvalidate(XPlatControl child, SKRegion region) =>
+        Invalidate(region, invalidateChildren: true);
+
+    /// <summary>
+    /// Maps a region from this control's coordinate space into its parent's, rounding each
+    /// rectangle out to the whole pixels that cover it.
+    /// </summary>
+    private SKRegion TranslateToParent(SKRegion region)
+    {
+        var offset = Parent is { } parent ? parent.GetChildOffset(this) : SKPoint.Empty;
+        var dx = _bounds.Left + offset.X;
+        var dy = _bounds.Top + offset.Y;
+
+        // Each rectangle is mapped and rounded out on its own rather than translating the region
+        // by a rounded origin, which would lose a pixel off an edge whenever the control sits at a
+        // fractional offset.
+        var mapped = new SKRegion();
+        using var rects = region.CreateRectIterator();
 
         while (rects.Next(out var rect))
         {
-            var mapped = XPlatUiHost.ToHost(this, new SKRect(rect.Left, rect.Top, rect.Right, rect.Bottom));
-            hostArea.Op(ToRectI(mapped), SKRegionOperation.Union);
+            mapped.Op(
+                new SKRectI(
+                    (int)MathF.Floor(rect.Left + dx),
+                    (int)MathF.Floor(rect.Top + dy),
+                    (int)MathF.Ceiling(rect.Right + dx),
+                    (int)MathF.Ceiling(rect.Bottom + dy)),
+                SKRegionOperation.Union);
         }
 
-        host.Invalidate(hostArea);
+        return mapped;
     }
 
     /// <summary>Rounds a rectangle out to the whole pixels that cover it.</summary>
-    private static SKRectI ToRectI(SKRect rect) => new(
+    protected static SKRectI ToRectI(SKRect rect) => new(
         (int)MathF.Floor(rect.Left),
         (int)MathF.Floor(rect.Top),
         (int)MathF.Ceiling(rect.Right),

@@ -308,6 +308,30 @@ window:
 caret.Invalidate(XPlatGeometry.Inflate(bounds, 1f), invalidateChildren: false);
 ```
 
+A control never talks to the host. It clips the area to its own client area, maps what is left into
+its parent's coordinates and calls the parent's `ChildInvalidate`; the default implementation of
+that hook clips the area to the parent's client area and invalidates the parent in turn, so the
+request walks up the tree one control at a time, and only the root - which has no parent - hands it
+to `XPlatUiHost`. A control therefore cannot reach past its own bounds, and the root cannot be
+reached around.
+
+That hop is the point: it is where a container decides what a child's request means.
+`ChildInvalidate` is `protected internal virtual` so a container can narrow the area, move it, or
+widen it to take in the decoration it draws around the child, and it receives the area in its own
+coordinates with the child's bounds already applied. `XPlatPanel` uses it to clip content to the
+viewport, so a control scrolled out of sight asks for nothing and one that is half scrolled out
+asks only for the part that is showing; the scrollbars are left alone, because they live in the
+gutter the viewport excludes and are painted over the content rather than clipped with it.
+
+```csharp
+// A container that frames its children repaints the frame along with whatever changed inside it.
+protected internal override void ChildInvalidate(XPlatControl child, SKRegion region)
+{
+    region.Op(ToRectI(Inflate(child.Bounds, FrameThickness)), SKRegionOperation.Union);
+    base.ChildInvalidate(child, region);
+}
+```
+
 The paint itself is region-exact. `XPlatUiHost.Paint` clips to the dirty region - through its
 boundary path when the region is not a plain rectangle, so scattered invalidations do not repaint
 the gaps between them - clears that area and renders the tree into it. `XPlatControl.Render` calls
