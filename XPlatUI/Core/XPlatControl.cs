@@ -552,6 +552,21 @@ public class XPlatControl : IDisposable
 
     public DockStyle Dock { get; set; }
 
+    /// <summary>
+    /// How an <see cref="XPlatStackPanel"/> places this control across the axis it does not stack
+    /// along. Defaults to <see cref="XPlatAlignment.Stretch"/>, so a child spans the panel unless it
+    /// asks for its own size.
+    /// </summary>
+    /// <remarks>
+    /// Only the stack panel reads it. The other containers size their children themselves - a
+    /// docked child fills its edge, a table cell fills its cell - so the value is ignored there
+    /// rather than being a second opinion on a decision that has already been made.
+    /// </remarks>
+    public XPlatAlignment HorizontalAlignment { get; set; }
+
+    /// <inheritdoc cref="HorizontalAlignment"/>
+    public XPlatAlignment VerticalAlignment { get; set; }
+
     public XPlatCursor Cursor { get; set; }
 
     /// <summary>

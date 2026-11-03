@@ -10,7 +10,7 @@ controls draw themselves on top of it. The same sample UI runs on all three plat
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
   Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatListBox, XPlatImage
+  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatListBox, XPlatImage
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
   Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
@@ -194,6 +194,65 @@ split, `Up`/`Down` for a horizontal one) when the container has keyboard focus. 
 `IsSplitterFixed` to lock it, and `SplitterColor`/`ShowSplitterGrip` to restyle it.
 `AddSplitterMovingHandler` runs continuously during a drag; `AddSplitterDistanceChangedHandler` runs
 whenever the distance changes for any reason.
+
+### Stack panel
+
+`XPlatStackPanel` lays its children out one after another along a single axis and sizes each one
+across that axis, which is the flow layout a plain panel does not have:
+
+| `Orientation` | Children run | Each child is stretched to the panel's |
+| --- | --- | --- |
+| `Vertical` (default) | top to bottom | width |
+| `Horizontal` | left to right | height |
+
+A child gets its own preferred size along the stack and fills the panel across it, so a stack of
+buttons is a stack of full-width rows. `Spacing` is the gap between children; there is none before
+the first or after the last.
+
+```csharp
+var stack = new XPlatStackPanel
+{
+    Dock = DockStyle.Fill,
+    Spacing = 8f,
+    Padding = new XPlatThickness(12f),
+    ShowFrame = true,            // a stack panel draws no frame of its own by default
+};
+
+stack.Controls.Add(new XPlatButton("Save"));
+stack.Controls.Add(new XPlatButton("Cancel"));
+root.Controls.Add(stack);
+```
+
+`HorizontalAlignment` on a child of a vertical stack, or `VerticalAlignment` on a child of a
+horizontal one, opts out of the stretch and leaves the child at its own size across the stack:
+
+| Value | Placed |
+| --- | --- |
+| `Stretch` | filling the stack; the default |
+| `Near` | at the left, or the top |
+| `Center` | in the middle |
+| `Far` | at the right, or the bottom |
+
+```csharp
+stack.Controls.Add(new XPlatButton("Centred") { HorizontalAlignment = XPlatAlignment.Center });
+```
+
+- A child with `AutoSize = false` keeps the size it was given along the stack, which is how a run of
+  fixed-height rows is built; it is still stretched across the stack unless it is aligned.
+- `Margin` still applies: it separates one child from the next along the stack and insets it from
+  the edges across it, so `Spacing` is for the gap and `Margin` for a per-child adjustment.
+- A docked child is not part of the run. It takes its edge of the panel the way a docked child of
+  any panel does and the stack fills what is left, which is how a header or a footer is added:
+
+```csharp
+stack.Controls.Add(new XPlatLabel("Header") { Dock = DockStyle.Top, AutoSize = false, Height = 24f });
+```
+
+- The run of children is the scrollable content, so `VerticalScroll = XPlatScrollStyle.Automatic`
+  scrolls a long stack; a docked header stays put while the rows scroll under it.
+- With `AutoSize = true` the stack is as long as the run and as wide as its widest child.
+- A child wider than the space across the stack is clipped to the panel rather than overflowing it,
+  so `Center` and `Far` never push a child outside the control.
 
 ### Scrolling
 
@@ -1292,7 +1351,7 @@ never cropped on a high-DPI monitor. The **Selection and clipboard** page is the
 drag down from its label, over the whole-control button and into the text box, then right-click
 the selection. The two **Performance** pages are the ones to watch scroll: **Performance: list box**
 loads 1 to 100,000 rows into a list, **Performance: controls** stacks 1 to 100,000 buttons in a
-panel, and both report what the last frame cost to draw them.
+stack panel, and both report what the last frame cost to draw them.
 
 ### On Linux (GTK4)
 

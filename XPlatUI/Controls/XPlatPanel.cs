@@ -284,18 +284,27 @@ public class XPlatPanel : XPlatControl
         base.Dispose(disposing);
     }
 
-    private void LayoutCore() =>
-        _scroll.Layout(ClientRect, Padding, area =>
-        {
-            LayoutDockedChildren(area);
-            return MeasureExtent(area);
-        });
+    private void LayoutCore() => _scroll.Layout(ClientRect, Padding, ArrangeChildren);
 
-    private void LayoutDockedChildren(SKRect area)
+    /// <summary>
+    /// Positions the children and returns the size of the content the panel scrolls. The scrollbars
+    /// call this once per visibility pass, so it has to be idempotent.
+    /// </summary>
+    /// <param name="area">The content area, with the padding and any visible scrollbar removed.</param>
+    protected virtual SKSize ArrangeChildren(SKRect area)
+    {
+        LayoutDockedChildren(area);
+        SizeFreeChildren(area);
+        return MeasureExtent(area);
+    }
+
+    /// <summary>Docks the docked children into <paramref name="area"/>, in declaration order.</summary>
+    /// <returns>What is left of <paramref name="area"/> once the docked children have taken their edges.</returns>
+    protected SKRect LayoutDockedChildren(SKRect area)
     {
         if (!HasChildren)
         {
-            return;
+            return area;
         }
 
         var remaining = area;
@@ -328,6 +337,17 @@ public class XPlatPanel : XPlatControl
             }
         }
 
+        return remaining;
+    }
+
+    /// <summary>Sizes the freely positioned children that ask to be sized to their content.</summary>
+    private void SizeFreeChildren(SKRect area)
+    {
+        if (!HasChildren)
+        {
+            return;
+        }
+
         // Freely positioned children keep their own position; only their size is resolved here.
         foreach (var child in Controls)
         {
@@ -341,7 +361,12 @@ public class XPlatPanel : XPlatControl
         }
     }
 
-    private SKSize MeasureExtent(SKRect area)
+    /// <summary>
+    /// Measures the scrollable content as the union of the freely positioned children, from the
+    /// top-left of <paramref name="area"/>. Docked children stay pinned to the viewport, so they are
+    /// not part of it.
+    /// </summary>
+    protected SKSize MeasureExtent(SKRect area)
     {
         var right = area.Right;
         var bottom = area.Bottom;
