@@ -975,7 +975,11 @@ scrolling and wheel work. All three platforms pay about the same, which is what 
 portable managed code plus a per-backend presentation call should look like; nothing new runs at
 startup, and `PartialUpdates` defaults to off so a backend that rasterizes whole surfaces is
 unaffected. This is exception 1 of §5.5, and the exception is the point: partial painting is a
-property of the framework's paint loop rather than a capability a control opts into.
+property of the framework's paint loop rather than a capability a control opts into. Routing the
+area a moved control vacates through its parent's `ChildInvalidate`, and folding the repaints a
+layout pass causes into one at the end of the pass, added two private fields and three private
+methods to `XPlatControl` - a type that is already retained - and published at the same 3,093,504
+bytes on win-x64, with no IL2xxx or IL3xxx warning.
 
 `XPlatListBox` is the fourth worked example and the cleanest rung 1 case so far. Nothing
 always-retained names it: it derives from `XPlatControl`, so it is reached only when an application

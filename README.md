@@ -513,7 +513,20 @@ whether or not the backend can present part of a frame.
 
 Moving or resizing a control repaints the area it vacated as well as the area it covers, without
 being asked. Without that a control that moved would leave a copy of itself behind, which is
-exactly what culling would otherwise make permanent.
+exactly what culling would otherwise make permanent. The vacated area is worked out in the parent's
+coordinates and offered to the parent's `ChildInvalidate` like any other request, so the same
+clipping applies to it: a child scrolled out of sight of a scrolling panel has vacated an area that
+runs from where it used to be to the far end of the content extent, and a request that reached the
+host directly would dirty a rectangle taller than the surface on every scroll step. The container's
+`ChildInvalidate` is the only place that can trim it back to the viewport.
+
+Arranging a child moves it, so a pass over many children asks for many repaints, and each one would
+otherwise walk up the parent chain. No frame can be painted while the pass is running, and the pass
+is about to repaint what it arranged, so `XPlatControl` folds the requests a pass causes into one
+`Invalidate` of the control being laid out, made when the pass - including any nested passes it
+started - finishes. The repaint covers that control's client area, which for a scrolling container
+is the viewport rather than the content. That is what lets a stack panel of a hundred thousand
+buttons scroll in milliseconds instead of seconds.
 
 Hovering is not a repaint on its own. A control that draws itself differently under the pointer
 says so, by invalidating from its own `OnMouseEnter`/`OnMouseLeave`; the base `XPlatControl` only
@@ -537,8 +550,9 @@ both do - would be left with blank patches where the retained content should be:
 `Paint` returns the `SKRectI` it covered, `PendingUpdateBounds` reports what the next paint will
 cover before it happens, and `IsUpdatePending` says whether anything has been invalidated at all -
 enough for a backend to skip asking the platform for a frame it would only redraw identically.
-`IncludeInNextPaint` adds an area to the next frame *without* raising the invalidated event. The
-framework uses it when a control moves out of an area; a backend does not need it.
+`IncludeInNextPaint` adds an area to the next frame *without* raising the invalidated event. It is
+there for a host that wants to force an area into the next frame without scheduling one; the
+framework itself no longer needs it, because a control that moves now asks its parent, as above.
 
 The request the platform is given has to be aimed at the same area. A backend that invalidates its
 whole window on every request gets its whole client area handed back as stale on the next frame,
