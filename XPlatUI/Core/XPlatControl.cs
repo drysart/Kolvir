@@ -1172,7 +1172,18 @@ public class XPlatControl : IDisposable
     /// <param name="invalidateChildren">True to repaint the controls inside the area as well.</param>
     public void Invalidate(SKRect rect, bool invalidateChildren)
     {
-        using var region = new SKRegion(ToRectI(XPlatGeometry.Normalize(rect)));
+        // The region is only built once the request is known to be worth making. A control that
+        // moves asks for a repaint from inside its parent's layout pass, and that request is
+        // always answered by the repaint the pass ends with, so building one here first meant a
+        // container arranging thousands of children allocated a native region per child per pass
+        // to throw every one of them away.
+        var area = ToRectI(XPlatGeometry.Normalize(rect));
+        if (area.Width <= 0 || area.Height <= 0 || DeferToParent())
+        {
+            return;
+        }
+
+        using var region = new SKRegion(area);
         Invalidate(region, invalidateChildren);
     }
 
@@ -1187,25 +1198,7 @@ public class XPlatControl : IDisposable
     {
         ArgumentNullException.ThrowIfNull(region);
 
-        if (region.IsEmpty)
-        {
-            return;
-        }
-
-        // A batch that is changing the tree in bulk asks for a repaint per child it touches, and
-        // no frame can be painted until the batch is done, so the requests are folded into the one
-        // ResumeLayout makes rather than walked up the parent chain one at a time.
-        if (_layoutSuspends > 0)
-        {
-            _invalidateDeferred = true;
-            return;
-        }
-
-        // The same for a request that arrives while the parent is arranging its children: that
-        // pass is what moves them, so it is answered by the repaint the pass ends with rather than
-        // by a walk up the tree per child. A container that clips its children has nothing on
-        // screen outside its own client area, which is the area that repaint covers.
-        if (FoldIntoParentLayout())
+        if (region.IsEmpty || DeferToParent())
         {
             return;
         }
@@ -1351,6 +1344,29 @@ public class XPlatControl : IDisposable
         {
             Host?.Invalidate(region);
         }
+    }
+
+    /// <summary>
+    /// Answers whether something already scheduled will repaint this control, which makes the
+    /// request being made now unnecessary.
+    /// </summary>
+    /// <returns>True when the request can be dropped, having been recorded if it still matters.</returns>
+    private bool DeferToParent()
+    {
+        // A batch that is changing the tree in bulk asks for a repaint per child it touches, and
+        // no frame can be painted until the batch is done, so the requests are folded into the one
+        // ResumeLayout makes rather than walked up the parent chain one at a time.
+        if (_layoutSuspends > 0)
+        {
+            _invalidateDeferred = true;
+            return true;
+        }
+
+        // The same for a request that arrives while the parent is arranging its children: that
+        // pass is what moves them, so it is answered by the repaint the pass ends with rather than
+        // by a walk up the tree per child. A container that clips its children has nothing on
+        // screen outside its own client area, which is the area that repaint covers.
+        return FoldIntoParentLayout();
     }
 
     /// <summary>
