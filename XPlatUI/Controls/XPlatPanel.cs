@@ -26,7 +26,26 @@ public class XPlatPanel : XPlatControl
     private const float ScrollEpsilon = 0.5f;
 
     private readonly XPlatScrollBars _scroll;
+    private readonly List<DockedChild> _docked = [];
     private bool _layingOut;
+
+    /// <summary>A docked child, and where it sits in the declaration order.</summary>
+    /// <remarks>
+    /// The order is what a container needs to merge the docked children with an ordered run of
+    /// other children without disturbing the order they paint in.
+    /// </remarks>
+    protected readonly struct DockedChild
+    {
+        public DockedChild(XPlatControl control, int order)
+        {
+            Control = control;
+            Order = order;
+        }
+
+        public XPlatControl Control { get; }
+
+        public int Order { get; }
+    }
 
     public XPlatPanel()
     {
@@ -176,6 +195,15 @@ public class XPlatPanel : XPlatControl
     protected internal override SKPoint GetChildOffset(XPlatControl child) =>
         _scroll.IsBar(child) ? SKPoint.Empty : _scroll.ChildOffset;
 
+    /// <summary>The area scrolled content is clipped to, in this panel's client coordinates.</summary>
+    protected SKRect ContentViewport => _scroll.EffectiveViewport(ClientRect);
+
+    /// <summary>The translation scrolled content is painted at, which is the negated offset.</summary>
+    protected SKPoint ContentOffset => _scroll.ChildOffset;
+
+    /// <summary>The docked children the last layout pass placed, in declaration order.</summary>
+    protected IReadOnlyList<DockedChild> DockedChildren => _docked;
+
     /// <summary>Clips a child's invalidation to the viewport the child is painted into.</summary>
     /// <remarks>
     /// Scrolled content is clipped to the viewport while painting, so an area outside it cannot
@@ -218,7 +246,7 @@ public class XPlatPanel : XPlatControl
             return Enabled ? this : null;
         }
 
-        return base.HitTest(pointInParent);
+        return HitTestChildren(local) ?? (Enabled ? this : null);
     }
 
     /// <summary>
@@ -260,7 +288,7 @@ public class XPlatPanel : XPlatControl
     protected override void RenderChildren(SKCanvas canvas)
     {
         canvas.Save();
-        canvas.ClipRect(_scroll.EffectiveViewport(ClientRect));
+        canvas.ClipRect(ContentViewport);
 
         var offset = _scroll.ChildOffset;
         if (offset.X != 0f || offset.Y != 0f)
@@ -268,11 +296,19 @@ public class XPlatPanel : XPlatControl
             canvas.Translate(offset.X, offset.Y);
         }
 
-        base.RenderChildren(canvas);
+        RenderScrolledChildren(canvas);
         canvas.Restore();
 
         _scroll.RenderBars(canvas);
     }
+
+    /// <summary>Paints the children into the clipped, translated canvas.</summary>
+    /// <remarks>
+    /// The canvas arrives already clipped to the viewport and translated by the content offset, so
+    /// children are painted in content coordinates. A container whose children are laid out in a
+    /// known order can override this to paint only the ones that can be seen.
+    /// </remarks>
+    protected virtual void RenderScrolledChildren(SKCanvas canvas) => base.RenderChildren(canvas);
 
     protected override void Dispose(bool disposing)
     {
@@ -284,18 +320,29 @@ public class XPlatPanel : XPlatControl
         base.Dispose(disposing);
     }
 
-    private void LayoutCore() =>
-        _scroll.Layout(ClientRect, Padding, area =>
-        {
-            LayoutDockedChildren(area);
-            return MeasureExtent(area);
-        });
+    private void LayoutCore() => _scroll.Layout(ClientRect, Padding, ArrangeChildren);
 
-    private void LayoutDockedChildren(SKRect area)
+    /// <summary>
+    /// Positions the children and returns the size of the content the panel scrolls. The scrollbars
+    /// call this once per visibility pass, so it has to be idempotent.
+    /// </summary>
+    /// <param name="area">The content area, with the padding and any visible scrollbar removed.</param>
+    protected virtual SKSize ArrangeChildren(SKRect area)
     {
+        LayoutDockedChildren(area);
+        SizeFreeChildren(area);
+        return MeasureExtent(area);
+    }
+
+    /// <summary>Docks the docked children into <paramref name="area"/>, in declaration order.</summary>
+    /// <returns>What is left of <paramref name="area"/> once the docked children have taken their edges.</returns>
+    protected SKRect LayoutDockedChildren(SKRect area)
+    {
+        _docked.Clear();
+
         if (!HasChildren)
         {
-            return;
+            return area;
         }
 
         var remaining = area;
@@ -303,17 +350,20 @@ public class XPlatPanel : XPlatControl
         // Docking is applied in declaration order: the first docked child gets the edge,
         // subsequent ones fill the space that is left over. Fill children are applied last
         // so their position in the list does not matter.
-        List<XPlatControl>? fillChildren = null;
-        foreach (var child in Controls)
+        List<int>? fillChildren = null;
+        for (int i = 0; i < Controls.Count; i++)
         {
+            var child = Controls[i];
             if (!child.Visible || child.Dock == DockStyle.None)
             {
                 continue;
             }
 
+            _docked.Add(new DockedChild(child, i));
+
             if (child.Dock == DockStyle.Fill)
             {
-                (fillChildren ??= new List<XPlatControl>()).Add(child);
+                (fillChildren ??= []).Add(i);
                 continue;
             }
 
@@ -322,10 +372,22 @@ public class XPlatPanel : XPlatControl
 
         if (fillChildren is not null)
         {
-            foreach (var child in fillChildren)
+            foreach (var index in fillChildren)
             {
+                var child = Controls[index];
                 child.Bounds = XPlatGeometry.Deflate(remaining, child.Margin);
             }
+        }
+
+        return remaining;
+    }
+
+    /// <summary>Sizes the freely positioned children that ask to be sized to their content.</summary>
+    private void SizeFreeChildren(SKRect area)
+    {
+        if (!HasChildren)
+        {
+            return;
         }
 
         // Freely positioned children keep their own position; only their size is resolved here.
@@ -341,7 +403,12 @@ public class XPlatPanel : XPlatControl
         }
     }
 
-    private SKSize MeasureExtent(SKRect area)
+    /// <summary>
+    /// Measures the scrollable content as the union of the freely positioned children, from the
+    /// top-left of <paramref name="area"/>. Docked children stay pinned to the viewport, so they are
+    /// not part of it.
+    /// </summary>
+    protected SKSize MeasureExtent(SKRect area)
     {
         var right = area.Right;
         var bottom = area.Bottom;

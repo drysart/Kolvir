@@ -21,6 +21,39 @@ public enum XPlatOrientation
     Vertical = 1,
 }
 
+/// <summary>The axis an <see cref="XPlatStackPanel"/> stacks its children along.</summary>
+public enum XPlatStackOrientation
+{
+    /// <summary>Children run top to bottom, and each one takes the width of the panel.</summary>
+    Vertical = 0,
+
+    /// <summary>Children run left to right, and each one takes the height of the panel.</summary>
+    Horizontal = 1,
+}
+
+/// <summary>
+/// How a child is placed across the axis an <see cref="XPlatStackPanel"/> does not stack along.
+/// </summary>
+/// <remarks>
+/// The names are axis-neutral because the same value is used on both axes: <see cref="Near"/> is
+/// the left for a horizontal alignment and the top for a vertical one, and <see cref="Far"/> is the
+/// right and the bottom respectively.
+/// </remarks>
+public enum XPlatAlignment
+{
+    /// <summary>Fills the space across the stack. The default.</summary>
+    Stretch = 0,
+
+    /// <summary>Sized to its own preferred size and placed at the left or the top.</summary>
+    Near = 1,
+
+    /// <summary>Sized to its own preferred size and placed in the middle.</summary>
+    Center = 2,
+
+    /// <summary>Sized to its own preferred size and placed at the right or the bottom.</summary>
+    Far = 3,
+}
+
 /// <summary>
 /// Whether a scrolling container shows a scrollbar along one axis. Each axis of an
 /// <see cref="XPlatPanel"/> is configured separately.

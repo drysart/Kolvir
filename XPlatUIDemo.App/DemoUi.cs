@@ -294,6 +294,7 @@ public sealed class DemoUi
     private static readonly (string Title, Func<DemoUi, XPlatControl> Build)[] Demos =
     {
         ("Split container", demo => Page(demo.BuildSplitDemo())),
+        ("Stack panel", demo => Page(demo.BuildStackPanelDemo())),
         ("Text input", demo => Page(demo.BuildTextInputDemo())),
         ("Dialogs", demo => Page(demo.BuildDialogDemo())),
         ("Table layout", demo => Page(demo.BuildTableLayoutDemo())),
@@ -824,6 +825,136 @@ public sealed class DemoUi
         return cell;
     }
 
+    /// <summary>
+    /// One control along one axis: children stretched across the stack by default, the three
+    /// alignments that opt out of it, the same control turned sideways, and a stack that scrolls
+    /// its own run with a docked header that stays put.
+    /// </summary>
+    private XPlatPanel BuildStackPanelDemo()
+    {
+        var card = Card();
+
+        card.Controls.Add(ScrollCaption("Vertical - each child takes its own height and the width of the stack"));
+        card.Controls.Add(BuildVerticalStack());
+
+        card.Controls.Add(ScrollCaption("Across the stack - HorizontalAlignment on each child"));
+        card.Controls.Add(BuildAlignedStack());
+
+        card.Controls.Add(ScrollCaption("Horizontal - the same control with Orientation = Horizontal"));
+        card.Controls.Add(BuildHorizontalStack());
+
+        card.Controls.Add(ScrollCaption("VerticalScroll = Automatic - the run of children is the scrollable content"));
+        card.Controls.Add(BuildScrollingStack());
+
+        return card;
+    }
+
+    /// <summary>
+    /// The framing the stacks on this page share: a bordered box, so the bounds the stack arranges
+    /// its children in are visible.
+    /// </summary>
+    private static XPlatStackPanel StackBox() => new()
+    {
+        Dock = XDock.Top,
+        ShowFrame = true,
+        IsCard = true,
+        CornerRadius = 8f,
+        Padding = new XPlatThickness(8f),
+        Spacing = 6f,
+        Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+    };
+
+    private XPlatStackPanel BuildVerticalStack()
+    {
+        var stack = StackBox();
+        stack.Height = 130f;
+
+        foreach (var text in new[] { "First", "Second", "Third" })
+        {
+            stack.Controls.Add(StackButton(text, XPlatAlignment.Stretch));
+        }
+
+        return stack;
+    }
+
+    private XPlatStackPanel BuildAlignedStack()
+    {
+        var stack = StackBox();
+        stack.Height = 170f;
+
+        stack.Controls.Add(StackButton("Near", XPlatAlignment.Near));
+        stack.Controls.Add(StackButton("Center", XPlatAlignment.Center));
+        stack.Controls.Add(StackButton("Far", XPlatAlignment.Far));
+        stack.Controls.Add(StackButton("Stretch", XPlatAlignment.Stretch));
+
+        return stack;
+    }
+
+    private XPlatStackPanel BuildHorizontalStack()
+    {
+        var stack = StackBox();
+        stack.Orientation = XPlatStackOrientation.Horizontal;
+        stack.Height = 60f;
+
+        // A horizontal stack stretches its children down the stack, so the interesting property is
+        // VerticalAlignment.
+        foreach (var (text, alignment) in new[]
+                 {
+                     ("Top", XPlatAlignment.Near),
+                     ("Middle", XPlatAlignment.Center),
+                     ("Bottom", XPlatAlignment.Far),
+                     ("Fill", XPlatAlignment.Stretch),
+                 })
+        {
+            stack.Controls.Add(StackButton(text, alignment));
+        }
+
+        return stack;
+    }
+
+    private XPlatStackPanel BuildScrollingStack()
+    {
+        var stack = StackBox();
+        stack.Dock = XDock.Fill;
+        stack.VerticalScroll = XPlatScrollStyle.Automatic;
+        stack.Spacing = 4f;
+
+        // A docked child is not part of the run: it keeps the top of the panel while the rows
+        // scroll underneath it.
+        stack.Controls.Add(new XPlatLabel("Docked header - it stays put while the rows scroll")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 20f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+        });
+
+        for (int index = 0; index < 40; index++)
+        {
+            var row = StackButton($"Row {index + 1}", XPlatAlignment.Stretch);
+            row.AutoSize = false;
+            row.Height = 28f;
+            stack.Controls.Add(row);
+        }
+
+        return stack;
+    }
+
+    private XPlatButton StackButton(string text, XPlatAlignment alignment)
+    {
+        var button = new XPlatButton(text)
+        {
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            HorizontalAlignment = alignment,
+            VerticalAlignment = alignment,
+        };
+        button.AddClickHandler(_ => SetStatus($"{text} clicked - placed {alignment} across the stack."));
+        return button;
+    }
+
     private static XPlatPanel Card() => new()
     {
         Dock = XDock.Fill,
@@ -1166,7 +1297,7 @@ public sealed class DemoUi
     }
 
     /// <summary>
-    /// The same measurement over real controls rather than rows: a plain panel holding one button
+    /// The same measurement over real controls rather than rows: a stack panel holding one button
     /// per entry, stacked down it and scrolled by the panel itself. Nothing here is virtualised, so
     /// the panel arranges and walks every button it holds on every frame - which is the cost the
     /// list page avoids, and the reason to have both.
@@ -1176,12 +1307,14 @@ public sealed class DemoUi
         const float ButtonHeight = 32f;
         const float ButtonPitch = 36f;
 
-        var panel = new XPlatPanel
+        var panel = new XPlatStackPanel
         {
             Dock = XDock.Fill,
             VerticalScroll = XPlatScrollStyle.Automatic,
             HorizontalScroll = XPlatScrollStyle.None,
-            Padding = new XPlatThickness(0f),
+            Spacing = ButtonPitch - ButtonHeight,
+            ShowFrame = true,
+            IsCard = true,
         };
 
         return PerformanceCard(panel, "buttons", count =>
@@ -1199,25 +1332,15 @@ public sealed class DemoUi
                     child.Dispose();
                 }
 
-                if (count > 0)
+                for (int index = 0; index < count; index++)
                 {
-                    // The buttons are positioned by hand because a docked child stays pinned to
-                    // the viewport instead of scrolling, so the stack has to be free-floating for
-                    // the panel to scroll it.
-                    float width = panel.ClientRect.Width -
-                                  (count * ButtonPitch > panel.ClientRect.Height ? panel.ScrollBarThickness : 0f);
-
-                    for (int index = 0; index < count; index++)
+                    // A fixed height with the stack's stretch keeps the button out of the measure
+                    // pass altogether: the stack only has to place it.
+                    panel.Controls.Add(new XPlatButton($"Button {index + 1:N0}")
                     {
-                        panel.Controls.Add(new XPlatButton($"Button {index + 1:N0}")
-                        {
-                            Dock = XDock.None,
-                            AutoSize = false,
-                            Size = new SKSize(width, ButtonHeight),
-                            Location = new SKPoint(0f, index * ButtonPitch),
-                            Margin = new XPlatThickness(0f),
-                        });
-                    }
+                        AutoSize = false,
+                        Height = ButtonHeight,
+                    });
                 }
             }
             finally

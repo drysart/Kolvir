@@ -36,9 +36,18 @@ internal sealed class XPlatScrollBars
     private float _horizontalOffset;
     private float _verticalOffset;
     private SKPoint _childOffset;
+    private SKRect _client;
     private SKRect _viewport;
     private SKRect _contentArea;
     private SKSize _extent;
+
+    // The visibility the last pass settled on. Starting the next one from it is what keeps a
+    // steady state at one arrange: an Automatic bar is only discovered by arranging without it, so
+    // guessing "hidden" every time would arrange the whole content twice on every single pass.
+    private bool _showHorizontal;
+    private bool _showVertical;
+
+    private bool _hasLayout;
     private bool _layingOut;
 
     public XPlatScrollBars(XPlatControl owner)
@@ -161,8 +170,20 @@ internal sealed class XPlatScrollBars
         _layingOut = true;
         try
         {
-            var showVertical = _vertical == XPlatScrollStyle.Always;
-            var showHorizontal = _horizontal == XPlatScrollStyle.Always;
+            var showVertical = _vertical switch
+            {
+                XPlatScrollStyle.Always => true,
+                XPlatScrollStyle.Automatic => _showVertical,
+                _ => false,
+            };
+
+            var showHorizontal = _horizontal switch
+            {
+                XPlatScrollStyle.Always => true,
+                XPlatScrollStyle.Automatic => _showHorizontal,
+                _ => false,
+            };
+
             var viewport = ViewportOf(client, showHorizontal, showVertical);
             var area = XPlatGeometry.Deflate(viewport, padding);
             var extent = arrange(area);
@@ -195,31 +216,19 @@ internal sealed class XPlatScrollBars
                 extent = arrange(area);
             }
 
+            _client = client;
             _viewport = viewport;
             _contentArea = area;
             _extent = extent;
+            _showVertical = showVertical;
+            _showHorizontal = showHorizontal;
+            _hasLayout = true;
 
             _horizontalOffset = Math.Clamp(_horizontalOffset, 0f, MaxHorizontalOffset);
             _verticalOffset = Math.Clamp(_verticalOffset, 0f, MaxVerticalOffset);
             _childOffset = new SKPoint(-_horizontalOffset, -_verticalOffset);
 
-            PlaceBar(
-                ref _verticalBar,
-                showVertical,
-                XPlatOrientation.Vertical,
-                new SKRect(viewport.Right, client.Top, client.Right, viewport.Bottom),
-                area.Height,
-                extent.Height,
-                _verticalOffset);
-
-            PlaceBar(
-                ref _horizontalBar,
-                showHorizontal,
-                XPlatOrientation.Horizontal,
-                new SKRect(client.Left, viewport.Bottom, viewport.Right, client.Bottom),
-                area.Width,
-                extent.Width,
-                _horizontalOffset);
+            PlaceBars();
         }
         finally
         {
@@ -233,6 +242,14 @@ internal sealed class XPlatScrollBars
         var horizontal = MathF.Max(0f, horizontalOffset);
         var vertical = MathF.Max(0f, verticalOffset);
 
+        // The range comes from the extent and the viewport, so it only exists once something has
+        // been arranged. Before that the offsets are kept as asked and the layout below clamps them.
+        if (_hasLayout)
+        {
+            horizontal = MathF.Min(horizontal, MaxHorizontalOffset);
+            vertical = MathF.Min(vertical, MaxVerticalOffset);
+        }
+
         if (MathF.Abs(horizontal - _horizontalOffset) < 0.01f && MathF.Abs(vertical - _verticalOffset) < 0.01f)
         {
             return;
@@ -240,7 +257,22 @@ internal sealed class XPlatScrollBars
 
         _horizontalOffset = horizontal;
         _verticalOffset = vertical;
-        _owner.PerformLayout();
+
+        // Scrolling slides the content under a viewport that does not move, so it changes nothing
+        // the arrange callback computes: whatever the container scrolls is positioned in content
+        // coordinates and painted through the offset. Re-arranging on a scroll would walk every
+        // child of a large content extent to end up exactly where the last pass left it, so only
+        // the bars and the frame are touched. The first scroll before any layout still needs one,
+        // because there is no viewport or extent to place the bars against yet.
+        if (!_hasLayout)
+        {
+            _owner.PerformLayout();
+            _owner.Invalidate();
+            return;
+        }
+
+        _childOffset = new SKPoint(-horizontal, -vertical);
+        PlaceBars();
         _owner.Invalidate();
     }
 
@@ -339,6 +371,28 @@ internal sealed class XPlatScrollBars
         var height = MathF.Max(0f, client.Height - (showHorizontal ? thickness : 0f));
 
         return new SKRect(client.Left, client.Top, client.Left + width, client.Top + height);
+    }
+
+    /// <summary>Positions the two bars for the geometry the last layout pass resolved.</summary>
+    private void PlaceBars()
+    {
+        PlaceBar(
+            ref _verticalBar,
+            _showVertical,
+            XPlatOrientation.Vertical,
+            new SKRect(_viewport.Right, _client.Top, _client.Right, _viewport.Bottom),
+            _contentArea.Height,
+            _extent.Height,
+            _verticalOffset);
+
+        PlaceBar(
+            ref _horizontalBar,
+            _showHorizontal,
+            XPlatOrientation.Horizontal,
+            new SKRect(_client.Left, _viewport.Bottom, _viewport.Right, _client.Bottom),
+            _contentArea.Width,
+            _extent.Width,
+            _horizontalOffset);
     }
 
     private void PlaceBar(

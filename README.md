@@ -10,7 +10,7 @@ controls draw themselves on top of it. The same sample UI runs on all three plat
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
   Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatListBox, XPlatImage
+  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatListBox, XPlatImage
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
   Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
@@ -194,6 +194,65 @@ split, `Up`/`Down` for a horizontal one) when the container has keyboard focus. 
 `IsSplitterFixed` to lock it, and `SplitterColor`/`ShowSplitterGrip` to restyle it.
 `AddSplitterMovingHandler` runs continuously during a drag; `AddSplitterDistanceChangedHandler` runs
 whenever the distance changes for any reason.
+
+### Stack panel
+
+`XPlatStackPanel` lays its children out one after another along a single axis and sizes each one
+across that axis, which is the flow layout a plain panel does not have:
+
+| `Orientation` | Children run | Each child is stretched to the panel's |
+| --- | --- | --- |
+| `Vertical` (default) | top to bottom | width |
+| `Horizontal` | left to right | height |
+
+A child gets its own preferred size along the stack and fills the panel across it, so a stack of
+buttons is a stack of full-width rows. `Spacing` is the gap between children; there is none before
+the first or after the last.
+
+```csharp
+var stack = new XPlatStackPanel
+{
+    Dock = DockStyle.Fill,
+    Spacing = 8f,
+    Padding = new XPlatThickness(12f),
+    ShowFrame = true,            // a stack panel draws no frame of its own by default
+};
+
+stack.Controls.Add(new XPlatButton("Save"));
+stack.Controls.Add(new XPlatButton("Cancel"));
+root.Controls.Add(stack);
+```
+
+`HorizontalAlignment` on a child of a vertical stack, or `VerticalAlignment` on a child of a
+horizontal one, opts out of the stretch and leaves the child at its own size across the stack:
+
+| Value | Placed |
+| --- | --- |
+| `Stretch` | filling the stack; the default |
+| `Near` | at the left, or the top |
+| `Center` | in the middle |
+| `Far` | at the right, or the bottom |
+
+```csharp
+stack.Controls.Add(new XPlatButton("Centred") { HorizontalAlignment = XPlatAlignment.Center });
+```
+
+- A child with `AutoSize = false` keeps the size it was given along the stack, which is how a run of
+  fixed-height rows is built; it is still stretched across the stack unless it is aligned.
+- `Margin` still applies: it separates one child from the next along the stack and insets it from
+  the edges across it, so `Spacing` is for the gap and `Margin` for a per-child adjustment.
+- A docked child is not part of the run. It takes its edge of the panel the way a docked child of
+  any panel does and the stack fills what is left, which is how a header or a footer is added:
+
+```csharp
+stack.Controls.Add(new XPlatLabel("Header") { Dock = DockStyle.Top, AutoSize = false, Height = 24f });
+```
+
+- The run of children is the scrollable content, so `VerticalScroll = XPlatScrollStyle.Automatic`
+  scrolls a long stack; a docked header stays put while the rows scroll under it.
+- With `AutoSize = true` the stack is as long as the run and as wide as its widest child.
+- A child wider than the space across the stack is clipped to the panel rather than overflowing it,
+  so `Center` and `Far` never push a child outside the control.
 
 ### Scrolling
 
@@ -454,7 +513,20 @@ whether or not the backend can present part of a frame.
 
 Moving or resizing a control repaints the area it vacated as well as the area it covers, without
 being asked. Without that a control that moved would leave a copy of itself behind, which is
-exactly what culling would otherwise make permanent.
+exactly what culling would otherwise make permanent. The vacated area is worked out in the parent's
+coordinates and offered to the parent's `ChildInvalidate` like any other request, so the same
+clipping applies to it: a child scrolled out of sight of a scrolling panel has vacated an area that
+runs from where it used to be to the far end of the content extent, and a request that reached the
+host directly would dirty a rectangle taller than the surface on every scroll step. The container's
+`ChildInvalidate` is the only place that can trim it back to the viewport.
+
+Arranging a child moves it, so a pass over many children asks for many repaints, and each one would
+otherwise walk up the parent chain. No frame can be painted while the pass is running, and the pass
+is about to repaint what it arranged, so `XPlatControl` folds the requests a pass causes into one
+`Invalidate` of the control being laid out, made when the pass - including any nested passes it
+started - finishes. The repaint covers that control's client area, which for a scrolling container
+is the viewport rather than the content. That is what lets a stack panel of a hundred thousand
+buttons scroll in milliseconds instead of seconds.
 
 Hovering is not a repaint on its own. A control that draws itself differently under the pointer
 says so, by invalidating from its own `OnMouseEnter`/`OnMouseLeave`; the base `XPlatControl` only
@@ -478,8 +550,9 @@ both do - would be left with blank patches where the retained content should be:
 `Paint` returns the `SKRectI` it covered, `PendingUpdateBounds` reports what the next paint will
 cover before it happens, and `IsUpdatePending` says whether anything has been invalidated at all -
 enough for a backend to skip asking the platform for a frame it would only redraw identically.
-`IncludeInNextPaint` adds an area to the next frame *without* raising the invalidated event. The
-framework uses it when a control moves out of an area; a backend does not need it.
+`IncludeInNextPaint` adds an area to the next frame *without* raising the invalidated event. It is
+there for a host that wants to force an area into the next frame without scheduling one; the
+framework itself no longer needs it, because a control that moves now asks its parent, as above.
 
 The request the platform is given has to be aimed at the same area. A backend that invalidates its
 whole window on every request gets its whole client area handed back as stale on the next frame,
@@ -1292,7 +1365,7 @@ never cropped on a high-DPI monitor. The **Selection and clipboard** page is the
 drag down from its label, over the whole-control button and into the text box, then right-click
 the selection. The two **Performance** pages are the ones to watch scroll: **Performance: list box**
 loads 1 to 100,000 rows into a list, **Performance: controls** stacks 1 to 100,000 buttons in a
-panel, and both report what the last frame cost to draw them.
+stack panel, and both report what the last frame cost to draw them.
 
 ### On Linux (GTK4)
 

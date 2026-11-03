@@ -46,7 +46,9 @@ public class XPlatControl : IDisposable
     private XPlatSelectionStyle _selectionStyle = XPlatSelectionStyle.Whole;
     private int _layoutSuspends;
     private bool _layoutPending;
+    private int _layoutPasses;
     private bool _invalidateDeferred;
+    private bool _repaintAfterLayout;
     private bool _disposed;
     private XPlatUiHost? _host;
     private XPlatControlCollection? _controls;
@@ -382,18 +384,16 @@ public class XPlatControl : IDisposable
 
             // A control paints nothing outside its own bounds, so whatever it covers now is not
             // what it covered a moment ago: the area it is leaving has to be repainted as well, or
-            // a control that moved or shrank leaves a copy of itself behind.
-            var previous = Host is null
-                ? SKRect.Empty
-                : XPlatUiHost.ToHost(this, ClientRect);
+            // a control that moved or shrank leaves a copy of itself behind. The area is worked out
+            // in the parent's coordinates and handed to the parent like any other repaint request,
+            // so that a container which clips its children clips this too. Asking the host for it
+            // directly would reach past a scrolling container, and the area a control scrolled out
+            // of sight left behind is the whole content extent - far larger than the surface.
+            var previous = ClientRectInParent(_bounds);
 
             _bounds = normalized;
             OnBoundsChanged();
-
-            if (previous.Width > 0f && previous.Height > 0f && Host is { } host)
-            {
-                host.IncludeInNextPaint(previous);
-            }
+            InvalidateAreaInParent(previous);
         }
     }
 
@@ -551,6 +551,21 @@ public class XPlatControl : IDisposable
     }
 
     public DockStyle Dock { get; set; }
+
+    /// <summary>
+    /// How an <see cref="XPlatStackPanel"/> places this control across the axis it does not stack
+    /// along. Defaults to <see cref="XPlatAlignment.Stretch"/>, so a child spans the panel unless it
+    /// asks for its own size.
+    /// </summary>
+    /// <remarks>
+    /// Only the stack panel reads it. The other containers size their children themselves - a
+    /// docked child fills its edge, a table cell fills its cell - so the value is ignored there
+    /// rather than being a second opinion on a decision that has already been made.
+    /// </remarks>
+    public XPlatAlignment HorizontalAlignment { get; set; }
+
+    /// <inheritdoc cref="HorizontalAlignment"/>
+    public XPlatAlignment VerticalAlignment { get; set; }
 
     public XPlatCursor Cursor { get; set; }
 
@@ -909,7 +924,37 @@ public class XPlatControl : IDisposable
             return;
         }
 
-        OnLayout();
+        RunLayout();
+    }
+
+    /// <summary>
+    /// Runs one layout pass, folding the repaints it causes into the one this control does at the
+    /// end of it.
+    /// </summary>
+    /// <remarks>
+    /// Arranging a child moves it, and a child that moves asks for the area it left to be
+    /// repainted, so a pass over many children would otherwise walk up the parent chain once per
+    /// child - which is what made a scrolling container with a large content extent slow to scroll.
+    /// No frame can be painted while the pass is running anyway, and the pass is going to repaint
+    /// what it arranged, so the requests are answered by one repaint of this control instead.
+    /// </remarks>
+    private void RunLayout()
+    {
+        _layoutPasses++;
+        try
+        {
+            OnLayout();
+        }
+        finally
+        {
+            _layoutPasses--;
+
+            if (_layoutPasses == 0 && _repaintAfterLayout)
+            {
+                _repaintAfterLayout = false;
+                Invalidate();
+            }
+        }
     }
 
     /// <summary>Arranges this control's children. Containers override this.</summary>
@@ -952,7 +997,7 @@ public class XPlatControl : IDisposable
 
         if (performLayout && pending)
         {
-            OnLayout();
+            RunLayout();
         }
 
         // The repaints the batch deferred happen after the layout, because arranging the children
@@ -979,25 +1024,41 @@ public class XPlatControl : IDisposable
             return null;
         }
 
-        if (_controls is not null)
-        {
-            for (int i = _controls.Count - 1; i >= 0; i--)
-            {
-                var child = _controls[i];
-                var offset = GetChildOffset(child);
-                var childPoint = offset.X == 0f && offset.Y == 0f
-                    ? local
-                    : new SKPoint(local.X - offset.X, local.Y - offset.Y);
+        return HitTestChildren(local) ?? (Enabled ? this : null);
+    }
 
-                var hit = child.HitTest(childPoint);
-                if (hit is not null)
-                {
-                    return hit;
-                }
+    /// <summary>
+    /// Returns the child containing a point, given in this control's client coordinates, or null
+    /// when no child does. Children are tested in reverse z-order.
+    /// </summary>
+    /// <remarks>
+    /// A container whose children are laid out in a known order can override this to find the one
+    /// candidate instead of walking all of them, which is what makes a container with a very large
+    /// number of children cheap to hit test.
+    /// </remarks>
+    protected virtual XPlatControl? HitTestChildren(SKPoint local)
+    {
+        if (_controls is null)
+        {
+            return null;
+        }
+
+        for (int i = _controls.Count - 1; i >= 0; i--)
+        {
+            var child = _controls[i];
+            var offset = GetChildOffset(child);
+            var childPoint = offset.X == 0f && offset.Y == 0f
+                ? local
+                : new SKPoint(local.X - offset.X, local.Y - offset.Y);
+
+            var hit = child.HitTest(childPoint);
+            if (hit is not null)
+            {
+                return hit;
             }
         }
 
-        return Enabled ? this : null;
+        return null;
     }
 
     /// <summary>Paints the control and, for containers, its children.</summary>
@@ -1127,7 +1188,18 @@ public class XPlatControl : IDisposable
     /// <param name="invalidateChildren">True to repaint the controls inside the area as well.</param>
     public void Invalidate(SKRect rect, bool invalidateChildren)
     {
-        using var region = new SKRegion(ToRectI(XPlatGeometry.Normalize(rect)));
+        // The region is only built once the request is known to be worth making. A control that
+        // moves asks for a repaint from inside its parent's layout pass, and that request is
+        // always answered by the repaint the pass ends with, so building one here first meant a
+        // container arranging thousands of children allocated a native region per child per pass
+        // to throw every one of them away.
+        var area = ToRectI(XPlatGeometry.Normalize(rect));
+        if (area.Width <= 0 || area.Height <= 0 || DeferToParent())
+        {
+            return;
+        }
+
+        using var region = new SKRegion(area);
         Invalidate(region, invalidateChildren);
     }
 
@@ -1142,17 +1214,8 @@ public class XPlatControl : IDisposable
     {
         ArgumentNullException.ThrowIfNull(region);
 
-        if (region.IsEmpty)
+        if (region.IsEmpty || DeferToParent())
         {
-            return;
-        }
-
-        // A batch that is changing the tree in bulk asks for a repaint per child it touches, and
-        // no frame can be painted until the batch is done, so the requests are folded into the one
-        // ResumeLayout makes rather than walked up the parent chain one at a time.
-        if (_layoutSuspends > 0)
-        {
-            _invalidateDeferred = true;
             return;
         }
 
@@ -1247,6 +1310,95 @@ public class XPlatControl : IDisposable
         }
 
         return mapped;
+    }
+
+    /// <summary>
+    /// Maps this control's client area, at <paramref name="bounds"/>, into the parent's
+    /// coordinates. A control with no parent is its own root, so the two spaces are the same.
+    /// </summary>
+    private SKRect ClientRectInParent(SKRect bounds)
+    {
+        var offset = Parent is { } parent ? parent.GetChildOffset(this) : SKPoint.Empty;
+
+        return new SKRect(
+            bounds.Left + offset.X,
+            bounds.Top + offset.Y,
+            bounds.Right + offset.X,
+            bounds.Bottom + offset.Y);
+    }
+
+    /// <summary>Asks for an area of the parent that this control has left to be repainted.</summary>
+    /// <param name="area">The area, in the parent's coordinates.</param>
+    /// <remarks>
+    /// The area is no longer part of this control, so it cannot go through
+    /// <see cref="Invalidate(SKRegion, bool)"/>: that clips to the client area the control has now.
+    /// It is offered to the parent as if the child were asking for a repaint there, which is what
+    /// lets a container that clips its children drop the part that was never on screen.
+    /// </remarks>
+    private void InvalidateAreaInParent(SKRect area)
+    {
+        if (area.Width <= 0f || area.Height <= 0f)
+        {
+            return;
+        }
+
+        // Deliberately not deferred while this control's own layout is suspended: the deferral
+        // repaints the client area it ends up with, and the whole point of this call is the area
+        // the control has left. A control being arranged is its parent's business anyway.
+        if (FoldIntoParentLayout())
+        {
+            return;
+        }
+
+        using var region = new SKRegion(ToRectI(area));
+
+        if (Parent is { } parent)
+        {
+            parent.ChildInvalidate(this, region);
+        }
+        else
+        {
+            Host?.Invalidate(region);
+        }
+    }
+
+    /// <summary>
+    /// Answers whether something already scheduled will repaint this control, which makes the
+    /// request being made now unnecessary.
+    /// </summary>
+    /// <returns>True when the request can be dropped, having been recorded if it still matters.</returns>
+    private bool DeferToParent()
+    {
+        // A batch that is changing the tree in bulk asks for a repaint per child it touches, and
+        // no frame can be painted until the batch is done, so the requests are folded into the one
+        // ResumeLayout makes rather than walked up the parent chain one at a time.
+        if (_layoutSuspends > 0)
+        {
+            _invalidateDeferred = true;
+            return true;
+        }
+
+        // The same for a request that arrives while the parent is arranging its children: that
+        // pass is what moves them, so it is answered by the repaint the pass ends with rather than
+        // by a walk up the tree per child. A container that clips its children has nothing on
+        // screen outside its own client area, which is the area that repaint covers.
+        return FoldIntoParentLayout();
+    }
+
+    /// <summary>
+    /// Folds a repaint request into the layout pass the parent is running, which is what keeps a
+    /// container that arranges many children from walking up the parent chain once per child.
+    /// </summary>
+    /// <returns>True when the parent's pass will answer the request, so there is nothing left to do.</returns>
+    private bool FoldIntoParentLayout()
+    {
+        if (Parent is not { _layoutPasses: > 0 } arranging)
+        {
+            return false;
+        }
+
+        arranging._repaintAfterLayout = true;
+        return true;
     }
 
     /// <summary>Rounds a rectangle out to the whole pixels that cover it.</summary>
@@ -1478,7 +1630,17 @@ public class XPlatControl : IDisposable
     protected virtual void OnVisibleChanged()
     {
         _visibleChanged?.Invoke(this);
+        Parent?.OnChildVisibleChanged(this);
         Invalidate();
+    }
+
+    /// <summary>
+    /// Called on a parent when one of its children changed visibility. Toggling visibility does not
+    /// re-run layout, so a container that caches where it placed its children uses this to drop the
+    /// cache rather than go on painting a child that is no longer there.
+    /// </summary>
+    internal virtual void OnChildVisibleChanged(XPlatControl child)
+    {
     }
 
     protected virtual void OnEnabledChanged()
