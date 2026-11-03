@@ -1172,7 +1172,7 @@ public class XPlatControl : IDisposable
     }
 
     /// <summary>Rounds a rectangle out to the whole pixels that cover it.</summary>
-    protected static SKRectI ToRectI(SKRect rect) => new(
+    protected internal static SKRectI ToRectI(SKRect rect) => new(
         (int)MathF.Floor(rect.Left),
         (int)MathF.Floor(rect.Top),
         (int)MathF.Ceiling(rect.Right),

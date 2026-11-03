@@ -640,9 +640,9 @@ public sealed class DemoUi
             CellPadding = new XPlatThickness(8f),
         };
 
-        for (int column = 0; column < 6; column++)
+        for (int column = 0; column < 7; column++)
         {
-            table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.Percent, 100f / 6f));
+            table.ColumnStyles.Add(new XPlatColumnStyle(XPlatSizeType.Percent, 100f / 7f));
         }
 
         table.RowStyles.Add(new XPlatRowStyle(XPlatSizeType.AutoSize, 0f));
@@ -654,6 +654,7 @@ public sealed class DemoUi
         table.Add(SectionLabel("Images and layout"), 3, 0);
         table.Add(SectionLabel("Selection and clipboard"), 4, 0);
         table.Add(SectionLabel("Scrolling"), 5, 0);
+        table.Add(SectionLabel("Lists"), 6, 0);
 
         table.Add(BuildLabelsCard(), 0, 1);
         table.Add(BuildButtonsCard(), 1, 1);
@@ -661,6 +662,7 @@ public sealed class DemoUi
         table.Add(BuildImagesCard(), 3, 1);
         table.Add(BuildSelectionCard(), 4, 1);
         table.Add(BuildScrollingCard(), 5, 1);
+        table.Add(BuildListBoxCard(), 6, 1);
 
         return table;
     }
@@ -890,6 +892,82 @@ public sealed class DemoUi
             ForeColorRole = XPlatThemeColor.MutedForeground,
             TextAlign = XPlatContentAlignment.TopLeft,
         });
+
+        return card;
+    }
+
+    /// <summary>
+    /// An <see cref="XPlatListBox"/> in <see cref="XPlatSelectionMode.MultiExtended"/>: click to
+    /// select, Ctrl+click to toggle, Shift+click to extend. The button cycles the mode so all four
+    /// behave the same way as the WinForms control.
+    /// </summary>
+    private XPlatPanel BuildListBoxCard()
+    {
+        var card = Card();
+
+        var modeCaption = ScrollCaption("MultiExtended");
+        card.Controls.Add(modeCaption);
+
+        var list = new XPlatListBox
+        {
+            Dock = XDock.Top,
+            Height = 108f,
+            SelectionMode = XPlatSelectionMode.MultiExtended,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        list.Items.AddRange(new object[]
+        {
+            "Overview", "Labels", "Buttons", "Text input", "Rich text", "Images",
+            "Scrolling", "Lists", "Dialogs", "Split container", "Selection", "Drag and drop",
+            "Menus", "Owned windows",
+        });
+
+        list.SelectedIndex = 0;
+        card.Controls.Add(list);
+
+        var selectionLabel = ScrollCaption("1 selected");
+        selectionLabel.Margin = new XPlatThickness(0f, 0f, 0f, 6f);
+        card.Controls.Add(selectionLabel);
+
+        list.AddSelectedIndexChangedHandler(_ =>
+        {
+            int count = list.SelectedIndices.Count;
+            selectionLabel.Text = count switch
+            {
+                0 => "no selection",
+                1 => $"\"{list.GetItemText(list.SelectedIndex)}\" selected",
+                _ => $"{count} rows",
+            };
+        });
+
+        list.AddItemActivatedHandler(_ =>
+            SetStatus($"Activated \"{list.GetItemText(list.SelectedIndex)}\"."));
+
+        var modeButton = new XPlatButton("Next mode")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+
+        modeButton.AddClickHandler(_ =>
+        {
+            var mode = list.SelectionMode switch
+            {
+                XPlatSelectionMode.None => XPlatSelectionMode.One,
+                XPlatSelectionMode.One => XPlatSelectionMode.MultiSimple,
+                XPlatSelectionMode.MultiSimple => XPlatSelectionMode.MultiExtended,
+                _ => XPlatSelectionMode.None,
+            };
+
+            list.SelectionMode = mode;
+            modeCaption.Text = mode.ToString();
+            SetStatus($"List selection mode is {mode}.");
+        });
+
+        card.Controls.Add(modeButton);
 
         return card;
     }
