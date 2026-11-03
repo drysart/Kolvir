@@ -10,7 +10,7 @@ controls draw themselves on top of it. The same sample UI runs on all three plat
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
   Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatListBox, XPlatImage
+  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatGroupBox, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatCheckBox, XPlatRadioButton, XPlatProgressBar, XPlatTextBox, XPlatListBox, XPlatImage
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
   Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
@@ -68,15 +68,19 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled`, colours, focus, mouse/keyboard events; any control can host children |
+| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree), colours, focus, mouse/keyboard events; any control can host children |
 | `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
 | `XPlatSplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
+| `XPlatGroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
 | `XPlatScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
 | `XPlatLabel` | `Label` | Nine-way alignment, optional word wrap |
 | `XPlatRichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
 | `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
+| `XPlatCheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
+| `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
+| `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
 | `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
@@ -448,6 +452,87 @@ is why hovering and selecting stay cheap on a long list. The row the focus recta
 as a change in its own right, so moving it repaints the row it leaves as well as the row it lands
 on - in `None` mode, where nothing is ever selected, that rectangle is the only thing a click moves.
 
+### Check boxes and radio buttons
+
+`XPlatCheckBox` and `XPlatRadioButton` are the same control with a different glyph, so the state
+machine, the label, the measuring and the input all live in one shared `XPlatToggleControl` base.
+
+| Member | Behaviour |
+| --- | --- |
+| `CheckState`, `AddCheckedChangedHandler` | `Unchecked`, `Checked` or `Indeterminate` |
+| `Checked` | Convenience view of the state: `true` for `Checked`, and setting it picks that state |
+| `ThreeState` | Opts a check box into the indeterminate state; a radio button ignores it |
+| `AutoCheck` | When `false` the control reports the click through `OnClick` and leaves the state to the application |
+| `TextAlign`, `GlyphSize`, `GlyphGap`, `Font` | Label side, glyph box, gap between glyph and label, label font |
+| `GroupName` | Radio buttons only: name of the group, see below |
+
+A click or `Space` advances the state, so a three-state check box cycles `Unchecked` -> `Checked` ->
+`Indeterminate` -> `Unchecked`; a two-state one is a plain toggle. Radio buttons group by their
+parent, so two groups in one container need either two containers or a distinct `GroupName` on
+each - `GroupName` is checked first and grouping by parent is what remains, which is a superset of
+the WinForms rule. Checking one clears the rest of its group, and the arrow keys move the check
+down the group (wrapping at the ends) as well as moving the focus.
+
+Neither control paints a background, so the surface behind them shows through; only the glyph and
+the label are drawn, and a disabled one greys both.
+
+```csharp
+var remember = new XPlatCheckBox { Text = "Remember me", Checked = true };
+remember.AddCheckedChangedHandler(_ => Console.WriteLine(remember.CheckState));
+
+var partial = new XPlatCheckBox { Text = "Some files", ThreeState = true, CheckState = XPlatCheckState.Indeterminate };
+
+var small = new XPlatRadioButton { Text = "Small", GroupName = "size", Checked = true };
+var large = new XPlatRadioButton { Text = "Large", GroupName = "size" };
+```
+
+### Progress bar
+
+`XPlatProgressBar` shows a value between `Minimum` and `Maximum` as a filled track. It takes no
+input, so it is neither focusable nor a tab stop.
+
+| Member | Behaviour |
+| --- | --- |
+| `Minimum`, `Maximum`, `Value`, `Percent` | The range and where in it the bar sits; `Value` is clamped, `Percent` is the fraction as `0 … 1` |
+| `Step`, `PerformStep()`, `Increment(amount)` | `Step` is what `PerformStep` adds; both clamp and repaint only when the value moved |
+| `Style` | `Continuous`, `Blocks` (a segmented fill) or `Marquee` |
+| `MarqueeAnimationSpeed` | Milliseconds between marquee frames |
+
+Only a `Marquee` bar starts a timer, and only while it is visible, attached and there is an
+application to tick it, so an idle continuous bar costs nothing. A continuous bar repaints only the
+strip the value actually crossed.
+
+```csharp
+var progress = new XPlatProgressBar { Dock = DockStyle.Top, Maximum = 200 };
+progress.Value = 80;                      // 40%
+progress.PerformStep();                   // 90
+
+var busy = new XPlatProgressBar { Dock = DockStyle.Top, Style = XPlatProgressBarStyle.Marquee };
+```
+
+### Group box
+
+`XPlatGroupBox` is a labelled frame: the caption sits in a break in the top edge and the content is
+laid out below it. It is an `XPlatPanel`, so it keeps the scrolling and the child management of one.
+
+The caption band is reserved by overriding `ContentBounds` rather than by adding to `Padding`, so
+the layout, the hit testing and the invalidation clipping all move together and a scrolled child
+cannot paint over the caption. The break in the frame is cut out of the border with a difference
+clip instead of being painted over, so a group box on a coloured or textured background still looks
+right.
+
+```csharp
+var group = new XPlatGroupBox { Dock = DockStyle.Top, Height = 140f, Text = "Appearance" };
+group.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
+group.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Snap to grid" });
+```
+
+`Enabled` cascades, so disabling a group box greys its caption, its frame and everything inside it,
+and none of the content takes input. Only the flag that was set is remembered: a control that was
+disabled on its own stays disabled when its container is enabled again, and one that was only
+disabled by its container comes back with it. Moving a subtree under a disabled container disables
+it the same way, without touching a single `Enabled` flag on the children.
+
 ### Invalidation and partial painting
 
 `Invalidate` says what changed, and the host keeps the answer as a region rather than a single
@@ -786,6 +871,7 @@ XPlatClipboard.SetHtml(rich.GetSelectionText(12, 4), html);   // both flavours a
 | `XPlatLabel`, `XPlatRichLabel` | `Selectable = false`, `Partial` | Set `Selectable`; a drag selects character by character |
 | `XPlatTextBox` | `Selectable = true`, `Partial` | Its own caret and anchor answer for a drag that *starts* inside it; a drag that merely passes through it selects its text and drops the caret |
 | `XPlatButton`, `XPlatImage` | `Selectable = false`, `Whole` | Set `Selectable`; a drag over the control selects it as one unit |
+| `XPlatCheckBox`, `XPlatRadioButton`, `XPlatProgressBar` | `Selectable = false`, `Whole` | Only the check state of a toggle is its own; the label is not selectable text |
 | `XPlatListBox` | `Selectable = false`, `Whole` | Its row selection is its own; the host selection is not involved |
 | `XPlatPanel` and other containers | `Selectable = false`, `Whole` | A selectable container hides its children from the selection, so leave containers off unless the container itself is what should be selected |
 

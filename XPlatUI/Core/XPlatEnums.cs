@@ -233,3 +233,38 @@ public enum XPlatSizeType
     /// <summary>Sizes to the content of the cells in the row/column.</summary>
     AutoSize = 2,
 }
+
+/// <summary>
+/// The state of an <see cref="XPlatCheckBox"/> or <see cref="XPlatRadioButton"/>, matching the
+/// WinForms <c>CheckState</c>.
+/// </summary>
+public enum XPlatCheckState
+{
+    /// <summary>Not checked.</summary>
+    Unchecked = 0,
+
+    /// <summary>Checked.</summary>
+    Checked = 1,
+
+    /// <summary>
+    /// Neither checked nor unchecked. Only reachable when <see cref="XPlatToggleControl.ThreeState"/>
+    /// is on; a two-state toggle never leaves the other two.
+    /// </summary>
+    Indeterminate = 2,
+}
+
+/// <summary>How an <see cref="XPlatProgressBar"/> draws its value, matching the WinForms <c>ProgressBarStyle</c>.</summary>
+public enum XPlatProgressBarStyle
+{
+    /// <summary>One solid run from the start of the bar to the value.</summary>
+    Continuous = 0,
+
+    /// <summary>The same run, drawn as separate blocks with gaps between them.</summary>
+    Blocks = 1,
+
+    /// <summary>
+    /// A band that sweeps the bar to show work of unknown length. The value is ignored, and the
+    /// animation only runs while an <see cref="XPlatApplication"/> is running the message loop.
+    /// </summary>
+    Marquee = 2,
+}

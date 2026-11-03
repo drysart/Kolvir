@@ -39,6 +39,8 @@ public class XPlatControl : IDisposable
     private string _text = string.Empty;
     private bool _visible = true;
     private bool _enabled = true;
+    private bool _effectiveEnabled = true;
+    private XPlatControl? _parent;
     private float _opacity = 1f;
     private bool _autoSize;
     private bool _focusable = true;
@@ -330,7 +332,23 @@ public class XPlatControl : IDisposable
     /// <param name="child">The child about to be painted or hit tested.</param>
     protected internal virtual SKPoint GetChildOffset(XPlatControl child) => SKPoint.Empty;
 
-    public XPlatControl? Parent { get; internal set; }
+    public XPlatControl? Parent
+    {
+        get => _parent;
+        internal set
+        {
+            if (ReferenceEquals(_parent, value))
+            {
+                return;
+            }
+
+            _parent = value;
+
+            // Moving a subtree under a disabled container (or out of one) changes whether it is
+            // enabled without touching a single Enabled flag, so re-read it here.
+            UpdateEffectiveEnabled();
+        }
+    }
 
     /// <summary>The host this control is attached to, if any (resolved through the parent chain).</summary>
     public XPlatUiHost? Host => _host ?? Parent?.Host;
@@ -493,9 +511,19 @@ public class XPlatControl : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether the control accepts input. Disabling a container disables everything inside it, so
+    /// this is true only when the control's own flag is set and every ancestor is enabled as well.
+    /// </summary>
+    /// <remarks>
+    /// The getter walks the parent chain rather than caching, so a subtree moved under a disabled
+    /// container answers correctly the moment it is attached. Setting the property only records the
+    /// control's own flag; <see cref="UpdateEffectiveEnabled"/> is what notices that the answer for
+    /// the subtree changed and fires <see cref="OnEnabledChanged"/> down it.
+    /// </remarks>
     public bool Enabled
     {
-        get => _enabled;
+        get => _enabled && (Parent?.Enabled ?? true);
         set
         {
             if (_enabled == value)
@@ -504,12 +532,7 @@ public class XPlatControl : IDisposable
             }
 
             _enabled = value;
-            if (!value && IsFocused)
-            {
-                Host?.SetFocus(null);
-            }
-
-            OnEnabledChanged();
+            UpdateEffectiveEnabled();
         }
     }
 
@@ -1647,6 +1670,38 @@ public class XPlatControl : IDisposable
     {
         _enabledChanged?.Invoke(this);
         Invalidate();
+    }
+
+    /// <summary>
+    /// Re-reads <see cref="Enabled"/> and, when it changed, tells this control and then its whole
+    /// subtree. Every path that can change the answer - the local flag and the parent link - ends
+    /// here, so a child never has to watch its ancestors.
+    /// </summary>
+    private void UpdateEffectiveEnabled()
+    {
+        bool enabled = Enabled;
+        if (enabled == _effectiveEnabled)
+        {
+            return;
+        }
+
+        _effectiveEnabled = enabled;
+        if (!enabled && IsFocused)
+        {
+            Host?.SetFocus(null);
+        }
+
+        OnEnabledChanged();
+
+        if (_controls is not { Count: > 0 } children)
+        {
+            return;
+        }
+
+        for (int i = 0; i < children.Count; i++)
+        {
+            children[i].UpdateEffectiveEnabled();
+        }
     }
 
     protected virtual void OnBoundsChanged()
