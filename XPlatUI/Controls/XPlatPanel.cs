@@ -196,7 +196,17 @@ public class XPlatPanel : XPlatControl
         _scroll.IsBar(child) ? SKPoint.Empty : _scroll.ChildOffset;
 
     /// <summary>The area scrolled content is clipped to, in this panel's client coordinates.</summary>
-    protected SKRect ContentViewport => _scroll.EffectiveViewport(ClientRect);
+    protected SKRect ContentViewport => _scroll.EffectiveViewport(ContentBounds);
+
+    /// <summary>
+    /// The part of the client area the content is laid out, clipped and hit-tested inside.
+    /// </summary>
+    /// <remarks>
+    /// A container that reserves some of its client area overrides this rather than its padding -
+    /// an <see cref="XPlatGroupBox"/> keeping the band its caption sits in - so the viewport, the
+    /// scrollbars and the clipping all move with the content instead of only the layout.
+    /// </remarks>
+    protected virtual SKRect ContentBounds => ClientRect;
 
     /// <summary>The translation scrolled content is painted at, which is the negated offset.</summary>
     protected SKPoint ContentOffset => _scroll.ChildOffset;
@@ -212,7 +222,7 @@ public class XPlatPanel : XPlatControl
     /// </remarks>
     protected internal override void ChildInvalidate(XPlatControl child, SKRegion region)
     {
-        _scroll.ClipInvalidate(child, region, ClientRect);
+        _scroll.ClipInvalidate(child, region, ContentBounds);
         base.ChildInvalidate(child, region);
     }
 
@@ -241,7 +251,7 @@ public class XPlatPanel : XPlatControl
 
         // Children are clipped to the viewport, so a point in the bar gutter (or the dead square
         // where the two bars meet) must not reach them even though it is inside the client area.
-        if (!XPlatGeometry.Contains(_scroll.EffectiveViewport(ClientRect), local))
+        if (!XPlatGeometry.Contains(ContentViewport, local))
         {
             return Enabled ? this : null;
         }
@@ -320,7 +330,7 @@ public class XPlatPanel : XPlatControl
         base.Dispose(disposing);
     }
 
-    private void LayoutCore() => _scroll.Layout(ClientRect, Padding, ArrangeChildren);
+    private void LayoutCore() => _scroll.Layout(ContentBounds, Padding, ArrangeChildren);
 
     /// <summary>
     /// Positions the children and returns the size of the content the panel scrolls. The scrollbars

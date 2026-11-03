@@ -300,6 +300,9 @@ public sealed class DemoUi
         ("Table layout", demo => Page(demo.BuildTableLayoutDemo())),
         ("Labels and text", demo => Page(demo.BuildLabelsCard())),
         ("Buttons and input", demo => Page(demo.BuildButtonsCard())),
+        ("Check boxes and radios", demo => Page(demo.BuildToggleDemo())),
+        ("Progress bars", demo => Page(demo.BuildProgressDemo())),
+        ("Group boxes", demo => Page(demo.BuildGroupBoxDemo())),
         ("Rich text", demo => Page(demo.BuildRichTextCard())),
         ("Images and layout", demo => Page(BuildImagesCard())),
         ("Selection and clipboard", demo => Page(demo.BuildSelectionCard())),
@@ -1175,6 +1178,351 @@ public sealed class DemoUi
         });
 
         return card;
+    }
+
+    /// <summary>
+    /// Check boxes on the left, radio buttons on the right: the checks cover the three states and
+    /// the disabled look, and the radios show two groups on one card separated only by
+    /// <see cref="XPlatRadioButton.GroupName"/> rather than by a container each.
+    /// </summary>
+    private XPlatPanel BuildToggleDemo()
+    {
+        var section = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var checks = Card();
+        checks.Dock = XDock.Left;
+        checks.Width = 320f;
+        checks.Margin = new XPlatThickness(0f, 0f, 16f, 0f);
+        checks.Controls.Add(Heading("Check boxes"));
+
+        foreach (string caption in new[] { "Auto-save", "Show line numbers", "Wrap long lines" })
+        {
+            var box = new XPlatCheckBox(caption)
+            {
+                Dock = XDock.Top,
+                Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+            };
+            box.AddCheckedChangedHandler(_ => SetStatus($"{box.Text} is {Describe(box.CheckState)}."));
+            checks.Controls.Add(box);
+        }
+
+        // ThreeState is set before CheckState because the initializer runs in order: a check box
+        // that cannot hold the indeterminate state would drop it on the way in.
+        var threeState = new XPlatCheckBox("Three state")
+        {
+            Dock = XDock.Top,
+            ThreeState = true,
+            CheckState = XPlatCheckState.Indeterminate,
+            Margin = new XPlatThickness(0f, 12f, 0f, 2f),
+        };
+        checks.Controls.Add(threeState);
+
+        var stateReadout = ScrollCaption("Indeterminate");
+        checks.Controls.Add(stateReadout);
+        threeState.AddCheckedChangedHandler(_ => stateReadout.Text = Describe(threeState.CheckState));
+
+        checks.Controls.Add(new XPlatCheckBox("Disabled, checked")
+        {
+            Dock = XDock.Top,
+            Checked = true,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 12f, 0f, 0f),
+        });
+
+        var radios = Card();
+        radios.Controls.Add(Heading("Radio buttons"));
+        radios.Controls.Add(new XPlatLabel("Both groups are on this card: GroupName decides which radio buttons answer to each other.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 34f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        });
+
+        AddRadioGroup(radios, "Size", "size", ["Small", "Medium", "Large"], "Medium");
+        AddRadioGroup(radios, "Alignment", "align", ["Left", "Centre", "Right"], "Left");
+
+        radios.Controls.Add(new XPlatRadioButton("Disabled")
+        {
+            Dock = XDock.Top,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 12f, 0f, 0f),
+        });
+
+        section.Controls.Add(checks);
+        section.Controls.Add(radios);
+        return section;
+    }
+
+    /// <summary>Adds a captioned run of radio buttons that form one group by name.</summary>
+    private void AddRadioGroup(XPlatPanel card, string caption, string groupName, string[] options, string selected)
+    {
+        var heading = ScrollCaption(caption);
+        heading.Margin = new XPlatThickness(0f, 10f, 0f, 2f);
+        card.Controls.Add(heading);
+
+        foreach (string option in options)
+        {
+            var radio = new XPlatRadioButton(option)
+            {
+                Dock = XDock.Top,
+                GroupName = groupName,
+                Checked = option == selected,
+                Margin = new XPlatThickness(0f, 0f, 0f, 4f),
+            };
+            radio.AddCheckedChangedHandler(_ =>
+            {
+                if (radio.Checked)
+                {
+                    SetStatus($"{caption} is {option}.");
+                }
+            });
+            card.Controls.Add(radio);
+        }
+    }
+
+    private static string Describe(XPlatCheckState state) => state switch
+    {
+        XPlatCheckState.Checked => "checked",
+        XPlatCheckState.Indeterminate => "indeterminate",
+        _ => "unchecked",
+    };
+
+    /// <summary>
+    /// The three <see cref="XPlatProgressBarStyle"/>s, a disabled bar, and a Step button, so the
+    /// fill is watched rather than described. Only the marquee bar animates, and only while the
+    /// window is running a frame loop to tick it.
+    /// </summary>
+    private XPlatPanel BuildProgressDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Progress bars"));
+
+        var readout = ScrollCaption("35%");
+        card.Controls.Add(readout);
+
+        var continuous = new XPlatProgressBar
+        {
+            Dock = XDock.Top,
+            Height = 18f,
+            Value = 35f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        };
+        card.Controls.Add(continuous);
+
+        card.Controls.Add(ScrollCaption("Blocks"));
+        card.Controls.Add(new XPlatProgressBar
+        {
+            Dock = XDock.Top,
+            Height = 18f,
+            Value = 60f,
+            Style = XPlatProgressBarStyle.Blocks,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        });
+
+        card.Controls.Add(ScrollCaption("Marquee"));
+        card.Controls.Add(new XPlatProgressBar
+        {
+            Dock = XDock.Top,
+            Height = 18f,
+            Style = XPlatProgressBarStyle.Marquee,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        });
+
+        card.Controls.Add(ScrollCaption("Disabled"));
+        card.Controls.Add(new XPlatProgressBar
+        {
+            Dock = XDock.Top,
+            Height = 18f,
+            Value = 70f,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        });
+
+        var buttons = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        var step = new XPlatButton("Step")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        step.AddClickHandler(_ =>
+        {
+            if (continuous.Value >= continuous.Maximum)
+            {
+                continuous.Value = continuous.Minimum;
+            }
+
+            continuous.PerformStep();
+            readout.Text = $"{continuous.Value:0}%";
+            SetStatus($"Continuous bar is at {continuous.Value:0} of {continuous.Maximum:0}.");
+        });
+        buttons.Controls.Add(step);
+
+        var reset = new XPlatButton("Reset")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        reset.AddClickHandler(_ =>
+        {
+            continuous.Value = 0f;
+            readout.Text = "0%";
+            SetStatus("Continuous bar reset.");
+        });
+        buttons.Controls.Add(reset);
+
+        card.Controls.Add(buttons);
+        card.Controls.Add(new XPlatLabel("Value is clamped to Minimum..Maximum, so PerformStep wraps only because this page resets it at the top.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 34f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatGroupBox"/>: the caption sits in a break in the top edge and the content is
+    /// laid out below it. The right-hand box scrolls, which is where the caption band earns its
+    /// keep - the rows are clipped below the caption instead of sliding under it.
+    /// </summary>
+    private XPlatPanel BuildGroupBoxDemo()
+    {
+        var section = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var column = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = 320f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 16f, 0f),
+        };
+
+        var appearance = new XPlatGroupBox("Appearance")
+        {
+            Dock = XDock.Top,
+            Height = 168f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        };
+        foreach (string caption in new[] { "Show grid", "Snap to grid", "Show rulers" })
+        {
+            var box = new XPlatCheckBox(caption)
+            {
+                Dock = XDock.Top,
+                Checked = caption != "Show rulers",
+                Margin = new XPlatThickness(0f, 0f, 0f, 4f),
+            };
+            box.AddCheckedChangedHandler(_ => SetStatus($"{box.Text} is {Describe(box.CheckState)}."));
+            appearance.Controls.Add(box);
+        }
+
+        column.Controls.Add(appearance);
+
+        // A disabled group box greys its caption and its frame. Enabled does not cascade to the
+        // children yet, so they are disabled here as well rather than left looking live.
+        var advanced = new XPlatGroupBox("Advanced (disabled)")
+        {
+            Dock = XDock.Top,
+            Height = 116f,
+            Enabled = false,
+        };
+
+        foreach (string caption in new[] { "Trace layout", "Cache layers" })
+        {
+            advanced.Controls.Add(new XPlatCheckBox(caption)
+            {
+                Dock = XDock.Top,
+                Checked = caption == "Trace layout",
+                Enabled = false,
+            });
+        }
+
+        column.Controls.Add(advanced);
+
+        section.Controls.Add(column);
+
+        var rows = new XPlatGroupBox("Rows")
+        {
+            Dock = XDock.Fill,
+        };
+
+        // A group box scrolls its own content below the caption; the rows go in a panel of their
+        // own so they can start at its top edge and scroll as one block.
+        var list = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            HorizontalScroll = XPlatScrollStyle.None,
+        };
+
+        for (int i = 0; i < 24; i++)
+        {
+            var row = new XPlatButton($"Row {i + 1}")
+            {
+                AutoSize = false,
+                Style = XPlatButtonStyle.Secondary,
+                Bounds = new SKRect(0f, i * 30f, 160f, (i * 30f) + 26f),
+            };
+            row.AddClickHandler(_ => SetStatus($"Row {i + 1} clicked inside a group box."));
+            list.Controls.Add(row);
+        }
+
+        rows.Controls.Add(list);
+        section.Controls.Add(rows);
+        return section;
     }
 
     /// <summary>
