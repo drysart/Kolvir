@@ -39,6 +39,7 @@ public class XPlatControl : IDisposable
     private string _text = string.Empty;
     private bool _visible = true;
     private bool _enabled = true;
+    private float _opacity = 1f;
     private bool _autoSize;
     private bool _focusable = true;
     private bool _selectable;
@@ -771,8 +772,14 @@ public class XPlatControl : IDisposable
         get => _backColorAssigned ? _backColor : DefaultBackColor;
         set
         {
+            if (_backColorAssigned && _backColor == value)
+            {
+                return;
+            }
+
             _backColor = value;
             _backColorAssigned = true;
+            Invalidate();
         }
     }
 
@@ -782,6 +789,47 @@ public class XPlatControl : IDisposable
     /// fill.
     /// </summary>
     protected virtual SKColor? DefaultBackColor => null;
+
+    /// <summary>
+    /// How opaque the control and everything inside it is: 0 is invisible, 1 is fully opaque.
+    /// </summary>
+    /// <remarks>
+    /// Below 1 the control paints into a layer of its own, which is what makes the whole subtree
+    /// fade as one: two children that overlap at half opacity do not darken where they meet, the
+    /// way they would if each were faded on its own. The layer is an offscreen surface per paint,
+    /// so leave this at 1 unless the control really is translucent. Unlike <see cref="BackColor"/>,
+    /// which only blends the control's own background, this fades its content and children too.
+    /// </remarks>
+    public float Opacity
+    {
+        get => _opacity;
+        set
+        {
+            var opacity = float.IsNaN(value) ? 1f : Math.Clamp(value, 0f, 1f);
+            if (MathF.Abs(opacity - _opacity) < 0.001f)
+            {
+                return;
+            }
+
+            _opacity = opacity;
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Whether the control paints every pixel inside its own bounds, so that nothing behind it can
+    /// show through and whatever it covers does not have to be repainted for its sake.
+    /// </summary>
+    /// <remarks>
+    /// It is an observation about what the control paints, not a switch: it follows
+    /// <see cref="BackColor"/>, <see cref="CornerRadius"/> and <see cref="Opacity"/>, so a control
+    /// whose background is transparent, whose corners are rounded or which is faded is reported as
+    /// not opaque without anything having to be told. Override it when a control paints over its
+    /// whole bounds by other means - an <see cref="XPlatImage"/> covered by an opaque bitmap - or
+    /// when it punches a hole in a background that is otherwise solid.
+    /// </remarks>
+    public virtual bool Opaque =>
+        _opacity >= 1f && CornerRadius <= 0f && BackColor is { Alpha: 255 };
 
     /// <summary>
     /// Text colour. While it has never been assigned the control paints
@@ -888,7 +936,9 @@ public class XPlatControl : IDisposable
     {
         ArgumentNullException.ThrowIfNull(canvas);
 
-        if (!Visible || _bounds.Width <= 0f || _bounds.Height <= 0f)
+        var fadeAlpha = OpacityAlpha(_opacity);
+
+        if (!Visible || fadeAlpha == 0 || _bounds.Width <= 0f || _bounds.Height <= 0f)
         {
             return;
         }
@@ -914,11 +964,27 @@ public class XPlatControl : IDisposable
             canvas.ClipRect(local);
         }
 
+        // A faded control paints into a layer so the whole subtree is composited once, at
+        // Opacity, rather than every fill and every child blending with what is already under it.
+        using var fade = fadeAlpha < 255
+            ? new SKPaint { Color = SKColors.White.WithAlpha(fadeAlpha) }
+            : null;
+
+        if (fade is not null)
+        {
+            canvas.SaveLayer(fade);
+        }
+
         OnPaintBackground(canvas, local);
         PaintSelection(canvas);
         OnPaint(canvas, local);
         RenderChildren(canvas);
         OnPaintBorder(canvas, local);
+
+        if (fade is not null)
+        {
+            canvas.Restore();
+        }
 
         canvas.Restore();
     }
@@ -1020,12 +1086,14 @@ public class XPlatControl : IDisposable
 
         // A hidden control is not painted, but the area it covers still belongs to the parent's
         // background, so it has to be repainted both when a control disappears and when one comes
-        // back - which is why visibility does not take part in this.
+        // back - which is why visibility does not take part in this. A child that does not cover
+        // its own bounds is left in: its background, corners or content let the parent's fresh
+        // background through, so repainting the parent without it would leave the child missing.
         if (!invalidateChildren && _controls is not null)
         {
             foreach (var child in _controls)
             {
-                if (child.Visible)
+                if (child.Visible && child.Opaque)
                 {
                     area.Op(ToRectI(child.Bounds), SKRegionOperation.Difference);
                 }
@@ -1109,6 +1177,10 @@ public class XPlatControl : IDisposable
         (int)MathF.Floor(rect.Top),
         (int)MathF.Ceiling(rect.Right),
         (int)MathF.Ceiling(rect.Bottom));
+
+    /// <summary>Converts a 0..1 opacity to the alpha a paint layer composites with.</summary>
+    private static byte OpacityAlpha(float opacity) =>
+        (byte)Math.Clamp(MathF.Round(opacity * 255f), 0f, 255f);
 
     internal void AttachHost(XPlatUiHost? host) => _host = host;
 

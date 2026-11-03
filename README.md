@@ -298,15 +298,22 @@ overload takes coordinates in the control's own space and drops anything outside
 | `Invalidate(SKRegion)` | A set of areas of the control, including its children |
 | `Invalidate(SKRegion, invalidateChildren)` | A set of areas of the control, with the children left in or out |
 
-`invalidateChildren: false` subtracts the visible children from the area, so a control that changed
-its own appearance without moving anything does not make the paint visit the children at all. It is
-the difference between a caret blink costing one column of one text box and costing the whole
-window:
+`invalidateChildren: false` subtracts the children that cover their own bounds from the area, so a
+control that changed its own appearance without moving anything does not make the paint visit the
+children at all. It is the difference between a caret blink costing one column of one text box and
+costing the whole window:
 
 ```csharp
 // The caret blinks by repainting its own column, not the control around it.
 caret.Invalidate(XPlatGeometry.Inflate(bounds, 1f), invalidateChildren: false);
 ```
+
+A child is only left out when it is `Opaque`, because one that is not lets the background show
+through, and a repaint that skipped it would leave a hole where its own paint should have been.
+The property is computed rather than set - it is false for a transparent or translucent
+`BackColor`, for rounded corners and for any `Opacity` below 1 - so nothing has to remember to keep
+a flag in step with what the control paints. Override it when a control covers its bounds by other
+means, or when it punches a hole in an otherwise solid background.
 
 A control never talks to the host. It clips the area to its own client area, maps what is left into
 its parent's coordinates and calls the parent's `ChildInvalidate`; the default implementation of
@@ -668,6 +675,7 @@ Controls resolve their colours while painting, so nothing has to be walked or re
 | `BackColor` | An explicitly assigned colour, otherwise `DefaultBackColor` |
 | `ForeColorRole` | The role used while `ForeColor` has not been assigned explicitly |
 | `BorderColor` | An explicitly assigned colour, otherwise `XPlatTheme.Border` |
+| `Opacity` | Fades the control and everything inside it as one group, 0 to 1 |
 | `XPlatTextSpan.ThemeColor` | A role for one span of a rich label; `AddLink` uses `Accent` |
 | `XPlatTextSpan.HoverBackColorRole` | The role tinted behind a span while it is hovered |
 | `XPlatUiHost.ClearColor` | Follows `XPlatTheme.Background` until assigned |
@@ -688,6 +696,41 @@ to the undocumented `uxtheme` `ShouldSystemUseDarkMode`), reacts to `WM_SETTINGC
 `WM_THEMECHANGED`, and darkens the title bar with
 `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` - driven by `XPlatTheme.Changed`, so a manual
 palette change updates the chrome too.
+
+### Opacity and transparency
+
+There are two ways to make a control see-through, and they are not the same thing.
+
+`BackColor` can carry alpha. A background of `new SKColor(0, 0, 0, 128)` is half-transparent
+black, and it blends with whatever the parent painted underneath it. That is the cheap option: it
+fades the control's own background and nothing else, and its text, border and children stay fully
+opaque.
+
+`Opacity` fades the control and everything inside it as one group:
+
+```csharp
+// The whole strip - background, text and the buttons inside it - at 60%.
+var strip = new XPlatPanel { Dock = XDock.Top, Height = 48f, Opacity = 0.6f };
+strip.Controls.Add(new XPlatLabel("Faded as one group"));
+strip.Controls.Add(new XPlatButton("And so is this"));
+```
+
+Below 1 the control paints into a layer of its own, which is then composited once at that opacity.
+That is what makes it a group: two children that overlap at half opacity do not darken where they
+meet, the way they would if each were faded on its own. It also costs a surface the size of the
+control's clip for the length of the paint, so leave `Opacity` at 1 unless the control really is
+translucent - for something that only needs a see-through background, use the alpha in
+`BackColor` instead. A control faded all the way to 0 paints nothing and its subtree is not walked.
+
+Both of them make the control non-opaque, which is what the invalidation chain needs to know: a
+control that shows what is behind it cannot be skipped when the thing behind it repaints. See
+[Invalidation and partial painting](#invalidation-and-partial-painting) for the `Opaque` contract.
+
+Transparency is a paint-time property. A translucent control blends with what its *parent* painted,
+so a sibling that overlaps it does not show through it; hit testing still belongs to the topmost
+control whose bounds contain the point, so a transparent panel over a button swallows clicks meant
+for the button. Both are what WinForms does, and both are the price of not keeping a compositor in
+the library.
 
 ### Window icons
 
