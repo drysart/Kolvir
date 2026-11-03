@@ -39,6 +39,14 @@ public class XPlatStackPanel : XPlatPanel
     private XPlatStackOrientation _orientation = XPlatStackOrientation.Vertical;
     private float _spacing;
 
+    // The children of the run, by index, in the order the last arrange pass placed them. A run is
+    // ordered along the stacking axis and does not overlap there, so hit testing and painting can
+    // binary search for the children that matter instead of walking every one of them. Only the
+    // order is kept: the geometry is read back from each child, so a child that is resized or moved
+    // outside of a layout pass cannot leave the search looking in the wrong place.
+    private readonly List<int> _run = [];
+    private bool _runValid;
+
     public XPlatStackPanel()
     {
         // A stack is a layout container rather than a card, so it does not paint a surface of its
@@ -138,8 +146,12 @@ public class XPlatStackPanel : XPlatPanel
         var content = area;
         area = LayoutDockedChildren(area);
 
+        _run.Clear();
+        _runValid = false;
+
         if (!HasChildren)
         {
+            _runValid = true;
             return MeasureExtent(content);
         }
 
@@ -161,8 +173,14 @@ public class XPlatStackPanel : XPlatPanel
         float crossAvailable = CrossLength(area);
         bool first = true;
 
-        foreach (var child in Controls)
+        // The extent is the union of the run, so it is taken from the same pass that places the
+        // children instead of walking them all a second time.
+        float right = content.Right;
+        float bottom = content.Bottom;
+
+        for (int i = 0; i < Controls.Count; i++)
         {
+            var child = Controls[i];
             if (!child.Visible || child.Dock != DockStyle.None)
             {
                 continue;
@@ -208,10 +226,248 @@ public class XPlatStackPanel : XPlatPanel
             first = false;
 
             float mainPosition = main + (vertical ? margin.Top : margin.Left);
-            child.Bounds = Slot(mainPosition, mainLength, crossPosition, crossLength);
+            var slot = Slot(mainPosition, mainLength, crossPosition, crossLength);
+            child.Bounds = slot;
             main = mainPosition + mainLength + (vertical ? margin.Bottom : margin.Right);
+
+            _run.Add(i);
+
+            var outer = XPlatGeometry.Inflate(slot, margin);
+            right = MathF.Max(right, outer.Right);
+            bottom = MathF.Max(bottom, outer.Bottom);
         }
 
-        return MeasureExtent(content);
+        _runValid = true;
+        return new SKSize(MathF.Max(0f, right - content.Left), MathF.Max(0f, bottom - content.Top));
+    }
+
+    /// <summary>Paints the children that can be seen, in the order they were declared.</summary>
+    protected override void RenderScrolledChildren(SKCanvas canvas)
+    {
+        if (!_runValid)
+        {
+            base.RenderScrolledChildren(canvas);
+            return;
+        }
+
+        var docked = DockedChildren;
+        var (first, last) = VisibleRun();
+
+        if (first > last)
+        {
+            for (int i = 0; i < docked.Count; i++)
+            {
+                docked[i].Control.Render(canvas);
+            }
+
+            return;
+        }
+
+        int firstOrder = _run[first];
+        int lastOrder = _run[last];
+
+        // Docked children are not part of the run, so they are painted either side of it. They are
+        // few: a stack docks a header or a footer, not a run.
+        for (int i = 0; i < docked.Count; i++)
+        {
+            if (docked[i].Order < firstOrder)
+            {
+                docked[i].Control.Render(canvas);
+            }
+        }
+
+        // The run children between the first and last visible one are exactly the visible ones,
+        // because the run is in declaration order and the visible children are a contiguous part of
+        // it. Walking the declaration order through that span keeps docked children in the right
+        // place and paints the rest of the run not at all.
+        for (int i = firstOrder; i <= lastOrder; i++)
+        {
+            Controls[i].Render(canvas);
+        }
+
+        for (int i = 0; i < docked.Count; i++)
+        {
+            if (docked[i].Order > lastOrder)
+            {
+                docked[i].Control.Render(canvas);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Finds the child under a point by searching the run along the stacking axis instead of
+    /// walking every child.
+    /// </summary>
+    protected override XPlatControl? HitTestChildren(SKPoint local)
+    {
+        if (!_runValid)
+        {
+            return base.HitTestChildren(local);
+        }
+
+        // Children are positioned in content coordinates and painted through the offset, so the
+        // point is moved into that space to match them.
+        var offset = ContentOffset;
+        var content = new SKPoint(local.X - offset.X, local.Y - offset.Y);
+        float main = Orientation == XPlatStackOrientation.Vertical ? content.Y : content.X;
+
+        // Docked children are not in the run, so they are checked one at a time, topmost first.
+        var docked = DockedChildren;
+        XPlatControl? dockedHit = null;
+        int dockedOrder = -1;
+        for (int i = docked.Count - 1; i >= 0; i--)
+        {
+            if (docked[i].Control.HitTest(content) is { } hit)
+            {
+                dockedHit = hit;
+                dockedOrder = docked[i].Order;
+                break;
+            }
+        }
+
+        var slot = RunAt(main);
+        if (slot >= 0)
+        {
+            // The run does not overlap along the stacking axis, so this is the only child of the
+            // run that can contain the point; declaration order only decides it against a docked
+            // child that happens to cover the same place.
+            int order = _run[slot];
+            if (order > dockedOrder && Controls[order].HitTest(content) is { } hit)
+            {
+                return hit;
+            }
+        }
+
+        return dockedHit;
+    }
+
+    internal override void OnControlAdded(XPlatControl control)
+    {
+        _runValid = false;
+        base.OnControlAdded(control);
+    }
+
+    internal override void OnControlRemoved(XPlatControl control)
+    {
+        _runValid = false;
+        base.OnControlRemoved(control);
+    }
+
+    internal override void OnChildVisibleChanged(XPlatControl child)
+    {
+        // Hiding or showing a child does not re-run layout, so the cached run would keep painting
+        // and hit testing the child where it used to be. Dropping the cache falls back to walking
+        // the children until the next arrange pass rebuilds it.
+        _runValid = false;
+        base.OnChildVisibleChanged(child);
+    }
+
+    /// <summary>The run slots that can be seen, as an inclusive range; empty when none can.</summary>
+    private (int First, int Last) VisibleRun()
+    {
+        if (_run.Count == 0)
+        {
+            return (0, -1);
+        }
+
+        bool vertical = Orientation == XPlatStackOrientation.Vertical;
+        var offset = ContentOffset;
+        var viewport = ContentViewport;
+
+        // Content is painted at the offset, so a child is on screen when its own band, shifted by
+        // the offset, overlaps the viewport.
+        float shift = vertical ? offset.Y : offset.X;
+        float low = (vertical ? viewport.Top : viewport.Left) - shift;
+        float high = (vertical ? viewport.Bottom : viewport.Right) - shift;
+
+        int first = FirstSlotEndingAfter(low);
+        int last = LastSlotStartingBefore(high);
+        return (first, last);
+    }
+
+    private int FirstSlotEndingAfter(float position)
+    {
+        int low = 0;
+        int high = _run.Count - 1;
+        int found = _run.Count;
+
+        while (low <= high)
+        {
+            int mid = (low + high) >> 1;
+            if (MainEndOf(_run[mid]) > position)
+            {
+                found = mid;
+                high = mid - 1;
+            }
+            else
+            {
+                low = mid + 1;
+            }
+        }
+
+        return found;
+    }
+
+    private int LastSlotStartingBefore(float position)
+    {
+        int low = 0;
+        int high = _run.Count - 1;
+        int found = -1;
+
+        while (low <= high)
+        {
+            int mid = (low + high) >> 1;
+            if (MainStartOf(_run[mid]) < position)
+            {
+                found = mid;
+                low = mid + 1;
+            }
+            else
+            {
+                high = mid - 1;
+            }
+        }
+
+        return found;
+    }
+
+    /// <summary>The run slot whose band contains a position along the stacking axis, or -1.</summary>
+    private int RunAt(float main)
+    {
+        int low = 0;
+        int high = _run.Count - 1;
+
+        while (low <= high)
+        {
+            int mid = (low + high) >> 1;
+            int index = _run[mid];
+
+            if (main < MainStartOf(index))
+            {
+                high = mid - 1;
+            }
+            else if (main >= MainEndOf(index))
+            {
+                low = mid + 1;
+            }
+            else
+            {
+                return mid;
+            }
+        }
+
+        return -1;
+    }
+
+    private float MainStartOf(int index)
+    {
+        var bounds = Controls[index].Bounds;
+        return Orientation == XPlatStackOrientation.Vertical ? bounds.Top : bounds.Left;
+    }
+
+    private float MainEndOf(int index)
+    {
+        var bounds = Controls[index].Bounds;
+        return Orientation == XPlatStackOrientation.Vertical ? bounds.Bottom : bounds.Right;
     }
 }

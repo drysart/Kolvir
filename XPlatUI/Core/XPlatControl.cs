@@ -1024,25 +1024,41 @@ public class XPlatControl : IDisposable
             return null;
         }
 
-        if (_controls is not null)
-        {
-            for (int i = _controls.Count - 1; i >= 0; i--)
-            {
-                var child = _controls[i];
-                var offset = GetChildOffset(child);
-                var childPoint = offset.X == 0f && offset.Y == 0f
-                    ? local
-                    : new SKPoint(local.X - offset.X, local.Y - offset.Y);
+        return HitTestChildren(local) ?? (Enabled ? this : null);
+    }
 
-                var hit = child.HitTest(childPoint);
-                if (hit is not null)
-                {
-                    return hit;
-                }
+    /// <summary>
+    /// Returns the child containing a point, given in this control's client coordinates, or null
+    /// when no child does. Children are tested in reverse z-order.
+    /// </summary>
+    /// <remarks>
+    /// A container whose children are laid out in a known order can override this to find the one
+    /// candidate instead of walking all of them, which is what makes a container with a very large
+    /// number of children cheap to hit test.
+    /// </remarks>
+    protected virtual XPlatControl? HitTestChildren(SKPoint local)
+    {
+        if (_controls is null)
+        {
+            return null;
+        }
+
+        for (int i = _controls.Count - 1; i >= 0; i--)
+        {
+            var child = _controls[i];
+            var offset = GetChildOffset(child);
+            var childPoint = offset.X == 0f && offset.Y == 0f
+                ? local
+                : new SKPoint(local.X - offset.X, local.Y - offset.Y);
+
+            var hit = child.HitTest(childPoint);
+            if (hit is not null)
+            {
+                return hit;
             }
         }
 
-        return Enabled ? this : null;
+        return null;
     }
 
     /// <summary>Paints the control and, for containers, its children.</summary>
@@ -1614,7 +1630,17 @@ public class XPlatControl : IDisposable
     protected virtual void OnVisibleChanged()
     {
         _visibleChanged?.Invoke(this);
+        Parent?.OnChildVisibleChanged(this);
         Invalidate();
+    }
+
+    /// <summary>
+    /// Called on a parent when one of its children changed visibility. Toggling visibility does not
+    /// re-run layout, so a container that caches where it placed its children uses this to drop the
+    /// cache rather than go on painting a child that is no longer there.
+    /// </summary>
+    internal virtual void OnChildVisibleChanged(XPlatControl child)
+    {
     }
 
     protected virtual void OnEnabledChanged()
