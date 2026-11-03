@@ -310,6 +310,9 @@ public sealed class DemoUi
         ("Lists", demo => Page(demo.BuildListBoxCard())),
         ("Performance: list box", demo => Page(demo.BuildPerformancePage())),
         ("Performance: controls", demo => Page(demo.BuildControlStackPage())),
+        ("Combo boxes", demo => Page(demo.BuildComboBoxDemo())),
+        ("Tab controls", demo => Page(demo.BuildTabControlDemo())),
+        ("Tool tips", demo => Page(demo.BuildToolTipDemo())),
     };
 
     /// <summary>
@@ -2025,6 +2028,283 @@ public sealed class DemoUi
     }
 
     private void UpdateCounter() => _counterLabel.Text = $"Button clicks: {_clicks}";
+
+    /// <summary>
+    /// Drop-down lists, including the two cases the popup layer exists for: a list longer than its
+    /// owner and one near the bottom of the window, which hangs past the edge of the window instead
+    /// of being clipped by it.
+    /// </summary>
+    private XPlatPanel BuildComboBoxDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Combo boxes"));
+
+        card.Controls.Add(ScrollCaption("A few items"));
+
+        var sizes = new XPlatComboBox
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        foreach (string size in new[] { "Small", "Medium", "Large", "Extra large" })
+        {
+            sizes.Items.Add(size);
+        }
+
+        sizes.SelectedIndex = 1;
+        sizes.AddSelectedIndexChangedHandler(_ => SetStatus($"Size is {sizes.SelectedText}."));
+        card.Controls.Add(sizes);
+
+        card.Controls.Add(ScrollCaption("No selection, so the empty text shows"));
+
+        var optional = new XPlatComboBox
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            EmptyText = "Nothing selected",
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        optional.Items.Add("Alpha");
+        optional.Items.Add("Beta");
+        optional.Items.Add("Gamma");
+        card.Controls.Add(optional);
+
+        card.Controls.Add(ScrollCaption("Longer than its owner, so the list scrolls"));
+
+        var languages = new XPlatComboBox
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            MaxDropDownHeight = 160f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        foreach (string language in new[]
+                 {
+                     "C#", "F#", "Rust", "Go", "Swift", "Kotlin", "TypeScript", "Python",
+                     "Ruby", "Elixir", "Haskell", "OCaml", "Zig", "Nim", "D", "Julia",
+                 })
+        {
+            languages.Items.Add(language);
+        }
+
+        languages.SelectedIndex = 0;
+        card.Controls.Add(languages);
+
+        card.Controls.Add(ScrollCaption("Disabled"));
+
+        var disabled = new XPlatComboBox
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        disabled.Items.Add("Cannot be opened");
+        disabled.SelectedIndex = 0;
+        card.Controls.Add(disabled);
+
+        card.Controls.Add(new XPlatLabel(
+            "A drop-down is drawn in a window of its own when the platform layer provides one, so it can " +
+            "hang past the edges of the window. Without one it is painted inside the window instead.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 54f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// A tab control whose pages hold real controls, plus a second one with more tabs than fit so
+    /// the strip has to scroll.
+    /// </summary>
+    private XPlatPanel BuildTabControlDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Tab controls"));
+
+        var readout = ScrollCaption("Selected: General");
+        card.Controls.Add(readout);
+
+        var tabs = new XPlatTabControl
+        {
+            Dock = XDock.Top,
+            Height = 220f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        };
+
+        var general = new XPlatTabPage("General");
+        general.Controls.Add(new XPlatCheckBox("Show the welcome screen")
+        {
+            Dock = XDock.Top,
+            Checked = true,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        });
+        general.Controls.Add(new XPlatCheckBox("Reopen the last page")
+        {
+            Dock = XDock.Top,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        });
+        general.Controls.Add(new XPlatLabel("Pages are ordinary panels: they dock, scroll and lay out like any other.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        var appearance = new XPlatTabPage("Appearance");
+        appearance.Controls.Add(new XPlatComboBox
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+        appearance.Controls.Add(new XPlatProgressBar
+        {
+            Dock = XDock.Top,
+            Height = 18f,
+            Value = 45f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+        appearance.Controls.Add(DemoButton("A button on a page", () => SetStatus("A button on the Appearance page.")));
+
+        var advanced = new XPlatTabPage("Advanced");
+        advanced.Controls.Add(new XPlatTextBox { Dock = XDock.Top, Height = 32f, Margin = new XPlatThickness(0f, 0f, 0f, 8f) });
+        advanced.Controls.Add(new XPlatLabel("Tab and the arrow keys move between pages.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        tabs.TabPages.Add(general);
+        tabs.TabPages.Add(appearance);
+        tabs.TabPages.Add(advanced);
+        tabs.SelectedIndex = 0;
+        tabs.AddSelectedIndexChangedHandler(_ => readout.Text = $"Selected: {tabs.SelectedTab?.Text ?? "none"}");
+        card.Controls.Add(tabs);
+
+        card.Controls.Add(ScrollCaption("More tabs than fit, so the strip scrolls with the wheel"));
+
+        var crowded = new XPlatTabControl
+        {
+            Dock = XDock.Fill,
+            Margin = new XPlatThickness(0f, 0f, 0f, 0f),
+        };
+
+        foreach (string name in new[]
+                 {
+                     "One", "Two", "Three", "Four", "Five", "Six", "Seven", "Eight",
+                     "Nine", "Ten", "Eleven", "Twelve",
+                 })
+        {
+            var page = new XPlatTabPage(name);
+            page.Controls.Add(new XPlatLabel($"Page {name}")
+            {
+                Dock = XDock.Fill,
+                AutoSize = false,
+                TextAlign = XPlatContentAlignment.MiddleCenter,
+            });
+            crowded.TabPages.Add(page);
+        }
+
+        card.Controls.Add(crowded);
+        return card;
+    }
+
+    /// <summary>
+    /// One <see cref="XPlatToolTip"/> shared by every control on the card, which is the shape the
+    /// Windows Forms component has: the tooltip is not a child of anything, it follows the pointer.
+    /// </summary>
+    private XPlatPanel BuildToolTipDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Tool tips"));
+
+        var toolTip = new XPlatToolTip { InitialDelay = 400, AutoPopDelay = 5000 };
+
+        card.Controls.Add(ScrollCaption("Hover a control to see its tip"));
+
+        var primary = new XPlatButton("Save")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Primary,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        toolTip.SetToolTip(primary, "Write the document to disk.");
+        card.Controls.Add(primary);
+
+        var secondary = new XPlatButton("Save as")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        toolTip.SetToolTip(secondary, "Write the document to a new file.");
+        card.Controls.Add(secondary);
+
+        var longTip = new XPlatButton("A long tip")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Ghost,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        // The tooltip measures itself and wraps at MaximumWidth, so a long string stays readable
+        // instead of becoming one very wide line.
+        toolTip.SetToolTip(longTip, "This tip is long enough that it has to wrap onto more than one line, which is what MaximumWidth is for.");
+        card.Controls.Add(longTip);
+
+        var field = new XPlatTextBox
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            Text = "Hover me",
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+        toolTip.SetToolTip(field, "Any control can carry a tip, not only buttons.");
+        card.Controls.Add(field);
+
+        var toggled = new XPlatCheckBox("Disable the tips")
+        {
+            Dock = XDock.Top,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+        toggled.AddCheckedChangedHandler(_ => toolTip.Active = !toggled.Checked);
+        card.Controls.Add(toggled);
+
+        card.Controls.Add(new XPlatLabel(
+            "A tip is shown in a popup that never takes the pointer, so the control under it keeps the hover.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
 
     /// <summary>Shows <paramref name="message"/> in the footer's status line.</summary>
     /// <param name="message">The text to show.</param>

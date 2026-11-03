@@ -65,6 +65,7 @@ internal static class NativeMethods
     internal const int HtTransparent = -1;
     internal const int SwShow = 5;
     internal const int SwShowNoActivate = 4;
+    internal const int SwHide = 0;
     internal const uint SwpNoZOrder = 0x0004;
     internal const uint SwpNoActivate = 0x0010;
     internal const uint SwpFrameChanged = 0x0020;
@@ -85,13 +86,22 @@ internal static class NativeMethods
     internal const uint WsExToolWindow = 0x00000080;
     internal const uint WsExTopmost = 0x00000008;
     internal const uint WsExLayered = 0x00080000;
+
+    /// <summary>Clicking the window leaves the active window alone, so a popup never steals focus.</summary>
+    internal const uint WsExNoActivate = 0x08000000;
+
+    /// <summary>Mouse input passes through the window to whatever is underneath it.</summary>
+    internal const uint WsExTransparent = 0x00000020;
     internal const int GwlpHwndParent = -8;
 
     internal const uint WmActivate = 0x0006;
     internal const uint WmActivateApp = 0x001C;
     internal const uint WmCaptureChanged = 0x0215;
     internal const uint WmNcHitTest = 0x0084;
+    internal const uint WmMouseActivate = 0x0021;
+    internal const uint WmMove = 0x0003;
     internal const int WaInactive = 0;
+    internal const int MaNoActivate = 3;
 
     internal const int VkReturn = 0x0D;
     internal const int VkEscape = 0x1B;

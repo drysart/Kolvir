@@ -753,8 +753,9 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     {
         NativeMethods.SetDarkTitleBar(_hwnd, XPlatTheme.IsDarkMode);
 
-        // The presenter needs a live HWND, so it can only be installed once the window exists.
+        // The presenters need a live HWND, so they can only be installed once the window exists.
         XPlatContextMenuPresenter.Current = new Win32ContextMenuPresenter(_hwnd, LogicalToScreen);
+        XPlatPopupService.Current = new Win32PopupService();
 
         NativeMethods.ShowWindow(_hwnd, NativeMethods.SwShow);
         NativeMethods.UpdateWindow(_hwnd);
@@ -1021,6 +1022,30 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         if (_hwnd == IntPtr.Zero)
         {
             _hwnd = hwnd;
+        }
+
+        // A press or a wheel turn on the window belongs to whatever is under the pointer, not to a
+        // popup floating above it, so an open popup has to be dismissed before the input is
+        // delivered. Moving or resizing the window has the same effect on anything anchored to it.
+        switch (message)
+        {
+            case NativeMethods.WmLButtonDown:
+            case NativeMethods.WmRButtonDown:
+            case NativeMethods.WmMButtonDown:
+            case NativeMethods.WmMouseWheel:
+            case NativeMethods.WmMouseHWheel:
+            case NativeMethods.WmMove:
+            case NativeMethods.WmSize:
+                Win32PopupWindow.DismissForOwner(hwnd);
+                break;
+
+            case NativeMethods.WmActivate:
+                if (NativeMethods.LowWord(wParam) == NativeMethods.WaInactive)
+                {
+                    Win32PopupWindow.DismissForOwner(hwnd);
+                }
+
+                break;
         }
 
         switch (message)

@@ -97,6 +97,10 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
             theme.AddChangedHandler(OnSystemThemeChanged);
         }
 
+        // A popup needs a parent window to be a child of, which only exists once the application
+        // has started, so the service is installed here rather than with the other adapters.
+        XPlatPopupService.Current = new AppKitPopupService();
+
         _initialized = true;
         RebuildMenuBar();
     }
@@ -379,6 +383,11 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
         }
 
         XPlatContextMenuPresenter.Current = null;
+
+        if (XPlatPopupService.Current is AppKitPopupService)
+        {
+            XPlatPopupService.Current = null;
+        }
 
         if (ReferenceEquals(XPlatSystemTheme.Current, SystemTheme))
         {

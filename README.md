@@ -10,9 +10,10 @@ controls draw themselves on top of it. The same sample UI runs on all three plat
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
   Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatGroupBox, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatCheckBox, XPlatRadioButton, XPlatProgressBar, XPlatTextBox, XPlatListBox, XPlatImage
+  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatGroupBox, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatCheckBox, XPlatRadioButton, XPlatProgressBar, XPlatTextBox, XPlatListBox, XPlatComboBox, XPlatTabControl, XPlatTabPage, XPlatToolTip, XPlatImage
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
+  Popups/                 the popup contract (IXPlatPopupService) and XPlatPopup, which floats a control above its window
   Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
   Selection/              text selection and its clipboard plumbing
   Services/               window-scoped service helpers
@@ -83,6 +84,9 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
+| `XPlatComboBox` | `ComboBox` | Edit field plus a drop-down list shown in a popup, so it can leave the window |
+| `XPlatTabControl` / `XPlatTabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
+| `XPlatToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
 | `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
@@ -532,6 +536,123 @@ and none of the content takes input. Only the flag that was set is remembered: a
 disabled on its own stays disabled when its container is enabled again, and one that was only
 disabled by its container comes back with it. Moving a subtree under a disabled container disables
 it the same way, without touching a single `Enabled` flag on the children.
+
+### Combo boxes
+
+`XPlatComboBox` is an input field with a chevron; clicking it opens a drop-down list in a popup, so
+the list is not clipped by the window and can overhang whatever is below it. The field is the
+control and the list is a separate `XPlatListBox` living in that popup, which is why the control
+keeps the keyboard focus the whole time it is open - the arrow keys, Enter and Escape all go to the
+combo box, not to a second focused control.
+
+| Member | Behaviour |
+| --- | --- |
+| `Items`, `ItemCount`, `DropDownList` | The rows; `DropDownList` is the underlying list, for its selection and row rendering |
+| `SelectedIndex`, `SelectedItem`, `SelectedText` | The selection; `-1` is nothing selected and leaves the field empty |
+| `Text`, `EmptyText` | `Text` is the selected item's text; `EmptyText` is the placeholder painted when nothing is selected |
+| `MaxDropDownHeight` | The tallest the list may be before it scrolls (240 logical pixels by default) |
+| `IsDropDownOpen`, `OpenDropDown()`, `CloseDropDown()` | The drop-down state |
+| `AddSelectedIndexChangedHandler` | Called with the combo box when the selection changes |
+
+A drop-down opens downwards and flips above the field when there is no room below it. Disabling
+the control closes the drop-down, and a disabled combo box neither opens nor takes input. The
+chevron and the text switch to `XPlatTheme.DisabledForeground`.
+
+```csharp
+var size = new XPlatComboBox { Dock = DockStyle.Top, EmptyText = "Choose a size" };
+size.Items.AddRange("Small", "Medium", "Large");
+size.AddSelectedIndexChangedHandler(sender => Console.WriteLine(((XPlatComboBox)sender).SelectedText));
+```
+
+### Tab controls
+
+`XPlatTabControl` draws a strip of tabs and lays the selected `XPlatTabPage` out in the area below
+it; the other pages stay in `Controls` but are hidden, so their state survives a switch. A
+`XPlatTabPage` is an `XPlatPanel` with no frame of its own, so it scrolls and docks like one.
+
+| Member | Behaviour |
+| --- | --- |
+| `TabPages` | The pages, in strip order (the same collection as `Controls`) |
+| `SelectedIndex`, `SelectedTab` | The visible page; `-1` selects nothing |
+| `Font` | The tab captions; the strip measures itself from it |
+| `AddSelectedIndexChangedHandler` | Called with the tab control when the selection changes |
+
+The strip scrolls with the wheel when the tabs do not fit, and the keyboard works the way it does
+in WinForms: the left and right arrows move the selection, `Home`/`End` jump to the ends, and
+`Ctrl`+`Tab`/`Ctrl`+`Shift`+`Tab` cycle it.
+
+```csharp
+var tabs = new XPlatTabControl { Dock = DockStyle.Fill };
+var general = new XPlatTabPage("General");
+general.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
+tabs.TabPages.Add(general);
+tabs.TabPages.Add(new XPlatTabPage("Advanced"));
+```
+
+### Tool tips
+
+One `XPlatToolTip` serves any number of controls, like WinForms': give it the text for each
+control and it watches their pointer enter and leave. The tip appears after `InitialDelay`, stays
+for `AutoPopDelay`, wraps at `MaximumWidth` and is shown in a popup that does **not** take input,
+so moving the pointer across it still reaches whatever is underneath.
+
+| Member | Behaviour |
+| --- | --- |
+| `SetToolTip(control, text)`, `GetToolTip(control)` | The text for a control; `null` or empty removes it |
+| `Active` | `false` hides the tip and stops new ones appearing |
+| `InitialDelay`, `AutoPopDelay` | Hover delay and how long the tip stays up, in milliseconds |
+| `MaximumWidth` | Wrapping width; the tip grows downwards instead |
+| `IsVisible`, `Hide()` | The current tip |
+
+A tip is only scheduled while the pointer is actually resting on the control, and the timer is
+disposed with the tool tip, so an idle application runs nothing. `Dispose` the instance when the
+controls it describes go away.
+
+```csharp
+using var tips = new XPlatToolTip { InitialDelay = 500 };
+tips.SetToolTip(saveButton, "Save the document");
+tips.SetToolTip(helpButton, "Open the help window");
+```
+
+### Popups
+
+A popup is a control floated above the window: a drop-down list, a tool tip, anything that has to
+escape the clipping of the control that owns it. `XPlatPopup` is the portable half. It is given an
+owner and a content control, and it either asks the platform layer for a real window or paints the
+content inside the owning window.
+
+| Piece | Role |
+| --- | --- |
+| `XPlatPopup(owner)` | `Content`, `Size`, `MaximumSize`, `DismissOnOutsideClick`, `Show(location)`, `MoveTo`, `Close()`, `IsOpen`, `AddClosedHandler` |
+| `Presentation` | `Auto` (the default), `Window` or `Overlay`; `ActualPresentation` reports which one happened |
+| `IXPlatPopupService` | The platform seam: `CreatePopup(ownerHost, dismissOnOutsideClick)` returns an `IXPlatPopupWindow` or `null` |
+| `XPlatPopupService.Current` | The process-wide service, registered by the backend next to the other adapters |
+| `IXPlatPopupWindow` | `Host`, `DismissesOnOutsideClick`, `Dismissed`, `Show(ownerHost, location, size)`, `UpdateBounds`, `Hide` |
+
+When no service is registered - or when it declines, because the owner is not on screen yet - the
+popup falls back to the host's overlay layer, which paints it above the root control and routes
+input to it first. That is what keeps the library platform free: a build that never opens a popup
+pays nothing for the feature, and the same code runs on a backend that has no popup surfaces.
+
+```csharp
+var popup = new XPlatPopup(this) { Content = new XPlatListBox(), Size = new SKSize(200f, 160f) };
+popup.AddClosedHandler(_ => Invalidate());
+popup.Show(new SKPoint(x, y));      // logical, in the owner's coordinate space
+```
+
+The platform decides where the popup really lands, because only it knows where the owning window
+is on screen and how the screen is arranged:
+
+| Backend | Surface |
+| --- | --- |
+| Win32 | An owned, layered `WS_EX_TOOLWINDOW \| WS_EX_NOACTIVATE` window drawn with `UpdateLayeredWindow`, clamped to the monitor's work area |
+| AppKit | A borderless child `NSWindow` ordered above its parent, that never becomes key or main |
+| GTK4 | A `Gtk.Popover` anchored to the owner's widget, which is allowed to extend past the window |
+| Headless | None; popups stay on the overlay path |
+
+A popup window is never activated and never takes focus, so the owning control keeps the keyboard
+while its drop-down is open. Dismissal is the platform's job too: a press outside the popup, a
+scroll or a resize closes it, and `Dismissed` tells `XPlatPopup` to raise its `Closed` event.
 
 ### Invalidation and partial painting
 
@@ -1339,6 +1460,10 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
    instead of a `Create*` member per service keeps adding a service from breaking every backend, and
    keeps them lazy, so the headless backend never constructs a clipboard it will not use.
 7. Implement `GetScreens`; `Shutdown` releases whatever `Initialize` took.
+8. Optionally assign an `IXPlatPopupService` to `XPlatPopupService.Current` so popups become real
+   windows instead of overlays inside the owning window. It is a static rather than a DI service
+   because a popup belongs to one owner host rather than to the application, and because leaving it
+   null is a valid implementation: the overlay fallback then draws every popup inside the window.
 
 Two contract details are easy to miss. `ShowMessage`, `OpenFile`, `SaveFile`, `SelectFolder` and
 `ShowDialog` are **synchronous** but re-enter the platform loop, so a backend has to tolerate a

@@ -22,6 +22,7 @@ public sealed class XPlatUiHost
     private Action<object, XPlatContextMenuEventArgs>? _contextMenuOpening;
     private readonly XPlatSelection _selection;
     private XPlatControl? _root;
+    private List<XPlatControl>? _overlays;
     private SKSize _clientSize;
     private XPlatControl? _hovered;
     private XPlatControl? _captured;
@@ -133,6 +134,16 @@ public sealed class XPlatUiHost
             _draggingSelection = false;
             ClearSelection();
 
+            if (_overlays is not null)
+            {
+                foreach (var overlay in _overlays)
+                {
+                    overlay.AttachHost(null);
+                }
+
+                _overlays.Clear();
+            }
+
             _root?.AttachHost(null);
             _root = value;
             _root?.AttachHost(this);
@@ -230,6 +241,62 @@ public sealed class XPlatUiHost
 
         _root.Bounds = new SKRect(0f, 0f, _clientSize.Width, _clientSize.Height);
         _root.PerformLayout();
+
+        if (_overlays is not null)
+        {
+            foreach (var overlay in _overlays)
+            {
+                overlay.PerformLayout();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Controls painted above the tree and hit tested before it, in the order they were added.
+    /// </summary>
+    /// <remarks>
+    /// An overlay is positioned in host coordinates by whoever owns it rather than by layout, so
+    /// this is how a popup gets drawn inside the window when the platform cannot give it a window
+    /// of its own. It still belongs to this host, so it resolves services and themes normally.
+    /// </remarks>
+    public IReadOnlyList<XPlatControl> Overlays =>
+        _overlays ?? (IReadOnlyList<XPlatControl>)Array.Empty<XPlatControl>();
+
+    /// <summary>Adds a control to the overlay layer, on top of the ones already there.</summary>
+    public void AddOverlay(XPlatControl control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+
+        if (control.Parent is not null)
+        {
+            throw new ArgumentException("An overlay cannot be a child of another control.", nameof(control));
+        }
+
+        _overlays ??= new List<XPlatControl>(2);
+
+        if (_overlays.Contains(control))
+        {
+            return;
+        }
+
+        _overlays.Add(control);
+        control.AttachHost(this);
+        control.PerformLayout();
+        Invalidate();
+    }
+
+    /// <summary>Removes a control from the overlay layer.</summary>
+    public void RemoveOverlay(XPlatControl control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+
+        if (_overlays is null || !_overlays.Remove(control))
+        {
+            return;
+        }
+
+        control.AttachHost(null);
+        Invalidate();
     }
 
     /// <summary>
@@ -371,6 +438,15 @@ public sealed class XPlatUiHost
             canvas.DrawPaint(clear);
 
             _root?.Render(canvas);
+
+            if (_overlays is not null)
+            {
+                foreach (var overlay in _overlays)
+                {
+                    overlay.Render(canvas);
+                }
+            }
+
             canvas.Restore();
         });
 
@@ -837,7 +913,21 @@ public sealed class XPlatUiHost
         previous.RaiseSelectionCleared();
     }
 
-    private XPlatControl? HitTest(SKPoint location) => _root?.HitTest(location);
+    private XPlatControl? HitTest(SKPoint location)
+    {
+        if (_overlays is not null)
+        {
+            for (int i = _overlays.Count - 1; i >= 0; i--)
+            {
+                if (_overlays[i].HitTest(location) is { } hit)
+                {
+                    return hit;
+                }
+            }
+        }
+
+        return _root?.HitTest(location);
+    }
 
     /// <summary>
     /// Runs an entry point that a backend calls from a platform callback, so a failure reaches
