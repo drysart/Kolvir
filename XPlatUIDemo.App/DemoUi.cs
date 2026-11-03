@@ -1032,6 +1032,23 @@ public sealed class DemoUi
     {
         var card = Card();
 
+        // Opacity fades a control and everything inside it as a single group, so the gradient and
+        // the panel it sits in are composited once over the card instead of each blending on its
+        // own. A faded control is not opaque, which is what tells the card that repainting it has
+        // to bring back what shows through.
+        var faded = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Opacity = 0.6f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+
         var image = new XPlatImage
         {
             Dock = XDock.Fill,
@@ -1039,12 +1056,12 @@ public sealed class DemoUi
             ImageAlign = XPlatContentAlignment.MiddleCenter,
             CornerRadius = 8f,
             DisposeImageWithControl = true,
-            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
         };
         image.Image = CreateGradientImage(320, 200);
-        card.Controls.Add(image);
+        faded.Controls.Add(image);
+        card.Controls.Add(faded);
 
-        card.Controls.Add(new XPlatLabel("A gradient drawn with SkiaSharp and shown with XPlatImage (Zoom).")
+        card.Controls.Add(new XPlatLabel("A gradient drawn with SkiaSharp, shown with XPlatImage (Zoom) at Opacity 0.6.")
         {
             Dock = XDock.Bottom,
             AutoSize = false,

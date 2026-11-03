@@ -265,6 +265,23 @@ public class XPlatPanel : XPlatControl
             ? SKPoint.Empty
             : _childOffset;
 
+    /// <summary>Clips a child's invalidation to the viewport the child is painted into.</summary>
+    /// <remarks>
+    /// Scrolled content is clipped to the viewport while painting, so an area outside it cannot
+    /// have changed anything on screen. The scrollbars are the exception: they live in the gutter
+    /// the viewport excludes and are painted over the content, so their areas are left alone.
+    /// </remarks>
+    protected internal override void ChildInvalidate(XPlatControl child, SKRegion region)
+    {
+        if (!ReferenceEquals(child, _verticalBar) && !ReferenceEquals(child, _horizontalBar))
+        {
+            var viewport = _viewport.Width > 0f && _viewport.Height > 0f ? _viewport : ClientRect;
+            region.Op(ToRectI(viewport), SKRegionOperation.Intersect);
+        }
+
+        base.ChildInvalidate(child, region);
+    }
+
     public override XPlatControl? HitTest(SKPoint pointInParent)
     {
         if (!Visible)
