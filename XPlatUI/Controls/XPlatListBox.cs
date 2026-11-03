@@ -301,6 +301,12 @@ public class XPlatListBox : XPlatControl
     /// <summary>The current horizontal scroll offset, in pixels. Zero when not scrolled.</summary>
     public float HorizontalOffset => _scroll.HorizontalOffset;
 
+    /// <summary>
+    /// The area the rows are painted into: the client area less the gutters of whichever
+    /// scrollbars are showing. Before the first layout it is the whole client area.
+    /// </summary>
+    public SKRect ViewportRect => _scroll.EffectiveViewport(ClientRect);
+
     /// <summary>Adds a handler that runs whenever the set of selected items changes.</summary>
     public IDisposable AddSelectedIndexChangedHandler(Action<object> handler)
     {
@@ -491,7 +497,11 @@ public class XPlatListBox : XPlatControl
             return;
         }
 
-        _scroll.ScrollRectIntoView(GetItemRect(index));
+        // GetItemRect reports client coordinates with the scroll offset already taken out, so the
+        // row has to be rebuilt in content coordinates here; the scrolling helper expects those.
+        float height = ItemHeight;
+        float top = index * height;
+        _scroll.ScrollVerticalIntoView(top, top + height);
     }
 
     /// <summary>Scrolls to the given offsets, clamped to the scrollable range.</summary>

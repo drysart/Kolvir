@@ -282,6 +282,27 @@ internal sealed class XPlatScrollBars
         ScrollTo(horizontal, vertical);
     }
 
+    /// <summary>
+    /// Scrolls vertically so that a band of the content, given as a top and a bottom in content
+    /// coordinates, is inside the viewport. The horizontal offset is left where it is, which is
+    /// what a caller moving a selection one row at a time wants.
+    /// </summary>
+    public void ScrollVerticalIntoView(float top, float bottom)
+    {
+        float vertical = _verticalOffset;
+
+        if (top < vertical)
+        {
+            vertical = top;
+        }
+        else if (bottom > vertical + _contentArea.Height)
+        {
+            vertical = bottom - _contentArea.Height;
+        }
+
+        ScrollTo(_horizontalOffset, vertical);
+    }
+
     /// <summary>Clips an invalidation coming from scrolled content to the viewport.</summary>
     /// <remarks>
     /// Scrolled content is clipped to the viewport while painting, so an area outside it cannot

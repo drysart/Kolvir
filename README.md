@@ -312,6 +312,7 @@ thousand items cost one control.
 | `TopIndex` | The first row at the top of the viewport, clamped to what can actually scroll |
 | `HorizontalScroll`, `VerticalScroll` | The same `XPlatScrollStyle` values a panel takes; vertical defaults to `Automatic`, horizontal to `None` |
 | `ScrollBarThickness` | The gutter width, 16 px by default |
+| `VerticalOffset`, `HorizontalOffset`, `ViewportRect` | Where the rows are scrolled to, and the area they are painted into - the client area less the gutters of the bars that are showing |
 | `EmptyText` | Muted text drawn while the list has no rows |
 | `EnsureVisible(i)`, `ScrollTo`, `ScrollBy` | Bring a row into view, or drive the offset directly |
 | `RefreshItems()` | Redraw after mutating the objects in `Items` in place |
@@ -335,14 +336,16 @@ root.Controls.Add(list);
 ```
 
 The mouse works the way the platform does: a plain click selects the row under the pointer,
-`Ctrl`+click toggles it, `Shift`+click extends from the anchor, and dragging past the edges
-autoscrolls. In `MultiSimple` a plain click still replaces the selection - only `Ctrl` toggles - and
-the keyboard moves the selection with the cursor while `Space` adds or removes the row under it.
-In `MultiExtended` `Shift`+arrow extends from the anchor, `Ctrl`+arrow moves the cursor without
-changing the selection, and `Space` toggles the row under it. `Home`/`End` jump to the ends,
-`PageUp`/`PageDown` move a viewport at a time, and typing a letter jumps to the next row that starts
-with it - typing again within 700 ms cycles through the matches and extends the prefix, so `c` `h`
-reaches "Charts" while a dead end restarts the search from the new character.
+`Ctrl`+click toggles it, `Shift`+click extends from the anchor, and dragging extends the selection
+to whichever row is under the pointer. In `MultiSimple` a plain click still replaces the selection -
+only `Ctrl` toggles - and the keyboard moves the selection with the cursor while `Space` adds or
+removes the row under it. In `MultiExtended` `Shift`+arrow extends from the anchor, `Ctrl`+arrow
+moves the cursor without changing the selection, and `Space` toggles the row under it.
+`Home`/`End` jump to the ends, `PageUp`/`PageDown` move a viewport at a time, and typing a letter
+jumps to the next row that starts with it - typing again within 700 ms cycles through the matches
+and extends the prefix, so `c` `h` reaches "Charts" while a dead end restarts the search from the
+new character. Every move the keyboard makes scrolls the list just far enough to keep the row it
+landed on whole, and never sideways, so a list the user has scrolled across stays where it was put.
 
 Selection is stored as a sorted list of indices, so membership is a binary search rather than a
 scan. A change repaints only the rows whose state actually differed, clipped to the viewport, which
