@@ -27,6 +27,7 @@ public sealed class XPlatUiHost
     private XPlatControl? _hovered;
     private XPlatControl? _captured;
     private XPlatControl? _focused;
+    private SKPoint? _mousePosition;
     private XPlatControl? _selectionOwner;
     private XPlatCursor _cursor = XPlatCursor.Default;
     private SKPoint _selectionOrigin;
@@ -192,6 +193,13 @@ public sealed class XPlatUiHost
     public XPlatControl? SelectionOwner => _selectionOwner;
 
     public XPlatControl? HoveredControl => _hovered;
+
+    /// <summary>
+    /// Where the pointer was the last time it moved over this host, in client coordinates, or null
+    /// when it has not moved over it since it last left. A tool tip is placed against this rather
+    /// than against the control that owns it, so the tip appears where the user is looking.
+    /// </summary>
+    public SKPoint? MousePosition => _mousePosition;
 
     public XPlatControl? CapturedControl => _captured;
 
@@ -602,6 +610,8 @@ public sealed class XPlatUiHost
 
     public void ProcessMouseMove(SKPoint location) => Guard(() =>
     {
+        _mousePosition = location;
+
         var hit = HitTest(location);
 
         if (!ReferenceEquals(hit, _hovered))
@@ -697,6 +707,7 @@ public sealed class XPlatUiHost
     /// <summary>Clears the hover state when the pointer leaves the surface.</summary>
     public void ProcessMouseLeave() => Guard(() =>
     {
+        _mousePosition = null;
         _hovered?.RaiseMouseLeave();
         _hovered = null;
         SetCursor(XPlatCursor.Default);

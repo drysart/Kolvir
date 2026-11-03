@@ -26,7 +26,18 @@ namespace XPlatUI;
 /// </example>
 public sealed class XPlatToolTip : IDisposable
 {
+    /// <summary>Distance between a tip and the control it belongs to, when there is no pointer to go by.</summary>
     private const float Gap = 4f;
+
+    /// <summary>How far right of the pointer a tip's top left corner sits.</summary>
+    private const float PointerOffsetX = 12f;
+
+    /// <summary>
+    /// How far below the pointer a tip's top left corner sits. It is larger than the horizontal
+    /// offset because the pointer's own hot spot is at the top left of its image, so the tip has to
+    /// clear the pointer itself before it starts.
+    /// </summary>
+    private const float PointerOffsetY = 20f;
 
     private readonly Dictionary<XPlatControl, ToolTipEntry> _entries = new(ReferenceEqualityComparer.Instance);
     private readonly XPlatTimer _timer;
@@ -281,16 +292,7 @@ public sealed class XPlatToolTip : IDisposable
         var view = new XPlatToolTipView(text, _maximumWidth);
         var size = view.Measure(new SKSize(MaximumWidth, float.PositiveInfinity));
 
-        var origin = control.GetPositionInHost();
-        float x = Math.Clamp(origin.X, 0f, MathF.Max(0f, host.ClientSize.Width - size.Width));
-        float y = origin.Y + control.Height + Gap;
-
-        // Below the control is the usual place; above it is where a control near the bottom edge
-        // of the window has room.
-        if (y + size.Height > host.ClientSize.Height && origin.Y - size.Height - Gap >= 0f)
-        {
-            y = origin.Y - size.Height - Gap;
-        }
+        var (x, y) = PlaceFor(control, host, size);
 
         var popup = new XPlatPopup(control)
         {
@@ -326,6 +328,56 @@ public sealed class XPlatToolTip : IDisposable
             _phase = Phase.Idle;
             _timer.Stop();
         }
+    }
+
+    /// <summary>
+    /// Works out where the bubble goes. A tip belongs to the pointer, not to the control that owns
+    /// it: a control can be wider than its text, and the pointer is the only point on it the user is
+    /// looking at. The pointer's own position is used while the pointer is inside the host, which is
+    /// the only time a tip is ever shown, and the control is only the fallback.
+    /// </summary>
+    private static (float X, float Y) PlaceFor(XPlatControl control, XPlatUiHost host, SKSize size)
+    {
+        var client = host.ClientSize;
+        float x;
+        float y;
+
+        if (host.MousePosition is { } pointer)
+        {
+            // Below and to the right of the pointer is where a tip is expected, so the pointer never
+            // sits underneath the bubble.
+            x = pointer.X + PointerOffsetX;
+            y = pointer.Y + PointerOffsetY;
+
+            // Flipping rather than only clamping keeps the tip away from the pointer at the far
+            // edges, where clamping alone would drag it back over the pointer.
+            if (x + size.Width > client.Width)
+            {
+                x = pointer.X - size.Width - PointerOffsetX;
+            }
+
+            if (y + size.Height > client.Height)
+            {
+                y = pointer.Y - size.Height - PointerOffsetY;
+            }
+        }
+        else
+        {
+            var origin = control.GetPositionInHost();
+            x = origin.X;
+            y = origin.Y + control.Height + Gap;
+
+            // Below the control is the usual place; above it is where a control near the bottom edge
+            // of the window has room.
+            if (y + size.Height > client.Height && origin.Y - size.Height - Gap >= 0f)
+            {
+                y = origin.Y - size.Height - Gap;
+            }
+        }
+
+        return (
+            Math.Clamp(x, 0f, MathF.Max(0f, client.Width - size.Width)),
+            Math.Clamp(y, 0f, MathF.Max(0f, client.Height - size.Height)));
     }
 
     private void OnPopupClosed(object sender)

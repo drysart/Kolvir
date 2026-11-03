@@ -164,24 +164,44 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
     /// Positions the window so the popup's top left corner sits at <paramref name="location"/> in
     /// the owner's content view, clamped so it stays inside the screen's visible area.
     /// </summary>
+    /// <remarks>
+    /// The portable layer works in the owner's client space: logical pixels with y growing down
+    /// from the top left of the window. AppKit works in screen space: points with y growing up from
+    /// the bottom left of the primary display. <see cref="AppKitApplicationBackend.LocationOf"/> and
+    /// <see cref="AppKitApplicationBackend.FrameFor"/> are the two conversions the rest of this
+    /// backend already uses, so they are used here too rather than repeating the arithmetic - and
+    /// the clamp is done in logical space, where the top and bottom of a rectangle are unambiguous.
+    /// <see cref="CGRect.Top"/> and <see cref="CGRect.Bottom"/> are the minimum and maximum y, not
+    /// the geometric top and bottom, so using them as edges in AppKit's y-up space pins the popup
+    /// to the top of the screen.
+    /// </remarks>
     private void Place(SKPoint location, SKSize size)
     {
         var window = _window!;
         var owner = _ownerWindow!;
 
-        // AppKit screen space has its origin at the bottom left, so the anchor is the owner's
-        // content top left and the popup's origin drops by its own height from there.
+        // ContentLayoutRect is in window space with its origin at the frame's bottom left, so the
+        // distance from the top of the frame down to the top of the content is what turns it into
+        // an offset from the owner's top left corner.
         var content = owner.ContentLayoutRect;
-        double x = owner.Frame.X + content.X + location.X;
-        double y = owner.Frame.Y + content.Y + content.Height - location.Y - size.Height;
+        var origin = AppKitApplicationBackend.LocationOf(owner);
+        double contentTop = owner.Frame.Height - content.Y - content.Height;
+        float x = (float)(origin.X + content.X + location.X);
+        float y = (float)(origin.Y + contentTop + location.Y);
 
-        if ((owner.Screen ?? NSScreen.MainScreen)?.VisibleFrame is { } visible)
+        if (AppKitApplicationBackend.ScreenForWindow(owner) is { } screen)
         {
-            x = Math.Max(Math.Min(x, visible.Right - size.Width), visible.Left);
-            y = Math.Max(Math.Min(y, visible.Top - size.Height), visible.Bottom);
+            var work = screen.WorkingArea;
+            x = Math.Clamp(x, work.Left, MathF.Max(work.Left, work.Right - size.Width));
+            y = Math.Clamp(y, work.Top, MathF.Max(work.Top, work.Bottom - size.Height));
         }
 
-        window.SetFrame(new CGRect(x, y, size.Width, size.Height), display: true);
+        window.SetFrame(
+            AppKitApplicationBackend.FrameFor(
+                new SKPoint(x, y),
+                size,
+                AppKitApplicationBackend.PrimaryHeightFor(owner)),
+            display: true);
     }
 
     private void InstallObservers()

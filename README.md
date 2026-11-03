@@ -596,6 +596,10 @@ control and it watches their pointer enter and leave. The tip appears after `Ini
 for `AutoPopDelay`, wraps at `MaximumWidth` and is shown in a popup that does **not** take input,
 so moving the pointer across it still reaches whatever is underneath.
 
+A tip belongs to the pointer rather than to the control it describes: it opens just below and to
+the right of the pointer, flips to the other side when it would otherwise leave the window, and
+only falls back to hanging off the control when the pointer's position is not known.
+
 | Member | Behaviour |
 | --- | --- |
 | `SetToolTip(control, text)`, `GetToolTip(control)` | The text for a control; `null` or empty removes it |

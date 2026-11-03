@@ -591,7 +591,8 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
         contentSize.Width,
         contentSize.Height);
 
-    private static double PrimaryHeightFor(NSWindow window)
+    /// <summary>The height of the primary display, which is the axis AppKit's screen space grows up from.</summary>
+    internal static double PrimaryHeightFor(NSWindow window)
     {
         var screens = NSScreen.Screens;
         return screens is { Length: > 0 } ? screens[0].Frame.Height : window.Frame.Height;

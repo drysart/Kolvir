@@ -286,6 +286,13 @@ public sealed class Gtk4SkiaView : IDisposable
 
         _picture.SetPaintable(texture);
 
+        // Setting a paintable makes the picture allocate itself again before it is next snapshotted, so
+        // the frame it was just given is not drawn by the frame currently being rendered - it needs one
+        // more. A window gets those anyway, but a popover does not paint again until something changes,
+        // which left popups showing their first, empty frame forever. Asking for the picture to be
+        // redrawn schedules exactly that one extra frame.
+        _picture.QueueDraw();
+
         texture.Dispose();
         bytes.Dispose();
     }
