@@ -233,7 +233,7 @@ public class XPlatRichLabel : XPlatControl
         return new SKSize(MathF.Ceiling(layout.Width), MathF.Ceiling(layout.Height));
     }
 
-    public override void PerformLayout()
+    protected override void OnLayout()
     {
         var content = ContentRect;
         if (content.Width <= 0f)

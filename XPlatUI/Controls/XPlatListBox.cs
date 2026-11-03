@@ -537,7 +537,7 @@ public class XPlatListBox : XPlatControl
         }
     }
 
-    public override void PerformLayout()
+    protected override void OnLayout()
     {
         if (_layingOut)
         {

@@ -291,6 +291,42 @@ placement, the offset clamping, `ScrollRectIntoView`, the wheel and the invalida
 scrolling control only has to say how big its content is - `XPlatPanel` measures its children, the
 list box multiplies its row count by the row height - and the helper does the rest.
 
+### Adding many children at once
+
+Adding a child lays its parent out again and asks for a repaint, which is the right thing when a
+control is added one at a time and the wrong thing when a container is filled in a loop: laying out
+`n` children that way costs a pass over a growing child list and a walk up the parent chain per
+child, so filling a panel with ten thousand of them spends most of its time re-arranging the ones
+already there. `SuspendLayout` and `ResumeLayout` fold the batch into one pass and one repaint:
+
+```csharp
+panel.SuspendLayout();
+try
+{
+    panel.Controls.Clear();
+    for (int i = 0; i < count; i++)
+    {
+        panel.Controls.Add(new XPlatButton($"Button {i}") { Location = new SKPoint(0f, i * 36f) });
+    }
+}
+finally
+{
+    panel.ResumeLayout();
+}
+```
+
+`SuspendLayout` nests, and the outermost `ResumeLayout` does the work, in this order: the layout the
+batch asked for, then a single `Invalidate` if anything asked for a repaint while it was suspended.
+Nothing can be painted in between, because a frame is driven by the host's loop and the batch runs
+inside one turn of it, so folding the repaints costs nothing and saves the parent chain walk per
+child. `ResumeLayout(false)` drops the deferred layout - for a caller that is about to arrange the
+container itself - but still repaints.
+
+`PerformLayout` is public and safe to call at any time; it is what a container does to itself when
+something changes that only it can resolve. `OnLayout` is the protected hook a container overrides.
+Neither of them is how a caller arranges children: set `Dock`, `Bounds` or `Location` and let the
+control do it.
+
 ### List box
 
 `XPlatListBox` is the WinForms list box: a vertical list of rows with a selection, keyboard
@@ -529,11 +565,14 @@ The handler runs after the paint has taken the dirty region, so the invalidation
 causes belongs to the next frame instead of being lost. That is also why a readout on a live page
 should assign only a changed string: otherwise it paints a frame that changes it again, forever.
 
-The **Performance** page of the sample is this in practice. It fills its list with 1 to 100,000
-items and reports the last frame beside it. Scrolling stays flat in the item count, because the
-list paints only the rows that are on screen, and moves with the size of the *area* instead - which
-is what the area half of the readout is for. On GTK4 it reports whole-surface frames, because that
-backend presents the whole surface every frame.
+The sample has two **Performance** pages, and the pair is the point. Both load 1 to 100,000 entries
+and report the last frame beside them; one fills a list box with rows, the other fills a panel with
+real buttons. Scrolling the list stays flat in the item count, because it paints only the rows that
+are on screen, and moves with the size of the *area* instead - which is what the area half of the
+readout is for. The controls page has nothing virtualised: every button is a control, so the panel
+arranges and walks all of them on every scroll and a hit test has all of them to sift. That is the
+cost the list page avoids, and the reason to have both. On GTK4 both report whole-surface frames,
+because that backend presents the whole surface every frame.
 
 ### Rich label
 
@@ -1251,8 +1290,9 @@ points and the backend scales the Skia canvas by `GetDpiForWindow(hwnd) / 96`, s
 area to `1280 x 820` multiplied by that scale (clamped to the monitor work area) so the demo is
 never cropped on a high-DPI monitor. The **Selection and clipboard** page is the one to try:
 drag down from its label, over the whole-control button and into the text box, then right-click
-the selection. The **Performance** page is the one to watch scroll: it loads 1 to 100,000 rows
-into its list and reports what the last frame cost to draw them.
+the selection. The two **Performance** pages are the ones to watch scroll: **Performance: list box**
+loads 1 to 100,000 rows into a list, **Performance: controls** stacks 1 to 100,000 buttons in a
+panel, and both report what the last frame cost to draw them.
 
 ### On Linux (GTK4)
 

@@ -93,7 +93,7 @@ public class XPlatTableLayoutPanel : XPlatPanel
         return new SKSize(width, height);
     }
 
-    public override void PerformLayout()
+    protected override void OnLayout()
     {
         if (_columnStyles.Count == 0 || _rowStyles.Count == 0)
         {
