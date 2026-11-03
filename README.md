@@ -500,6 +500,41 @@ macOS does: the content frame would overwrite the red one before either was on s
 every 530 ms, which makes a steady supply of small partial repaints to watch - handy when the
 machine driving the demo is not the machine looking at it.
 
+### Frame timing
+
+`XPlatUiHost` times the frames it paints, which is enough to see what a partial repaint buys
+without reaching for a profiler:
+
+| Member | Reports |
+| --- | --- |
+| `LastFrameTime` | Library time spent on the last frame: clipping, clearing and walking the tree |
+| `LastFrameArea` | The `SKRectI` that frame covered, in logical pixels - the surface or the dirty region |
+| `FrameCount` | How many frames have been painted |
+| `AddFramePaintedHandler` | A handler that runs after a frame, for a readout of the last one |
+
+The time is the library's own work, so it leaves out whatever the backend spends presenting the
+frame: that part belongs to the platform and the library cannot see it. The debug paint's red frame
+is not counted either - the content frame that replaces it is.
+
+The stats are published after the tree has drawn, so a control that reads them while painting shows
+the frame *before* its own. That is what a readout of the last frame has to say, and it keeps the
+readout from invalidating itself on every frame:
+
+```csharp
+host.AddFramePaintedHandler(_ =>
+    caption.Text = $"Last frame {host.LastFrameTime.TotalMilliseconds:0.0} ms");
+```
+
+The handler runs after the paint has taken the dirty region, so the invalidation its assignment
+causes belongs to the next frame instead of being lost. That is also why a readout on a live page
+should assign only a changed string: otherwise it paints a frame that changes it again, forever.
+
+The **Performance** page of the sample is this in practice. It fills its list with 1 to 100,000
+items and reports the last frame beside it. Scrolling stays flat in the item count, because the
+list paints only the rows that are on screen, and moves with the size of the *area* instead - which
+is what the area half of the readout is for. On GTK4 it reports whole-surface frames, because that
+backend presents the whole surface every frame.
+
 ### Rich label
 
 `XPlatRichLabel` flows styled runs of text into a wrapping paragraph. Formatting lives on
@@ -1216,7 +1251,8 @@ points and the backend scales the Skia canvas by `GetDpiForWindow(hwnd) / 96`, s
 area to `1280 x 820` multiplied by that scale (clamped to the monitor work area) so the demo is
 never cropped on a high-DPI monitor. The **Selection and clipboard** page is the one to try:
 drag down from its label, over the whole-control button and into the text box, then right-click
-the selection.
+the selection. The **Performance** page is the one to watch scroll: it loads 1 to 100,000 rows
+into its list and reports what the last frame cost to draw them.
 
 ### On Linux (GTK4)
 
