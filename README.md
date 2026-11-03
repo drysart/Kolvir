@@ -68,7 +68,7 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled`, colours, focus, mouse/keyboard events; any control can host children |
+| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree), colours, focus, mouse/keyboard events; any control can host children |
 | `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
@@ -527,8 +527,11 @@ group.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" 
 group.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Snap to grid" });
 ```
 
-A container's `Enabled` is not inherited by its children, so a disabled group box greys its own
-caption and frame but its content has to be disabled explicitly.
+`Enabled` cascades, so disabling a group box greys its caption, its frame and everything inside it,
+and none of the content takes input. Only the flag that was set is remembered: a control that was
+disabled on its own stays disabled when its container is enabled again, and one that was only
+disabled by its container comes back with it. Moving a subtree under a disabled container disables
+it the same way, without touching a single `Enabled` flag on the children.
 
 ### Invalidation and partial painting
 

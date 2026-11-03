@@ -1465,8 +1465,8 @@ public sealed class DemoUi
 
         column.Controls.Add(appearance);
 
-        // A disabled group box greys its caption and its frame. Enabled does not cascade to the
-        // children yet, so they are disabled here as well rather than left looking live.
+        // Disabling the group box disables everything inside it, so the caption, the frame and the
+        // check boxes all grey out together.
         var advanced = new XPlatGroupBox("Advanced (disabled)")
         {
             Dock = XDock.Top,
@@ -1480,7 +1480,6 @@ public sealed class DemoUi
             {
                 Dock = XDock.Top,
                 Checked = caption == "Trace layout",
-                Enabled = false,
             });
         }
 

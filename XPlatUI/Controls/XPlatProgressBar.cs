@@ -246,6 +246,7 @@ public class XPlatProgressBar : XPlatControl
     {
         bool run = _style == XPlatProgressBarStyle.Marquee
             && Visible
+            && Enabled
             && Host is not null
             && XPlatApplication.Current is not null;
 
