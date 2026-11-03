@@ -67,6 +67,41 @@ public enum XPlatSizeMode
     Zoom = 3,
 }
 
+/// <summary>How an <see cref="XPlatListBox"/> tracks which of its items are selected.</summary>
+public enum XPlatSelectionMode
+{
+    /// <summary>Items cannot be selected. The list is read-only.</summary>
+    None = 0,
+
+    /// <summary>Exactly one item can be selected at a time, which is the default.</summary>
+    One = 1,
+
+    /// <summary>Any number of items can be selected, each toggled on its own.</summary>
+    MultiSimple = 2,
+
+    /// <summary>Any number of items can be selected; Shift selects a range and Ctrl toggles one item.</summary>
+    MultiExtended = 3,
+}
+
+/// <summary>What an item being drawn by an <see cref="XPlatListBox"/> owner-draw handler looks like.</summary>
+[Flags]
+public enum XPlatDrawItemState
+{
+    None = 0,
+
+    /// <summary>The item is part of the selection.</summary>
+    Selected = 1,
+
+    /// <summary>The item is the one the keyboard is on, which is where a focus rectangle belongs.</summary>
+    Focused = 2,
+
+    /// <summary>The control is disabled, so the item is drawn greyed out.</summary>
+    Disabled = 4,
+
+    /// <summary>The pointer is over the item and it is not selected.</summary>
+    Hot = 8,
+}
+
 /// <summary>Mouse cursor requested by a control.</summary>
 public enum XPlatCursor
 {

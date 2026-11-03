@@ -10,7 +10,7 @@ controls draw themselves on top of it. The same sample UI runs on all three plat
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
   Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatImage
+  Controls/               XPlatPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatTextBox, XPlatListBox, XPlatImage
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
   Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
@@ -78,6 +78,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatRichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
 | `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
+| `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
 | `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
@@ -282,6 +283,75 @@ another selectable control, ends the selection.
 
 What is still missing is the overlay style: an overlay scrollbar floats over the content and does
 not take a gutter. The bars are classic until that lands.
+
+A scrolling container and a scrolling list want the same plumbing, so it lives in one internal
+`XPlatScrollBars` helper that `XPlatPanel` and `XPlatListBox` both own: the visibility fixed point
+(a gutter can bring the other axis into play, so the two axes are resolved together), the bar
+placement, the offset clamping, `ScrollRectIntoView`, the wheel and the invalidation clip. A third
+scrolling control only has to say how big its content is - `XPlatPanel` measures its children, the
+list box multiplies its row count by the row height - and the helper does the rest.
+
+### List box
+
+`XPlatListBox` is the WinForms list box: a vertical list of rows with a selection, keyboard
+navigation, type-ahead and optional scrollbars. It has no children and paints its own rows, so a
+thousand items cost one control.
+
+| Member | Behaviour |
+| --- | --- |
+| `Items` | An `IList<object?>` view over the rows; `Add`, `AddRange`, `Insert`, `RemoveAt`, `Clear` and the indexer all repaint what they touch |
+| `ItemCount` | Shorthand for `Items.Count` |
+| `GetItemText(item)` | How an item becomes a row - `ToString()` by default; override it to keep the objects you added |
+| `SelectionMode` | `None`, `One` (default), `MultiSimple` or `MultiExtended` |
+| `SelectedIndex`, `SelectedItem` | The one selected row, or `-1`/`null` when nothing is selected |
+| `SelectedIndices`, `SelectedItems` | Every selected row, in ascending order |
+| `GetSelected(i)`, `SetSelected(i, bool)`, `ClearSelected()`, `SelectAll()` | The per-row form of the same thing |
+| `GetItemRect(i)`, `IndexFromPoint(point)` | Row geometry, in control coordinates; `IndexFromPoint` returns the nearest row and `-1` above the first |
+| `ItemHeight` | Row height; follows `Font.LineHeight` until assigned explicitly |
+| `Font` | Optional override of `XPlatTheme.DefaultFont` |
+| `TopIndex` | The first row at the top of the viewport, clamped to what can actually scroll |
+| `HorizontalScroll`, `VerticalScroll` | The same `XPlatScrollStyle` values a panel takes; vertical defaults to `Automatic`, horizontal to `None` |
+| `ScrollBarThickness` | The gutter width, 16 px by default |
+| `VerticalOffset`, `HorizontalOffset`, `ViewportRect` | Where the rows are scrolled to, and the area they are painted into - the client area less the gutters of the bars that are showing |
+| `EmptyText` | Muted text drawn while the list has no rows |
+| `EnsureVisible(i)`, `ScrollTo`, `ScrollBy` | Bring a row into view, or drive the offset directly |
+| `RefreshItems()` | Redraw after mutating the objects in `Items` in place |
+| `AddSelectedIndexChangedHandler`, `AddItemActivatedHandler` | Selection changed; and a row was double-clicked or confirmed with `Enter` |
+| `AddDrawItemHandler` | Paints a row yourself: it is handed the canvas, the row rect, the item and an `XPlatDrawItemState` |
+| `BeginUpdate()`, `EndUpdate()` | Batch many changes into one layout and one repaint |
+
+```csharp
+var list = new XPlatListBox
+{
+    Dock = DockStyle.Fill,
+    SelectionMode = XPlatSelectionMode.One,
+    VerticalScroll = XPlatScrollStyle.Automatic,
+    EmptyText = "Nothing to show",
+};
+
+list.Items.AddRange(new object[] { "Overview", "Text input", "Dialogs", "Split container" });
+list.SelectedIndex = 0;
+list.AddSelectedIndexChangedHandler(_ => ShowCard(list.SelectedIndex));
+root.Controls.Add(list);
+```
+
+The mouse works the way the platform does: a plain click selects the row under the pointer,
+`Ctrl`+click toggles it, `Shift`+click extends from the anchor, and dragging extends the selection
+to whichever row is under the pointer. In `MultiSimple` a plain click still replaces the selection -
+only `Ctrl` toggles - and the keyboard moves the selection with the cursor while `Space` adds or
+removes the row under it. In `MultiExtended` `Shift`+arrow extends from the anchor, `Ctrl`+arrow
+moves the cursor without changing the selection, and `Space` toggles the row under it.
+`Home`/`End` jump to the ends, `PageUp`/`PageDown` move a viewport at a time, and typing a letter
+jumps to the next row that starts with it - typing again within 700 ms cycles through the matches
+and extends the prefix, so `c` `h` reaches "Charts" while a dead end restarts the search from the
+new character. Every move the keyboard makes scrolls the list just far enough to keep the row it
+landed on whole, and never sideways, so a list the user has scrolled across stays where it was put.
+
+Selection is stored as a sorted list of indices, so membership is a binary search rather than a
+scan. A change repaints only the rows whose state actually differed, clipped to the viewport, which
+is why hovering and selecting stay cheap on a long list. The row the focus rectangle is on counts
+as a change in its own right, so moving it repaints the row it leaves as well as the row it lands
+on - in `None` mode, where nothing is ever selected, that rectangle is the only thing a click moves.
 
 ### Invalidation and partial painting
 
@@ -569,6 +639,7 @@ XPlatClipboard.SetHtml(rich.GetSelectionText(12, 4), html);   // both flavours a
 | `XPlatLabel`, `XPlatRichLabel` | `Selectable = false`, `Partial` | Set `Selectable`; a drag selects character by character |
 | `XPlatTextBox` | `Selectable = true`, `Partial` | Its own caret and anchor answer for a drag that *starts* inside it; a drag that merely passes through it selects its text and drops the caret |
 | `XPlatButton`, `XPlatImage` | `Selectable = false`, `Whole` | Set `Selectable`; a drag over the control selects it as one unit |
+| `XPlatListBox` | `Selectable = false`, `Whole` | Its row selection is its own; the host selection is not involved |
 | `XPlatPanel` and other containers | `Selectable = false`, `Whole` | A selectable container hides its children from the selection, so leave containers off unless the container itself is what should be selected |
 
 A text box is selectable by default and does not paint a second overlay: `GetSelectionOffset` and

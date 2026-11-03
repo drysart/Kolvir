@@ -977,6 +977,21 @@ startup, and `PartialUpdates` defaults to off so a backend that rasterizes whole
 unaffected. This is exception 1 of §5.5, and the exception is the point: partial painting is a
 property of the framework's paint loop rather than a capability a control opts into.
 
+`XPlatListBox` is the fourth worked example and the cleanest rung 1 case so far. Nothing
+always-retained names it: it derives from `XPlatControl`, so it is reached only when an application
+constructs one, and the two enums it introduced (`XPlatSelectionMode`, `XPlatDrawItemState`) are
+reachable only from its own members. The scrolling it needs was extracted out of `XPlatPanel` into
+`XPlatScrollBars`, an `internal sealed` class that the list box and the panel both hold a private
+field of, so the extraction added no retained member of its own - it moved code from one rung 1 type
+to another. The one edit to an always-retained type is `XPlatControl.ToRectI`, which widened from
+`private` to `protected internal static`; the method already existed and was already retained, so
+the change is visibility rather than content. The fixture publishes at 3,092,992 bytes on win-x64
+both before and after, so the delta is 0. That zero is weaker than it reads for the same reason the
+scrolling zero is: the fixture has no list box, so what it measures is the absence of new retained
+members rather than the size of the control. The use check is the demo application, which builds a
+list box in its card table and publishes with `-p:TrimmerSingleWarn=false` reporting no IL2xxx or
+IL3xxx warning from the new code.
+
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
 

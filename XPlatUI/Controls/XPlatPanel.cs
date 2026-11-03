@@ -25,22 +25,12 @@ public class XPlatPanel : XPlatControl
 {
     private const float ScrollEpsilon = 0.5f;
 
-    private XPlatScrollStyle _horizontalScroll = XPlatScrollStyle.None;
-    private XPlatScrollStyle _verticalScroll = XPlatScrollStyle.None;
-    private float _scrollBarThickness = XPlatScrollBar.DefaultThickness;
-
-    private XPlatScrollBar? _horizontalBar;
-    private XPlatScrollBar? _verticalBar;
-
-    private float _horizontalOffset;
-    private float _verticalOffset;
-    private SKPoint _childOffset;
-    private SKRect _viewport;
-    private SKSize _scrollExtent;
+    private readonly XPlatScrollBars _scroll;
     private bool _layingOut;
 
     public XPlatPanel()
     {
+        _scroll = new XPlatScrollBars(this);
         BorderWidth = 1f;
         CornerRadius = 8f;
         Padding = new XPlatThickness(8f);
@@ -58,92 +48,56 @@ public class XPlatPanel : XPlatControl
     /// <summary>How the horizontal axis scrolls. Defaults to <see cref="XPlatScrollStyle.None"/>.</summary>
     public XPlatScrollStyle HorizontalScroll
     {
-        get => _horizontalScroll;
-        set
-        {
-            if (_horizontalScroll == value)
-            {
-                return;
-            }
-
-            _horizontalScroll = value;
-            PerformLayout();
-            Invalidate();
-        }
+        get => _scroll.Horizontal;
+        set => _scroll.Horizontal = value;
     }
 
     /// <summary>How the vertical axis scrolls. Defaults to <see cref="XPlatScrollStyle.None"/>.</summary>
     public XPlatScrollStyle VerticalScroll
     {
-        get => _verticalScroll;
-        set
-        {
-            if (_verticalScroll == value)
-            {
-                return;
-            }
-
-            _verticalScroll = value;
-            PerformLayout();
-            Invalidate();
-        }
+        get => _scroll.Vertical;
+        set => _scroll.Vertical = value;
     }
 
     /// <summary>The thickness reserved for a visible scrollbar, in device independent pixels.</summary>
     public float ScrollBarThickness
     {
-        get => _scrollBarThickness;
-        set
-        {
-            var clamped = MathF.Max(0f, value);
-            if (_scrollBarThickness == clamped)
-            {
-                return;
-            }
-
-            _scrollBarThickness = clamped;
-            PerformLayout();
-            Invalidate();
-        }
+        get => _scroll.Thickness;
+        set => _scroll.Thickness = value;
     }
 
     /// <summary>The horizontal scrollbar, or null until the panel first needs one.</summary>
-    public XPlatScrollBar? HorizontalScrollBar => _horizontalBar;
+    public XPlatScrollBar? HorizontalScrollBar => _scroll.HorizontalBar;
 
     /// <summary>The vertical scrollbar, or null until the panel first needs one.</summary>
-    public XPlatScrollBar? VerticalScrollBar => _verticalBar;
+    public XPlatScrollBar? VerticalScrollBar => _scroll.VerticalBar;
 
     /// <summary>The current horizontal scroll offset, in pixels. Zero when not scrolled.</summary>
-    public float HorizontalOffset => _horizontalOffset;
+    public float HorizontalOffset => _scroll.HorizontalOffset;
 
     /// <summary>The current vertical scroll offset, in pixels. Zero when not scrolled.</summary>
-    public float VerticalOffset => _verticalOffset;
+    public float VerticalOffset => _scroll.VerticalOffset;
 
     /// <summary>
     /// The total size of the scrollable content, measured from the top-left of
     /// <see cref="ContentArea"/>. Never smaller than the content area.
     /// </summary>
-    public SKSize ScrollExtent => _scrollExtent;
+    public SKSize ScrollExtent => _scroll.Extent;
 
     /// <summary>The client area left over once the visible scrollbars are accounted for.</summary>
-    public SKRect ViewportRect => _viewport;
+    public SKRect ViewportRect => _scroll.Viewport;
 
     /// <summary>True when there is more content below the viewport.</summary>
-    public bool CanScrollVertically => _verticalOffset < MaxVerticalOffset - ScrollEpsilon;
+    public bool CanScrollVertically => _scroll.CanScrollVertically;
 
     /// <summary>True when there is more content to the right of the viewport.</summary>
-    public bool CanScrollHorizontally => _horizontalOffset < MaxHorizontalOffset - ScrollEpsilon;
+    public bool CanScrollHorizontally => _scroll.CanScrollHorizontally;
 
-    private SKRect ContentArea => XPlatGeometry.Deflate(_viewport, Padding);
+    private SKRect ContentArea => _scroll.ContentArea;
 
-    // A None axis never scrolls, so it has no reachable offset even if the content overflows.
-    private float MaxHorizontalOffset => HorizontalScroll == XPlatScrollStyle.None
-        ? 0f
-        : MathF.Max(0f, _scrollExtent.Width - ContentArea.Width);
+    private float MaxHorizontalOffset => _scroll.MaxHorizontalOffset;
 
-    private float MaxVerticalOffset => VerticalScroll == XPlatScrollStyle.None
-        ? 0f
-        : MathF.Max(0f, _scrollExtent.Height - ContentArea.Height);
+    private float MaxVerticalOffset => _scroll.MaxVerticalOffset;
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
@@ -162,14 +116,14 @@ public class XPlatPanel : XPlatControl
             height += childSize.Height + child.Margin.Vertical;
         }
 
-        if (_verticalScroll == XPlatScrollStyle.Always)
+        if (VerticalScroll == XPlatScrollStyle.Always)
         {
-            width += _scrollBarThickness;
+            width += ScrollBarThickness;
         }
 
-        if (_horizontalScroll == XPlatScrollStyle.Always)
+        if (HorizontalScroll == XPlatScrollStyle.Always)
         {
-            height += _scrollBarThickness;
+            height += ScrollBarThickness;
         }
 
         return new SKSize(width, height);
@@ -207,63 +161,20 @@ public class XPlatPanel : XPlatControl
             return;
         }
 
-        var area = ContentArea;
-        var bounds = XPlatGeometry.Inflate(control.Bounds, control.Margin);
-
-        float horizontal = _horizontalOffset;
-        float vertical = _verticalOffset;
-
-        float left = bounds.Left - area.Left;
-        float right = bounds.Right - area.Left;
-        if (left < horizontal)
-        {
-            horizontal = left;
-        }
-        else if (right > horizontal + area.Width)
-        {
-            horizontal = right - area.Width;
-        }
-
-        float top = bounds.Top - area.Top;
-        float bottom = bounds.Bottom - area.Top;
-        if (top < vertical)
-        {
-            vertical = top;
-        }
-        else if (bottom > vertical + area.Height)
-        {
-            vertical = bottom - area.Height;
-        }
-
-        ScrollTo(horizontal, vertical);
+        _scroll.ScrollRectIntoView(XPlatGeometry.Inflate(control.Bounds, control.Margin));
     }
 
     /// <summary>Scrolls to the given offsets, clamped to the scrollable range.</summary>
-    public void ScrollTo(float horizontalOffset, float verticalOffset)
-    {
-        var horizontal = MathF.Max(0f, horizontalOffset);
-        var vertical = MathF.Max(0f, verticalOffset);
-
-        if (MathF.Abs(horizontal - _horizontalOffset) < 0.01f && MathF.Abs(vertical - _verticalOffset) < 0.01f)
-        {
-            return;
-        }
-
-        _horizontalOffset = horizontal;
-        _verticalOffset = vertical;
-        PerformLayout();
-        Invalidate();
-    }
+    public void ScrollTo(float horizontalOffset, float verticalOffset) =>
+        _scroll.ScrollTo(horizontalOffset, verticalOffset);
 
     /// <summary>Scrolls by a relative amount, clamped to the scrollable range.</summary>
     public void ScrollBy(float horizontalDelta, float verticalDelta) =>
-        ScrollTo(_horizontalOffset + horizontalDelta, _verticalOffset + verticalDelta);
+        _scroll.ScrollBy(horizontalDelta, verticalDelta);
 
     /// <summary>The scrollbars sit above the content and are never part of the scrolled area.</summary>
     protected internal override SKPoint GetChildOffset(XPlatControl child) =>
-        ReferenceEquals(child, _verticalBar) || ReferenceEquals(child, _horizontalBar)
-            ? SKPoint.Empty
-            : _childOffset;
+        _scroll.IsBar(child) ? SKPoint.Empty : _scroll.ChildOffset;
 
     /// <summary>Clips a child's invalidation to the viewport the child is painted into.</summary>
     /// <remarks>
@@ -273,12 +184,7 @@ public class XPlatPanel : XPlatControl
     /// </remarks>
     protected internal override void ChildInvalidate(XPlatControl child, SKRegion region)
     {
-        if (!ReferenceEquals(child, _verticalBar) && !ReferenceEquals(child, _horizontalBar))
-        {
-            var viewport = _viewport.Width > 0f && _viewport.Height > 0f ? _viewport : ClientRect;
-            region.Op(ToRectI(viewport), SKRegionOperation.Intersect);
-        }
-
+        _scroll.ClipInvalidate(child, region, ClientRect);
         base.ChildInvalidate(child, region);
     }
 
@@ -295,20 +201,19 @@ public class XPlatPanel : XPlatControl
             return null;
         }
 
-        if (_verticalBar?.HitTest(local) is { } verticalHit)
+        if (_scroll.VerticalBar?.HitTest(local) is { } verticalHit)
         {
             return verticalHit;
         }
 
-        if (_horizontalBar?.HitTest(local) is { } horizontalHit)
+        if (_scroll.HorizontalBar?.HitTest(local) is { } horizontalHit)
         {
             return horizontalHit;
         }
 
         // Children are clipped to the viewport, so a point in the bar gutter (or the dead square
         // where the two bars meet) must not reach them even though it is inside the client area.
-        var viewport = _viewport.Width > 0f && _viewport.Height > 0f ? _viewport : ClientRect;
-        if (!XPlatGeometry.Contains(viewport, local))
+        if (!XPlatGeometry.Contains(_scroll.EffectiveViewport(ClientRect), local))
         {
             return Enabled ? this : null;
         }
@@ -326,7 +231,7 @@ public class XPlatPanel : XPlatControl
     {
         base.OnMouseWheel(e);
 
-        if (e.Handled || _viewport.Width <= 0f || _viewport.Height <= 0f)
+        if (e.Handled || _scroll.Viewport.Width <= 0f || _scroll.Viewport.Height <= 0f)
         {
             return;
         }
@@ -337,127 +242,54 @@ public class XPlatPanel : XPlatControl
 
         if (canScrollVertically && !(shift && canScrollHorizontally))
         {
-            var before = _verticalOffset;
+            var before = VerticalOffset;
             ScrollBy(0f, -e.Delta);
-            e.Handled = MathF.Abs(_verticalOffset - before) > ScrollEpsilon;
+            e.Handled = MathF.Abs(VerticalOffset - before) > ScrollEpsilon;
             return;
         }
 
         if (canScrollHorizontally)
         {
-            var before = _horizontalOffset;
+            var before = HorizontalOffset;
             ScrollBy(-e.Delta, 0f);
-            e.Handled = MathF.Abs(_horizontalOffset - before) > ScrollEpsilon;
+            e.Handled = MathF.Abs(HorizontalOffset - before) > ScrollEpsilon;
         }
     }
 
     /// <summary>Clips the scrolled children to the viewport, then paints the scrollbars on top.</summary>
     protected override void RenderChildren(SKCanvas canvas)
     {
-        var viewport = _viewport.Width > 0f && _viewport.Height > 0f ? _viewport : ClientRect;
-
         canvas.Save();
-        canvas.ClipRect(viewport);
+        canvas.ClipRect(_scroll.EffectiveViewport(ClientRect));
 
-        if (_childOffset.X != 0f || _childOffset.Y != 0f)
+        var offset = _scroll.ChildOffset;
+        if (offset.X != 0f || offset.Y != 0f)
         {
-            canvas.Translate(_childOffset.X, _childOffset.Y);
+            canvas.Translate(offset.X, offset.Y);
         }
 
         base.RenderChildren(canvas);
         canvas.Restore();
 
-        _verticalBar?.Render(canvas);
-        _horizontalBar?.Render(canvas);
+        _scroll.RenderBars(canvas);
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            _horizontalBar = null;
-            _verticalBar = null;
+            _scroll.Dispose();
         }
 
         base.Dispose(disposing);
     }
 
-    private void LayoutCore()
-    {
-        var client = ClientRect;
-
-        // Bar visibility depends on the extent, the extent depends on the viewport and the
-        // viewport depends on visibility, so repeat until all three agree.
-        var showVertical = _verticalScroll == XPlatScrollStyle.Always;
-        var showHorizontal = _horizontalScroll == XPlatScrollStyle.Always;
-        var viewport = ViewportOf(client, showHorizontal, showVertical);
-        var area = XPlatGeometry.Deflate(viewport, Padding);
-        LayoutDockedChildren(area);
-        var extent = MeasureExtent(area);
-
-        for (int pass = 0; pass < 3; pass++)
+    private void LayoutCore() =>
+        _scroll.Layout(ClientRect, Padding, area =>
         {
-            var nextVertical = _verticalScroll switch
-            {
-                XPlatScrollStyle.Always => true,
-                XPlatScrollStyle.Automatic => extent.Height > area.Height + ScrollEpsilon,
-                _ => false,
-            };
-
-            var nextHorizontal = _horizontalScroll switch
-            {
-                XPlatScrollStyle.Always => true,
-                XPlatScrollStyle.Automatic => extent.Width > area.Width + ScrollEpsilon,
-                _ => false,
-            };
-
-            if (nextVertical == showVertical && nextHorizontal == showHorizontal)
-            {
-                break;
-            }
-
-            showVertical = nextVertical;
-            showHorizontal = nextHorizontal;
-            viewport = ViewportOf(client, showHorizontal, showVertical);
-            area = XPlatGeometry.Deflate(viewport, Padding);
             LayoutDockedChildren(area);
-            extent = MeasureExtent(area);
-        }
-
-        _viewport = viewport;
-        _scrollExtent = extent;
-
-        _horizontalOffset = Math.Clamp(_horizontalOffset, 0f, MaxHorizontalOffset);
-        _verticalOffset = Math.Clamp(_verticalOffset, 0f, MaxVerticalOffset);
-        _childOffset = new SKPoint(-_horizontalOffset, -_verticalOffset);
-
-        PlaceScrollBar(
-            ref _verticalBar,
-            showVertical,
-            XPlatOrientation.Vertical,
-            new SKRect(viewport.Right, client.Top, client.Right, viewport.Bottom),
-            area.Height,
-            extent.Height,
-            _verticalOffset);
-
-        PlaceScrollBar(
-            ref _horizontalBar,
-            showHorizontal,
-            XPlatOrientation.Horizontal,
-            new SKRect(client.Left, viewport.Bottom, viewport.Right, client.Bottom),
-            area.Width,
-            extent.Width,
-            _horizontalOffset);
-    }
-
-    private SKRect ViewportOf(SKRect client, bool showHorizontal, bool showVertical)
-    {
-        var thickness = MathF.Max(0f, _scrollBarThickness);
-        var width = MathF.Max(0f, client.Width - (showVertical ? thickness : 0f));
-        var height = MathF.Max(0f, client.Height - (showHorizontal ? thickness : 0f));
-
-        return new SKRect(client.Left, client.Top, client.Left + width, client.Top + height);
-    }
+            return MeasureExtent(area);
+        });
 
     private void LayoutDockedChildren(SKRect area)
     {
@@ -530,71 +362,6 @@ public class XPlatPanel : XPlatControl
         }
 
         return new SKSize(MathF.Max(0f, right - area.Left), MathF.Max(0f, bottom - area.Top));
-    }
-
-    private void PlaceScrollBar(
-        ref XPlatScrollBar? bar,
-        bool visible,
-        XPlatOrientation orientation,
-        SKRect bounds,
-        float viewportLength,
-        float extentLength,
-        float offset)
-    {
-        if (!visible)
-        {
-            if (bar is not null)
-            {
-                bar.Visible = false;
-            }
-
-            return;
-        }
-
-        if (bar is null)
-        {
-            bar = new XPlatScrollBar
-            {
-                Name = orientation == XPlatOrientation.Vertical ? "VerticalScrollBar" : "HorizontalScrollBar",
-                Orientation = orientation,
-
-                // The bar belongs to the panel, so the focus belongs to whatever the user is
-                // working in. It still takes clicks and wheel turns, just never the focus.
-                Focusable = false,
-                Parent = this,
-            };
-
-            bar.AddScrollHandler(OnScrollBarScrolled);
-            Own(bar);
-        }
-
-        var maximum = MathF.Max(0f, extentLength - viewportLength);
-
-        bar.Visible = true;
-        bar.Bounds = bounds;
-        bar.Minimum = 0f;
-        bar.Maximum = maximum;
-        bar.LargeChange = MathF.Max(1f, viewportLength);
-        bar.SmallChange = MathF.Max(1f, MathF.Min(XPlatScrollBar.DefaultThickness, maximum));
-        bar.Value = MathF.Min(offset, maximum);
-        bar.Enabled = maximum > 0f;
-    }
-
-    private void OnScrollBarScrolled(object sender)
-    {
-        if (_layingOut)
-        {
-            return;
-        }
-
-        if (ReferenceEquals(sender, _verticalBar))
-        {
-            ScrollTo(_horizontalOffset, _verticalBar!.Value);
-        }
-        else if (ReferenceEquals(sender, _horizontalBar))
-        {
-            ScrollTo(_horizontalBar!.Value, _verticalOffset);
-        }
     }
 
     private static SKRect DockChild(XPlatControl child, SKRect remaining)
