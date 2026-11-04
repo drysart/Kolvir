@@ -80,6 +80,8 @@ public sealed class XPlatMenu
         ArgumentNullException.ThrowIfNull(items);
 
         Text = text;
+        DisplayText = XPlatMenuText.Parse(text, out var mnemonic);
+        Mnemonic = mnemonic;
 
         foreach (var item in items)
         {
@@ -88,11 +90,22 @@ public sealed class XPlatMenu
     }
 
     /// <summary>
-    /// The label shown in the menu bar. On macOS the platform turns the first character into the
-    /// mnemonic, so a caller does not spell out the underscore itself.
+    /// The label shown in the menu bar. A <c>&amp;</c> marks the next character as the mnemonic and
+    /// is not drawn, so <c>"&amp;File"</c> answers to Alt+F on Windows and Linux. macOS works the
+    /// mnemonic out from the first character itself, so there it is <see cref="DisplayText"/> that
+    /// is shown.
     /// </summary>
     public string Text { get; }
 
+    /// <summary><see cref="Text"/> with the mnemonic marker removed, which is what gets drawn.</summary>
+    public string DisplayText { get; }
+
+    /// <summary>The character <see cref="Text"/> marked with <c>&amp;</c>, or <c>'\0'</c> for none.</summary>
+    public char Mnemonic { get; }
+
     /// <summary>The drop-down entries, top to bottom. Use <see cref="XPlatMenuItem.Separator"/> for dividers.</summary>
     public IList<XPlatMenuItem> Items { get; } = new List<XPlatMenuItem>();
+
+    /// <summary><see cref="Items"/> with the separators that would look wrong dropped.</summary>
+    public IReadOnlyList<XPlatMenuItem> TrimmedItems => XPlatMenuTrimming.Trim((IReadOnlyList<XPlatMenuItem>)Items);
 }

@@ -49,7 +49,7 @@ internal sealed class AppKitContextMenuPresenter : IXPlatContextMenuPresenter
 
     internal static NSMenuItem CreateItem(XPlatMenuItem item)
     {
-        var menuItem = new NSMenuItem(item.Text ?? string.Empty, string.Empty, (_, _) => item.Invoke())
+        var menuItem = new NSMenuItem(item.DisplayText, string.Empty, (_, _) => item.Invoke())
         {
             Enabled = item.Enabled,
             State = item.Checked ? NSCellStateValue.On : NSCellStateValue.Off,

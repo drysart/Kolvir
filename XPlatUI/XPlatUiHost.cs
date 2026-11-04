@@ -22,7 +22,9 @@ public sealed class XPlatUiHost
     private Action<object, XPlatContextMenuEventArgs>? _contextMenuOpening;
     private readonly XPlatSelection _selection;
     private XPlatControl? _root;
+    private XPlatMenuBarView? _menuBar;
     private List<XPlatControl>? _overlays;
+    private List<IXPlatInputSink>? _inputSinks;
     private SKSize _clientSize;
     private XPlatControl? _hovered;
     private XPlatControl? _captured;
@@ -239,15 +241,61 @@ public sealed class XPlatUiHost
         Invalidate();
     }
 
-    /// <summary>Arranges the root control to fill the client area.</summary>
+    /// <summary>
+    /// The menu bar drawn inside the window, or null for a window with no in-window bar.
+    /// </summary>
+    /// <remarks>
+    /// The bar belongs to the window rather than to the tree, so the host arranges it across the top
+    /// of the client area and gives the root everything below it. A backend that hands its menus to
+    /// the platform instead - macOS, which owns the system-wide bar - leaves this null.
+    /// </remarks>
+    public XPlatMenuBarView? MenuBar
+    {
+        get => _menuBar;
+        set
+        {
+            if (ReferenceEquals(_menuBar, value))
+            {
+                return;
+            }
+
+            if (_menuBar is { } previous)
+            {
+                _menuBar = null;
+                previous.AttachHost(null);
+            }
+
+            _menuBar = value;
+
+            if (_menuBar is { } bar)
+            {
+                bar.AttachHost(this);
+            }
+
+            PerformLayout();
+            Invalidate();
+        }
+    }
+
+    /// <summary>Arranges the menu bar across the top of the client area and the root below it.</summary>
     public void PerformLayout()
     {
+        var top = 0f;
+
+        if (_menuBar is { } menuBar)
+        {
+            var size = menuBar.Measure(new SKSize(_clientSize.Width, _clientSize.Height));
+            top = MathF.Min(size.Height, _clientSize.Height);
+            menuBar.Bounds = new SKRect(0f, 0f, _clientSize.Width, top);
+            menuBar.PerformLayout();
+        }
+
         if (_root is null)
         {
             return;
         }
 
-        _root.Bounds = new SKRect(0f, 0f, _clientSize.Width, _clientSize.Height);
+        _root.Bounds = new SKRect(0f, top, _clientSize.Width, _clientSize.Height);
         _root.PerformLayout();
 
         if (_overlays is not null)
@@ -445,6 +493,7 @@ public sealed class XPlatUiHost
             using var clear = new SKPaint { Color = ClearColor, BlendMode = SKBlendMode.Src };
             canvas.DrawPaint(clear);
 
+            _menuBar?.Render(canvas);
             _root?.Render(canvas);
 
             if (_overlays is not null)
@@ -787,13 +836,26 @@ public sealed class XPlatUiHost
     /// key, which tells the adapter to swallow the platform key event (and its text input).
     /// </summary>
     /// <remarks>
-    /// The window's menu bar sees the key first, the way a native menu's accelerators do, so a
-    /// shortcut is not shadowed by whichever control happens to have the focus. macOS dispatches
-    /// Command combinations through its own menu bar before a view sees them at all, so the same
-    /// lookup there only ever covers the modifiers AppKit does not claim.
+    /// An input sink sees the key first - an open menu owns the keyboard while it is down - then the
+    /// window's menu bar, the way a native menu's accelerators do, so a shortcut is not shadowed by
+    /// whichever control happens to have the focus. macOS dispatches Command combinations through
+    /// its own menu bar before a view sees them at all, so the same lookup there only ever covers the
+    /// modifiers AppKit does not claim.
     /// </remarks>
     public bool ProcessKeyDown(XPlatKey key, XPlatModifiers modifiers = XPlatModifiers.None) => Guard(() =>
     {
+        if (ProcessKeyInSinks(key, modifiers))
+        {
+            return true;
+        }
+
+        // Alt+mnemonic reaches the bar before anything else, the way a native menu bar is reached
+        // even when a control has the focus.
+        if (_menuBar is { } bar && bar.ProcessKeyDown(key, modifiers))
+        {
+            return true;
+        }
+
         if (Window is { } window && window.TryInvokeShortcut(key, modifiers))
         {
             return true;
@@ -812,7 +874,80 @@ public sealed class XPlatUiHost
         Guard(() => _focused?.RaiseKeyUp(new XPlatKeyEventArgs(key, modifiers)));
 
     public void ProcessTextInput(string text) =>
-        Guard(() => _focused?.RaiseTextInput(new XPlatTextInputEventArgs(text)));
+        Guard(() =>
+        {
+            if (ProcessTextInSinks(text))
+            {
+                return;
+            }
+
+            _focused?.RaiseTextInput(new XPlatTextInputEventArgs(text));
+        });
+
+    /// <summary>
+    /// Pushes <paramref name="sink"/> onto the window's input sinks, so it sees keys and typed text
+    /// before the focused control does. Dispose the result to remove it again.
+    /// </summary>
+    public IDisposable AddInputSink(IXPlatInputSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+
+        _inputSinks ??= new List<IXPlatInputSink>();
+
+        if (!_inputSinks.Contains(sink))
+        {
+            _inputSinks.Add(sink);
+        }
+
+        return new InputSinkToken(this, sink);
+    }
+
+    /// <summary>Removes a sink that <see cref="AddInputSink"/> added.</summary>
+    public void RemoveInputSink(IXPlatInputSink sink)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+        _inputSinks?.Remove(sink);
+    }
+
+    /// <summary>
+    /// Offers a key to the sinks, newest first. A sink may remove itself while it handles the key,
+    /// so the walk re-reads the live list rather than a copy of it.
+    /// </summary>
+    private bool ProcessKeyInSinks(XPlatKey key, XPlatModifiers modifiers)
+    {
+        if (_inputSinks is not { Count: > 0 } sinks)
+        {
+            return false;
+        }
+
+        for (var i = sinks.Count - 1; i >= 0; i--)
+        {
+            if (i < sinks.Count && sinks[i].ProcessKeyDown(key, modifiers))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private bool ProcessTextInSinks(string text)
+    {
+        if (_inputSinks is not { Count: > 0 } sinks)
+        {
+            return false;
+        }
+
+        for (var i = sinks.Count - 1; i >= 0; i--)
+        {
+            if (i < sinks.Count && sinks[i].ProcessTextInput(text))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>Moves keyboard focus to the given control (null clears focus).</summary>
     public void SetFocus(XPlatControl? control)
@@ -935,6 +1070,11 @@ public sealed class XPlatUiHost
                     return hit;
                 }
             }
+        }
+
+        if (_menuBar?.HitTest(location) is { } barHit)
+        {
+            return barHit;
         }
 
         return _root?.HitTest(location);
@@ -1179,5 +1319,27 @@ public sealed class XPlatUiHost
         }
 
         return local;
+    }
+
+    /// <summary>
+    /// The subscription <see cref="AddInputSink"/> hands back. It is not an
+    /// <see cref="XPlatHandlerToken{T}"/> because a sink is an object, not a handler delegate.
+    /// </summary>
+    private sealed class InputSinkToken : IDisposable
+    {
+        private XPlatUiHost? _host;
+        private readonly IXPlatInputSink _sink;
+
+        public InputSinkToken(XPlatUiHost host, IXPlatInputSink sink)
+        {
+            _host = host;
+            _sink = sink;
+        }
+
+        public void Dispose()
+        {
+            _host?.RemoveInputSink(_sink);
+            _host = null;
+        }
     }
 }

@@ -91,6 +91,7 @@ internal static class Program
             ApplicationName = "XPlat UI",
             FontFamily = PreferredFontFamily(),
             ForcedDarkMode = ForcedDarkMode(args),
+            MenuPresentation = MenuPresentationArgument(args),
 
             // The application-wide icon: the Dock tile on macOS, the taskbar and Alt-Tab on Windows,
             // and the default icon name for every GTK window. Windows also shows it in the title bar
@@ -121,10 +122,10 @@ internal static class Program
             MinimumClientSize = DesignMinimumClientSize,
         };
 
-// Attached on every platform: GTK and macOS draw the bar, and the Win32 backend records it
-// without drawing it yet - but the shortcuts it carries work everywhere, because the window
-// checks the bar before the focused control sees a key.
-window.MenuBar = CreateMenuBar(window, demo);
+        // Attached on every platform. macOS draws it in the system bar, and Windows and GTK4 draw it
+        // inside the window; the shortcuts it carries work on all three, because the window checks
+        // the bar before the focused control sees a key.
+        window.MenuBar = CreateMenuBar(window, demo);
 
         application.MainWindow = window;
 
@@ -168,18 +169,18 @@ window.MenuBar = CreateMenuBar(window, demo);
     /// </summary>
     private static XPlatMenuBar CreateMenuBar(XPlatWindow window, DemoUi demo) => new(
         new XPlatMenu(
-            "View",
-            new XPlatMenuItem("Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
+            "&View",
+            new XPlatMenuItem("&Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
             {
                 Shortcut = new XPlatShortcut(XPlatKey.D),
             },
-            new XPlatMenuItem("Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
+            new XPlatMenuItem("&Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
             {
                 Shortcut = new XPlatShortcut(XPlatKey.L),
             }),
         new XPlatMenu(
-            "Window",
-            new XPlatMenuItem("Topmost", () =>
+            "&Window",
+            new XPlatMenuItem("&Topmost", () =>
             {
                 window.TopMost = !window.TopMost;
                 demo.SetStatus(window.TopMost
@@ -189,7 +190,7 @@ window.MenuBar = CreateMenuBar(window, demo);
             {
                 Shortcut = new XPlatShortcut(XPlatKey.T),
             },
-            new XPlatMenuItem("Owned Window", demo.ShowOwnedWindow)
+            new XPlatMenuItem("&Owned Window", demo.ShowOwnedWindow)
             {
                 Shortcut = new XPlatShortcut(XPlatKey.N),
             }));
@@ -251,7 +252,13 @@ window.MenuBar = CreateMenuBar(window, demo);
 #endif
         ApplyAppearanceOverride(args);
 
-        DemoUi.RenderToPng(path, width, height, PageArgument(args));
+        DemoUi.RenderToPng(
+            path,
+            width,
+            height,
+            PageArgument(args),
+            CreateMenuBar,
+            args.Contains("--menu") ? (window, demo) => demo.OpenMenuDemo(window) : null);
         Console.WriteLine($"Rendered {width}x{height} sample UI to {path}");
         // Printing what the render actually used makes it possible to tell a real visual difference
         // from a changed font or appearance when comparing renders from two builds.
@@ -259,6 +266,27 @@ window.MenuBar = CreateMenuBar(window, demo);
             $"Font: {XPlatTheme.FontFamily ?? "<SkiaSharp default>"}; " +
             $"appearance: {(XPlatTheme.IsDarkMode ? "dark" : "light")}");
         return 0;
+    }
+
+    /// <summary>
+    /// The value of <c>--menus xplatui|native</c>, which overrides who draws the menus instead of
+    /// letting each platform choose. The portable bar is otherwise unreachable on macOS, where the
+    /// system bar is the right default.
+    /// </summary>
+    private static XPlatMenuPresentation MenuPresentationArgument(string[] args)
+    {
+        int index = Array.IndexOf(args, "--menus");
+        if (index < 0 || index + 1 >= args.Length)
+        {
+            return XPlatMenuPresentation.Auto;
+        }
+
+        return args[index + 1].ToLowerInvariant() switch
+        {
+            "xplatui" => XPlatMenuPresentation.XPlatUI,
+            "native" => XPlatMenuPresentation.Native,
+            _ => XPlatMenuPresentation.Auto,
+        };
     }
 
     /// <summary>The value of <c>--page</c>, or -1 when the sample should show its first page.</summary>

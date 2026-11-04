@@ -10,7 +10,7 @@ internal static class Gtk4MenuItemWidget
     {
         var content = Gtk.Box.New(Gtk.Orientation.Horizontal, 24);
 
-        var text = item.Checked ? $"\u2713  {item.Text}" : item.Text;
+        var text = item.Checked ? $"\u2713  {item.DisplayText}" : item.DisplayText;
         var label = Gtk.Label.New(text);
         label.SetHalign(Gtk.Align.Start);
         label.SetHexpand(true);

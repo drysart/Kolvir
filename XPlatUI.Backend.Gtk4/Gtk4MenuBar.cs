@@ -76,7 +76,7 @@ internal sealed class Gtk4MenuBar : IDisposable
         _popovers.Add(popover);
 
         var button = Gtk.MenuButton.New();
-        button.SetLabel(menu.Text);
+        button.SetLabel(menu.DisplayText);
         button.SetHasFrame(false);
         button.SetAlwaysShowArrow(false);
         button.AddCssClass("flat");

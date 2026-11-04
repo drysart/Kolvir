@@ -18,7 +18,7 @@ The tiers were set when the library had twelve controls and they still describe 
 | --- | --- | --- |
 | 1 - common input | `XPlatCheckBox`, `XPlatRadioButton`, `XPlatProgressBar`, `XPlatGroupBox` | shipped |
 | 2 - popup-based | the popup layer (`IXPlatPopupService`, `XPlatPopup`, one popup window per backend), `XPlatComboBox`, `XPlatTabControl`/`XPlatTabPage`, `XPlatToolTip` | shipped |
-| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | §3 |
+| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | in-library menus shipped; the rest in §3 |
 | 3 - large list controls | `XPlatVirtualList` (the shared row base), `XPlatListView`, `XPlatTreeView` | shipped |
 | 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | shipped |
 
@@ -63,40 +63,9 @@ a reviewer should ask for each one rather than infer it.
 
 ## 3. Unlocked by the popup layer
 
-These four are pure control work now; the hard foundation is in place.
+These three are pure control work now; the hard foundation is in place.
 
-### 3.1 In-library menus
-
-The biggest consistency win left. The menu *model* is already portable - `XPlatMenu`,
-`XPlatMenuItem`, `XPlatContextMenu`, `XPlatMenuMetrics`, `XPlatMenuLayout` and `XPlatMenuRenderer`
-contain no platform code - but its *presentation* is not:
-
-| Surface | Today |
-| --- | --- |
-| Context menu, Windows 11 | Drawn by XPlatUI: `Win32MenuWindow` renders `XPlatMenuRenderer` into a layered popup with captured, blurred acrylic and a drop shadow. This is the target look. |
-| Context menu, macOS | Native `NSMenu.PopUpMenu` - system font, system spacing, no icons, no custom rows, no controls inside. |
-| Context menu, GTK4 | Native `Gtk.Popover` - the theme's look, not ours. |
-| Menu bar | Native on all three, and on Win32 it is recorded and not drawn at all. |
-
-What it needs:
-
-1. Generalise the part of `Win32MenuWindow` that is not menu-specific (layered popup, backdrop
-   capture, work-area placement, nested pump, dismissal) so it sits behind the popup service rather
-   than being a menu window. `XPlatPopup` already covers placement and dismissal, so this may mostly
-   be deletion.
-2. Draw the context menu through `XPlatMenuRenderer` in a popup on macOS and GTK4 as well, so all
-   three platforms look the same and follow `XPlatTheme`.
-3. Draw the menu bar in the window on Windows and Linux. On macOS the app menu bar has to stay
-   native: AppKit owns the system bar, and Cmd+Q, Cmd+W and the Edit-menu clipboard items come from
-   being in it.
-4. Icons and in-menu controls, which the current renderer has no room for (`XPlatMenuMetrics` has a
-   check column and a shortcut gap, no icon column).
-
-Open question: replace the native path or keep both. The likely answer is a
-`MenuPresentation` option (`XPlatUI` | `Native`) defaulting to `XPlatUI` on Windows and Linux and
-native for the macOS bar, with `--classic-menus` staying as the escape hatch it is today.
-
-### 3.2 `XPlatDateTimePicker`
+### 3.1 `XPlatDateTimePicker`
 
 A field plus a calendar in a popup: month grid with a header for month and year, today and clear
 affordances, `Value`, `MinDate`, `MaxDate`, `Format` (`Short`/`Long`/`Time`/`CustomFormat`),
@@ -112,7 +81,7 @@ Notes:
   calendar. WinForms allows both; the read-only one is a fraction of the work and has no partial-input
   states to get wrong.
 
-### 3.3 Text-box autocomplete
+### 3.2 Text-box autocomplete
 
 `XPlatTextBox` grows `AutoCompleteMode` (`None`/`Suggest`/`Append`/`SuggestAppend`),
 `AutoCompleteSource` (`CustomSource`/`HistoryList`) and `AutoCompleteCustomSource`, with the
@@ -123,7 +92,7 @@ filtered as the text changes.
 This is the cheapest of the four: it is a re-arrangement of `XPlatComboBox`'s drop-down plumbing and
 needs no new primitives.
 
-### 3.4 Drag previews
+### 3.3 Drag previews
 
 Two separable halves, and only the first belongs to the library proper:
 
@@ -150,8 +119,6 @@ Recorded so the decision is not re-litigated every time someone asks:
 
 ## 5. Suggested order
 
-1. **In-library menus** (§3.1) - the largest consistency win, the renderer already exists, and it
-   removes the last place where the same UI looks different per platform.
-2. **`XPlatDateTimePicker` and text-box autocomplete** (§3.2, §3.3) - both are popup work now, and
+1. **`XPlatDateTimePicker` and text-box autocomplete** (§3.1, §3.2) - both are popup work now, and
    both are things an application notices missing on day one.
-3. **Drag previews** (§3.4) - small, and independent of everything above.
+2. **Drag previews** (§3.3) - small, and independent of everything above.

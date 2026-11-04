@@ -31,7 +31,8 @@ public enum XPlatPopupPresentation
 /// </remarks>
 public sealed class XPlatPopup : IDisposable
 {
-    private readonly XPlatControl _owner;
+    private readonly XPlatControl? _owner;
+    private readonly XPlatUiHost? _host;
     private Action<object>? _closed;
     private IXPlatPopupWindow? _window;
     private XPlatPopupDismissCatcher? _catcher;
@@ -50,8 +51,21 @@ public sealed class XPlatPopup : IDisposable
         _owner = owner;
     }
 
-    /// <summary>The control the popup belongs to.</summary>
-    public XPlatControl Owner => _owner;
+    /// <param name="host">
+    /// The window the popup is anchored to, for a popup that belongs to the window rather than to a
+    /// control - which is what a menu opened from the menu bar or the keyboard is.
+    /// </param>
+    public XPlatPopup(XPlatUiHost host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        _host = host;
+    }
+
+    /// <summary>The control the popup belongs to, or null when it belongs to the window.</summary>
+    public XPlatControl? Owner => _owner;
+
+    /// <summary>The window the popup is anchored to.</summary>
+    public XPlatUiHost Host => _owner?.Host ?? _host!;
 
     /// <summary>
     /// The control drawn inside the popup. It must not already be in a control tree, because the
@@ -123,7 +137,7 @@ public sealed class XPlatPopup : IDisposable
             throw new InvalidOperationException("The popup's content is already in a control tree.");
         }
 
-        var host = _owner.Host ?? throw new InvalidOperationException("The popup's owner is not attached to a window.");
+        var host = Host ?? throw new InvalidOperationException("The popup is not attached to a window.");
 
         _location = location;
 
@@ -139,6 +153,12 @@ public sealed class XPlatPopup : IDisposable
     /// Moves an open popup so that its top left corner sits at <paramref name="location"/>, which
     /// is what a drop-down list does when its owner scrolls or resizes.
     /// </summary>
+    /// <remarks>
+    /// The popup is re-measured rather than only moved: content is free to change size while it is
+    /// open, and a submenu opening is exactly that. A window popup passes the new size to its
+    /// window; an overlaid one has to resize the control it hangs in the host, or the growth is
+    /// clipped away at the old edge.
+    /// </remarks>
     public void MoveTo(SKPoint location)
     {
         if (!_open)
@@ -156,8 +176,7 @@ public sealed class XPlatPopup : IDisposable
 
         if (_shownContent is { } content)
         {
-            content.Location = location;
-            SyncCatcherBounds();
+            PlaceOverlay(content, location);
         }
     }
 
@@ -214,7 +233,7 @@ public sealed class XPlatPopup : IDisposable
 
     private bool TryShowInWindow(XPlatUiHost host, XPlatControl content, SKPoint location)
     {
-        var service = _owner.GetService<IXPlatPopupService>() ?? XPlatPopupService.Current;
+        var service = host.GetService<IXPlatPopupService>() ?? XPlatPopupService.Current;
         var window = service?.CreatePopup(host, DismissOnOutsideClick);
 
         if (window is null)
@@ -260,7 +279,16 @@ public sealed class XPlatPopup : IDisposable
         }
 
         host.AddOverlay(content);
+        PlaceOverlay(content, location);
+    }
 
+    /// <summary>
+    /// Puts overlaid content at <paramref name="location" />, sized to what it measures now. Called
+    /// again whenever the content changes size while it is open, so the growth is never clipped at
+    /// the old edge.
+    /// </summary>
+    private void PlaceOverlay(XPlatControl content, SKPoint location)
+    {
         var size = MeasureContent();
         content.Bounds = new SKRect(location.X, location.Y, location.X + size.Width, location.Y + size.Height);
         content.PerformLayout();

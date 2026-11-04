@@ -466,13 +466,30 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
     /// </summary>
     private bool IsKeyHandledByUi(in NativeMethods.MSG message)
     {
-        if (message.message != NativeMethods.WmKeyDown)
+        var isSystemKey = message.message == NativeMethods.WmSysKeyDown;
+
+        if (message.message != NativeMethods.WmKeyDown && !isSystemKey)
+        {
+            return false;
+        }
+
+        // A key pressed with Alt held arrives as WM_SYSKEYDOWN rather than WM_KEYDOWN, which is how
+        // menu mnemonics reach the UI at all. The handful the window manager owns still have to be
+        // left alone, or Alt+F4 would stop closing the window.
+        if (isSystemKey && IsReservedSystemKey(message.wParam))
         {
             return false;
         }
 
         return FindWindow(message.hwnd)?.TryHandleKeyDown(message.wParam) == true;
     }
+
+    /// <summary>True for the Alt combinations the shell owns rather than the application.</summary>
+    private static bool IsReservedSystemKey(IntPtr wParam) => (int)wParam switch
+    {
+        NativeMethods.VkF4 or NativeMethods.VkTab or NativeMethods.VkSpace or NativeMethods.VkEscape => true,
+        _ => false,
+    };
 
     private Win32WindowBackend? FindWindow(IntPtr hwnd)
     {

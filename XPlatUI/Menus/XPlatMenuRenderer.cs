@@ -21,6 +21,30 @@ public readonly record struct XPlatMenuMetrics
     /// <summary>Width reserved for the check mark to the left of every label.</summary>
     public float CheckColumnWidth { get; init; }
 
+    /// <summary>
+    /// Width reserved for an item's icon, to the right of the check column. A menu that has no icons
+    /// anywhere does not reserve it, so an iconless menu is exactly as wide as it always was.
+    /// </summary>
+    public float IconColumnWidth { get; init; }
+
+    /// <summary>The square an icon is fitted into.</summary>
+    public float IconSize { get; init; }
+
+    /// <summary>
+    /// Width reserved at the right end of a row for the chevron that marks a submenu. Only reserved
+    /// when the menu has at least one submenu.
+    /// </summary>
+    public float ChevronColumnWidth { get; init; }
+
+    /// <summary>Space above and below a control hosted in a row.</summary>
+    public float ControlPadding { get; init; }
+
+    /// <summary>
+    /// Width a hosted control is measured at. A control that fills whatever it is given - a track
+    /// bar, a progress bar - would otherwise ask for the whole screen and stretch the menu to it.
+    /// </summary>
+    public float ControlWidth { get; init; }
+
     /// <summary>Minimum space between a label and its shortcut hint.</summary>
     public float ShortcutGap { get; init; }
 
@@ -42,6 +66,11 @@ public readonly record struct XPlatMenuMetrics
         SeparatorHeight = 9f,
         Padding = 6f,
         CheckColumnWidth = 22f,
+        IconColumnWidth = 24f,
+        IconSize = 16f,
+        ChevronColumnWidth = 16f,
+        ControlPadding = 4f,
+        ControlWidth = 220f,
         ShortcutGap = 24f,
         MinWidth = 132f,
         CornerRadius = 8f,
@@ -57,8 +86,23 @@ public readonly record struct XPlatMenuMetrics
 /// </summary>
 public readonly record struct XPlatMenuRow(XPlatMenuItem Item, SKRect Bounds)
 {
-    /// <summary>True when picking this row should do something: a real item that is enabled.</summary>
-    public bool IsPickable => !Item.IsSeparator && Item.Enabled;
+    /// <summary>Where the item's icon goes. Empty when the menu has no icon column.</summary>
+    public SKRect IconBounds { get; init; }
+
+    /// <summary>Where a control hosted by the item goes. Empty for an ordinary item.</summary>
+    public SKRect ControlBounds { get; init; }
+
+    /// <summary>
+    /// True when picking this row should do something: a real, enabled item that is not filled by a
+    /// control of its own. A row that opens a submenu is pickable, because pressing it opens the menu.
+    /// </summary>
+    public bool IsPickable => !Item.IsSeparator && Item.Enabled && Item.Control is null;
+
+    /// <summary>True when pressing this row opens <see cref="XPlatMenuItem.SubItems"/>.</summary>
+    public bool IsSubMenu => !Item.IsSeparator && Item.HasSubMenu;
+
+    /// <summary>True when the row is filled by <see cref="XPlatMenuItem.Control"/> rather than a label.</summary>
+    public bool HasControl => !Item.IsSeparator && Item.Control is not null;
 }
 
 /// <summary>
@@ -69,10 +113,12 @@ public sealed class XPlatMenuLayout
 {
     private readonly XPlatMenuRow[] _rows;
 
-    internal XPlatMenuLayout(SKSize surfaceSize, float shadowExtent, XPlatMenuRow[] rows)
+    internal XPlatMenuLayout(SKSize surfaceSize, float shadowExtent, XPlatMenuRow[] rows, bool hasIcons, bool hasSubMenus)
     {
         SurfaceSize = surfaceSize;
         ShadowExtent = shadowExtent;
+        HasIcons = hasIcons;
+        HasSubMenus = hasSubMenus;
         _rows = rows;
         FirstPickable = -1;
 
@@ -90,6 +136,12 @@ public sealed class XPlatMenuLayout
 
     /// <summary>Size of the menu itself, without the shadow margin.</summary>
     public SKSize SurfaceSize { get; }
+
+    /// <summary>True when at least one item carries an icon, so the icon column is reserved.</summary>
+    public bool HasIcons { get; }
+
+    /// <summary>True when at least one item opens a submenu, so the chevron column is reserved.</summary>
+    public bool HasSubMenus { get; }
 
     /// <summary>How far the shadow reaches past the menu. Zero when the layout has no shadow.</summary>
     public float ShadowExtent { get; }
@@ -161,10 +213,10 @@ public sealed class XPlatMenuLayout
 }
 
 /// <summary>
-/// Draws an <see cref="XPlatContextMenu"/> with Skia in the modern Windows 11 style: a rounded
-/// surface with a drop shadow, a pill behind the hovered row, a check column and right aligned
-/// shortcut hints. It is deliberately free of platform code, so a backend that does not want a
-/// native menu can hand it an <c>SKCanvas</c> and reuse this on macOS or Linux.
+/// Draws a menu - a context menu, a drop-down, a submenu - with Skia in the modern Windows 11
+/// style: a rounded surface with a drop shadow, a pill behind the hovered row, check and icon
+/// columns, right aligned shortcut hints and a chevron on an item that opens a submenu. It is
+/// deliberately free of platform code, so every backend draws the same menu.
 /// </summary>
 /// <remarks>
 /// Measuring and painting are separate so a platform layer can cache the layout and only repaint
@@ -182,7 +234,7 @@ public static class XPlatMenuRenderer
     /// the hover invisible on a light menu while reading well on a dark one. Washing the text colour
     /// over the surface keeps the step the same size in both palettes.
     /// </summary>
-    private const byte HoverWashAlpha = 0x1D;
+    internal const byte HoverWashAlpha = 0x1D;
 
     /// <summary>Measures <paramref name="menu"/> and works out where each row sits.</summary>
     /// <param name="menu">The menu to measure.</param>
@@ -196,25 +248,74 @@ public static class XPlatMenuRenderer
         bool shadow = true)
     {
         ArgumentNullException.ThrowIfNull(menu);
+        return Measure(menu.TrimmedItems, metrics, font, shadow);
+    }
+
+    /// <summary>Measures a list of items and works out where each row sits.</summary>
+    /// <param name="items">The items to lay out, in order. Trimmed before measuring.</param>
+    /// <param name="metrics">Row metrics, or null for <see cref="XPlatMenuMetrics.Default"/>.</param>
+    /// <param name="font">Label font, or null for <see cref="XPlatTheme.DefaultFont"/>.</param>
+    /// <param name="shadow">True to reserve room for a drop shadow around the surface.</param>
+    /// <param name="availableWidth">
+    /// How wide the menu is allowed to be, which is what a hosted control is measured against.
+    /// Infinite by default, so a menu is as wide as its contents.
+    /// </param>
+    public static XPlatMenuLayout Measure(
+        IReadOnlyList<XPlatMenuItem> items,
+        XPlatMenuMetrics? metrics = null,
+        XPlatFont? font = null,
+        bool shadow = true,
+        float availableWidth = float.PositiveInfinity)
+    {
+        ArgumentNullException.ThrowIfNull(items);
 
         var m = metrics ?? XPlatMenuMetrics.Default;
         var f = font ?? XPlatTheme.DefaultFont;
-        var items = menu.TrimmedItems;
+        items = XPlatMenuTrimming.Trim(items);
 
-        var width = m.MinWidth;
-        var height = m.Padding * 2f;
+        var hasIcons = false;
+        var hasSubMenus = false;
 
         foreach (var item in items)
         {
+            hasIcons |= item.Image is not null;
+            hasSubMenus |= item.HasSubMenu;
+        }
+
+        var iconColumn = hasIcons ? m.IconColumnWidth : 0f;
+        var chevronColumn = hasSubMenus ? m.ChevronColumnWidth : 0f;
+        var columns = (m.Padding * 2f) + m.CheckColumnWidth + iconColumn;
+        var controlWidth = MathF.Max(0f, availableWidth - columns - m.Padding);
+
+        var width = m.MinWidth;
+        var height = m.Padding * 2f;
+        var rowHeights = new float[items.Count];
+
+        for (var i = 0; i < items.Count; i++)
+        {
+            var item = items[i];
+
             if (item.IsSeparator)
             {
+                rowHeights[i] = m.SeparatorHeight;
                 height += m.SeparatorHeight;
                 continue;
             }
 
+            if (item.Control is { } control)
+            {
+                var controlExtent = MathF.Min(m.ControlWidth, controlWidth);
+                var desired = control.Measure(new SKSize(controlExtent, float.PositiveInfinity));
+                rowHeights[i] = MathF.Max(m.ItemHeight, desired.Height + (m.ControlPadding * 2f));
+                height += rowHeights[i];
+                width = MathF.Max(width, columns + MathF.Min(desired.Width, controlExtent) + m.Padding);
+                continue;
+            }
+
+            rowHeights[i] = m.ItemHeight;
             height += m.ItemHeight;
 
-            var needed = (m.Padding * 2f) + m.CheckColumnWidth + FontFor(item, f).MeasureWidth(item.Text);
+            var needed = columns + FontFor(item, f).MeasureWidth(item.DisplayText) + chevronColumn;
             if (item.ShortcutDisplayText is { } hint)
             {
                 needed += m.ShortcutGap + f.MeasureWidth(hint);
@@ -229,16 +330,43 @@ public static class XPlatMenuRenderer
         var extent = shadow ? m.ShadowExtent : 0f;
         var rows = new XPlatMenuRow[items.Count];
         var y = extent + m.Padding;
+        var iconLeft = extent + m.Padding + m.CheckColumnWidth;
 
         for (var i = 0; i < items.Count; i++)
         {
             var item = items[i];
-            var rowHeight = item.IsSeparator ? m.SeparatorHeight : m.ItemHeight;
-            rows[i] = new XPlatMenuRow(item, SKRect.Create(extent, y, width, rowHeight));
+            var rowHeight = rowHeights[i];
+            var rowBounds = SKRect.Create(extent, y, width, rowHeight);
+
+            var row = new XPlatMenuRow(item, rowBounds);
+
+            if (!item.IsSeparator)
+            {
+                row = row with
+                {
+                    IconBounds = hasIcons
+                        ? SKRect.Create(iconLeft, rowBounds.MidY - (m.IconSize * 0.5f), m.IconSize, m.IconSize)
+                        : SKRect.Empty,
+                };
+
+                if (item.Control is not null)
+                {
+                    row = row with
+                    {
+                        ControlBounds = SKRect.Create(
+                            iconLeft + iconColumn,
+                            rowBounds.Top + m.ControlPadding,
+                            MathF.Max(0f, width - columns - m.Padding),
+                            rowHeight - (m.ControlPadding * 2f)),
+                    };
+                }
+            }
+
+            rows[i] = row;
             y += rowHeight;
         }
 
-        return new XPlatMenuLayout(new SKSize(width, height), extent, rows);
+        return new XPlatMenuLayout(new SKSize(width, height), extent, rows, hasIcons, hasSubMenus);
     }
 
     /// <summary>Paints a measured menu onto <paramref name="canvas"/>.</summary>
@@ -308,8 +436,8 @@ public static class XPlatMenuRenderer
 
         DrawHover(canvas, layout, hoveredIndex, m, alpha);
 
-        var textLeft = bounds.Left + m.Padding + m.CheckColumnWidth;
-        var textRight = bounds.Right - m.Padding;
+        var textLeft = bounds.Left + m.Padding + m.CheckColumnWidth + (layout.HasIcons ? m.IconColumnWidth : 0f);
+        var textRight = bounds.Right - m.Padding - (layout.HasSubMenus ? m.ChevronColumnWidth : 0f);
         var checkCenter = bounds.Left + m.Padding + (m.CheckColumnWidth * 0.5f);
 
         using var text = new SKPaint { IsAntialias = true };
@@ -335,8 +463,19 @@ public static class XPlatMenuRenderer
                 continue;
             }
 
+            if (row.HasControl)
+            {
+                // The hosted control paints itself: it is a child of the surface, drawn after this.
+                continue;
+            }
+
             var rowFont = FontFor(item, f);
             var baseline = row.Bounds.MidY + (rowFont.BaselineOffset - (rowFont.LineHeight * 0.5f));
+
+            if (item.Image is { } image && !row.IconBounds.IsEmpty)
+            {
+                DrawIcon(canvas, image, row.IconBounds, alpha);
+            }
 
             if (item.Checked)
             {
@@ -344,14 +483,60 @@ public static class XPlatMenuRenderer
             }
 
             text.Color = Scale(item.Enabled ? XPlatTheme.Foreground : XPlatTheme.DisabledForeground, MathF.Max(alpha, 0.85f));
-            canvas.DrawText(item.Text, textLeft, baseline, SKTextAlign.Left, rowFont.SkFont, text);
+            canvas.DrawText(item.DisplayText, textLeft, baseline, SKTextAlign.Left, rowFont.SkFont, text);
 
             if (item.ShortcutDisplayText is { } hint)
             {
                 text.Color = Scale(item.Enabled ? XPlatTheme.MutedForeground : XPlatTheme.DisabledForeground, MathF.Max(alpha, 0.85f));
                 canvas.DrawText(hint, textRight, baseline, SKTextAlign.Right, f.SkFont, text);
             }
+
+            if (row.IsSubMenu)
+            {
+                DrawChevron(
+                    canvas,
+                    bounds.Right - m.Padding - (m.ChevronColumnWidth * 0.5f),
+                    row.Bounds.MidY,
+                    Scale(item.Enabled ? XPlatTheme.MutedForeground : XPlatTheme.DisabledForeground, MathF.Max(alpha, 0.85f)));
+            }
         }
+    }
+
+    private static void DrawIcon(SKCanvas canvas, SKImage image, SKRect slot, float alpha)
+    {
+        var scale = MathF.Min(slot.Width / image.Width, slot.Height / image.Height);
+        var width = image.Width * scale;
+        var height = image.Height * scale;
+
+        var target = SKRect.Create(
+            slot.MidX - (width * 0.5f),
+            slot.MidY - (height * 0.5f),
+            width,
+            height);
+
+        using var paint = new SKPaint { Color = SKColors.White.WithAlpha((byte)Math.Clamp(MathF.Round(alpha * 255f), 0f, 255f)) };
+        canvas.DrawImage(image, target, new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear), paint);
+    }
+
+    private static void DrawChevron(SKCanvas canvas, float centerX, float centerY, SKColor color)
+    {
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1.5f,
+            StrokeCap = SKStrokeCap.Round,
+            StrokeJoin = SKStrokeJoin.Round,
+            Color = color,
+        };
+
+        using var builder = new SKPathBuilder();
+        builder.MoveTo(centerX - 2.5f, centerY - 4f);
+        builder.LineTo(centerX + 1.5f, centerY);
+        builder.LineTo(centerX - 2.5f, centerY + 4f);
+
+        using var path = builder.Snapshot();
+        canvas.DrawPath(path, paint);
     }
 
     private static void DrawHover(SKCanvas canvas, XPlatMenuLayout layout, int hoveredIndex, XPlatMenuMetrics m, float alpha)

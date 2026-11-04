@@ -107,6 +107,19 @@ public sealed class XPlatApplicationOptions
     public XPlatMenuBar? MenuBar { get; set; }
 
     /// <summary>
+    /// Who draws the menus: the library or the platform. Defaults to
+    /// <see cref="XPlatMenuPresentation.Auto"/>, which is the library's own menus everywhere except
+    /// macOS, where the system owns the menu bar.
+    /// </summary>
+    /// <remarks>
+    /// The library's menus are the same Skia drawing on every platform, so they support icons,
+    /// submenus and controls in a menu row; a platform menu supports whatever that platform's menu
+    /// API does. Windows keeps <c>--classic-menus</c> as a further step down to <c>TrackPopupMenuEx</c>
+    /// for comparison.
+    /// </remarks>
+    public XPlatMenuPresentation MenuPresentation { get; set; } = XPlatMenuPresentation.Auto;
+
+    /// <summary>
     /// The icon every window starts with, and the icon the desktop shows for the application: the
     /// taskbar and Alt-Tab on Windows, the Dock on macOS. Null keeps the platform's generic icon.
     /// </summary>

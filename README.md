@@ -94,6 +94,10 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTabControl` / `XPlatTabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
 | `XPlatToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
 | `XPlatToolStrip` / `XPlatStatusStrip` | `ToolStrip` / `StatusStrip` | A docked bar of *items* - button, label, separator, spring, progress bar - painted in one pass and taken as a single tab stop |
+| `XPlatMenuView` | `ContextMenuStrip` (the surface) | The portable menu: rows, hover pill, check/icon columns, shortcut hints, submenus as child views and real controls hosted in a row. No platform code |
+| `XPlatMenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
+| `XPlatMenuPresenter` | `ToolStripDropDown` plumbing | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, on every backend |
+| `XPlatMenuPresentation` | - | Chooses the library's menus or the platform's, per application |
 | `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
@@ -1309,27 +1313,87 @@ what makes copying a multi-control selection work no matter which control was ri
 ### Context menus
 
 `host.ProcessContextMenu(point)` builds an `XPlatContextMenu` and hands it to the presenter
-installed on the host. The library only owns the model; the backend decides how to show it.
-
-On Windows 11 the backend draws the menu itself instead of calling `TrackPopupMenuEx`, because the
-Win32 menu is the old flat style while the shell and WinUI menus are rounded, softly shadowed and
-backed by acrylic. The menu goes through the same Skia pipeline as the controls and is shown in a
-`WS_EX_LAYERED` popup, so it looks the same on every machine and follows `XPlatTheme` in light and
-dark:
+installed on the host. The library owns the model; the presenter decides how to draw it, and there
+are two families of presenter: the platform's own menus, and the portable one that draws every menu
+with Skia. The portable one is the default, because a menu drawn from Skia is the same menu on
+every platform and can carry icons, submenus and controls in a row.
 
 | Piece | What it does |
 | --- | --- |
-| `XPlatMenuRenderer.Measure(menu, metrics, font, shadow)` | Lays the rows out and returns an `XPlatMenuLayout`: surface size, shadow margin, row bounds, `HitTest` and `NextPickable` |
-| `XPlatMenuRenderer.Paint(canvas, layout, hovered, surfaceAlpha)` | Draws the surface, drop shadow, hover pill, check column and right-aligned shortcut hints. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
-| `XPlatMenuMetrics` | Row height, padding, corner radii and shadow extent; `Default` is tuned to the Windows 11 menu |
-| `Win32MenuWindow.cs` | The popup: captures and blurs the backdrop, renders into a 32bpp DIB and
+| `XPlatMenuItem` / `XPlatMenuBar` / `XPlatContextMenu` | The model: items, separators, submenus, checked and disabled state, shortcuts, icons and hosted controls |
+| `XPlatMenuRenderer` | `Measure(menu, metrics, font, shadow)` lays the rows out and returns an `XPlatMenuLayout`: surface size, shadow margin, row bounds, `HitTest` and `NextPickable`. `Paint(canvas, layout, hovered, surfaceAlpha)` draws the surface, drop shadow, hover pill, check column, icons and right-aligned shortcut hints. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
+| `XPlatMenuMetrics` | Row height, padding, corner radii, shadow extent and the check/icon/control column widths; `Default` is tuned to the Windows 11 menu |
+| `XPlatMenuView` | The control that shows one menu, with its submenus and its in-menu controls |
+| `XPlatMenuPresenter` | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView` |
+| `XPlatMenuBarView` | The menu bar drawn inside the window |
+| `Win32MenuWindow.cs` | The popup window the Win32 backend shows a menu in: layered, so the rounded corners and the drop shadow come from per-pixel alpha, with the acrylic backdrop described below |
 
-`XPlatMenuRenderer` contains no platform code, so a macOS or Linux backend can reuse it verbatim
-instead of writing its own menu drawing. Because the popup is layered, the rounded corners and the
-drop shadow come from per-pixel alpha: the window is sized surface + `ShadowExtent` on each side and
-positioned so that the surface - not the window - lands exactly on the requested point.
+`XPlatMenuRenderer` contains no platform code, so every backend draws the same menu from it.
 
-The acrylic is produced by the popup rather than by DWM, because DWM ignores
+### Menus drawn by the library
+
+`XPlatMenuView` is the menu surface. It is a plain control: it paints through the normal control
+paint path, takes its colours from `XPlatTheme` at paint time and answers `MeasureContent`, which is
+what lets the presenter size the popup around it:
+
+```csharp
+var menu = new XPlatContextMenu()
+    .Add(new XPlatMenuItem("&Open...") { Image = openIcon, Shortcut = new XPlatShortcut(XPlatKey.O) })
+    .AddSeparator()
+    .Add(new XPlatMenuItem("Show &grid") { Checked = true });
+
+listView.ContextMenu = menu;
+```
+
+A menu bar is the same view with a strip above it. `XPlatMenuBarView` lays the top-level titles out
+in a row, paints the hover and open states, and opens a drop-down in an `XPlatPopup` so it can hang
+past the bottom of the window:
+
+| Behaviour | How it works |
+| --- | --- |
+| Reaching the bar | The bar is not focusable and takes no part in tab order. `Alt` plus a mnemonic is what reaches it, because `XPlatUiHost.ProcessKeyDown` offers the key to the bar before the focused control |
+| Switching menus | Pressing another title while a menu is open switches menus instead of closing and reopening, the way a native bar does |
+| Keys inside a menu | Up/Down walk the pickable rows (separators, disabled rows and control rows are skipped), Right opens a submenu, Left closes it, `Home`/`End` jump, `Tab` moves between the menu's own rows rather than leaving the menu, `Enter` or `Space` invokes, `Esc` closes the innermost menu and then dismisses the whole chain, and a mnemonic letter picks a row directly |
+| Dismissal | A click outside, losing activation or `Esc` closes the chain. The popup never takes the keyboard, so the menu is pushed onto the *owning* window as an `IXPlatInputSink` for as long as it is open |
+
+Submenus are child `XPlatMenuView`s rather than separate popups: `MeasureContent` unions the chain
+so the surface is always big enough for the deepest menu, and `AddSizeChangedHandler` tells the
+presenter to grow or shrink the popup when one opens or closes. A submenu sits against the right
+edge of the menu that opened it, overlapping by `SubMenuOverlap`, with its first row level with the
+row that opened it - so it is placed a little above that row, as `XPlatMenuMetrics.Padding` dictates.
+
+An item can carry an icon, a tick, or a control. Icons are drawn in their own column and the tick in
+the check column, and `XPlatMenuTrimming.Trim` drops a separator that would lead, trail or double up,
+so a menu built by filtering a list still looks right. An in-menu control is a real control: it is
+parented to the open menu view, laid out in its row and taken out again when the menu closes. A
+control has one parent, so if two open menus share one, only the first shows it.
+
+`XPlatMenuItem.DisplayText` is the label with the mnemonic marker removed and never contains `&`;
+`Text` is the one that does. Mnemonics are matched against `XPlatMenuBar.Menus[i].Mnemonic`, which is
+the letter the item declared.
+
+### Choosing native or portable menus
+
+`XPlatApplicationOptions.MenuPresentation` picks the family, and a backend resolves it once when it
+creates a window:
+
+| Value | Meaning |
+| --- | --- |
+| `Auto` | The library's menus on Windows and Linux, the platform's on macOS |
+| `XPlatUI` | Always the library's menus |
+| `Native` | Always the platform's menus: the system bar on macOS, `TrackPopupMenuEx` and GTK4 popovers on Windows and Linux |
+
+macOS is the exception under `Auto` because AppKit owns the one menu bar the system shows at the top
+of the screen, and the standard Edit and application menus - and the key equivalents that go with
+them - come from being in it. A window-drawn bar there would sit inside the window and leave the
+system bar empty. Passing `XPlatMenuPresentation.XPlatUI` on macOS still draws the context menus with
+Skia; only the bar stays the system's.
+
+The sample takes `--menus xplatui|native` to compare the two on any platform. On Windows,
+`--classic-menus` is a further step down to `TrackPopupMenuEx` even when the portable menu is
+selected, which is only useful for looking at the difference.
+
+The acrylic on Windows is produced by the popup rather than by DWM, because DWM ignores
 `DWMWA_SYSTEMBACKDROP_TYPE` on a layered window and translucency without blur would leave the text
 behind the menu legible through it. Instead the popup copies the screen region it is about to cover
 before it is shown, blurs that copy, adds a fine noise and paints the surface over it at 80% (dark)
@@ -1337,13 +1401,6 @@ or 84% (light) opacity - the same three layers real acrylic is made of. The blur
 captured image because Skia ignores an image filter on the paint passed to `DrawImage`. If the
 capture fails, the surface falls back to fully opaque.
 
-The popup runs its own message loop while it is open, the way `TrackPopupMenuEx` does. Moving the
-pointer moves the highlight, the arrow keys walk the enabled items (skipping separators and disabled
-rows), `Enter` or a click invokes, and `Esc`, a click outside or losing activation dismisses it.
-
-This style is used when `Environment.OSVersion.Version.Build >= 22000`. On older Windows, or if the
-popup cannot be created, `Win32ContextMenuPresenter` falls back to `TrackPopupMenuEx`; pass
-`--classic-menus` to the application to force the old menu on Windows 11 as well.
 
 ### Keyboard shortcuts
 
@@ -1368,8 +1425,7 @@ The window checks its menu bar - the one on the `XPlatWindow`, falling back to
 `XPlatApplicationOptions.MenuBar` - before the focused control sees the key, which is the order
 native menus use. A matching item claims the key even when it is disabled, so a greyed-out command
 does not silently fall through to the control that has focus. Because the lookup happens in
-`XPlatUiHost.ProcessKeyDown`, it works on every backend, including the Win32 one, which records the
-bar without drawing it yet.
+`XPlatUiHost.ProcessKeyDown`, it works on every backend and whichever way the bar is presented.
 
 `ShortcutText` still exists for a menu that wants to describe a key it does not dispatch itself;
 when it is set it wins over the shortcut's own text in the menu drawing.

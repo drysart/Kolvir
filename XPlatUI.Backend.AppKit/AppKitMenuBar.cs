@@ -73,7 +73,7 @@ internal static class AppKitMenuBar
     /// </summary>
     private static NSMenuItem CreateMenu(XPlatMenu menu)
     {
-        var text = menu.Text ?? string.Empty;
+        var text = menu.DisplayText;
         var submenu = new NSMenu(text) { AutoEnablesItems = false };
 
         foreach (var item in menu.Items)
