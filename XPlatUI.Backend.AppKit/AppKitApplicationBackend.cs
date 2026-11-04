@@ -298,6 +298,8 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
         services.AddSingleton(this);
         services.AddSingleton<AppKitClipboard>();
         services.AddSingleton<IXPlatClipboard>(static provider => provider.GetRequiredService<AppKitClipboard>());
+        services.AddSingleton<AppKitLauncher>();
+        services.AddSingleton<IXPlatLauncher>(static provider => provider.GetRequiredService<AppKitLauncher>());
         services.AddSingleton(SystemTheme);
         services.AddSingleton<IXPlatDialogService, AppKitDialogService>();
     }

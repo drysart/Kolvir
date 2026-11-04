@@ -11,13 +11,22 @@ public enum DockStyle
     Fill = 5,
 }
 
-/// <summary>Orientation of the splitter in an <see cref="XPlatSplitContainer"/>.</summary>
+/// <summary>
+/// Which way something runs: the splitter of an <see cref="XPlatSplitContainer"/>, or the axis the
+/// thumb of an <see cref="XPlatScrollBar"/> or <see cref="XPlatTrackBar"/> travels along.
+/// </summary>
 public enum XPlatOrientation
 {
-    /// <summary>The splitter runs horizontally; panels are stacked top and bottom and the adjustable size is a height.</summary>
+    /// <summary>
+    /// A splitter that runs horizontally, leaving the panels stacked top and bottom with a height to
+    /// adjust; or a thumb that travels left and right.
+    /// </summary>
     Horizontal = 0,
 
-    /// <summary>The splitter runs vertically; panels sit side by side and the adjustable size is a width.</summary>
+    /// <summary>
+    /// A splitter that runs vertically, leaving the panels side by side with a width to adjust; or a
+    /// thumb that travels up and down.
+    /// </summary>
     Vertical = 1,
 }
 

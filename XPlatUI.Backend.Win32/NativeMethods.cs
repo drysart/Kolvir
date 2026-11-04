@@ -913,6 +913,21 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     internal static extern int MessageBoxW(IntPtr hwnd, string text, string caption, uint type);
 
+    // Shell execution, used to hand a URI to whatever handler owns its scheme.
+    internal const int SwShowNormal = 1;
+
+    /// <summary>ShellExecuteW reports success as any value above this; below it is an error code.</summary>
+    internal const int ShellExecuteSuccess = 32;
+
+    [DllImport("shell32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    internal static extern IntPtr ShellExecuteW(
+        IntPtr hwnd,
+        string? operation,
+        string file,
+        string? parameters,
+        string? directory,
+        int showCommand);
+
     // COM activation for the file dialogs.
     internal const uint ClsCtxInprocServer = 0x00000001;
     internal const int ErrorCancelled = unchecked((int)0x800704C7);

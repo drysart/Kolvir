@@ -685,6 +685,11 @@ public sealed partial class XPlatApplication : IDisposable
             XPlatClipboard.Current = clipboard;
         }
 
+        if (_provider.GetService<IXPlatLauncher>() is { } launcher)
+        {
+            XPlatLauncher.Current = launcher;
+        }
+
         // A system theme only arrives from a backend. Without one there is no desktop preference
         // to follow, so the palette is left exactly as the application set it - which is what keeps
         // a headless render deterministic regardless of how the host machine is configured.

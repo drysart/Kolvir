@@ -258,6 +258,8 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
 
         services.AddSingleton<Win32Clipboard>();
         services.AddSingleton<IXPlatClipboard>(static provider => provider.GetRequiredService<Win32Clipboard>());
+        services.AddSingleton<Win32Launcher>();
+        services.AddSingleton<IXPlatLauncher>(static provider => provider.GetRequiredService<Win32Launcher>());
         services.AddSingleton(SystemTheme);
         services.AddSingleton(this);
         services.AddSingleton<IXPlatDialogService, Win32DialogService>();

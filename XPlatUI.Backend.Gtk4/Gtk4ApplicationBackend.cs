@@ -308,6 +308,8 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
         services.AddSingleton(this);
         services.AddSingleton<Gtk4Clipboard>();
         services.AddSingleton<IXPlatClipboard>(static provider => provider.GetRequiredService<Gtk4Clipboard>());
+        services.AddSingleton<Gtk4Launcher>();
+        services.AddSingleton<IXPlatLauncher>(static provider => provider.GetRequiredService<Gtk4Launcher>());
         services.AddSingleton(SystemTheme);
         services.AddSingleton<IXPlatDialogService, Gtk4DialogService>();
     }

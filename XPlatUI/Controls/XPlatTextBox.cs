@@ -56,6 +56,16 @@ public class XPlatTextBox : XPlatControl
     /// <summary>An editable field is painted on the input fill until <see cref="XPlatControl.BackColor"/> is assigned.</summary>
     protected override SKColor? DefaultBackColor => XPlatTheme.InputBackground;
 
+    /// <summary>
+    /// The inset the text, caret and selection are laid out inside. Derived controls that draw
+    /// their own chrome in the field, such as <see cref="XPlatNumericUpDown"/>'s spinner, widen
+    /// it so the text stops short of what they draw instead of running underneath it.
+    /// </summary>
+    protected virtual XPlatThickness ContentPadding => Padding;
+
+    /// <summary>The area the text is laid out in: the client rect without <see cref="ContentPadding"/>.</summary>
+    private protected SKRect TextRect => XPlatGeometry.Deflate(ClientRect, ContentPadding);
+
     /// <summary>Font used to draw the text. The text box does not take ownership of it.</summary>
     public XPlatFont Font
     {
@@ -278,7 +288,7 @@ public class XPlatTextBox : XPlatControl
     {
         ArgumentNullException.ThrowIfNull(output);
 
-        var content = ContentRect;
+        var content = TextRect;
         if (length <= 0 || content.Width <= 0f || content.Height <= 0f)
         {
             return;
@@ -364,7 +374,7 @@ public class XPlatTextBox : XPlatControl
 
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
-        var content = XPlatGeometry.Deflate(rect, Padding);
+        var content = XPlatGeometry.Deflate(rect, ContentPadding);
         if (content.Width <= 0f || content.Height <= 0f)
         {
             return;
@@ -709,7 +719,7 @@ public class XPlatTextBox : XPlatControl
 
     private void EnsureCaretVisible()
     {
-        float width = ContentRect.Width;
+        float width = TextRect.Width;
         if (width <= 0f)
         {
             _scrollX = 0f;
@@ -731,7 +741,7 @@ public class XPlatTextBox : XPlatControl
 
     private void ClampScroll()
     {
-        float width = ContentRect.Width;
+        float width = TextRect.Width;
         float textWidth = _font.MeasureWidth(DisplayText);
         float max = MathF.Max(0f, textWidth - width + HorizontalCaretPadding + _caret.Width);
         _scrollX = Math.Clamp(_scrollX, 0f, max);
@@ -755,7 +765,7 @@ public class XPlatTextBox : XPlatControl
             return 0;
         }
 
-        float target = xInControl - ContentRect.Left + _scrollX;
+        float target = xInControl - TextRect.Left + _scrollX;
         if (target <= 0f)
         {
             return 0;
