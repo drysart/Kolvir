@@ -87,6 +87,21 @@ public interface IXPlatApplicationBackend
     IXPlatWindowBackend CreateWindow(XPlatWindow window);
 
     /// <summary>
+    /// Creates the wait behind an <see cref="XPlatTimer"/>: an <see cref="IXPlatTimerBackend"/>
+    /// that calls <paramref name="tick"/> once per interval, on whatever thread the platform's
+    /// timer runs on.
+    /// </summary>
+    /// <param name="tick">The callback to run once per interval. It must not block.</param>
+    /// <remarks>
+    /// The wait is the only part a backend owns: dropping overlapping ticks and moving the
+    /// callback to the UI thread stay in <see cref="XPlatTimer"/>. Return a
+    /// <see cref="ThreadPoolTimerBackend"/> unless the platform's own timer is too coarse for the
+    /// intervals the UI asks for, which on Windows means anything under the 15.625 ms system timer
+    /// period.
+    /// </remarks>
+    IXPlatTimerBackend CreateTimer(Action tick);
+
+    /// <summary>
     /// Registers the platform services. Called once, before the application's own
     /// <c>ConfigureServices</c> runs, so an application can override any of them.
     /// </summary>

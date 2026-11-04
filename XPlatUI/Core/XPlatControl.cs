@@ -370,6 +370,35 @@ public class XPlatControl : IDisposable
     /// <remarks>Useful for parenting a dialog on the window the user is looking at.</remarks>
     public XPlatWindow? Window => Host?.Window;
 
+    /// <summary>
+    /// The top-left corner of this control in host coordinates, walking the parent chain so that
+    /// scroll offsets and container padding are included.
+    /// </summary>
+    /// <remarks>
+    /// The value is only meaningful while the control is attached to a host. A window popup
+    /// needs it because it is positioned outside the host's coordinate space entirely.
+    /// </remarks>
+    public SKPoint GetPositionInHost()
+    {
+        float x = 0f;
+        float y = 0f;
+
+        for (XPlatControl? current = this; current is not null; current = current.Parent)
+        {
+            x += current.Left;
+            y += current.Top;
+
+            if (current.Parent is { } parent)
+            {
+                var offset = parent.GetChildOffset(current);
+                x += offset.X;
+                y += offset.Y;
+            }
+        }
+
+        return new SKPoint(x, y);
+    }
+
     /// <summary>Text shown by the control. Simple controls use it directly.</summary>
     public virtual string Text
     {

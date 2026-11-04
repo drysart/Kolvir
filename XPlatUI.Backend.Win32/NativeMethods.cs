@@ -65,6 +65,7 @@ internal static class NativeMethods
     internal const int HtTransparent = -1;
     internal const int SwShow = 5;
     internal const int SwShowNoActivate = 4;
+    internal const int SwHide = 0;
     internal const uint SwpNoZOrder = 0x0004;
     internal const uint SwpNoActivate = 0x0010;
     internal const uint SwpFrameChanged = 0x0020;
@@ -85,13 +86,22 @@ internal static class NativeMethods
     internal const uint WsExToolWindow = 0x00000080;
     internal const uint WsExTopmost = 0x00000008;
     internal const uint WsExLayered = 0x00080000;
+
+    /// <summary>Clicking the window leaves the active window alone, so a popup never steals focus.</summary>
+    internal const uint WsExNoActivate = 0x08000000;
+
+    /// <summary>Mouse input passes through the window to whatever is underneath it.</summary>
+    internal const uint WsExTransparent = 0x00000020;
     internal const int GwlpHwndParent = -8;
 
     internal const uint WmActivate = 0x0006;
     internal const uint WmActivateApp = 0x001C;
     internal const uint WmCaptureChanged = 0x0215;
     internal const uint WmNcHitTest = 0x0084;
+    internal const uint WmMouseActivate = 0x0021;
+    internal const uint WmMove = 0x0003;
     internal const int WaInactive = 0;
+    internal const int MaNoActivate = 3;
 
     internal const int VkReturn = 0x0D;
     internal const int VkEscape = 0x1B;
@@ -143,6 +153,12 @@ internal static class NativeMethods
     internal const uint CfUnicodeText = 13;
     internal const uint GmemMoveable = 0x0002;
 
+    // Waitable timers.
+    internal const uint CreateWaitableTimerHighResolution = 0x00000002;
+    internal const uint TimerAllAccess = 0x1F0003;
+    internal const uint WaitObject0 = 0;
+    internal const uint Infinite = 0xFFFFFFFF;
+
     // DPI.
     internal const uint SpiGetWorkArea = 0x0030;
     internal const uint MonitorDefaultToNearest = 0x00000002;
@@ -150,6 +166,9 @@ internal static class NativeMethods
     internal static readonly IntPtr DpiAwarenessUnaware = new(-1);
     internal static readonly IntPtr DpiAwarenessSystem = new(-2);
     internal static readonly IntPtr DpiAwarenessPerMonitorV2 = new(-4);
+
+    /// <summary><c>EnumDisplaySettings</c> mode: the display's current mode.</summary>
+    internal const uint EnumCurrentSettings = 0xFFFFFFFF;
 
     /// <summary><c>GetDpiForMonitor</c> mode: the effective (post-scaling) DPI.</summary>
     internal const int MdtEffectiveDpi = 0;
@@ -244,6 +263,68 @@ internal static class NativeMethods
         public RECT rcMonitor;
         public RECT rcWork;
         public uint dwFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct MONITORINFOEX
+    {
+        public uint cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+
+        /// <summary>The display device name, such as <c>\\.\DISPLAY1</c>, which <c>EnumDisplaySettings</c> takes.</summary>
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string szDevice;
+    }
+
+    /// <summary>
+    /// <c>DEVMODEW</c>, the display-mode record <c>EnumDisplaySettings</c> fills in. Only
+    /// <c>dmDisplayFrequency</c> is read, but the layout up to it has to be exact.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct DEVMODEW
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        public ushort dmSpecVersion;
+        public ushort dmDriverVersion;
+        public ushort dmSize;
+        public ushort dmDriverExtra;
+        public uint dmFields;
+
+        // The union that follows dmFields. A display mode uses the position arm; a printer mode
+        // uses orientation and paper size, which occupy the same sixteen bytes.
+        public int dmPositionX;
+        public int dmPositionY;
+        public uint dmDisplayOrientation;
+        public uint dmDisplayFixedOutput;
+
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmFormName;
+        public ushort dmLogPixels;
+        public uint dmBitsPerPel;
+        public uint dmPelsWidth;
+        public uint dmPelsHeight;
+        public uint dmDisplayFlags;
+        public uint dmDisplayFrequency;
+
+        // The tail of the native record. Nothing reads it, but EnumDisplaySettingsW fills in the
+        // whole structure, so it has to be there for the buffer to be the size Windows expects.
+        public uint dmICMMethod;
+        public uint dmICMIntent;
+        public uint dmMediaType;
+        public uint dmDitherType;
+        public uint dmReserved1;
+        public uint dmReserved2;
+        public uint dmPanningWidth;
+        public uint dmPanningHeight;
     }
 
     [StructLayout(LayoutKind.Sequential, Size = 32)]
@@ -454,6 +535,12 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
 
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", CharSet = CharSet.Unicode)]
+    internal static extern bool GetMonitorInfoExW(IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+    [DllImport("user32.dll", EntryPoint = "EnumDisplaySettingsW", CharSet = CharSet.Unicode)]
+    internal static extern bool EnumDisplaySettingsW(string? lpszDeviceName, uint iModeNum, ref DEVMODEW lpDevMode);
+
     [DllImport("user32.dll")]
     internal static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
 
@@ -623,6 +710,24 @@ internal static class NativeMethods
     [DllImport("kernel32.dll")]
     internal static extern bool AttachConsole(uint dwProcessId);
 
+    // Waitable timers. A timer created with CreateWaitableTimerHighResolution is not bound by the
+    // 15.625 ms system timer period, which is what lets a sub-period interval actually tick at its
+    // own rate instead of being rounded up to the period.
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr CreateWaitableTimerExW(IntPtr lpTimerAttributes, IntPtr lpTimerName, uint dwFlags, uint dwDesiredAccess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool SetWaitableTimer(IntPtr hTimer, ref long lpDueTime, int lPeriod, IntPtr pfnCompletionRoutine, IntPtr lpArgToCompletionRoutine, bool fResume);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool CancelWaitableTimer(IntPtr hTimer);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool CloseHandle(IntPtr hObject);
+
     // Clipboard.
     [DllImport("user32.dll", SetLastError = true)]
     internal static extern bool OpenClipboard(IntPtr hWndNewOwner);
@@ -685,6 +790,21 @@ internal static class NativeMethods
         }
 
         return GetPrimaryWorkArea();
+    }
+
+    /// <summary>
+    /// The refresh rate of a display in Hz, or null when Windows does not report one. Drivers that
+    /// run a display at its "hardware default" report 0 or 1 rather than a real rate.
+    /// </summary>
+    internal static float? GetRefreshRate(string? deviceName)
+    {
+        var mode = new DEVMODEW { dmSize = (ushort)Marshal.SizeOf<DEVMODEW>() };
+        if (!EnumDisplaySettingsW(deviceName, EnumCurrentSettings, ref mode))
+        {
+            return null;
+        }
+
+        return mode.dmDisplayFrequency > 1 ? mode.dmDisplayFrequency : (float?)null;
     }
 
     /// <summary>Extracts the signed low word of a packed coordinate.</summary>

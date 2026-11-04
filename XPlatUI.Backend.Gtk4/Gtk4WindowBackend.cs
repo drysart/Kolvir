@@ -401,6 +401,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         presenter?.Dismiss();
 
+        if (XPlatPopupService.Current is Gtk4PopupService)
+        {
+            XPlatPopupService.Current = null;
+        }
+
         // Whatever the window registered natively has to let go while the window still exists: the
         // platform keeps calling into a registered object for as long as the window is alive.
         ReleaseNativeTeardowns();
@@ -723,6 +728,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         ApplyChrome();
         SetTransient(_owner);
         _window.Present();
+
+        // A popup is a popover anchored to this window's drawing area, so the service can only be
+        // installed once that widget exists. Like the context menu presenter it is process wide and
+        // stateless: it resolves the owning window from the host it is handed.
+        XPlatPopupService.Current = new Gtk4PopupService();
 
         // A state requested before the window existed still has to be honoured, and a window can
         // only be minimized or maximized once it has been mapped.

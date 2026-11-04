@@ -20,9 +20,16 @@ namespace XPlatUI.Backend.Gtk4;
 /// leaving the renderer pointing at freed memory.
 /// </para>
 /// <para>
-/// A <see cref="Gtk.DrawingArea"/> is kept on top of the picture, transparent, because it is what
-/// reports the widget's size and scale factor and what receives input. GTK only draws an overlay
-/// child above the main child, so the picture has to be the main child.
+/// The picture and a transparent <see cref="Gtk.DrawingArea"/> share one cell of a
+/// <see cref="Gtk.Grid"/>. The drawing area is what reports the widget's size and scale factor and
+/// what receives input, and its draw function is also what paints the frame; the picture is added
+/// first so that the area stays on top of it for input. A grid snapshots its children in the order
+/// they were added, so the picture is snapshotted before the area paints, and setting a paintable
+/// queues a resize as well - either one alone leaves the picture holding the frame from before
+/// when GTK reaches it in that pass. The view therefore asks for one more pass once the frame is
+/// painted; see <see cref="SchedulePicturePass"/>. A window paints often enough for that to go
+/// unnoticed, but a popover paints only when something asks it to, so without the extra pass a
+/// popup kept showing its first, empty frame until the pointer moved over it.
 /// </para>
 /// <para>
 /// The view does not run a timer. Time based behaviour is the business of whichever control needs
@@ -44,10 +51,13 @@ public sealed class Gtk4SkiaView : IDisposable
     private static readonly bool DebugTrace =
         Environment.GetEnvironmentVariable("XPLATUI_DEBUG") is "1" or "true";
 
-    private readonly Gtk.Overlay _root;
+    internal string DebugTag { get; set; } = "window";
+
+    private readonly Gtk.Grid _root;
     private readonly Gtk.DrawingArea _area;
     private readonly Gtk.Picture _picture;
     private readonly GLib.SourceFunc _redrawIdle;
+    private readonly GLib.SourceFunc _pictureIdle;
     private readonly GLib.SourceFunc _notifyMetrics;
 
     private SKSurface? _frame;
@@ -66,6 +76,7 @@ public sealed class Gtk4SkiaView : IDisposable
 
     private bool _inDraw;
     private bool _redrawPending;
+    private bool _picturePassPending;
     private bool _metricsPending;
     private int _deferredRepaints;
     private bool _disposed;
@@ -86,6 +97,7 @@ public sealed class Gtk4SkiaView : IDisposable
 
         // The delegates must stay rooted for as long as GLib may call them.
         _redrawIdle = OnRedrawIdle;
+        _pictureIdle = OnPictureIdle;
         _notifyMetrics = OnNotifyMetrics;
 
         _area = Gtk.DrawingArea.New();
@@ -105,9 +117,14 @@ public sealed class Gtk4SkiaView : IDisposable
         _picture.SetFocusable(false);
         _picture.SetCanFocus(false);
 
-        _root = Gtk.Overlay.New();
-        _root.SetChild(_picture);
-        _root.AddOverlay(_area);
+        _root = Gtk.Grid.New();
+        _root.SetHexpand(true);
+        _root.SetVexpand(true);
+
+        // Both children share the grid's only cell. The picture goes in first so that the drawing
+        // area, which is what receives input, stays on top of it.
+        _root.Attach(_picture, 0, 0, 1, 1);
+        _root.Attach(_area, 0, 0, 1, 1);
 
         Host.AddInvalidatedHandler(OnHostInvalidated);
         Host.AddCursorChangedHandler(OnHostCursorChanged);
@@ -237,7 +254,7 @@ public sealed class Gtk4SkiaView : IDisposable
             _height = height;
             _scale = scale;
 
-            Trace($"draw {width}x{height} at {scale}x");
+            Trace($"{DebugTag} draw {width}x{height} at {scale}x");
 
             PaintFrame(width, height, scale);
 
@@ -286,8 +303,55 @@ public sealed class Gtk4SkiaView : IDisposable
 
         _picture.SetPaintable(texture);
 
+        SchedulePicturePass();
+
         texture.Dispose();
         bytes.Dispose();
+    }
+
+    /// <summary>
+    /// Asks for the render pass that puts the frame just painted on screen.
+    /// </summary>
+    /// <remarks>
+    /// GTK renders a widget from a render node it caches, and rebuilds that node only for a widget
+    /// that has been asked to draw. The picture cannot draw this frame in the pass that produced it:
+    /// setting a paintable queues a resize, so when GTK reaches the picture later in the same pass
+    /// the picture still needs an allocation and GTK keeps the node it had before - which, the
+    /// first time, is no node at all. A window paints often enough for the next pass to fix that
+    /// unnoticed, but a popover paints only when something asks it to, so a popup stayed blank
+    /// until the user happened to move the pointer over it.
+    /// <para>
+    /// The request has to be made from outside the pass, and it has to name a widget that is not
+    /// already waiting to be drawn: queuing a draw on a widget that already is stops GTK from
+    /// walking up to the surfaces above it, so no pass would be scheduled at all.
+    /// </para>
+    /// </remarks>
+    private void SchedulePicturePass()
+    {
+        if (_picturePassPending || _disposed)
+        {
+            return;
+        }
+
+        _picturePassPending = true;
+        GLib.Functions.IdleAdd(0, _pictureIdle);
+    }
+
+    private bool OnPictureIdle()
+    {
+        _picturePassPending = false;
+
+        if (_disposed)
+        {
+            return false;
+        }
+
+        // The picture redraws itself, and the grid redraws so that it snapshots the picture again:
+        // the node it cached holds the picture's previous node, not the one about to be built.
+        _picture.QueueDraw();
+        _root.QueueDraw();
+
+        return false;
     }
 
     /// <summary>Allocates or reallocates the Skia surface that backs the picture, if needed.</summary>

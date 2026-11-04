@@ -97,6 +97,10 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
             theme.AddChangedHandler(OnSystemThemeChanged);
         }
 
+        // A popup needs a parent window to be a child of, which only exists once the application
+        // has started, so the service is installed here rather than with the other adapters.
+        XPlatPopupService.Current = new AppKitPopupService();
+
         _initialized = true;
         RebuildMenuBar();
     }
@@ -265,6 +269,13 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// macOS honours a sub-millisecond interval on a pool timer, so the portable wait is already
+    /// as precise as anything the display can show.
+    /// </remarks>
+    public IXPlatTimerBackend CreateTimer(Action tick) => new ThreadPoolTimerBackend(tick);
+
+    /// <inheritdoc />
     public IXPlatWindowBackend CreateWindow(XPlatWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
@@ -379,6 +390,11 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
         }
 
         XPlatContextMenuPresenter.Current = null;
+
+        if (XPlatPopupService.Current is AppKitPopupService)
+        {
+            XPlatPopupService.Current = null;
+        }
 
         if (ReferenceEquals(XPlatSystemTheme.Current, SystemTheme))
         {
@@ -553,7 +569,18 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
             ToLogical(frame, primaryHeight),
             ToLogical(visible, primaryHeight),
             (float)screen.BackingScaleFactor,
-            isPrimary);
+            isPrimary,
+            RefreshRateOf(screen));
+    }
+
+    /// <summary>
+    /// The display's refresh rate in Hz, or null when AppKit does not report one. AppKit reports
+    /// the fastest rate the display supports, which is what a ProMotion panel should animate at.
+    /// </summary>
+    private static float? RefreshRateOf(NSScreen screen)
+    {
+        var rate = screen.MaximumFramesPerSecond;
+        return rate > 0 ? (float)rate : null;
     }
 
     /// <summary>The display a window is on, in logical units.</summary>
@@ -582,7 +609,8 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
         contentSize.Width,
         contentSize.Height);
 
-    private static double PrimaryHeightFor(NSWindow window)
+    /// <summary>The height of the primary display, which is the axis AppKit's screen space grows up from.</summary>
+    internal static double PrimaryHeightFor(NSWindow window)
     {
         var screens = NSScreen.Screens;
         return screens is { Length: > 0 } ? screens[0].Frame.Height : window.Frame.Height;

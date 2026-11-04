@@ -30,6 +30,7 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
 
     private readonly Queue<Action> _pending = new();
     private readonly List<Win32WindowBackend> _windows = new();
+    private readonly List<IXPlatTimerBackend> _timers = new();
     private readonly object _gate = new();
 
     private NativeMethods.WndProc? _messageProc;
@@ -236,6 +237,21 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <inheritdoc />
+    public IXPlatTimerBackend CreateTimer(Action tick)
+    {
+        ArgumentNullException.ThrowIfNull(tick);
+
+        var backend = new Win32TimerBackend(tick, ForgetTimer);
+
+        lock (_gate)
+        {
+            _timers.Add(backend);
+        }
+
+        return backend;
+    }
+
+    /// <inheritdoc />
     public void RegisterServices(IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -268,7 +284,12 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
             // window still has somewhere to centre itself.
             var work = NativeMethods.GetPrimaryWorkArea();
             var scale = ScaleOf(NativeMethods.GetDpiForSystem());
-            screens.Add(new XPlatScreen(ToLogical(work, scale), ToLogical(work, scale), scale, isPrimary: true));
+            screens.Add(new XPlatScreen(
+                ToLogical(work, scale),
+                ToLogical(work, scale),
+                scale,
+                isPrimary: true,
+                NativeMethods.GetRefreshRate(null)));
         }
 
         return screens;
@@ -283,6 +304,20 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
     /// <inheritdoc />
     public void Shutdown()
     {
+        IXPlatTimerBackend[] timers;
+
+        lock (_gate)
+        {
+            timers = _timers.ToArray();
+            _timers.Clear();
+        }
+
+        // A timer the UI forgot to dispose would otherwise keep a wait thread alive past the loop.
+        foreach (var timer in timers)
+        {
+            timer.Dispose();
+        }
+
         _instanceLock?.Dispose();
         _instanceLock = null;
 
@@ -386,6 +421,14 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
         lock (_gate)
         {
             _windows.Remove(window);
+        }
+    }
+
+    private void ForgetTimer(IXPlatTimerBackend timer)
+    {
+        lock (_gate)
+        {
+            _timers.Remove(timer);
         }
     }
 
@@ -573,8 +616,8 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
 
     private static XPlatScreen ToScreen(IntPtr monitor, NativeMethods.RECT bounds)
     {
-        var info = new NativeMethods.MONITORINFO { cbSize = (uint)Marshal.SizeOf<NativeMethods.MONITORINFO>() };
-        var hasInfo = NativeMethods.GetMonitorInfoW(monitor, ref info);
+        var info = new NativeMethods.MONITORINFOEX { cbSize = (uint)Marshal.SizeOf<NativeMethods.MONITORINFOEX>() };
+        var hasInfo = NativeMethods.GetMonitorInfoExW(monitor, ref info);
 
         if (hasInfo && info.rcMonitor.Right > info.rcMonitor.Left && info.rcMonitor.Bottom > info.rcMonitor.Top)
         {
@@ -584,8 +627,9 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
         var work = hasInfo && info.rcWork.Right > info.rcWork.Left ? info.rcWork : bounds;
         var isPrimary = hasInfo && (info.dwFlags & NativeMethods.MonitorInfoPrimary) != 0;
         var scale = ScaleOf(monitor);
+        var refreshRate = NativeMethods.GetRefreshRate(hasInfo ? info.szDevice : null);
 
-        return new XPlatScreen(ToLogical(bounds, scale), ToLogical(work, scale), scale, isPrimary);
+        return new XPlatScreen(ToLogical(bounds, scale), ToLogical(work, scale), scale, isPrimary, refreshRate);
     }
 
     private static float ScaleOf(IntPtr monitor)

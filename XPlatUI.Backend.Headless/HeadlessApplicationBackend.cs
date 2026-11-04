@@ -104,6 +104,12 @@ public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// A headless render paints once and exits, so the portable wait is all a timer can need here.
+    /// </remarks>
+    public IXPlatTimerBackend CreateTimer(Action tick) => new ThreadPoolTimerBackend(tick);
+
+    /// <inheritdoc />
     public IXPlatWindowBackend CreateWindow(XPlatWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);
