@@ -28,6 +28,18 @@ public sealed class DemoUi
     public DemoUi()
     {
         Root = BuildUi();
+
+        // A page that has no menu of its own still has to answer a right-click: the host asks for a
+        // menu only after the control under the pointer has declined, and the native menu paths show
+        // nothing at all when nobody answers. The selection's Copy menu comes after this hook, so a
+        // page menu is only offered while there is nothing selected to copy.
+        OnHostAvailable(Root, host => host.AddContextMenuOpeningHandler((_, args) =>
+        {
+            if (host.Selection.IsEmpty)
+            {
+                args.Menu = BuildPageContextMenu();
+            }
+        }));
     }
 
     /// <summary>The root of the sample control tree.</summary>
@@ -79,6 +91,26 @@ public sealed class DemoUi
         {
             _navList.SelectedIndex = index;
         }
+    }
+
+    /// <summary>
+    /// The menu a page offers when the control under the pointer has none of its own: the two moves
+    /// a reader of a page wants, and a line about what the sample is. It is built per right-click so
+    /// the page moves know which page they are on.
+    /// </summary>
+    private XPlatContextMenu BuildPageContextMenu()
+    {
+        int index = _navList.SelectedIndex;
+
+        return new XPlatContextMenu()
+            .Add(new XPlatMenuItem("&Previous page", () => SelectPage(index - 1)) { Enabled = index > 0 })
+            .Add(new XPlatMenuItem("&Next page", () => SelectPage(index + 1))
+            {
+                Enabled = index < _pages.Length - 1,
+            })
+            .AddSeparator()
+            .Add(new XPlatMenuItem("&About this sample", () => SetStatus(
+                "Every control here is drawn by XPlatUI itself, so the same tree runs on Windows, macOS and Linux.")));
     }
 
     /// <summary>

@@ -34,6 +34,14 @@ namespace XPlatUI.Backend.Gtk4;
 /// The popup's drawing area is not focusable, so the control that opened the popup keeps the
 /// keyboard: the popup is a surface to look at and click, and everything typed belongs to its owner.
 /// </para>
+/// <para>
+/// A popover takes the seat's keyboard while it is up, though, so the owner's drawing area stops
+/// seeing keys even though nothing in the popup can take the focus. A capture-phase key controller
+/// on the popover hands each key straight to the owner's host, which is where the portable layer
+/// keeps the keyboard: an open menu is an input sink on its owner, and its arrow keys, Escape and
+/// mnemonics have to reach it. A key the owner does not take is left to GTK, which is what pops a
+/// popover down on Escape.
+/// </para>
 /// </remarks>
 internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 {
@@ -103,6 +111,14 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         _popover.Autohide = dismissOnOutsideClick;
         _popover.Position = Gtk.PositionType.Bottom;
         _popover.OnClosed += OnPopoverClosed;
+
+        // The popover holds the seat's keyboard, and nothing inside it can be focused, so the keys
+        // are captured at the popover itself and forwarded to the host that owns the popup.
+        var key = Gtk.EventControllerKey.New();
+        key.SetPropagationPhase(Gtk.PropagationPhase.Capture);
+        key.OnKeyPressed += OnKeyPressed;
+        key.OnKeyReleased += OnKeyReleased;
+        _popover.AddController(key);
     }
 
     /// <inheritdoc />
@@ -256,6 +272,49 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         }
 
         Dismissed?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Forwards a key press to the host that owns the popup; returns true when the UI consumed it.
+    /// </summary>
+    private bool OnKeyPressed(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyPressedSignalArgs args)
+    {
+        var ownerHost = _ownerView.Host;
+        var modifiers = ModifiersOf(args.Keyval, args.State);
+        var key = Gtk4KeyMap.Map(args.Keyval);
+
+        if (key != XPlatKey.None && ownerHost.ProcessKeyDown(key, modifiers))
+        {
+            return true;
+        }
+
+        var text = Gtk4KeyMap.MapText(args.Keyval, args.State);
+        if (text is null)
+        {
+            return false;
+        }
+
+        ownerHost.ProcessTextInput(text);
+        return true;
+    }
+
+    private void OnKeyReleased(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyReleasedSignalArgs args)
+    {
+        var key = Gtk4KeyMap.Map(args.Keyval);
+        if (key != XPlatKey.None)
+        {
+            _ownerView.Host.ProcessKeyUp(key, ModifiersOf(args.Keyval, args.State));
+        }
+    }
+
+    /// <summary>
+    /// Reads the modifiers of a key event. GTK reports shift+Tab as <c>ISO_Left_Tab</c>, a key value
+    /// of its own, so the shift bit is not the only place the modifier comes from.
+    /// </summary>
+    private static XPlatModifiers ModifiersOf(uint keyval, Gdk.ModifierType state)
+    {
+        var modifiers = Gtk4KeyMap.MapModifiers(state);
+        return Gtk4KeyMap.ImpliesShift(keyval) ? modifiers | XPlatModifiers.Shift : modifiers;
     }
 
     /// <summary>
