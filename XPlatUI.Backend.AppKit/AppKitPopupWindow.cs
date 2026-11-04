@@ -75,10 +75,12 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
             IsOpaque = false,
             BackgroundColor = NSColor.Clear,
 
-            // The portable layer draws the drop shadow itself, in the transparent margin a menu
-            // reserves around its surface. A window shadow on top of that draws a second shadow
-            // from the window's own shape, which on a window this transparent shows up as a hard
-            // black outline just outside the shadow the menu already has.
+            // A window shadow is drawn from the window's own alpha shape, which on a window this
+            // transparent is a hard black outline sitting outside whatever the popup drew - the
+            // menu's own drop shadow, and beyond it the page. A menu draws the shadow it wants
+            // itself, in the transparent margin it reserves around its surface, and every other
+            // popup is flush: a layered window on Win32 and a popover on GTK have no window shadow
+            // either, so leaving it off here is also what makes the three look the same.
             HasShadow = false,
 
             // A tooltip must not swallow the press that was meant for the control underneath it,
