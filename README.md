@@ -77,12 +77,15 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatGroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
 | `XPlatScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
 | `XPlatLabel` | `Label` | Nine-way alignment, optional word wrap |
+| `XPlatLinkLabel` | `LinkLabel` | A rich label styled as a link that hands its URI to the desktop through `IXPlatLauncher` |
 | `XPlatRichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
 | `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
 | `XPlatCheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
 | `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
+| `XPlatNumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
+| `XPlatTrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
 | `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
 | `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
 | `XPlatListView` | `ListView` | `List` and `Details` views over the same virtualized rows: columns, header-click sorting, grid lines |
@@ -90,9 +93,11 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatComboBox` | `ComboBox` | Edit field plus a drop-down list shown in a popup, so it can leave the window |
 | `XPlatTabControl` / `XPlatTabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
 | `XPlatToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
+| `XPlatToolStrip` / `XPlatStatusStrip` | `ToolStrip` / `StatusStrip` | A docked bar of *items* - button, label, separator, spring, progress bar - painted in one pass and taken as a single tab stop |
 | `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
+| `IXPlatLauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
 
 Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
 does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
@@ -796,6 +801,91 @@ controls it describes go away.
 using var tips = new XPlatToolTip { InitialDelay = 500 };
 tips.SetToolTip(saveButton, "Save the document");
 tips.SetToolTip(helpButton, "Open the help window");
+```
+
+### Numeric up-down and track bar
+
+`XPlatNumericUpDown` is an `XPlatTextBox` with a spinner pair in its right-hand edge, so the value
+can be typed or stepped. The value is a `decimal` rather than a float, because stepping a money
+amount a hundred times has to land on the amount and not on a rounding artefact.
+`DecimalPlaces` decides how many of those decimals are held and shown, and every value that comes
+in - typed, stepped or assigned - is rounded to it and clamped to `Minimum`..`Maximum`.
+
+Typing stays free-form: the text is parsed as it changes and `Value` follows, but the text is only
+rewritten from the value when the edit is committed - on Enter, when the focus leaves, or on any
+step - so a half-typed `-` or `1.` is never taken away from the user. Characters a number cannot
+contain are dropped as they are typed, along with a second decimal separator, and parsing and
+formatting use the current culture so the separator is the one the user's keyboard produces. The
+arrow keys, the wheel and the buttons all step by `Increment`, and a held button repeats.
+
+`XPlatTrackBar` fills its track up to the knob, so the value reads without finding the knob first,
+and `TickFrequency` puts marks where the round values are. Pressing the knob starts a drag that
+keeps the grab point, so grabbing it off-centre does not make it jump under the pointer; pressing
+the track pages by `LargeChange` toward the press. Arrow keys move by `SmallChange`, `PageUp` and
+`PageDown` by `LargeChange`, and `Home`/`End` jump to the ends. `Orientation` turns the track, the
+knob and the ticks through ninety degrees.
+
+```csharp
+var amount = new XPlatNumericUpDown(1.5m)
+{
+    Minimum = 0m,
+    Maximum = 99.99m,
+    Increment = 0.25m,
+    DecimalPlaces = 2,
+};
+
+var zoom = new XPlatTrackBar { Minimum = 25f, Maximum = 400f, Value = 100f, TickFrequency = 25f };
+zoom.AddValueChangedHandler(_ => SetStatus($"Zoom {zoom.Value:0}%"));
+```
+
+### Link labels
+
+`XPlatLinkLabel` is an `XPlatRichLabel` whose text is styled as a link, so extra spans can be added
+around it to build a sentence. Clicking it - or pressing Enter or Space while it has focus - hands
+its `Url` to the desktop and raises `AddLinkClickedHandler` with an `XPlatLinkClickedEventArgs` that
+says which span was clicked and whether the platform accepted the URI. Setting `AutoLaunch` to
+`false` makes the label a notification only, which is what an application that navigates inside
+itself wants.
+
+Opening a URI needs the platform, so it goes through `IXPlatLauncher`: each backend installs its
+implementation into `XPlatLauncher.Current` (`ShellExecute` on Win32, `NSWorkspace.OpenUrl` on
+AppKit, `Gtk.UriLauncher` on GTK4), and the fallback opens nothing and reports failure. The URI is
+expected to come from the application - a `file:` URI reaches the local file system, so
+user-supplied text belongs behind a scheme allow-list rather than straight into `OpenUrl`.
+
+```csharp
+var link = new XPlatLinkLabel("Project home", "https://github.com/drysart/XPlatUI");
+link.AddLinkClickedHandler((_, e) => SetStatus(e.Opened ? "Opened" : "Could not open"));
+```
+
+### Tool strips and status strips
+
+A tool strip holds *items* rather than child controls, because a strip that accepted children would
+just be a panel. An item is a plain object - `XPlatToolStripButton`, `XPlatToolStripLabel`,
+`XPlatToolStripSeparator`, `XPlatToolStripProgressBar` or `XPlatToolStripSpring` - so a bar of nine
+items costs one control, one paint pass and one hit test rather than nine of each.
+`XPlatStatusStrip` is the same control with the status-bar defaults.
+
+| Member | Behaviour |
+| --- | --- |
+| `Items` | The item list: add, insert, remove and reorder without rebuilding the bar |
+| `XPlatToolStripItem.Alignment` | `Near` packs from the left, `Far` from the right; a `Spring` takes the slack between them |
+| `XPlatToolStripItem.Width` | A fixed width, or `NaN` to measure the item's own content |
+| `XPlatToolStripItem.Enabled` | A disabled item greys out and takes no input while the rest of the bar keeps working |
+| `XPlatToolStripButton.AddClickHandler` | Runs when the item is clicked, or activated from the keyboard |
+| `XPlatToolStripProgressBar` | `Minimum`/`Maximum`/`Value`/`Percent`; the fill needs no timer, unlike a marquee `XPlatProgressBar` |
+
+The bar is a single tab stop: the arrow keys move a selection along the items, `Home` and `End`
+jump to the ends, and Enter or Space activates the selected item, so a strip does not put every one
+of its items into the tab order. `XPlatToolStrip` docks to the top of its container and
+`XPlatStatusStrip` to the bottom, each at its own natural height.
+
+```csharp
+var toolbar = new XPlatToolStrip();
+toolbar.Items.Add(new XPlatToolStripButton("Save"));
+toolbar.Items.Add(new XPlatToolStripSeparator());
+toolbar.Items.Add(new XPlatToolStripSpring());
+toolbar.Items.Add(new XPlatToolStripLabel("UTF-8"));
 ```
 
 ### Popups
