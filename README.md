@@ -10,7 +10,7 @@ controls draw themselves on top of it. The same sample UI runs on all three plat
 XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
   Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatGroupBox, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatCheckBox, XPlatRadioButton, XPlatProgressBar, XPlatTextBox, XPlatListBox, XPlatComboBox, XPlatTabControl, XPlatTabPage, XPlatToolTip, XPlatImage
+  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatGroupBox, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatCheckBox, XPlatRadioButton, XPlatProgressBar, XPlatTextBox, XPlatVirtualList, XPlatListBox, XPlatListView, XPlatTreeView, XPlatComboBox, XPlatTabControl, XPlatTabPage, XPlatToolTip, XPlatImage
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
   Popups/                 the popup contract (IXPlatPopupService) and XPlatPopup, which floats a control above its window
@@ -83,7 +83,10 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
+| `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
 | `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
+| `XPlatListView` | `ListView` | `List` and `Details` views over the same virtualized rows: columns, header-click sorting, grid lines |
+| `XPlatTreeView` | `TreeView` | Indented nodes with expanders and optional check boxes; the flattened visible nodes are the rows |
 | `XPlatComboBox` | `ComboBox` | Edit field plus a drop-down list shown in a popup, so it can leave the window |
 | `XPlatTabControl` / `XPlatTabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
 | `XPlatToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
@@ -458,6 +461,134 @@ scan. A change repaints only the rows whose state actually differed, clipped to 
 is why hovering and selecting stay cheap on a long list. The row the focus rectangle is on counts
 as a change in its own right, so moving it repaints the row it leaves as well as the row it lands
 on - in `None` mode, where nothing is ever selected, that rectangle is the only thing a click moves.
+
+### Virtual row lists
+
+`XPlatListBox`, `XPlatListView` and `XPlatTreeView` are the same control with a different idea of
+what a row is, so everything that is not about the row lives in one abstract `XPlatVirtualList`
+base: the scrolling helper, the selection set and its four modes, keyboard navigation and
+type-ahead, hover, drag-select and the wheel, the `BeginUpdate`/`EndUpdate` batch, and the paint
+loop that measures the rows, clips to the viewport and draws only the band that is showing. A
+subclass answers five questions and inherits the rest:
+
+| Member | Behaviour |
+| --- | --- |
+| `ItemCount` | How many rows there are *now* - a tree answers with its visible node count, so collapsing a branch changes it |
+| `GetItemText(i)` | The row's label, which is also what type-ahead matches against |
+| `GetItem(i)` | The object behind a row, which is what `SelectedItem` returns |
+| `MeasureItemWidth()` | The widest row, from which the horizontal extent is derived |
+| `OnDrawItem(canvas, i, bounds, state, textColor)` | Paints one row; `state` carries `Selected`/`Focused`/`Hot`/`Disabled`, and `textColor` is already resolved for them |
+
+Every member the list box documents above - `SelectionMode`, `SelectedIndex`, `GetItemRect`,
+`IndexFromPoint`, `EnsureVisible`, `VerticalOffset`, `BeginUpdate` and the rest - is on the base, so
+it behaves the same way on all three. What the base does not own is what a row *is*: the list box
+keeps an `IList<object?>`, the list view keeps `XPlatListViewItem`s, the tree keeps nodes.
+
+Three protected hooks exist for a subclass that is not a plain row list: `ScrollClient` (the area
+the rows are painted into, which the list view shrinks by its header), `ScrollPadding` and
+`DefaultItemHeight`. `LeadIndex`, `HotIndex`, `SetLead` and `SelectOnly` expose the cursor the base
+already tracks, so a subclass can move it without re-implementing selection, and `TextBoundsOf`,
+`DrawItemText` and `DrawFocusRectangle` keep the text metrics and the focus rectangle in one place.
+
+One trap is worth naming because it cost a regression: a subclass must not declare
+`protected string GetItemText(object? item)` next to its `GetItemText(int index)` override. An
+`object?` argument binds to the more specific overload, so the row loop's boxed index would reach
+it and every row would render its own number. The list box calls its object form
+`GetItemTextOf(object?)` for exactly that reason.
+
+### List view
+
+`XPlatListView` is the WinForms list view: the same rows as either a single column of text
+(`XPlatView.List`) or a grid (`XPlatView.Details`), with header-click sorting and optional grid
+lines.
+
+| Member | Behaviour |
+| --- | --- |
+| `Items` | An `IList<XPlatListViewItem>`; an item's `Text` is its first cell, and `SetCell`/`GetCell` or the `(text, cells)` constructor fill the rest |
+| `Columns` | An `IList<XPlatListViewColumn>` of `Text`, `Width` and `Alignment` |
+| `View` | `List` (one text column, no header) or `Details` (columns under a header) |
+| `HeaderHeight` | Height of the header band in `Details`; the rows are laid out below it |
+| `GridLines` | Draws the column separators and the row rules in `Details` |
+| `SortColumn`, `SortOrder` | Which column shows the header glyph, and which way it points |
+| `Sort()` | Sorts `Items` by the current column and keeps the selection on the items it was on |
+| `AddColumnClickHandler` | A header was clicked; setting `Cancel` on the arguments stops the built-in sort so an application can sort its own way |
+| `ColumnFromPoint(point)` | Which column a point is in, or `-1` |
+
+```csharp
+var list = new XPlatListView { Dock = DockStyle.Fill, View = XPlatView.Details, GridLines = true };
+
+list.Columns.Add(new XPlatListViewColumn("Name", 180f));
+list.Columns.Add(new XPlatListViewColumn("Size", 80f, XPlatContentAlignment.MiddleRight));
+
+foreach (var file in files)
+{
+    var item = new XPlatListViewItem(file.Name);
+    item.SetCell(1, file.Size);
+    list.Items.Add(item);
+}
+
+list.SortColumn = 0;
+list.SortOrder = XPlatSortOrder.Ascending;
+list.Sort();
+root.Controls.Add(list);
+```
+
+A header click sorts by that column, or reverses the order when it is already the sorted one, which
+is the behaviour every file browser has. `Sort` is a stable insertion sort over the item list rather
+than a LINQ `OrderBy`, because the library does not reference `System.Linq` - it keeps the sort
+allocating nothing but the index array it permutes, which matters when the list is large and the
+comparison is a string one.
+
+Rows in `Details` are a fixed height for the whole control, so the row bands line up with the header
+columns and the vertical grid lines are one stroke per column. The horizontal extent is the sum of
+the column widths, so narrowing the control below that raises the horizontal scrollbar rather than
+squeezing a column.
+
+### Tree view
+
+`XPlatTreeView` is the WinForms tree view: nodes with an indented label, a triangular expander when
+they have children, and an optional check box.
+
+| Member | Behaviour |
+| --- | --- |
+| `Nodes` | The root `XPlatTreeNodeCollection`; every node has the same `Nodes` collection for its children |
+| `Indent` | Pixels of indentation per level, 18 by default |
+| `CheckBoxes` | Shows a check box on every row; off by default |
+| `SelectedNode` | The one selected node, or `null` |
+| `AddAfterCheckHandler` | A node's check state changed; the argument is the node |
+| `ExpandAll()`, `CollapseAll()` | Set every branch's state at once, in one layout pass |
+| `IndexOf(node)` | The node's row index among the visible nodes, or `-1` when it is inside a collapsed branch |
+
+An `XPlatTreeNode` carries `Text`, `Tag`, `Nodes`, `Parent`, `Owner`, `Level`, `HasChildren`,
+`FirstNode`/`LastNode`, `IsExpanded`, `IsVisible`, `Selected` and `CheckState`/`Checked`, plus
+`Expand`, `Collapse`, `Toggle`, `EnsureVisible` and `Remove`. Nothing is flattened up front: the
+visible nodes are rebuilt from the roots when the structure or an expansion changes, and that list
+is what the base virtualizes, so a collapsed branch costs nothing to paint no matter how deep it is.
+
+```csharp
+var tree = new XPlatTreeView { Dock = DockStyle.Fill, CheckBoxes = true };
+
+var src = new XPlatTreeNode("src");
+src.Nodes.AddRange(new[] { new XPlatTreeNode("Core"), new XPlatTreeNode("Controls") });
+tree.Nodes.Add(src);
+src.Expand();
+
+tree.SelectedNode = src.Nodes[0];
+tree.AddAfterCheckHandler(node => Console.WriteLine(((XPlatTreeNode)node).CheckState));
+```
+
+The mouse and the keyboard do what a tree view does. Clicking the expander toggles the branch
+without moving the selection, clicking the check box toggles the check without selecting, and
+clicking the label selects. Double-clicking or `Enter` activates the row, which toggles a parent and
+does nothing on a leaf. `Right` expands, `Left` collapses or moves to the parent, and `Space`
+toggles the check box when `CheckBoxes` is on and the expander otherwise; `+`, `-` and `*` expand,
+collapse and expand-everything, arriving through text input because `XPlatKey` has no punctuation.
+
+Checking a node pushes the state down to its whole subtree and then re-derives every ancestor from
+its children, so a parent whose children are all checked reads `Checked`, one whose children are
+all unchecked reads `Unchecked`, and anything in between reads `Indeterminate`. That derivation is
+what the demo's `Controls` branch shows: two of its children are checked at start-up, so it opens
+in the indeterminate state.
 
 ### Check boxes and radio buttons
 

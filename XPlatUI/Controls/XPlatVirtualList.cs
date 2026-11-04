@@ -265,6 +265,12 @@ public abstract class XPlatVirtualList : XPlatControl
     /// </summary>
     public SKRect ViewportRect => _scroll.EffectiveViewport(ScrollClient);
 
+    /// <summary>
+    /// The area the rows are laid out in: the viewport without the scroll padding and without the
+    /// scrollbars' gutter. A control that draws something above its rows lines it up with this.
+    /// </summary>
+    public SKRect RowsRect => _scroll.ContentArea;
+
     /// <summary>Adds a handler that runs whenever the set of selected rows changes.</summary>
     public IDisposable AddSelectedIndexChangedHandler(Action<object> handler)
     {
@@ -1048,7 +1054,18 @@ public abstract class XPlatVirtualList : XPlatControl
         }
     }
 
-    private void RaiseSelectedIndexChanged() => _selectedIndexChanged?.Invoke(this);
+    private void RaiseSelectedIndexChanged()
+    {
+        // Inside BeginUpdate/EndUpdate the change is reported once, when the batch closes, so that
+        // restoring a selection item by item does not raise the event item by item.
+        if (_updateCount > 0)
+        {
+            _pendingSelectionChanged = true;
+            return;
+        }
+
+        _selectedIndexChanged?.Invoke(this);
+    }
 
     /// <summary>Replaces the selection with a single row and repaints only what changed.</summary>
     private void SelectSingle(int index)

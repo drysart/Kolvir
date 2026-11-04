@@ -170,6 +170,24 @@ internal sealed class XPlatScrollBars
         _layingOut = true;
         try
         {
+            // A control that has not been given a size yet has no viewport to scroll in, and
+            // deflating an empty client still leaves a small non-empty content area behind.
+            // Scrolling against that would record an offset that is wrong the moment the control
+            // is really laid out, so an unsized client arranges nothing visible.
+            if (client.Width <= 0f || client.Height <= 0f)
+            {
+                _client = client;
+                _viewport = SKRect.Empty;
+                _contentArea = SKRect.Empty;
+                _extent = arrange(SKRect.Empty);
+                _showVertical = _vertical == XPlatScrollStyle.Always;
+                _showHorizontal = _horizontal == XPlatScrollStyle.Always;
+                _hasLayout = true;
+                _childOffset = new SKPoint(-_horizontalOffset, -_verticalOffset);
+                PlaceBars();
+                return;
+            }
+
             var showVertical = _vertical switch
             {
                 XPlatScrollStyle.Always => true,
