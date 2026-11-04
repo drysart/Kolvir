@@ -108,7 +108,10 @@ public sealed class DemoUi
             ClientSize = new SKSize(width, height),
         };
 
-        window.AddShownHandler(_ => backend.LastWindow!.SavePng(path));
+        window.AddShownHandler(_ =>
+        {
+            backend.LastWindow!.SavePng(path);
+        });
         window.Show();
         application.Run();
     }
@@ -313,6 +316,8 @@ public sealed class DemoUi
         ("Combo boxes", demo => Page(demo.BuildComboBoxDemo())),
         ("Tab controls", demo => Page(demo.BuildTabControlDemo())),
         ("Tool tips", demo => Page(demo.BuildToolTipDemo())),
+        ("List views", demo => Page(demo.BuildListViewDemo())),
+        ("Tree view", demo => Page(demo.BuildTreeViewDemo())),
     };
 
     /// <summary>
@@ -1604,6 +1609,350 @@ public sealed class DemoUi
     }
 
     /// <summary>
+    /// Two list views over the same shape of data: one in <see cref="XPlatView.Details"/> with
+    /// sortable columns and grid lines, one in <see cref="XPlatView.List"/>. Both only paint the
+    /// rows on screen, so the row count is there to make that claim checkable.
+    /// </summary>
+    private XPlatPanel BuildListViewDemo()
+    {
+        var card = Card();
+
+        var sortCaption = ScrollCaption("Click a column header to sort; drag a header edge to resize");
+        card.Controls.Add(sortCaption);
+
+        var details = new XPlatListView
+        {
+            Dock = XDock.Top,
+            Height = 200f,
+            View = XPlatView.Details,
+            GridLines = true,
+            SelectionMode = XPlatSelectionMode.MultiExtended,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            HorizontalScroll = XPlatScrollStyle.Automatic,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        // The Size cells read "812 KB" and "4 KB", which is the wrong way round as text, so the column
+        // compares the byte count the rows keep in their Tag instead.
+        var sizeColumn = new XPlatListViewColumn("Size", 76f, XPlatContentAlignment.MiddleRight)
+        {
+            Comparer = (left, right) => BytesOf(left).CompareTo(BytesOf(right)),
+        };
+
+        details.Columns.Add(new XPlatListViewColumn("Name", 168f));
+        details.Columns.Add(new XPlatListViewColumn("Kind", 104f));
+        details.Columns.Add(sizeColumn);
+        details.Columns.Add(new XPlatListViewColumn("Modified", 118f));
+
+        foreach (var row in SampleFiles)
+        {
+            details.Items.Add(new XPlatListViewItem(row.Name, row.Kind, FormatSize(row.Bytes), row.Modified)
+            {
+                Tag = row.Bytes,
+            });
+        }
+
+        details.SelectedIndex = 0;
+        card.Controls.Add(details);
+
+        var selectionCaption = ScrollCaption("1 selected");
+        card.Controls.Add(selectionCaption);
+
+        details.AddSelectedIndexChangedHandler(_ =>
+        {
+            int count = details.SelectedIndices.Count;
+            selectionCaption.Text = count switch
+            {
+                0 => "no selection",
+                1 => $"{details.Items[details.SelectedIndex].Text} selected",
+                _ => $"{count} rows selected",
+            };
+        });
+
+        details.AddItemActivatedHandler(_ =>
+            SetStatus($"Opened {details.Items[details.SelectedIndex].Text}."));
+
+        details.AddColumnClickHandler((_, e) =>
+            sortCaption.Text = $"Sorted by {e.Column.Text}, {details.SortOrder}");
+
+        var icons = new XPlatListView
+        {
+            Dock = XDock.Top,
+            Height = 148f,
+            View = XPlatView.List,
+            SelectionMode = XPlatSelectionMode.One,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            HorizontalScroll = XPlatScrollStyle.Automatic,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        foreach (var row in SampleFiles)
+        {
+            icons.Items.Add(new XPlatListViewItem(row.Name));
+        }
+
+        icons.SelectedIndex = 2;
+        card.Controls.Add(icons);
+
+        var iconsCaption = ScrollCaption("List view");
+        iconsCaption.Margin = new XPlatThickness(0f, 0f, 0f, 6f);
+        card.Controls.Add(iconsCaption);
+
+        var buttons = ButtonRow();
+
+        var clearSort = new XPlatButton("Clear sort")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 6f, 0f),
+        };
+
+        clearSort.AddClickHandler(_ =>
+        {
+            details.SortOrder = XPlatSortOrder.None;
+            sortCaption.Text = "Click a column header to sort";
+            SetStatus("Sorting cleared.");
+        });
+
+        var grow = new XPlatButton("Add rows")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+
+        grow.AddClickHandler(_ =>
+        {
+            details.BeginUpdate();
+            try
+            {
+                for (int index = 0; index < 500; index++)
+                {
+                    long bytes = (index + 1) * 1_024L;
+                    details.Items.Add(new XPlatListViewItem(
+                        $"generated-{details.Items.Count:D4}.bin",
+                        "File",
+                        FormatSize(bytes),
+                        "today")
+                    {
+                        Tag = bytes,
+                    });
+                }
+            }
+            finally
+            {
+                details.EndUpdate();
+            }
+
+            SetStatus($"{details.Items.Count} rows; only the visible ones are drawn.");
+        });
+
+        buttons.Controls.Add(clearSort);
+        buttons.Controls.Add(grow);
+
+        var lockWidths = new XPlatButton("Lock widths")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(6f, 0f, 0f, 0f),
+        };
+
+        lockWidths.AddClickHandler(_ =>
+        {
+            details.AllowColumnResize = !details.AllowColumnResize;
+            lockWidths.Text = details.AllowColumnResize ? "Lock widths" : "Unlock widths";
+            SetStatus(details.AllowColumnResize
+                ? "Header edges can be dragged again."
+                : "Header edges are locked; the columns cannot be resized.");
+        });
+
+        buttons.Controls.Add(lockWidths);
+        card.Controls.Add(buttons);
+
+        var countCaption = ScrollCaption($"{details.Items.Count} rows");
+        card.Controls.Add(countCaption);
+
+        return card;
+    }
+
+    private static long BytesOf(XPlatListViewItem item) => item.Tag is long bytes ? bytes : 0L;
+
+    private static string FormatSize(long bytes) => bytes >= 1024 ? $"{bytes / 1024} KB" : $"{bytes} B";
+
+    private static readonly (string Name, string Kind, long Bytes, string Modified)[] SampleFiles =
+    {
+        ("readme.txt", "Text", 4_096, "2024-05-02 09:14"),
+        ("XPlatControl.cs", "Source", 62_464, "2024-05-11 18:02"),
+        ("XPlatListView.cs", "Source", 31_744, "2024-05-12 07:45"),
+        ("theme-light.json", "Data", 2_048, "2024-04-28 12:30"),
+        ("theme-dark.json", "Data", 2_048, "2024-04-28 12:30"),
+        ("render-target.png", "Image", 151_552, "2024-05-09 22:11"),
+        ("harness.exe", "Binary", 98_304, "2024-05-10 08:00"),
+        ("LICENSE", "Text", 1_024, "2024-01-04 00:00"),
+        ("build.log", "Log", 831_488, "2024-05-12 06:59"),
+        ("a-very-long-file-name-that-should-be-trimmed-with-an-ellipsis.txt", "Text", 7_168, "2024-05-01 11:20"),
+    };
+
+    /// <summary>
+    /// A tree with check boxes over a small source-tree shape. The rows are virtualized the same way
+    /// the lists are - the control only knows the nodes whose ancestors are open - so the branch the
+    /// "Add leaves" button grows costs nothing until it is opened.
+    /// </summary>
+    private XPlatPanel BuildTreeViewDemo()
+    {
+        var card = Card();
+
+        var selectionCaption = ScrollCaption("Select a node");
+        card.Controls.Add(selectionCaption);
+
+        var tree = new XPlatTreeView
+        {
+            Dock = XDock.Top,
+            Height = 260f,
+            CheckBoxes = true,
+            SelectionMode = XPlatSelectionMode.One,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            HorizontalScroll = XPlatScrollStyle.Automatic,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        var src = new XPlatTreeNode("src");
+
+        var core = new XPlatTreeNode("Core");
+        core.Nodes.Add(new XPlatTreeNode("XPlatControl.cs"));
+        core.Nodes.Add(new XPlatTreeNode("XPlatPainter.cs"));
+        core.Nodes.Add(new XPlatTreeNode("XPlatTheme.cs"));
+        src.Nodes.Add(core);
+
+        var controls = new XPlatTreeNode("Controls");
+        controls.Nodes.Add(new XPlatTreeNode("XPlatButton.cs"));
+        controls.Nodes.Add(new XPlatTreeNode("XPlatListView.cs"));
+        controls.Nodes.Add(new XPlatTreeNode("XPlatTreeView.cs"));
+        src.Nodes.Add(controls);
+
+        var platforms = new XPlatTreeNode("Platform");
+        platforms.Nodes.Add(new XPlatTreeNode("Win32"));
+        platforms.Nodes.Add(new XPlatTreeNode("AppKit"));
+        platforms.Nodes.Add(new XPlatTreeNode("Gtk4"));
+        src.Nodes.Add(platforms);
+
+        tree.Nodes.Add(src);
+        tree.Nodes.Add(new XPlatTreeNode("README.md"));
+        tree.Nodes.Add(new XPlatTreeNode("LICENSE"));
+
+        src.Expand();
+        core.Expand();
+        tree.SelectedNode = core.Nodes[0];
+
+        // Two of the three files under Controls are checked, so that branch reads as indeterminate.
+        controls.Nodes[0].Checked = true;
+        controls.Nodes[1].Checked = true;
+
+        card.Controls.Add(tree);
+
+        tree.AddSelectedIndexChangedHandler(_ =>
+            selectionCaption.Text = tree.SelectedNode is { } node
+                ? $"{node.Text}, level {node.Level}"
+                : "no selection");
+
+        var buttons = ButtonRow();
+
+        var expand = new XPlatButton("Expand all")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 6f, 0f),
+        };
+
+        expand.AddClickHandler(_ =>
+        {
+            tree.ExpandAll();
+            SetStatus($"{tree.ItemCount} rows visible.");
+        });
+
+        var collapse = new XPlatButton("Collapse all")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 6f, 0f),
+        };
+
+        collapse.AddClickHandler(_ =>
+        {
+            tree.CollapseAll();
+            SetStatus($"{tree.ItemCount} rows visible.");
+        });
+
+        var grow = new XPlatButton("Add 5,000 leaves")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+
+        grow.AddClickHandler(_ =>
+        {
+            // The branch is built while it is still detached, so filling it costs nothing; adding it
+            // to the tree is the one rebuild.
+            var generated = new XPlatTreeNode("generated");
+            for (int index = 0; index < 5000; index++)
+            {
+                generated.Nodes.Add(new XPlatTreeNode($"leaf-{index:D4}.cs"));
+            }
+
+            tree.Nodes.Add(generated);
+            generated.Expand();
+
+            SetStatus($"{tree.Nodes.Count} roots, {tree.ItemCount} rows visible; only those are drawn.");
+        });
+
+        buttons.Controls.Add(expand);
+        buttons.Controls.Add(collapse);
+        buttons.Controls.Add(grow);
+        card.Controls.Add(buttons);
+
+        var checkCaption = ScrollCaption(
+            $"{CountChecked(tree.Nodes)} of {CountNodes(tree.Nodes)} nodes checked");
+        card.Controls.Add(checkCaption);
+
+        tree.AddAfterCheckHandler(_ => checkCaption.Text =
+            $"{CountChecked(tree.Nodes)} of {CountNodes(tree.Nodes)} nodes checked");
+
+        return card;
+    }
+
+    private static int CountNodes(XPlatTreeView.XPlatTreeNodeCollection nodes)
+    {
+        int count = 0;
+        foreach (var node in nodes)
+        {
+            count += 1 + CountNodes(node.Nodes);
+        }
+
+        return count;
+    }
+
+    private static int CountChecked(XPlatTreeView.XPlatTreeNodeCollection nodes)
+    {
+        int count = 0;
+        foreach (var node in nodes)
+        {
+            if (node.Checked)
+            {
+                count++;
+            }
+
+            count += CountChecked(node.Nodes);
+        }
+
+        return count;
+    }
+
+    /// <summary>
     /// A list of a chosen size, with what the last frame cost to draw it. The list only paints the
     /// rows that are on screen, so scrolling a hundred thousand items should cost about what
     /// scrolling ten does; the readout is there to show that rather than claim it.
@@ -1867,6 +2216,20 @@ public sealed class DemoUi
         ForeColorRole = XPlatThemeColor.MutedForeground,
         TextAlign = XPlatContentAlignment.BottomLeft,
         Margin = new XPlatThickness(0f, 0f, 0f, 2f),
+    };
+
+    /// <summary>An invisible strip that a row of buttons docks into, left to right.</summary>
+    private static XPlatPanel ButtonRow() => new()
+    {
+        Dock = XDock.Top,
+        Height = 30f,
+        ShowFrame = false,
+        IsCard = false,
+        BackColor = null,
+        BorderWidth = 0f,
+        CornerRadius = 0f,
+        Padding = new XPlatThickness(0f),
+        Margin = new XPlatThickness(0f, 0f, 0f, 6f),
     };
 
     /// <summary>

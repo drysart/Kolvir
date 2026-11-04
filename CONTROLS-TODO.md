@@ -19,8 +19,8 @@ The tiers were set when the library had twelve controls and they still describe 
 | 1 - common input | `XPlatCheckBox`, `XPlatRadioButton`, `XPlatProgressBar`, `XPlatGroupBox` | shipped |
 | 2 - popup-based | the popup layer (`IXPlatPopupService`, `XPlatPopup`, one popup window per backend), `XPlatComboBox`, `XPlatTabControl`/`XPlatTabPage`, `XPlatToolTip` | shipped |
 | 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | §3 |
-| 3 - large list controls | `XPlatTreeView`, `XPlatListView` | §4 |
-| 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | §5 |
+| 3 - large list controls | `XPlatVirtualList` (the shared row base), `XPlatListView`, `XPlatTreeView` | shipped |
+| 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | §4 |
 
 Tier 2 is what unblocked the rest: until there was a popup that could leave the window, every
 remaining control that wants one (a calendar, a suggestion list, a menu, a drag ghost) was either
@@ -135,34 +135,7 @@ Two separable halves, and only the first belongs to the library proper:
 
 Do (1) first. (2) is worth its own plan document, the way selection got one.
 
-## 4. Tier 3 - large list controls
-
-Both of these are only viable virtualized, and the reason is in the repository: the performance page
-scrolls 100,000 rows because `XPlatListBox` paints the visible band instead of the item list. A tree
-or a list view built any other way would have to be rewritten.
-
-### `XPlatTreeView`
-
-Nodes with `Text`, optional glyph and `Tag`; `Expand`/`Collapse`/`Expanded`; indentation and
-expand/collapse glyphs drawn by the control; keyboard (arrows to move and expand, `+`/`-`, `Home`/
-`End`, type-ahead); optional per-node checkboxes reusing `XPlatToggleControl`'s glyph; a selected-node
-event; optional scrollbars. Only expanded nodes are laid out, so the flattened visible list is the
-virtualized item source.
-
-### `XPlatListView`
-
-`Details` and `List` views, columns with `Width` and header text, header-click sorting, per-column
-alignment, full-row selection with the four `XPlatSelectionMode`s reused from `XPlatListBox`,
-multi-column and multi-row virtualized painting, optional scrollbars.
-
-### Shared decision, worth settling before either starts
-
-Should there be one virtualized row source (`ItemCount` + `GetRow(i)` + `RowHeight`) shared by
-`XPlatListBox`, `XPlatListView`, `XPlatTreeView` and the combo box's drop-down? The list box already
-virtualizes internally; hoisting that into a seam would make the other three cheap, but it means
-touching a shipped control. The alternative is three independent implementations that drift.
-
-## 5. Tier 4 - small widgets
+## 4. Tier 4 - small widgets
 
 | Control | Needs |
 | --- | --- |
@@ -171,7 +144,7 @@ touching a shipped control. The alternative is three independent implementations
 | `XPlatLinkLabel` | Mostly `XPlatRichLabel`'s interactive spans, plus a way to open a URL. **No such seam exists today** - there is no `OpenUrl` anywhere in the library - so this needs `IXPlatApplicationBackend` (or a small service) to hand a URL to the platform: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
 | `XPlatStatusStrip` / `XPlatToolStrip` | A docked bar holding *items* rather than arbitrary controls (spring, label, progress, button, separator), because a tool strip that accepts children is just a panel. `XPlatMenuItem`'s item model is the closest precedent |
 
-## 6. Deliberately not planned
+## 5. Deliberately not planned
 
 Recorded so the decision is not re-litigated every time someone asks:
 
@@ -184,13 +157,11 @@ Recorded so the decision is not re-litigated every time someone asks:
 | Ribbon | Nobody wants it back. |
 | Printing / print preview | Belongs to an application, not to a Skia-drawn control toolkit. |
 
-## 7. Suggested order
+## 6. Suggested order
 
 1. **In-library menus** (§3.1) - the largest consistency win, the renderer already exists, and it
    removes the last place where the same UI looks different per platform.
 2. **`XPlatDateTimePicker` and text-box autocomplete** (§3.2, §3.3) - both are popup work now, and
    both are things an application notices missing on day one.
-3. **Tier 3 list controls** (§4) - after settling the row-source question, since it decides how much
-   of `XPlatListBox` gets touched.
-4. **Drag previews** (§3.4) - small, and independent of everything above.
-5. **Tier 4 widgets** (§5) - each is a few hundred lines, and `XPlatLinkLabel` waits on a URL seam.
+3. **Drag previews** (§3.4) - small, and independent of everything above.
+4. **Tier 4 widgets** (§4) - each is a few hundred lines, and `XPlatLinkLabel` waits on a URL seam.

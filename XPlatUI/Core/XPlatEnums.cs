@@ -268,3 +268,29 @@ public enum XPlatProgressBarStyle
     /// </summary>
     Marquee = 2,
 }
+
+/// <summary>How an <see cref="XPlatListView"/> arranges its items, matching the WinForms <c>View</c>.</summary>
+public enum XPlatView
+{
+    /// <summary>One text column per item with no header, filling the control's width.</summary>
+    List = 0,
+
+    /// <summary>
+    /// One column per <see cref="XPlatListViewColumn"/>, with a header band above the rows that
+    /// sorts the items when a header is clicked.
+    /// </summary>
+    Details = 1,
+}
+
+/// <summary>Which way a column of an <see cref="XPlatListView"/> sorts, matching the WinForms <c>SortOrder</c>.</summary>
+public enum XPlatSortOrder
+{
+    /// <summary>The items are shown in the order they were added.</summary>
+    None = 0,
+
+    /// <summary>Sorted from smallest to largest.</summary>
+    Ascending = 1,
+
+    /// <summary>Sorted from largest to smallest.</summary>
+    Descending = 2,
+}
