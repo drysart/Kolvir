@@ -239,14 +239,21 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
 
     private NSEvent OnLocalMouseDown(NSEvent theEvent)
     {
-        // The press belongs to whatever it landed on, so the popup is dismissed but the event is
-        // still delivered.
-        if (_window is null || !ReferenceEquals(theEvent.Window, _window))
+        // A press that is not on the popup dismisses it and belongs to the popup: it stops there
+        // rather than being delivered to whatever it landed on, which is what the Win32 and
+        // overlay presentations do too. Without that, a press on the control that opened the popup
+        // closes it and then reaches that control, which acts on a popup that is already gone - a
+        // combo box reopens its list on the same click that closed it.
+        if (_window is null || ReferenceEquals(theEvent.Window, _window))
         {
-            Dismiss();
+            return theEvent;
         }
 
-        return theEvent;
+        Dismiss();
+
+        // Returning null is how a local monitor swallows the event, which the binding does not
+        // express in its delegate signature.
+        return null!;
     }
 
     private void Dismiss()

@@ -96,15 +96,17 @@ internal sealed class Win32PopupWindow : IXPlatPopupWindow
     public event Action<object>? Dismissed;
 
     /// <summary>Closes every popup owned by <paramref name="ownerHwnd"/>.</summary>
+    /// <returns>Whether a popup was dismissed, which is what tells the caller the press it is
+    /// handling belonged to that popup.</returns>
     /// <remarks>
     /// A press on the owning window is delivered to that window rather than to the popup floating
     /// above it, so the owner is what has to notice and dismiss. Called from its message procedure.
     /// </remarks>
-    public static void DismissForOwner(IntPtr ownerHwnd)
+    public static bool DismissForOwner(IntPtr ownerHwnd)
     {
         if (Live.Count == 0)
         {
-            return;
+            return false;
         }
 
         // Copied first: dismissing disposes the popup, which removes it from the dictionary.
@@ -121,6 +123,8 @@ internal sealed class Win32PopupWindow : IXPlatPopupWindow
         {
             window.Dismiss();
         }
+
+        return owned.Count > 0;
     }
 
     public void Show(XPlatUiHost ownerHost, SKPoint location, SKSize size)

@@ -23,6 +23,12 @@ public interface IXPlatPopupWindow : IDisposable
     /// Whether the platform raised <see cref="Dismissed"/> when the pointer went down outside the
     /// popup or the owning window lost activation, so the popup closes itself.
     /// </summary>
+    /// <remarks>
+    /// The press that dismisses a popup belongs to the popup and is not delivered to whatever it
+    /// landed on, so a control that owns an open popup does not act on the same click that closed
+    /// it. The overlay presentation gets that from the control it paints behind the popup; a
+    /// platform window has to consume the press itself.
+    /// </remarks>
     bool DismissesOnOutsideClick { get; }
 
     /// <summary>Raised when the platform dismissed the popup on the user's behalf.</summary>

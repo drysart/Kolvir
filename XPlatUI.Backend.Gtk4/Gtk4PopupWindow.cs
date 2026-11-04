@@ -37,6 +37,23 @@ namespace XPlatUI.Backend.Gtk4;
 /// </remarks>
 internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 {
+    /// <summary>The style class the popup stylesheet below is written against.</summary>
+    private const string PopupStyleClass = "xplat-popup";
+
+    /// <summary>
+    /// A popover draws its child inside its own padding, which the theme sizes for a shadow and a
+    /// rounded corner. The portable layer sizes a popup to exactly the content it contains, so that
+    /// padding shows up as a border of dead space around the XPlat controls. The padding and the
+    /// chrome are removed for popups only, through a style class of their own.
+    /// </summary>
+    private const string PopupStyleSheet =
+        "popover." + PopupStyleClass +
+        " { padding: 0; margin: 0; border: none; background: none; box-shadow: none; }\n" +
+        "popover." + PopupStyleClass +
+        " > contents { padding: 0; margin: 0; border: none; box-shadow: none; }\n";
+
+    private static Gdk.Display? _styledDisplay;
+
     private readonly XPlatUiHost _host = new();
     private readonly Gtk4SkiaView _ownerView;
     private readonly Gtk4SkiaView _view;
@@ -55,6 +72,7 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         _dismissOnOutsideClick = dismissOnOutsideClick;
 
         _view = new Gtk4SkiaView(_host);
+        _view.DebugTag = "popup";
 
         // Keys belong to the owner, so the popup never takes the keyboard.
         _view.InputArea.SetFocusable(false);
@@ -77,6 +95,8 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         _popover.SetParent(ownerView.Widget);
         _popover.SetChild(_frame);
         _popover.SetHasArrow(false);
+        _popover.AddCssClass(PopupStyleClass);
+        EnsurePopupStyle(ownerView.Widget.GetDisplay());
 
         // GTK's own auto-hide is the outside-click dismissal, and it also pops the surface down
         // when the window loses the pointer grab.
@@ -184,6 +204,23 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         _view.Dispose();
     }
 
+    private static void EnsurePopupStyle(Gdk.Display? display)
+    {
+        if (display is null || ReferenceEquals(display, _styledDisplay))
+        {
+            return;
+        }
+
+        _styledDisplay = display;
+
+        var provider = Gtk.CssProvider.New();
+        provider.LoadFromString(PopupStyleSheet);
+
+        // 600 is GTK_STYLE_PROVIDER_PRIORITY_APPLICATION: above the theme, below the user's own
+        // settings, which is the priority a library's own styling belongs at.
+        Gtk.StyleContext.AddProviderForDisplay(display, provider, 600);
+    }
+
     private void Place(SKPoint location, SKSize size)
     {
         int x = ToPixels(location.X);
@@ -198,7 +235,7 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 
     /// <summary>
     /// Tells the frame and the view how big the popup is, which is the size the popover ends up
-    /// taking because neither of them propagates a natural size of its own.
+    /// taking because the frame measures as the size it is asked for rather than the view's.
     /// </summary>
     private void Resize(SKSize size)
     {

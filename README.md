@@ -658,6 +658,30 @@ A popup window is never activated and never takes focus, so the owning control k
 while its drop-down is open. Dismissal is the platform's job too: a press outside the popup, a
 scroll or a resize closes it, and `Dismissed` tells `XPlatPopup` to raise its `Closed` event.
 
+The press that dismisses a popup belongs to the popup: it is consumed, not delivered to whatever it
+landed on. That is what the overlay presentation gets from its dismiss catcher, which covers the
+window and swallows the click, and a platform window has to match it - otherwise a press on the
+control that opened a pop-up both closes and reaches that control, which acts on a pop-up that is
+already gone. A combo box is where it shows: it reopens its list on the very click that closed it.
+So the Win32 window procedure returns without dispatching the button press that dismissed a popup,
+the AppKit local monitor returns `nil` for it, and on GTK4 `Gtk.Popover.Autohide` grabs the pointer
+so the press never reaches the window behind the popover. Wheel, pointer motion and resize are not
+presses: they dismiss the popup and are still delivered.
+
+GTK4 needs two things of its own, because a popover is styled and painted by the toolkit rather
+than by the backend:
+
+- A popover positions itself by its own CSS margin rect and draws its child inside its padding, so
+  the theme's shadow and rounded corner would show up as a border of dead space around a popup that
+  the portable layer sized to exactly its content. `Gtk4PopupWindow` installs a display-wide
+  `Gtk.CssProvider` at application priority that strips padding, margin, border, background and box
+  shadow from popovers carrying its own style class - popovers only, nothing else.
+- A popover paints when something asks it to and not again, unlike a window, which repaints often
+  enough to hide a frame that arrived late. `Gtk4SkiaView` therefore asks for one extra render pass
+  once a frame has been rasterized (see `SchedulePicturePass`), deferred to an idle source so the
+  request is made from outside the pass and names a widget that is not already waiting to draw.
+  Without it a popup kept showing its first, empty frame until the pointer moved over it.
+
 ### Invalidation and partial painting
 
 `Invalidate` says what changed, and the host keeps the answer as a region rather than a single
