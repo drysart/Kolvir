@@ -94,9 +94,9 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTabControl` / `XPlatTabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
 | `XPlatToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
 | `XPlatToolStrip` / `XPlatStatusStrip` | `ToolStrip` / `StatusStrip` | A docked bar of *items* - button, label, separator, spring, progress bar - painted in one pass and taken as a single tab stop |
-| `XPlatMenuView` | `ContextMenuStrip` (the surface) | The portable menu: rows, hover pill, check/icon columns, shortcut hints, submenus as child views and real controls hosted in a row. No platform code |
+| `XPlatMenuView` | `ContextMenuStrip` (the surface) | The portable menu: rows, hover pill, check/icon columns, shortcut hints, submenus in popups of their own and real controls hosted in a row. No platform code |
 | `XPlatMenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
-| `XPlatMenuPresenter` | `ToolStripDropDown` plumbing | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, on every backend |
+| `XPlatMenuPresenter` | `ToolStripDropDown` plumbing | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, on every backend, one popup per level of the chain |
 | `XPlatMenuPresentation` | - | Chooses the library's menus or the platform's, per application |
 | `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
@@ -1323,8 +1323,8 @@ every platform and can carry icons, submenus and controls in a row.
 | `XPlatMenuItem` / `XPlatMenuBar` / `XPlatContextMenu` | The model: items, separators, submenus, checked and disabled state, shortcuts, icons and hosted controls |
 | `XPlatMenuRenderer` | `Measure(menu, metrics, font, shadow, availableWidth, availableHeight)` lays the rows out and returns an `XPlatMenuLayout`: surface size, shadow margin, row bounds, scroll state, `HitTest` and `NextPickable`. `Paint(canvas, layout, hovered, surfaceAlpha, ..., scrollOffset)` draws the surface, drop shadow, hover pill, check column, icons, right-aligned shortcut hints and - for a menu that does not fit - the arrows at either end. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
 | `XPlatMenuMetrics` | Row height, padding, corner radii, shadow extent, the check/icon/control column widths and `ScrollIndicatorHeight`; `Default` is tuned to the Windows 11 menu |
-| `XPlatMenuView` | The control that shows one menu, with its submenus and its in-menu controls |
-| `XPlatMenuPresenter` | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView` |
+| `XPlatMenuView` | The control that shows one menu level, its in-menu controls and the submenu it has open |
+| `XPlatMenuPresenter` | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, one popup per level of the chain |
 | `XPlatMenuBarView` | The menu bar drawn inside the window |
 | `Win32MenuWindow.cs` | The popup window the Win32 backend shows a menu in: layered, so the rounded corners and the drop shadow come from per-pixel alpha, with the acrylic backdrop described below |
 
@@ -1369,24 +1369,27 @@ past the bottom of the window:
 | Keys inside a menu | Up/Down walk the pickable rows (separators, disabled rows and control rows are skipped), Right opens a submenu, Left closes it, `Home`/`End` jump, `Tab` moves between the menu's own rows rather than leaving the menu, `Enter` or `Space` invokes, `Esc` closes the innermost menu and then dismisses the whole chain, and a mnemonic letter picks a row directly |
 | Dismissal | A click outside, losing activation or `Esc` closes the chain. The popup never takes the keyboard, so the menu is pushed onto the *owning* window as an `IXPlatInputSink` for as long as it is open |
 
-Submenus are child `XPlatMenuView`s rather than separate popups: `MeasureContent` unions the chain
-so the surface is always big enough for the deepest menu, and `AddSizeChangedHandler` tells the
-presenter to grow or shrink the popup when one opens or closes. A submenu sits against the right
-edge of the menu that opened it, overlapping by `SubMenuOverlap`, with its first row level with the
-row that opened it - so it is placed a little above that row, as `XPlatMenuMetrics.Padding` dictates.
+Submenus are separate popups, not a child view drawn inside the menu that opened them: the presenter
+keeps a chain of levels, each with its own `XPlatPopup` and `XPlatMenuView`, and opening a submenu
+opens the next window instead of growing the one already on screen. That is what keeps a menu still:
+a submenu that is taller than the room beside its parent, or that opens and closes as the pointer
+crosses a row, can never resize or move the menu it hangs off. A submenu sits against the edge of the
+menu that opened it, overlapping by `SubMenuOverlap`, with its first row level with the row that
+opened it - so it is placed a little above that row, as `XPlatMenuMetrics.Padding` dictates.
 
 Which side a submenu opens on is decided against the display, not the window: the presenter asks
-`IXPlatPopupService.GetPlacementArea` for the area the popup is allowed to occupy, which on Windows
-is the monitor's work area and on macOS the screen's, and a submenu that would not fit to the right
-inside that area opens to the left of the menu that opened it instead. The root menu stays where it
-was - the popup grows leftwards to hold the chain - and the whole surface is then clamped back into
-the area, which is also why a menu can hang past the edge of the window it was opened from. GTK4 is
-the one backend that reports no area, because a popover is clipped by its window there, so a menu on
-Linux is laid out inside the window and flips at the window's edge.
+`IXPlatPopupService.GetPlacementArea` for the area a popup is allowed to occupy, which on Windows is
+the monitor's work area and on macOS the screen's, and a submenu that would not fit to the right
+inside that area opens to the left of the menu that opened it instead. Each level is clamped into the
+area on its own, which is also why a menu can hang past the edge of the window it was opened from.
+Once a chain has turned left it keeps going left, so a submenu of a submenu does not zigzag back
+across its parent. GTK4 is the one backend that reports no area, because a popover is clipped by its
+window there, so a menu on Linux is laid out inside the window and flips at the window's edge.
 
 Submenus nest as deeply as the model does: `XPlatMenuItem.SubItems` is the same list at every level,
-and since a submenu is a child view of the menu that opened it, measuring, painting, hit testing and
-the keyboard all recurse through the chain without knowing how long it is. Nothing caps the depth;
+and since every level measures, paints and hit-tests only its own rows while the keyboard walks the
+chain from the innermost menu outwards, nothing has to know how long the chain is. Nothing caps the
+depth;
 the demo's context menu carries `Recent > Program.cs > a place in the file` to prove it. On macOS
 the same chain reaches the system bar, because `AppKitMenuBar` translates every level into a real
 `NSMenu` submenu and lets AppKit draw and drive it.

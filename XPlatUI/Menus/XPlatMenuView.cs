@@ -495,13 +495,20 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     /// <inheritdoc />
     public bool ProcessKeyDown(XPlatKey key, XPlatModifiers modifiers)
     {
+        var deepest = DeepestMenu;
+
         // Escape closes the menu from wherever the keyboard focus is, including from a control
-        // hosted in a row.
+        // hosted in a row. It takes one level away per press, starting at the innermost submenu, so
+        // a chain three deep unwinds the way the Left arrow does and only the outermost dismisses.
         if (key == XPlatKey.Escape)
         {
-            if (_subMenu is not null)
+            if (deepest._subMenu is not null)
             {
-                CloseSubMenu();
+                deepest.CloseSubMenu();
+            }
+            else if (deepest.ParentMenu is { } parent)
+            {
+                parent.CloseSubMenu();
             }
             else
             {
@@ -510,8 +517,6 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
 
             return true;
         }
-
-        var deepest = DeepestMenu;
 
         // A control hosted in a row owns the keyboard while it has the focus. The popup window is
         // deliberately not focusable, so the window that has the keyboard forwards to it through here.
