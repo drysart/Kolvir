@@ -71,8 +71,8 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         // only an unretained reference.
         _delegate = new WindowDelegate(this);
 
-        // Resolved once, when the window is created. macOS keeps its own menu bar by default, so
-        // this is only false when the application asks for the portable one explicitly.
+        // Resolved once, when the window is created. The library's menus are the default on every
+        // platform; the system menu bar is only used when the application asks for it explicitly.
         _useXPlatMenus = !(application.Application?.Options.MenuPresentation ?? XPlatMenuPresentation.Auto)
             .UsesNativeMenus();
     }
@@ -301,8 +301,40 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
             }
 
             _menuBar = value;
-            _application.RebuildMenuBar();
+            ApplyMenuBar();
         }
+    }
+
+    /// <summary>
+    /// Keeps the system bar in step with the window and, when the library draws its own menus, also
+    /// puts a bar inside the Skia surface. The system bar is maintained either way: AppKit owns the
+    /// one menu bar the platform shows at the top of the screen, it carries the application menu,
+    /// and the key equivalents that the standard Edit commands rely on come from being in it.
+    /// </summary>
+    private void ApplyMenuBar()
+    {
+        _application.RebuildMenuBar();
+
+        if (!_useXPlatMenus)
+        {
+            return;
+        }
+
+        if (_menuBar is null || _menuBar.Menus.Count == 0)
+        {
+            _host.MenuBar = null;
+            return;
+        }
+
+        // Re-point an existing view rather than replacing it, so a bar that is filled in after it is
+        // assigned keeps the open-menu state.
+        if (_host.MenuBar is { } existing)
+        {
+            existing.MenuBar = _menuBar;
+            return;
+        }
+
+        _host.MenuBar = new XPlatMenuBarView(_menuBar);
     }
 
     /// <summary>The presenter that shows this window's context menus.</summary>
@@ -608,6 +640,9 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         _presenter = _useXPlatMenus
             ? new XPlatMenuPresenter()
             : new AppKitContextMenuPresenter(view);
+
+        // The bar may have been assigned before there was a window to draw it in.
+        ApplyMenuBar();
 
         ApplySizeLimits();
 

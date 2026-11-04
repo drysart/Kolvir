@@ -102,14 +102,14 @@ public sealed class XPlatApplicationOptions
 
     /// <summary>
     /// The menu bar every window uses unless it sets <see cref="XPlatWindow.MenuBar"/> itself. On
-    /// macOS this is the only menu bar there is.
+    /// macOS it is also mirrored into the system menu bar, which the platform requires to exist.
     /// </summary>
     public XPlatMenuBar? MenuBar { get; set; }
 
     /// <summary>
     /// Who draws the menus: the library or the platform. Defaults to
-    /// <see cref="XPlatMenuPresentation.Auto"/>, which is the library's own menus everywhere except
-    /// macOS, where the system owns the menu bar.
+    /// <see cref="XPlatMenuPresentation.Auto"/>, which is the library's own menus on every platform,
+    /// macOS included.
     /// </summary>
     /// <remarks>
     /// The library's menus are the same Skia drawing on every platform, so they support icons,

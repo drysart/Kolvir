@@ -122,9 +122,9 @@ internal static class Program
             MinimumClientSize = DesignMinimumClientSize,
         };
 
-        // Attached on every platform. macOS draws it in the system bar, and Windows and GTK4 draw it
-        // inside the window; the shortcuts it carries work on all three, because the window checks
-        // the bar before the focused control sees a key.
+        // Attached on every platform, and drawn by the library on every platform. macOS keeps the
+        // system bar in step with it as well; the shortcuts it carries work on all three, because
+        // the window checks the bar before the focused control sees a key.
         window.MenuBar = CreateMenuBar(window, demo);
 
         application.MainWindow = window;
@@ -269,9 +269,9 @@ internal static class Program
     }
 
     /// <summary>
-    /// The value of <c>--menus xplatui|native</c>, which overrides who draws the menus instead of
-    /// letting each platform choose. The portable bar is otherwise unreachable on macOS, where the
-    /// system bar is the right default.
+    /// The value of <c>--menus xplatui|native</c>, which overrides who draws the menus. The library
+    /// draws them by default on every platform, so <c>native</c> is the interesting one: it hands
+    /// the menus back to the desktop.
     /// </summary>
     private static XPlatMenuPresentation MenuPresentationArgument(string[] args)
     {

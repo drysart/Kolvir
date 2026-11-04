@@ -4,13 +4,12 @@ namespace XPlatUI;
 public enum XPlatMenuPresentation
 {
     /// <summary>
-    /// The library's own menus on Windows and Linux, the platform's on macOS.
+    /// The library's own menus, drawn with Skia, on every platform.
     /// </summary>
     /// <remarks>
-    /// macOS is the exception because AppKit owns the one menu bar the system shows at the top of
-    /// the screen, and the standard Edit menu, the application menu and the shortcuts that go with
-    /// them come from being in it. A window-drawn bar there would sit inside the window and leave
-    /// the system bar empty.
+    /// The same as <see cref="XPlatUI"/>; the platform's menus are never picked implicitly, so a
+    /// window looks the same wherever it runs unless the application asks otherwise with
+    /// <see cref="Native"/>.
     /// </remarks>
     Auto,
 
@@ -19,9 +18,9 @@ public enum XPlatMenuPresentation
     /// support icons, submenus and controls in a row.
     /// </summary>
     /// <remarks>
-    /// A window's bar is still the system's on macOS, because there is only one menu bar there and
-    /// it belongs to the application; what changes is the context menus, which are drawn by the
-    /// library instead of by AppKit.
+    /// On macOS the window's bar is drawn inside the window as well, and the system's own menu bar
+    /// is left with nothing but the application menu, which is what the platform requires to be
+    /// present at all.
     /// </remarks>
     XPlatUI,
 
@@ -39,10 +38,11 @@ public static class XPlatMenuPresentationExtensions
     /// True when <paramref name="presentation"/> means the platform's own menus on the platform the
     /// process is running on.
     /// </summary>
-    public static bool UsesNativeMenus(this XPlatMenuPresentation presentation) => presentation switch
-    {
-        XPlatMenuPresentation.Native => true,
-        XPlatMenuPresentation.XPlatUI => false,
-        _ => OperatingSystem.IsMacOS(),
-    };
+    /// <remarks>
+    /// Only <see cref="XPlatMenuPresentation.Native"/> asks for the platform's menus. A window that
+    /// is drawn with Skia is drawn with Skia's menus too, on macOS as much as anywhere else, so a
+    /// context menu or a bar does not change shape between platforms.
+    /// </remarks>
+    public static bool UsesNativeMenus(this XPlatMenuPresentation presentation) =>
+        presentation == XPlatMenuPresentation.Native;
 }

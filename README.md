@@ -1392,15 +1392,19 @@ creates a window:
 
 | Value | Meaning |
 | --- | --- |
-| `Auto` | The library's menus on Windows and Linux, the platform's on macOS |
+| `Auto` | The library's menus, on every platform |
 | `XPlatUI` | Always the library's menus |
 | `Native` | Always the platform's menus: the system bar on macOS, `TrackPopupMenuEx` and GTK4 popovers on Windows and Linux |
 
-macOS is the exception under `Auto` because AppKit owns the one menu bar the system shows at the top
-of the screen, and the standard Edit and application menus - and the key equivalents that go with
-them - come from being in it. A window-drawn bar there would sit inside the window and leave the
-system bar empty. Passing `XPlatMenuPresentation.XPlatUI` on macOS still draws the context menus with
-Skia; only the bar stays the system's.
+A window drawn with Skia is drawn with Skia's menus too, so `Auto` does not fall back to the
+platform anywhere: a menu keeps its shape, its icons and its keyboard handling wherever the
+application runs. On macOS that means the bar is drawn inside the window as well, and the system's
+menu bar is still maintained - it carries the application menu, which AppKit requires to exist, and
+the key equivalents the standard Edit commands rely on - but it mirrors the same model rather than
+replacing the bar in the window.
+
+`XPlatMenuPresentation.Native` is the escape hatch, and on macOS it puts the menus back at the top
+of the screen and hands context menus to AppKit.
 
 The sample takes `--menus xplatui|native` to compare the two on any platform. On Windows,
 `--classic-menus` is a further step down to `TrackPopupMenuEx` even when the portable menu is
@@ -1848,9 +1852,10 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 
 Two contract details are easy to miss. `ShowMessage`, `OpenFile`, `SaveFile`, `SelectFolder` and
 `ShowDialog` are **synchronous** but re-enter the platform loop, so a backend has to tolerate a
-nested loop and keep dispatching `Invoke` callbacks inside it. And `MenuBar` is per window: AppKit
-mirrors the active window's bar into the single global macOS menu bar, which is the only place the
-presentations diverge.
+nested loop and keep dispatching `Invoke` callbacks inside it. And `MenuBar` is per window: on macOS
+a backend draws the bar in the window like any other platform, and additionally mirrors the active
+window's bar into the single global macOS menu bar, because AppKit requires one to exist and the
+standard Edit key equivalents come from being in it.
 
 ## NativeAOT
 
