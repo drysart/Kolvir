@@ -58,6 +58,7 @@ internal sealed class AppKitSkiaView : NSView
     private readonly XPlatUiHost _host;
 
     private NSTrackingArea? _trackingArea;
+    private bool _tracksPointerInBackgroundWindow;
     private SKBitmap? _bitmap;
     private SKSurface? _skia;
     private CGDataProvider? _provider;
@@ -350,7 +351,35 @@ internal sealed class AppKitSkiaView : NSView
     public override void UpdateTrackingAreas()
     {
         base.UpdateTrackingAreas();
+        SyncTrackingArea();
+    }
 
+    /// <summary>
+    /// True to deliver pointer movement to this view even when its window is not the key window,
+    /// which is what a popup needs: a popup is never key, so a key-window-only tracking area never
+    /// becomes active and nothing inside the popup highlights under the pointer.
+    /// </summary>
+    public bool TracksPointerInBackgroundWindow
+    {
+        get => _tracksPointerInBackgroundWindow;
+        set
+        {
+            if (_tracksPointerInBackgroundWindow == value)
+            {
+                return;
+            }
+
+            _tracksPointerInBackgroundWindow = value;
+            SyncTrackingArea();
+        }
+    }
+
+    /// <summary>
+    /// Rebuilds the tracking area the view reports pointer movement through, so the options always
+    /// match <see cref="TracksPointerInBackgroundWindow"/> and the view's current bounds.
+    /// </summary>
+    private void SyncTrackingArea()
+    {
         if (_trackingArea is not null)
         {
             RemoveTrackingArea(_trackingArea);
@@ -358,11 +387,16 @@ internal sealed class AppKitSkiaView : NSView
             _trackingArea = null;
         }
 
+        if (_disposed)
+        {
+            return;
+        }
+
         _trackingArea = new NSTrackingArea(
             Bounds,
             NSTrackingAreaOptions.MouseEnteredAndExited |
             NSTrackingAreaOptions.MouseMoved |
-            NSTrackingAreaOptions.ActiveInKeyWindow |
+            (_tracksPointerInBackgroundWindow ? NSTrackingAreaOptions.ActiveAlways : NSTrackingAreaOptions.ActiveInKeyWindow) |
             NSTrackingAreaOptions.InVisibleRect |
             NSTrackingAreaOptions.EnabledDuringMouseDrag,
             this,

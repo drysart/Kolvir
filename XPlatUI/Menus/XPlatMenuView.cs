@@ -88,10 +88,18 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     public float SurfaceAlpha { get; set; } = 1f;
 
     /// <summary>
-    /// True to reserve room for the drop shadow. The root menu does; a submenu does not, because it
-    /// sits against the menu that opened it and a shadow there would blur over its own parent.
+    /// True to reserve room for the drop shadow. A submenu keeps one too, so it reads as a surface
+    /// of its own, but it is not allowed to cast it over the menu it is joined to - see
+    /// <see cref="ShadowExclusion"/>.
     /// </summary>
     public bool ShowShadow { get; set; } = true;
+
+    /// <summary>
+    /// How far this view's own surface is inset inside its bounds: the margin it keeps for the drop
+    /// shadow, or zero when it has none. A presenter offsets the popup by this much so that the
+    /// surface - not the transparent shadow margin - lands where the caller asked for it.
+    /// </summary>
+    public float SurfaceInset => ShowShadow ? (Metrics ?? XPlatMenuMetrics.Default).ShadowExtent : 0f;
 
     /// <summary>The menu that opened this one, or null for a root menu.</summary>
     public XPlatMenuView? ParentMenu => _parent;
@@ -330,7 +338,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             Metrics = Metrics,
             Font = Font,
             SurfaceAlpha = SurfaceAlpha,
-            ShowShadow = false,
+            ShowShadow = ShowShadow,
             _parent = this,
         };
 
@@ -529,7 +537,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
 
         if (_layout is { } layout)
         {
-            XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font);
+            XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, ShadowExclusion());
         }
     }
 
@@ -745,9 +753,31 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         var extent = ShowShadow ? metrics.ShadowExtent : 0f;
         var surfaceWidth = _layout?.SurfaceSize.Width ?? Bounds.Width;
 
+        // The child is offset by its own shadow margin: its bounds start one margin before its
+        // surface, so the two surfaces still meet at the same place they did without one.
+        var inset = _subMenu?.SurfaceInset ?? 0f;
+
         return new SKPoint(
-            extent + surfaceWidth - SubMenuOverlap,
-            MathF.Max(0f, row.Bounds.Top - metrics.Padding));
+            extent + surfaceWidth - SubMenuOverlap - inset,
+            MathF.Max(0f, row.Bounds.Top - metrics.Padding - inset));
+    }
+
+    /// <summary>
+    /// The rectangle this view's shadow must not reach into: the surface of the menu that opened
+    /// it, in this view's coordinates. A submenu is painted after its parent, so a shadow left
+    /// unclipped would darken the edge of the menu it is joined to instead of falling past it.
+    /// </summary>
+    private SKRect? ShadowExclusion()
+    {
+        if (_parent is not { } parent || parent._layout is not { } parentLayout)
+        {
+            return null;
+        }
+
+        var surface = parentLayout.SurfaceBounds;
+        surface.Offset(-Bounds.Left, -Bounds.Top);
+
+        return surface;
     }
 
     private void EnsureLayout()

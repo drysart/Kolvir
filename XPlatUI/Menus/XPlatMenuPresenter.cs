@@ -101,7 +101,7 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
                 return;
             }
 
-            popup.MoveTo(Place(location, view.Measure(maximum), maximum));
+            popup.MoveTo(Place(view, location, view.Measure(maximum), maximum));
         });
 
         closedToken = popup.AddClosedHandler(_ =>
@@ -113,21 +113,32 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
         });
 
         view.Attach(host);
-        popup.Show(Place(location, view.Measure(maximum), maximum));
+        popup.Show(Place(view, location, view.Measure(maximum), maximum));
 
         return popup;
     }
 
     /// <summary>
-    /// Keeps a menu of <paramref name="size"/> inside a window of <paramref name="client"/>: a menu
-    /// that would run off the right or bottom edge moves left or up instead, which is what a native
-    /// menu does when it is opened near a corner.
+    /// Works out where the popup's top left corner goes so that the menu's own surface lands on
+    /// <paramref name="location" />, kept inside a window of <paramref name="client" />.
     /// </summary>
-    private static SKPoint Place(SKPoint location, SKSize size, SKSize client)
+    /// <remarks>
+    /// A menu measures with room around it for its drop shadow, and that margin is transparent. The
+    /// surface - the part the user sees as the menu - sits one margin inside the popup, so the popup
+    /// is placed one margin up and to the left of the point that was asked for. The clamp is done on
+    /// the surface too, which is what keeps the menu itself inside the window rather than its
+    /// invisible margin.
+    /// </remarks>
+    private static SKPoint Place(XPlatMenuView view, SKPoint location, SKSize size, SKSize client)
     {
+        var inset = view.SurfaceInset;
+        var surface = new SKSize(
+            MathF.Max(0f, size.Width - (inset * 2f)),
+            MathF.Max(0f, size.Height - (inset * 2f)));
+
         return new SKPoint(
-            Axis(location.X, size.Width, client.Width),
-            Axis(location.Y, size.Height, client.Height));
+            Axis(location.X, surface.Width, client.Width) - inset,
+            Axis(location.Y, surface.Height, client.Height) - inset);
     }
 
     private static float Axis(float offset, float size, float available) =>

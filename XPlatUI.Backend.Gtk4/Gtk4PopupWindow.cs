@@ -155,8 +155,7 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         // so a control inside a popup that opens a popup of its own finds the service too.
         _host.Services = ownerHost.Services;
 
-        Resize(size);
-        Place(location, size);
+        Apply(location, size);
 
         _popover.Popup();
     }
@@ -169,8 +168,7 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
             return;
         }
 
-        Resize(size);
-        Place(location, size);
+        Apply(location, size);
     }
 
     /// <inheritdoc />
@@ -246,6 +244,34 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         Gtk.StyleContext.AddProviderForDisplay(display, provider, 600);
     }
 
+    /// <summary>
+    /// Applies a new position and size to the popup as a single change.
+    /// </summary>
+    /// <remarks>
+    /// GTK applies popover geometry in its next layout pass, and a resize on its own makes the
+    /// pass re-allocate the popover against the pointing rectangle it still has - clamped to the
+    /// monitor - before the new position lands, so a popup that grows briefly shows the new size at
+    /// the old place. Setting the pointing rectangle and offset first, then asking for the new
+    /// size, leaves the pass nothing to see but the final geometry.
+    /// </remarks>
+    private void Apply(SKPoint location, SKSize size)
+    {
+        int width = ToPixels(size.Width);
+        int height = ToPixels(size.Height);
+
+        _host.SetClientSize(width, height);
+
+        // Paint for the new size now: the picture fills its allocation, so without a frame at the
+        // new size the pass that applies it stretches the previous one across the new bounds.
+        _view.PaintNow(width, height);
+
+        Place(location, size);
+
+        _view.Widget.SetSizeRequest(width, height);
+        _frame.SetSizeRequest(width, height);
+        _frame.QueueResize();
+    }
+
     private void Place(SKPoint location, SKSize size)
     {
         int x = ToPixels(location.X);
@@ -256,21 +282,6 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         // edge and shifting right by half the width puts its top left corner on the requested spot.
         _popover.SetPointingTo(new Gdk.Rectangle { X = x, Y = y, Width = 1, Height = 1 });
         _popover.SetOffset(width / 2, 0);
-    }
-
-    /// <summary>
-    /// Tells the frame and the view how big the popup is, which is the size the popover ends up
-    /// taking because the frame measures as the size it is asked for rather than the view's.
-    /// </summary>
-    private void Resize(SKSize size)
-    {
-        int width = ToPixels(size.Width);
-        int height = ToPixels(size.Height);
-
-        _host.SetClientSize(width, height);
-        _view.Widget.SetSizeRequest(width, height);
-        _frame.SetSizeRequest(width, height);
-        _frame.QueueResize();
     }
 
     private void OnPopoverClosed(Gtk.Popover sender, EventArgs args)

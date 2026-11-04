@@ -379,6 +379,10 @@ public static class XPlatMenuRenderer
     /// </param>
     /// <param name="metrics">Row metrics, or null for <see cref="XPlatMenuMetrics.Default"/>.</param>
     /// <param name="font">Label font, or null for <see cref="XPlatTheme.DefaultFont"/>.</param>
+    /// <param name="shadowExclusion">
+    /// A rectangle, in the canvas's coordinates, that the shadow must not be painted over - the
+    /// surface of the menu a submenu is joined to. Null to paint the shadow everywhere.
+    /// </param>
     /// <remarks>
     /// The canvas is not cleared, so whatever the caller has already painted stays visible through a
     /// translucent surface.
@@ -389,7 +393,8 @@ public static class XPlatMenuRenderer
         int hoveredIndex = -1,
         float surfaceAlpha = 1f,
         XPlatMenuMetrics? metrics = null,
-        XPlatFont? font = null)
+        XPlatFont? font = null,
+        SKRect? shadowExclusion = null)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(layout);
@@ -408,12 +413,23 @@ public static class XPlatMenuRenderer
                 MaskFilter = SKMaskFilter.CreateBlur(SKBlurStyle.Normal, layout.ShadowExtent * 0.32f),
             };
 
+            if (shadowExclusion is { } exclusion)
+            {
+                canvas.Save();
+                canvas.ClipRect(exclusion, SKClipOperation.Difference, antialias: true);
+            }
+
             // Offset downwards the way a raised surface casts a shadow, and keep the blur inside
             // the reserved margin so it never has a hard edge.
             var shadowBounds = bounds;
             shadowBounds.Offset(0f, 2f);
             shadowBounds.Inflate(-2f, -2f);
             canvas.DrawRoundRect(shadowBounds, m.CornerRadius, m.CornerRadius, shadow);
+
+            if (shadowExclusion is not null)
+            {
+                canvas.Restore();
+            }
         }
 
         using (var fill = new SKPaint { IsAntialias = true, Color = Scale(XPlatTheme.Surface, alpha) })

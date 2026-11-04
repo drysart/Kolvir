@@ -74,12 +74,21 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
         {
             IsOpaque = false,
             BackgroundColor = NSColor.Clear,
-            HasShadow = true,
+
+            // The portable layer draws the drop shadow itself, in the transparent margin a menu
+            // reserves around its surface. A window shadow on top of that draws a second shadow
+            // from the window's own shape, which on a window this transparent shows up as a hard
+            // black outline just outside the shadow the menu already has.
+            HasShadow = false,
 
             // A tooltip must not swallow the press that was meant for the control underneath it,
             // which is what the Win32 side gets from WS_EX_TRANSPARENT.
             IgnoresMouseEvents = !_dismissOnOutsideClick,
         };
+
+        // The popup never becomes key, so its tracking area has to be active regardless of which
+        // window holds the keyboard or the pointer never reaches the controls inside it.
+        window.AcceptsMouseMovedEvents = true;
 
         // The managed side owns the window, so AppKit must not release it when it closes.
         window.ReleaseWhenClosed(false);
@@ -88,6 +97,7 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
         var view = new AppKitSkiaView(_host)
         {
             AutoresizingMask = NSViewResizingMask.WidthSizable | NSViewResizingMask.HeightSizable,
+            TracksPointerInBackgroundWindow = true,
         };
 
         window.ContentView = view;
