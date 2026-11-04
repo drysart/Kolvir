@@ -1617,7 +1617,7 @@ public sealed class DemoUi
     {
         var card = Card();
 
-        var sortCaption = ScrollCaption("Click a column header to sort");
+        var sortCaption = ScrollCaption("Click a column header to sort; drag a header edge to resize");
         card.Controls.Add(sortCaption);
 
         var details = new XPlatListView
@@ -1750,6 +1750,25 @@ public sealed class DemoUi
 
         buttons.Controls.Add(clearSort);
         buttons.Controls.Add(grow);
+
+        var lockWidths = new XPlatButton("Lock widths")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(6f, 0f, 0f, 0f),
+        };
+
+        lockWidths.AddClickHandler(_ =>
+        {
+            details.AllowColumnResize = !details.AllowColumnResize;
+            lockWidths.Text = details.AllowColumnResize ? "Lock widths" : "Unlock widths";
+            SetStatus(details.AllowColumnResize
+                ? "Header edges can be dragged again."
+                : "Header edges are locked; the columns cannot be resized.");
+        });
+
+        buttons.Controls.Add(lockWidths);
         card.Controls.Add(buttons);
 
         var countCaption = ScrollCaption($"{details.Items.Count} rows");

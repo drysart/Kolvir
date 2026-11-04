@@ -258,12 +258,22 @@ public class XPlatListView : XPlatVirtualList
     private readonly XPlatListViewItemCollection _itemCollection;
     private readonly XPlatListViewColumnCollection _columnCollection;
 
+    /// <summary>How close to a column's right edge the pointer has to be to grab it.</summary>
+    private const float ResizeGrabSize = 4f;
+
+    /// <summary>The narrowest a column can be dragged, so that it stays big enough to grab again.</summary>
+    private const float MinColumnWidth = 24f;
+
     private XPlatView _view = XPlatView.Details;
     private XPlatSortOrder _sortOrder;
     private int _sortColumn = -1;
     private int _hotColumn = -1;
     private float? _headerHeight;
     private bool _gridLines;
+    private bool _allowColumnResize = true;
+    private int _resizeColumn = -1;
+    private float _resizeOrigin;
+    private float _resizeOriginWidth;
 
     private Action<object, XPlatListViewColumnClickEventArgs>? _columnClick;
 
@@ -292,6 +302,7 @@ public class XPlatListView : XPlatVirtualList
 
             _view = value;
             _hotColumn = -1;
+            EndColumnResize();
             NotifyItemsChanged();
         }
     }
@@ -330,6 +341,31 @@ public class XPlatListView : XPlatVirtualList
 
             _gridLines = value;
             Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// True to let the width of a column be changed by dragging its right edge in the header.
+    /// Defaults to true.
+    /// </summary>
+    /// <remarks>
+    /// Only <see cref="XPlatView.Details"/> has a header to drag. The last column is not a drag
+    /// target while it is stretched to fill the control, because its width is then the space that
+    /// is left over rather than a width of its own; set <see cref="XPlatListViewColumn.Width"/> to
+    /// size it. Columns are never dragged narrower than 24 pixels.
+    /// </remarks>
+    public bool AllowColumnResize
+    {
+        get => _allowColumnResize;
+        set
+        {
+            if (_allowColumnResize == value)
+            {
+                return;
+            }
+
+            _allowColumnResize = value;
+            EndColumnResize();
         }
     }
 
@@ -499,6 +535,82 @@ public class XPlatListView : XPlatVirtualList
         return -1;
     }
 
+    /// <summary>
+    /// The column whose right edge is under a point and can be dragged, or -1 when there is none.
+    /// </summary>
+    private int ResizeColumnFromPoint(SKPoint point)
+    {
+        if (!_allowColumnResize || !Enabled || _view != XPlatView.Details || !XPlatGeometry.Contains(HeaderBand, point))
+        {
+            return -1;
+        }
+
+        // A stretched last column has no edge of its own to move: it takes whatever space is left.
+        int count = _columns.Count;
+        if (count > 0 && CellRect(count - 1).Width > _columns[count - 1].Width)
+        {
+            count--;
+        }
+
+        for (int index = 0; index < count; index++)
+        {
+            if (MathF.Abs(point.X - CellRect(index).Right) <= ResizeGrabSize)
+            {
+                return index;
+            }
+        }
+
+        return -1;
+    }
+
+    /// <summary>Shows the left-right arrow over a column edge that can be dragged.</summary>
+    public override XPlatCursor GetCursorAt(SKPoint pointInLocal)
+    {
+        if (_resizeColumn >= 0 || ResizeColumnFromPoint(pointInLocal) >= 0)
+        {
+            return XPlatCursor.SizeWE;
+        }
+
+        return base.GetCursorAt(pointInLocal);
+    }
+
+    private bool TryBeginColumnResize(SKPoint point)
+    {
+        int column = ResizeColumnFromPoint(point);
+        if (column < 0)
+        {
+            return false;
+        }
+
+        _resizeColumn = column;
+        _resizeOrigin = point.X;
+        _resizeOriginWidth = _columns[column].Width;
+        _hotColumn = -1;
+        CaptureMouse();
+        return true;
+    }
+
+    private void ResizeColumnTo(float x)
+    {
+        if (_resizeColumn < 0 || _resizeColumn >= _columns.Count)
+        {
+            return;
+        }
+
+        _columns[_resizeColumn].Width = MathF.Max(MinColumnWidth, _resizeOriginWidth + (x - _resizeOrigin));
+    }
+
+    private void EndColumnResize()
+    {
+        if (_resizeColumn < 0)
+        {
+            return;
+        }
+
+        _resizeColumn = -1;
+        ReleaseMouseCapture();
+    }
+
     public override string GetItemText(int index) => _items[index].Text;
 
     public override object? GetItem(int index) => _items[index];
@@ -638,6 +750,12 @@ public class XPlatListView : XPlatVirtualList
             return;
         }
 
+        if (TryBeginColumnResize(e.Location))
+        {
+            Focus();
+            return;
+        }
+
         int column = ColumnFromPoint(e.Location);
         if (column < 0)
         {
@@ -652,6 +770,12 @@ public class XPlatListView : XPlatVirtualList
     {
         base.OnMouseMove(e);
 
+        if (_resizeColumn >= 0)
+        {
+            ResizeColumnTo(e.Location.X);
+            return;
+        }
+
         int column = ColumnFromPoint(e.Location);
         if (column == _hotColumn)
         {
@@ -660,6 +784,16 @@ public class XPlatListView : XPlatVirtualList
 
         _hotColumn = column;
         Invalidate(HeaderBand);
+    }
+
+    protected override void OnMouseUp(XPlatMouseEventArgs e)
+    {
+        base.OnMouseUp(e);
+
+        if (e.Button == XPlatMouseButtons.Left)
+        {
+            EndColumnResize();
+        }
     }
 
     protected override void OnMouseLeave()
@@ -673,6 +807,12 @@ public class XPlatListView : XPlatVirtualList
 
         _hotColumn = -1;
         Invalidate(HeaderBand);
+    }
+
+    protected override void OnLostFocus()
+    {
+        base.OnLostFocus();
+        EndColumnResize();
     }
 
     /// <summary>

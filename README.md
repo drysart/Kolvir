@@ -509,6 +509,7 @@ lines.
 | `View` | `List` (one text column, no header) or `Details` (columns under a header) |
 | `HeaderHeight` | Height of the header band in `Details`; the rows are laid out below it |
 | `GridLines` | Draws the column separators and the row rules in `Details` |
+| `AllowColumnResize` | Whether a column's right edge can be dragged in the header; `true` by default |
 | `SortColumn`, `SortOrder` | Which column shows the header glyph, and which way it points |
 | `XPlatListViewColumn.Comparer` | Orders two rows for that column; `null` compares the cell text with the current culture |
 | `Sort()` | Sorts `Items` by the current column and keeps the selection on the items it was on |
@@ -563,6 +564,12 @@ Rows in `Details` are a fixed height for the whole control, so the row bands lin
 columns and the vertical grid lines are one stroke per column. The horizontal extent is the sum of
 the column widths, so narrowing the control below that raises the horizontal scrollbar rather than
 squeezing a column.
+
+Dragging a column's right edge in the header resizes it, with the pointer turning into a left-right
+arrow over the edge. Set `AllowColumnResize` to `false` to take the drag away and leave the widths to
+code. Columns stop at 24 pixels, and the last column is only a drag target while it is narrower than
+the space left for it - once it is stretched to fill the control its width is the leftover rather
+than a width of its own, so set `Width` instead.
 
 ### Tree view
 
