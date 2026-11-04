@@ -1632,14 +1632,24 @@ public sealed class DemoUi
             Margin = new XPlatThickness(0f, 0f, 0f, 6f),
         };
 
+        // The Size cells read "812 KB" and "4 KB", which is the wrong way round as text, so the column
+        // compares the byte count the rows keep in their Tag instead.
+        var sizeColumn = new XPlatListViewColumn("Size", 76f, XPlatContentAlignment.MiddleRight)
+        {
+            Comparer = (left, right) => BytesOf(left).CompareTo(BytesOf(right)),
+        };
+
         details.Columns.Add(new XPlatListViewColumn("Name", 168f));
         details.Columns.Add(new XPlatListViewColumn("Kind", 104f));
-        details.Columns.Add(new XPlatListViewColumn("Size", 76f, XPlatContentAlignment.MiddleRight));
+        details.Columns.Add(sizeColumn);
         details.Columns.Add(new XPlatListViewColumn("Modified", 118f));
 
         foreach (var row in SampleFiles)
         {
-            details.Items.Add(new XPlatListViewItem(row.Name, row.Kind, row.Size, row.Modified));
+            details.Items.Add(new XPlatListViewItem(row.Name, row.Kind, FormatSize(row.Bytes), row.Modified)
+            {
+                Tag = row.Bytes,
+            });
         }
 
         details.SelectedIndex = 0;
@@ -1719,11 +1729,15 @@ public sealed class DemoUi
             {
                 for (int index = 0; index < 500; index++)
                 {
+                    long bytes = (index + 1) * 1_024L;
                     details.Items.Add(new XPlatListViewItem(
                         $"generated-{details.Items.Count:D4}.bin",
                         "File",
-                        "0 KB",
-                        "today"));
+                        FormatSize(bytes),
+                        "today")
+                    {
+                        Tag = bytes,
+                    });
                 }
             }
             finally
@@ -1744,18 +1758,22 @@ public sealed class DemoUi
         return card;
     }
 
-    private static readonly (string Name, string Kind, string Size, string Modified)[] SampleFiles =
+    private static long BytesOf(XPlatListViewItem item) => item.Tag is long bytes ? bytes : 0L;
+
+    private static string FormatSize(long bytes) => bytes >= 1024 ? $"{bytes / 1024} KB" : $"{bytes} B";
+
+    private static readonly (string Name, string Kind, long Bytes, string Modified)[] SampleFiles =
     {
-        ("readme.txt", "Text", "4 KB", "2024-05-02 09:14"),
-        ("XPlatControl.cs", "Source", "61 KB", "2024-05-11 18:02"),
-        ("XPlatListView.cs", "Source", "31 KB", "2024-05-12 07:45"),
-        ("theme-light.json", "Data", "2 KB", "2024-04-28 12:30"),
-        ("theme-dark.json", "Data", "2 KB", "2024-04-28 12:30"),
-        ("render-target.png", "Image", "148 KB", "2024-05-09 22:11"),
-        ("harness.exe", "Binary", "96 KB", "2024-05-10 08:00"),
-        ("LICENSE", "Text", "1 KB", "2024-01-04 00:00"),
-        ("build.log", "Log", "812 KB", "2024-05-12 06:59"),
-        ("a-very-long-file-name-that-should-be-trimmed-with-an-ellipsis.txt", "Text", "7 KB", "2024-05-01 11:20"),
+        ("readme.txt", "Text", 4_096, "2024-05-02 09:14"),
+        ("XPlatControl.cs", "Source", 62_464, "2024-05-11 18:02"),
+        ("XPlatListView.cs", "Source", 31_744, "2024-05-12 07:45"),
+        ("theme-light.json", "Data", 2_048, "2024-04-28 12:30"),
+        ("theme-dark.json", "Data", 2_048, "2024-04-28 12:30"),
+        ("render-target.png", "Image", 151_552, "2024-05-09 22:11"),
+        ("harness.exe", "Binary", 98_304, "2024-05-10 08:00"),
+        ("LICENSE", "Text", 1_024, "2024-01-04 00:00"),
+        ("build.log", "Log", 831_488, "2024-05-12 06:59"),
+        ("a-very-long-file-name-that-should-be-trimmed-with-an-ellipsis.txt", "Text", 7_168, "2024-05-01 11:20"),
     };
 
     /// <summary>

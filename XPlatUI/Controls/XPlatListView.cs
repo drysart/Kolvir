@@ -12,6 +12,7 @@ public sealed class XPlatListViewColumn
     private string _text = string.Empty;
     private float _width = 120f;
     private XPlatContentAlignment _alignment = XPlatContentAlignment.MiddleLeft;
+    private Comparison<XPlatListViewItem>? _comparer;
 
     public XPlatListViewColumn()
     {
@@ -77,6 +78,32 @@ public sealed class XPlatListViewColumn
 
             _alignment = value;
             Owner?.OnColumnChanged();
+        }
+    }
+
+    /// <summary>
+    /// How two rows are ordered when this column is the one being sorted, or <see langword="null"/> to
+    /// compare the cell text with the current culture. The comparison is always written ascending: the
+    /// control turns it around for <see cref="XPlatSortOrder.Descending"/>, and rows that compare equal
+    /// keep the order they were added in.
+    /// </summary>
+    /// <remarks>
+    /// Use this when the cell text is not the value being ordered, such as a right-aligned "812 KB"
+    /// that has to sort above "4 KB". The items are handed over whole, so a row can keep its real
+    /// value in <see cref="XPlatListViewItem.Tag"/> and sort on that instead of parsing the text.
+    /// </remarks>
+    public Comparison<XPlatListViewItem>? Comparer
+    {
+        get => _comparer;
+        set
+        {
+            if (ReferenceEquals(_comparer, value))
+            {
+                return;
+            }
+
+            _comparer = value;
+            Owner?.OnColumnComparerChanged(this);
         }
     }
 
@@ -377,8 +404,9 @@ public class XPlatListView : XPlatVirtualList
 
     /// <summary>
     /// Re-orders the items by <see cref="SortColumn"/> and <see cref="SortOrder"/>. The sort is
-    /// stable, compares cell text with the current culture, and keeps the selection on the items
-    /// that had it.
+    /// stable, orders the cells with the column's <see cref="XPlatListViewColumn.Comparer"/> when it has
+    /// one and their text with the current culture when it does not, and keeps the selection on the
+    /// items that had it.
     /// </summary>
     public void Sort()
     {
@@ -395,16 +423,24 @@ public class XPlatListView : XPlatVirtualList
         }
 
         int column = _sortColumn;
+        var comparer = _columns[column].Comparer;
         bool descending = _sortOrder == XPlatSortOrder.Descending;
         Array.Sort(order, (left, right) =>
         {
-            int result = string.Compare(
-                _items[left].GetCell(column),
-                _items[right].GetCell(column),
-                StringComparison.CurrentCultureIgnoreCase);
+            // Swapping the rows rather than negating the result turns the order around without the
+            // overflow that a comparer returning int.MinValue would hit.
+            int first = descending ? right : left;
+            int second = descending ? left : right;
 
-            // Falling back to the original position keeps equal cells in the order they were added.
-            return result == 0 ? left.CompareTo(right) : descending ? -result : result;
+            int result = comparer is null
+                ? string.Compare(
+                    _items[first].GetCell(column),
+                    _items[second].GetCell(column),
+                    StringComparison.CurrentCultureIgnoreCase)
+                : comparer(_items[first], _items[second]);
+
+            // Falling back to the original position keeps equal rows in the order they were added.
+            return result == 0 ? left.CompareTo(right) : result;
         });
 
         var sorted = new XPlatListViewItem[count];
@@ -667,6 +703,20 @@ public class XPlatListView : XPlatVirtualList
 
     /// <summary>Called when a column changed, so that the rows can be measured again.</summary>
     internal void OnColumnChanged() => NotifyItemsChanged();
+
+    /// <summary>Re-sorts when the column that just got a new comparer is the one being sorted by.</summary>
+    internal void OnColumnComparerChanged(XPlatListViewColumn column)
+    {
+        if (_sortOrder == XPlatSortOrder.None || _sortColumn < 0 || _sortColumn >= _columns.Count)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(_columns[_sortColumn], column))
+        {
+            Sort();
+        }
+    }
 
     private SKRect CellRect(int index) => CellRect(index, HeaderBand.Top, HeaderBand.Bottom);
 

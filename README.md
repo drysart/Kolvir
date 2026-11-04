@@ -505,11 +505,12 @@ lines.
 | Member | Behaviour |
 | --- | --- |
 | `Items` | An `IList<XPlatListViewItem>`; an item's `Text` is its first cell, and `SetCell`/`GetCell` or the `(text, cells)` constructor fill the rest |
-| `Columns` | An `IList<XPlatListViewColumn>` of `Text`, `Width` and `Alignment` |
+| `Columns` | An `IList<XPlatListViewColumn>` of `Text`, `Width`, `Alignment` and an optional `Comparer` |
 | `View` | `List` (one text column, no header) or `Details` (columns under a header) |
 | `HeaderHeight` | Height of the header band in `Details`; the rows are laid out below it |
 | `GridLines` | Draws the column separators and the row rules in `Details` |
 | `SortColumn`, `SortOrder` | Which column shows the header glyph, and which way it points |
+| `XPlatListViewColumn.Comparer` | Orders two rows for that column; `null` compares the cell text with the current culture |
 | `Sort()` | Sorts `Items` by the current column and keeps the selection on the items it was on |
 | `AddColumnClickHandler` | A header was clicked; setting `Cancel` on the arguments stops the built-in sort so an application can sort its own way |
 | `ColumnFromPoint(point)` | Which column a point is in, or `-1` |
@@ -534,10 +535,29 @@ root.Controls.Add(list);
 ```
 
 A header click sorts by that column, or reverses the order when it is already the sorted one, which
-is the behaviour every file browser has. `Sort` is a stable insertion sort over the item list rather
-than a LINQ `OrderBy`, because the library does not reference `System.Linq` - it keeps the sort
-allocating nothing but the index array it permutes, which matters when the list is large and the
-comparison is a string one.
+is the behaviour every file browser has. The comparison is always written ascending: `SortOrder`
+turns it around, and rows that compare equal keep the order they were added in. `Sort` permutes an
+index array with `Array.Sort` rather than a LINQ `OrderBy`, because the library does not reference
+`System.Linq`; the original position is the tie-break, which is what makes the sort stable.
+
+Sorting on cell text is wrong as soon as the cell is formatted, because `"812 KB"` sorts above
+`"4 KB"`. Give the column a `Comparer` and it orders the rows however the application wants. The
+comparison is handed the two items whole, so the real value can live in `Tag`:
+
+```csharp
+var size = new XPlatListViewColumn("Size", 80f, XPlatContentAlignment.MiddleRight)
+{
+    Comparer = (left, right) => BytesOf(left).CompareTo(BytesOf(right)),
+};
+
+list.Columns.Add(size);
+list.Items.Add(new XPlatListViewItem("build.log", "812 KB") { Tag = 831_488L });
+
+static long BytesOf(XPlatListViewItem item) => item.Tag is long bytes ? bytes : 0L;
+```
+
+Setting `Comparer` re-sorts straight away when that column is the one being sorted by, so the rows
+never sit in an order the comparer disagrees with.
 
 Rows in `Details` are a fixed height for the whole control, so the row bands line up with the header
 columns and the vertical grid lines are one stroke per column. The horizontal extent is the sum of
