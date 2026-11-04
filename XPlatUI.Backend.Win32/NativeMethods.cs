@@ -153,6 +153,12 @@ internal static class NativeMethods
     internal const uint CfUnicodeText = 13;
     internal const uint GmemMoveable = 0x0002;
 
+    // Waitable timers.
+    internal const uint CreateWaitableTimerHighResolution = 0x00000002;
+    internal const uint TimerAllAccess = 0x1F0003;
+    internal const uint WaitObject0 = 0;
+    internal const uint Infinite = 0xFFFFFFFF;
+
     // DPI.
     internal const uint SpiGetWorkArea = 0x0030;
     internal const uint MonitorDefaultToNearest = 0x00000002;
@@ -703,6 +709,24 @@ internal static class NativeMethods
 
     [DllImport("kernel32.dll")]
     internal static extern bool AttachConsole(uint dwProcessId);
+
+    // Waitable timers. A timer created with CreateWaitableTimerHighResolution is not bound by the
+    // 15.625 ms system timer period, which is what lets a sub-period interval actually tick at its
+    // own rate instead of being rounded up to the period.
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern IntPtr CreateWaitableTimerExW(IntPtr lpTimerAttributes, IntPtr lpTimerName, uint dwFlags, uint dwDesiredAccess);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool SetWaitableTimer(IntPtr hTimer, ref long lpDueTime, int lPeriod, IntPtr pfnCompletionRoutine, IntPtr lpArgToCompletionRoutine, bool fResume);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool CancelWaitableTimer(IntPtr hTimer);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern uint WaitForSingleObject(IntPtr hHandle, uint dwMilliseconds);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern bool CloseHandle(IntPtr hObject);
 
     // Clipboard.
     [DllImport("user32.dll", SetLastError = true)]

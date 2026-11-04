@@ -30,6 +30,7 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
 
     private readonly Queue<Action> _pending = new();
     private readonly List<Win32WindowBackend> _windows = new();
+    private readonly List<IXPlatTimerBackend> _timers = new();
     private readonly object _gate = new();
 
     private NativeMethods.WndProc? _messageProc;
@@ -236,6 +237,21 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <inheritdoc />
+    public IXPlatTimerBackend CreateTimer(Action tick)
+    {
+        ArgumentNullException.ThrowIfNull(tick);
+
+        var backend = new Win32TimerBackend(tick, ForgetTimer);
+
+        lock (_gate)
+        {
+            _timers.Add(backend);
+        }
+
+        return backend;
+    }
+
+    /// <inheritdoc />
     public void RegisterServices(IServiceCollection services)
     {
         ArgumentNullException.ThrowIfNull(services);
@@ -288,6 +304,20 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
     /// <inheritdoc />
     public void Shutdown()
     {
+        IXPlatTimerBackend[] timers;
+
+        lock (_gate)
+        {
+            timers = _timers.ToArray();
+            _timers.Clear();
+        }
+
+        // A timer the UI forgot to dispose would otherwise keep a wait thread alive past the loop.
+        foreach (var timer in timers)
+        {
+            timer.Dispose();
+        }
+
         _instanceLock?.Dispose();
         _instanceLock = null;
 
@@ -391,6 +421,14 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
         lock (_gate)
         {
             _windows.Remove(window);
+        }
+    }
+
+    private void ForgetTimer(IXPlatTimerBackend timer)
+    {
+        lock (_gate)
+        {
+            _timers.Remove(timer);
         }
     }
 

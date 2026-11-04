@@ -269,6 +269,13 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <inheritdoc />
+    /// <remarks>
+    /// macOS honours a sub-millisecond interval on a pool timer, so the portable wait is already
+    /// as precise as anything the display can show.
+    /// </remarks>
+    public IXPlatTimerBackend CreateTimer(Action tick) => new ThreadPoolTimerBackend(tick);
+
+    /// <inheritdoc />
     public IXPlatWindowBackend CreateWindow(XPlatWindow window)
     {
         ArgumentNullException.ThrowIfNull(window);

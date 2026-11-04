@@ -6,20 +6,28 @@ namespace XPlatUI;
 /// </summary>
 /// <remarks>
 /// <para>
-/// The wait itself happens on a pool thread; only the <see cref="AddTickHandler"/> callback is
-/// moved to the UI thread, through <see cref="XPlatApplication.BeginInvoke"/>. That keeps the
-/// message loop free of any timer bookkeeping and gives every platform the same behaviour.
+/// The wait itself happens in the platform's <see cref="IXPlatTimerBackend"/>; only the
+/// <see cref="AddTickHandler"/> callback is moved to the UI thread, through
+/// <see cref="XPlatApplication.BeginInvoke"/>. That keeps the message loop free of any timer
+/// bookkeeping and gives every platform the same behaviour.
 /// </para>
 /// <para>
 /// Ticks are not queued up: if the loop is busy for longer than <see cref="Interval"/>, missed
 /// ticks are dropped rather than replayed. Before any <see cref="XPlatApplication"/> exists - or
-/// once it has been disposed - ticks run inline on the pool thread.
+/// once it has been disposed - ticks run inline on the thread that waited for them.
+/// </para>
+/// <para>
+/// The underlying timer is created on the first <see cref="Start" /> and comes from the running
+/// application's backend, so a timer waits the way its platform wants. A timer that never starts
+/// never asks for one.
 /// </para>
 /// </remarks>
 public sealed class XPlatTimer : IDisposable
 {
+    private readonly object _gate = new();
     private Action<object>? _tick;
-    private readonly System.Threading.Timer _timer;
+    private IXPlatTimerBackend? _backend;
+    private IXPlatApplicationBackend? _owner;
     private TimeSpan _interval;
     private bool _enabled;
     private bool _disposed;
@@ -33,11 +41,7 @@ public sealed class XPlatTimer : IDisposable
 
     /// <summary>Creates a stopped timer.</summary>
     /// <param name="interval">The interval between ticks; must be positive.</param>
-    public XPlatTimer(TimeSpan interval)
-    {
-        _interval = ValidateInterval(interval);
-        _timer = new System.Threading.Timer(static state => ((XPlatTimer)state!).OnTimer(), this, Timeout.Infinite, Timeout.Infinite);
-    }
+    public XPlatTimer(TimeSpan interval) => _interval = ValidateInterval(interval);
 
     /// <summary>The interval between ticks. Changing it while the timer is running restarts it.</summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
@@ -114,20 +118,29 @@ public sealed class XPlatTimer : IDisposable
         }
 
         _enabled = false;
-        _timer.Change(Timeout.Infinite, Timeout.Infinite);
+        Volatile.Read(ref _backend)?.Stop();
     }
 
     /// <inheritdoc />
     public void Dispose()
     {
-        if (_disposed)
+        IXPlatTimerBackend? backend;
+
+        lock (_gate)
         {
-            return;
+            if (_disposed)
+            {
+                return;
+            }
+
+            _disposed = true;
+            _enabled = false;
+            backend = _backend;
+            _backend = null;
+            _owner = null;
         }
 
-        _disposed = true;
-        _enabled = false;
-        _timer.Dispose();
+        backend?.Dispose();
     }
 
     private static TimeSpan ValidateInterval(TimeSpan interval)
@@ -140,7 +153,34 @@ public sealed class XPlatTimer : IDisposable
         return interval;
     }
 
-    private void Restart() => _timer.Change(_interval, _interval);
+    private void Restart()
+    {
+        var owner = XPlatApplication.Current?.Backend;
+        IXPlatTimerBackend backend;
+        IXPlatTimerBackend? replaced = null;
+
+        lock (_gate)
+        {
+            if (_disposed)
+            {
+                return;
+            }
+
+            if (_backend is null || !ReferenceEquals(_owner, owner))
+            {
+                // First start, or the application the wait belonged to has come or gone since:
+                // the wait has to be built again against whoever is running now.
+                replaced = _backend;
+                _owner = owner;
+                _backend = owner?.CreateTimer(OnTimer) ?? new ThreadPoolTimerBackend(OnTimer);
+            }
+
+            backend = _backend;
+        }
+
+        replaced?.Dispose();
+        backend.Start(_interval);
+    }
 
     private void OnTimer()
     {

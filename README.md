@@ -513,13 +513,14 @@ A marquee that leaves `MarqueeAnimationSpeed` null asks
 `XPlatScreen.RefreshRate` for the refresh rate of the display the window is on and animates at that
 frame time, falling back to 30 ms when the platform cannot report one. The rate is read when the
 sweep starts, so a bar that begins animating on another display picks that display up; a running one
-does not query the platform from inside its paint. Two things are worth knowing before relying on
-it. A platform timer cannot tick faster than the OS allows - Windows' timer queue is capped at about
-15 ms unless the process raises the timer resolution - so a 144 Hz display animates at roughly 64
-frames a second rather than 144; the sweep still runs at the same speed because each frame advances
-by the time that actually passed, not by the interval that was asked for. And the repaint rate is
-the display's, so a fast panel costs more repaints than a fixed 30 ms would: set a speed explicitly
-when that matters more than smoothness.
+does not query the platform from inside its paint. A platform timer cannot tick faster than the OS
+allows, so the wait itself belongs to the backend: on Windows, where the default timer cannot fire
+faster than its 15.625 ms period, a sub-period interval is run on a high-resolution waitable timer,
+which is why a 240 Hz display really does animate at about 240 frames a second instead of 64. Each
+frame advances by the time that actually passed rather than by the interval that was asked for, so
+the sweep runs at `MarqueeSweepsPerSecond` whatever the timer manages. The repaint rate is the
+display's, though, so a fast panel costs more repaints than a fixed 30 ms would: set a speed
+explicitly when that matters more than smoothness.
 
 ```csharp
 var progress = new XPlatProgressBar { Dock = DockStyle.Top, Maximum = 200 };
@@ -1004,7 +1005,10 @@ control's focus and enabled state, so it only runs while the caret is actually o
 idle application has no timer running at all. `XPlatTextBox.Caret` exposes the instance it uses, so
 its interval, width and color can be changed, and a new editable control gets the same caret with
 `new XPlatCaret(this)`. A control that animates something else does the same through `CreateTimer`,
-which hands back an `XPlatTimer` the control owns and that is disposed with it.
+which hands back an `XPlatTimer` the control owns and that is disposed with it. The wait itself comes
+from the backend's `CreateTimer`, so a control asks for an interval and the platform decides how to
+honour it; the underlying timer is created on the first `Start`, so a timer that never runs never
+asks for one.
 
 ### Selection and the clipboard
 
@@ -1511,7 +1515,16 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 7. Implement `GetScreens`, reporting each display's refresh rate when the platform can supply one -
    it is what a marquee progress bar animates at - and `Shutdown` releases whatever `Initialize`
    took.
-8. Optionally assign an `IXPlatPopupService` to `XPlatPopupService.Current` so popups become real
+8. Implement `CreateTimer`, returning an `IXPlatTimerBackend` that calls the callback it is handed
+   once per interval. `new ThreadPoolTimerBackend(tick)` is the whole implementation for a platform
+   whose own timer is fine-grained; the Win32 backend answers an interval under the 15.625 ms system
+   timer period with a high-resolution waitable timer instead, because a pool timer there cannot
+   fire any faster than the period however small the interval is. It is a `Create*` member rather
+   than a registered service for the same reason `CreateWindow` is: a timer is an object the backend
+   owns for as long as a control needs it, not a singleton the container holds. Dropping overlapping
+   ticks and moving the callback to the UI thread stay in `XPlatTimer`, so a backend only has to get
+   the wait right.
+9. Optionally assign an `IXPlatPopupService` to `XPlatPopupService.Current` so popups become real
    windows instead of overlays inside the owning window. It is a static rather than a DI service
    because a popup belongs to one owner host rather than to the application, and because leaving it
    null is a valid implementation: the overlay fallback then draws every popup inside the window.
