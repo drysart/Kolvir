@@ -1330,6 +1330,19 @@ every platform and can carry icons, submenus and controls in a row.
 
 `XPlatMenuRenderer` contains no platform code, so every backend draws the same menu from it.
 
+The control under the pointer answers first: `ProcessContextMenu` walks from the hit control up
+through its parents looking for a `ContextMenu`, and only then asks the application. A window that
+wants a menu over its empty space therefore has to answer itself:
+
+```csharp
+host.AddContextMenuOpeningHandler((_, args) => args.Menu = BuildPageMenu());
+```
+
+The selection's **Copy** menu is built after those handlers, so a handler that wants Copy to keep
+winning checks `host.Selection.IsEmpty` first. Answering matters: when control, handler and
+selection all decline, `ProcessContextMenu` shows nothing on any presenter, so a page with no
+menu-bearing control under the pointer looks unresponsive.
+
 ### Menus drawn by the library
 
 `XPlatMenuView` is the menu surface. It is a plain control: it paints through the normal control
