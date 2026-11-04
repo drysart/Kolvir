@@ -54,11 +54,20 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
     /// padding shows up as a border of dead space around the XPlat controls. The padding and the
     /// chrome are removed for popups only, through a style class of their own.
     /// </summary>
+    /// <remarks>
+    /// The fill has to be cleared on the popover's <c>contents</c> node as well as on the popover:
+    /// that is the node a GTK4 theme paints the popover background on, and a background left in
+    /// place there covers the page behind the popup. A menu shows that as an opaque rectangle
+    /// around the menu proper, because the portable layer leaves its shadow margin transparent on
+    /// purpose and expects to see the window underneath.
+    /// </remarks>
     private const string PopupStyleSheet =
-        "popover." + PopupStyleClass +
-        " { padding: 0; margin: 0; border: none; background: none; box-shadow: none; }\n" +
-        "popover." + PopupStyleClass +
-        " > contents { padding: 0; margin: 0; border: none; box-shadow: none; }\n";
+        "popover." + PopupStyleClass + ", popover." + PopupStyleClass + ".background" +
+        " { padding: 0; margin: 0; border: none; border-radius: 0;" +
+        " background: none; background-color: transparent; box-shadow: none; }\n" +
+        "popover." + PopupStyleClass + " > contents, popover." + PopupStyleClass + ".background > contents" +
+        " { padding: 0; margin: 0; border: none; border-radius: 0;" +
+        " background: none; background-color: transparent; box-shadow: none; }\n";
 
     private static Gdk.Display? _styledDisplay;
 
