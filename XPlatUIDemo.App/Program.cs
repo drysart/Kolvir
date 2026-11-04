@@ -145,6 +145,14 @@ internal static class Program
         // this one.
         window.TopMost = Array.IndexOf(args, "--topmost") >= 0;
 
+        // Opens the menus page's context menu as if the box had been right-clicked, which is what a
+        // screenshot or a script needs in order to see a menu without hunting for the box. A popup
+        // needs a host, and a page has none until the window is up, so this waits for that moment.
+        if (Array.IndexOf(args, "--menu") >= 0)
+        {
+            window.AddShownHandler(_ => demo.OpenMenuDemo(window));
+        }
+
         window.Show();
 
         demo.SelectPage(PageArgument(args));
@@ -157,13 +165,6 @@ internal static class Program
         if (Array.IndexOf(args, "--owned") >= 0)
         {
             demo.ShowOwnedWindow();
-        }
-
-        // Opens the menus page's context menu as if the box had been right-clicked, which is what a
-        // screenshot or a script needs in order to see a menu without hunting for the box.
-        if (Array.IndexOf(args, "--menu") >= 0)
-        {
-            demo.OpenMenuDemo(window);
         }
 
         return application.Run();
