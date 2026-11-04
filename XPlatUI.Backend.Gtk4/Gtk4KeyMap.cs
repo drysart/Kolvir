@@ -8,6 +8,13 @@ internal static class Gtk4KeyMap
 {
     private const uint KeyBackspace = 0xFF08;
     private const uint KeyTab = 0xFF09;
+
+    /// <summary>
+    /// X11 gives shift+Tab a key value of its own rather than reporting <see cref="KeyTab"/> with
+    /// the shift bit, so a shifted Tab arrives here instead of as Tab.
+    /// </summary>
+    private const uint KeyIsoLeftTab = 0xFE20;
+
     private const uint KeyReturn = 0xFF0D;
     private const uint KeyEscape = 0xFF1B;
     private const uint KeySpace = 0x0020;
@@ -41,7 +48,7 @@ internal static class Gtk4KeyMap
 
         return keyval switch
         {
-            KeyTab => XPlatKey.Tab,
+            KeyTab or KeyIsoLeftTab => XPlatKey.Tab,
             KeyReturn or KeyKpEnter => XPlatKey.Enter,
             KeySpace => XPlatKey.Space,
             KeyEscape => XPlatKey.Escape,
@@ -80,6 +87,13 @@ internal static class Gtk4KeyMap
 
         return modifiers;
     }
+
+    /// <summary>
+    /// True when the key value itself says that shift is held. X11 only does this for
+    /// <see cref="KeyIsoLeftTab"/>, whose whole meaning is shift+Tab, and it is not guaranteed to
+    /// set the shift bit in the event state alongside it.
+    /// </summary>
+    public static bool ImpliesShift(uint keyval) => keyval == KeyIsoLeftTab;
 
     /// <summary>
     /// Returns the text a key press produces, or null when it produces none. Layouts, dead keys and
