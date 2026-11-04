@@ -199,6 +199,7 @@ public class XPlatRichLabel : XPlatControl
             ThemeColor = XPlatThemeColor.Accent,
             Underline = true,
             HoverBackColorRole = XPlatThemeColor.Accent,
+            Cursor = XPlatCursor.Hand,
         };
 
         if (onClick is not null)
@@ -350,6 +351,19 @@ public class XPlatRichLabel : XPlatControl
     {
         SetHoverSpan(null);
         base.OnMouseLeave();
+    }
+
+    protected override void OnEnabledChanged()
+    {
+        // Disabling a control does not send it a mouse-leave, so a span hovered or pressed at the
+        // time would keep its highlight - and keep painting it, since nothing would clear it.
+        if (!Enabled)
+        {
+            _pressedSpan = null;
+            SetHoverSpan(null);
+        }
+
+        base.OnEnabledChanged();
     }
 
     internal override void OnControlAdded(XPlatControl control)
@@ -959,11 +973,18 @@ public class XPlatRichLabel : XPlatControl
 
     /// <summary>
     /// The colour a span's text is painted in: its own colour, else the palette entry it names,
-    /// else the label's <see cref="XPlatControl.ForeColor"/>. Resolved while painting so that a
-    /// link keeps up with the theme instead of freezing the accent colour it was created with.
+    /// else the label's <see cref="XPlatControl.ForeColor"/> - except while the label is disabled,
+    /// where every span greys out so a link inside a disabled panel stops looking live. Resolved
+    /// while painting so that a link keeps up with the theme instead of freezing the accent colour
+    /// it was created with.
     /// </summary>
     private SKColor ResolveSpanColor(XPlatTextSpan span)
     {
+        if (!Enabled)
+        {
+            return XPlatTheme.DisabledForeground;
+        }
+
         if (span.ForeColor is { } literal)
         {
             return literal;
@@ -974,7 +995,7 @@ public class XPlatRichLabel : XPlatControl
             return XPlatTheme.ColorOf(role);
         }
 
-        return Enabled ? ForeColor : XPlatTheme.DisabledForeground;
+        return ForeColor;
     }
 
     /// <summary>

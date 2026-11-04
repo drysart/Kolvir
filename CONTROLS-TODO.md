@@ -20,7 +20,7 @@ The tiers were set when the library had twelve controls and they still describe 
 | 2 - popup-based | the popup layer (`IXPlatPopupService`, `XPlatPopup`, one popup window per backend), `XPlatComboBox`, `XPlatTabControl`/`XPlatTabPage`, `XPlatToolTip` | shipped |
 | 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | §3 |
 | 3 - large list controls | `XPlatVirtualList` (the shared row base), `XPlatListView`, `XPlatTreeView` | shipped |
-| 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | §4 |
+| 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | shipped |
 
 Tier 2 is what unblocked the rest: until there was a popup that could leave the window, every
 remaining control that wants one (a calendar, a suggestion list, a menu, a drag ghost) was either
@@ -135,16 +135,7 @@ Two separable halves, and only the first belongs to the library proper:
 
 Do (1) first. (2) is worth its own plan document, the way selection got one.
 
-## 4. Tier 4 - small widgets
-
-| Control | Needs |
-| --- | --- |
-| `XPlatNumericUpDown` | `XPlatTextBox` plus a spinner pair; `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`/`Value`, wheel and arrow-key stepping, culture-aware parse and format |
-| `XPlatTrackBar` | Horizontal and vertical, `Minimum`/`Maximum`/`Value`/`TickFrequency`/`SmallChange`/`LargeChange`, tick marks, drag and click-to-page, arrow keys; the thumb drawing is `XPlatScrollBar`'s thumb with a different track |
-| `XPlatLinkLabel` | Mostly `XPlatRichLabel`'s interactive spans, plus a way to open a URL. **No such seam exists today** - there is no `OpenUrl` anywhere in the library - so this needs `IXPlatApplicationBackend` (or a small service) to hand a URL to the platform: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
-| `XPlatStatusStrip` / `XPlatToolStrip` | A docked bar holding *items* rather than arbitrary controls (spring, label, progress, button, separator), because a tool strip that accepts children is just a panel. `XPlatMenuItem`'s item model is the closest precedent |
-
-## 5. Deliberately not planned
+## 4. Deliberately not planned
 
 Recorded so the decision is not re-litigated every time someone asks:
 
@@ -157,11 +148,10 @@ Recorded so the decision is not re-litigated every time someone asks:
 | Ribbon | Nobody wants it back. |
 | Printing / print preview | Belongs to an application, not to a Skia-drawn control toolkit. |
 
-## 6. Suggested order
+## 5. Suggested order
 
 1. **In-library menus** (§3.1) - the largest consistency win, the renderer already exists, and it
    removes the last place where the same UI looks different per platform.
 2. **`XPlatDateTimePicker` and text-box autocomplete** (§3.2, §3.3) - both are popup work now, and
    both are things an application notices missing on day one.
 3. **Drag previews** (§3.4) - small, and independent of everything above.
-4. **Tier 4 widgets** (§4) - each is a few hundred lines, and `XPlatLinkLabel` waits on a URL seam.

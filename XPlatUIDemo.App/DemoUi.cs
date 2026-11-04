@@ -318,6 +318,10 @@ public sealed class DemoUi
         ("Tool tips", demo => Page(demo.BuildToolTipDemo())),
         ("List views", demo => Page(demo.BuildListViewDemo())),
         ("Tree view", demo => Page(demo.BuildTreeViewDemo())),
+        ("Numeric up-down", demo => Page(demo.BuildNumericUpDownDemo())),
+        ("Track bars", demo => Page(demo.BuildTrackBarDemo())),
+        ("Link labels", demo => Page(demo.BuildLinkLabelDemo())),
+        ("Status and tool strips", demo => Page(demo.BuildToolStripDemo())),
     };
 
     /// <summary>
@@ -1419,6 +1423,517 @@ public sealed class DemoUi
             TextAlign = XPlatContentAlignment.TopLeft,
         });
 
+        return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatNumericUpDown"/>: the spinner is the whole point, so the fields on this page
+    /// cover a plain integer, a money amount with two decimals and a coarse step, a percentage
+    /// whose increment is larger than one, and a disabled field for comparison.
+    /// </summary>
+    private XPlatPanel BuildNumericUpDownDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Numeric up-down"));
+
+        var readout = ScrollCaption("Quantity 3 x 12.50 = 37.50");
+        card.Controls.Add(readout);
+
+        var quantity = new XPlatNumericUpDown
+        {
+            Minimum = 1m,
+            Maximum = 99m,
+            Value = 3m,
+        };
+
+        var price = new XPlatNumericUpDown
+        {
+            Minimum = 0m,
+            Maximum = 9999.99m,
+            DecimalPlaces = 2,
+            Increment = 0.05m,
+            Value = 12.5m,
+        };
+
+        quantity.AddValueChangedHandler(_ => UpdateTotal());
+        price.AddValueChangedHandler(_ => UpdateTotal());
+
+        void UpdateTotal() => readout.Text =
+            $"Quantity {quantity.Value:0} x {price.Value:0.00} = {quantity.Value * price.Value:0.00}";
+
+        card.Controls.Add(NumericRow("Quantity (1-99, step 1)", quantity));
+        card.Controls.Add(NumericRow("Unit price (0-9999.99, step 0.05)", price));
+
+        card.Controls.Add(NumericRow("Percentage (step 5, typed value snaps on Enter)", new XPlatNumericUpDown
+        {
+            Minimum = 0m,
+            Maximum = 100m,
+            Increment = 5m,
+            Value = 40m,
+        }));
+
+        card.Controls.Add(NumericRow("Large value (two decimals, step 0.01)", new XPlatNumericUpDown
+        {
+            Minimum = 0m,
+            Maximum = 999999.99m,
+            DecimalPlaces = 2,
+            Increment = 0.01m,
+            Value = 987654.32m,
+        }));
+
+        card.Controls.Add(NumericRow("Disabled", new XPlatNumericUpDown
+        {
+            Minimum = 0m,
+            Maximum = 10m,
+            Value = 5m,
+            Enabled = false,
+        }));
+
+        card.Controls.Add(new XPlatLabel(
+            "Arrow keys step by Increment, Page Up/Down by ten times that, the wheel steps one detent per notch, " +
+            "and a held spinner button repeats after a short delay. Typing is free-form: the value follows the text, " +
+            "and the text is rewritten from the value on Enter or when the focus leaves.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 62f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 6f, 0f, 0f),
+        });
+
+        return card;
+    }
+
+    /// <summary>A caption with a fixed-width field on the right, so the fields line up.</summary>
+    private static XPlatPanel NumericRow(string caption, XPlatControl field)
+    {
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 34f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        };
+
+        row.Controls.Add(new XPlatLabel(caption)
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            Font = XPlatTheme.DefaultFont,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+            Margin = new XPlatThickness(0f, 0f, 12f, 0f),
+        });
+
+        field.Dock = XDock.Right;
+        field.Width = 170f;
+        row.Controls.Add(field);
+
+        return row;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatTrackBar"/>: a horizontal bar whose value drives a vertical one, so the two
+    /// orientations can be compared against the same number, plus a bar with no ticks and a
+    /// disabled one.
+    /// </summary>
+    private XPlatPanel BuildTrackBarDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Track bars"));
+
+        var readout = ScrollCaption("Value 30 of 100");
+        card.Controls.Add(readout);
+
+        var horizontal = new XPlatTrackBar
+        {
+            Dock = XDock.Top,
+            Height = 28f,
+            Maximum = 100f,
+            Value = 30f,
+            SmallChange = 1f,
+            LargeChange = 10f,
+            TickFrequency = 10f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        var vertical = new XPlatTrackBar
+        {
+            Dock = XDock.Left,
+            Width = 44f,
+            Orientation = XPlatOrientation.Vertical,
+            Maximum = 100f,
+            Value = 30f,
+            SmallChange = 1f,
+            LargeChange = 10f,
+            TickFrequency = 10f,
+            Margin = new XPlatThickness(0f, 0f, 16f, 0f),
+        };
+
+        horizontal.AddValueChangedHandler(_ =>
+        {
+            vertical.Value = horizontal.Value;
+            readout.Text = $"Value {horizontal.Value:0} of 100";
+        });
+
+        card.Controls.Add(horizontal);
+
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 150f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        row.Controls.Add(new XPlatLabel("The same value, drawn vertically: the knob sits at the bottom for Minimum, so dragging up raises the value.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+        row.Controls.Add(vertical);
+        card.Controls.Add(row);
+
+        card.Controls.Add(ScrollCaption("No tick marks (TickFrequency 0), fine steps"));
+
+        var fine = new XPlatTrackBar
+        {
+            Dock = XDock.Top,
+            Height = 28f,
+            Minimum = -50f,
+            Maximum = 50f,
+            Value = 0f,
+            SmallChange = 0.5f,
+            LargeChange = 5f,
+            TickFrequency = 0f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        var fineReadout = ScrollCaption("0.0");
+        fine.AddValueChangedHandler(_ => fineReadout.Text = $"{fine.Value:0.0}");
+        card.Controls.Add(fine);
+        card.Controls.Add(fineReadout);
+
+        card.Controls.Add(ScrollCaption("Disabled"));
+
+        card.Controls.Add(new XPlatTrackBar
+        {
+            Dock = XDock.Top,
+            Height = 28f,
+            Maximum = 100f,
+            Value = 65f,
+            TickFrequency = 25f,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        card.Controls.Add(new XPlatLabel(
+            "Pressing the knob starts a drag and the value follows the pointer; pressing the track pages by " +
+            "LargeChange toward the press. Arrow keys step by SmallChange, Page Up/Down by LargeChange, " +
+            "Home and End jump to the ends, and the wheel steps one SmallChange per detent.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 62f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatLinkLabel"/>: two links that hand their URI to the desktop, one that
+    /// navigates in the application instead, a sentence with a link inside it, and a disabled
+    /// link - which greys out rather than staying the accent colour.
+    /// </summary>
+    private XPlatPanel BuildLinkLabelDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Link labels"));
+
+        var readout = ScrollCaption("Click a link, or Tab to one and press Enter.");
+        card.Controls.Add(readout);
+
+        var home = new XPlatLinkLabel("Project home", "https://github.com/drysart/XPlatUI")
+        {
+            Dock = XDock.Top,
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        };
+
+        home.AddLinkClickedHandler((_, e) =>
+            readout.Text = e.Opened ? $"Handed {e.Url} to the desktop" : $"Could not open {e.Url}");
+
+        var issue = new XPlatLinkLabel("Report an issue", "https://github.com/drysart/XPlatUI/issues")
+        {
+            Dock = XDock.Top,
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        };
+
+        issue.AddLinkClickedHandler((_, e) =>
+            readout.Text = e.Opened ? $"Handed {e.Url} to the desktop" : $"Could not open {e.Url}");
+
+        // No Url at all: the label is only a click target, and the handler decides what happens.
+        var inApp = new XPlatLinkLabel("What's new (navigates inside the app)")
+        {
+            Dock = XDock.Top,
+            AutoLaunch = false,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        };
+
+        inApp.AddLinkClickedHandler((_, e) => readout.Text = $"In-app navigation from \"{e.Span?.Text}\"");
+
+        // A sentence with a link inside it: the label is a rich label, so the link is just one span
+        // among the plain ones around it.
+        var sentence = new XPlatLinkLabel
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 44f,
+            WrapText = true,
+            AutoLaunch = false,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        };
+
+        sentence.AddText("Every control in this library draws itself with Skia and owns no native handle, so ");
+        sentence.AddLink("the whole set", span => readout.Text = $"Span \"{span.Text}\" clicked");
+        sentence.AddText(" works the same way on Windows, macOS and Linux.");
+
+        card.Controls.Add(home);
+        card.Controls.Add(issue);
+        card.Controls.Add(inApp);
+        card.Controls.Add(sentence);
+
+        card.Controls.Add(new XPlatLinkLabel("A disabled link", "https://example.com")
+        {
+            Dock = XDock.Top,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        });
+
+        card.Controls.Add(new XPlatLabel(
+            "A link is an XPlatRichLabel whose text is a link span, so AddText and AddLink build a sentence around it. " +
+            "Clicking one, or pressing Enter or Space while it has the focus, raises LinkClicked; with AutoLaunch on " +
+            "and a Url set, the label also hands the URI to the desktop through XPlatLauncher.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 62f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatToolStrip"/> and <see cref="XPlatStatusStrip"/>: docked bars that hold items
+    /// rather than child controls. The first card is a mock editor whose tool bar and status bar
+    /// are strips; the second drives a status strip's progress item from a row of buttons.
+    /// </summary>
+    private XPlatPanel BuildToolStripDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Tool strip and status strip"));
+
+        var readout = ScrollCaption("Click an item, or Tab to a strip and use the arrow keys.");
+        readout.Margin = new XPlatThickness(0f, 0f, 0f, 12f);
+        card.Controls.Add(readout);
+
+        var revert = new XPlatToolStripButton("Revert") { Enabled = false };
+        revert.AddClickHandler(_ => readout.Text = "Tool strip: Revert");
+
+        XPlatToolStripButton ToolItem(string text, string message)
+        {
+            var item = new XPlatToolStripButton(text);
+            item.AddClickHandler(_ =>
+            {
+                readout.Text = message;
+                revert.Enabled = true;
+            });
+
+            return item;
+        }
+
+        var fit = ToolItem("Fit", "Tool strip: Fit");
+        fit.Alignment = XPlatToolStripItemAlignment.Far;
+
+        var farSeparator = new XPlatToolStripSeparator { Alignment = XPlatToolStripItemAlignment.Far };
+
+        var toolbar = new XPlatToolStrip();
+        toolbar.Items.Add(ToolItem("New", "Tool strip: New"));
+        toolbar.Items.Add(ToolItem("Open", "Tool strip: Open"));
+        toolbar.Items.Add(new XPlatToolStripSeparator());
+        toolbar.Items.Add(ToolItem("Save", "Tool strip: Save"));
+        toolbar.Items.Add(revert);
+        toolbar.Items.Add(new XPlatToolStripSpring());
+        toolbar.Items.Add(new XPlatToolStripLabel("Zoom: 100%"));
+        toolbar.Items.Add(farSeparator);
+        toolbar.Items.Add(fit);
+
+        var editorStatus = new XPlatStatusStrip();
+        editorStatus.Items.Add(new XPlatToolStripLabel("Ready")
+        {
+            ForeColor = XPlatThemeColor.MutedForeground,
+        });
+        editorStatus.Items.Add(new XPlatToolStripSpring());
+        editorStatus.Items.Add(new XPlatToolStripLabel("UTF-8")
+        {
+            ForeColor = XPlatThemeColor.MutedForeground,
+        });
+        editorStatus.Items.Add(new XPlatToolStripSeparator());
+        editorStatus.Items.Add(new XPlatToolStripProgressBar { Width = 90f, Value = 65f });
+
+        var editor = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 156f,
+            CornerRadius = 8f,
+            BorderWidth = 1f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 20f),
+        };
+
+        editor.Controls.Add(toolbar);
+        editor.Controls.Add(editorStatus);
+        editor.Controls.Add(new XPlatLabel(
+            "The tool bar and the status bar are one control each, and every item in them is a plain object " +
+            "rather than a child control: nine items on the top bar and five on the bottom cost one paint pass " +
+            "between them. The spring takes the slack, which is what pins Zoom and Fit to the right-hand end, " +
+            "and Revert stays disabled until one of the other items is used.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Padding = new XPlatThickness(14f, 10f),
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        card.Controls.Add(editor);
+        card.Controls.Add(Heading("Progress in a status strip"));
+
+        var percentLabel = new XPlatToolStripLabel("0%")
+        {
+            ForeColor = XPlatThemeColor.MutedForeground,
+        };
+
+        var progress = new XPlatToolStripProgressBar { Width = 220f };
+
+        var copyStatus = new XPlatStatusStrip();
+        copyStatus.Items.Add(new XPlatToolStripLabel("Copying files..."));
+        copyStatus.Items.Add(new XPlatToolStripSeparator());
+        copyStatus.Items.Add(progress);
+        copyStatus.Items.Add(percentLabel);
+        copyStatus.Items.Add(new XPlatToolStripSpring());
+
+        var clear = new XPlatToolStripButton("Clear") { Alignment = XPlatToolStripItemAlignment.Far };
+        clear.AddClickHandler(_ =>
+        {
+            progress.Value = 0f;
+            SyncPercent();
+            readout.Text = "Status strip: Clear";
+        });
+
+        copyStatus.Items.Add(clear);
+
+        void SyncPercent() => percentLabel.Text = $"{(int)MathF.Round(progress.Percent * 100f)}%";
+
+        var statusBox = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 92f,
+            CornerRadius = 8f,
+            BorderWidth = 1f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 16f),
+        };
+
+        statusBox.Controls.Add(copyStatus);
+        statusBox.Controls.Add(new XPlatLabel(
+            "The bar, the percentage and the Clear button are items of one status strip, so the strip is a " +
+            "single tab stop: the arrow keys move between the items and Enter activates the one under them.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Padding = new XPlatThickness(14f, 10f),
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        var row = ButtonRow();
+
+        var start = new XPlatButton("Start")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 6f, 0f),
+        };
+        start.AddClickHandler(_ =>
+        {
+            progress.Value = 0f;
+            SyncPercent();
+            readout.Text = "Copy started.";
+        });
+
+        var step = new XPlatButton("Step 10")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 6f, 0f),
+        };
+        step.AddClickHandler(_ =>
+        {
+            progress.Value = MathF.Min(progress.Maximum, progress.Value + 10f);
+            SyncPercent();
+            readout.Text = $"Copy at {percentLabel.Text}";
+        });
+
+        var finish = new XPlatButton("Finish")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 6f, 0f),
+        };
+        finish.AddClickHandler(_ =>
+        {
+            progress.Value = progress.Maximum;
+            SyncPercent();
+            readout.Text = "Copy finished.";
+        });
+
+        row.Controls.Add(start);
+        row.Controls.Add(step);
+        row.Controls.Add(finish);
+
+        card.Controls.Add(row);
+        card.Controls.Add(statusBox);
         return card;
     }
 

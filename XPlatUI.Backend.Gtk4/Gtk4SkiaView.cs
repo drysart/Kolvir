@@ -520,7 +520,7 @@ public sealed class Gtk4SkiaView : IDisposable
     /// <summary>Forwards a key press; returns true when the UI consumed it.</summary>
     private bool OnKeyPressed(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyPressedSignalArgs args)
     {
-        var modifiers = Gtk4KeyMap.MapModifiers(args.State);
+        var modifiers = ModifiersOf(args.Keyval, args.State);
         var key = Gtk4KeyMap.Map(args.Keyval);
 
         if (key != XPlatKey.None && Host.ProcessKeyDown(key, modifiers))
@@ -543,8 +543,18 @@ public sealed class Gtk4SkiaView : IDisposable
         var key = Gtk4KeyMap.Map(args.Keyval);
         if (key != XPlatKey.None)
         {
-            Host.ProcessKeyUp(key, Gtk4KeyMap.MapModifiers(args.State));
+            Host.ProcessKeyUp(key, ModifiersOf(args.Keyval, args.State));
         }
+    }
+
+    /// <summary>
+    /// Reads the modifiers of a key event. GTK reports shift+Tab as <c>ISO_Left_Tab</c>, a key
+    /// value of its own, so the shift bit is not the only place the modifier comes from.
+    /// </summary>
+    private static XPlatModifiers ModifiersOf(uint keyval, Gdk.ModifierType state)
+    {
+        var modifiers = Gtk4KeyMap.MapModifiers(state);
+        return Gtk4KeyMap.ImpliesShift(keyval) ? modifiers | XPlatModifiers.Shift : modifiers;
     }
 
     private void OnHostInvalidated(object sender)
