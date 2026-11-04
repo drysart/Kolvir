@@ -18,9 +18,10 @@ public enum XPlatMenuPresentation
     /// support icons, submenus and controls in a row.
     /// </summary>
     /// <remarks>
-    /// On macOS the window's bar is drawn inside the window as well, and the system's own menu bar
-    /// is left with nothing but the application menu, which is what the platform requires to be
-    /// present at all.
+    /// A window's menu bar is the one exception: macOS has a single menu bar for the whole process,
+    /// owned by AppKit and drawn at the top of the screen, so the bar is the system's there whichever
+    /// presentation is asked for. The rest of the library's menus - context menus, the drop-downs
+    /// under a bar - are still drawn with Skia on macOS.
     /// </remarks>
     XPlatUI,
 
@@ -41,7 +42,9 @@ public static class XPlatMenuPresentationExtensions
     /// <remarks>
     /// Only <see cref="XPlatMenuPresentation.Native"/> asks for the platform's menus. A window that
     /// is drawn with Skia is drawn with Skia's menus too, on macOS as much as anywhere else, so a
-    /// context menu or a bar does not change shape between platforms.
+    /// context menu or a bar does not change shape between platforms. The bar is the exception on
+    /// macOS, where the system's menu bar is the only one the platform shows: it is used whatever
+    /// this reports, and what is lost with it is documented on <see cref="XPlatMenuBar"/>.
     /// </remarks>
     public static bool UsesNativeMenus(this XPlatMenuPresentation presentation) =>
         presentation == XPlatMenuPresentation.Native;

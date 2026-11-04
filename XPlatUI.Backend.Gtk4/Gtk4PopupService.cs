@@ -1,3 +1,5 @@
+using SkiaSharp;
+
 namespace XPlatUI.Backend.Gtk4;
 
 /// <summary>
@@ -20,4 +22,16 @@ internal sealed class Gtk4PopupService : IXPlatPopupService
 
         return new Gtk4PopupWindow(view, dismissOnOutsideClick);
     }
+
+    /// <summary>
+    /// Always null: a GTK4 popover is a widget inside the window it belongs to rather than a surface
+    /// of its own, so it is clipped by that window and the window's client area really is as far as
+    /// a popup can go here.
+    /// </summary>
+    /// <remarks>
+    /// This is why a menu near the right of a small window opens its submenus to the left even when
+    /// the display has room to the right: the room that matters is the room the popover can be drawn
+    /// in. Windows and macOS answer with the display instead, because their popups are windows.
+    /// </remarks>
+    public SKRect? GetPlacementArea(XPlatUiHost ownerHost) => null;
 }

@@ -1375,6 +1375,15 @@ presenter to grow or shrink the popup when one opens or closes. A submenu sits a
 edge of the menu that opened it, overlapping by `SubMenuOverlap`, with its first row level with the
 row that opened it - so it is placed a little above that row, as `XPlatMenuMetrics.Padding` dictates.
 
+Which side a submenu opens on is decided against the display, not the window: the presenter asks
+`IXPlatPopupService.GetPlacementArea` for the area the popup is allowed to occupy, which on Windows
+is the monitor's work area and on macOS the screen's, and a submenu that would not fit to the right
+inside that area opens to the left of the menu that opened it instead. The root menu stays where it
+was - the popup grows leftwards to hold the chain - and the whole surface is then clamped back into
+the area, which is also why a menu can hang past the edge of the window it was opened from. GTK4 is
+the one backend that reports no area, because a popover is clipped by its window there, so a menu on
+Linux is laid out inside the window and flips at the window's edge.
+
 An item can carry an icon, a tick, or a control. Icons are drawn in their own column and the tick in
 the check column, and `XPlatMenuTrimming.Trim` drops a separator that would lead, trail or double up,
 so a menu built by filtering a list still looks right. An in-menu control is a real control: it is
@@ -1398,13 +1407,20 @@ creates a window:
 
 A window drawn with Skia is drawn with Skia's menus too, so `Auto` does not fall back to the
 platform anywhere: a menu keeps its shape, its icons and its keyboard handling wherever the
-application runs. On macOS that means the bar is drawn inside the window as well, and the system's
-menu bar is still maintained - it carries the application menu, which AppKit requires to exist, and
-the key equivalents the standard Edit commands rely on - but it mirrors the same model rather than
-replacing the bar in the window.
+application runs.
 
-`XPlatMenuPresentation.Native` is the escape hatch, and on macOS it puts the menus back at the top
-of the screen and hands context menus to AppKit.
+The menu bar is the one exception, and only on macOS. The platform has a single menu bar for the
+whole process, owned by AppKit and drawn at the top of the screen, and no way to put one in a
+window, so the bar there is the system's whichever presentation is asked for. It carries the same
+menus, with the same drop-downs, icons, shortcuts and submenus, but it is the system's row of titles
+and not `XPlatMenuBarView`, so what belongs to that view is not available: no bar inside the window,
+no `XPlatMenuBarView.TitleHeight` or bar font, and no controls hosted in a bar row. The system bar
+also follows the active window rather than belonging to one window, and macOS answers a mnemonic
+from the first character of a title rather than from the `&` marker. This is a platform limitation,
+not a switch.
+
+`XPlatMenuPresentation.Native` is the escape hatch, and on macOS it additionally hands context menus
+to AppKit.
 
 The sample takes `--menus xplatui|native` to compare the two on any platform. On Windows,
 `--classic-menus` is a further step down to `TrackPopupMenuEx` even when the portable menu is

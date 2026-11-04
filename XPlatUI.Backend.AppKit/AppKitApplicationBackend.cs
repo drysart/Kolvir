@@ -604,6 +604,24 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
     /// <summary>The top-left corner of <paramref name="window"/>, in the library's logical space.</summary>
     internal static SKPoint LocationOf(NSWindow window) => ToLogical(window.Frame, PrimaryHeightFor(window)).Location;
 
+    /// <summary>
+    /// The top-left corner of <paramref name="window"/>'s content, in the library's logical space -
+    /// the origin the portable layer's client coordinates are measured from.
+    /// </summary>
+    /// <remarks>
+    /// ContentLayoutRect is in window space with its origin at the frame's bottom left, so the
+    /// distance from the top of the frame down to the top of the content is what turns it into an
+    /// offset from the window's top left corner.
+    /// </remarks>
+    internal static SKPoint ClientOriginOf(NSWindow window)
+    {
+        var content = window.ContentLayoutRect;
+        var origin = LocationOf(window);
+        var contentTop = window.Frame.Height - content.Y - content.Height;
+
+        return new SKPoint((float)(origin.X + content.X), (float)(origin.Y + contentTop));
+    }
+
     /// <summary>The AppKit frame for a window at <paramref name="location"/> with a content size of <paramref name="contentSize"/>.</summary>
     internal static CGRect FrameFor(SKPoint location, SKSize contentSize, double primaryHeight) => new(
         location.X,

@@ -43,6 +43,9 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     private int _hovered = -1;
     private int _pressed = -1;
     private bool _laying;
+    private float _surfaceOffset;
+    private bool _openedToLeft;
+    private SKPoint _ownOrigin;
 
     /// <summary>Creates an empty menu view. Fill <see cref="Items"/> with <see cref="SetItems"/>.</summary>
     public XPlatMenuView()
@@ -100,6 +103,33 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     /// surface - not the transparent shadow margin - lands where the caller asked for it.
     /// </summary>
     public float SurfaceInset => ShowShadow ? (Metrics ?? XPlatMenuMetrics.Default).ShadowExtent : 0f;
+
+    /// <summary>
+    /// How far right the chain of open menus may paint, measured from the left edge of the root
+    /// menu's surface, or null for no limit.
+    /// </summary>
+    /// <remarks>
+    /// A presenter sets it on the root menu from the right edge of the display the menu is shown
+    /// on. A submenu that does not fit before it opens on the left of the menu that owns it rather
+    /// than dragging the whole chain back into the display.
+    /// </remarks>
+    public float? SurfaceLimit { get; set; }
+
+    /// <summary>
+    /// How far left the chain of open menus may paint, measured from the left edge of the root
+    /// menu's surface, or null for no limit. A menu shown on the right of the display gets a
+    /// negative value, because the room it has to the left of its own surface is that much less
+    /// than none.
+    /// </summary>
+    public float? SurfaceFloor { get; set; }
+
+    /// <summary>
+    /// How far this view's chain paints to the left of its own surface, in logical pixels. It is
+    /// zero until a submenu opens on the left; a presenter subtracts it from the popup's position
+    /// so the menu still lands where the caller asked for it, with the room the submenu needs to
+    /// its left instead of over it.
+    /// </summary>
+    public float SurfaceOverhang => _ownOrigin.X;
 
     /// <summary>The menu that opened this one, or null for a root menu.</summary>
     public XPlatMenuView? ParentMenu => _parent;
@@ -455,28 +485,41 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var metrics = Metrics ?? XPlatMenuMetrics.Default;
-        var extent = ShowShadow ? metrics.ShadowExtent : 0f;
+        var size = MeasureOwn(availableSize.Width);
 
-        _layout = XPlatMenuRenderer.Measure(
-            _items,
-            Metrics,
-            Font,
-            ShowShadow,
-            MathF.Max(0f, availableSize.Width - (extent * 2f)));
-
-        var size = _layout.WindowSize;
-
-        if (_subMenu is { } child && RowForSubMenu() is { } row)
+        if (_subMenu is not { } child || RowForSubMenu() is not { } row)
         {
-            var origin = SubMenuOrigin(row, metrics);
-            var childSize = child.Measure(new SKSize(availableSize.Width, availableSize.Height));
-
-            size = new SKSize(
-                MathF.Max(size.Width, origin.X + childSize.Width),
-                MathF.Max(size.Height, origin.Y + childSize.Height));
+            _ownOrigin = SKPoint.Empty;
+            return size;
         }
 
-        return size;
+        var origin = SubMenuOrigin(row, metrics, child.MeasureSurface(availableSize.Width), out var flipped);
+
+        // The child has to know where it sits in the chain before it measures, because that is what
+        // tells its own submenus where the display ends.
+        child._openedToLeft = flipped;
+
+        var childSize = child.Measure(new SKSize(availableSize.Width, availableSize.Height));
+
+        // A submenu that opened on the left starts left of this menu's own surface, and this menu's
+        // bounds have to cover it: everything it draws moves right by the overhang instead.
+        var childLeft = origin.X - child.SurfaceOverhang;
+
+        _ownOrigin = new SKPoint(MathF.Max(0f, -childLeft), 0f);
+
+        return new SKSize(
+            _ownOrigin.X + MathF.Max(size.Width, childLeft + childSize.Width),
+            MathF.Max(size.Height, origin.Y + childSize.Height));
+    }
+
+    /// <summary>
+    /// Measures this menu's own surface - the menu itself, without the margin it keeps for its drop
+    /// shadow and without any submenu - as it would be laid out in <paramref name="availableWidth"/>.
+    /// </summary>
+    public SKSize MeasureSurface(float availableWidth)
+    {
+        MeasureOwn(MathF.Max(0f, availableWidth - Padding.Horizontal));
+        return _layout?.SurfaceSize ?? SKSize.Empty;
     }
 
     /// <summary>Places the submenu against the row that opened it and hosts any in-menu controls.</summary>
@@ -500,21 +543,28 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             {
                 if (row.Item.Control is { } control)
                 {
-                    HostControl(control, row.ControlBounds);
+                    HostControl(control, Offset(row.ControlBounds));
                 }
             }
 
             if (_subMenu is { } child && RowForSubMenu() is { } subMenuRow)
             {
-                var origin = SubMenuOrigin(subMenuRow, Metrics ?? XPlatMenuMetrics.Default);
+                var surface = child._layout?.SurfaceSize ?? new SKSize(child.Bounds.Width, child.Bounds.Height);
+                var origin = SubMenuOrigin(subMenuRow, Metrics ?? XPlatMenuMetrics.Default, surface, out var flipped);
                 var size = child.DesiredSize;
+
+                child._openedToLeft = flipped;
 
                 if (size.Width <= 0f || size.Height <= 0f)
                 {
                     size = child.Measure(new SKSize(float.PositiveInfinity, float.PositiveInfinity));
                 }
 
-                var bounds = SKRect.Create(origin.X, origin.Y, size.Width, size.Height);
+                var bounds = SKRect.Create(
+                    _ownOrigin.X + origin.X - child.SurfaceOverhang,
+                    _ownOrigin.Y + origin.Y,
+                    size.Width,
+                    size.Height);
 
                 if (!child.Bounds.Equals(bounds))
                 {
@@ -535,9 +585,24 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     {
         EnsureLayout();
 
-        if (_layout is { } layout)
+        if (_layout is not { } layout)
         {
-            XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, ShadowExclusion());
+            return;
+        }
+
+        var shifted = _ownOrigin != SKPoint.Empty;
+
+        if (shifted)
+        {
+            canvas.Save();
+            canvas.Translate(_ownOrigin.X, _ownOrigin.Y);
+        }
+
+        XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, ShadowExclusion());
+
+        if (shifted)
+        {
+            canvas.Restore();
         }
     }
 
@@ -735,7 +800,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     private int HitTestRow(SKPoint location)
     {
         EnsureLayout();
-        return _layout?.HitTest(location) ?? -1;
+        return _layout?.HitTest(new SKPoint(location.X - _ownOrigin.X, location.Y - _ownOrigin.Y)) ?? -1;
     }
 
     private XPlatMenuRow? RowForSubMenu() =>
@@ -744,11 +809,27 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             : null;
 
     /// <summary>
-    /// Where a submenu's top left corner goes: flush against the right edge of the surface that
-    /// opened it, overlapping by <see cref="SubMenuOverlap"/>, with its first row level with the row
-    /// that opened it.
+    /// Where a submenu's top left corner goes: flush against the edge of the surface that opened it,
+    /// overlapping by <see cref="SubMenuOverlap"/>, with its first row level with the row that
+    /// opened it.
     /// </summary>
-    private SKPoint SubMenuOrigin(XPlatMenuRow row, XPlatMenuMetrics metrics)
+    /// <remarks>
+    /// <para>
+    /// The child opens to the right unless it does not fit before <see cref="SurfaceLimit"/>, in
+    /// which case it opens to the left of this menu, its own right edge against this menu's left
+    /// edge. A menu that was itself opened to the left keeps its submenus going the same way, so a
+    /// chain of them does not zigzag back over the menu it came from. When neither side has the
+    /// room - the child is wider than the display - it is kept on the display and allowed to
+    /// overlap this menu rather than hang off the edge of the screen.
+    /// </para>
+    /// <para>
+    /// The result is in this menu's own layout coordinates, which start at the margin this menu
+    /// keeps for its drop shadow. Setting the child's <see cref="_surfaceOffset"/> is part of the
+    /// calculation rather than a caller's job: where the child sits relative to the root menu is
+    /// what tells the child's own submenus where the display ends.
+    /// </para>
+    /// </remarks>
+    private SKPoint SubMenuOrigin(XPlatMenuRow row, XPlatMenuMetrics metrics, SKSize childSurface, out bool flipped)
     {
         var extent = ShowShadow ? metrics.ShadowExtent : 0f;
         var surfaceWidth = _layout?.SurfaceSize.Width ?? Bounds.Width;
@@ -757,9 +838,71 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         // surface, so the two surfaces still meet at the same place they did without one.
         var inset = _subMenu?.SurfaceInset ?? 0f;
 
+        // Where the child's surface lands when it opens to the right of this one, and when it opens
+        // to the left of it, both measured from the left edge of this menu's surface.
+        var right = surfaceWidth - SubMenuOverlap;
+        var left = SubMenuOverlap - childSurface.Width;
+
+        var limit = Limit;
+        var floor = Floor;
+
+        var fitsRight = limit is not { } maximum || right + childSurface.Width <= maximum;
+        var fitsLeft = floor is not { } minimum || left >= minimum;
+
+        flipped = fitsLeft && (!fitsRight || _openedToLeft);
+
+        var x = flipped ? left : right;
+
+        if (limit is { } edge)
+        {
+            x = MathF.Min(x, edge - childSurface.Width);
+        }
+
+        if (floor is { } nearEdge)
+        {
+            x = MathF.Max(x, nearEdge);
+        }
+
+        if (_subMenu is { } child)
+        {
+            child._surfaceOffset = _surfaceOffset + x;
+        }
+
         return new SKPoint(
-            extent + surfaceWidth - SubMenuOverlap - inset,
+            extent + x - inset,
             MathF.Max(0f, row.Bounds.Top - metrics.Padding - inset));
+    }
+
+    /// <summary>How far right this menu's chain may paint, measured from its own surface's left edge.</summary>
+    private float? Limit => RootMenu.SurfaceLimit is { } limit ? limit - _surfaceOffset : null;
+
+    /// <summary>How far left this menu's chain may paint, measured from its own surface's left edge.</summary>
+    private float? Floor => RootMenu.SurfaceFloor is { } floor ? floor - _surfaceOffset : null;
+
+    /// <summary>Translates a rectangle of this menu's own layout into its bounds.</summary>
+    private SKRect Offset(SKRect rect)
+    {
+        if (_ownOrigin == SKPoint.Empty)
+        {
+            return rect;
+        }
+
+        return SKRect.Create(rect.Left + _ownOrigin.X, rect.Top + _ownOrigin.Y, rect.Width, rect.Height);
+    }
+
+    /// <summary>Lays the items out and returns the size of the drawing surface, shadow margin included.</summary>
+    private SKSize MeasureOwn(float availableWidth)
+    {
+        var extent = ShowShadow ? (Metrics ?? XPlatMenuMetrics.Default).ShadowExtent : 0f;
+
+        _layout = XPlatMenuRenderer.Measure(
+            _items,
+            Metrics,
+            Font,
+            ShowShadow,
+            MathF.Max(0f, availableWidth - (extent * 2f)));
+
+        return _layout.WindowSize;
     }
 
     /// <summary>
@@ -775,7 +918,9 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         }
 
         var surface = parentLayout.SurfaceBounds;
-        surface.Offset(-Bounds.Left, -Bounds.Top);
+        surface.Offset(
+            -(Bounds.Left + _ownOrigin.X - parent._ownOrigin.X),
+            -(Bounds.Top + _ownOrigin.Y - parent._ownOrigin.Y));
 
         return surface;
     }

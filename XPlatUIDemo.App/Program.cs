@@ -271,7 +271,8 @@ internal static class Program
     /// <summary>
     /// The value of <c>--menus xplatui|native</c>, which overrides who draws the menus. The library
     /// draws them by default on every platform, so <c>native</c> is the interesting one: it hands
-    /// the menus back to the desktop.
+    /// the menus back to the desktop. A menu bar is the exception on macOS, where the system's bar
+    /// is the only one the platform shows and this switch changes nothing about it.
     /// </summary>
     private static XPlatMenuPresentation MenuPresentationArgument(string[] args)
     {

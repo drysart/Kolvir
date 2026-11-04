@@ -53,12 +53,18 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
             MathF.Max(1f, host.ClientSize.Width),
             MathF.Max(1f, host.ClientSize.Height));
 
+        // A popup window can hang past the window it belongs to, so the display - not the window -
+        // is what a menu has to stay inside. A presenter whose backend cannot say where the window
+        // sits on screen keeps the menu within the window, which is all an overlay can show.
+        var client = new SKRect(0f, 0f, maximum.Width, maximum.Height);
+        var area = PlacementArea(host) ?? client;
+
         var popup = new XPlatPopup(host)
         {
             Content = view,
             Presentation = XPlatPopupPresentation.Auto,
             DismissOnOutsideClick = true,
-            MaximumSize = maximum,
+            MaximumSize = area.Size,
         };
 
         IDisposable? invokedToken = null;
@@ -101,7 +107,9 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
                 return;
             }
 
-            popup.MoveTo(Place(view, location, view.Measure(maximum), maximum));
+            var bounds = AreaOf(popup, area, client);
+            popup.MaximumSize = bounds.Size;
+            popup.MoveTo(Place(view, location, bounds));
         });
 
         closedToken = popup.AddClosedHandler(_ =>
@@ -113,34 +121,78 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
         });
 
         view.Attach(host);
-        popup.Show(Place(view, location, view.Measure(maximum), maximum));
+        popup.Show(Place(view, location, area));
+
+        if (popup.ActualPresentation == XPlatPopupPresentation.Overlay && !area.Equals(client))
+        {
+            // Painted inside the window, so the window is as far as the menu can go after all.
+            popup.MaximumSize = client.Size;
+            popup.MoveTo(Place(view, location, client));
+        }
 
         return popup;
     }
 
     /// <summary>
     /// Works out where the popup's top left corner goes so that the menu's own surface lands on
-    /// <paramref name="location" />, kept inside a window of <paramref name="client" />.
+    /// <paramref name="location" />, kept inside <paramref name="area" />, and tells the menu where
+    /// the chain of submenus has to stop on either side.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// A menu measures with room around it for its drop shadow, and that margin is transparent. The
     /// surface - the part the user sees as the menu - sits one margin inside the popup, so the popup
-    /// is placed one margin up and to the left of the point that was asked for. The clamp is done on
-    /// the surface too, which is what keeps the menu itself inside the window rather than its
-    /// invisible margin.
+    /// is placed one margin up and to the left of the point that was asked for.
+    /// </para>
+    /// <para>
+    /// Only the menu itself is clamped, which is what keeps it still while a submenu is open: the
+    /// room a submenu needs is not room the menu has to make by moving. A submenu that does not fit
+    /// before <see cref="XPlatMenuView.SurfaceLimit" /> opens on the other side of its parent
+    /// instead, and a chain that opens to the left takes the popup with it - see
+    /// <see cref="XPlatMenuView.SurfaceOverhang" />.
+    /// </para>
     /// </remarks>
-    private static SKPoint Place(XPlatMenuView view, SKPoint location, SKSize size, SKSize client)
+    private static SKPoint Place(XPlatMenuView view, SKPoint location, SKRect area)
     {
         var inset = view.SurfaceInset;
-        var surface = new SKSize(
-            MathF.Max(0f, size.Width - (inset * 2f)),
-            MathF.Max(0f, size.Height - (inset * 2f)));
+        var surface = view.MeasureSurface(area.Width);
+
+        // The margin kept for the drop shadow is transparent, but it is still part of the popup.
+        // Reserving it keeps the visible surface on the display and leaves the platform layer with
+        // nothing to nudge back on screen, which it would otherwise do behind the menu's back.
+        var left = area.Left + inset;
+        var right = area.Right - inset;
+
+        var x = Axis(location.X, surface.Width, left, right);
+
+        // Both limits are measured from the left edge of the root menu's surface, which is where
+        // the user pointed; the shadow margin and the overhang are placement, not geometry.
+        view.SurfaceLimit = right - x;
+        view.SurfaceFloor = left - x;
+
+        var measured = view.Measure(new SKSize(area.Width, area.Height));
 
         return new SKPoint(
-            Axis(location.X, surface.Width, client.Width) - inset,
-            Axis(location.Y, surface.Height, client.Height) - inset);
+            x - view.SurfaceOverhang - inset,
+            Axis(location.Y, measured.Height, area.Top, area.Bottom) - inset);
     }
 
-    private static float Axis(float offset, float size, float available) =>
-        size >= available ? 0f : Math.Clamp(offset, 0f, available - size);
+    /// <summary>The area the menu may use: the display, or the window when the popup is painted inside it.</summary>
+    private static SKRect AreaOf(XPlatPopup popup, SKRect area, SKRect client) =>
+        popup.ActualPresentation == XPlatPopupPresentation.Overlay ? client : area;
+
+    /// <summary>
+    /// The work area of the display <paramref name="host" /> is on, in its client coordinates, or
+    /// null when the backend cannot tell where the window sits on screen.
+    /// </summary>
+    private static SKRect? PlacementArea(XPlatUiHost host)
+    {
+        var service = host.GetService<IXPlatPopupService>() ?? XPlatPopupService.Current;
+        return service?.GetPlacementArea(host);
+    }
+
+    private static float Axis(float offset, float size, float minimum, float maximum) =>
+        size >= maximum - minimum
+            ? minimum
+            : Math.Clamp(offset, minimum, maximum - size);
 }

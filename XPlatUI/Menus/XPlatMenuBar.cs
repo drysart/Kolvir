@@ -15,6 +15,16 @@ namespace XPlatUI;
 /// View, Window and Help including the clipboard commands a text box depends on. Submenus can be
 /// added when a backend actually requires them.
 /// </para>
+/// <para>
+/// macOS is a platform limitation: the bar there is always the system menu bar, at the top of the
+/// screen, and never a bar drawn inside the window - the platform has one menu bar for the whole
+/// process and no way to put one in a window. Everything the bar holds works the same way - the
+/// drop-downs, their shortcuts, submenus and icons - but the row of titles itself is the system's,
+/// so what <see cref="XPlatMenuBarView"/> adds to it is not available: no bar inside the window, no
+/// <see cref="XPlatMenuBarView.TitleHeight"/> or bar font, and no controls hosted in a bar row. The
+/// system bar also follows the active window rather than belonging to one window, and macOS answers
+/// mnemonics from the first character of a title rather than from the <c>&amp;</c> marker.
+/// </para>
 /// </remarks>
 public sealed class XPlatMenuBar
 {

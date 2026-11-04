@@ -306,36 +306,13 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>
-    /// Keeps the system bar in step with the window and, when the library draws its own menus, also
-    /// puts a bar inside the Skia surface. The system bar is maintained either way: AppKit owns the
-    /// one menu bar the platform shows at the top of the screen, it carries the application menu,
-    /// and the key equivalents that the standard Edit commands rely on come from being in it.
+    /// Keeps the system bar in step with the window. macOS has one menu bar for the whole process,
+    /// owned by AppKit and drawn at the top of the screen, so this is the only bar the platform can
+    /// show: it is never drawn inside the Skia surface, whichever presentation the application asked
+    /// for. It carries the application menu, and the key equivalents the standard Edit commands rely
+    /// on come from being in it.
     /// </summary>
-    private void ApplyMenuBar()
-    {
-        _application.RebuildMenuBar();
-
-        if (!_useXPlatMenus)
-        {
-            return;
-        }
-
-        if (_menuBar is null || _menuBar.Menus.Count == 0)
-        {
-            _host.MenuBar = null;
-            return;
-        }
-
-        // Re-point an existing view rather than replacing it, so a bar that is filled in after it is
-        // assigned keeps the open-menu state.
-        if (_host.MenuBar is { } existing)
-        {
-            existing.MenuBar = _menuBar;
-            return;
-        }
-
-        _host.MenuBar = new XPlatMenuBarView(_menuBar);
-    }
+    private void ApplyMenuBar() => _application.RebuildMenuBar();
 
     /// <summary>The presenter that shows this window's context menus.</summary>
     internal IXPlatContextMenuPresenter? Presenter => _presenter;

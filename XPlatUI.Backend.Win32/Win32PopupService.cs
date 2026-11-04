@@ -1,3 +1,4 @@
+using SkiaSharp;
 using XPlatUI;
 
 namespace XPlatUI.Backend.Win32;
@@ -21,5 +22,25 @@ internal sealed class Win32PopupService : IXPlatPopupService
         }
 
         return new Win32PopupWindow(dismissOnOutsideClick);
+    }
+
+    /// <inheritdoc />
+    public SKRect? GetPlacementArea(XPlatUiHost ownerHost)
+    {
+        ArgumentNullException.ThrowIfNull(ownerHost);
+
+        if (ownerHost.Window?.Backend is not Win32WindowBackend backend || backend.Handle == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var work = NativeMethods.GetWorkArea(backend.Handle);
+
+        // The window's own conversion is used rather than repeating the arithmetic: it is what the
+        // popup uses to place itself, so the two agree to the pixel.
+        var topLeft = backend.ScreenToLogical(work.Left, work.Top);
+        var bottomRight = backend.ScreenToLogical(work.Right, work.Bottom);
+
+        return new SKRect(topLeft.X, topLeft.Y, bottomRight.X, bottomRight.Y);
     }
 }

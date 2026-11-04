@@ -259,6 +259,11 @@ public sealed partial class XPlatWindow : IDisposable
     /// Per window on Windows and Linux; the macOS backend mirrors the active window's bar into the
     /// single global menu bar, which is the only place the two presentations diverge.
     /// </summary>
+    /// <remarks>
+    /// On macOS the bar is always the system menu bar and never one drawn inside the window, so the
+    /// bar-only features listed on <see cref="XPlatMenuBar"/> are unavailable there. The menus
+    /// themselves, their shortcuts and their drop-downs work the same way on all three platforms.
+    /// </remarks>
     public XPlatMenuBar? MenuBar
     {
         get => _menuBar;

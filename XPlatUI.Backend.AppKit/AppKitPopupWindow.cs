@@ -192,14 +192,9 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
         var window = _window!;
         var owner = _ownerWindow!;
 
-        // ContentLayoutRect is in window space with its origin at the frame's bottom left, so the
-        // distance from the top of the frame down to the top of the content is what turns it into
-        // an offset from the owner's top left corner.
-        var content = owner.ContentLayoutRect;
-        var origin = AppKitApplicationBackend.LocationOf(owner);
-        double contentTop = owner.Frame.Height - content.Y - content.Height;
-        float x = (float)(origin.X + content.X + location.X);
-        float y = (float)(origin.Y + contentTop + location.Y);
+        var client = AppKitApplicationBackend.ClientOriginOf(owner);
+        float x = client.X + location.X;
+        float y = client.Y + location.Y;
 
         if (AppKitApplicationBackend.ScreenForWindow(owner) is { } screen)
         {

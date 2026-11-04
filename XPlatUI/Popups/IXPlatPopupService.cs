@@ -63,6 +63,26 @@ public interface IXPlatPopupService
     /// tooltip wants false so the press reaches whatever it landed on.
     /// </param>
     IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick);
+
+    /// <summary>
+    /// The work area of the display <paramref name="ownerHost"/> is on, in the owner's client
+    /// coordinates, or null when the popup will not be able to leave that client area.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A popup is a surface of its own, so the window it belongs to is not the limit of where it can
+    /// go: a menu opened near the bottom or right of a window still belongs on the display, not
+    /// folded back inside the window. Only the platform layer knows where the window sits on screen
+    /// and how big the display is, so it answers here and the portable layer places against the
+    /// answer.
+    /// </para>
+    /// <para>
+    /// Null means "inside the window", which is what a backend that paints popups inside the window
+    /// - GTK's popover, or the fallback overlay - has to say, because anything it is given beyond
+    /// the window would be clipped.
+    /// </para>
+    /// </remarks>
+    SKRect? GetPlacementArea(XPlatUiHost ownerHost);
 }
 
 /// <summary>
