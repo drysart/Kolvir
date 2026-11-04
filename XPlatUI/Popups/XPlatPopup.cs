@@ -243,6 +243,12 @@ public sealed class XPlatPopup : IDisposable
 
         _window = window;
         ActualPresentation = XPlatPopupPresentation.Window;
+
+        // A popup window is composited per pixel on every platform, so its surface starts out
+        // empty and only what the content paints shows. Clearing it to the theme background
+        // instead would fill the margin a menu keeps for its drop shadow, which turns the whole
+        // popup - and the union of a menu and its submenu - into an opaque rectangle.
+        window.Host.ClearColor = SKColors.Transparent;
         window.Host.Root = content;
         window.Dismissed += OnWindowDismissed;
         _open = true;
