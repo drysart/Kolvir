@@ -1321,8 +1321,8 @@ every platform and can carry icons, submenus and controls in a row.
 | Piece | What it does |
 | --- | --- |
 | `XPlatMenuItem` / `XPlatMenuBar` / `XPlatContextMenu` | The model: items, separators, submenus, checked and disabled state, shortcuts, icons and hosted controls |
-| `XPlatMenuRenderer` | `Measure(menu, metrics, font, shadow)` lays the rows out and returns an `XPlatMenuLayout`: surface size, shadow margin, row bounds, `HitTest` and `NextPickable`. `Paint(canvas, layout, hovered, surfaceAlpha)` draws the surface, drop shadow, hover pill, check column, icons and right-aligned shortcut hints. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
-| `XPlatMenuMetrics` | Row height, padding, corner radii, shadow extent and the check/icon/control column widths; `Default` is tuned to the Windows 11 menu |
+| `XPlatMenuRenderer` | `Measure(menu, metrics, font, shadow, availableWidth, availableHeight)` lays the rows out and returns an `XPlatMenuLayout`: surface size, shadow margin, row bounds, scroll state, `HitTest` and `NextPickable`. `Paint(canvas, layout, hovered, surfaceAlpha, ..., scrollOffset)` draws the surface, drop shadow, hover pill, check column, icons, right-aligned shortcut hints and - for a menu that does not fit - the arrows at either end. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
+| `XPlatMenuMetrics` | Row height, padding, corner radii, shadow extent, the check/icon/control column widths and `ScrollIndicatorHeight`; `Default` is tuned to the Windows 11 menu |
 | `XPlatMenuView` | The control that shows one menu, with its submenus and its in-menu controls |
 | `XPlatMenuPresenter` | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView` |
 | `XPlatMenuBarView` | The menu bar drawn inside the window |
@@ -1384,6 +1384,25 @@ the area, which is also why a menu can hang past the edge of the window it was o
 the one backend that reports no area, because a popover is clipped by its window there, so a menu on
 Linux is laid out inside the window and flips at the window's edge.
 
+Submenus nest as deeply as the model does: `XPlatMenuItem.SubItems` is the same list at every level,
+and since a submenu is a child view of the menu that opened it, measuring, painting, hit testing and
+the keyboard all recurse through the chain without knowing how long it is. Nothing caps the depth;
+the demo's context menu carries `Recent > Program.cs > a place in the file` to prove it. On macOS
+the same chain reaches the system bar, because `AppKitMenuBar` translates every level into a real
+`NSMenu` submenu and lets AppKit draw and drive it.
+
+A menu never grows past the room it is given. The presenter caps the root menu to the placement area
+minus the room its drop shadow needs, and a submenu is capped to the room below the row that opened
+it - sliding up to the top of the available space if not even one row fits below that row. A menu
+that still does not fit keeps its width, stops growing, and scrolls its rows instead:
+
+| Part | How it works |
+| --- | --- |
+| The window | `XPlatMenuLayout.ContentHeight` is the height the rows need and `SurfaceSize.Height` the height the menu is allowed, so the surface is a window onto the rows. `ContentViewport` is the surface minus the two strips |
+| The strips | `ScrollIndicatorHeight` (20 by default) is reserved at the top and bottom and painted opaque, so a half-scrolled row cannot read through the arrows. The arrow at an end is greyed out once there is nothing more in that direction. Set `ScrollIndicatorHeight` to zero to turn scrolling off and let the menu overflow instead |
+| The pointer | The wheel scrolls; `XPlatMenuView.ScrollBy` and `ScrollTo` are the same thing from code, and a press on either arrow scrolls by one row and never picks an item |
+| The keyboard | `Highlight` scrolls the highlighted row into view, so Up/Down/Home/End walk a long menu instead of moving the highlight off the visible part of it |
+
 An item can carry an icon, a tick, or a control. Icons are drawn in their own column and the tick in
 the check column, and `XPlatMenuTrimming.Trim` drops a separator that would lead, trail or double up,
 so a menu built by filtering a list still looks right. An in-menu control is a real control: it is
@@ -1416,8 +1435,9 @@ menus, with the same drop-downs, icons, shortcuts and submenus, but it is the sy
 and not `XPlatMenuBarView`, so what belongs to that view is not available: no bar inside the window,
 no `XPlatMenuBarView.TitleHeight` or bar font, and no controls hosted in a bar row. The system bar
 also follows the active window rather than belonging to one window, and macOS answers a mnemonic
-from the first character of a title rather than from the `&` marker. This is a platform limitation,
-not a switch.
+from the first character of a title rather than from the `&` marker. A drop-down that is too tall for
+the screen scrolls with AppKit's own arrows rather than the library's, so `ScrollIndicatorHeight`
+does not reach it. This is a platform limitation, not a switch.
 
 `XPlatMenuPresentation.Native` is the escape hatch, and on macOS it additionally hands context menus
 to AppKit.
@@ -1457,8 +1477,10 @@ the focused control.
 The window checks its menu bar - the one on the `XPlatWindow`, falling back to
 `XPlatApplicationOptions.MenuBar` - before the focused control sees the key, which is the order
 native menus use. A matching item claims the key even when it is disabled, so a greyed-out command
-does not silently fall through to the control that has focus. Because the lookup happens in
-`XPlatUiHost.ProcessKeyDown`, it works on every backend and whichever way the bar is presented.
+does not silently fall through to the control that has focus. The lookup walks into submenus, so a
+shortcut declared one or more levels down is still dispatched. Because the lookup happens in
+`XPlatUiHost.ProcessKeyDown`, it works on every backend and whichever way the bar is presented; on
+macOS the key equivalent on the `NSMenuItem` answers it first.
 
 `ShortcutText` still exists for a menu that wants to describe a key it does not dispatch itself;
 when it is set it wins over the shortcut's own text in the menu drawing.

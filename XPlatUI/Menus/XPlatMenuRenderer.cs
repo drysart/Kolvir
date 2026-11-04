@@ -60,6 +60,13 @@ public readonly record struct XPlatMenuMetrics
     /// <summary>How far the drop shadow reaches past the menu on every side.</summary>
     public float ShadowExtent { get; init; }
 
+    /// <summary>
+    /// Height of the strip a scrolling menu keeps at its top and bottom for the scroll arrows. A
+    /// menu that fits its space does not reserve it and does not scroll. Zero disables scrolling
+    /// altogether, so a menu is then simply cut off at its available height.
+    /// </summary>
+    public float ScrollIndicatorHeight { get; init; }
+
     public static XPlatMenuMetrics Default => new()
     {
         ItemHeight = 32f,
@@ -76,6 +83,7 @@ public readonly record struct XPlatMenuMetrics
         CornerRadius = 8f,
         ItemCornerRadius = 4f,
         ShadowExtent = 12f,
+        ScrollIndicatorHeight = 20f,
     };
 }
 
@@ -113,12 +121,21 @@ public sealed class XPlatMenuLayout
 {
     private readonly XPlatMenuRow[] _rows;
 
-    internal XPlatMenuLayout(SKSize surfaceSize, float shadowExtent, XPlatMenuRow[] rows, bool hasIcons, bool hasSubMenus)
+    internal XPlatMenuLayout(
+        SKSize surfaceSize,
+        float shadowExtent,
+        XPlatMenuRow[] rows,
+        bool hasIcons,
+        bool hasSubMenus,
+        float contentHeight,
+        float scrollIndicatorHeight)
     {
         SurfaceSize = surfaceSize;
         ShadowExtent = shadowExtent;
         HasIcons = hasIcons;
         HasSubMenus = hasSubMenus;
+        ContentHeight = MathF.Max(contentHeight, surfaceSize.Height);
+        ScrollIndicatorHeight = scrollIndicatorHeight;
         _rows = rows;
         FirstPickable = -1;
 
@@ -160,6 +177,69 @@ public sealed class XPlatMenuLayout
 
     /// <summary>Index of the first enabled item, or -1 when the menu has none.</summary>
     public int FirstPickable { get; }
+
+    /// <summary>
+    /// How tall the rows are if the menu is allowed to be as tall as it likes. Equal to
+    /// <see cref="SurfaceSize"/>'s height when the menu is not scrolling.
+    /// </summary>
+    public float ContentHeight { get; }
+
+    /// <summary>Height of the strip at the top and bottom of a scrolling menu that holds its arrows.</summary>
+    public float ScrollIndicatorHeight { get; }
+
+    /// <summary>
+    /// True when the rows are taller than the surface, so the menu scrolls: the rows are clipped to
+    /// <see cref="ContentViewport"/> and shifted by the scroll position, and the strips outside it
+    /// hold the scroll arrows.
+    /// </summary>
+    public bool IsScrollable => ContentHeight > SurfaceSize.Height + 0.5f;
+
+    /// <summary>How far the rows can be scrolled, from 0 to this value. Zero when not scrolling.</summary>
+    public float MaxScroll => IsScrollable ? ContentHeight - SurfaceSize.Height : 0f;
+
+    /// <summary>
+    /// The part of the surface the rows are shown in, in surface coordinates: the whole menu when it
+    /// is not scrolling, and the menu without its two scroll strips when it is.
+    /// </summary>
+    public SKRect ContentViewport
+    {
+        get
+        {
+            var bounds = SurfaceBounds;
+
+            if (!IsScrollable)
+            {
+                return bounds;
+            }
+
+            var band = ScrollIndicatorHeight;
+            return SKRect.Create(
+                bounds.Left,
+                bounds.Top + band,
+                bounds.Width,
+                MathF.Max(0f, bounds.Height - (band * 2f)));
+        }
+    }
+
+    /// <summary>
+    /// Where the arrow that scrolls towards the first row is drawn and hit-tested, in surface
+    /// coordinates. Empty when the menu is not scrolling.
+    /// </summary>
+    public SKRect ScrollStartBounds => IsScrollable
+        ? SKRect.Create(SurfaceBounds.Left, SurfaceBounds.Top, SurfaceBounds.Width, ScrollIndicatorHeight)
+        : SKRect.Empty;
+
+    /// <summary>
+    /// Where the arrow that scrolls towards the last row is drawn and hit-tested, in surface
+    /// coordinates. Empty when the menu is not scrolling.
+    /// </summary>
+    public SKRect ScrollEndBounds => IsScrollable
+        ? SKRect.Create(
+            SurfaceBounds.Left,
+            SurfaceBounds.Bottom - ScrollIndicatorHeight,
+            SurfaceBounds.Width,
+            ScrollIndicatorHeight)
+        : SKRect.Empty;
 
     /// <summary>Index of the row under <paramref name="point"/>, or -1 when it is over no row.</summary>
     public int HitTest(SKPoint point)
@@ -260,12 +340,18 @@ public static class XPlatMenuRenderer
     /// How wide the menu is allowed to be, which is what a hosted control is measured against.
     /// Infinite by default, so a menu is as wide as its contents.
     /// </param>
+    /// <param name="availableHeight">
+    /// How tall the menu itself is allowed to be, shadow margin excluded. Infinite by default, so a
+    /// menu is as tall as its rows. A menu whose rows do not fit is capped to this height and
+    /// scrolls, reserving <see cref="XPlatMenuMetrics.ScrollIndicatorHeight"/> at its top and bottom.
+    /// </param>
     public static XPlatMenuLayout Measure(
         IReadOnlyList<XPlatMenuItem> items,
         XPlatMenuMetrics? metrics = null,
         XPlatFont? font = null,
         bool shadow = true,
-        float availableWidth = float.PositiveInfinity)
+        float availableWidth = float.PositiveInfinity,
+        float availableHeight = float.PositiveInfinity)
     {
         ArgumentNullException.ThrowIfNull(items);
 
@@ -328,8 +414,18 @@ public static class XPlatMenuRenderer
         height = MathF.Ceiling(height);
 
         var extent = shadow ? m.ShadowExtent : 0f;
+        var band = MathF.Max(0f, m.ScrollIndicatorHeight);
+        var naturalHeight = height;
+
+        // A menu that cannot fit the space it is being shown in keeps its width but stops growing,
+        // and takes a strip at the top and bottom for its scroll arrows. The rows still lay out as
+        // if the menu were its natural height, so the surface is a window onto them.
+        var scrollable = band > 0f && naturalHeight + (band * 2f) > availableHeight + 0.5f;
+        var contentHeight = scrollable ? naturalHeight + (band * 2f) : naturalHeight;
+        var surfaceHeight = scrollable ? MathF.Min(contentHeight, MathF.Max(0f, availableHeight)) : naturalHeight;
+
         var rows = new XPlatMenuRow[items.Count];
-        var y = extent + m.Padding;
+        var y = extent + m.Padding + (scrollable ? band : 0f);
         var iconLeft = extent + m.Padding + m.CheckColumnWidth;
 
         for (var i = 0; i < items.Count; i++)
@@ -366,7 +462,14 @@ public static class XPlatMenuRenderer
             y += rowHeight;
         }
 
-        return new XPlatMenuLayout(new SKSize(width, height), extent, rows, hasIcons, hasSubMenus);
+        return new XPlatMenuLayout(
+            new SKSize(width, surfaceHeight),
+            extent,
+            rows,
+            hasIcons,
+            hasSubMenus,
+            contentHeight,
+            band);
     }
 
     /// <summary>Paints a measured menu onto <paramref name="canvas"/>.</summary>
@@ -383,6 +486,10 @@ public static class XPlatMenuRenderer
     /// A rectangle, in the canvas's coordinates, that the shadow must not be painted over - the
     /// surface of the menu a submenu is joined to. Null to paint the shadow everywhere.
     /// </param>
+    /// <param name="scrollOffset">
+    /// How far the rows are scrolled up, from 0 to <see cref="XPlatMenuLayout.MaxScroll"/>. Ignored
+    /// by a menu that is not scrolling.
+    /// </param>
     /// <remarks>
     /// The canvas is not cleared, so whatever the caller has already painted stays visible through a
     /// translucent surface.
@@ -394,7 +501,8 @@ public static class XPlatMenuRenderer
         float surfaceAlpha = 1f,
         XPlatMenuMetrics? metrics = null,
         XPlatFont? font = null,
-        SKRect? shadowExclusion = null)
+        SKRect? shadowExclusion = null,
+        float scrollOffset = 0f)
     {
         ArgumentNullException.ThrowIfNull(canvas);
         ArgumentNullException.ThrowIfNull(layout);
@@ -448,6 +556,40 @@ public static class XPlatMenuRenderer
             var edgeBounds = bounds;
             edgeBounds.Inflate(-0.5f, -0.5f);
             canvas.DrawRoundRect(edgeBounds, m.CornerRadius, m.CornerRadius, edge);
+        }
+
+        if (layout.IsScrollable)
+        {
+            // Rows are clipped to the rounded surface so a half-scrolled row does not spill over the
+            // arrows or the corners.
+            using var clip = new SKRoundRect(bounds, m.CornerRadius);
+            canvas.Save();
+            canvas.ClipRoundRect(clip, SKClipOperation.Intersect, antialias: true);
+            PaintRows(canvas, layout, hoveredIndex, m, f, alpha, scrollOffset);
+            PaintScrollIndicators(canvas, layout, m, alpha, scrollOffset);
+            canvas.Restore();
+        }
+        else
+        {
+            PaintRows(canvas, layout, hoveredIndex, m, f, alpha, 0f);
+        }
+    }
+
+    private static void PaintRows(
+        SKCanvas canvas,
+        XPlatMenuLayout layout,
+        int hoveredIndex,
+        XPlatMenuMetrics m,
+        XPlatFont f,
+        float alpha,
+        float scrollOffset)
+    {
+        var bounds = layout.SurfaceBounds;
+
+        if (scrollOffset != 0f)
+        {
+            canvas.Save();
+            canvas.Translate(0f, -scrollOffset);
         }
 
         DrawHover(canvas, layout, hoveredIndex, m, alpha);
@@ -516,6 +658,45 @@ public static class XPlatMenuRenderer
                     Scale(item.Enabled ? XPlatTheme.MutedForeground : XPlatTheme.DisabledForeground, MathF.Max(alpha, 0.85f)));
             }
         }
+
+        if (scrollOffset != 0f)
+        {
+            canvas.Restore();
+        }
+    }
+
+    private static void PaintScrollIndicators(
+        SKCanvas canvas,
+        XPlatMenuLayout layout,
+        XPlatMenuMetrics m,
+        float alpha,
+        float scrollOffset)
+    {
+        var start = layout.ScrollStartBounds;
+        var end = layout.ScrollEndBounds;
+
+        if (start.IsEmpty || end.IsEmpty)
+        {
+            return;
+        }
+
+        // Opaque strips, so a row scrolled underneath an arrow does not read through it.
+        var surface = XPlatTheme.Surface;
+        using (var wash = new SKPaint
+        {
+            IsAntialias = false,
+            Color = new SKColor(surface.Red, surface.Green, surface.Blue, (byte)Math.Clamp(MathF.Round(alpha * 255f), 0f, 255f)),
+        })
+        {
+            canvas.DrawRect(start, wash);
+            canvas.DrawRect(end, wash);
+        }
+
+        var active = Scale(XPlatTheme.MutedForeground, MathF.Max(alpha, 0.85f));
+        var idle = Scale(XPlatTheme.DisabledForeground, MathF.Max(alpha, 0.85f));
+
+        DrawScrollArrow(canvas, start.MidX, start.MidY, up: true, scrollOffset > 0.5f ? active : idle);
+        DrawScrollArrow(canvas, end.MidX, end.MidY, up: false, scrollOffset < layout.MaxScroll - 0.5f ? active : idle);
     }
 
     private static void DrawIcon(SKCanvas canvas, SKImage image, SKRect slot, float alpha)
@@ -550,6 +731,29 @@ public static class XPlatMenuRenderer
         builder.MoveTo(centerX - 2.5f, centerY - 4f);
         builder.LineTo(centerX + 1.5f, centerY);
         builder.LineTo(centerX - 2.5f, centerY + 4f);
+
+        using var path = builder.Snapshot();
+        canvas.DrawPath(path, paint);
+    }
+
+    private static void DrawScrollArrow(SKCanvas canvas, float centerX, float centerY, bool up, SKColor color)
+    {
+        using var paint = new SKPaint
+        {
+            IsAntialias = true,
+            Style = SKPaintStyle.Stroke,
+            StrokeWidth = 1.6f,
+            StrokeCap = SKStrokeCap.Round,
+            StrokeJoin = SKStrokeJoin.Round,
+            Color = color,
+        };
+
+        var direction = up ? -1f : 1f;
+
+        using var builder = new SKPathBuilder();
+        builder.MoveTo(centerX - 4.5f, centerY - (direction * 2.5f));
+        builder.LineTo(centerX, centerY + (direction * 2.5f));
+        builder.LineTo(centerX + 4.5f, centerY - (direction * 2.5f));
 
         using var path = builder.Snapshot();
         canvas.DrawPath(path, paint);

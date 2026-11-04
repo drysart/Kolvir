@@ -22,17 +22,7 @@ internal sealed class Gtk4ContextMenuPresenter : IXPlatContextMenuPresenter
 
         Dismiss();
 
-        var box = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
-        box.SetSizeRequest(200, -1);
-        box.SetMarginTop(4);
-        box.SetMarginBottom(4);
-
-        foreach (var item in items)
-        {
-            box.Append(item.IsSeparator
-                ? Gtk4MenuItemWidget.CreateSeparator()
-                : Gtk4MenuItemWidget.Create(item, Dismiss));
-        }
+        var box = Gtk4MenuItemWidget.CreateList(items, Dismiss);
 
         var popover = Gtk.Popover.New();
         popover.SetParent(_anchor);

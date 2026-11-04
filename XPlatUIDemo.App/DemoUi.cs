@@ -1774,12 +1774,14 @@ public sealed class DemoUi
         card.Controls.Add(new XPlatLabel(
             "The bar is an ordinary control in the window's own tree, so it scrolls, resizes and repaints " +
             "with everything else; a drop-down is a popup surface that holds an XPlatMenuView. Mnemonics come " +
-            "from an & in the text, submenus open to the side of their parent row, and a row may host a control " +
-            "instead of a label - the zoom slider below is an XPlatTrackBar living inside the menu.")
+            "from an & in the text, submenus open to the side of their parent row and nest as deeply as the " +
+            "application likes - Recent > Program.cs is two of them - and a menu taller than the room it has " +
+            "scrolls its rows behind arrows at either end. A row may host a control instead of a label: the " +
+            "zoom slider is an XPlatTrackBar living inside the menu.")
         {
             Dock = XDock.Top,
             AutoSize = false,
-            Height = 76f,
+            Height = 92f,
             WrapText = true,
             Font = XPlatTheme.CaptionFont,
             ForeColorRole = XPlatThemeColor.MutedForeground,
@@ -1817,13 +1819,25 @@ public sealed class DemoUi
         var view = new XPlatMenuView(menu);
         XPlatMenuPresenter.ShowMenu(window.Host, view, new SKPoint(location.X + 48f, location.Y + 24f));
 
-        var items = menu.TrimmedItems;
-        for (int index = 0; index < items.Count; index++)
+        // Follow the first row that opens a submenu all the way down, so the picture shows the
+        // whole chain rather than just the level the presenter opened.
+        for (int depth = 0, limit = 4; depth < limit; depth++)
         {
-            if (items[index].HasSubMenu)
+            var level = view.DeepestMenu;
+            int index = -1;
+            for (int i = 0; i < level.Items.Count && index < 0; i++)
             {
-                view.Highlight(index);
-                view.OpenSubMenu(index);
+                index = level.Items[i].HasSubMenu ? i : -1;
+            }
+
+            if (index < 0)
+            {
+                break;
+            }
+
+            level.Highlight(index);
+            if (!level.OpenSubMenu(index))
+            {
                 break;
             }
         }
@@ -1831,7 +1845,8 @@ public sealed class DemoUi
 
     /// <summary>
     /// The context menu the menus page shows: one row of every shape the renderer supports, so a
-    /// screenshot of the open menu covers the whole of it.
+    /// screenshot of the open menu covers the whole of it, plus a submenu inside a submenu and one
+    /// menu with more rows than any display can show at once.
     /// </summary>
     private XPlatContextMenu BuildMenuDemoContextMenu(XPlatLabel readout)
     {
@@ -1842,10 +1857,35 @@ public sealed class DemoUi
         };
 
         var recent = new XPlatMenuItem("&Recent");
-        foreach (var name in new[] { "Program.cs", "DemoUi.cs", "Program.cs (older)" })
+
+        // A submenu inside a submenu, so the chain is exercised at a depth a single level cannot
+        // reach: Recent > Program.cs > a place in the file.
+        var program = new XPlatMenuItem("&Program.cs");
+        foreach (var place in new[] { "The top of the file", "Main", "RenderSample" })
+        {
+            var spot = place;
+            program.SubItems.Add(new XPlatMenuItem(
+                spot, () => readout.Text = $"'Recent > Program.cs > {spot}' picked."));
+        }
+
+        recent.SubItems.Add(program);
+
+        foreach (var name in new[] { "DemoUi.cs", "Program.cs (older)" })
         {
             var file = name;
             recent.SubItems.Add(new XPlatMenuItem(file, () => readout.Text = $"'Recent > {file}' picked."));
+        }
+
+        // More rows than fit on any display, so the menu keeps the height it is given and scrolls
+        // its rows instead of growing past the edge - which is what the arrows at either end, the
+        // wheel and the keyboard keeping the highlight in view are for.
+        var scrolling = new XPlatMenuItem("&Scroll test");
+        for (int number = 1; number <= 320; number++)
+        {
+            int picked = number;
+            scrolling.SubItems.Add(new XPlatMenuItem(
+                $"Item {picked:000}",
+                () => readout.Text = $"'Scroll test > Item {picked:000}' picked."));
         }
 
         var zoom = new XPlatTrackBar
@@ -1880,6 +1920,7 @@ public sealed class DemoUi
             })
             .AddSeparator()
             .Add(recent)
+            .Add(scrolling)
             .Add(grid)
             .AddSeparator()
             .Add(new XPlatMenuItem("Zoom") { Control = zoom })

@@ -11,9 +11,10 @@ namespace XPlatUI;
 /// no menu drawing code for a bar it does not own.
 /// </para>
 /// <para>
-/// The shape here is what v1 needs - one drop-down per top-level menu - which covers File, Edit,
-/// View, Window and Help including the clipboard commands a text box depends on. Submenus can be
-/// added when a backend actually requires them.
+/// A drop-down can hold submenus, nested as deeply as the application likes through
+/// <see cref="XPlatMenuItem.SubItems"/>. The library's own bar draws them as further menus; macOS
+/// hands the whole chain to AppKit, which draws and drives it the way it drives every other
+/// submenu on the system.
 /// </para>
 /// <para>
 /// macOS is a platform limitation: the bar there is always the system menu bar, at the top of the
@@ -54,22 +55,41 @@ public sealed class XPlatMenuBar
     /// <remarks>
     /// A matching but disabled item still claims the key, so a shortcut the user can see greyed out
     /// does not fall through to the focused control and do something else instead. Menus are
-    /// searched in the order they appear in the bar.
+    /// searched in the order they appear in the bar, and the items of a submenu are searched before
+    /// the next item of the drop-down that holds it. macOS does not come through here - AppKit
+    /// answers the key equivalent of the item itself - so this is what keeps a shortcut inside a
+    /// submenu working on the platforms that draw their own bar.
     /// </remarks>
     public bool TryInvokeShortcut(XPlatKey key, XPlatModifiers modifiers)
     {
         foreach (var menu in Menus)
         {
-            foreach (var item in menu.Items)
+            if (TryInvokeShortcut(menu.Items, key, modifiers))
             {
-                if (item.IsSeparator ||
-                    item.Shortcut is not { } shortcut ||
-                    !shortcut.Matches(key, modifiers))
-                {
-                    continue;
-                }
+                return true;
+            }
+        }
 
+        return false;
+    }
+
+    private static bool TryInvokeShortcut(IEnumerable<XPlatMenuItem> items, XPlatKey key, XPlatModifiers modifiers)
+    {
+        foreach (var item in items)
+        {
+            if (item.IsSeparator)
+            {
+                continue;
+            }
+
+            if (item.Shortcut is { } shortcut && shortcut.Matches(key, modifiers))
+            {
                 item.Invoke();
+                return true;
+            }
+
+            if (item.HasSubMenu && TryInvokeShortcut(item.SubItems, key, modifiers))
+            {
                 return true;
             }
         }

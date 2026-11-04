@@ -155,6 +155,11 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
     private static SKPoint Place(XPlatMenuView view, SKPoint location, SKRect area)
     {
         var inset = view.SurfaceInset;
+
+        // A menu that is taller than the space it has scrolls instead of being cut off, so it is
+        // measured against the room the area leaves once the transparent shadow margin is taken off.
+        view.MaximumSurfaceHeight = MathF.Max(0f, area.Height - (inset * 2f));
+
         var surface = view.MeasureSurface(area.Width);
 
         // The margin kept for the drop shadow is transparent, but it is still part of the popup.

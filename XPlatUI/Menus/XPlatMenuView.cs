@@ -46,6 +46,8 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     private float _surfaceOffset;
     private bool _openedToLeft;
     private SKPoint _ownOrigin;
+    private float? _maximumSurfaceHeight;
+    private float _scroll;
 
     /// <summary>Creates an empty menu view. Fill <see cref="Items"/> with <see cref="SetItems"/>.</summary>
     public XPlatMenuView()
@@ -103,6 +105,81 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     /// surface - not the transparent shadow margin - lands where the caller asked for it.
     /// </summary>
     public float SurfaceInset => ShowShadow ? (Metrics ?? XPlatMenuMetrics.Default).ShadowExtent : 0f;
+
+    /// <summary>
+    /// The tallest this menu's surface may be, shadow margin excluded, or null for no limit. A menu
+    /// whose rows do not fit is capped to this height and scrolls instead of growing past it: the
+    /// caller sets it from the space the display has, and a parent menu sets it on its submenus from
+    /// the room they have below the row that opened them.
+    /// </summary>
+    public float? MaximumSurfaceHeight
+    {
+        get => _maximumSurfaceHeight;
+        set
+        {
+            if (Nullable.Equals(_maximumSurfaceHeight, value))
+            {
+                return;
+            }
+
+            _maximumSurfaceHeight = value;
+            _layout = null;
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// How far the rows of a scrolling menu are shifted up, from zero to
+    /// <see cref="XPlatMenuLayout.MaxScroll"/>. Always zero for a menu that fits the space it was
+    /// given, which is most of them.
+    /// </summary>
+    public float ScrollOffset => _scroll;
+
+    /// <summary>
+    /// Scrolls the rows so that <paramref name="offset"/> is the first pixel of content shown,
+    /// clamped to what the menu has room for. Does nothing to a menu that fits its space.
+    /// </summary>
+    public void ScrollTo(float offset)
+    {
+        EnsureLayout();
+
+        var clamped = Math.Clamp(offset, 0f, _layout?.MaxScroll ?? 0f);
+
+        if (MathF.Abs(clamped - _scroll) < 0.01f)
+        {
+            return;
+        }
+
+        _scroll = clamped;
+        Invalidate();
+        PerformLayout();
+    }
+
+    /// <summary>Scrolls the rows by <paramref name="delta"/> pixels, positive scrolling towards the last row.</summary>
+    public void ScrollBy(float delta) => ScrollTo(_scroll + delta);
+
+    /// <summary>Scrolls the rows just far enough that the row at <paramref name="index"/> is fully shown.</summary>
+    public void ScrollRowIntoView(int index)
+    {
+        EnsureLayout();
+
+        if (_layout is not { IsScrollable: true } layout || index < 0 || index >= layout.Rows.Count)
+        {
+            return;
+        }
+
+        var row = layout.Rows[index].Bounds;
+        var viewport = layout.ContentViewport;
+
+        if (row.Top - _scroll < viewport.Top)
+        {
+            ScrollTo(row.Top - viewport.Top);
+        }
+        else if (row.Bottom - _scroll > viewport.Bottom)
+        {
+            ScrollTo(row.Bottom - viewport.Bottom);
+        }
+    }
 
     /// <summary>
     /// How far right the chain of open menus may paint, measured from the left edge of the root
@@ -329,6 +406,10 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         _hovered = index;
         Invalidate();
 
+        // Reached from the keyboard as well as the pointer, and a menu that scrolls has to follow the
+        // highlight or the arrow keys would walk into rows that are not on screen.
+        ScrollRowIntoView(index);
+
         if (layout.Rows[index].IsSubMenu)
         {
             OpenSubMenu(index);
@@ -493,13 +574,37 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             return size;
         }
 
-        var origin = SubMenuOrigin(row, metrics, child.MeasureSurface(availableSize.Width), out var flipped);
+        var extent = ShowShadow ? metrics.ShadowExtent : 0f;
+        var childSurface = child.MeasureSurface(availableSize.Width);
+        var origin = SubMenuOrigin(row, metrics, childSurface, out var flipped);
 
         // The child has to know where it sits in the chain before it measures, because that is what
         // tells its own submenus where the display ends.
         child._openedToLeft = flipped;
 
-        var childSize = child.Measure(new SKSize(availableSize.Width, availableSize.Height));
+        // A submenu gets the room below the row that opened it and no more: past that it scrolls,
+        // rather than growing off the bottom of the space the whole chain was given.
+        var room = availableSize.Height - origin.Y - extent;
+
+        if (childSurface.Height > room)
+        {
+            child._maximumSurfaceHeight = MathF.Max(metrics.ItemHeight, room);
+            childSurface = child.MeasureSurface(availableSize.Width);
+            origin = SubMenuOrigin(row, metrics, childSurface, out flipped);
+            child._openedToLeft = flipped;
+
+            // Not even one row fits below the row that opened it, so the child slides up to the top
+            // of the space instead - still scrolling, because it is taller than the whole of it.
+            room = availableSize.Height - origin.Y - extent;
+
+            if (childSurface.Height > room)
+            {
+                var slid = availableSize.Height - extent - childSurface.Height;
+                origin = new SKPoint(origin.X, slid >= extent ? slid : extent);
+            }
+        }
+
+        var childSize = child.Measure(new SKSize(availableSize.Width, MathF.Max(0f, availableSize.Height - origin.Y)));
 
         // A submenu that opened on the left starts left of this menu's own surface, and this menu's
         // bounds have to cover it: everything it draws moves right by the overhang instead.
@@ -562,7 +667,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
 
                 var bounds = SKRect.Create(
                     _ownOrigin.X + origin.X - child.SurfaceOverhang,
-                    _ownOrigin.Y + origin.Y,
+                    _ownOrigin.Y + origin.Y - _scroll,
                     size.Width,
                     size.Height);
 
@@ -598,7 +703,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             canvas.Translate(_ownOrigin.X, _ownOrigin.Y);
         }
 
-        XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, ShadowExclusion());
+        XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, ShadowExclusion(), _scroll);
 
         if (shifted)
         {
@@ -631,7 +736,29 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             return;
         }
 
+        if (ScrollFromIndicator(e.Location))
+        {
+            return;
+        }
+
         _pressed = HitTestRow(e.Location);
+    }
+
+    /// <inheritdoc />
+    protected override void OnMouseWheel(XPlatMouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+
+        EnsureLayout();
+
+        if (_layout is not { IsScrollable: true } || e.Delta == 0f)
+        {
+            return;
+        }
+
+        var before = _scroll;
+        ScrollBy(-e.Delta);
+        e.Handled |= _scroll != before;
     }
 
     /// <inheritdoc />
@@ -800,7 +927,53 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     private int HitTestRow(SKPoint location)
     {
         EnsureLayout();
-        return _layout?.HitTest(new SKPoint(location.X - _ownOrigin.X, location.Y - _ownOrigin.Y)) ?? -1;
+
+        if (_layout is not { } layout)
+        {
+            return -1;
+        }
+
+        var point = new SKPoint(location.X - _ownOrigin.X, location.Y - _ownOrigin.Y);
+
+        // A row scrolled out of the viewport is not there as far as the pointer is concerned, even
+        // though its bounds still lie above or below it.
+        if (layout.IsScrollable && !layout.ContentViewport.Contains(point))
+        {
+            return -1;
+        }
+
+        return layout.HitTest(new SKPoint(point.X, point.Y + _scroll));
+    }
+
+    /// <summary>
+    /// Scrolls one row when <paramref name="location"/> is on a scroll arrow, and reports whether it
+    /// was. An arrow is not a row, so pressing one never picks an item.
+    /// </summary>
+    private bool ScrollFromIndicator(SKPoint location)
+    {
+        EnsureLayout();
+
+        if (_layout is not { IsScrollable: true } layout)
+        {
+            return false;
+        }
+
+        var point = new SKPoint(location.X - _ownOrigin.X, location.Y - _ownOrigin.Y);
+        var step = (Metrics ?? XPlatMenuMetrics.Default).ItemHeight;
+
+        if (layout.ScrollStartBounds.Contains(point))
+        {
+            ScrollBy(-step);
+            return true;
+        }
+
+        if (layout.ScrollEndBounds.Contains(point))
+        {
+            ScrollBy(step);
+            return true;
+        }
+
+        return false;
     }
 
     private XPlatMenuRow? RowForSubMenu() =>
@@ -880,15 +1053,8 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     private float? Floor => RootMenu.SurfaceFloor is { } floor ? floor - _surfaceOffset : null;
 
     /// <summary>Translates a rectangle of this menu's own layout into its bounds.</summary>
-    private SKRect Offset(SKRect rect)
-    {
-        if (_ownOrigin == SKPoint.Empty)
-        {
-            return rect;
-        }
-
-        return SKRect.Create(rect.Left + _ownOrigin.X, rect.Top + _ownOrigin.Y, rect.Width, rect.Height);
-    }
+    private SKRect Offset(SKRect rect) =>
+        SKRect.Create(rect.Left + _ownOrigin.X, rect.Top + _ownOrigin.Y - _scroll, rect.Width, rect.Height);
 
     /// <summary>Lays the items out and returns the size of the drawing surface, shadow margin included.</summary>
     private SKSize MeasureOwn(float availableWidth)
@@ -900,7 +1066,12 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             Metrics,
             Font,
             ShowShadow,
-            MathF.Max(0f, availableWidth - (extent * 2f)));
+            MathF.Max(0f, availableWidth - (extent * 2f)),
+            _maximumSurfaceHeight ?? float.PositiveInfinity);
+
+        // A menu that came back with fewer rows than it had - it was reset, or its submenu closed -
+        // cannot stay scrolled past its new end.
+        _scroll = Math.Clamp(_scroll, 0f, _layout.MaxScroll);
 
         return _layout.WindowSize;
     }

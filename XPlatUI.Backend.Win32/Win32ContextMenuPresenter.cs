@@ -104,8 +104,18 @@ internal sealed class Win32ContextMenuPresenter : IXPlatContextMenuPresenter
         }
 
         var built = new BuiltMenu(handle);
+        AppendItems(handle, built, menu.TrimmedItems);
+        return built;
+    }
 
-        foreach (var item in menu.TrimmedItems)
+    /// <summary>
+    /// Appends <paramref name="items"/> to <paramref name="handle"/>, at any depth: an item that
+    /// carries <see cref="XPlatMenuItem.SubItems"/> becomes a real popup submenu. Command ids stay
+    /// unique across the whole tree, and destroying the root frees the submenus with it.
+    /// </summary>
+    private static void AppendItems(IntPtr handle, BuiltMenu built, IEnumerable<XPlatMenuItem> items)
+    {
+        foreach (var item in items)
         {
             if (item.IsSeparator)
             {
@@ -113,11 +123,27 @@ internal sealed class Win32ContextMenuPresenter : IXPlatContextMenuPresenter
                 continue;
             }
 
+            if (item.HasSubMenu)
+            {
+                var submenu = NativeMethods.CreatePopupMenu();
+                if (submenu == IntPtr.Zero)
+                {
+                    continue;
+                }
+
+                AppendItems(submenu, built, item.TrimmedSubItems);
+
+                if (!NativeMethods.AppendMenuW(handle, FlagsFor(item) | NativeMethods.MfPopup, submenu, TextFor(item)))
+                {
+                    NativeMethods.DestroyMenu(submenu);
+                }
+
+                continue;
+            }
+
             var id = built.Add(item);
             NativeMethods.AppendMenuW(handle, FlagsFor(item), new IntPtr(id), TextFor(item));
         }
-
-        return built;
     }
 
     private static uint FlagsFor(XPlatMenuItem item)

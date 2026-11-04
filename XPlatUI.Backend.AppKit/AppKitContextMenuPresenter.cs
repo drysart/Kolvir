@@ -56,7 +56,35 @@ internal sealed class AppKitContextMenuPresenter : IXPlatContextMenuPresenter
         };
 
         ApplyShortcut(menuItem, item);
+
+        if (item.HasSubMenu)
+        {
+            // A row that opens a submenu runs nothing itself: AppKit takes the click and shows the
+            // menu attached to it, so the action above is never reached.
+            var submenu = new NSMenu(item.DisplayText) { AutoEnablesItems = false };
+            AddItems(submenu, item.TrimmedSubItems);
+            menuItem.Submenu = submenu;
+        }
+
         return menuItem;
+    }
+
+    /// <summary>
+    /// Fills <paramref name="menu"/> with <paramref name="items"/>, at any depth: an item that
+    /// carries <see cref="XPlatMenuItem.SubItems"/> becomes a real <c>NSMenu</c> submenu.
+    /// </summary>
+    internal static void AddItems(NSMenu menu, IEnumerable<XPlatMenuItem> items)
+    {
+        foreach (var item in items)
+        {
+            if (item.IsSeparator)
+            {
+                menu.AddItem(NSMenuItem.SeparatorItem);
+                continue;
+            }
+
+            menu.AddItem(CreateItem(item));
+        }
     }
 
     /// <summary>

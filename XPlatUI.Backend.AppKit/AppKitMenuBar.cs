@@ -69,24 +69,17 @@ internal static class AppKitMenuBar
     }
 
     /// <summary>
-    /// One top-level menu. The library has no submenus in v1, so a menu is exactly one drop-down.
+    /// One top-level menu and its drop-down. An item inside it that carries
+    /// <see cref="XPlatMenuItem.SubItems"/> becomes a real nested submenu, which AppKit draws and
+    /// drives itself: a chain of menus in the system bar needs no code of ours past this translation.
     /// </summary>
     private static NSMenuItem CreateMenu(XPlatMenu menu)
     {
         var text = menu.DisplayText;
         var submenu = new NSMenu(text) { AutoEnablesItems = false };
 
-        foreach (var item in menu.Items)
-        {
-            if (item.IsSeparator)
-            {
-                submenu.AddItem(NSMenuItem.SeparatorItem);
-                continue;
-            }
-
-            // The same builder the context menus use, so an item looks identical in both places.
-            submenu.AddItem(AppKitContextMenuPresenter.CreateItem(item));
-        }
+        // The same builder the context menus use, so an item looks identical in both places.
+        AppKitContextMenuPresenter.AddItems(submenu, menu.Items);
 
         return new NSMenuItem(text) { Submenu = submenu };
     }

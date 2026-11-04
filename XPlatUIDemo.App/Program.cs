@@ -159,6 +159,13 @@ internal static class Program
             demo.ShowOwnedWindow();
         }
 
+        // Opens the menus page's context menu as if the box had been right-clicked, which is what a
+        // screenshot or a script needs in order to see a menu without hunting for the box.
+        if (Array.IndexOf(args, "--menu") >= 0)
+        {
+            demo.OpenMenuDemo(window);
+        }
+
         return application.Run();
     }
 
@@ -167,33 +174,56 @@ internal static class Program
     /// the same commands are reachable from the keyboard on all three platforms, including the one
     /// that does not draw the bar yet.
     /// </summary>
-    private static XPlatMenuBar CreateMenuBar(XPlatWindow window, DemoUi demo) => new(
-        new XPlatMenu(
-            "&View",
-            new XPlatMenuItem("&Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.D),
-            },
-            new XPlatMenuItem("&Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.L),
-            }),
-        new XPlatMenu(
-            "&Window",
-            new XPlatMenuItem("&Topmost", () =>
-            {
-                window.TopMost = !window.TopMost;
-                demo.SetStatus(window.TopMost
-                    ? "The window is now above every other window."
-                    : "The window is back in the normal stacking order.");
-            })
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.T),
-            },
-            new XPlatMenuItem("&Owned Window", demo.ShowOwnedWindow)
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.N),
-            }));
+    /// <remarks>
+    /// Both menus put their commands inside a submenu, so the sample covers the case that only the
+    /// system bar can prove: macOS hands the whole chain to AppKit, which draws and drives the
+    /// nested menus itself. The shortcuts sit inside those submenus on purpose - a shortcut nested
+    /// one level down still has to reach the command on every platform.
+    /// </remarks>
+    private static XPlatMenuBar CreateMenuBar(XPlatWindow window, DemoUi demo)
+    {
+        var theme = new XPlatMenuItem("&Theme");
+        theme.SubItems.Add(new XPlatMenuItem("&Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
+        {
+            Shortcut = new XPlatShortcut(XPlatKey.D),
+        });
+        theme.SubItems.Add(new XPlatMenuItem("&Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
+        {
+            Shortcut = new XPlatShortcut(XPlatKey.L),
+        });
+
+        var state = new XPlatMenuItem("&State");
+        foreach (var (text, value) in new[]
+        {
+            ("&Normal", XPlatWindowState.Normal),
+            ("&Maximized", XPlatWindowState.Maximized),
+            ("&Minimized", XPlatWindowState.Minimized),
+        })
+        {
+            state.SubItems.Add(new XPlatMenuItem(text, () => window.State = value));
+        }
+
+        return new(
+            new XPlatMenu("&View", theme),
+            new XPlatMenu(
+                "&Window",
+                new XPlatMenuItem("&Topmost", () =>
+                {
+                    window.TopMost = !window.TopMost;
+                    demo.SetStatus(window.TopMost
+                        ? "The window is now above every other window."
+                        : "The window is back in the normal stacking order.");
+                })
+                {
+                    Shortcut = new XPlatShortcut(XPlatKey.T),
+                },
+                new XPlatMenuItem("&Owned Window", demo.ShowOwnedWindow)
+                {
+                    Shortcut = new XPlatShortcut(XPlatKey.N),
+                },
+                XPlatMenuItem.Separator,
+                state));
+    }
 
     /// <summary>
     /// The title bar text. It names the backend on purpose: three builds of the same program are

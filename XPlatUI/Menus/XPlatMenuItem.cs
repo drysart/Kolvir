@@ -61,6 +61,13 @@ public sealed class XPlatMenuItem
     public bool HasSubMenu => SubItems.Count > 0;
 
     /// <summary>
+    /// <see cref="SubItems"/> with the separators a menu would not draw removed, which is what a
+    /// presenter that builds a native submenu should show.
+    /// </summary>
+    public IReadOnlyList<XPlatMenuItem> TrimmedSubItems =>
+        XPlatMenuTrimming.Trim((IReadOnlyList<XPlatMenuItem>)SubItems);
+
+    /// <summary>
     /// The icon drawn in the column to the left of the label, or null for none. The item does not
     /// own the image: a menu that loads images disposes them with whatever owns them.
     /// </summary>
