@@ -161,6 +161,9 @@ internal static class NativeMethods
     internal static readonly IntPtr DpiAwarenessSystem = new(-2);
     internal static readonly IntPtr DpiAwarenessPerMonitorV2 = new(-4);
 
+    /// <summary><c>EnumDisplaySettings</c> mode: the display's current mode.</summary>
+    internal const uint EnumCurrentSettings = 0xFFFFFFFF;
+
     /// <summary><c>GetDpiForMonitor</c> mode: the effective (post-scaling) DPI.</summary>
     internal const int MdtEffectiveDpi = 0;
 
@@ -254,6 +257,68 @@ internal static class NativeMethods
         public RECT rcMonitor;
         public RECT rcWork;
         public uint dwFlags;
+    }
+
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct MONITORINFOEX
+    {
+        public uint cbSize;
+        public RECT rcMonitor;
+        public RECT rcWork;
+        public uint dwFlags;
+
+        /// <summary>The display device name, such as <c>\\.\DISPLAY1</c>, which <c>EnumDisplaySettings</c> takes.</summary>
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string szDevice;
+    }
+
+    /// <summary>
+    /// <c>DEVMODEW</c>, the display-mode record <c>EnumDisplaySettings</c> fills in. Only
+    /// <c>dmDisplayFrequency</c> is read, but the layout up to it has to be exact.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct DEVMODEW
+    {
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmDeviceName;
+        public ushort dmSpecVersion;
+        public ushort dmDriverVersion;
+        public ushort dmSize;
+        public ushort dmDriverExtra;
+        public uint dmFields;
+
+        // The union that follows dmFields. A display mode uses the position arm; a printer mode
+        // uses orientation and paper size, which occupy the same sixteen bytes.
+        public int dmPositionX;
+        public int dmPositionY;
+        public uint dmDisplayOrientation;
+        public uint dmDisplayFixedOutput;
+
+        public short dmColor;
+        public short dmDuplex;
+        public short dmYResolution;
+        public short dmTTOption;
+        public short dmCollate;
+
+        [MarshalAs(UnmanagedType.ByValTStr, SizeConst = 32)]
+        public string dmFormName;
+        public ushort dmLogPixels;
+        public uint dmBitsPerPel;
+        public uint dmPelsWidth;
+        public uint dmPelsHeight;
+        public uint dmDisplayFlags;
+        public uint dmDisplayFrequency;
+
+        // The tail of the native record. Nothing reads it, but EnumDisplaySettingsW fills in the
+        // whole structure, so it has to be there for the buffer to be the size Windows expects.
+        public uint dmICMMethod;
+        public uint dmICMIntent;
+        public uint dmMediaType;
+        public uint dmDitherType;
+        public uint dmReserved1;
+        public uint dmReserved2;
+        public uint dmPanningWidth;
+        public uint dmPanningHeight;
     }
 
     [StructLayout(LayoutKind.Sequential, Size = 32)]
@@ -463,6 +528,12 @@ internal static class NativeMethods
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool GetMonitorInfoW(IntPtr hMonitor, ref MONITORINFO lpmi);
+
+    [DllImport("user32.dll", EntryPoint = "GetMonitorInfoW", CharSet = CharSet.Unicode)]
+    internal static extern bool GetMonitorInfoExW(IntPtr hMonitor, ref MONITORINFOEX lpmi);
+
+    [DllImport("user32.dll", EntryPoint = "EnumDisplaySettingsW", CharSet = CharSet.Unicode)]
+    internal static extern bool EnumDisplaySettingsW(string? lpszDeviceName, uint iModeNum, ref DEVMODEW lpDevMode);
 
     [DllImport("user32.dll")]
     internal static extern bool EnumDisplayMonitors(IntPtr hdc, IntPtr lprcClip, MonitorEnumProc lpfnEnum, IntPtr dwData);
@@ -695,6 +766,21 @@ internal static class NativeMethods
         }
 
         return GetPrimaryWorkArea();
+    }
+
+    /// <summary>
+    /// The refresh rate of a display in Hz, or null when Windows does not report one. Drivers that
+    /// run a display at its "hardware default" report 0 or 1 rather than a real rate.
+    /// </summary>
+    internal static float? GetRefreshRate(string? deviceName)
+    {
+        var mode = new DEVMODEW { dmSize = (ushort)Marshal.SizeOf<DEVMODEW>() };
+        if (!EnumDisplaySettingsW(deviceName, EnumCurrentSettings, ref mode))
+        {
+            return null;
+        }
+
+        return mode.dmDisplayFrequency > 1 ? mode.dmDisplayFrequency : (float?)null;
     }
 
     /// <summary>Extracts the signed low word of a packed coordinate.</summary>

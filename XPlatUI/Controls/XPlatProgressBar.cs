@@ -1,3 +1,4 @@
+using System.Diagnostics;
 using SkiaSharp;
 
 namespace XPlatUI;
@@ -18,13 +19,18 @@ public class XPlatProgressBar : XPlatControl
     private const float BlockGap = 2f;
     private const float MarqueeSweepsPerSecond = 0.8f;
 
+    /// <summary>What a marquee bar uses when no display rate is available: about 33 frames a second.</summary>
+    private static readonly TimeSpan FallbackMarqueeAnimationSpeed = TimeSpan.FromMilliseconds(30);
+
     private float _minimum;
     private float _maximum = 100f;
     private float _value;
     private float _step = 10f;
     private float _marqueePhase;
     private XPlatProgressBarStyle _style = XPlatProgressBarStyle.Continuous;
-    private TimeSpan _marqueeAnimationSpeed = TimeSpan.FromMilliseconds(30);
+    private TimeSpan? _marqueeAnimationSpeed;
+    private TimeSpan _marqueeInterval = FallbackMarqueeAnimationSpeed;
+    private long _marqueeTimestamp;
     private XPlatTimer? _marquee;
 
     public XPlatProgressBar()
@@ -129,22 +135,38 @@ public class XPlatProgressBar : XPlatControl
         }
     }
 
-    /// <summary>How often a marquee bar advances. Defaults to 30 ms.</summary>
+    /// <summary>
+    /// How often a marquee bar advances. Null, the default, animates at the refresh rate of the
+    /// display the window is on, and falls back to 30 ms when the platform cannot report one.
+    /// </summary>
     /// <exception cref="ArgumentOutOfRangeException">The value is not positive.</exception>
-    public TimeSpan MarqueeAnimationSpeed
+    public TimeSpan? MarqueeAnimationSpeed
     {
         get => _marqueeAnimationSpeed;
         set
         {
-            if (value <= TimeSpan.Zero)
+            if (value is { } speed && speed <= TimeSpan.Zero)
             {
                 throw new ArgumentOutOfRangeException(nameof(value), value, "The speed must be positive.");
             }
 
+            if (_marqueeAnimationSpeed == value)
+            {
+                return;
+            }
+
             _marqueeAnimationSpeed = value;
+
+            // Setting the interval restarts a running timer, so only touch it when the resolved
+            // interval really moved - a display-driven bar keeps the same one most of the time.
             if (_marquee is { Enabled: true } timer)
             {
-                timer.Interval = value;
+                var interval = ResolveMarqueeInterval();
+                if (interval != timer.Interval)
+                {
+                    _marqueeInterval = interval;
+                    timer.Interval = interval;
+                }
             }
         }
     }
@@ -250,23 +272,71 @@ public class XPlatProgressBar : XPlatControl
             && Host is not null
             && XPlatApplication.Current is not null;
 
-        if (run)
+        if (!run)
         {
-            _marquee ??= CreateTimer(_marqueeAnimationSpeed, OnMarqueeTick);
-            if (!_marquee.Enabled)
+            if (_marquee is { Enabled: true } running)
             {
-                _marquee.Start();
+                running.Stop();
             }
+
+            return;
         }
-        else if (_marquee is { Enabled: true } timer)
+
+        // The display rate is read when the sweep starts rather than on every frame: a window that
+        // moved to another display, or a speed set while the bar was idle, is picked up by the next
+        // start, and a running bar does not query the platform from inside its paint.
+        if (_marquee is null)
         {
-            timer.Stop();
+            _marqueeInterval = ResolveMarqueeInterval();
+            _marquee = CreateTimer(_marqueeInterval, OnMarqueeTick);
         }
+        else if (_marquee.Enabled)
+        {
+            return;
+        }
+        else
+        {
+            _marqueeInterval = ResolveMarqueeInterval();
+            _marquee.Interval = _marqueeInterval;
+        }
+
+        _marqueeTimestamp = 0;
+        _marquee.Start();
+    }
+
+    /// <summary>
+    /// The interval one marquee frame takes: the speed the application asked for, or the display's
+    /// own frame time when it asked for none.
+    /// </summary>
+    private TimeSpan ResolveMarqueeInterval()
+    {
+        if (_marqueeAnimationSpeed is { } speed)
+        {
+            return speed;
+        }
+
+        float rate = Host?.Window?.Screen?.RefreshRate ?? 0f;
+        if (rate <= 0f)
+        {
+            return FallbackMarqueeAnimationSpeed;
+        }
+
+        // Floored at a millisecond so an implausible rate cannot turn the sweep into a busy loop.
+        return TimeSpan.FromMilliseconds(Math.Max(1000.0 / rate, 1.0));
     }
 
     private void OnMarqueeTick(object sender)
     {
-        _marqueePhase += (float)(_marqueeAnimationSpeed.TotalSeconds * MarqueeSweepsPerSecond);
+        // Measured, not assumed: the platform's timer granularity rarely matches the interval it
+        // was asked for, and a display-driven interval is not exact either. Advancing by the time
+        // that actually passed is what keeps MarqueeSweepsPerSecond a real unit.
+        long now = Stopwatch.GetTimestamp();
+        TimeSpan elapsed = _marqueeTimestamp == 0
+            ? _marqueeInterval
+            : Stopwatch.GetElapsedTime(_marqueeTimestamp, now);
+
+        _marqueeTimestamp = now;
+        _marqueePhase += (float)(elapsed.TotalSeconds * MarqueeSweepsPerSecond);
         if (_marqueePhase >= 1f)
         {
             _marqueePhase -= MathF.Floor(_marqueePhase);

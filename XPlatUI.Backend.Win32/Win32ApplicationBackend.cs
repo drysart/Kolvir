@@ -268,7 +268,12 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
             // window still has somewhere to centre itself.
             var work = NativeMethods.GetPrimaryWorkArea();
             var scale = ScaleOf(NativeMethods.GetDpiForSystem());
-            screens.Add(new XPlatScreen(ToLogical(work, scale), ToLogical(work, scale), scale, isPrimary: true));
+            screens.Add(new XPlatScreen(
+                ToLogical(work, scale),
+                ToLogical(work, scale),
+                scale,
+                isPrimary: true,
+                NativeMethods.GetRefreshRate(null)));
         }
 
         return screens;
@@ -573,8 +578,8 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
 
     private static XPlatScreen ToScreen(IntPtr monitor, NativeMethods.RECT bounds)
     {
-        var info = new NativeMethods.MONITORINFO { cbSize = (uint)Marshal.SizeOf<NativeMethods.MONITORINFO>() };
-        var hasInfo = NativeMethods.GetMonitorInfoW(monitor, ref info);
+        var info = new NativeMethods.MONITORINFOEX { cbSize = (uint)Marshal.SizeOf<NativeMethods.MONITORINFOEX>() };
+        var hasInfo = NativeMethods.GetMonitorInfoExW(monitor, ref info);
 
         if (hasInfo && info.rcMonitor.Right > info.rcMonitor.Left && info.rcMonitor.Bottom > info.rcMonitor.Top)
         {
@@ -584,8 +589,9 @@ public sealed class Win32ApplicationBackend : IXPlatApplicationBackend
         var work = hasInfo && info.rcWork.Right > info.rcWork.Left ? info.rcWork : bounds;
         var isPrimary = hasInfo && (info.dwFlags & NativeMethods.MonitorInfoPrimary) != 0;
         var scale = ScaleOf(monitor);
+        var refreshRate = NativeMethods.GetRefreshRate(hasInfo ? info.szDevice : null);
 
-        return new XPlatScreen(ToLogical(bounds, scale), ToLogical(work, scale), scale, isPrimary);
+        return new XPlatScreen(ToLogical(bounds, scale), ToLogical(work, scale), scale, isPrimary, refreshRate);
     }
 
     private static float ScaleOf(IntPtr monitor)

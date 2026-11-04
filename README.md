@@ -81,7 +81,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
 | `XPlatCheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
 | `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
-| `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer |
+| `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
 | `XPlatComboBox` | `ComboBox` | Edit field plus a drop-down list shown in a popup, so it can leave the window |
@@ -503,11 +503,23 @@ input, so it is neither focusable nor a tab stop.
 | `Minimum`, `Maximum`, `Value`, `Percent` | The range and where in it the bar sits; `Value` is clamped, `Percent` is the fraction as `0 … 1` |
 | `Step`, `PerformStep()`, `Increment(amount)` | `Step` is what `PerformStep` adds; both clamp and repaint only when the value moved |
 | `Style` | `Continuous`, `Blocks` (a segmented fill) or `Marquee` |
-| `MarqueeAnimationSpeed` | Milliseconds between marquee frames |
+| `MarqueeAnimationSpeed` | How often a marquee frame is drawn. Null, the default, is the display's own frame time; a `TimeSpan` pins it |
 
 Only a `Marquee` bar starts a timer, and only while it is visible, attached and there is an
 application to tick it, so an idle continuous bar costs nothing. A continuous bar repaints only the
 strip the value actually crossed.
+
+A marquee that leaves `MarqueeAnimationSpeed` null asks
+`XPlatScreen.RefreshRate` for the refresh rate of the display the window is on and animates at that
+frame time, falling back to 30 ms when the platform cannot report one. The rate is read when the
+sweep starts, so a bar that begins animating on another display picks that display up; a running one
+does not query the platform from inside its paint. Two things are worth knowing before relying on
+it. A platform timer cannot tick faster than the OS allows - Windows' timer queue is capped at about
+15 ms unless the process raises the timer resolution - so a 144 Hz display animates at roughly 64
+frames a second rather than 144; the sweep still runs at the same speed because each frame advances
+by the time that actually passed, not by the interval that was asked for. And the repaint rate is
+the display's, so a fast panel costs more repaints than a fixed 30 ms would: set a speed explicitly
+when that matters more than smoothness.
 
 ```csharp
 var progress = new XPlatProgressBar { Dock = DockStyle.Top, Maximum = 200 };
@@ -515,6 +527,12 @@ progress.Value = 80;                      // 40%
 progress.PerformStep();                   // 90
 
 var busy = new XPlatProgressBar { Dock = DockStyle.Top, Style = XPlatProgressBarStyle.Marquee };
+var calmer = new XPlatProgressBar
+{
+    Dock = DockStyle.Top,
+    Style = XPlatProgressBarStyle.Marquee,
+    MarqueeAnimationSpeed = TimeSpan.FromMilliseconds(50),   // ignore the display's own rate
+};
 ```
 
 ### Group box
@@ -1490,7 +1508,9 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
    system theme, the dialog service and the context menu presenter. Doing it through one hook
    instead of a `Create*` member per service keeps adding a service from breaking every backend, and
    keeps them lazy, so the headless backend never constructs a clipboard it will not use.
-7. Implement `GetScreens`; `Shutdown` releases whatever `Initialize` took.
+7. Implement `GetScreens`, reporting each display's refresh rate when the platform can supply one -
+   it is what a marquee progress bar animates at - and `Shutdown` releases whatever `Initialize`
+   took.
 8. Optionally assign an `IXPlatPopupService` to `XPlatPopupService.Current` so popups become real
    windows instead of overlays inside the owning window. It is a static rather than a DI service
    because a popup belongs to one owner host rather than to the application, and because leaving it

@@ -483,7 +483,20 @@ public sealed class Gtk4ApplicationBackend : IXPlatApplicationBackend
 
         // GTK reports a monitor's geometry but not its work area: the panel and dock are drawn by
         // the shell over the display, so the usable area is reported as the whole monitor.
-        return new XPlatScreen(bounds, bounds, Math.Max(monitor.ScaleFactor, 1), isPrimary);
+        return new XPlatScreen(
+            bounds,
+            bounds,
+            Math.Max(monitor.ScaleFactor, 1),
+            isPrimary,
+            RefreshRateOf(monitor));
+    }
+
+    /// <summary>The display's refresh rate in Hz, or null when GDK does not report one.</summary>
+    private static float? RefreshRateOf(Gdk.Monitor monitor)
+    {
+        // GDK reports milli-Hertz, and zero for an unknown rate.
+        var rate = monitor.RefreshRate;
+        return rate > 0d ? (float)(rate / 1000d) : null;
     }
 
     /// <summary>The display a window is on, in logical units.</summary>

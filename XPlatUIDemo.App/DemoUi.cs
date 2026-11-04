@@ -1336,7 +1336,7 @@ public sealed class DemoUi
             Margin = new XPlatThickness(0f, 0f, 0f, 16f),
         });
 
-        card.Controls.Add(ScrollCaption("Marquee"));
+        card.Controls.Add(ScrollCaption("Marquee (no speed set, so it follows the display)"));
         card.Controls.Add(new XPlatProgressBar
         {
             Dock = XDock.Top,

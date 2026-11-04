@@ -562,7 +562,18 @@ public sealed class AppKitApplicationBackend : IXPlatApplicationBackend
             ToLogical(frame, primaryHeight),
             ToLogical(visible, primaryHeight),
             (float)screen.BackingScaleFactor,
-            isPrimary);
+            isPrimary,
+            RefreshRateOf(screen));
+    }
+
+    /// <summary>
+    /// The display's refresh rate in Hz, or null when AppKit does not report one. AppKit reports
+    /// the fastest rate the display supports, which is what a ProMotion panel should animate at.
+    /// </summary>
+    private static float? RefreshRateOf(NSScreen screen)
+    {
+        var rate = screen.MaximumFramesPerSecond;
+        return rate > 0 ? (float)rate : null;
     }
 
     /// <summary>The display a window is on, in logical units.</summary>

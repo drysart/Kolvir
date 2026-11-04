@@ -14,7 +14,10 @@ public sealed class XPlatScreen
     /// <param name="workingArea"><paramref name="bounds"/> minus the taskbar, Dock or menu bar.</param>
     /// <param name="scaleFactor">Logical-to-physical pixel ratio, such as 2 for a Retina display.</param>
     /// <param name="isPrimary">True for the display the OS treats as primary.</param>
-    public XPlatScreen(SKRect bounds, SKRect workingArea, float scaleFactor, bool isPrimary)
+    /// <param name="refreshRate">
+    /// The display's refresh rate in Hz, or null when the backend cannot find it out.
+    /// </param>
+    public XPlatScreen(SKRect bounds, SKRect workingArea, float scaleFactor, bool isPrimary, float? refreshRate = null)
     {
         ArgumentOutOfRangeException.ThrowIfNegativeOrZero(scaleFactor);
 
@@ -22,6 +25,7 @@ public sealed class XPlatScreen
         WorkingArea = workingArea;
         ScaleFactor = scaleFactor;
         IsPrimary = isPrimary;
+        RefreshRate = refreshRate > 0f ? refreshRate : null;
     }
 
     /// <summary>The whole display, in logical pixels.</summary>
@@ -35,4 +39,10 @@ public sealed class XPlatScreen
 
     /// <summary>True for the display the OS treats as primary.</summary>
     public bool IsPrimary { get; }
+
+    /// <summary>
+    /// The display's refresh rate in Hz, or null when the backend cannot report one. This is what
+    /// <see cref="XPlatProgressBar.MarqueeAnimationSpeed"/> falls back to when it is null.
+    /// </summary>
+    public float? RefreshRate { get; }
 }
