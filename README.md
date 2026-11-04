@@ -97,6 +97,9 @@ construction where it can, by an opt-in registration where it cannot, and by its
 neither is practical; §8 of the policy has the measured sizes, including what opting into drag and
 drop costs on each platform.
 
+Controls that do not exist yet, and the order they are worth building in, are tracked in
+[CONTROLS-TODO.md](CONTROLS-TODO.md).
+
 Everything is drawn in **logical (96 DPI) coordinates**; the host adapter is responsible
 for scaling the canvas and the incoming pointer coordinates (the Win32 backend uses
 `GetDpiForWindow() / 96f`).
