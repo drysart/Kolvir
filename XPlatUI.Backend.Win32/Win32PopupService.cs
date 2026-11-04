@@ -10,7 +10,7 @@ namespace XPlatUI.Backend.Win32;
 /// </summary>
 internal sealed class Win32PopupService : IXPlatPopupService
 {
-    public IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick)
+    public IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick, bool takesPresses)
     {
         ArgumentNullException.ThrowIfNull(ownerHost);
 
@@ -21,7 +21,7 @@ internal sealed class Win32PopupService : IXPlatPopupService
             return null;
         }
 
-        return new Win32PopupWindow(dismissOnOutsideClick);
+        return new Win32PopupWindow(dismissOnOutsideClick, takesPresses);
     }
 
     /// <inheritdoc />

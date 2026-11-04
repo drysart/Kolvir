@@ -177,22 +177,28 @@ internal static class Program
     /// that does not draw the bar yet.
     /// </summary>
     /// <remarks>
-    /// Both menus put their commands inside a submenu, so the sample covers the case that only the
-    /// system bar can prove: macOS hands the whole chain to AppKit, which draws and drives the
-    /// nested menus itself. The shortcuts sit inside those submenus on purpose - a shortcut nested
-    /// one level down still has to reach the command on every platform.
+    /// Both menus put their commands inside a submenu, and <c>View &gt; Theme &gt; Appearance</c> goes
+    /// one level deeper still, so the sample covers the case that only the system bar can prove:
+    /// macOS hands the whole chain to AppKit, which draws and drives the nested menus itself. The
+    /// shortcuts sit inside those submenus on purpose - a shortcut nested two levels down still has
+    /// to reach the command on every platform.
     /// </remarks>
     private static XPlatMenuBar CreateMenuBar(XPlatWindow window, DemoUi demo)
     {
-        var theme = new XPlatMenuItem("&Theme");
-        theme.SubItems.Add(new XPlatMenuItem("&Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
+        var appearance = new XPlatMenuItem("&Appearance");
+        appearance.SubItems.Add(new XPlatMenuItem("&Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
         {
             Shortcut = new XPlatShortcut(XPlatKey.D),
         });
-        theme.SubItems.Add(new XPlatMenuItem("&Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
+        appearance.SubItems.Add(new XPlatMenuItem("&Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
         {
             Shortcut = new XPlatShortcut(XPlatKey.L),
         });
+
+        var theme = new XPlatMenuItem("&Theme");
+        theme.SubItems.Add(appearance);
+        theme.SubItems.Add(XPlatMenuItem.Separator);
+        theme.SubItems.Add(new XPlatMenuItem("&Reset colours", () => demo.SetAppearance(XPlatPalette.Light)));
 
         var state = new XPlatMenuItem("&State");
         foreach (var (text, value) in new[]

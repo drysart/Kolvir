@@ -526,8 +526,11 @@ public sealed partial class XPlatWindow : IDisposable
         Backend.MenuBar = _menuBar ?? _application.Options.MenuBar;
         Backend.Owner = _owner?.Backend;
         RaisePhase(XPlatWindowPhase.Showing);
+
+        // Every backend raises Shown itself, once the window is really on screen. Raising it here
+        // as well would tell a handler that the window is up when a backend that defers to its
+        // event loop - GTK4 - has not even created it yet.
         Backend.Show();
-        RaiseShown();
     }
 
     /// <summary>

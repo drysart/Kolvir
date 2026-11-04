@@ -10,7 +10,7 @@ namespace XPlatUI.Backend.AppKit;
 internal sealed class AppKitPopupService : IXPlatPopupService
 {
     /// <inheritdoc />
-    public IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick)
+    public IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick, bool takesPresses)
     {
         // Without a window of its own the owner has nothing to be a child of, so the popup layer
         // falls back to painting inside the window.
@@ -19,7 +19,7 @@ internal sealed class AppKitPopupService : IXPlatPopupService
             return null;
         }
 
-        return new AppKitPopupWindow(dismissOnOutsideClick);
+        return new AppKitPopupWindow(dismissOnOutsideClick, takesPresses);
     }
 
     /// <inheritdoc />

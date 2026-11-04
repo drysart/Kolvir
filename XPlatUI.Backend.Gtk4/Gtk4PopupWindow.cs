@@ -35,12 +35,10 @@ namespace XPlatUI.Backend.Gtk4;
 /// keyboard: the popup is a surface to look at and click, and everything typed belongs to its owner.
 /// </para>
 /// <para>
-/// A popover takes the seat's keyboard while it is up, though, so the owner's drawing area stops
-/// seeing keys even though nothing in the popup can take the focus. A capture-phase key controller
-/// on the popover hands each key straight to the owner's host, which is where the portable layer
-/// keeps the keyboard: an open menu is an input sink on its owner, and its arrow keys, Escape and
-/// mnemonics have to reach it. A key the owner does not take is left to GTK, which is what pops a
-/// popover down on Escape.
+/// A popover may still end up with the focus, so a capture-phase key controller on it hands each
+/// key straight to the owner's host, which is where the portable layer keeps the keyboard: an open
+/// menu is an input sink on its owner, and its arrow keys, Escape and mnemonics have to reach it.
+/// A key the owner does not take is left to GTK.
 /// </para>
 /// </remarks>
 internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
@@ -77,19 +75,21 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
     private readonly Gtk.ScrolledWindow _frame;
     private readonly Gtk.Popover _popover;
     private readonly bool _dismissOnOutsideClick;
+    private readonly bool _takesPresses;
 
+    private Gtk.Window? _ownerWindow;
     private bool _dismissing;
     private bool _disposed;
 
-    internal Gtk4PopupWindow(Gtk4SkiaView ownerView, bool dismissOnOutsideClick)
+    internal Gtk4PopupWindow(Gtk4SkiaView ownerView, bool dismissOnOutsideClick, bool takesPresses)
     {
         ArgumentNullException.ThrowIfNull(ownerView);
 
         _ownerView = ownerView;
         _dismissOnOutsideClick = dismissOnOutsideClick;
+        _takesPresses = takesPresses;
 
         _view = new Gtk4SkiaView(_host);
-        _view.DebugTag = "popup";
 
         // Keys belong to the owner, so the popup never takes the keyboard.
         _view.InputArea.SetFocusable(false);
@@ -115,14 +115,29 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         _popover.AddCssClass(PopupStyleClass);
         EnsurePopupStyle(ownerView.Widget.GetDisplay());
 
-        // GTK's own auto-hide is the outside-click dismissal, and it also pops the surface down
-        // when the window loses the pointer grab.
-        _popover.Autohide = dismissOnOutsideClick;
+        // Autohide is what makes GTK take a widget grab, and GTK hands a grabbed pointer event to
+        // the widget holding the grab and to nothing else: a popover that autohides swallows the
+        // motion and the presses of every other popover in the same window. Every level of a menu
+        // chain is a popover of its own, so no level may grab - a grab taken by one level would
+        // starve all the others, and hovering a submenu or turning the wheel over it would reach
+        // the menu that took the grab instead of the one under the pointer. A press outside the
+        // chain is caught by the portable layer instead, which hangs a dismiss catcher over the
+        // window the popup belongs to.
+        _popover.Autohide = false;
         _popover.Position = Gtk.PositionType.Bottom;
         _popover.OnClosed += OnPopoverClosed;
 
-        // The popover holds the seat's keyboard, and nothing inside it can be focused, so the keys
-        // are captured at the popover itself and forwarded to the host that owns the popup.
+        // Without a grab nothing tells the popup that the user has gone elsewhere, so the window it
+        // belongs to is watched for losing activation, which is GTK's version of the outside press
+        // the other backends see.
+        if (dismissOnOutsideClick && ownerView.Widget.GetRoot() is Gtk.Window toplevel)
+        {
+            _ownerWindow = toplevel;
+            _ownerWindow.OnNotify += OnOwnerWindowNotify;
+        }
+
+        // Nothing inside the popover can be focused, so any key that does reach the popover is
+        // captured there and forwarded to the host that owns the popup.
         var key = Gtk.EventControllerKey.New();
         key.SetPropagationPhase(Gtk.PropagationPhase.Capture);
         key.OnKeyPressed += OnKeyPressed;
@@ -135,6 +150,9 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 
     /// <inheritdoc />
     public bool DismissesOnOutsideClick => _dismissOnOutsideClick;
+
+    /// <inheritdoc />
+    public bool TakesPresses => _takesPresses;
 
     /// <inheritdoc />
     public event Action<object>? Dismissed;
@@ -202,6 +220,12 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 
         _disposed = true;
         _popover.OnClosed -= OnPopoverClosed;
+
+        if (_ownerWindow is { } ownerWindow)
+        {
+            ownerWindow.OnNotify -= OnOwnerWindowNotify;
+            _ownerWindow = null;
+        }
 
         _dismissing = true;
 
@@ -292,6 +316,27 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         }
 
         Dismissed?.Invoke(this);
+    }
+
+    private void OnOwnerWindowNotify(GObject.Object sender, GObject.Object.NotifySignalArgs args)
+    {
+        if (args.Pspec?.GetName() is not "is-active" || _dismissing || _disposed)
+        {
+            return;
+        }
+
+        // Deferring keeps the popover out of the window's own activation bookkeeping: popping it
+        // down re-enters GTK from the middle of the notification, which is not a safe place to
+        // change the window's popup list.
+        GLib.Functions.IdleAdd(0, () =>
+        {
+            if (!_disposed && _ownerWindow is { } window && !window.GetIsActive())
+            {
+                Dismissed?.Invoke(this);
+            }
+
+            return false;
+        });
     }
 
     /// <summary>

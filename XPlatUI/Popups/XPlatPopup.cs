@@ -95,6 +95,18 @@ public sealed class XPlatPopup : IDisposable
     /// </summary>
     public bool DismissOnOutsideClick { get; set; } = true;
 
+    /// <summary>
+    /// Whether the popup takes the pointer, as opposed to passing it through to whatever it covers.
+    /// Null, the default, follows <see cref="DismissOnOutsideClick"/>: a popup that dismisses itself
+    /// on an outside press takes that press, and a tooltip that does not dismiss takes nothing.
+    /// </summary>
+    /// <remarks>
+    /// A submenu needs these apart. The chain is dismissed by the menu the user started from, so a
+    /// submenu does not dismiss on its own - but it is still a menu the user clicks in, so it has to
+    /// take the pointer.
+    /// </remarks>
+    public bool? TakesPresses { get; set; }
+
     /// <summary>Whether the popup is currently shown.</summary>
     public bool IsOpen => _open;
 
@@ -190,6 +202,12 @@ public sealed class XPlatPopup : IDisposable
 
         _open = false;
 
+        if (_catcher is { } catcher)
+        {
+            _catcher = null;
+            (catcher.Host ?? _host)?.RemoveOverlay(catcher);
+        }
+
         if (_window is { } window)
         {
             _window = null;
@@ -202,17 +220,6 @@ public sealed class XPlatPopup : IDisposable
         if (_shownContent is { } content)
         {
             _shownContent = null;
-
-            if (_catcher is { } catcher)
-            {
-                _catcher = null;
-
-                if (content.Host is { } host)
-                {
-                    host.RemoveOverlay(catcher);
-                }
-            }
-
             content.Host?.RemoveOverlay(content);
         }
 
@@ -234,7 +241,7 @@ public sealed class XPlatPopup : IDisposable
     private bool TryShowInWindow(XPlatUiHost host, XPlatControl content, SKPoint location)
     {
         var service = host.GetService<IXPlatPopupService>() ?? XPlatPopupService.Current;
-        var window = service?.CreatePopup(host, DismissOnOutsideClick);
+        var window = service?.CreatePopup(host, DismissOnOutsideClick, TakesPresses ?? DismissOnOutsideClick);
 
         if (window is null)
         {
@@ -265,6 +272,15 @@ public sealed class XPlatPopup : IDisposable
             window.Host.Root = null;
             window.Dispose();
             throw;
+        }
+
+        // A press inside the window the popup belongs to is outside the popup, and a press outside
+        // the popup belongs to the popup: it closes it and stops there. A window popup covers that
+        // for the press that lands on the window itself, whichever platform draws the window.
+        if (DismissOnOutsideClick)
+        {
+            _catcher = new XPlatPopupDismissCatcher(this);
+            host.AddOverlay(_catcher);
         }
 
         return true;

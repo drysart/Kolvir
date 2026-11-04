@@ -140,6 +140,15 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             // GTK sizes windows in logical pixels, which is the same space the library uses, so no
             // scale conversion is involved.
             _window?.SetDefaultSize(ToPixels(value.Width), ToPixels(value.Height));
+
+            // The drawing area reports its own size once GTK allocates it, but that happens a frame
+            // after the window is presented - later than the Shown event, which the other two
+            // backends raise with a host that already has its size. Seeding the host here keeps a
+            // popup opened from a Shown handler from being clamped to a 0 x 0 client area.
+            if (_host.ClientSize.Width <= 0f || _host.ClientSize.Height <= 0f)
+            {
+                _host.SetClientSize(value.Width, value.Height);
+            }
         }
     }
 
@@ -743,6 +752,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         // installed once that widget exists. Like the context menu presenter it is process wide and
         // stateless: it resolves the owning window from the host it is handed.
         XPlatPopupService.Current = new Gtk4PopupService();
+
+        // GTK reports the window as active only once it has been mapped, which is later than the
+        // Shown event, so a menu opened from a Shown handler would otherwise find no presenter.
+        // Moving between windows still hands the presenter to whichever one is active.
+        XPlatContextMenuPresenter.Current = _presenter;
 
         // A state requested before the window existed still has to be honoured, and a window can
         // only be minimized or maximized once it has been mapped.

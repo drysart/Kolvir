@@ -22,8 +22,12 @@ namespace XPlatUI.Backend.AppKit;
 /// </remarks>
 internal sealed class AppKitPopupWindow : IXPlatPopupWindow
 {
+    /// <summary>Every popup currently on screen, so a press can be recognised as being on one.</summary>
+    private static readonly List<AppKitPopupWindow> Live = new();
+
     private readonly XPlatUiHost _host = new();
     private readonly bool _dismissOnOutsideClick;
+    private readonly bool _takesPresses;
 
     private PopupWindow? _window;
     private AppKitSkiaView? _view;
@@ -33,13 +37,20 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
     private bool _dismissing;
     private bool _disposed;
 
-    internal AppKitPopupWindow(bool dismissOnOutsideClick) => _dismissOnOutsideClick = dismissOnOutsideClick;
+    internal AppKitPopupWindow(bool dismissOnOutsideClick, bool takesPresses)
+    {
+        _dismissOnOutsideClick = dismissOnOutsideClick;
+        _takesPresses = takesPresses;
+    }
 
     /// <inheritdoc />
     public XPlatUiHost Host => _host;
 
     /// <inheritdoc />
     public bool DismissesOnOutsideClick => _dismissOnOutsideClick;
+
+    /// <inheritdoc />
+    public bool TakesPresses => _takesPresses;
 
     /// <inheritdoc />
     public event Action<object>? Dismissed;
@@ -84,8 +95,10 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
             HasShadow = false,
 
             // A tooltip must not swallow the press that was meant for the control underneath it,
-            // which is what the Win32 side gets from WS_EX_TRANSPARENT.
-            IgnoresMouseEvents = !_dismissOnOutsideClick,
+            // which is what the Win32 side gets from WS_EX_TRANSPARENT. A submenu is not a tooltip:
+            // it is a menu of its own and has to be clickable, even though it is the menu it hangs
+            // off that dismisses the chain.
+            IgnoresMouseEvents = !_takesPresses,
         };
 
         // The popup never becomes key, so its tracking area has to be active regardless of which
@@ -107,6 +120,8 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
         _window = window;
         _view = view;
         _ownerWindow = owner;
+
+        Live.Add(this);
 
         owner.AddChildWindow(window, NSWindowOrderingMode.Above);
 
@@ -148,6 +163,8 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
         }
 
         _disposed = true;
+
+        Live.Remove(this);
 
         RemoveObservers();
 
@@ -246,21 +263,47 @@ internal sealed class AppKitPopupWindow : IXPlatPopupWindow
 
     private NSEvent OnLocalMouseDown(NSEvent theEvent)
     {
-        // A press that is not on the popup dismisses it and belongs to the popup: it stops there
-        // rather than being delivered to whatever it landed on, which is what the Win32 and
-        // overlay presentations do too. Without that, a press on the control that opened the popup
-        // closes it and then reaches that control, which acts on a popup that is already gone - a
-        // combo box reopens its list on the same click that closed it.
-        if (_window is null || ReferenceEquals(theEvent.Window, _window))
+        if (_window is null || _disposed)
         {
             return theEvent;
         }
 
+        // A press inside any popup of ours belongs to that popup. A submenu is a window of its own,
+        // so without this a press in a submenu would look like a press outside the menu it hangs
+        // off and close the whole chain before the submenu saw it.
+        if (IsPopupWindow(theEvent.Window))
+        {
+            return theEvent;
+        }
+
+        // A press that is not on a popup dismisses it and belongs to the popup: it stops there
+        // rather than being delivered to whatever it landed on, which is what the Win32 and
+        // overlay presentations do too. Without that, a press on the control that opened the popup
+        // closes it and then reaches that control, which acts on a popup that is already gone - a
+        // combo box reopens its list on the same click that closed it.
         Dismiss();
 
         // Returning null is how a local monitor swallows the event, which the binding does not
         // express in its delegate signature.
         return null!;
+    }
+
+    private static bool IsPopupWindow(NSWindow? window)
+    {
+        if (window is null)
+        {
+            return false;
+        }
+
+        foreach (var popup in Live)
+        {
+            if (ReferenceEquals(popup._window, window))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private void Dismiss()

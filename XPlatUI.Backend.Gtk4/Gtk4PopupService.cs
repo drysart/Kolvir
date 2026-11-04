@@ -13,14 +13,14 @@ namespace XPlatUI.Backend.Gtk4;
 internal sealed class Gtk4PopupService : IXPlatPopupService
 {
     /// <inheritdoc />
-    public IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick)
+    public IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick, bool takesPresses)
     {
         if (ownerHost.Window?.Backend is not Gtk4WindowBackend { View: { } view } || view.Widget.GetMapped() is false)
         {
             return null;
         }
 
-        return new Gtk4PopupWindow(view, dismissOnOutsideClick);
+        return new Gtk4PopupWindow(view, dismissOnOutsideClick, takesPresses);
     }
 
     /// <summary>

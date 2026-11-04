@@ -16,18 +16,25 @@ namespace XPlatUI;
 /// submenu, with no platform code anywhere.
 /// </para>
 /// <para>
-/// A submenu is another view inside this one, positioned against the row that opened it, so the
-/// whole open menu is one control tree and one surface. Everything the chain needs - hover, keys,
-/// dismissal - is answered by the deepest view that is open.
+/// A submenu is a view of its own too, joined to the row that opened it and given its own surface.
+/// It is not drawn inside this one: a menu is placed once, from the row it hangs off, so a submenu
+/// with more rows than the room below that row scrolls instead of pushing the menu the user is
+/// pointing at out from under the pointer. <see cref="XPlatMenuPresenter"/> owns that chain - this
+/// view only says which submenu is open, through <see cref="SubMenuOpened"/>.
+/// </para>
+/// <para>
+/// Keys and dismissal are still answered by the deepest view that is open, which is why the
+/// outermost view is the one pushed onto the owning window as an <see cref="IXPlatInputSink"/>.
 /// </para>
 /// </remarks>
 public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
 {
     /// <summary>
     /// How far a submenu overlaps the menu that opened it, so the two rounded corners meet without
-    /// leaving a notch between them.
+    /// leaving a notch between them. <see cref="XPlatMenuPresenter"/> places the submenu's popup
+    /// with it.
     /// </summary>
-    private const float SubMenuOverlap = 4f;
+    internal const float SubMenuOverlap = 4f;
 
     private readonly List<XPlatControl> _hostedControls = new();
     private IReadOnlyList<XPlatMenuItem> _items = Array.Empty<XPlatMenuItem>();
@@ -38,14 +45,10 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     private IDisposable? _sink;
     private Action<object, XPlatMenuItem>? _invoked;
     private Action<object>? _dismissed;
-    private Action<object>? _sizeChanged;
     private int _subMenuIndex = -1;
     private int _hovered = -1;
     private int _pressed = -1;
     private bool _laying;
-    private float _surfaceOffset;
-    private bool _openedToLeft;
-    private SKPoint _ownOrigin;
     private float? _maximumSurfaceHeight;
     private float _scroll;
 
@@ -94,8 +97,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
 
     /// <summary>
     /// True to reserve room for the drop shadow. A submenu keeps one too, so it reads as a surface
-    /// of its own, but it is not allowed to cast it over the menu it is joined to - see
-    /// <see cref="ShadowExclusion"/>.
+    /// of its own rather than a patch of the menu that opened it.
     /// </summary>
     public bool ShowShadow { get; set; } = true;
 
@@ -151,6 +153,8 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         }
 
         _scroll = clamped;
+
+
         Invalidate();
         PerformLayout();
     }
@@ -182,31 +186,11 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     }
 
     /// <summary>
-    /// How far right the chain of open menus may paint, measured from the left edge of the root
-    /// menu's surface, or null for no limit.
+    /// True when this menu was opened to the left of the menu that opened it, because the display
+    /// had no room to its right. Its own submenus then open to the left as well, so a chain of them
+    /// does not zigzag back over the menus it came from.
     /// </summary>
-    /// <remarks>
-    /// A presenter sets it on the root menu from the right edge of the display the menu is shown
-    /// on. A submenu that does not fit before it opens on the left of the menu that owns it rather
-    /// than dragging the whole chain back into the display.
-    /// </remarks>
-    public float? SurfaceLimit { get; set; }
-
-    /// <summary>
-    /// How far left the chain of open menus may paint, measured from the left edge of the root
-    /// menu's surface, or null for no limit. A menu shown on the right of the display gets a
-    /// negative value, because the room it has to the left of its own surface is that much less
-    /// than none.
-    /// </summary>
-    public float? SurfaceFloor { get; set; }
-
-    /// <summary>
-    /// How far this view's chain paints to the left of its own surface, in logical pixels. It is
-    /// zero until a submenu opens on the left; a presenter subtracts it from the popup's position
-    /// so the menu still lands where the caller asked for it, with the room the submenu needs to
-    /// its left instead of over it.
-    /// </summary>
-    public float SurfaceOverhang => _ownOrigin.X;
+    public bool OpenedToLeft { get; internal set; }
 
     /// <summary>The menu that opened this one, or null for a root menu.</summary>
     public XPlatMenuView? ParentMenu => _parent;
@@ -272,22 +256,14 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     }
 
     /// <summary>
-    /// Raised when opening or closing a submenu changed the size the whole menu needs, which is what
-    /// tells the presenter to grow or shrink the surface it is drawn on.
+    /// Raised once a submenu has been opened, with the menu that opened it, the submenu itself and
+    /// the row it hangs off. <see cref="XPlatMenuPresenter"/> answers by giving the submenu a popup
+    /// of its own; a menu shown without a presenter simply has no submenus.
     /// </summary>
-    public IDisposable AddSizeChangedHandler(Action<object> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _sizeChanged += handler;
-        return new XPlatHandlerToken<Action<object>>(RemoveSizeChangedHandler, handler);
-    }
+    internal event Action<XPlatMenuView, XPlatMenuView, int>? SubMenuOpened;
 
-    /// <summary>Removes a handler that <see cref="AddSizeChangedHandler"/> added.</summary>
-    public void RemoveSizeChangedHandler(Action<object> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _sizeChanged -= handler;
-    }
+    /// <summary>Raised when a submenu is closing, before it is let go of.</summary>
+    internal event Action<XPlatMenuView, XPlatMenuView>? SubMenuClosed;
 
     /// <summary>Replaces the items, dropping any submenu that is open.</summary>
     public void SetItems(IEnumerable<XPlatMenuItem> items)
@@ -456,13 +432,16 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         _subMenu = child;
         _subMenuIndex = index;
 
-        Controls.Add(child);
         Invalidate();
-        RaiseSizeChanged();
+        SubMenuOpened?.Invoke(this, child, index);
         return true;
     }
 
-    /// <summary>Closes the open submenu, if there is one.</summary>
+    /// <summary>
+    /// Closes the open submenu and everything opened from it, if there is one. The view that
+    /// answered <see cref="SubMenuOpened"/> takes the submenu's surface away; the submenu is then
+    /// disposed here, once nothing is drawing it any more.
+    /// </summary>
     public void CloseSubMenu()
     {
         if (_subMenu is not { } child)
@@ -473,11 +452,11 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         _subMenu = null;
         _subMenuIndex = -1;
 
-        Controls.Remove(child);
-        child.Dispose();
-
         Invalidate();
-        RaiseSizeChanged();
+
+        child.CloseSubMenu();
+        SubMenuClosed?.Invoke(this, child);
+        child.Dispose();
     }
 
     /// <summary>Picks the item at <paramref name="index"/>, opening its submenu or invoking it.</summary>
@@ -532,14 +511,15 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             return true;
         }
 
+        var deepest = DeepestMenu;
+
         // A control hosted in a row owns the keyboard while it has the focus. The popup window is
         // deliberately not focusable, so the window that has the keyboard forwards to it through here.
-        if (ForwardToHostedControl(key, modifiers))
+        if (deepest.ForwardToHostedControl(key, modifiers))
         {
             return true;
         }
 
-        var deepest = DeepestMenu;
         return deepest.HandleNavigationKey(key, modifiers) || deepest.HandleMnemonic(key);
     }
 
@@ -562,60 +542,11 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         return true;
     }
 
-    /// <summary>Measures the menu, and the submenu chain hanging off it.</summary>
-    protected override SKSize MeasureContent(SKSize availableSize)
-    {
-        var metrics = Metrics ?? XPlatMenuMetrics.Default;
-        var size = MeasureOwn(availableSize.Width);
-
-        if (_subMenu is not { } child || RowForSubMenu() is not { } row)
-        {
-            _ownOrigin = SKPoint.Empty;
-            return size;
-        }
-
-        var extent = ShowShadow ? metrics.ShadowExtent : 0f;
-        var childSurface = child.MeasureSurface(availableSize.Width);
-        var origin = SubMenuOrigin(row, metrics, childSurface, out var flipped);
-
-        // The child has to know where it sits in the chain before it measures, because that is what
-        // tells its own submenus where the display ends.
-        child._openedToLeft = flipped;
-
-        // A submenu gets the room below the row that opened it and no more: past that it scrolls,
-        // rather than growing off the bottom of the space the whole chain was given.
-        var room = availableSize.Height - origin.Y - extent;
-
-        if (childSurface.Height > room)
-        {
-            child._maximumSurfaceHeight = MathF.Max(metrics.ItemHeight, room);
-            childSurface = child.MeasureSurface(availableSize.Width);
-            origin = SubMenuOrigin(row, metrics, childSurface, out flipped);
-            child._openedToLeft = flipped;
-
-            // Not even one row fits below the row that opened it, so the child slides up to the top
-            // of the space instead - still scrolling, because it is taller than the whole of it.
-            room = availableSize.Height - origin.Y - extent;
-
-            if (childSurface.Height > room)
-            {
-                var slid = availableSize.Height - extent - childSurface.Height;
-                origin = new SKPoint(origin.X, slid >= extent ? slid : extent);
-            }
-        }
-
-        var childSize = child.Measure(new SKSize(availableSize.Width, MathF.Max(0f, availableSize.Height - origin.Y)));
-
-        // A submenu that opened on the left starts left of this menu's own surface, and this menu's
-        // bounds have to cover it: everything it draws moves right by the overhang instead.
-        var childLeft = origin.X - child.SurfaceOverhang;
-
-        _ownOrigin = new SKPoint(MathF.Max(0f, -childLeft), 0f);
-
-        return new SKSize(
-            _ownOrigin.X + MathF.Max(size.Width, childLeft + childSize.Width),
-            MathF.Max(size.Height, origin.Y + childSize.Height));
-    }
+    /// <summary>
+    /// Measures this menu's own surface. A submenu is a surface of its own, so nothing of it is
+    /// measured here.
+    /// </summary>
+    protected override SKSize MeasureContent(SKSize availableSize) => MeasureOwn(availableSize.Width);
 
     /// <summary>
     /// Measures this menu's own surface - the menu itself, without the margin it keeps for its drop
@@ -627,7 +558,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         return _layout?.SurfaceSize ?? SKSize.Empty;
     }
 
-    /// <summary>Places the submenu against the row that opened it and hosts any in-menu controls.</summary>
+    /// <summary>Hosts any in-menu controls in the rows that carry one.</summary>
     protected override void OnLayout()
     {
         if (_laying)
@@ -651,33 +582,6 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
                     HostControl(control, Offset(row.ControlBounds));
                 }
             }
-
-            if (_subMenu is { } child && RowForSubMenu() is { } subMenuRow)
-            {
-                var surface = child._layout?.SurfaceSize ?? new SKSize(child.Bounds.Width, child.Bounds.Height);
-                var origin = SubMenuOrigin(subMenuRow, Metrics ?? XPlatMenuMetrics.Default, surface, out var flipped);
-                var size = child.DesiredSize;
-
-                child._openedToLeft = flipped;
-
-                if (size.Width <= 0f || size.Height <= 0f)
-                {
-                    size = child.Measure(new SKSize(float.PositiveInfinity, float.PositiveInfinity));
-                }
-
-                var bounds = SKRect.Create(
-                    _ownOrigin.X + origin.X - child.SurfaceOverhang,
-                    _ownOrigin.Y + origin.Y - _scroll,
-                    size.Width,
-                    size.Height);
-
-                if (!child.Bounds.Equals(bounds))
-                {
-                    child.Bounds = bounds;
-                }
-
-                child.PerformLayout();
-            }
         }
         finally
         {
@@ -695,20 +599,7 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             return;
         }
 
-        var shifted = _ownOrigin != SKPoint.Empty;
-
-        if (shifted)
-        {
-            canvas.Save();
-            canvas.Translate(_ownOrigin.X, _ownOrigin.Y);
-        }
-
-        XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, ShadowExclusion(), _scroll);
-
-        if (shifted)
-        {
-            canvas.Restore();
-        }
+        XPlatMenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, null, _scroll);
     }
 
     /// <inheritdoc />
@@ -788,6 +679,10 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         {
             Detach();
             ReleaseHostedControls();
+            SubMenuOpened = null;
+            SubMenuClosed = null;
+            _subMenu = null;
+            _subMenuIndex = -1;
         }
 
         base.Dispose(disposing);
@@ -933,16 +828,14 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             return -1;
         }
 
-        var point = new SKPoint(location.X - _ownOrigin.X, location.Y - _ownOrigin.Y);
-
         // A row scrolled out of the viewport is not there as far as the pointer is concerned, even
         // though its bounds still lie above or below it.
-        if (layout.IsScrollable && !layout.ContentViewport.Contains(point))
+        if (layout.IsScrollable && !layout.ContentViewport.Contains(location))
         {
             return -1;
         }
 
-        return layout.HitTest(new SKPoint(point.X, point.Y + _scroll));
+        return layout.HitTest(new SKPoint(location.X, location.Y + _scroll));
     }
 
     /// <summary>
@@ -958,16 +851,15 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
             return false;
         }
 
-        var point = new SKPoint(location.X - _ownOrigin.X, location.Y - _ownOrigin.Y);
         var step = (Metrics ?? XPlatMenuMetrics.Default).ItemHeight;
 
-        if (layout.ScrollStartBounds.Contains(point))
+        if (layout.ScrollStartBounds.Contains(location))
         {
             ScrollBy(-step);
             return true;
         }
 
-        if (layout.ScrollEndBounds.Contains(point))
+        if (layout.ScrollEndBounds.Contains(location))
         {
             ScrollBy(step);
             return true;
@@ -976,85 +868,9 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         return false;
     }
 
-    private XPlatMenuRow? RowForSubMenu() =>
-        _layout is { } layout && _subMenuIndex >= 0 && _subMenuIndex < layout.Rows.Count
-            ? layout.Rows[_subMenuIndex]
-            : null;
-
-    /// <summary>
-    /// Where a submenu's top left corner goes: flush against the edge of the surface that opened it,
-    /// overlapping by <see cref="SubMenuOverlap"/>, with its first row level with the row that
-    /// opened it.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// The child opens to the right unless it does not fit before <see cref="SurfaceLimit"/>, in
-    /// which case it opens to the left of this menu, its own right edge against this menu's left
-    /// edge. A menu that was itself opened to the left keeps its submenus going the same way, so a
-    /// chain of them does not zigzag back over the menu it came from. When neither side has the
-    /// room - the child is wider than the display - it is kept on the display and allowed to
-    /// overlap this menu rather than hang off the edge of the screen.
-    /// </para>
-    /// <para>
-    /// The result is in this menu's own layout coordinates, which start at the margin this menu
-    /// keeps for its drop shadow. Setting the child's <see cref="_surfaceOffset"/> is part of the
-    /// calculation rather than a caller's job: where the child sits relative to the root menu is
-    /// what tells the child's own submenus where the display ends.
-    /// </para>
-    /// </remarks>
-    private SKPoint SubMenuOrigin(XPlatMenuRow row, XPlatMenuMetrics metrics, SKSize childSurface, out bool flipped)
-    {
-        var extent = ShowShadow ? metrics.ShadowExtent : 0f;
-        var surfaceWidth = _layout?.SurfaceSize.Width ?? Bounds.Width;
-
-        // The child is offset by its own shadow margin: its bounds start one margin before its
-        // surface, so the two surfaces still meet at the same place they did without one.
-        var inset = _subMenu?.SurfaceInset ?? 0f;
-
-        // Where the child's surface lands when it opens to the right of this one, and when it opens
-        // to the left of it, both measured from the left edge of this menu's surface.
-        var right = surfaceWidth - SubMenuOverlap;
-        var left = SubMenuOverlap - childSurface.Width;
-
-        var limit = Limit;
-        var floor = Floor;
-
-        var fitsRight = limit is not { } maximum || right + childSurface.Width <= maximum;
-        var fitsLeft = floor is not { } minimum || left >= minimum;
-
-        flipped = fitsLeft && (!fitsRight || _openedToLeft);
-
-        var x = flipped ? left : right;
-
-        if (limit is { } edge)
-        {
-            x = MathF.Min(x, edge - childSurface.Width);
-        }
-
-        if (floor is { } nearEdge)
-        {
-            x = MathF.Max(x, nearEdge);
-        }
-
-        if (_subMenu is { } child)
-        {
-            child._surfaceOffset = _surfaceOffset + x;
-        }
-
-        return new SKPoint(
-            extent + x - inset,
-            MathF.Max(0f, row.Bounds.Top - metrics.Padding - inset));
-    }
-
-    /// <summary>How far right this menu's chain may paint, measured from its own surface's left edge.</summary>
-    private float? Limit => RootMenu.SurfaceLimit is { } limit ? limit - _surfaceOffset : null;
-
-    /// <summary>How far left this menu's chain may paint, measured from its own surface's left edge.</summary>
-    private float? Floor => RootMenu.SurfaceFloor is { } floor ? floor - _surfaceOffset : null;
-
     /// <summary>Translates a rectangle of this menu's own layout into its bounds.</summary>
     private SKRect Offset(SKRect rect) =>
-        SKRect.Create(rect.Left + _ownOrigin.X, rect.Top + _ownOrigin.Y - _scroll, rect.Width, rect.Height);
+        SKRect.Create(rect.Left, rect.Top - _scroll, rect.Width, rect.Height);
 
     /// <summary>Lays the items out and returns the size of the drawing surface, shadow margin included.</summary>
     private SKSize MeasureOwn(float availableWidth)
@@ -1076,37 +892,15 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
         return _layout.WindowSize;
     }
 
-    /// <summary>
-    /// The rectangle this view's shadow must not reach into: the surface of the menu that opened
-    /// it, in this view's coordinates. A submenu is painted after its parent, so a shadow left
-    /// unclipped would darken the edge of the menu it is joined to instead of falling past it.
-    /// </summary>
-    private SKRect? ShadowExclusion()
-    {
-        if (_parent is not { } parent || parent._layout is not { } parentLayout)
-        {
-            return null;
-        }
-
-        var surface = parentLayout.SurfaceBounds;
-        surface.Offset(
-            -(Bounds.Left + _ownOrigin.X - parent._ownOrigin.X),
-            -(Bounds.Top + _ownOrigin.Y - parent._ownOrigin.Y));
-
-        return surface;
-    }
-
     private void EnsureLayout()
     {
         if (_layout is null)
         {
-            MeasureContent(new SKSize(float.PositiveInfinity, float.PositiveInfinity));
+            MeasureOwn(float.PositiveInfinity);
         }
     }
 
     private void RaiseInvoked(XPlatMenuItem item) => _invoked?.Invoke(this, item);
 
     private void RaiseDismissed() => _dismissed?.Invoke(this);
-
-    private void RaiseSizeChanged() => RootMenu._sizeChanged?.Invoke(RootMenu);
 }

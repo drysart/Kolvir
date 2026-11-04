@@ -77,9 +77,10 @@ internal sealed class Win32PopupWindow : IXPlatPopupWindow
     private int _lastClickX;
     private int _lastClickY;
 
-    public Win32PopupWindow(bool dismissOnOutsideClick)
+    public Win32PopupWindow(bool dismissOnOutsideClick, bool takesPresses)
     {
         DismissesOnOutsideClick = dismissOnOutsideClick;
+        TakesPresses = takesPresses;
 
         // The delegate has to stay rooted for as long as the window class can call it.
         _instanceProc = WindowProc;
@@ -92,6 +93,8 @@ internal sealed class Win32PopupWindow : IXPlatPopupWindow
     public XPlatUiHost Host => _host;
 
     public bool DismissesOnOutsideClick { get; }
+
+    public bool TakesPresses { get; }
 
     public event Action<object>? Dismissed;
 
@@ -161,7 +164,7 @@ internal sealed class Win32PopupWindow : IXPlatPopupWindow
 
         var exStyle = NativeMethods.WsExToolWindow | NativeMethods.WsExLayered | NativeMethods.WsExNoActivate;
 
-        if (!DismissesOnOutsideClick)
+        if (!TakesPresses)
         {
             // A tooltip must not swallow the press that was meant for the control underneath it.
             exStyle |= NativeMethods.WsExTransparent;
