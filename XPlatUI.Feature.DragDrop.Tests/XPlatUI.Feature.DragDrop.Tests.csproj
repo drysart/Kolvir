@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The drag and drop feature's own suite, in an assembly of its own because the feature is a
+       package of its own: a rung-3 feature is not part of the core library, so its tests are not
+       part of the core suite either.
+
+       The feature is split by platform - `common/` plus one of windows, macos or linux compiled per
+       target framework - but these tests only touch `common/`, so the project takes one portable
+       target framework and the reference resolves the `net10.0` (linux) inner build of the feature
+       on every machine. That keeps the assembly buildable everywhere, which matters: a test project
+       targeting net10.0-macos would need the .NET for macOS SDK with a matching Xcode on whichever
+       mac builds it, and a test project has no business imposing that. Driving a real drag needs
+       the platform hook and a native window; that is what the demo application is for. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>XPlatUI.DragDrop.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- SkiaSharp's main package carries the Win32 native library only, so the other two platforms
+       need their own. A couple of these tests create a window, and a window creates a surface. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.DragDrop\XPlatUI.Feature.DragDrop.csproj" />
+    <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>

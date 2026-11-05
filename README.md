@@ -110,6 +110,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTheme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
 | `IXPlatLauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
+| `XPlatUI.Tests` | a test project | One portable `net10.0` MSTest assembly that drives the library through the headless backend, so a control is exercised with no display; a test that can only run on one platform carries a `Platform.*` category rather than being skipped by accident |
 
 Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
 does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
@@ -119,6 +120,74 @@ drop costs on each platform.
 
 Controls that do not exist yet, and the order they are worth building in, are tracked in
 [CONTROLS-TODO.md](CONTROLS-TODO.md).
+
+### Running the tests
+
+`XPlatUI.Tests` is the portable suite. It targets `net10.0`, references the library and the
+headless backend, and needs no display, window server or network, so the same command works on
+Windows, macOS and Linux:
+
+```
+dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj
+```
+
+Three things keep the run deterministic, and a test that breaks one of them is a bug to fix rather
+than a flake to retry:
+
+- **Time is driven, not waited for.** `XPlatUndoClock.Current` is a `TimeProvider`, and
+  `HeadlessScene`-based tests install a clock that only moves when the test calls `Advance`. There
+  is no `Thread.Sleep` in the suite and no assertion that depends on wall-clock time.
+- **The font is pinned.** `TestFont` loads the demo application's embedded IBM Plex Sans from
+  `XPlatUIDemo.App/Fonts`, so a measured width, a wrap point or a caret position is the same
+  number on every platform. Tests that assert a metric pin it; tests that assert the default
+  behaviour do not.
+- **Nothing is shared.** The theme, the clipboard, the undo clock and the menu presenter are
+  static by design, so `HeadlessTestBase`'s cleanup restores them after every test and the suite
+  is not parallelised.
+
+Tests are categorised with `[TestCategory]`, and the categories are the contract the CI matrix
+filters on:
+
+| Category | Meaning |
+| --- | --- |
+| `Core` | Pure library behaviour: geometry, fonts, layout maths, defaults. Runs everywhere. |
+| `Headless` | Needs an application, a window or the host, driven through the headless backend. Runs everywhere. |
+| `Pixels` | Samples raster output, restricted to solid fills and semantic colours so it is stable across the three rasterisers. Runs everywhere. |
+| `Platform.Win32`, `Platform.AppKit`, `Platform.Gtk4` | Can only pass on one platform. The portable CI job skips these; a platform job can select them. |
+| `Feature`, `DragDrop` | The drag and drop feature's own suite. Runs everywhere. |
+
+To run exactly what CI runs:
+
+```
+dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj \
+  --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4"
+```
+
+A rung-3 feature is a package of its own, so its tests are an assembly of their own:
+
+```
+dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj
+```
+
+`XPlatUI.Feature.DragDrop.Tests` uses the same categories, plus `Feature` and `DragDrop`, and the
+same filter. It targets plain `net10.0` on every platform even though the feature itself is split by
+platform: the tests only touch the feature's `common/` folder, and a test project that targeted
+`net10.0-macos` would need the .NET for macOS SDK with an exactly matching Xcode on whichever Mac
+builds it, which is a requirement no test project should impose.
+
+That suite drives the feature's router and per-control state directly, and the feature project grants
+it `InternalsVisibleTo` for exactly that. Both types are internal on purpose - an application never
+names them and the package ships no public API for them - but the behaviour they carry is real
+behaviour (which control a drag reaches, when it is told the drag arrived or left, what effect the
+target settles on) and it regresses silently if nothing watches it. The grant is one `ItemGroup` on
+the feature project, names only `XPlatUI.Feature.DragDrop.Tests`, and adds no public API for testing;
+`XPlatUI.Tests` and the core library are untouched. What still cannot be tested here is the native
+half - a real drag from another application - which is what the demo application exercises.
+
+The suite deliberately has no committed golden images. Rasterisation of text differs by a fraction
+between platforms even with the font pinned, so a committed image would either have to be pinned to
+one platform or be fuzzy in a way that hides real changes; the pixel tests that do exist sample a
+solid fill whose colour a palette role decides.
 
 Everything is drawn in **logical (96 DPI) coordinates**; the host adapter is responsible
 for scaling the canvas and the incoming pointer coordinates (the Win32 backend uses
@@ -2012,8 +2081,8 @@ a background role on screen, with what its children make of them, one label that
 a label that paints nothing in front of a panel that does. Its buttons change the panel's font and
 the theme's face on a live tree; `--appearance-change` makes the same two changes before a
 `--render` writes the frame, so the page can be screenshotted before and after it.
-`XPlatUIDemoApp --appearance-check` runs the resolution rules headlessly and prints one line per
-check.
+`XPlatUI.Tests`' `InheritedAppearanceTests` runs the same resolution rules headlessly, one test per
+rule, through the headless backend.
 
 ### Fonts
 
@@ -2085,9 +2154,10 @@ the application code that calls them, and `XPlatApplicationOptions` keeps its ol
 The demo's font page - `--page 32` - draws a label, a multi-line text box and a
 rich label with IBM Plex Sans Regular carried as an embedded resource (`XPlatUIDemo.App/Fonts`,
 OFL licensed), and prints the width and line height it measures against the system face's.
-`XPlatUIDemoApp --font-check` prints the same measurements headlessly so the numbers can be compared
-between platforms, and `--embedded-font` applies the face to the whole sample UI, including a
-`--render`, which is the application-wide path in one switch.
+`XPlatUI.Tests`' `FontLoadingTests` asserts the same measurements and failure paths headlessly, so
+the identities that make a pinned face portable can be compared on every runner, and
+`--embedded-font` applies the face to the whole sample UI, including a `--render`, which is the
+application-wide path in one switch.
 
 ### Opacity and transparency
 
@@ -2547,11 +2617,11 @@ XPlatUIDemoApp.exe --render out.png 1280 820 --page 3
 
 Add `--light` or `--dark` to either mode to force an appearance instead of using the system one; the
 header's **Switch appearance** button flips it at runtime. `--page` picks a stage page by index in
-both modes, which is what makes a single page renderable on its own. `--undo-check [report.txt]`
-runs the undo history's headless input harness instead: it drives real text boxes through the
-host's own input entry points with a clock the harness moves by hand, prints one line per check and
-exits non-zero when any of them fails (the report file is for Windows, where the sample has no
-console of its own). `--undo-focus` puts the caret in the undo page's field, the way `--span-menu`
+both modes, which is what makes a single page renderable on its own.
+`XPlatUI.Tests`' `UndoHistoryTests` covers the history headlessly instead: it drives real text boxes
+through the host's own input entry points with a clock the test moves by hand, and one failed
+assertion names the coalescing rule that broke.
+`--undo-focus` puts the caret in the undo page's field, the way `--span-menu`
 opens a menu a script cannot click. `--classic-menus` forces the old
 `TrackPopupMenuEx` context menus. The sample UI is laid out for a 1280 x 820 client area at 96 DPI
 points and the backend scales the Skia canvas by `GetDpiForWindow(hwnd) / 96`, sizing its client
