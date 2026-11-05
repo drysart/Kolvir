@@ -215,6 +215,7 @@ public static class XPlatTheme
     }
 
     private static string? _fontFamily;
+    private static XPlatFont? _fontFace;
     private static XPlatFont _defaultFont = new(size: 13f);
     private static XPlatFont _captionFont = new(size: 11.5f);
     private static XPlatFont _emphasizedFont = new(size: 13f, weight: 600);
@@ -226,26 +227,66 @@ public static class XPlatTheme
     /// default. A backend sets this once at start-up so the UI matches the desktop it runs on.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Assign it before creating controls: the theme fonts are rebuilt when it changes, and the
     /// previous font objects are left undisposed because a control may still be holding one from a
     /// paint pass. A handful of fonts is a few bytes, and this is a start-up only operation.
+    /// </para>
+    /// <para>
+    /// Assigning a family name also drops a face given to <see cref="UseFont"/>, so this is the way
+    /// back to a family the platform provides.
+    /// </para>
     /// </remarks>
     public static string? FontFamily
     {
         get => _fontFamily;
         set
         {
-            if (string.Equals(_fontFamily, value, StringComparison.Ordinal))
+            if (string.Equals(_fontFamily, value, StringComparison.Ordinal) && _fontFace is null)
             {
                 return;
             }
 
             _fontFamily = value;
+            _fontFace = null;
             RebuildFonts();
 
             // A static event has no instance to name as the sender.
             _changed?.Invoke(null!);
         }
+    }
+
+    /// <summary>
+    /// Draws every built-in control with <paramref name="face"/>, whichever desktop the application
+    /// runs on: one call instead of assigning a font to every control. This is how an application
+    /// says "use this font everywhere":
+    /// <c>XPlatTheme.UseFont(XPlatFont.FromFile("Fonts/Inter-Regular.ttf"))</c>.
+    /// </summary>
+    /// <param name="face">
+    /// A font built with <see cref="XPlatFont.FromFile"/>, <see cref="XPlatFont.FromStream"/> or
+    /// <see cref="XPlatFont.FromBytes"/>, or any <see cref="XPlatFont"/> whose face is the one to
+    /// use. The theme keeps it for the rest of the process and derives its fonts from it, so do not
+    /// dispose it afterwards.
+    /// </param>
+    /// <remarks>
+    /// The theme fonts are rebuilt from the face, so <see cref="TitleFont"/>,
+    /// <see cref="SectionFont"/> and <see cref="EmphasizedFont"/> become that face at their own sizes
+    /// rather than a bold or semibold one: a file holds one face, and no weight is synthesised. Call
+    /// it before creating controls, the way <see cref="FontFamily"/> is.
+    /// </remarks>
+    public static void UseFont(XPlatFont face)
+    {
+        ArgumentNullException.ThrowIfNull(face);
+
+        // The previous face is left undisposed for the same reason the previous theme fonts are: a
+        // control may still be painting with one of its fonts. Loading a font is a start-up only
+        // operation, so holding one face per assignment costs nothing worth reclaiming.
+        _fontFace = face;
+        _fontFamily = null;
+        RebuildFonts();
+
+        // A static event has no instance to name as the sender.
+        _changed?.Invoke(null!);
     }
 
     public static XPlatFont DefaultFont => _defaultFont;
@@ -260,12 +301,20 @@ public static class XPlatTheme
 
     private static void RebuildFonts()
     {
-        _defaultFont = new XPlatFont(_fontFamily, 13f);
-        _captionFont = new XPlatFont(_fontFamily, 11.5f);
-        _emphasizedFont = new XPlatFont(_fontFamily, 13f, weight: 600);
-        _titleFont = new XPlatFont(_fontFamily, 24f, weight: 700);
-        _sectionFont = new XPlatFont(_fontFamily, 15f, weight: 600);
+        _defaultFont = ThemeFont(13f);
+        _captionFont = ThemeFont(11.5f);
+        _emphasizedFont = ThemeFont(13f, 600);
+        _titleFont = ThemeFont(24f, 700);
+        _sectionFont = ThemeFont(15f, 600);
     }
+
+    /// <summary>
+    /// One theme font at <paramref name="size"/>, from the loaded face when there is one. A face
+    /// loaded from data is a single face, so the weight is only meaningful on the family-name path;
+    /// asking the loaded face for semibold would otherwise silently fall back to the system default.
+    /// </summary>
+    private static XPlatFont ThemeFont(float size, int weight = 400) =>
+        _fontFace is { } face ? face.WithSize(size) : new XPlatFont(_fontFamily, size, weight);
 
     private static void Assign(XPlatPalette palette)
     {

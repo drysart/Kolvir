@@ -88,6 +88,14 @@ internal static class Program
             return UndoChecks.Run(args.Length > 1 ? args[1] : null);
         }
 
+        // The font loaders' headless harness: it measures the face the sample bundles, prints the
+        // numbers that have to match on all three platforms, and checks every failure path. Like
+        // --render it needs no window and no display, so it comes before anything touches a toolkit.
+        if (args.Length > 0 && args[0] == "--font-check")
+        {
+            return FontChecks.Run(args.Length > 1 ? args[1] : null);
+        }
+
 #if !WINDOWS && !MACOS
         // Registers the native library resolver for the GTK/GDK/GLib bindings and opens the display,
         // so without one it ends the process with exit code 1. The backend does this too, but the
@@ -123,6 +131,15 @@ internal static class Program
         };
 
         using var application = new XPlatApplication(CreateBackend(args), options);
+
+        // --embedded-font makes the face the sample carries its own application-wide font. It is
+        // called here, in application code, rather than exposed as an application option: an option
+        // is read by the library at start-up, and that would keep the font loaders in every
+        // published application whether or not it loads a font.
+        if (Array.IndexOf(args, "--embedded-font") >= 0)
+        {
+            XPlatTheme.UseFont(XPlatFont.FromBytes(DemoFont.Data));
+        }
 
         var demo = new DemoUi();
         var window = new XPlatWindow(WindowTitle, demo.Root)
@@ -311,6 +328,14 @@ internal static class Program
 #if MACOS
         XPlatTheme.FontFamily = AppKitSystemTheme.PreferredFontFamily();
 #endif
+
+        // The same application-wide switch as the window path's --embedded-font: the theme is rebuilt
+        // before the sample builds its controls, so every page renders in the bundled face.
+        if (Array.IndexOf(args, "--embedded-font") >= 0)
+        {
+            XPlatTheme.UseFont(XPlatFont.FromBytes(DemoFont.Data));
+        }
+
         ApplyAppearanceOverride(args);
 
         DemoUi.RenderToPng(
@@ -324,7 +349,7 @@ internal static class Program
         // Printing what the render actually used makes it possible to tell a real visual difference
         // from a changed font or appearance when comparing renders from two builds.
         Console.WriteLine(
-            $"Font: {XPlatTheme.FontFamily ?? "<SkiaSharp default>"}; " +
+            $"Font: {XPlatTheme.FontFamily ?? XPlatTheme.DefaultFont.FamilyName}; " +
             $"appearance: {(XPlatTheme.IsDarkMode ? "dark" : "light")}");
         return 0;
     }

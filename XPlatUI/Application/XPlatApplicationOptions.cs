@@ -89,6 +89,14 @@ public sealed class XPlatApplicationOptions
     /// The font family the built-in controls draw with. Null uses the operating system's default,
     /// which is what a headless render does.
     /// </summary>
+    /// <remarks>
+    /// A family name resolves to a different physical face on each platform, and this option cannot
+    /// carry a font of your own: an option is read by <see cref="XPlatApplication"/> at start-up,
+    /// which is a type every application runs, so a font read there would keep the loaders in every
+    /// published application. Call <see cref="XPlatTheme.UseFont"/> from application code before the
+    /// windows are created instead - <c>XPlatTheme.UseFont(XPlatFont.FromFile(path))</c> - when the
+    /// same metrics everywhere matter.
+    /// </remarks>
     public string? FontFamily { get; set; }
 
     /// <summary>How the process responds to display scaling. Defaults to <see cref="XPlatDpiAwareness.PerMonitor"/>.</summary>

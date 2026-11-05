@@ -264,7 +264,7 @@ public sealed partial class XPlatApplication : IDisposable
         _windowClosed -= handler;
     }
 
-    /// <summary>Adds a handler that runs after <see cref="XPlatTheme.Palette"/> or <see cref="XPlatTheme.FontFamily"/> changed.</summary>
+    /// <summary>Adds a handler that runs after <see cref="XPlatTheme.Palette"/>, <see cref="XPlatTheme.FontFamily"/> or <see cref="XPlatTheme.UseFont"/> changed.</summary>
     public IDisposable AddThemeChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);

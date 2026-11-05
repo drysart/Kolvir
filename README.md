@@ -105,6 +105,8 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatMenuPresentation` | - | Chooses the library's menus or the platform's, per application |
 | `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
+| `XPlatFont` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
+| `XPlatTheme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
 | `IXPlatLauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
 
@@ -1918,6 +1920,76 @@ to the undocumented `uxtheme` `ShouldSystemUseDarkMode`), reacts to `WM_SETTINGC
 `WM_THEMECHANGED`, and darkens the title bar with
 `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` - driven by `XPlatTheme.Changed`, so a manual
 palette change updates the chrome too.
+
+### Fonts
+
+`XPlatFont` is a size plus a face, and the face can come from the machine or from font data:
+
+```csharp
+using var body = new XPlatFont("Segoe UI", 13f);           // a family the desktop has
+using var pinned = XPlatFont.FromFile("Fonts/Inter-Regular.ttf");
+using var embedded = XPlatFont.FromStream(resourceStream);  // or FromBytes(bytes)
+using var title = pinned.WithSize(24f);                      // the same face, larger
+```
+
+A loaded font is the same physical face on every platform, so `MeasureWidth`, `LineHeight`,
+`BaselineOffset`, wrapping and caret geometry measure the same on Windows, macOS and Linux - to a
+thousandth of a pixel. A loaded face's advances and the font's own vertical metrics are taken
+unhinted and linear (`LinearMetrics`, `Hinting = None`, `BaselineSnap = false`), which is what stops
+FreeType on Linux rounding advances to whole pixels when CoreText and DirectWrite do not; what is
+left is each backend's own fixed-point rounding, under 0.001 px on the demo face at 13 pt. Those
+three settings apply only to a loaded face, so a font resolved by family name keeps exactly the
+numbers it had. That is what a test pins a `.ttf` for, and what a trimmed single-file application
+needs when it carries its brand in the executable. A family name gets none of that: the same name
+resolves to whatever face each desktop calls by that name, so a layout measured on one platform does
+not have to match another.
+
+`FromFile` reads the whole file, `FromStream` reads the whole stream and `FromBytes` copies the span,
+so nothing is tied to the source afterwards. A path that does not exist throws
+`FileNotFoundException`; a stream or span that is not a font throws `ArgumentException`, and so does
+empty data. Disposing a font twice does nothing, and a font obtained with `WithSize` keeps working
+after the one it came from is disposed: each derived font holds its own reference to the face.
+
+**A loaded font is one face.** `WithSize` keeps it, and a weight or italic that the data does not
+contain is satisfied by the same face: nothing is synthesised, so `Weight` and `Italic` describe the
+face actually used rather than what was asked for. Span formatting in `XPlatRichLabel` follows the
+same rule - a span that changes only weight, slant or size is derived from the label's own font, so
+a loaded face never falls back to a system family on a bold span. Load the bold file separately when
+an emphasis needs a real bold face.
+
+To make a face the application's font, say so once instead of per control:
+
+```csharp
+XPlatTheme.UseFont(XPlatFont.FromFile("Fonts/Inter-Regular.ttf"));   // a file
+XPlatTheme.UseFont(XPlatFont.FromBytes(embeddedFontBytes));          // or an embedded resource
+```
+
+Call it before the controls are created. The theme's fonts are rebuilt from that face at their own
+sizes, so `DefaultFont`, `CaptionFont`, `TitleFont`, `SectionFont` and `EmphasizedFont` all come from
+it; because one file is one face, the large and emphasized ones are that face at their sizes rather
+than a bold one. Assigning `XPlatTheme.FontFamily` goes back to a family name, and the existing
+`XPlatApplicationOptions.FontFamily` path is unchanged.
+
+This lives on `XPlatTheme` rather than growing `XPlatApplicationOptions` on purpose. An option is
+read by `XPlatApplication` at start-up - a type every application runs - so a font read there would
+be reachable from every published application rather than only from the one that asked for it. The
+loading path stays behind application code: `XPlatApplicationOptions` gained no member.
+
+The measured cost is one image-alignment step and nothing that runs. The `XPlatUI.Minimal` fixture
+publishes at 3,194,368 bytes on `win-x64` against 3,189,248 at `b83e6cd`, a difference of 5,120
+bytes (0.16%) that is the size of one alignment step on that image - the picture is quantised, so a
+change of this size cannot be resolved more finely. What is there on every app's behalf is the
+theme's font source (one static reference and one branch when the theme fonts are rebuilt) and one
+flag on `XPlatFont` saying that a face is a single face, which fits in padding the object already
+had: no new per-instance field and no startup work. The loaders themselves are only reachable from
+the application code that calls them, and `XPlatApplicationOptions` keeps its old shape.
+
+The demo's font page - the last page, or `--page 32` - draws a label, a multi-line text box and a
+rich label with IBM Plex Sans Regular carried as an embedded resource (`XPlatUIDemo.App/Fonts`,
+OFL licensed), and prints the width and line height it measures against the system face's.
+`XPlatUIDemoApp --font-check` prints the same measurements headlessly so the numbers can be compared
+between platforms, and `--embedded-font` applies the face to the whole sample UI, including a
+`--render`, which is the application-wide path in one switch.
 
 ### Opacity and transparency
 
