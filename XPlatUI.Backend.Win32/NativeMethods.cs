@@ -39,6 +39,7 @@ internal static class NativeMethods
     internal const uint WmMouseHWheel = 0x020E;
     internal const uint WmKeyDown = 0x0100;
     internal const uint WmKeyUp = 0x0101;
+    internal const uint WmSysKeyDown = 0x0104;
     internal const uint WmChar = 0x0102;
     internal const uint WmSetCursor = 0x0020;
     internal const uint WmMouseLeave = 0x02A3;
@@ -50,6 +51,7 @@ internal static class NativeMethods
 
     // Menus.
     internal const uint MfString = 0x00000000;
+    internal const uint MfPopup = 0x00000010;
     internal const uint MfSeparator = 0x00000800;
     internal const uint MfGrayed = 0x00000001;
     internal const uint MfChecked = 0x00000008;
@@ -105,6 +107,9 @@ internal static class NativeMethods
 
     internal const int VkReturn = 0x0D;
     internal const int VkEscape = 0x1B;
+    internal const int VkSpace = 0x20;
+    internal const int VkTab = 0x09;
+    internal const int VkF4 = 0x73;
     internal const int VkEnd = 0x23;
     internal const int VkHome = 0x24;
     internal const int VkLeft = 0x25;

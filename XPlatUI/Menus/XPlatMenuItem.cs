@@ -1,9 +1,16 @@
+using SkiaSharp;
+
 namespace XPlatUI;
 
 /// <summary>
-/// A single entry in an <see cref="XPlatContextMenu"/>. Items are plain data: the platform
-/// presenter decides how they look, and calls <see cref="Invoke"/> when the user picks one.
+/// A single entry in an <see cref="XPlatContextMenu"/>. Items are plain data: the presenter
+/// decides how they look, and calls <see cref="Invoke"/> when the user picks one.
 /// </summary>
+/// <remarks>
+/// A <c>&amp;</c> in <see cref="Text"/> marks the next character as the item's mnemonic without
+/// being drawn, so <c>"&amp;Save"</c> shows "Save" with the S underlined and answers to S while the
+/// menu is open. Write <c>&amp;&amp;</c> for a literal ampersand.
+/// </remarks>
 public sealed class XPlatMenuItem
 {
     private XPlatMenuItem(string text, Action? command, bool isSeparator)
@@ -11,6 +18,8 @@ public sealed class XPlatMenuItem
         Text = text;
         Command = command;
         IsSeparator = isSeparator;
+        DisplayText = XPlatMenuText.Parse(text, out var mnemonic);
+        Mnemonic = mnemonic;
     }
 
     public XPlatMenuItem(string text)
@@ -26,11 +35,54 @@ public sealed class XPlatMenuItem
     /// <summary>The label to show for the item. Empty for a separator.</summary>
     public string Text { get; }
 
+    /// <summary><see cref="Text"/> with the mnemonic marker removed, which is what gets drawn.</summary>
+    public string DisplayText { get; }
+
+    /// <summary>
+    /// The character <see cref="Text"/> marked with <c>&amp;</c>, upper-cased, or <c>'\0'</c> when
+    /// it marked none.
+    /// </summary>
+    public char Mnemonic { get; }
+
     /// <summary>What picking the item does. Null makes the item decorative.</summary>
     public Action? Command { get; }
 
     /// <summary>True for a separator line rather than a pickable item.</summary>
     public bool IsSeparator { get; }
+
+    /// <summary>
+    /// A submenu that opens to the side of this item, or an empty list for an ordinary item.
+    /// A parent item is pickable - clicking it opens the submenu - but its own
+    /// <see cref="Command"/> is not run.
+    /// </summary>
+    public IList<XPlatMenuItem> SubItems { get; } = new List<XPlatMenuItem>();
+
+    /// <summary>True when this item opens a submenu rather than doing something itself.</summary>
+    public bool HasSubMenu => SubItems.Count > 0;
+
+    /// <summary>
+    /// <see cref="SubItems"/> with the separators a menu would not draw removed, which is what a
+    /// presenter that builds a native submenu should show.
+    /// </summary>
+    public IReadOnlyList<XPlatMenuItem> TrimmedSubItems =>
+        XPlatMenuTrimming.Trim((IReadOnlyList<XPlatMenuItem>)SubItems);
+
+    /// <summary>
+    /// The icon drawn in the column to the left of the label, or null for none. The item does not
+    /// own the image: a menu that loads images disposes them with whatever owns them.
+    /// </summary>
+    public SKImage? Image { get; set; }
+
+    /// <summary>
+    /// A control drawn in the item's row instead of a label, which is how a menu carries a slider,
+    /// a text box or a colour swatch. Null for an ordinary item.
+    /// </summary>
+    /// <remarks>
+    /// A control has one parent, so an item that hosts one can only be shown by one menu at a time;
+    /// the presenter adds it to its own surface and hands it back when the menu closes. Such a row
+    /// is not pickable, because every press in it belongs to the control.
+    /// </remarks>
+    public XPlatControl? Control { get; set; }
 
     /// <summary>False greys the item out and stops <see cref="Invoke"/> from running its command.</summary>
     public bool Enabled { get; set; } = true;
@@ -61,12 +113,12 @@ public sealed class XPlatMenuItem
     public static XPlatMenuItem Separator { get; } = new(string.Empty, null, true);
 
     /// <summary>
-    /// Runs the item's command. Returns false when the item is a separator or is disabled, so
-    /// a presenter never has to repeat those checks.
+    /// Runs the item's command. Returns false when the item is a separator, is disabled, hosts a
+    /// control or opens a submenu, so a presenter never has to repeat those checks.
     /// </summary>
     public bool Invoke()
     {
-        if (IsSeparator || !Enabled)
+        if (IsSeparator || !Enabled || HasSubMenu || Control is not null)
         {
             return false;
         }

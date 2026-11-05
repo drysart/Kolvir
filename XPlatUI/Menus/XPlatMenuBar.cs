@@ -11,9 +11,20 @@ namespace XPlatUI;
 /// no menu drawing code for a bar it does not own.
 /// </para>
 /// <para>
-/// The shape here is what v1 needs - one drop-down per top-level menu - which covers File, Edit,
-/// View, Window and Help including the clipboard commands a text box depends on. Submenus can be
-/// added when a backend actually requires them.
+/// A drop-down can hold submenus, nested as deeply as the application likes through
+/// <see cref="XPlatMenuItem.SubItems"/>. The library's own bar draws them as further menus; macOS
+/// hands the whole chain to AppKit, which draws and drives it the way it drives every other
+/// submenu on the system.
+/// </para>
+/// <para>
+/// macOS is a platform limitation: the bar there is always the system menu bar, at the top of the
+/// screen, and never a bar drawn inside the window - the platform has one menu bar for the whole
+/// process and no way to put one in a window. Everything the bar holds works the same way - the
+/// drop-downs, their shortcuts, submenus and icons - but the row of titles itself is the system's,
+/// so what <see cref="XPlatMenuBarView"/> adds to it is not available: no bar inside the window, no
+/// <see cref="XPlatMenuBarView.TitleHeight"/> or bar font, and no controls hosted in a bar row. The
+/// system bar also follows the active window rather than belonging to one window, and macOS answers
+/// mnemonics from the first character of a title rather than from the <c>&amp;</c> marker.
 /// </para>
 /// </remarks>
 public sealed class XPlatMenuBar
@@ -44,22 +55,41 @@ public sealed class XPlatMenuBar
     /// <remarks>
     /// A matching but disabled item still claims the key, so a shortcut the user can see greyed out
     /// does not fall through to the focused control and do something else instead. Menus are
-    /// searched in the order they appear in the bar.
+    /// searched in the order they appear in the bar, and the items of a submenu are searched before
+    /// the next item of the drop-down that holds it. macOS does not come through here - AppKit
+    /// answers the key equivalent of the item itself - so this is what keeps a shortcut inside a
+    /// submenu working on the platforms that draw their own bar.
     /// </remarks>
     public bool TryInvokeShortcut(XPlatKey key, XPlatModifiers modifiers)
     {
         foreach (var menu in Menus)
         {
-            foreach (var item in menu.Items)
+            if (TryInvokeShortcut(menu.Items, key, modifiers))
             {
-                if (item.IsSeparator ||
-                    item.Shortcut is not { } shortcut ||
-                    !shortcut.Matches(key, modifiers))
-                {
-                    continue;
-                }
+                return true;
+            }
+        }
 
+        return false;
+    }
+
+    private static bool TryInvokeShortcut(IEnumerable<XPlatMenuItem> items, XPlatKey key, XPlatModifiers modifiers)
+    {
+        foreach (var item in items)
+        {
+            if (item.IsSeparator)
+            {
+                continue;
+            }
+
+            if (item.Shortcut is { } shortcut && shortcut.Matches(key, modifiers))
+            {
                 item.Invoke();
+                return true;
+            }
+
+            if (item.HasSubMenu && TryInvokeShortcut(item.SubItems, key, modifiers))
+            {
                 return true;
             }
         }
@@ -80,6 +110,8 @@ public sealed class XPlatMenu
         ArgumentNullException.ThrowIfNull(items);
 
         Text = text;
+        DisplayText = XPlatMenuText.Parse(text, out var mnemonic);
+        Mnemonic = mnemonic;
 
         foreach (var item in items)
         {
@@ -88,11 +120,22 @@ public sealed class XPlatMenu
     }
 
     /// <summary>
-    /// The label shown in the menu bar. On macOS the platform turns the first character into the
-    /// mnemonic, so a caller does not spell out the underscore itself.
+    /// The label shown in the menu bar. A <c>&amp;</c> marks the next character as the mnemonic and
+    /// is not drawn, so <c>"&amp;File"</c> answers to Alt+F on Windows and Linux. macOS works the
+    /// mnemonic out from the first character itself, so there it is <see cref="DisplayText"/> that
+    /// is shown.
     /// </summary>
     public string Text { get; }
 
+    /// <summary><see cref="Text"/> with the mnemonic marker removed, which is what gets drawn.</summary>
+    public string DisplayText { get; }
+
+    /// <summary>The character <see cref="Text"/> marked with <c>&amp;</c>, or <c>'\0'</c> for none.</summary>
+    public char Mnemonic { get; }
+
     /// <summary>The drop-down entries, top to bottom. Use <see cref="XPlatMenuItem.Separator"/> for dividers.</summary>
     public IList<XPlatMenuItem> Items { get; } = new List<XPlatMenuItem>();
+
+    /// <summary><see cref="Items"/> with the separators that would look wrong dropped.</summary>
+    public IReadOnlyList<XPlatMenuItem> TrimmedItems => XPlatMenuTrimming.Trim((IReadOnlyList<XPlatMenuItem>)Items);
 }

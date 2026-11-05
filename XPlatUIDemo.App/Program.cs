@@ -91,6 +91,7 @@ internal static class Program
             ApplicationName = "XPlat UI",
             FontFamily = PreferredFontFamily(),
             ForcedDarkMode = ForcedDarkMode(args),
+            MenuPresentation = MenuPresentationArgument(args),
 
             // The application-wide icon: the Dock tile on macOS, the taskbar and Alt-Tab on Windows,
             // and the default icon name for every GTK window. Windows also shows it in the title bar
@@ -121,10 +122,10 @@ internal static class Program
             MinimumClientSize = DesignMinimumClientSize,
         };
 
-// Attached on every platform: GTK and macOS draw the bar, and the Win32 backend records it
-// without drawing it yet - but the shortcuts it carries work everywhere, because the window
-// checks the bar before the focused control sees a key.
-window.MenuBar = CreateMenuBar(window, demo);
+        // Attached on every platform, and drawn by the library on every platform. macOS keeps the
+        // system bar in step with it as well; the shortcuts it carries work on all three, because
+        // the window checks the bar before the focused control sees a key.
+        window.MenuBar = CreateMenuBar(window, demo);
 
         application.MainWindow = window;
 
@@ -144,9 +145,18 @@ window.MenuBar = CreateMenuBar(window, demo);
         // this one.
         window.TopMost = Array.IndexOf(args, "--topmost") >= 0;
 
-        window.Show();
-
         demo.SelectPage(PageArgument(args));
+
+        // Opens the menus page's context menu as if the box had been right-clicked, which is what a
+        // screenshot or a script needs in order to see a menu without hunting for the box. A popup
+        // needs a host, and a page has none until the window is up, so this waits for that moment -
+        // which means the page has to be selected before the window is shown.
+        if (Array.IndexOf(args, "--menu") >= 0)
+        {
+            window.AddShownHandler(_ => demo.OpenMenuDemo(window));
+        }
+
+        window.Show();
 
         if (Array.IndexOf(args, "--focus") >= 0)
         {
@@ -166,33 +176,62 @@ window.MenuBar = CreateMenuBar(window, demo);
     /// the same commands are reachable from the keyboard on all three platforms, including the one
     /// that does not draw the bar yet.
     /// </summary>
-    private static XPlatMenuBar CreateMenuBar(XPlatWindow window, DemoUi demo) => new(
-        new XPlatMenu(
-            "View",
-            new XPlatMenuItem("Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.D),
-            },
-            new XPlatMenuItem("Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.L),
-            }),
-        new XPlatMenu(
-            "Window",
-            new XPlatMenuItem("Topmost", () =>
-            {
-                window.TopMost = !window.TopMost;
-                demo.SetStatus(window.TopMost
-                    ? "The window is now above every other window."
-                    : "The window is back in the normal stacking order.");
-            })
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.T),
-            },
-            new XPlatMenuItem("Owned Window", demo.ShowOwnedWindow)
-            {
-                Shortcut = new XPlatShortcut(XPlatKey.N),
-            }));
+    /// <remarks>
+    /// Both menus put their commands inside a submenu, and <c>View &gt; Theme &gt; Appearance</c> goes
+    /// one level deeper still, so the sample covers the case that only the system bar can prove:
+    /// macOS hands the whole chain to AppKit, which draws and drives the nested menus itself. The
+    /// shortcuts sit inside those submenus on purpose - a shortcut nested two levels down still has
+    /// to reach the command on every platform.
+    /// </remarks>
+    private static XPlatMenuBar CreateMenuBar(XPlatWindow window, DemoUi demo)
+    {
+        var appearance = new XPlatMenuItem("&Appearance");
+        appearance.SubItems.Add(new XPlatMenuItem("&Dark Mode", () => demo.SetAppearance(XPlatPalette.Dark))
+        {
+            Shortcut = new XPlatShortcut(XPlatKey.D),
+        });
+        appearance.SubItems.Add(new XPlatMenuItem("&Light Mode", () => demo.SetAppearance(XPlatPalette.Light))
+        {
+            Shortcut = new XPlatShortcut(XPlatKey.L),
+        });
+
+        var theme = new XPlatMenuItem("&Theme");
+        theme.SubItems.Add(appearance);
+        theme.SubItems.Add(XPlatMenuItem.Separator);
+        theme.SubItems.Add(new XPlatMenuItem("&Reset colours", () => demo.SetAppearance(XPlatPalette.Light)));
+
+        var state = new XPlatMenuItem("&State");
+        foreach (var (text, value) in new[]
+        {
+            ("&Normal", XPlatWindowState.Normal),
+            ("&Maximized", XPlatWindowState.Maximized),
+            ("&Minimized", XPlatWindowState.Minimized),
+        })
+        {
+            state.SubItems.Add(new XPlatMenuItem(text, () => window.State = value));
+        }
+
+        return new(
+            new XPlatMenu("&View", theme),
+            new XPlatMenu(
+                "&Window",
+                new XPlatMenuItem("&Topmost", () =>
+                {
+                    window.TopMost = !window.TopMost;
+                    demo.SetStatus(window.TopMost
+                        ? "The window is now above every other window."
+                        : "The window is back in the normal stacking order.");
+                })
+                {
+                    Shortcut = new XPlatShortcut(XPlatKey.T),
+                },
+                new XPlatMenuItem("&Owned Window", demo.ShowOwnedWindow)
+                {
+                    Shortcut = new XPlatShortcut(XPlatKey.N),
+                },
+                XPlatMenuItem.Separator,
+                state));
+    }
 
     /// <summary>
     /// The title bar text. It names the backend on purpose: three builds of the same program are
@@ -251,7 +290,13 @@ window.MenuBar = CreateMenuBar(window, demo);
 #endif
         ApplyAppearanceOverride(args);
 
-        DemoUi.RenderToPng(path, width, height, PageArgument(args));
+        DemoUi.RenderToPng(
+            path,
+            width,
+            height,
+            PageArgument(args),
+            CreateMenuBar,
+            args.Contains("--menu") ? (window, demo) => demo.OpenMenuDemo(window) : null);
         Console.WriteLine($"Rendered {width}x{height} sample UI to {path}");
         // Printing what the render actually used makes it possible to tell a real visual difference
         // from a changed font or appearance when comparing renders from two builds.
@@ -259,6 +304,28 @@ window.MenuBar = CreateMenuBar(window, demo);
             $"Font: {XPlatTheme.FontFamily ?? "<SkiaSharp default>"}; " +
             $"appearance: {(XPlatTheme.IsDarkMode ? "dark" : "light")}");
         return 0;
+    }
+
+    /// <summary>
+    /// The value of <c>--menus xplatui|native</c>, which overrides who draws the menus. The library
+    /// draws them by default on every platform, so <c>native</c> is the interesting one: it hands
+    /// the menus back to the desktop. A menu bar is the exception on macOS, where the system's bar
+    /// is the only one the platform shows and this switch changes nothing about it.
+    /// </summary>
+    private static XPlatMenuPresentation MenuPresentationArgument(string[] args)
+    {
+        int index = Array.IndexOf(args, "--menus");
+        if (index < 0 || index + 1 >= args.Length)
+        {
+            return XPlatMenuPresentation.Auto;
+        }
+
+        return args[index + 1].ToLowerInvariant() switch
+        {
+            "xplatui" => XPlatMenuPresentation.XPlatUI,
+            "native" => XPlatMenuPresentation.Native,
+            _ => XPlatMenuPresentation.Auto,
+        };
     }
 
     /// <summary>The value of <c>--page</c>, or -1 when the sample should show its first page.</summary>

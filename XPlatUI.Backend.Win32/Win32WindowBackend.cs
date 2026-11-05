@@ -60,6 +60,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private IXPlatWindowBackend? _owner;
     private XPlatWindowState _state = XPlatWindowState.Normal;
     private XPlatMenuBar? _menuBar;
+    private readonly bool _useXPlatMenus;
 
     private XPlatIcon? _icon;
     private IntPtr _bigIcon;
@@ -103,6 +104,11 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         // The window keeps a drawing buffer between frames and copies it to the screen with
         // BitBlt, so only the part that changed has to be painted and copied.
         _host.PartialUpdates = true;
+
+        // Resolved once, when the window is created: the application's presentation choice does not
+        // change while a window is open, and the presenters are installed from it.
+        _useXPlatMenus = !(application.Application?.Options.MenuPresentation ?? XPlatMenuPresentation.Auto)
+            .UsesNativeMenus();
     }
 
     /// <inheritdoc />
@@ -293,13 +299,18 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>
-    /// The window's menu bar, or null for none. Stored but not drawn yet: menu bar rendering is a
-    /// separate piece of work from moving the harness onto the application model.
+    /// The window's menu bar, or null for none. When the application uses the library's own menus
+    /// the bar is drawn inside the window, above the control tree; with native menus it is left to
+    /// the platform, which on Windows draws no bar at all.
     /// </summary>
     public XPlatMenuBar? MenuBar
     {
         get => _menuBar;
-        set => _menuBar = value;
+        set
+        {
+            _menuBar = value;
+            UpdateMenuBarView();
+        }
     }
 
     /// <summary>The native window handle, or <see cref="IntPtr.Zero"/> before the window is shown.</summary>
@@ -658,7 +669,8 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     internal bool TryHandleKeyDown(IntPtr wParam)
     {
         var key = MapKey((int)wParam);
-        return key != XPlatKey.None && _host.ProcessKeyDown(key, CurrentModifiers());
+        var modifiers = CurrentModifiers();
+        return key != XPlatKey.None && _host.ProcessKeyDown(key, modifiers);
     }
 
     /// <summary>Maps a logical client point to physical screen pixels, for native menus.</summary>
@@ -754,8 +766,12 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         NativeMethods.SetDarkTitleBar(_hwnd, XPlatTheme.IsDarkMode);
 
         // The presenters need a live HWND, so they can only be installed once the window exists.
-        XPlatContextMenuPresenter.Current = new Win32ContextMenuPresenter(_hwnd, LogicalToScreen);
+        XPlatContextMenuPresenter.Current = _useXPlatMenus
+            ? new XPlatMenuPresenter()
+            : new Win32ContextMenuPresenter(_hwnd, LogicalToScreen);
         XPlatPopupService.Current = new Win32PopupService();
+
+        UpdateMenuBarView();
 
         NativeMethods.ShowWindow(_hwnd, NativeMethods.SwShow);
         NativeMethods.UpdateWindow(_hwnd);
@@ -765,6 +781,31 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         ApplyTopMost();
 
         _shown?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Puts the window's menu bar into the host, or takes it out, as the menu presentation requires.
+    /// </summary>
+    /// <remarks>
+    /// Called when the bar is assigned and again when the window is presented, because the bar can
+    /// arrive either side of the window being shown. An existing view is kept and re-pointed rather
+    /// than replaced, so a bar that is filled in after it is assigned keeps its open-menu state.
+    /// </remarks>
+    private void UpdateMenuBarView()
+    {
+        if (!_useXPlatMenus || _menuBar is null)
+        {
+            _host.MenuBar = null;
+            return;
+        }
+
+        if (_host.MenuBar is { } existing)
+        {
+            existing.MenuBar = _menuBar;
+            return;
+        }
+
+        _host.MenuBar = new XPlatMenuBarView(_menuBar);
     }
 
     /// <summary>

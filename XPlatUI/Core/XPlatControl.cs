@@ -1061,6 +1061,13 @@ public class XPlatControl : IDisposable
         }
     }
 
+    /// <summary>
+    /// True for an invisible layer that still takes presses but must not take the pointer's hover
+    /// away from what it covers. The catcher behind an open popup is one: it has to see the press
+    /// that dismisses the popup, while the control underneath keeps tracking the pointer.
+    /// </summary>
+    internal virtual bool PassesHoverThrough => false;
+
     /// <summary>Returns the deepest visible, enabled control containing the point.</summary>
     /// <param name="pointInParent">Point expressed in the parent's coordinate space.</param>
     public virtual XPlatControl? HitTest(SKPoint pointInParent)

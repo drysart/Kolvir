@@ -76,7 +76,7 @@ internal sealed class Gtk4MenuBar : IDisposable
         _popovers.Add(popover);
 
         var button = Gtk.MenuButton.New();
-        button.SetLabel(menu.Text);
+        button.SetLabel(menu.DisplayText);
         button.SetHasFrame(false);
         button.SetAlwaysShowArrow(false);
         button.AddCssClass("flat");
@@ -84,20 +84,5 @@ internal sealed class Gtk4MenuBar : IDisposable
         return button;
     }
 
-    private Gtk.Widget CreateMenuBody(XPlatMenu menu)
-    {
-        var box = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
-        box.SetSizeRequest(220, -1);
-        box.SetMarginTop(4);
-        box.SetMarginBottom(4);
-
-        foreach (var item in menu.Items)
-        {
-            box.Append(item.IsSeparator
-                ? Gtk4MenuItemWidget.CreateSeparator()
-                : Gtk4MenuItemWidget.Create(item, Dismiss));
-        }
-
-        return box;
-    }
+    private Gtk.Widget CreateMenuBody(XPlatMenu menu) => Gtk4MenuItemWidget.CreateList(menu.Items, Dismiss, 220);
 }

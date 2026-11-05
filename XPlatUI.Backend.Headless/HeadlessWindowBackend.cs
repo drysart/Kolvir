@@ -22,6 +22,7 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
     private Action<object>? _scaleChanged;
     private Action<object>? _stateChanged;
     private readonly XPlatScreen _screen;
+    private XPlatMenuBar? _menuBar;
     private SKSize _clientSize;
     private SKSize _minimumClientSize;
     private SKSize _maximumClientSize = new(float.PositiveInfinity, float.PositiveInfinity);
@@ -121,7 +122,19 @@ public sealed class HeadlessWindowBackend : IXPlatWindowBackend
     public IXPlatWindowBackend? Owner { get; set; }
 
     /// <inheritdoc />
-    public XPlatMenuBar? MenuBar { get; set; }
+    /// <remarks>
+    /// The bar is drawn into the same surface as the rest of the window, so a headless render shows
+    /// the strip the native backends draw instead of skipping it.
+    /// </remarks>
+    public XPlatMenuBar? MenuBar
+    {
+        get => _menuBar;
+        set
+        {
+            _menuBar = value;
+            Host.MenuBar = value is null ? null : new XPlatMenuBarView(value);
+        }
+    }
 
     /// <summary>True once the window is the current one on the stack.</summary>
     public bool IsVisible { get; private set; }

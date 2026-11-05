@@ -34,6 +34,12 @@ namespace XPlatUI.Backend.Gtk4;
 /// The popup's drawing area is not focusable, so the control that opened the popup keeps the
 /// keyboard: the popup is a surface to look at and click, and everything typed belongs to its owner.
 /// </para>
+/// <para>
+/// A popover may still end up with the focus, so a capture-phase key controller on it hands each
+/// key straight to the owner's host, which is where the portable layer keeps the keyboard: an open
+/// menu is an input sink on its owner, and its arrow keys, Escape and mnemonics have to reach it.
+/// A key the owner does not take is left to GTK.
+/// </para>
 /// </remarks>
 internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 {
@@ -46,11 +52,20 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
     /// padding shows up as a border of dead space around the XPlat controls. The padding and the
     /// chrome are removed for popups only, through a style class of their own.
     /// </summary>
+    /// <remarks>
+    /// The fill has to be cleared on the popover's <c>contents</c> node as well as on the popover:
+    /// that is the node a GTK4 theme paints the popover background on, and a background left in
+    /// place there covers the page behind the popup. A menu shows that as an opaque rectangle
+    /// around the menu proper, because the portable layer leaves its shadow margin transparent on
+    /// purpose and expects to see the window underneath.
+    /// </remarks>
     private const string PopupStyleSheet =
-        "popover." + PopupStyleClass +
-        " { padding: 0; margin: 0; border: none; background: none; box-shadow: none; }\n" +
-        "popover." + PopupStyleClass +
-        " > contents { padding: 0; margin: 0; border: none; box-shadow: none; }\n";
+        "popover." + PopupStyleClass + ", popover." + PopupStyleClass + ".background" +
+        " { padding: 0; margin: 0; border: none; border-radius: 0;" +
+        " background: none; background-color: transparent; box-shadow: none; }\n" +
+        "popover." + PopupStyleClass + " > contents, popover." + PopupStyleClass + ".background > contents" +
+        " { padding: 0; margin: 0; border: none; border-radius: 0;" +
+        " background: none; background-color: transparent; box-shadow: none; }\n";
 
     private static Gdk.Display? _styledDisplay;
 
@@ -60,19 +75,21 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
     private readonly Gtk.ScrolledWindow _frame;
     private readonly Gtk.Popover _popover;
     private readonly bool _dismissOnOutsideClick;
+    private readonly bool _takesPresses;
 
+    private Gtk.Window? _ownerWindow;
     private bool _dismissing;
     private bool _disposed;
 
-    internal Gtk4PopupWindow(Gtk4SkiaView ownerView, bool dismissOnOutsideClick)
+    internal Gtk4PopupWindow(Gtk4SkiaView ownerView, bool dismissOnOutsideClick, bool takesPresses)
     {
         ArgumentNullException.ThrowIfNull(ownerView);
 
         _ownerView = ownerView;
         _dismissOnOutsideClick = dismissOnOutsideClick;
+        _takesPresses = takesPresses;
 
         _view = new Gtk4SkiaView(_host);
-        _view.DebugTag = "popup";
 
         // Keys belong to the owner, so the popup never takes the keyboard.
         _view.InputArea.SetFocusable(false);
@@ -98,11 +115,34 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         _popover.AddCssClass(PopupStyleClass);
         EnsurePopupStyle(ownerView.Widget.GetDisplay());
 
-        // GTK's own auto-hide is the outside-click dismissal, and it also pops the surface down
-        // when the window loses the pointer grab.
-        _popover.Autohide = dismissOnOutsideClick;
+        // Autohide is what makes GTK take a widget grab, and GTK hands a grabbed pointer event to
+        // the widget holding the grab and to nothing else: a popover that autohides swallows the
+        // motion and the presses of every other popover in the same window. Every level of a menu
+        // chain is a popover of its own, so no level may grab - a grab taken by one level would
+        // starve all the others, and hovering a submenu or turning the wheel over it would reach
+        // the menu that took the grab instead of the one under the pointer. A press outside the
+        // chain is caught by the portable layer instead, which hangs a dismiss catcher over the
+        // window the popup belongs to.
+        _popover.Autohide = false;
         _popover.Position = Gtk.PositionType.Bottom;
         _popover.OnClosed += OnPopoverClosed;
+
+        // Without a grab nothing tells the popup that the user has gone elsewhere, so the window it
+        // belongs to is watched for losing activation, which is GTK's version of the outside press
+        // the other backends see.
+        if (dismissOnOutsideClick && ownerView.Widget.GetRoot() is Gtk.Window toplevel)
+        {
+            _ownerWindow = toplevel;
+            _ownerWindow.OnNotify += OnOwnerWindowNotify;
+        }
+
+        // Nothing inside the popover can be focused, so any key that does reach the popover is
+        // captured there and forwarded to the host that owns the popup.
+        var key = Gtk.EventControllerKey.New();
+        key.SetPropagationPhase(Gtk.PropagationPhase.Capture);
+        key.OnKeyPressed += OnKeyPressed;
+        key.OnKeyReleased += OnKeyReleased;
+        _popover.AddController(key);
     }
 
     /// <inheritdoc />
@@ -110,6 +150,9 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 
     /// <inheritdoc />
     public bool DismissesOnOutsideClick => _dismissOnOutsideClick;
+
+    /// <inheritdoc />
+    public bool TakesPresses => _takesPresses;
 
     /// <inheritdoc />
     public event Action<object>? Dismissed;
@@ -130,8 +173,7 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         // so a control inside a popup that opens a popup of its own finds the service too.
         _host.Services = ownerHost.Services;
 
-        Resize(size);
-        Place(location, size);
+        Apply(location, size);
 
         _popover.Popup();
     }
@@ -144,8 +186,7 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
             return;
         }
 
-        Resize(size);
-        Place(location, size);
+        Apply(location, size);
     }
 
     /// <inheritdoc />
@@ -179,6 +220,12 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
 
         _disposed = true;
         _popover.OnClosed -= OnPopoverClosed;
+
+        if (_ownerWindow is { } ownerWindow)
+        {
+            ownerWindow.OnNotify -= OnOwnerWindowNotify;
+            _ownerWindow = null;
+        }
 
         _dismissing = true;
 
@@ -221,6 +268,34 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         Gtk.StyleContext.AddProviderForDisplay(display, provider, 600);
     }
 
+    /// <summary>
+    /// Applies a new position and size to the popup as a single change.
+    /// </summary>
+    /// <remarks>
+    /// GTK applies popover geometry in its next layout pass, and a resize on its own makes the
+    /// pass re-allocate the popover against the pointing rectangle it still has - clamped to the
+    /// monitor - before the new position lands, so a popup that grows briefly shows the new size at
+    /// the old place. Setting the pointing rectangle and offset first, then asking for the new
+    /// size, leaves the pass nothing to see but the final geometry.
+    /// </remarks>
+    private void Apply(SKPoint location, SKSize size)
+    {
+        int width = ToPixels(size.Width);
+        int height = ToPixels(size.Height);
+
+        _host.SetClientSize(width, height);
+
+        // Paint for the new size now: the picture fills its allocation, so without a frame at the
+        // new size the pass that applies it stretches the previous one across the new bounds.
+        _view.PaintNow(width, height);
+
+        Place(location, size);
+
+        _view.Widget.SetSizeRequest(width, height);
+        _frame.SetSizeRequest(width, height);
+        _frame.QueueResize();
+    }
+
     private void Place(SKPoint location, SKSize size)
     {
         int x = ToPixels(location.X);
@@ -233,21 +308,6 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         _popover.SetOffset(width / 2, 0);
     }
 
-    /// <summary>
-    /// Tells the frame and the view how big the popup is, which is the size the popover ends up
-    /// taking because the frame measures as the size it is asked for rather than the view's.
-    /// </summary>
-    private void Resize(SKSize size)
-    {
-        int width = ToPixels(size.Width);
-        int height = ToPixels(size.Height);
-
-        _host.SetClientSize(width, height);
-        _view.Widget.SetSizeRequest(width, height);
-        _frame.SetSizeRequest(width, height);
-        _frame.QueueResize();
-    }
-
     private void OnPopoverClosed(Gtk.Popover sender, EventArgs args)
     {
         if (_dismissing || _disposed)
@@ -256,6 +316,70 @@ internal sealed class Gtk4PopupWindow : IXPlatPopupWindow
         }
 
         Dismissed?.Invoke(this);
+    }
+
+    private void OnOwnerWindowNotify(GObject.Object sender, GObject.Object.NotifySignalArgs args)
+    {
+        if (args.Pspec?.GetName() is not "is-active" || _dismissing || _disposed)
+        {
+            return;
+        }
+
+        // Deferring keeps the popover out of the window's own activation bookkeeping: popping it
+        // down re-enters GTK from the middle of the notification, which is not a safe place to
+        // change the window's popup list.
+        GLib.Functions.IdleAdd(0, () =>
+        {
+            if (!_disposed && _ownerWindow is { } window && !window.GetIsActive())
+            {
+                Dismissed?.Invoke(this);
+            }
+
+            return false;
+        });
+    }
+
+    /// <summary>
+    /// Forwards a key press to the host that owns the popup; returns true when the UI consumed it.
+    /// </summary>
+    private bool OnKeyPressed(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyPressedSignalArgs args)
+    {
+        var ownerHost = _ownerView.Host;
+        var modifiers = ModifiersOf(args.Keyval, args.State);
+        var key = Gtk4KeyMap.Map(args.Keyval);
+
+        if (key != XPlatKey.None && ownerHost.ProcessKeyDown(key, modifiers))
+        {
+            return true;
+        }
+
+        var text = Gtk4KeyMap.MapText(args.Keyval, args.State);
+        if (text is null)
+        {
+            return false;
+        }
+
+        ownerHost.ProcessTextInput(text);
+        return true;
+    }
+
+    private void OnKeyReleased(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyReleasedSignalArgs args)
+    {
+        var key = Gtk4KeyMap.Map(args.Keyval);
+        if (key != XPlatKey.None)
+        {
+            _ownerView.Host.ProcessKeyUp(key, ModifiersOf(args.Keyval, args.State));
+        }
+    }
+
+    /// <summary>
+    /// Reads the modifiers of a key event. GTK reports shift+Tab as <c>ISO_Left_Tab</c>, a key value
+    /// of its own, so the shift bit is not the only place the modifier comes from.
+    /// </summary>
+    private static XPlatModifiers ModifiersOf(uint keyval, Gdk.ModifierType state)
+    {
+        var modifiers = Gtk4KeyMap.MapModifiers(state);
+        return Gtk4KeyMap.ImpliesShift(keyval) ? modifiers | XPlatModifiers.Shift : modifiers;
     }
 
     /// <summary>

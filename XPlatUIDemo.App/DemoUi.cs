@@ -22,11 +22,24 @@ public sealed class DemoUi
     private XPlatPanel _stage = null!;
     private XPlatControl[] _pages = null!;
     private XPlatControl? _shownPage;
+    private XPlatControl? _menuDemoTarget;
     private int _clicks;
 
     public DemoUi()
     {
         Root = BuildUi();
+
+        // A page that has no menu of its own still has to answer a right-click: the host asks for a
+        // menu only after the control under the pointer has declined, and the native menu paths show
+        // nothing at all when nobody answers. The selection's Copy menu comes after this hook, so a
+        // page menu is only offered while there is nothing selected to copy.
+        OnHostAvailable(Root, host => host.AddContextMenuOpeningHandler((_, args) =>
+        {
+            if (host.Selection.IsEmpty)
+            {
+                args.Menu = BuildPageContextMenu();
+            }
+        }));
     }
 
     /// <summary>The root of the sample control tree.</summary>
@@ -81,6 +94,26 @@ public sealed class DemoUi
     }
 
     /// <summary>
+    /// The menu a page offers when the control under the pointer has none of its own: the two moves
+    /// a reader of a page wants, and a line about what the sample is. It is built per right-click so
+    /// the page moves know which page they are on.
+    /// </summary>
+    private XPlatContextMenu BuildPageContextMenu()
+    {
+        int index = _navList.SelectedIndex;
+
+        return new XPlatContextMenu()
+            .Add(new XPlatMenuItem("&Previous page", () => SelectPage(index - 1)) { Enabled = index > 0 })
+            .Add(new XPlatMenuItem("&Next page", () => SelectPage(index + 1))
+            {
+                Enabled = index < _pages.Length - 1,
+            })
+            .AddSeparator()
+            .Add(new XPlatMenuItem("&About this sample", () => SetStatus(
+                "Every control here is drawn by XPlatUI itself, so the same tree runs on Windows, macOS and Linux.")));
+    }
+
+    /// <summary>
     /// Renders the sample UI to a PNG without opening a window. Useful for visual regression tests
     /// and for verifying the render pipeline on CI.
     /// </summary>
@@ -94,7 +127,23 @@ public sealed class DemoUi
     /// <param name="width">Client width in logical pixels.</param>
     /// <param name="height">Client height in logical pixels.</param>
     /// <param name="page">The page to show, or -1 for the first one.</param>
-    public static void RenderToPng(string path, int width, int height, int page = -1)
+    /// <param name="menuBar">
+    /// Builds the window's menu bar from the window and the sample it drives, or null to render
+    /// without one. A screenshot should show the same strip the window does, so the harness passes
+    /// its own bar in.
+    /// </param>
+    /// <param name="afterShown">
+    /// Runs once the window is up and before the frame is written, which is the only moment a popup
+    /// can be opened: a popup needs a host, and a page has none until it is attached. The menus page
+    /// uses it to render with its context menu open.
+    /// </param>
+    public static void RenderToPng(
+        string path,
+        int width,
+        int height,
+        int page = -1,
+        Func<XPlatWindow, DemoUi, XPlatMenuBar>? menuBar = null,
+        Action<XPlatWindow, DemoUi>? afterShown = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
@@ -108,8 +157,14 @@ public sealed class DemoUi
             ClientSize = new SKSize(width, height),
         };
 
+        if (menuBar is not null)
+        {
+            window.MenuBar = menuBar(window, demo);
+        }
+
         window.AddShownHandler(_ =>
         {
+            afterShown?.Invoke(window, demo);
             backend.LastWindow!.SavePng(path);
         });
         window.Show();
@@ -322,6 +377,7 @@ public sealed class DemoUi
         ("Track bars", demo => Page(demo.BuildTrackBarDemo())),
         ("Link labels", demo => Page(demo.BuildLinkLabelDemo())),
         ("Status and tool strips", demo => Page(demo.BuildToolStripDemo())),
+        ("Menus", demo => Page(demo.BuildMenuDemo())),
     };
 
     /// <summary>
@@ -1658,6 +1714,236 @@ public sealed class DemoUi
         });
 
         return card;
+    }
+
+    /// <summary>
+    /// The in-library menus. The bar across the top of the window is drawn by the library on
+    /// Windows and Linux and reachable with Alt plus a mnemonic; this page adds a context menu that
+    /// uses every row shape the renderer knows - icon, check mark, submenu, shortcut hint, disabled
+    /// entry and a hosted control.
+    /// </summary>
+    private XPlatPanel BuildMenuDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Menus"));
+
+        var readout = ScrollCaption(
+            "Alt+V and Alt+W open the window's own bar. Right-click the box for a context menu.");
+        readout.Margin = new XPlatThickness(0f, 0f, 0f, 12f);
+        card.Controls.Add(readout);
+
+        var target = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 96f,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        target.Controls.Add(new XPlatLabel("Right-click anywhere in this box")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            TextAlign = XPlatContentAlignment.MiddleCenter,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            Font = XPlatTheme.CaptionFont,
+        });
+
+        target.ContextMenu = BuildMenuDemoContextMenu(readout);
+        _menuDemoTarget = target;
+        card.Controls.Add(target);
+
+        // The bar belongs to the window rather than to a control, so opening one of its menus is a
+        // host-level call - which is also how Alt plus a mnemonic gets there.
+        XPlatButton? openView = null;
+        openView = DemoButton("Open the View menu", () =>
+        {
+            var view = openView?.Host?.MenuBar;
+            if (view?.MenuBar is not { } bar || bar.Menus.Count == 0)
+            {
+                readout.Text = "This backend has no in-window menu bar - it uses the native one.";
+                return;
+            }
+
+            view.OpenMenu(0);
+        });
+
+        card.Controls.Add(openView);
+
+        card.Controls.Add(new XPlatLabel(
+            "The bar is an ordinary control in the window's own tree, so it scrolls, resizes and repaints " +
+            "with everything else; a drop-down is a popup surface that holds an XPlatMenuView. Mnemonics come " +
+            "from an & in the text, submenus open to the side of their parent row and nest as deeply as the " +
+            "application likes - Recent > Program.cs is two of them - and a menu taller than the room it has " +
+            "scrolls its rows behind arrows at either end. A row may host a control instead of a label: the " +
+            "zoom slider is an XPlatTrackBar living inside the menu.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 92f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// Opens the menus page's context menu as if the box had been right-clicked, which is what a
+    /// screenshot of the page needs in order to show a menu at all.
+    /// </summary>
+    /// <param name="window">The window the sample is showing in.</param>
+    public void OpenMenuDemo(XPlatWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        if (_menuDemoTarget?.ContextMenu is not { } menu)
+        {
+            return;
+        }
+
+        // Nothing has painted yet, so the page has no bounds until something lays it out.
+        window.Host.PerformLayout();
+
+        var location = SKPoint.Empty;
+        for (var control = _menuDemoTarget; control is not null; control = control.Parent)
+        {
+            location.Offset(control.Bounds.Left, control.Bounds.Top);
+        }
+
+        // Shown through the presenter rather than through the menu itself, because a screenshot
+        // wants the row under the pointer and its submenu too, and only the view can open those.
+        var view = new XPlatMenuView(menu);
+        XPlatMenuPresenter.ShowMenu(window.Host, view, new SKPoint(location.X + 48f, location.Y + 24f));
+
+        // Follow the first row that opens a submenu all the way down, so the picture shows the
+        // whole chain rather than just the level the presenter opened.
+        for (int depth = 0, limit = 4; depth < limit; depth++)
+        {
+            var level = view.DeepestMenu;
+            int index = -1;
+            for (int i = 0; i < level.Items.Count && index < 0; i++)
+            {
+                index = level.Items[i].HasSubMenu ? i : -1;
+            }
+
+            if (index < 0)
+            {
+                break;
+            }
+
+            level.Highlight(index);
+            if (!level.OpenSubMenu(index))
+            {
+                break;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The context menu the menus page shows: one row of every shape the renderer supports, so a
+    /// screenshot of the open menu covers the whole of it, plus a submenu inside a submenu and one
+    /// menu with more rows than any display can show at once.
+    /// </summary>
+    private XPlatContextMenu BuildMenuDemoContextMenu(XPlatLabel readout)
+    {
+        var grid = new XPlatMenuItem("Show &grid", () =>
+            readout.Text = "'Show grid' picked - the tick is drawn in the check column.")
+        {
+            Checked = true,
+        };
+
+        var recent = new XPlatMenuItem("&Recent");
+
+        // A submenu inside a submenu, so the chain is exercised at a depth a single level cannot
+        // reach: Recent > Program.cs > a place in the file.
+        var program = new XPlatMenuItem("&Program.cs");
+        foreach (var place in new[] { "The top of the file", "Main", "RenderSample" })
+        {
+            var spot = place;
+            program.SubItems.Add(new XPlatMenuItem(
+                spot, () => readout.Text = $"'Recent > Program.cs > {spot}' picked."));
+        }
+
+        recent.SubItems.Add(program);
+
+        foreach (var name in new[] { "DemoUi.cs", "Program.cs (older)" })
+        {
+            var file = name;
+            recent.SubItems.Add(new XPlatMenuItem(file, () => readout.Text = $"'Recent > {file}' picked."));
+        }
+
+        // More rows than fit on any display, so the menu keeps the height it is given and scrolls
+        // its rows instead of growing past the edge - which is what the arrows at either end, the
+        // wheel and the keyboard keeping the highlight in view are for.
+        var scrolling = new XPlatMenuItem("&Scroll test");
+        for (int number = 1; number <= 320; number++)
+        {
+            int picked = number;
+            scrolling.SubItems.Add(new XPlatMenuItem(
+                $"Item {picked:000}",
+                () => readout.Text = $"'Scroll test > Item {picked:000}' picked."));
+        }
+
+        var zoom = new XPlatTrackBar
+        {
+            Minimum = 50f,
+            Maximum = 200f,
+            Value = 100f,
+            TickFrequency = 25f,
+            Margin = new XPlatThickness(0f),
+        };
+
+        zoom.AddValueChangedHandler(_ =>
+            readout.Text = $"Zoom is {zoom.Value:0}% - a control hosted in a menu row.");
+
+        return new XPlatContextMenu()
+            .Add(new XPlatMenuItem("&New file", () => readout.Text = "'New file' picked.")
+            {
+                Image = MenuGlyph((canvas, paint) => canvas.DrawRoundRect(SKRect.Create(7f, 4f, 18f, 24f), 3f, 3f, paint)),
+                Shortcut = new XPlatShortcut(XPlatKey.N, XPlatModifiers.Control),
+            })
+            .Add(new XPlatMenuItem("&Open...", () => readout.Text = "'Open' picked.")
+            {
+                Image = MenuGlyph((canvas, paint) =>
+                {
+                    paint.Style = SKPaintStyle.Stroke;
+                    paint.StrokeWidth = 2.5f;
+                    canvas.DrawRect(SKRect.Create(5f, 10f, 22f, 16f), paint);
+                    canvas.DrawLine(5f, 10f, 11f, 5f, paint);
+                    canvas.DrawLine(11f, 5f, 16f, 10f, paint);
+                }),
+                Shortcut = new XPlatShortcut(XPlatKey.O, XPlatModifiers.Control),
+            })
+            .AddSeparator()
+            .Add(recent)
+            .Add(scrolling)
+            .Add(grid)
+            .AddSeparator()
+            .Add(new XPlatMenuItem("Zoom") { Control = zoom })
+            .AddSeparator()
+            .Add(new XPlatMenuItem("&Delete", null)
+            {
+                Enabled = false,
+                Shortcut = new XPlatShortcut(XPlatKey.Delete),
+            });
+    }
+
+    /// <summary>
+    /// A monochrome glyph for a menu row, drawn in code so the sample needs no image files. The
+    /// renderer fits whatever it is given into the icon column, so the source only has to be large
+    /// enough to stay crisp.
+    /// </summary>
+    private static SKImage MenuGlyph(Action<SKCanvas, SKPaint> draw)
+    {
+        using var surface = SKSurface.Create(new SKImageInfo(32, 32, SKColorType.Bgra8888, SKAlphaType.Premul));
+        using var paint = new SKPaint { IsAntialias = true, Color = XPlatTheme.Foreground };
+        draw(surface.Canvas, paint);
+        surface.Canvas.Flush();
+        return surface.Snapshot();
     }
 
     /// <summary>

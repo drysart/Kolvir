@@ -115,6 +115,10 @@ public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
         ArgumentNullException.ThrowIfNull(window);
 
         LastWindow = new HeadlessWindowBackend(window, GetScreens()[0]);
+
+        // There is no native menu on a headless backend, so menus are drawn by the portable
+        // presenter - which also means a render can show one, and a test can drive it.
+        XPlatContextMenuPresenter.Current = new XPlatMenuPresenter();
         return LastWindow;
     }
 

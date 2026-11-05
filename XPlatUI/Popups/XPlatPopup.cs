@@ -31,7 +31,8 @@ public enum XPlatPopupPresentation
 /// </remarks>
 public sealed class XPlatPopup : IDisposable
 {
-    private readonly XPlatControl _owner;
+    private readonly XPlatControl? _owner;
+    private readonly XPlatUiHost? _host;
     private Action<object>? _closed;
     private IXPlatPopupWindow? _window;
     private XPlatPopupDismissCatcher? _catcher;
@@ -50,8 +51,21 @@ public sealed class XPlatPopup : IDisposable
         _owner = owner;
     }
 
-    /// <summary>The control the popup belongs to.</summary>
-    public XPlatControl Owner => _owner;
+    /// <param name="host">
+    /// The window the popup is anchored to, for a popup that belongs to the window rather than to a
+    /// control - which is what a menu opened from the menu bar or the keyboard is.
+    /// </param>
+    public XPlatPopup(XPlatUiHost host)
+    {
+        ArgumentNullException.ThrowIfNull(host);
+        _host = host;
+    }
+
+    /// <summary>The control the popup belongs to, or null when it belongs to the window.</summary>
+    public XPlatControl? Owner => _owner;
+
+    /// <summary>The window the popup is anchored to.</summary>
+    public XPlatUiHost Host => _owner?.Host ?? _host!;
 
     /// <summary>
     /// The control drawn inside the popup. It must not already be in a control tree, because the
@@ -81,8 +95,26 @@ public sealed class XPlatPopup : IDisposable
     /// </summary>
     public bool DismissOnOutsideClick { get; set; } = true;
 
+    /// <summary>
+    /// Whether the popup takes the pointer, as opposed to passing it through to whatever it covers.
+    /// Null, the default, follows <see cref="DismissOnOutsideClick"/>: a popup that dismisses itself
+    /// on an outside press takes that press, and a tooltip that does not dismiss takes nothing.
+    /// </summary>
+    /// <remarks>
+    /// A submenu needs these apart. The chain is dismissed by the menu the user started from, so a
+    /// submenu does not dismiss on its own - but it is still a menu the user clicks in, so it has to
+    /// take the pointer.
+    /// </remarks>
+    public bool? TakesPresses { get; set; }
+
     /// <summary>Whether the popup is currently shown.</summary>
     public bool IsOpen => _open;
+
+    /// <summary>
+    /// The catcher this popup installed in the owning window to see outside presses, or null when
+    /// it installed none. A menu bar uses it to tell its own menu's catcher from another popup's.
+    /// </summary>
+    internal XPlatControl? DismissCatcher => _catcher;
 
     /// <summary>Where the popup's top left corner sits, in the owning host's coordinates.</summary>
     public SKPoint Location => _location;
@@ -123,7 +155,7 @@ public sealed class XPlatPopup : IDisposable
             throw new InvalidOperationException("The popup's content is already in a control tree.");
         }
 
-        var host = _owner.Host ?? throw new InvalidOperationException("The popup's owner is not attached to a window.");
+        var host = Host ?? throw new InvalidOperationException("The popup is not attached to a window.");
 
         _location = location;
 
@@ -139,6 +171,12 @@ public sealed class XPlatPopup : IDisposable
     /// Moves an open popup so that its top left corner sits at <paramref name="location"/>, which
     /// is what a drop-down list does when its owner scrolls or resizes.
     /// </summary>
+    /// <remarks>
+    /// The popup is re-measured rather than only moved: content is free to change size while it is
+    /// open, and a submenu opening is exactly that. A window popup passes the new size to its
+    /// window; an overlaid one has to resize the control it hangs in the host, or the growth is
+    /// clipped away at the old edge.
+    /// </remarks>
     public void MoveTo(SKPoint location)
     {
         if (!_open)
@@ -156,8 +194,7 @@ public sealed class XPlatPopup : IDisposable
 
         if (_shownContent is { } content)
         {
-            content.Location = location;
-            SyncCatcherBounds();
+            PlaceOverlay(content, location);
         }
     }
 
@@ -171,6 +208,12 @@ public sealed class XPlatPopup : IDisposable
 
         _open = false;
 
+        if (_catcher is { } catcher)
+        {
+            _catcher = null;
+            (catcher.Host ?? _host)?.RemoveOverlay(catcher);
+        }
+
         if (_window is { } window)
         {
             _window = null;
@@ -183,17 +226,6 @@ public sealed class XPlatPopup : IDisposable
         if (_shownContent is { } content)
         {
             _shownContent = null;
-
-            if (_catcher is { } catcher)
-            {
-                _catcher = null;
-
-                if (content.Host is { } host)
-                {
-                    host.RemoveOverlay(catcher);
-                }
-            }
-
             content.Host?.RemoveOverlay(content);
         }
 
@@ -214,8 +246,8 @@ public sealed class XPlatPopup : IDisposable
 
     private bool TryShowInWindow(XPlatUiHost host, XPlatControl content, SKPoint location)
     {
-        var service = _owner.GetService<IXPlatPopupService>() ?? XPlatPopupService.Current;
-        var window = service?.CreatePopup(host, DismissOnOutsideClick);
+        var service = host.GetService<IXPlatPopupService>() ?? XPlatPopupService.Current;
+        var window = service?.CreatePopup(host, DismissOnOutsideClick, TakesPresses ?? DismissOnOutsideClick);
 
         if (window is null)
         {
@@ -224,6 +256,12 @@ public sealed class XPlatPopup : IDisposable
 
         _window = window;
         ActualPresentation = XPlatPopupPresentation.Window;
+
+        // A popup window is composited per pixel on every platform, so its surface starts out
+        // empty and only what the content paints shows. Clearing it to the theme background
+        // instead would fill the margin a menu keeps for its drop shadow, which turns the whole
+        // popup - and the union of a menu and its submenu - into an opaque rectangle.
+        window.Host.ClearColor = SKColors.Transparent;
         window.Host.Root = content;
         window.Dismissed += OnWindowDismissed;
         _open = true;
@@ -240,6 +278,15 @@ public sealed class XPlatPopup : IDisposable
             window.Host.Root = null;
             window.Dispose();
             throw;
+        }
+
+        // A press inside the window the popup belongs to is outside the popup, and a press outside
+        // the popup belongs to the popup: it closes it and stops there. A window popup covers that
+        // for the press that lands on the window itself, whichever platform draws the window.
+        if (DismissOnOutsideClick)
+        {
+            _catcher = new XPlatPopupDismissCatcher(this);
+            host.AddOverlay(_catcher);
         }
 
         return true;
@@ -260,7 +307,16 @@ public sealed class XPlatPopup : IDisposable
         }
 
         host.AddOverlay(content);
+        PlaceOverlay(content, location);
+    }
 
+    /// <summary>
+    /// Puts overlaid content at <paramref name="location" />, sized to what it measures now. Called
+    /// again whenever the content changes size while it is open, so the growth is never clipped at
+    /// the old edge.
+    /// </summary>
+    private void PlaceOverlay(XPlatControl content, SKPoint location)
+    {
         var size = MeasureContent();
         content.Bounds = new SKRect(location.X, location.Y, location.X + size.Width, location.Y + size.Height);
         content.PerformLayout();
@@ -309,6 +365,9 @@ internal sealed class XPlatPopupDismissCatcher : XPlatControl
         _popup = popup;
         Cursor = XPlatCursor.Default;
     }
+
+    // The catcher paints nothing, so the pointer still hovers whatever it covers.
+    internal override bool PassesHoverThrough => true;
 
     protected override void OnMouseDown(XPlatMouseEventArgs e)
     {

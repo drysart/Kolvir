@@ -182,6 +182,40 @@ public sealed class Gtk4SkiaView : IDisposable
     /// <summary>Gives the drawing area keyboard focus, which is how key events reach the host.</summary>
     public void Focus() => _area.GrabFocus();
 
+    /// <summary>
+    /// Paints the tree now, at a size the widget is about to be allocated, and hands the frame to
+    /// the picture before returning.
+    /// </summary>
+    /// <param name="width">Width in logical pixels.</param>
+    /// <param name="height">Height in logical pixels.</param>
+    /// <returns>True when a frame was painted.</returns>
+    /// <remarks>
+    /// A popup changes size while it is up, and GTK applies that geometry in its next layout pass
+    /// while a frame produced by the draw signal only reaches the picture one idle later. The pass
+    /// therefore runs with the picture still holding the previous frame, and a picture that fills
+    /// its allocation stretches that frame across the new size - which reads as the popup jumping
+    /// and stretching when a submenu opens. Painting before the pass means the pass already has the
+    /// frame for the new size.
+    /// </remarks>
+    public bool PaintNow(int width, int height)
+    {
+        if (_disposed || _inDraw || width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        var scale = ScaleFactor;
+
+        _width = width;
+        _height = height;
+        _scale = scale;
+
+        Host.SetClientSize(width, height);
+        PaintFrame(width, height, scale);
+
+        return true;
+    }
+
     /// <summary>Called periodically by the application backend; only reports under XPLATUI_DEBUG.</summary>
     public void ReportStatistics()
     {

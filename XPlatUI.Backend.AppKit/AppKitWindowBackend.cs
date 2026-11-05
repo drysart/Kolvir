@@ -38,7 +38,8 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
 
     private NSWindow? _window;
     private AppKitSkiaView? _view;
-    private AppKitContextMenuPresenter? _presenter;
+    private IXPlatContextMenuPresenter? _presenter;
+    private readonly bool _useXPlatMenus;
 
     private string _title = string.Empty;
     private SKSize _clientSize = new(800f, 600f);
@@ -69,6 +70,11 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         // The delegate must stay rooted for as long as the window points at it, and AppKit holds
         // only an unretained reference.
         _delegate = new WindowDelegate(this);
+
+        // Resolved once, when the window is created. The library's menus are the default on every
+        // platform; the system menu bar is only used when the application asks for it explicitly.
+        _useXPlatMenus = !(application.Application?.Options.MenuPresentation ?? XPlatMenuPresentation.Auto)
+            .UsesNativeMenus();
     }
 
     /// <inheritdoc />
@@ -295,12 +301,21 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
             }
 
             _menuBar = value;
-            _application.RebuildMenuBar();
+            ApplyMenuBar();
         }
     }
 
+    /// <summary>
+    /// Keeps the system bar in step with the window. macOS has one menu bar for the whole process,
+    /// owned by AppKit and drawn at the top of the screen, so this is the only bar the platform can
+    /// show: it is never drawn inside the Skia surface, whichever presentation the application asked
+    /// for. It carries the application menu, and the key equivalents the standard Edit commands rely
+    /// on come from being in it.
+    /// </summary>
+    private void ApplyMenuBar() => _application.RebuildMenuBar();
+
     /// <summary>The presenter that shows this window's context menus.</summary>
-    internal AppKitContextMenuPresenter? Presenter => _presenter;
+    internal IXPlatContextMenuPresenter? Presenter => _presenter;
 
     /// <summary>The native window, or null before it has been shown.</summary>
     internal NSWindow? Window => _window;
@@ -599,7 +614,12 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         _reportedState = CurrentState();
 
         // A context menu is anchored to the view that shows it, so it can only be built now.
-        _presenter = new AppKitContextMenuPresenter(view);
+        _presenter = _useXPlatMenus
+            ? new XPlatMenuPresenter()
+            : new AppKitContextMenuPresenter(view);
+
+        // The bar may have been assigned before there was a window to draw it in.
+        ApplyMenuBar();
 
         ApplySizeLimits();
 

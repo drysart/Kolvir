@@ -36,10 +36,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     private Gtk.ApplicationWindow? _window;
     private Gtk.Box? _container;
     private Gtk4SkiaView? _view;
-    private Gtk4ContextMenuPresenter? _presenter;
+    private IXPlatContextMenuPresenter? _presenter;
     private Gtk4MenuBar? _menuBarWidget;
     private GLib.MainLoop? _modalLoop;
     private IXPlatWindowBackend? _owner;
+    private readonly bool _useXPlatMenus;
 
     private string _title = string.Empty;
     private SKSize _clientSize = new(800f, 600f);
@@ -67,6 +68,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         ArgumentNullException.ThrowIfNull(window);
 
         _application = application;
+
+        // Resolved once, when the window is created: the application's presentation choice does not
+        // change while a window is open, and the presenters are installed from it.
+        _useXPlatMenus = !(application.Application?.Options.MenuPresentation ?? XPlatMenuPresentation.Auto)
+            .UsesNativeMenus();
     }
 
     /// <inheritdoc />
@@ -84,7 +90,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     public Gtk.Window? Window => _window;
 
     /// <summary>The presenter that shows context menus for this window.</summary>
-    internal Gtk4ContextMenuPresenter? Presenter => _presenter;
+    internal IXPlatContextMenuPresenter? Presenter => _presenter;
 
     /// <inheritdoc />
     public string Title
@@ -134,6 +140,15 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             // GTK sizes windows in logical pixels, which is the same space the library uses, so no
             // scale conversion is involved.
             _window?.SetDefaultSize(ToPixels(value.Width), ToPixels(value.Height));
+
+            // The drawing area reports its own size once GTK allocates it, but that happens a frame
+            // after the window is presented - later than the Shown event, which the other two
+            // backends raise with a host that already has its size. Seeding the host here keeps a
+            // popup opened from a Shown handler from being clamped to a 0 x 0 client area.
+            if (_host.ClientSize.Width <= 0f || _host.ClientSize.Height <= 0f)
+            {
+                _host.SetClientSize(value.Width, value.Height);
+            }
         }
     }
 
@@ -399,7 +414,9 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             }
         }
 
-        presenter?.Dismiss();
+        // Only the native presenter holds a live popover; the portable one owns no native state, so
+        // its menus close with the popups that the window is about to tear down.
+        (presenter as Gtk4ContextMenuPresenter)?.Dismiss();
 
         if (XPlatPopupService.Current is Gtk4PopupService)
         {
@@ -705,7 +722,9 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         _window = window;
         _container = container;
         _view = view;
-        _presenter = new Gtk4ContextMenuPresenter(view.Widget);
+        _presenter = _useXPlatMenus
+            ? new XPlatMenuPresenter()
+            : new Gtk4ContextMenuPresenter(view.Widget);
 
         _scale = view.ScaleFactor;
         _reportedState = CurrentState();
@@ -733,6 +752,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         // installed once that widget exists. Like the context menu presenter it is process wide and
         // stateless: it resolves the owning window from the host it is handed.
         XPlatPopupService.Current = new Gtk4PopupService();
+
+        // GTK reports the window as active only once it has been mapped, which is later than the
+        // Shown event, so a menu opened from a Shown handler would otherwise find no presenter.
+        // Moving between windows still hands the presenter to whichever one is active.
+        XPlatContextMenuPresenter.Current = _presenter;
 
         // A state requested before the window existed still has to be honoured, and a window can
         // only be minimized or maximized once it has been mapped.
@@ -789,6 +813,12 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
     private void ApplyMenuBar()
     {
+        if (_useXPlatMenus)
+        {
+            ApplyXPlatMenuBar();
+            return;
+        }
+
         if (_container is null)
         {
             return;
@@ -815,6 +845,29 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             _container.Prepend(_menuBarWidget.Widget);
             _menuBarAttached = true;
         }
+    }
+
+    /// <summary>
+    /// Puts the bar inside the Skia surface, so GTK4 draws the same strip Windows does. The host
+    /// owns it, which means it needs no native widget and survives the window being re-presented.
+    /// </summary>
+    private void ApplyXPlatMenuBar()
+    {
+        if (_menuBar is null || _menuBar.Menus.Count == 0)
+        {
+            _host.MenuBar = null;
+            return;
+        }
+
+        // Re-point an existing view rather than replacing it, so a bar that is filled in after it is
+        // assigned keeps the open-menu state.
+        if (_host.MenuBar is { } existing)
+        {
+            existing.MenuBar = _menuBar;
+            return;
+        }
+
+        _host.MenuBar = new XPlatMenuBarView(_menuBar);
     }
 
     private void OnViewMetricsChanged(object sender)

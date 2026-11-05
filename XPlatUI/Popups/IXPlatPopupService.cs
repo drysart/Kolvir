@@ -31,6 +31,19 @@ public interface IXPlatPopupWindow : IDisposable
     /// </remarks>
     bool DismissesOnOutsideClick { get; }
 
+    /// <summary>
+    /// Whether the popup takes the pointer at all, as opposed to passing it through to whatever it
+    /// covers.
+    /// </summary>
+    /// <remarks>
+    /// This is separate from <see cref="DismissesOnOutsideClick"/> because the two answer different
+    /// questions. A tooltip is dismissed by an outside press but must let that press reach the
+    /// control underneath it, so it takes nothing and dismisses. A submenu is not the surface that
+    /// dismisses the menu chain - its own menu does - but it has to be clickable, so it takes the
+    /// pointer and does not dismiss.
+    /// </remarks>
+    bool TakesPresses { get; }
+
     /// <summary>Raised when the platform dismissed the popup on the user's behalf.</summary>
     event Action<object>? Dismissed;
 
@@ -62,7 +75,30 @@ public interface IXPlatPopupService
     /// Whether a press outside the popup should close it. A drop-down list or a menu wants true; a
     /// tooltip wants false so the press reaches whatever it landed on.
     /// </param>
-    IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick);
+    /// <param name="takesPresses">
+    /// Whether the popup takes the pointer, as opposed to passing it through to what it covers.
+    /// </param>
+    IXPlatPopupWindow? CreatePopup(XPlatUiHost ownerHost, bool dismissOnOutsideClick, bool takesPresses);
+
+    /// <summary>
+    /// The work area of the display <paramref name="ownerHost"/> is on, in the owner's client
+    /// coordinates, or null when the popup will not be able to leave that client area.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A popup is a surface of its own, so the window it belongs to is not the limit of where it can
+    /// go: a menu opened near the bottom or right of a window still belongs on the display, not
+    /// folded back inside the window. Only the platform layer knows where the window sits on screen
+    /// and how big the display is, so it answers here and the portable layer places against the
+    /// answer.
+    /// </para>
+    /// <para>
+    /// Null means "inside the window", which is what a backend that paints popups inside the window
+    /// - GTK's popover, or the fallback overlay - has to say, because anything it is given beyond
+    /// the window would be clipped.
+    /// </para>
+    /// </remarks>
+    SKRect? GetPlacementArea(XPlatUiHost ownerHost);
 }
 
 /// <summary>
