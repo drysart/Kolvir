@@ -28,6 +28,8 @@ public abstract class HeadlessTestBase
         XPlatUndoClock.Current = TimeProvider.System;
         XPlatClipboard.SetText(null);
         XPlatClipboard.SetHtml(null, null);
-        XPlatLauncher.Current = null;
+        // The setter accepts null and installs its no-op fallback, which is what a test that put a
+        // recording launcher in place has to put back.
+        XPlatLauncher.Current = null!;
     }
 }
