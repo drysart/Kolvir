@@ -154,6 +154,7 @@ filters on:
 | `Headless` | Needs an application, a window or the host, driven through the headless backend. Runs everywhere. |
 | `Pixels` | Samples raster output, restricted to solid fills and semantic colours so it is stable across the three rasterisers. Runs everywhere. |
 | `Platform.Win32`, `Platform.AppKit`, `Platform.Gtk4` | Can only pass on one platform. The portable CI job skips these; a platform job can select them. |
+| `Feature`, `DragDrop` | The drag and drop feature's own suite. Runs everywhere. |
 
 To run exactly what CI runs:
 
@@ -161,6 +162,21 @@ To run exactly what CI runs:
 dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj \
   --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4"
 ```
+
+A rung-3 feature is a package of its own, so its tests are an assembly of their own:
+
+```
+dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj
+```
+
+`XPlatUI.Feature.DragDrop.Tests` uses the same categories, plus `Feature` and `DragDrop`, and the
+same filter. It targets plain `net10.0` on every platform even though the feature itself is split by
+platform: the tests only touch the feature's `common/` folder, and a test project that targeted
+`net10.0-macos` would need the .NET for macOS SDK with an exactly matching Xcode on whichever Mac
+builds it, which is a requirement no test project should impose. Driving a drag end to end needs the
+platform hook and a native window, so that half is exercised by the demo application rather than
+here; the feature's routing code is internal, so reaching it from a test would need
+`InternalsVisibleTo`, which this branch deliberately does not add.
 
 The suite deliberately has no committed golden images. Rasterisation of text differs by a fraction
 between platforms even with the font pinned, so a committed image would either have to be pinned to
