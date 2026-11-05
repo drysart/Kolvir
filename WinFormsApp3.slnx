@@ -6,6 +6,8 @@
   <Project Path="XPlatUI.Backend/XPlatUI.Backend.csproj" />
   <Project Path="XPlatUIDemo.App/XPlatUIDemo.App.csproj" />
   <Project Path="XPlatUI/XPlatUI.csproj" />
+  <Project Path="XPlatUI.Feature.Animations/XPlatUI.Feature.Animations.csproj" />
+  <Project Path="XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj" />
   <Project Path="XPlatUI.Feature.DragDrop/XPlatUI.Feature.DragDrop.csproj" />
   <Project Path="XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj" />
   <Project Path="XPlatUI.Minimal/XPlatUI.Minimal.csproj" />

@@ -1,8 +1,9 @@
 name: Tests
 
-# Both suites are portable net10.0 assemblies, so they need no window server, no display and no
-# platform workload: every test drives XPlatUI through the headless backend. That is why no leg of
-# this workflow installs a workload - the macOS build and feature pack workflows are the only jobs
+# All three suites are portable net10.0 assemblies, so they need no window server, no display and
+# no platform workload: every test drives XPlatUI through the headless backend, and the animation
+# suite drives its own clock and frame source rather than a real timer. That is why no leg of this
+# workflow installs a workload - the macOS build and feature pack workflows are the only jobs
 # that do, because they compile or pack the net10.0-macos target. The matrix is the point rather than
 # a formality - the same tests run on all three platforms, which is what keeps the portable claims
 # honest, and a control that only behaves on one of them fails here.
@@ -80,6 +81,7 @@ jobs:
         run: |
           dotnet restore XPlatUI.Tests/XPlatUI.Tests.csproj --nologo
           dotnet restore XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -114,6 +116,22 @@ jobs:
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=dragdrop.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The animations feature's suite, wired the same way and for the same reasons: its own
+      # assembly, the same category filter, and the same -p:TargetFramework=net10.0 narrowing
+      # because the feature lists all three frameworks unconditionally for `dotnet pack`. Every
+      # animation in it is driven by a hand-advanced clock and a frame source the test fires, so
+      # this leg is as deterministic as the other two and needs no display.
+      - name: Test the animations feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj --no-restore --nologo \
+            -p:TargetFramework=net10.0 \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=animations.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

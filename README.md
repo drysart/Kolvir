@@ -36,6 +36,9 @@ XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one
   windows/                the opt-in, its hook and the OLE IDropTarget they register
   linux/                  the opt-in, its hook and the GtkDropTarget controllers they add
   macos/                  the opt-in, its hook, and the sink it installs on the view (below)
+XPlatUI.Feature.Animations/ timeline animations, as a separate package: same layout, all portable
+  common/                 the set, the value animations, the easings and the app-wide frame clock
+  windows/ macos/ linux/  empty: an animation is arithmetic, a clock and an invalidation
 XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
 ```
 
@@ -111,6 +114,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
 | `IXPlatLauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
 | `XPlatUI.Tests` | a test project | One portable `net10.0` MSTest assembly that drives the library through the headless backend, so a control is exercised with no display; a test that can only run on one platform carries a `Platform.*` category rather than being skipped by accident |
+| `XPlatAnimationSet` + `XPlatUI.Animations` | a hand-written storyboard, or `System.Windows.Media.Animation` | `Start()`/`Pause()`/`Resume()`/`Restart()`/`End()` and one finished handler, as an opt-in package: one or more value animations on a shared timeline, eased by the factories in `XPlatEasing`, advanced by a single application-wide frame clock that runs only while something is animating |
 
 Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
 does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
@@ -155,6 +159,7 @@ filters on:
 | `Pixels` | Samples raster output, restricted to solid fills and semantic colours so it is stable across the three rasterisers. Runs everywhere. |
 | `Platform.Win32`, `Platform.AppKit`, `Platform.Gtk4` | Can only pass on one platform. The portable CI job skips these; a platform job can select them. |
 | `Feature`, `DragDrop` | The drag and drop feature's own suite. Runs everywhere. |
+| `Feature`, `Animations` | The animations feature's own suite. Runs everywhere. |
 
 To run exactly what CI runs:
 
@@ -168,7 +173,19 @@ A rung-3 feature is a package of its own, so its tests are an assembly of their 
 ```
 dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj \
   -p:TargetFramework=net10.0
+
+dotnet test XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj \
+  -p:TargetFramework=net10.0
 ```
+
+`XPlatUI.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
+`Animations` categories, the same filter, plain `net10.0` on every platform, and the same
+`-p:TargetFramework=net10.0` narrowing, because the feature lists all three frameworks
+unconditionally for `dotnet pack`. What its tests drive is the same code production runs: a
+`TestClock` the test advances and a `ManualFrameSource` the test fires are handed to a real
+`XPlatAnimationScheduler`, so the timeline's arithmetic and the clock's start and stop edges are
+exercised exactly rather than approximately, and nothing sleeps. The one thing the suite cannot show
+is a real timer waking a real window, which is what the demo's **Animations** page is for.
 
 `XPlatUI.Feature.DragDrop.Tests` uses the same categories, plus `Feature` and `DragDrop`, and the
 same filter. It targets plain `net10.0` on every platform even though the feature itself is split by
@@ -2505,6 +2522,111 @@ lost its payload, so `root.DragLeave += (_, _) => Reset();` becomes
 the only two lines with no counterpart. Leaving out the call still compiles and runs - the window
 simply never becomes a drop target - while leaving out the package removes the members the rest of
 this code is written against, which is the point of it being a package.
+
+### Animations
+
+Animations are a package of their own, `XPlatUI.Feature.Animations`, because an application that
+animates nothing should not carry a timeline. Nothing in it is native - an animation is arithmetic,
+a clock and an invalidation - so the whole feature is portable code and the package has one
+`common/` folder and three empty platform folders. Reference it and opt in:
+
+```csharp
+using XPlatUI.Animations;
+
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddAnimations(),
+};
+```
+
+The opt-in registers one **frame clock for the application**, not one per control. Every
+`XPlatAnimationSet` attaches to it, and it starts when the first set starts and stops when the last
+one finishes, pauses or is disposed - so an application sitting still runs no timer at all, which is
+the rule `CONTROLS-TODO.md` §2 sets for everything time-based in the library.
+
+An **`XPlatAnimationSet`** is one or more value animations on a shared timeline:
+
+```csharp
+var set = new XPlatAnimationSet();
+
+set.Add(XPlatValueAnimation.Create(
+    0f, 1f, TimeSpan.FromMilliseconds(240), value => card.Opacity = value,
+    easing: XPlatEasing.EaseOutCubic));
+
+// a stagger: same animation, three start times, measured from the same zero
+for (int i = 0; i < 3; i++)
+{
+    var tile = tiles[i];
+    set.Add(XPlatValueAnimation.Create(
+        0f, 1f, TimeSpan.FromMilliseconds(300), value => tile.Opacity = value,
+        startTime: TimeSpan.FromMilliseconds(80 * i)));
+}
+
+using var subscription = set.AddFinishedHandler(finished => Console.WriteLine($"{finished} is over"));
+
+set.Start();
+```
+
+An **`XPlatValueAnimation`** carries a start value, an end value, a duration, a start time relative
+to the set, an easing curve and the callback that assigns the current value. `XPlatValueAnimation.Create`
+has overloads for `float`, `double`, `SKColor`, `SKPoint`, `SKSize` and `SKRect`; for anything else,
+construct `XPlatValueAnimation<T>` with your own blend, which is the trim-safe way to extend it -
+there is no registry, no reflection and no static state:
+
+```csharp
+var lift = new XPlatValueAnimation<Level>(
+    Level.Quiet, Level.Loud, TimeSpan.FromMilliseconds(500),
+    value => meter.SetLevel(value),
+    (from, to, t) => Level.Blend(from, to, t));
+```
+
+**Easing** functions are static methods on `XPlatEasing`, pure and allocation-free: `Linear`,
+`EaseInQuad`, `EaseOutQuad`, `EaseInOutQuad`, and the same three for `Cubic` and `Sine`. Each maps
+`0` to `0` and `1` to `1`, which is what makes an animation settle exactly on its end value; a curve
+you write has to do the same. `XPlatInterpolation` has the blends, as overloads of `Lerp` so a
+method group picks the right one.
+
+The five methods and what each one means:
+
+| Call | What it does |
+| --- | --- |
+| `Start()` | Begins the timeline. On a set that is already running it does nothing, so calling it twice is harmless; on a paused set it resumes. On a finished set it does nothing - use `Restart()`. |
+| `Pause()` | Freezes the timeline where it is and lets go of the frame clock. |
+| `Resume()` | Continues a paused timeline. The request listed only four methods; a pause with no resume is a trap, so this is the fifth. |
+| `Restart()` | Back to zero and playing again, from any state including finished. It is a new run, so the finished handler runs again. |
+| `End()` | Finishes now: every animation is assigned its end value and the finished handler runs once. Ending one that has already finished does nothing. |
+
+A few consequences worth knowing before you rely on them:
+
+- **The finished handler is an `Add`/`Remove` pair**, not a C# `event`, like every other
+  notification in the library: `AddFinishedHandler(Action<object>)` returns a token that unsubscribes
+  on dispose, and the argument is the set. It runs once per run, on the UI thread, after the values
+  are already at their end. A handler that throws is reported through
+  `XPlatApplication.AddUnhandledExceptionHandler` and stops the handlers after it, exactly as a C#
+  event would.
+- **`End()` mid-flight runs the handler.** The timeline is over however it got there.
+- **A zero-length set costs nothing.** A set with no animations, or only zero-duration ones at time
+  zero, finishes inside `Start()` without ever asking for a frame.
+- **A zero-duration animation applies its end value** as soon as its start time arrives.
+- **A set is as long as its last animation**, so `startTime` lengthens the set rather than pushing
+  the timeline past its own end. The animation list is fixed by the first `Start()`: adding one after
+  that throws, because a length that changes underneath a running frame cannot be measured against.
+- **Values are assigned only when they change**, and a restarted set assigns its start values again
+  even when they match what it finished on. A frame that changes nothing calls no callback.
+- **The clock stops at the end of the frame**, not in the middle of it. A finished handler that runs
+  from a frame therefore still sees `scheduler.IsRunning == true`, and a handler that starts or
+  restarts a set keeps the clock running rather than stopping and restarting it for one frame's work.
+  A set ended from application code - by `End()`, `Pause()` or `Dispose()` - stops the clock before
+  the call returns.
+- **A callback that throws is reported, not retried.** It goes to
+  `XPlatApplication.AddUnhandledExceptionHandler` (the same route drag and drop uses) and the rest of
+  the frame still runs, so one bad animation cannot freeze the others. With no application in the
+  process there is nowhere to report it and the exception surfaces at the caller.
+
+The demo's **Animations** page runs nine animations on one timeline - a block that eases across its
+track, a bar that blends two colours on a different curve, three tiles that each arrive in a stagger
+of position and opacity, and a readout that is itself an animated value - with Start, Pause, Resume,
+Restart and End wired to the one set.
 
 ## Writing a backend
 
