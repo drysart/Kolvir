@@ -1420,8 +1420,9 @@ The library itself stays platform free, so one thing remains the adapter's job:
   (`Win32Clipboard.cs`), which publishes a real `HTML Format` payload.
 
 The caret is a control of its own: `XPlatCaret` owns the timer that blinks it and follows its
-control's focus and enabled state, so it only runs while the caret is actually on screen and an
-idle application has no timer running at all. `XPlatTextBox.Caret` exposes the instance it uses, so
+control's focus, enabled state and display state, so it only runs while the caret is actually on
+screen - hiding a container above a focused field stops the blink, and showing it again resumes it -
+and an idle application has no timer running at all. `XPlatTextBox.Caret` exposes the instance it uses, so
 its interval, width and color can be changed, and a new editable control gets the same caret with
 `new XPlatCaret(this)`. A control that animates something else does the same through `CreateTimer`,
 which hands back an `XPlatTimer` the control owns and that is disposed with it. The wait itself comes

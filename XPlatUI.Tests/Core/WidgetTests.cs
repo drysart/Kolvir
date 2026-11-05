@@ -75,7 +75,7 @@ public sealed class WidgetTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
 
-        WhenShown(scene, () =>
+        scene.RunWhileShown(() =>
         {
             Assert.IsTrue(backend.Timer.IsRunning, "a bar on screen should be sweeping");
             Assert.AreEqual(
@@ -104,7 +104,7 @@ public sealed class WidgetTests : HeadlessTestBase
         using var scene = HeadlessScene.Create(backend, panel, 240f, 60f);
         scene.Paint();
 
-        WhenShown(scene, () =>
+        scene.RunWhileShown(() =>
         {
             Assert.IsTrue(backend.Timer.IsRunning);
 
@@ -127,7 +127,7 @@ public sealed class WidgetTests : HeadlessTestBase
         using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
         scene.Paint();
 
-        WhenShown(scene, () =>
+        scene.RunWhileShown(() =>
         {
             Assert.IsTrue(backend.Timer.IsRunning);
 
@@ -147,7 +147,7 @@ public sealed class WidgetTests : HeadlessTestBase
         using var scene = HeadlessScene.Create(backend, host, 240f, 60f);
         scene.Paint();
 
-        WhenShown(scene, () =>
+        scene.RunWhileShown(() =>
         {
             Assert.IsFalse(backend.Timer.IsRunning, "the bar is not in the tree yet");
 
@@ -190,7 +190,7 @@ public sealed class WidgetTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
 
-        WhenShown(scene, () =>
+        scene.RunWhileShown(() =>
         {
             // The first tick after a start advances by exactly one interval, so the phase after it
             // is a known fraction of the sweep rather than anything the wall clock decided.
@@ -569,18 +569,6 @@ public sealed class WidgetTests : HeadlessTestBase
 
         strip.Items.Add(button);
         Assert.IsTrue(strip.TabStop, "adding an interactive item makes the strip one tab stop");
-    }
-
-    /// <summary>
-    /// Shows the scene's window and runs <paramref name="body"/> once it is on screen, which is the
-    /// only moment a window is really visible: <see cref="XPlatWindow.Show"/> outside
-    /// <see cref="XPlatApplication.Run"/> only registers it.
-    /// </summary>
-    private static void WhenShown(HeadlessScene scene, Action body)
-    {
-        scene.Window.AddShownHandler(_ => body());
-        scene.Window.Show();
-        scene.Application.Run();
     }
 
     /// <summary>Encodes a small solid PNG so the image control has real bytes to decode.</summary>
