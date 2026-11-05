@@ -173,7 +173,14 @@ internal sealed class XPlatDragDropRouter
                 continue;
             }
 
-            Leave();
+            // Only a change of target ends a drag for the control that had it. A drag that is still
+            // over the same control has not left it, and telling it that it had would take away the
+            // highlight it put up when the drag arrived.
+            if (!ReferenceEquals(control, _target))
+            {
+                Leave();
+            }
+
             _target = control;
             return accepted;
         }
