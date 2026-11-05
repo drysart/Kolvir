@@ -52,10 +52,10 @@ public static class XPlatInterpolation
     /// space would look better and disagree with every other colour in the tree.
     /// </remarks>
     public static SKColor Lerp(SKColor from, SKColor to, double t) => new(
-        Channel(from.Alpha, to.Alpha, t),
         Channel(from.Red, to.Red, t),
         Channel(from.Green, to.Green, t),
-        Channel(from.Blue, to.Blue, t));
+        Channel(from.Blue, to.Blue, t),
+        Channel(from.Alpha, to.Alpha, t));
 
     /// <summary>Blends two points coordinate by coordinate.</summary>
     /// <param name="from">The point at <paramref name="t"/> 0.</param>
