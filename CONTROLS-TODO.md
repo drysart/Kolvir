@@ -49,8 +49,8 @@ a reviewer should ask for each one rather than infer it.
 	with no rebuild;
   - events come in `AddXxxHandler` / `RemoveXxxHandler` pairs returning `XPlatHandlerToken<T>`.
 - Input is complete: pointer press inside/release inside is a click, hover and press are distinct
-  states, `TabStop`/`TabIndex` order it, the keys a native control of that kind would take are
-  handled and marked `e.Handled`, and focus draws a ring.
+  states, `TabStop`/`TabIndex` order it - per container, with tree order breaking ties - the keys a
+  native control of that kind would take are handled and marked `e.Handled`, and focus draws a ring.
 - Disabled is complete: no input, `XPlatTheme.DisabledBackground` / `DisabledForeground`, any press
   cancelled and capture released in `OnEnabledChanged`. The cascade from a disabled ancestor is
   inherited from `XPlatControl` and needs no code.

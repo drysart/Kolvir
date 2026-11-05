@@ -222,6 +222,196 @@ public sealed class ControlModelTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void TabFollowsTabIndexRatherThanTreeOrder()
+    {
+        // Created in the order third, second, first, so tree order and index order disagree.
+        var third = new XPlatButton("third") { Dock = DockStyle.Top, TabIndex = 2 };
+        var second = new XPlatButton("second") { Dock = DockStyle.Top, TabIndex = 1 };
+        var first = new XPlatButton("first") { Dock = DockStyle.Top, TabIndex = 0 };
+        var panel = PlainContainer();
+        panel.Controls.Add(third);
+        panel.Controls.Add(second);
+        panel.Controls.Add(first);
+
+        using var scene = HeadlessScene.Create(panel, 200f, 200f);
+
+        third.Focus();
+        Assert.AreSame(third, scene.Host.FocusedControl);
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(first, scene.Host.FocusedControl, "index 0 should follow the last index once the order wraps");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(second, scene.Host.FocusedControl, "then index 1, not the child that comes next in the tree");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(third, scene.Host.FocusedControl, "and index 2 last");
+    }
+
+    [TestMethod]
+    public void ShiftTabFollowsTabIndexBackwards()
+    {
+        // Created in the order third, second, first, so tree order and index order disagree.
+        var third = new XPlatButton("third") { Dock = DockStyle.Top, TabIndex = 2 };
+        var second = new XPlatButton("second") { Dock = DockStyle.Top, TabIndex = 1 };
+        var first = new XPlatButton("first") { Dock = DockStyle.Top, TabIndex = 0 };
+        var panel = PlainContainer();
+        panel.Controls.Add(third);
+        panel.Controls.Add(second);
+        panel.Controls.Add(first);
+
+        using var scene = HeadlessScene.Create(panel, 200f, 200f);
+
+        third.Focus();
+        scene.Key(XPlatKey.Tab, XPlatModifiers.Shift);
+        Assert.AreSame(second, scene.Host.FocusedControl, "Shift+Tab should walk the indices downwards, not the tree");
+
+        scene.Key(XPlatKey.Tab, XPlatModifiers.Shift);
+        Assert.AreSame(first, scene.Host.FocusedControl);
+
+        scene.Key(XPlatKey.Tab, XPlatModifiers.Shift);
+        Assert.AreSame(third, scene.Host.FocusedControl, "and wrap from the lowest index to the highest");
+    }
+
+    [TestMethod]
+    public void EqualTabIndexValuesKeepTreeOrder()
+    {
+        var first = new XPlatButton("first") { Dock = DockStyle.Top, TabIndex = 1 };
+        var second = new XPlatButton("second") { Dock = DockStyle.Top, TabIndex = 1 };
+        var third = new XPlatButton("third") { Dock = DockStyle.Top, TabIndex = 1 };
+        var panel = PlainContainer();
+        panel.Controls.Add(first);
+        panel.Controls.Add(second);
+        panel.Controls.Add(third);
+
+        using var scene = HeadlessScene.Create(panel, 200f, 200f);
+
+        first.Focus();
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(second, scene.Host.FocusedControl, "equal indices should keep the order the children were added in");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(third, scene.Host.FocusedControl, "and stay in that order to the end of the group");
+    }
+
+    [TestMethod]
+    public void TabSkipsAControlThatIsNotATabStopEvenInTabIndexOrder()
+    {
+        // A(0), skipped(1), B(2), C(3) by index; A, C, B by tree order, so both the skip and the
+        // order are needed to explain where focus lands.
+        var last = new XPlatButton("last") { Dock = DockStyle.Top, TabIndex = 3 };
+        var second = new XPlatButton("second") { Dock = DockStyle.Top, TabIndex = 2 };
+        var skipped = new XPlatButton("skipped") { Dock = DockStyle.Top, TabIndex = 1, TabStop = false };
+        var first = new XPlatButton("first") { Dock = DockStyle.Top, TabIndex = 0 };
+        var panel = PlainContainer();
+        panel.Controls.Add(first);
+        panel.Controls.Add(skipped);
+        panel.Controls.Add(last);
+        panel.Controls.Add(second);
+
+        using var scene = HeadlessScene.Create(panel, 200f, 240f);
+
+        first.Focus();
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(second, scene.Host.FocusedControl, "a control that is not a tab stop is skipped wherever its index puts it");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(last, scene.Host.FocusedControl, "and the stops after it follow their own indices");
+        Assert.AreNotSame(skipped, scene.Host.FocusedControl);
+    }
+
+    [TestMethod]
+    public void TabSkipsADisabledControlInTheMiddleOfTheIndexOrder()
+    {
+        // A(0), disabled(1), B(2), C(3) by index; A, C, B by tree order.
+        var last = new XPlatButton("last") { Dock = DockStyle.Top, TabIndex = 3 };
+        var second = new XPlatButton("second") { Dock = DockStyle.Top, TabIndex = 2 };
+        var skipped = new XPlatButton("skipped") { Dock = DockStyle.Top, TabIndex = 1, Enabled = false };
+        var first = new XPlatButton("first") { Dock = DockStyle.Top, TabIndex = 0 };
+        var panel = PlainContainer();
+        panel.Controls.Add(first);
+        panel.Controls.Add(skipped);
+        panel.Controls.Add(last);
+        panel.Controls.Add(second);
+
+        using var scene = HeadlessScene.Create(panel, 200f, 240f);
+
+        first.Focus();
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(second, scene.Host.FocusedControl, "a disabled control in the middle of the order is skipped");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(last, scene.Host.FocusedControl, "and the stops after it follow their own indices");
+    }
+
+    [TestMethod]
+    public void ANestedContainerOrdersItsOwnChildrenAndIsEnteredAsAUnit()
+    {
+        // The outer order is first, panel, last; the inner order is innerSecond, innerFirst. The
+        // inner indices are deliberately smaller than the outer ones: if the order were flat they
+        // would sort against the outer controls instead of among themselves.
+        var last = new XPlatButton("last") { Dock = DockStyle.Top, TabIndex = 9 };
+        var innerSecond = new XPlatButton("innerSecond") { Dock = DockStyle.Top, TabIndex = 5 };
+        var innerFirst = new XPlatButton("innerFirst") { Dock = DockStyle.Top, TabIndex = 1 };
+        var nested = PlainContainer();
+        nested.Dock = DockStyle.Top;
+        nested.Height = 80f;
+        nested.TabIndex = 1;
+        nested.Controls.Add(innerSecond);
+        nested.Controls.Add(innerFirst);
+
+        var first = new XPlatButton("first") { Dock = DockStyle.Top, TabIndex = 0 };
+        var panel = PlainContainer();
+        panel.Controls.Add(last);
+        panel.Controls.Add(nested);
+        panel.Controls.Add(first);
+
+        using var scene = HeadlessScene.Create(panel, 200f, 240f);
+
+        first.Focus();
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(innerFirst, scene.Host.FocusedControl, "a nested container should enter its own order, not the outer one");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(innerSecond, scene.Host.FocusedControl, "and finish its own order before leaving");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(last, scene.Host.FocusedControl, "then continue with the container's own next sibling");
+
+        scene.Key(XPlatKey.Tab, XPlatModifiers.Shift);
+        Assert.AreSame(innerSecond, scene.Host.FocusedControl, "Shift+Tab should re-enter the container at its last stop");
+    }
+
+    [TestMethod]
+    public void AFocusableContainerHasItsOwnPlaceInTheOrder()
+    {
+        // A split container is a tab stop that has children of its own: it is one step of the outer
+        // order, and its children are visited straight after it rather than interleaved with it.
+        var last = new XPlatButton("last") { Dock = DockStyle.Top, TabIndex = 2 };
+        var container = new XPlatSplitContainer { TabIndex = 1, Height = 120f, Dock = DockStyle.Top };
+        var inside = new XPlatButton("inside") { Dock = DockStyle.Top, TabIndex = 0 };
+        container.Panel1.Controls.Add(inside);
+
+        var first = new XPlatButton("first") { Dock = DockStyle.Top, TabIndex = 0 };
+        var panel = PlainContainer();
+        panel.Controls.Add(last);
+        panel.Controls.Add(container);
+        panel.Controls.Add(first);
+
+        using var scene = HeadlessScene.Create(panel, 200f, 320f);
+
+        first.Focus();
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(container, scene.Host.FocusedControl, "a focusable container takes its own place in the order");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(inside, scene.Host.FocusedControl, "and its children come straight after it");
+
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(last, scene.Host.FocusedControl, "before the container's next sibling");
+    }
+
+    [TestMethod]
     public void AHandlerTokenRemovesItsHandlerOnDispose()
     {
         var button = new XPlatButton("Go") { Dock = DockStyle.Fill };

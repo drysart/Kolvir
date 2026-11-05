@@ -242,6 +242,31 @@ host.ProcessTextInput("a");
 `host.AddInvalidatedHandler` tells the adapter to repaint; `host.AddCursorChangedHandler` lets it
 update the native cursor.
 
+### Focus and tab order
+
+`Tab` and `Shift+Tab` walk the controls that are both `TabStop` and `Focusable`, skipping anything
+invisible or disabled and anything inside an invisible or disabled container. The order is the one
+WinForms has, because an application author coming from it will expect it:
+
+- **Per container.** Each container visits its own children in `TabIndex` order, so a control inside
+  a nested panel is ordered against its siblings there and never against the controls outside that
+  panel. The lowest index is visited first; the default, 0, leaves the children in the order they
+  were added.
+- **Equal indices keep tree order.** Two controls with the same `TabIndex` are visited in the order
+  they were added, so the walk is deterministic rather than dependent on how a sort permutes equals.
+  With every index at its default that makes the whole walk plain tree order.
+- **A focusable container is one step.** A container that is itself a `TabStop` - a split container,
+  for instance - takes its own place among its siblings, and its children are visited straight after
+  it: index 1 on a container puts the container, then its contents, between index 0 and index 2.
+- **It wraps.** `Tab` at the last stop goes back to the first, and `Shift+Tab` at the first goes to
+  the last; `host.FocusedControl` is the control the walk landed on.
+
+```csharp
+var name = new XPlatTextBox { TabIndex = 0, Dock = DockStyle.Top };
+var notes = new XPlatTextBox { TabIndex = 2, Dock = DockStyle.Fill, Multiline = true };
+var ok = new XPlatButton("OK") { TabIndex = 1, Dock = DockStyle.Bottom };   // visited second
+```
+
 ### Handlers
 
 There are no C# events. Every notification is a pair of methods, `Add<Name>Handler` and

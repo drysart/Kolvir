@@ -1354,6 +1354,30 @@ public sealed class XPlatUiHost
         SetFocus(focusable[next]);
     }
 
+    /// <summary>
+    /// Collects the controls Tab can reach, in the order it reaches them.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Tab order is per container, the way WinForms nests it: each container visits its own
+    /// children in <see cref="XPlatControl.TabIndex"/> order, and a container that is itself a tab
+    /// stop is collected before its children, so it is entered as a unit rather than interleaved
+    /// with them. A child container's indices are therefore only compared with its siblings' -
+    /// a control inside a nested panel does not sort against controls outside it.
+    /// </para>
+    /// <para>
+    /// Equal <see cref="XPlatControl.TabIndex"/> values fall back to the order the children were
+    /// added in, so the result is deterministic rather than dependent on how a sort happens to
+    /// permute equals. With the default index of 0 everywhere that makes the walk plain tree order,
+    /// which is what the host did before it ordered by index at all.
+    /// </para>
+    /// <para>
+    /// Only the order changes here. Which controls are eligible is unchanged: a control is a stop
+    /// when it is <see cref="XPlatControl.TabStop"/> and <see cref="XPlatControl.Focusable"/>, and
+    /// an invisible or disabled control - or one inside an invisible or disabled container - takes
+    /// no part in the walk at all.
+    /// </para>
+    /// </remarks>
     private static void CollectFocusable(XPlatControl? control, List<XPlatControl> output)
     {
         if (control is null || !control.Visible || !control.Enabled)
@@ -1366,12 +1390,35 @@ public sealed class XPlatUiHost
             output.Add(control);
         }
 
-        if (control.HasChildren)
+        int count = control.Controls.Count;
+        if (count == 0)
         {
-            foreach (var child in control.Controls)
-            {
-                CollectFocusable(child, output);
-            }
+            return;
+        }
+
+        if (count == 1)
+        {
+            CollectFocusable(control.Controls[0], output);
+            return;
+        }
+
+        // Array.Sort is not stable, so the current position is part of the key: that is what makes
+        // equal indices keep tree order. The library does not reference System.Linq for an OrderBy.
+        var order = new int[count];
+        for (int i = 0; i < count; i++)
+        {
+            order[i] = i;
+        }
+
+        Array.Sort(order, (left, right) =>
+        {
+            int byIndex = control.Controls[left].TabIndex.CompareTo(control.Controls[right].TabIndex);
+            return byIndex != 0 ? byIndex : left.CompareTo(right);
+        });
+
+        foreach (int index in order)
+        {
+            CollectFocusable(control.Controls[index], output);
         }
     }
 
