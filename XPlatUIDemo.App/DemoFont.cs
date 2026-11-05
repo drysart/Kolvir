@@ -7,7 +7,7 @@ namespace XPlatUI.Demo;
 /// IBM Plex Sans is licensed under the SIL Open Font License 1.1; the licence text is
 /// <c>XPlatUIDemo.App/Fonts/OFL.txt</c>. The face is deliberately one the test machines do not have
 /// installed, so a measurement taken with it can only have come from these bytes - which is what the
-/// font page and <c>--font-check</c> rely on.
+/// font page and the test suite's <c>FontLoadingTests</c> rely on.
 /// </remarks>
 internal static class DemoFont
 {

@@ -79,30 +79,10 @@ internal static class Program
             return RenderSample(args);
         }
 
-        // The undo history's headless input harness: it drives real text boxes through the host's
-        // input entry points on the headless backend and checks what the history made of it. It has
-        // to run before any toolkit is touched for the same reason --render does, and it exits
-        // non-zero when a check fails so it can gate a build.
-        if (args.Length > 0 && args[0] == "--undo-check")
-        {
-            return UndoChecks.Run(args.Length > 1 ? args[1] : null);
-        }
-
-        // The font loaders' headless harness: it measures the face the sample bundles, prints the
-        // numbers that have to match on all three platforms, and checks every failure path. Like
-        // --render it needs no window and no display, so it comes before anything touches a toolkit.
-        if (args.Length > 0 && args[0] == "--font-check")
-        {
-            return FontChecks.Run(args.Length > 1 ? args[1] : null);
-        }
-
-        // The inherited appearance model's headless harness: it builds real trees on the headless
-        // backend and checks where a font, a foreground and a background resolve to, including
-        // changes made after the controls exist. Like --render it needs no window and no display.
-        if (args.Length > 0 && args[0] == "--appearance-check")
-        {
-            return AppearanceChecks.Run(args.Length > 1 ? args[1] : null);
-        }
+        // The undo history, the font loaders and the inherited appearance model used to have their
+        // own headless harnesses here. They are XPlatUI.Tests now: the same scenarios as real tests,
+        // so they run in CI on all three platforms instead of only where someone remembered to pass
+        // a flag.
 
 #if !WINDOWS && !MACOS
         // Registers the native library resolver for the GTK/GDK/GLib bindings and opens the display,
