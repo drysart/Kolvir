@@ -30,6 +30,7 @@ public class XPlatControl : IDisposable
     private Action<object>? _textChanged;
     private Action<object>? _visibleChanged;
     private Action<object>? _enabledChanged;
+    private Action<XPlatContextMenuEventArgs>? _contextMenuOpening;
     private SKRect _bounds;
     private SKSize _desiredSize;
     private SKSize _minimumSize;
@@ -301,6 +302,62 @@ public class XPlatControl : IDisposable
 
     /// <summary>Arbitrary user data associated with the control.</summary>
     public object? Tag { get; set; }
+
+    /// <summary>
+    /// Adds a handler that runs before this control's context menu is shown, so a control's own
+    /// right-click behaviour - the menu it offers, and what it can say about where the pointer
+    /// landed - is attached to the control rather than to the window.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The host raises the event for the control under the pointer, or for its nearest ancestor that
+    /// has a handler, so nothing outside the control has to know which control was clicked. An
+    /// ancestor can therefore give every child the same handler without repeating itself, the way
+    /// <see cref="ContextMenu"/> already works.
+    /// </para>
+    /// <para>
+    /// The handler receives the menu the control contributed in
+    /// <see cref="XPlatContextMenuEventArgs.Menu"/> and adds to it - its own items in front with
+    /// <see cref="XPlatContextMenu.Insert"/>, or after them with <see cref="XPlatContextMenu.Add"/> -
+    /// so a spell-checking menu sits beside a text box's Cut/Copy/Paste rather than replacing it.
+    /// Assigning a different menu, or clearing the one it was given, is how a handler suppresses what
+    /// the control would have offered. The host's own
+    /// <see cref="XPlatUiHost.AddContextMenuOpeningHandler"/> is the application-wide fallback and
+    /// runs only when no control ran a handler or supplied a menu.
+    /// </para>
+    /// </remarks>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
+    public IDisposable AddContextMenuOpeningHandler(Action<XPlatContextMenuEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _contextMenuOpening += handler;
+        return new XPlatHandlerToken<Action<XPlatContextMenuEventArgs>>(RemoveContextMenuOpeningHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddContextMenuOpeningHandler"/> added.</summary>
+    public void RemoveContextMenuOpeningHandler(Action<XPlatContextMenuEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _contextMenuOpening -= handler;
+    }
+
+    /// <summary>
+    /// Raises the context-menu event on this control, or on the nearest ancestor that has a handler,
+    /// and reports whether one ran. A control that has no handler of its own passes the event up, so
+    /// a container answers for its children.
+    /// </summary>
+    protected internal virtual bool RaiseContextMenuOpening(XPlatContextMenuEventArgs args)
+    {
+        ArgumentNullException.ThrowIfNull(args);
+
+        if (_contextMenuOpening is { } handlers)
+        {
+            handlers(args);
+            return true;
+        }
+
+        return Parent?.RaiseContextMenuOpening(args) ?? false;
+    }
 
     /// <summary>
     /// Menu shown when the control is right-clicked. When null the nearest ancestor's menu is

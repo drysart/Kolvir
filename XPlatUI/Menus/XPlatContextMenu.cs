@@ -55,6 +55,17 @@ public sealed class XPlatContextMenu
     /// <summary>Adds a separator line between two groups of items.</summary>
     public XPlatContextMenu AddSeparator() => Add(XPlatMenuItem.Separator);
 
+    /// <summary>
+    /// Inserts an item at <paramref name="index"/>, so a handler can put its own group in front of
+    /// what the control contributed, or between two of its groups.
+    /// </summary>
+    public XPlatContextMenu Insert(int index, XPlatMenuItem item)
+    {
+        ArgumentNullException.ThrowIfNull(item);
+        _items.Insert(Math.Clamp(index, 0, _items.Count), item);
+        return this;
+    }
+
     public XPlatContextMenu Clear()
     {
         _items.Clear();

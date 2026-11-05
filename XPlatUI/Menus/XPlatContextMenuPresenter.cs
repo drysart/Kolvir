@@ -35,10 +35,14 @@ public sealed class XPlatContextMenuRequest
 
 /// <summary>
 /// Handed to the handlers <see cref="XPlatUiHost.AddContextMenuOpeningHandler"/> added before a
-/// context menu is shown, so an application can build a menu for a control that does not carry one.
-/// Assigning
-/// <see cref="Menu"/> takes precedence over the host's default selection menu.
+/// context menu is shown, so an application can see where the right-click landed - which control,
+/// at which point - and build the menu for it.
 /// </summary>
+/// <remarks>
+/// The handlers run for every right-click, whether or not the control under the pointer carries a
+/// menu of its own. Assigning <see cref="Menu"/> takes precedence over the menu the control offered
+/// and over the host's default selection menu.
+/// </remarks>
 public sealed class XPlatContextMenuEventArgs
 {
     internal XPlatContextMenuEventArgs(XPlatControl? control, SKPoint location)
@@ -53,8 +57,22 @@ public sealed class XPlatContextMenuEventArgs
     /// <summary>Where the menu will be shown, in logical pixels in the host's coordinate space.</summary>
     public SKPoint Location { get; }
 
-    /// <summary>The menu to show. Null falls through to the host's default selection menu.</summary>
+    /// <summary>
+    /// The menu being composed. It starts as what the control under the pointer contributes - a
+    /// text box starts with Cut, Copy, Paste and Select All, enabled for the current state - so a
+    /// handler adds its own items to it, with <see cref="XPlatContextMenu.Insert"/> to put them in
+    /// front or <see cref="XPlatContextMenu.Add"/> to append them. Assigning a different menu, or
+    /// clearing this one, suppresses the control's contribution.
+    /// </summary>
     public XPlatContextMenu? Menu { get; set; }
+
+    /// <summary>
+    /// What the control under the pointer found for this press, if it records anything - a text box
+    /// puts the annotated span the pointer landed in here. Object-typed on purpose: naming a
+    /// feature's own types would publish them to applications that never use the feature, and this
+    /// costs one pointer on an object that only exists while a menu is being built.
+    /// </summary>
+    internal object? Hit { get; set; }
 }
 
 /// <summary>

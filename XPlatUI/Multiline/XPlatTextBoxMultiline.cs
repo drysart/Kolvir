@@ -46,7 +46,6 @@ internal sealed class XPlatTextBoxMultiline : IXPlatTextBoxMultiline
 
     private readonly XPlatTextBox _textBox;
     private readonly XPlatScrollBars _scroll;
-    private readonly List<SKRect> _scratch = [];
 
     private List<TextLine>? _lines;
     private string? _linesText;
@@ -258,17 +257,8 @@ internal sealed class XPlatTextBoxMultiline : IXPlatTextBoxMultiline
 
         using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
 
-        if (textBox.HasSelection && textBox.Enabled)
-        {
-            _scratch.Clear();
-            GetSelectionRects(textBox, viewport, textBox.SelectionStart, textBox.SelectionLength, _scratch);
-            paint.Color = XPlatTheme.Selection;
-
-            foreach (var selection in _scratch)
-            {
-                canvas.DrawRect(selection, paint);
-            }
-        }
+        // The selection and the annotation squiggles are painted by the control before this call,
+        // and the caret after it, so all three land in the same order on a one-line field too.
 
         if (textBox.Text.Length == 0 && !string.IsNullOrEmpty(placeholderText))
         {
@@ -309,7 +299,8 @@ internal sealed class XPlatTextBoxMultiline : IXPlatTextBoxMultiline
             }
         }
 
-        textBox.Caret.Draw(canvas, GetCaretBounds(textBox, viewport));
+        // The caret is not drawn here: the control draws it after the annotation squiggles, so the
+        // order is the same on a one-line and a multi-line field.
 
         canvas.Restore();
     }

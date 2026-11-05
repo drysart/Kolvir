@@ -1,6 +1,7 @@
 using System.Text;
 using SkiaSharp;
 using XPlatUI.Multiline;
+using XPlatUI.Spans;
 
 namespace XPlatUI;
 
@@ -74,11 +75,21 @@ public class XPlatTextBox : XPlatControl
     /// </remarks>
     internal IXPlatTextBoxMultiline? MultilineFeature { get; set; }
 
+    /// <summary>
+    /// The span annotation feature when this box has spans, otherwise null. The second of the text
+    /// box's two nullable seams, and the same shape as <see cref="MultilineFeature"/>: drawing a
+    /// squiggle is the control's own paint path, so it cannot live outside the control, while every
+    /// type that knows how to draw one is named only by the extension property that installs this.
+    /// A box that never assigns <c>Spans</c> therefore carries the reference and a null check on the
+    /// paint path and publishes without the rest.
+    /// </summary>
+    internal IXPlatTextBoxSpanFeature? SpanFeature { get; set; }
+
     /// <summary>True when the box edits several lines. Answers from the seam, so it costs one null check.</summary>
     internal bool IsMultiline => MultilineFeature is not null;
 
     /// <summary>The client area and padding the multi-line feature lays text out against.</summary>
-    private XPlatTextBoxViewport Viewport => new(ClientRect, ContentPadding);
+    internal XPlatTextBoxViewport Viewport => new(ClientRect, ContentPadding);
 
     /// <summary>
     /// The text as a value. A multi-line box normalises what it is given: CRLF and a lone CR become
@@ -415,10 +426,41 @@ public class XPlatTextBox : XPlatControl
     }
 
     /// <summary>
+    /// Records which annotated span the press landed in before any handler sees the event, so the
+    /// answer is the one the frame showed rather than a hit test re-run later, when the field may
+    /// have been scrolled or re-wrapped underneath the pointer. A press outside every span, and a
+    /// press routed up from a child control, both record null.
+    /// </summary>
+    protected internal override bool RaiseContextMenuOpening(XPlatContextMenuEventArgs args)
+    {
+        if (SpanFeature is { } spans)
+        {
+            if (ReferenceEquals(args.Control, this))
+            {
+                var origin = GetPositionInHost();
+                args.Hit = spans.HitTest(this, new SKPoint(args.Location.X - origin.X, args.Location.Y - origin.Y));
+            }
+            else
+            {
+                args.Hit = null;
+            }
+        }
+
+        return base.RaiseContextMenuOpening(args);
+    }
+
+    /// <summary>
     /// Offers the editing commands the box supports - Cut, Copy, Paste and Select All - instead
     /// of the generic menu. Copy falls back to the host's selection when the box is only part of
     /// a larger selection, which is what the generic menu would have offered.
     /// </summary>
+    /// <remarks>
+    /// This is what a right-click over the box starts with: a handler adds its own items to it, so
+    /// an annotation menu sits beside the editing commands rather than replacing them. Each command
+    /// is enabled by the rule the command itself obeys - nothing selected means no Cut or Copy, a
+    /// read-only box means no Cut or Paste, an empty clipboard means no Paste, and empty text means
+    /// no Select All - so a disabled row here and a call that would have done nothing agree.
+    /// </remarks>
     protected internal override XPlatContextMenu? BuildContextMenu()
     {
         if (ContextMenu is not null || !Enabled)
@@ -427,11 +469,14 @@ public class XPlatTextBox : XPlatControl
         }
 
         bool hasSelection = HasSelection;
+        bool canWrite = !ReadOnly;
+        bool canPaste = canWrite && !string.IsNullOrEmpty(XPlatClipboard.GetText());
+
         return new XPlatContextMenu()
             .Add(new XPlatMenuItem("Cut", () => Cut())
             {
                 Shortcut = new XPlatShortcut(XPlatKey.X),
-                Enabled = !ReadOnly && hasSelection,
+                Enabled = canWrite && hasSelection,
             })
             .Add(new XPlatMenuItem("Copy", CopySelection)
             {
@@ -441,7 +486,7 @@ public class XPlatTextBox : XPlatControl
             .Add(new XPlatMenuItem("Paste", () => Paste())
             {
                 Shortcut = new XPlatShortcut(XPlatKey.V),
-                Enabled = !ReadOnly,
+                Enabled = canPaste,
             })
             .AddSeparator()
             .Add(new XPlatMenuItem("Select All", SelectAll)
@@ -483,7 +528,12 @@ public class XPlatTextBox : XPlatControl
     {
         if (MultilineFeature is { } multiline)
         {
+            // The feature lays the text out and paints it; everything that has to sit under or over
+            // the glyphs is drawn here, so the order is the same on a one-line field.
+            var area = Viewport.Text;
+            PaintUnderText(canvas, area);
             multiline.Paint(this, canvas, Viewport, _placeholderText);
+            PaintCaret(canvas, area);
             return;
         }
 
@@ -492,6 +542,8 @@ public class XPlatTextBox : XPlatControl
         {
             return;
         }
+
+        PaintUnderText(canvas, content);
 
         var display = DisplayText;
         float lineHeight = _font.LineHeight;
@@ -503,14 +555,6 @@ public class XPlatTextBox : XPlatControl
         canvas.ClipRect(content);
 
         using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-
-        if (HasSelection && Enabled)
-        {
-            float x1 = originX + MeasureX(display, SelectionStart);
-            float x2 = originX + MeasureX(display, SelectionStart + SelectionLength);
-            paint.Color = XPlatTheme.Selection;
-            canvas.DrawRect(new SKRect(x1, top, x2, top + lineHeight), paint);
-        }
 
         string text = display;
         var color = ForeColor;
@@ -531,8 +575,72 @@ public class XPlatTextBox : XPlatControl
             canvas.DrawText(text, originX, baseline, SKTextAlign.Left, _font.SkFont, paint);
         }
 
-        _caret.Draw(canvas, originX + MeasureX(display, _caretIndex), top, lineHeight);
+        canvas.Restore();
 
+        PaintCaret(canvas, content);
+    }
+
+    /// <summary>
+    /// Paints what a marker has to be drawn under or over: the selection highlight, then the
+    /// annotation squiggles, both clipped to the area the text is laid out in.
+    /// </summary>
+    /// <remarks>
+    /// The order the paint path uses is selection, squiggles, text, caret, on a one-line and a
+    /// multi-line field alike. The wash goes <em>under</em> the squiggle because the theme's
+    /// selection colour is caller-supplied and may be opaque, which would otherwise hide a marked
+    /// word exactly while the user is looking at it; a squiggle in its own colour survives the
+    /// translucent wash that is the usual case and stays legible under an opaque one. The glyphs go
+    /// over the squiggle so a descender is drawn on top of it instead of being cut by it, and the
+    /// caret goes last so a blinking caret is never covered by a marker.
+    /// </remarks>
+    private void PaintUnderText(SKCanvas canvas, SKRect area)
+    {
+        if (area.Width <= 0f || area.Height <= 0f)
+        {
+            return;
+        }
+
+        canvas.Save();
+        canvas.ClipRect(area);
+
+        if (HasSelection && Enabled && SelectionLength > 0)
+        {
+            var rects = new List<SKRect>();
+            GetSelectionRects(SelectionStart, SelectionLength, rects);
+            if (rects.Count > 0)
+            {
+                using var paint = new SKPaint
+                {
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Fill,
+                    Color = XPlatTheme.Selection,
+                };
+
+                foreach (var selection in rects)
+                {
+                    canvas.DrawRect(selection, paint);
+                }
+            }
+        }
+
+        SpanFeature?.Paint(this, canvas);
+        canvas.Restore();
+    }
+
+    /// <summary>
+    /// Draws the caret, clipped to the area the text is laid out in. Last of all, so a squiggle or
+    /// a glyph can never cover it.
+    /// </summary>
+    private void PaintCaret(SKCanvas canvas, SKRect area)
+    {
+        if (area.Width <= 0f || area.Height <= 0f)
+        {
+            return;
+        }
+
+        canvas.Save();
+        canvas.ClipRect(area);
+        _caret.Draw(canvas, CaretBounds);
         canvas.Restore();
     }
 
@@ -820,6 +928,8 @@ public class XPlatTextBox : XPlatControl
     {
         if (disposing)
         {
+            SpanFeature?.Dispose();
+            SpanFeature = null;
             MultilineFeature?.Dispose();
             MultilineFeature = null;
         }

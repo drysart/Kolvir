@@ -58,7 +58,10 @@ internal interface IXPlatTextBoxMultiline
     /// <summary>Positions the scrollbars and rebuilds the visual lines for the current width.</summary>
     void Layout(XPlatTextBox textBox, XPlatTextBoxViewport viewport);
 
-    /// <summary>Paints the text, its selection and the caret.</summary>
+    /// <summary>
+    /// Paints the text. The control paints the selection and any squiggles before this and the
+    /// caret after it, so the order is the same on a one-line field.
+    /// </summary>
     void Paint(XPlatTextBox textBox, SKCanvas canvas, XPlatTextBoxViewport viewport, string placeholderText);
 
     /// <summary>Where the caret is drawn, in the control's client coordinates.</summary>
