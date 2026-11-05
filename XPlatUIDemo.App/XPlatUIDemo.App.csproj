@@ -48,6 +48,12 @@
   <ItemGroup>
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
     <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
+
+    <!-- The animations feature is portable end to end - arithmetic, a clock and an invalidation -
+         so this is the single unconditional line FEATURE-COST-POLICY.md section 4 describes: the
+         framework the application builds for selects the matching lib/ folder, and nothing here has
+         to be conditioned on the platform to pick the right one. -->
+    <ProjectReference Include="..\XPlatUI.Feature.Animations\XPlatUI.Feature.Animations.csproj" />
   </ItemGroup>
 
   <!-- The demo's bundled face. It travels inside the assembly rather than beside the executable,

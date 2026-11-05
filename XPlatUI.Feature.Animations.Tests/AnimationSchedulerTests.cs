@@ -157,6 +157,44 @@ public sealed class AnimationSchedulerTests : AnimationsTestBase
     }
 
     [TestMethod]
+    public void AFinishedHandlerThatStartsWithANewSetKeepsTheClockRunning()
+    {
+        using var harness = new AnimationHarness();
+        float second = -1f;
+        XPlatAnimationSet? spawned = null;
+
+        var first = harness.Set();
+        first.Add(XPlatValueAnimation.Create(0f, 1f, Hundred, _ => { }));
+        first.AddFinishedHandler(_ =>
+        {
+            if (spawned is not null)
+            {
+                return;
+            }
+
+            spawned = harness.Set();
+            spawned.Add(XPlatValueAnimation.Create(0f, 1f, Hundred, v => second = v));
+            spawned.Start();
+        });
+
+        first.Start();
+        harness.Frame(100);
+
+        Assert.IsTrue(first.IsFinished);
+        Assert.IsNotNull(spawned);
+        Assert.IsTrue(
+            harness.Scheduler.IsRunning,
+            "the last set detached during the frame, but its handler gave the clock a new one");
+        Assert.AreEqual(1, harness.Frames.Starts, "so the clock never stopped and started again");
+        Assert.AreEqual(0, harness.Frames.Stops);
+
+        harness.Frame(100);
+        Assert.AreEqual(1f, second, 1e-4f);
+        Assert.IsFalse(harness.Scheduler.IsRunning);
+        Assert.AreEqual(1, harness.Frames.Stops);
+    }
+
+    [TestMethod]
     public void ASetRestartedFromItsOwnFinishedHandlerLoopsWithoutRestartingTheClock()
     {
         using var harness = new AnimationHarness();
