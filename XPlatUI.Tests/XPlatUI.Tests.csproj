@@ -28,6 +28,18 @@
     </PackageReference>
   </ItemGroup>
 
+  <!-- SkiaSharp's main package carries the Win32 native library only; macOS and Linux are separate
+       packages, and in a platform application the backend brings the one its own platform needs.
+       The test project has no backend to borrow it from, so it takes the native library itself.
+       This is a test-only dependency and changes nothing about the shipped library. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
+  </ItemGroup>
+
   <ItemGroup>
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
     <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
