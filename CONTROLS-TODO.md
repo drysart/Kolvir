@@ -18,7 +18,7 @@ The tiers were set when the library had twelve controls and they still describe 
 | --- | --- | --- |
 | 1 - common input | `XPlatCheckBox`, `XPlatRadioButton`, `XPlatProgressBar`, `XPlatGroupBox` | shipped |
 | 2 - popup-based | the popup layer (`IXPlatPopupService`, `XPlatPopup`, one popup window per backend), `XPlatComboBox`, `XPlatTabControl`/`XPlatTabPage`, `XPlatToolTip` | shipped |
-| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | in-library menus shipped; the rest in §3 |
+| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | in-library menus and `XPlatDateTimePicker` shipped; the rest in §3 |
 | 3 - large list controls | `XPlatVirtualList` (the shared row base), `XPlatListView`, `XPlatTreeView` | shipped |
 | 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | shipped |
 
@@ -63,25 +63,9 @@ a reviewer should ask for each one rather than infer it.
 
 ## 3. Unlocked by the popup layer
 
-These three are pure control work now; the hard foundation is in place.
+These two are pure control work now; the hard foundation is in place.
 
-### 3.1 `XPlatDateTimePicker`
-
-A field plus a calendar in a popup: month grid with a header for month and year, today and clear
-affordances, `Value`, `MinDate`, `MaxDate`, `Format` (`Short`/`Long`/`Time`/`CustomFormat`),
-`ValueChanged`, and keyboard editing of the field (arrows step the segment under the caret, Up/Down
-step the day, `PageUp`/`PageDown` the month).
-
-Notes:
-
-- Culture-aware formatting and parsing come from `System.Globalization`, which the projects already
-  pull in (nothing sets `InvariantGlobalization`), so this costs no new dependency - but it is worth
-  stating in the pull request, because ICU data is the sort of thing an AOT size review asks about.
-- Open question: an editable field that parses typed dates, or a read-only field that only opens the
-  calendar. WinForms allows both; the read-only one is a fraction of the work and has no partial-input
-  states to get wrong.
-
-### 3.2 Text-box autocomplete
+### 3.1 Text-box autocomplete
 
 `XPlatTextBox` grows `AutoCompleteMode` (`None`/`Suggest`/`Append`/`SuggestAppend`),
 `AutoCompleteSource` (`CustomSource`/`HistoryList`) and `AutoCompleteCustomSource`, with the
@@ -89,10 +73,10 @@ suggestion list in a non-focus-taking popup under the caret. Up/Down/Enter/Escap
 box, exactly as they already do for the combo box's drop-down, and the list is an `XPlatListBox`
 filtered as the text changes.
 
-This is the cheapest of the four: it is a re-arrangement of `XPlatComboBox`'s drop-down plumbing and
+This is the cheapest of the two: it is a re-arrangement of `XPlatComboBox`'s drop-down plumbing and
 needs no new primitives.
 
-### 3.3 Drag previews
+### 3.2 Drag previews
 
 Two separable halves, and only the first belongs to the library proper:
 
@@ -119,6 +103,6 @@ Recorded so the decision is not re-litigated every time someone asks:
 
 ## 5. Suggested order
 
-1. **`XPlatDateTimePicker` and text-box autocomplete** (§3.1, §3.2) - both are popup work now, and
-   both are things an application notices missing on day one.
-2. **Drag previews** (§3.3) - small, and independent of everything above.
+1. **Text-box autocomplete** (§3.1) - popup work now, and something an application notices missing
+   on day one.
+2. **Drag previews** (§3.2) - small, and independent of everything above.
