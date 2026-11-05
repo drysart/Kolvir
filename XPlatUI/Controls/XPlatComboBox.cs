@@ -531,7 +531,14 @@ public class XPlatComboBox : XPlatControl
         canvas.DrawPath(path, paint);
     }
 
-    private void OnListSelectedIndexChanged(object? sender) => Invalidate();
+    private void OnListSelectedIndexChanged(object? sender)
+    {
+        // The list is the model: its selection change is the combo box's selection change, whether
+        // it came from the drop-down, from typing, or from the SelectedIndex property. The handler
+        // is only reached for a real change, because the list raises its own event that way.
+        Invalidate();
+        _selectedIndexChanged?.Invoke(this);
+    }
 
     private void OnListMouseUp(object? sender, XPlatMouseEventArgs e)
     {
