@@ -28,7 +28,7 @@ internal sealed class HeadlessScene : IDisposable
 
     private HeadlessScene(
         XPlatApplication application,
-        HeadlessApplicationBackend backend,
+        IXPlatApplicationBackend backend,
         XPlatWindow window,
         HeadlessWindowBackend windowBackend)
     {
@@ -38,8 +38,11 @@ internal sealed class HeadlessScene : IDisposable
         WindowBackend = windowBackend;
     }
 
-    /// <summary>The application backend, for tests that drive activation or second-instance paths.</summary>
-    public HeadlessApplicationBackend Backend { get; }
+    /// <summary>
+    /// The application backend. Usually <see cref="HeadlessApplicationBackend"/>; a test that needs
+    /// to own a timer passes its own wrapper (see <see cref="TestApplicationBackend"/>).
+    /// </summary>
+    public IXPlatApplicationBackend Backend { get; }
 
     /// <summary>The window model.</summary>
     public XPlatWindow Window { get; }
@@ -78,15 +81,34 @@ internal sealed class HeadlessScene : IDisposable
         float width = 480f,
         float height = 320f,
         string title = "XPlatUI test")
+        => Create(new HeadlessApplicationBackend(), root, width, height, title);
+
+    /// <summary>The same scene over an application backend the test supplies.</summary>
+    /// <param name="backend">
+    /// The backend to drive. It has to create <see cref="HeadlessWindowBackend"/> windows, which is
+    /// what the headless backend and a wrapper that delegates to it both do.
+    /// </param>
+    /// <param name="root">The control tree, or null for an empty window.</param>
+    /// <param name="width">Client width in logical pixels.</param>
+    /// <param name="height">Client height in logical pixels.</param>
+    /// <param name="title">The window title.</param>
+    public static HeadlessScene Create(
+        IXPlatApplicationBackend backend,
+        XPlatControl? root = null,
+        float width = 480f,
+        float height = 320f,
+        string title = "XPlatUI test")
     {
-        var backend = new HeadlessApplicationBackend();
+        ArgumentNullException.ThrowIfNull(backend);
+
         var application = new XPlatApplication(backend);
         var window = new XPlatWindow(title, root) { ClientSize = new SKSize(width, height) };
 
-        // LastWindow is assigned when the window backend is created, which the XPlatWindow
-        // constructor has already done.
-        var windowBackend = backend.LastWindow
-            ?? throw new InvalidOperationException("The headless backend did not create a window backend.");
+        if (window.Backend is not HeadlessWindowBackend windowBackend)
+        {
+            throw new InvalidOperationException(
+                $"The backend created {window.Backend.GetType().Name}; a scene needs a {nameof(HeadlessWindowBackend)}.");
+        }
 
         // The setter above already drove layout through XPlatUiHost.SetClientSize; a second pass
         // costs nothing and makes the scene independent of that detail.

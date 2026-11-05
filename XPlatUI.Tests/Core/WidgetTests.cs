@@ -285,6 +285,8 @@ public sealed class WidgetTests : HeadlessTestBase
     [TestMethod]
     public void TypedTextIsParsedOnEnter()
     {
+        using var culture = CultureScope.English();
+
         var picker = new XPlatDateTimePicker
         {
             Format = XPlatDateTimePickerFormat.Short,

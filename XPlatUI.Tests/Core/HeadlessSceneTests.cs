@@ -88,10 +88,11 @@ public sealed class HeadlessSceneTests : HeadlessTestBase
     public void TheBackendCreatesOneWindowBackendForTheWindow()
     {
         using var scene = HeadlessScene.Create();
+        var backend = (HeadlessApplicationBackend)scene.Backend;
 
-        Assert.IsNotNull(scene.Backend.LastWindow);
-        Assert.AreSame(scene.Window, scene.Backend.LastWindow.Window);
-        Assert.AreSame(scene.Backend.LastWindow.Host, scene.Host);
+        Assert.IsNotNull(backend.LastWindow);
+        Assert.AreSame(scene.Window, backend.LastWindow.Window);
+        Assert.AreSame(backend.LastWindow.Host, scene.Host);
     }
 
     [TestMethod]
