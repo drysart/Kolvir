@@ -140,6 +140,9 @@ internal sealed class HeadlessScene : IDisposable
     /// <summary>Moves the pointer to the centre of <paramref name="control"/>.</summary>
     public void MoveTo(XPlatControl control) => Host.ProcessMouseMove(CenterOf(control));
 
+    /// <summary>Moves the pointer to a point in host coordinates.</summary>
+    public void MoveTo(SKPoint point) => Host.ProcessMouseMove(point);
+
     /// <summary>Presses the left button at the centre of <paramref name="control"/>, without releasing.</summary>
     public void Press(XPlatControl control, XPlatModifiers modifiers = XPlatModifiers.None) =>
         Host.ProcessMouseDown(CenterOf(control), XPlatMouseButtons.Left, modifiers);
