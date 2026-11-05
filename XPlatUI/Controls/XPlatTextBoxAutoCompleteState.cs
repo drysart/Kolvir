@@ -92,7 +92,7 @@ internal sealed class XPlatTextBoxAutoCompleteState
 
             _mode = value;
             Close();
-            _typed = _textBox.Text;
+            _typed = CurrentPrefix();
             _appended = null;
         }
     }
@@ -122,7 +122,12 @@ internal sealed class XPlatTextBoxAutoCompleteState
     private bool HasSuggest =>
         _mode is XPlatAutoCompleteMode.Suggest or XPlatAutoCompleteMode.SuggestAppend;
 
+    // Inline completion appends the rest of a single-line value to what was typed. A suffix cannot
+    // span a line break, and completing a whole multi-line document from a single-line suggestion
+    // would throw away every other line, so append is off in a multi-line box: Append and
+    // SuggestAppend both behave as Suggest there.
     private bool HasAppend =>
+        !_textBox.IsMultiline &&
         _mode is XPlatAutoCompleteMode.Append or XPlatAutoCompleteMode.SuggestAppend;
 
     private void OnKeyDown(object? sender, XPlatKeyEventArgs e)
@@ -240,7 +245,7 @@ internal sealed class XPlatTextBoxAutoCompleteState
         {
             // An assignment is not typing: adopt the text as it stands, drop any completion and get
             // out of the way.
-            _typed = _textBox.Text;
+            _typed = CurrentPrefix();
             _appended = null;
             Close();
             return;
@@ -275,9 +280,53 @@ internal sealed class XPlatTextBoxAutoCompleteState
         }
     }
 
+    /// <summary>
+    /// The text a suggestion is matched against for the editing position. A single-line field
+    /// matches its whole value. A multi-line one matches the logical line the caret is on, up to the
+    /// caret, because suggestions are single-line values: taking one must not rewrite - or match
+    /// against - any other line of the document.
+    /// </summary>
+    private string CurrentPrefix()
+    {
+        if (!_textBox.IsMultiline)
+        {
+            return _textBox.Text;
+        }
+
+        var text = _textBox.Text;
+        int caret = CaretIndex();
+        return text[LineStart()..caret];
+    }
+
+    /// <summary>Index of the caret, clamped to the text, for a prefix that is always a real slice.</summary>
+    private int CaretIndex() => Math.Clamp(_textBox.CaretIndex, 0, _textBox.Text.Length);
+
+    /// <summary>Index of the first character of the logical line the caret is on.</summary>
+    private int LineStart()
+    {
+        var text = _textBox.Text;
+        int index = CaretIndex();
+        while (index > 0 && text[index - 1] != '\n')
+        {
+            index--;
+        }
+
+        return index;
+    }
+
     /// <summary>Re-filters after an edit the user made.</summary>
     private void UpdateForEdit()
     {
+        if (_textBox.IsMultiline)
+        {
+            // Only the line being edited is offered: a deletion never re-completes and an insertion
+            // into an empty line closes the list, exactly as an empty single-line field does.
+            _typed = CurrentPrefix();
+            _appended = null;
+            Refresh(_typed, allowComplete: false);
+            return;
+        }
+
         string text = _textBox.Text;
 
         if (_appended is not null && string.Equals(text, _typed, StringComparison.Ordinal))
@@ -354,7 +403,9 @@ internal sealed class XPlatTextBoxAutoCompleteState
             return;
         }
 
-        string typed = _appended is not null ? _typed : _textBox.Text;
+        string typed = _textBox.IsMultiline
+            ? CurrentPrefix()
+            : _appended is not null ? _typed : _textBox.Text;
         _typed = typed;
         _appended = null;
 
@@ -401,8 +452,9 @@ internal sealed class XPlatTextBoxAutoCompleteState
         if (wasOpen)
         {
             // The list can grow or shrink as the filter changes; the popup re-measures in place so
-            // it does not slide around under the pointer.
-            _popup.MoveTo(_popup.Location);
+            // it does not slide around under the pointer. A multi-line box also re-anchors it,
+            // because the caret it hangs from can now be on a different line.
+            _popup.MoveTo(_textBox.IsMultiline ? Placement(host) : _popup.Location);
         }
         else
         {
@@ -490,8 +542,19 @@ internal sealed class XPlatTextBoxAutoCompleteState
             _previewing = true;
             try
             {
-                _textBox.Text = item;
-                _textBox.Select(item.Length, 0);
+                if (_textBox.IsMultiline)
+                {
+                    // Replace what was typed on the caret's line and leave every other line alone.
+                    int start = LineStart();
+                    _textBox.Select(start, CaretIndex() - start);
+                    _textBox.InsertText(item);
+                    _textBox.Select(start + item.Length, 0);
+                }
+                else
+                {
+                    _textBox.Text = item;
+                    _textBox.Select(item.Length, 0);
+                }
             }
             finally
             {
@@ -513,6 +576,13 @@ internal sealed class XPlatTextBoxAutoCompleteState
     private void RecordHistory()
     {
         if (_mode == XPlatAutoCompleteMode.None || _source != XPlatAutoCompleteSource.HistoryList)
+        {
+            return;
+        }
+
+        // History holds single-line values. A multi-line document is not one, and recording it
+        // would make the next suggestion replace the whole document with one of its lines.
+        if (_textBox.IsMultiline)
         {
             return;
         }
@@ -622,9 +692,13 @@ internal sealed class XPlatTextBoxAutoCompleteState
         x = Math.Clamp(x, area.Left, MathF.Max(area.Left, area.Right - size.Width));
 
         // Like a drop-down list, it opens downwards and flips above the field when there is no room
-        // below it. The platform layer still clamps a window popup to the display.
-        float below = origin.Y + _textBox.Height;
-        float above = origin.Y - size.Height;
+        // below it. In a field that spans lines it hangs from the caret's own line instead, which is
+        // the line being edited and may be many lines away from the top or bottom of a tall box. The
+        // platform layer still clamps a window popup to the display.
+        float top = origin.Y + (_textBox.IsMultiline ? caret.Top : 0f);
+        float bottom = origin.Y + (_textBox.IsMultiline ? caret.Bottom : _textBox.Height);
+        float below = bottom;
+        float above = top - size.Height;
         float y = below + size.Height <= area.Bottom || above < area.Top ? below : above;
         y = Math.Clamp(y, area.Top, MathF.Max(area.Top, area.Bottom - size.Height));
 

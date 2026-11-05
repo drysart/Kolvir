@@ -85,6 +85,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
+| `XPlatTextBox` + `XPlatUI.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
 | `XPlatNumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
 | `XPlatTrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
 | `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
@@ -1255,7 +1256,8 @@ label.
 ### Text box
 
 `XPlatTextBox` is a single-line editor: caret, selection, clipboard, password masking,
-placeholder text and horizontal scrolling are all implemented by the control itself.
+placeholder text and horizontal scrolling are all implemented by the control itself. Multi-line
+editing is a separate opt-in feature, described in [Multi-line text](#multi-line-text).
 
 | Member | Behaviour |
 | --- | --- |
@@ -1346,6 +1348,73 @@ var city = new XPlatTextBox
 city.AutoCompleteCustomSource.Add("Amsterdam");
 city.AutoCompleteCustomSource.Add("Athens");
 ```
+
+### Multi-line text
+
+`Multiline` turns the same `XPlatTextBox` into a multi-line editor. It is an opt-in extension in
+`XPlatUI.Multiline`, so a text box that never turns it on carries none of its state and an
+application that never imports the namespace carries none of its code. It adds:
+
+| Member | Behaviour |
+| --- | --- |
+| `Multiline` | Off by default. When true `Enter` inserts a line break, the text wraps or scrolls sideways, and a scrollbar appears when the content is taller than the box. Turning it off again drops the line breaks and releases the feature |
+| `WordWrap` | True by default. True wraps at word boundaries and never scrolls sideways; false keeps each logical line on one visual line and adds a horizontal bar |
+| `VerticalScrollBar`, `HorizontalScrollBar`, `VerticalOffset`, `HorizontalOffset` | The bars and the scroll state, for an application that wants to read them |
+
+```csharp
+using XPlatUI.Multiline;
+
+var notes = new XPlatTextBox
+{
+    Dock = XDock.Fill,
+    Multiline = true,
+    PlaceholderText = "Write something",
+};
+```
+
+The line model is visual: a logical line is the run between two line breaks, and word wrapping
+splits a logical line into further visual lines without inserting characters. The caret and the
+selection are still plain text indices, so `CaretIndex`, `Select`, `SelectionStart`,
+`SelectedText` and the control-level selection all keep working unchanged, and a selection may
+span any number of visual and logical lines. Soft wrapping breaks at the start of a word that does
+not fit, so the whitespace before it stays at the end of the line instead of opening the next one;
+a word wider than the box is broken between two of its own characters.
+
+Keyboard, in addition to the single-line keys: `Enter` inserts a line break, `Up`/`Down` move by
+visual line and keep the column they started in, even across a line that is too short to have one,
+`PageUp`/`PageDown` turn a page and take the view with them, and `Home`/`End` go to the start and
+end of the *visual* line the caret is drawn on. `Left`/`Right` move by character, so they cross a
+soft wrap and a line break the same way. `Ctrl+Home`/`Ctrl+End` still reach the start and end of
+the whole value.
+
+Three behaviours are deliberate and worth stating:
+
+* **`Enter` inserts a line break and `Ctrl+Enter` is left unhandled**, so a form around a
+  multi-line field still has an accept gesture; `Enter` in a single-line field is untouched.
+* **`Tab` still moves the focus.** A multi-line field here is not a code editor, and a tab that is
+  invisible in a proportional font is worse than one that leaves the field. Pasted tabs are
+  expanded to four spaces, so the value never contains a tab the user cannot type.
+* **Autocomplete completes one line at a time.** The suggestion list hangs from the caret's own
+  line rather than from the bottom of a tall field, a suggestion replaces the text on that line and
+  leaves every other line alone, the history source records nothing from a multi-line field, and
+  `Append`/`SuggestAppend` complete nothing at all - a suffix cannot cross a line break, and
+  rewriting a document from a single-line suggestion would throw away the rest of it - so both
+  behave as `Suggest`. Typing a line break closes the list, because the new line's empty prefix has
+  nothing to suggest.
+
+Scrolling reuses `XPlatScrollBars`, the helper the scrolling containers share, so the bars, the
+wheel, the drag and the clamping behave like every other scrolling control. The scrolled region is
+the text area inside the padding; a bar takes its gutter out of that area, so the text never runs
+underneath one.
+
+`MaxLength` counts characters, and a line break is one character, so a limit applies to the value
+the box actually holds rather than to a platform-specific encoding of it. Nothing is inserted past
+the limit, and an insertion that would cross it is cut where the limit falls.
+
+Line breaks are normalised on every path that brings text in - assignment, typing, paste and
+programmatic insertion - so `CRLF` and a lone `CR` both become the single `'\n'` the line model
+uses. Copy and cut hand out that value, and `Text` never holds a `\r`, so text that leaves and
+pastes back is unchanged.
 
 ### Selection and the clipboard
 

@@ -1265,6 +1265,13 @@ public sealed class XPlatUiHost
     {
         for (var current = control; current is not null; current = current.Parent)
         {
+            // A scrollbar inside a selectable control is chrome, not content: the press belongs to
+            // the bar and must not begin, extend or release a selection of the control around it.
+            if (current is IXPlatSelectionBarrier)
+            {
+                return null;
+            }
+
             if (current.SelectionUnitCount > 0)
             {
                 return current;

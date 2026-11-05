@@ -1,5 +1,6 @@
 using System.Text;
 using SkiaSharp;
+using XPlatUI.Multiline;
 
 namespace XPlatUI;
 
@@ -57,6 +58,63 @@ public class XPlatTextBox : XPlatControl
     protected override SKColor? DefaultBackColor => XPlatTheme.InputBackground;
 
     /// <summary>
+    /// The multi-line feature when this box opted into it, otherwise null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the whole seam between the text box and <c>XPlatUI.Multiline</c>, and the one thing
+    /// every text box in every application carries for a feature it may never use: a null reference
+    /// and a null check. Everything the feature does - measuring, painting, hit testing, the
+    /// scrollbars, the keys that mean something else once text spans lines - is called through this
+    /// interface, and the interface's only implementation is created by the extension property that
+    /// turns the feature on. An application that never sets <c>Multiline</c> therefore publishes
+    /// without the feature's code, which is what FEATURE-COST-POLICY.md §4's first rung asks for and
+    /// what a field or a member per multi-line concern could not deliver.
+    /// </para>
+    /// </remarks>
+    internal IXPlatTextBoxMultiline? MultilineFeature { get; set; }
+
+    /// <summary>True when the box edits several lines. Answers from the seam, so it costs one null check.</summary>
+    internal bool IsMultiline => MultilineFeature is not null;
+
+    /// <summary>The client area and padding the multi-line feature lays text out against.</summary>
+    private XPlatTextBoxViewport Viewport => new(ClientRect, ContentPadding);
+
+    /// <summary>
+    /// The text as a value. A multi-line box normalises what it is given: CRLF and a lone CR become
+    /// the single line feed its line model uses, and a tab becomes spaces, because Tab moves the
+    /// focus here and the value has to stay something the box can draw. Every path - typing, paste,
+    /// insertion, a binding - therefore produces the same value for the same content, and text that
+    /// is copied out and pasted back is unchanged.
+    /// </summary>
+    public override string Text
+    {
+        get => base.Text;
+        set
+        {
+            var text = value ?? string.Empty;
+            base.Text = MultilineFeature?.SanitizeText(text) ?? text;
+        }
+    }
+
+    /// <summary>
+    /// Sets the selection anchor and the caret independently, which is what Shift-extension needs on
+    /// a field whose caret moves by visual line. <see cref="Select"/> always puts the caret at the
+    /// end of the range, so it cannot express an extension towards the left.
+    /// </summary>
+    internal void SetSelection(int anchor, int caretIndex)
+    {
+        ActivateCaret();
+
+        _anchor = Math.Clamp(anchor, 0, Text.Length);
+        _caretIndex = Math.Clamp(caretIndex, 0, Text.Length);
+
+        _caret.ResetBlink();
+        EnsureCaretVisible();
+        Invalidate();
+    }
+
+    /// <summary>
     /// The inset the text, caret and selection are laid out inside. Derived controls that draw
     /// their own chrome in the field, such as <see cref="XPlatNumericUpDown"/>'s spinner, widen
     /// it so the text stops short of what they draw instead of running underneath it.
@@ -96,6 +154,11 @@ public class XPlatTextBox : XPlatControl
     {
         get
         {
+            if (MultilineFeature is { } multiline)
+            {
+                return multiline.GetCaretBounds(this, Viewport);
+            }
+
             var content = TextRect;
             if (content.Width <= 0f || content.Height <= 0f)
             {
@@ -275,6 +338,14 @@ public class XPlatTextBox : XPlatControl
     public void InsertText(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+
+        // A line break survives insertion into a multi-line box, normalised the way every other path
+        // normalises one. A single-line box keeps exactly the behaviour it always had.
+        if (MultilineFeature is { } multiline)
+        {
+            text = multiline.SanitizeText(text);
+        }
+
         ReplaceRange(SelectionStart, SelectionLength, text);
     }
 
@@ -291,6 +362,11 @@ public class XPlatTextBox : XPlatControl
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
+        if (MultilineFeature is { } multiline)
+        {
+            return multiline.Measure(this, Viewport, availableSize);
+        }
+
         var sample = Text.Length == 0 ? "W" : Text;
         float width = MathF.Min(MathF.Ceiling(_font.MeasureWidth(sample)) + 4f, 320f);
         return new SKSize(width, MathF.Ceiling(_font.LineHeight) + 2f);
@@ -300,7 +376,10 @@ public class XPlatTextBox : XPlatControl
     /// Maps a point to the nearest character boundary rather than a proportion of the width, so
     /// a selection dragged into the box lands between two characters.
     /// </summary>
-    public override float GetSelectionOffset(SKPoint pointInLocal) => IndexFromX(pointInLocal.X);
+    public override float GetSelectionOffset(SKPoint pointInLocal) =>
+        MultilineFeature is { } multiline
+            ? multiline.GetIndexFromPoint(this, Viewport, pointInLocal)
+            : IndexFromX(pointInLocal.X);
 
     /// <summary>
     /// Adds the run of characters covered by the selection, using the same geometry as the box's
@@ -309,6 +388,12 @@ public class XPlatTextBox : XPlatControl
     public override void GetSelectionRects(int start, int length, List<SKRect> output)
     {
         ArgumentNullException.ThrowIfNull(output);
+
+        if (MultilineFeature is { } multiline)
+        {
+            multiline.GetSelectionRects(this, Viewport, start, length, output);
+            return;
+        }
 
         var content = TextRect;
         if (length <= 0 || content.Width <= 0f || content.Height <= 0f)
@@ -396,6 +481,12 @@ public class XPlatTextBox : XPlatControl
 
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
+        if (MultilineFeature is { } multiline)
+        {
+            multiline.Paint(this, canvas, Viewport, _placeholderText);
+            return;
+        }
+
         var content = XPlatGeometry.Deflate(rect, ContentPadding);
         if (content.Width <= 0f || content.Height <= 0f)
         {
@@ -464,7 +555,9 @@ public class XPlatTextBox : XPlatControl
         _selecting = true;
         CaptureMouse();
 
-        int index = IndexFromX(e.Location.X);
+        int index = MultilineFeature is { } multiline
+            ? multiline.GetIndexFromPoint(this, Viewport, e.Location)
+            : IndexFromX(e.Location.X);
         if (e.ClickCount >= 3)
         {
             SelectAll();
@@ -489,7 +582,11 @@ public class XPlatTextBox : XPlatControl
 
         if (_selecting)
         {
-            MoveCaretTo(IndexFromX(e.Location.X), extendSelection: true);
+            MoveCaretTo(
+                MultilineFeature is { } multiline
+                    ? multiline.GetIndexFromPoint(this, Viewport, e.Location)
+                    : IndexFromX(e.Location.X),
+                extendSelection: true);
         }
     }
 
@@ -517,6 +614,11 @@ public class XPlatTextBox : XPlatControl
 
         bool shift = (e.Modifiers & XPlatModifiers.Shift) != 0;
         bool control = (e.Modifiers & XPlatModifiers.Control) != 0;
+
+        if (MultilineFeature is { } multiline && multiline.OnKeyDown(this, Viewport, e))
+        {
+            return;
+        }
 
         switch (e.Key)
         {
@@ -621,6 +723,9 @@ public class XPlatTextBox : XPlatControl
     {
         _caretIndex = Math.Clamp(_caretIndex, 0, Text.Length);
         _anchor = Math.Clamp(_anchor, 0, Text.Length);
+
+        MultilineFeature?.OnTextChanged(this, Viewport);
+
         ClampScroll();
 
         base.OnTextChanged();
@@ -658,7 +763,46 @@ public class XPlatTextBox : XPlatControl
     protected override void OnBoundsChanged()
     {
         base.OnBoundsChanged();
+
+        // Layout has already run, so the scroll helper knows the new viewport and the caret can be
+        // brought back inside it.
         EnsureCaretVisible();
+    }
+
+    /// <summary>Positions the scrollbars, then the text they scroll. A single-line box has neither.</summary>
+    protected override void OnLayout()
+    {
+        base.OnLayout();
+        MultilineFeature?.Layout(this, Viewport);
+    }
+
+    /// <summary>
+    /// The scrollbars belong to the box but are not children of it: <see cref="XPlatScrollBars"/>
+    /// positions them itself and the container paints them last, exactly as <see cref="XPlatPanel"/>
+    /// does with its own.
+    /// </summary>
+    protected override void RenderChildren(SKCanvas canvas)
+    {
+        base.RenderChildren(canvas);
+        MultilineFeature?.RenderBars(canvas);
+    }
+
+    /// <summary>Lets a press land on a scrollbar instead of putting the caret where the thumb is.</summary>
+    protected override XPlatControl? HitTestChildren(SKPoint local) =>
+        MultilineFeature?.HitTestBar(local) ?? base.HitTestChildren(local);
+
+    /// <summary>
+    /// Turns the wheel over the text. The feature claims the turn only when it moved, so a box
+    /// already at its end hands the rest of the turn to the container around it.
+    /// </summary>
+    protected override void OnMouseWheel(XPlatMouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+
+        if (!e.Handled && MultilineFeature is { } multiline)
+        {
+            e.Handled = multiline.OnMouseWheel(this, e);
+        }
     }
 
     protected override void OnEnabledChanged()
@@ -670,6 +814,17 @@ public class XPlatTextBox : XPlatControl
         }
 
         base.OnEnabledChanged();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            MultilineFeature?.Dispose();
+            MultilineFeature = null;
+        }
+
+        base.Dispose(disposing);
     }
 
     private string DisplayText =>
@@ -741,6 +896,12 @@ public class XPlatTextBox : XPlatControl
 
     private void EnsureCaretVisible()
     {
+        if (MultilineFeature is { } multiline)
+        {
+            multiline.EnsureCaretVisible(this, Viewport);
+            return;
+        }
+
         float width = TextRect.Width;
         if (width <= 0f)
         {
@@ -763,6 +924,12 @@ public class XPlatTextBox : XPlatControl
 
     private void ClampScroll()
     {
+        if (MultilineFeature is { } multiline)
+        {
+            multiline.ClampScroll(this, Viewport);
+            return;
+        }
+
         float width = TextRect.Width;
         float textWidth = _font.MeasureWidth(DisplayText);
         float max = MathF.Max(0f, textWidth - width + HorizontalCaretPadding + _caret.Width);
@@ -884,8 +1051,17 @@ public class XPlatTextBox : XPlatControl
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
+    /// <summary>
+    /// Prepares text for the box: a multi-line box keeps its line breaks and normalises them, a
+    /// single-line box strips every control character so the field stays one line.
+    /// </summary>
+    private string Sanitize(string? text) =>
+        MultilineFeature is { } multiline
+            ? multiline.SanitizeText(text ?? string.Empty)
+            : SanitizeSingleLine(text);
+
     /// <summary>Strips control characters (including line breaks) so the field stays single-line.</summary>
-    private static string Sanitize(string? text)
+    internal static string SanitizeSingleLine(string? text)
     {
         if (string.IsNullOrEmpty(text))
         {

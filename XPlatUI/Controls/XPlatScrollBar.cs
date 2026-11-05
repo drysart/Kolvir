@@ -13,7 +13,7 @@ namespace XPlatUI;
 /// use this control directly only when you need a standalone slider. <see cref="Value"/> is
 /// always kept inside <see cref="Minimum"/> and <see cref="Maximum"/>.
 /// </remarks>
-public class XPlatScrollBar : XPlatControl
+public class XPlatScrollBar : XPlatControl, IXPlatSelectionBarrier
 {
     /// <summary>The thickness a scrollbar is given by default, in device independent pixels.</summary>
     public const float DefaultThickness = 16f;
