@@ -173,10 +173,16 @@ dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj
 same filter. It targets plain `net10.0` on every platform even though the feature itself is split by
 platform: the tests only touch the feature's `common/` folder, and a test project that targeted
 `net10.0-macos` would need the .NET for macOS SDK with an exactly matching Xcode on whichever Mac
-builds it, which is a requirement no test project should impose. Driving a drag end to end needs the
-platform hook and a native window, so that half is exercised by the demo application rather than
-here; the feature's routing code is internal, so reaching it from a test would need
-`InternalsVisibleTo`, which this branch deliberately does not add.
+builds it, which is a requirement no test project should impose.
+
+That suite drives the feature's router and per-control state directly, and the feature project grants
+it `InternalsVisibleTo` for exactly that. Both types are internal on purpose - an application never
+names them and the package ships no public API for them - but the behaviour they carry is real
+behaviour (which control a drag reaches, when it is told the drag arrived or left, what effect the
+target settles on) and it regresses silently if nothing watches it. The grant is one `ItemGroup` on
+the feature project, names only `XPlatUI.Feature.DragDrop.Tests`, and adds no public API for testing;
+`XPlatUI.Tests` and the core library are untouched. What still cannot be tested here is the native
+half - a real drag from another application - which is what the demo application exercises.
 
 The suite deliberately has no committed golden images. Rasterisation of text differs by a fraction
 between platforms even with the font pinned, so a committed image would either have to be pinned to
