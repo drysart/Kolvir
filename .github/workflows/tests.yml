@@ -56,15 +56,20 @@ jobs:
         with:
           dotnet-version: '10.0.x'
 
-      # Restoring the test project restores the library and the headless backend with it. It is a
-      # separate step so a restore failure is distinguishable from a test failure in the log.
+      # Restoring the test projects restores the library, the headless backend and the feature with
+      # them. It is a separate step so a restore failure is distinguishable from a test failure in
+      # the log. Each test project is restored on its own rather than the whole solution: the
+      # solution lists every platform backend and the platform workloads they need, and a runner
+      # has none of those workloads installed.
       - name: Restore
-        run: dotnet restore XPlatUI.Tests/XPlatUI.Tests.csproj --nologo
+        run: |
+          dotnet restore XPlatUI.Tests/XPlatUI.Tests.csproj --nologo
+          dotnet restore XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --nologo
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
-      # the matrix runs is Core, Headless or Pixels. Keep this expression identical to the one in
-      # the README so a local run matches CI.
+      # the matrix runs is Core, Headless, Pixels or a feature's own category. Keep this expression
+      # identical to the one in the README so a local run matches CI.
       - name: Test
         shell: bash
         run: |
@@ -75,6 +80,21 @@ jobs:
             --results-directory "$RUNNER_TEMP/test-results" \
             --collect:"XPlat Code Coverage" \
             --blame-hang-timeout 5m 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      # The feature suite is a second assembly because a rung-3 feature is a package of its own: an
+      # application that never calls AddDragDrop() ships none of it, so it gets its own tests rather
+      # than a folder inside the core suite. It runs under the same category filter, so a
+      # platform-only test opts out the same way there. `tee -a` keeps both runs in one log, which
+      # is what the failure summary below reads.
+      - name: Test the drag and drop feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --no-restore --nologo \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=dragdrop.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 
       # MSBuild and test diagnostics are not workflow annotations, so lift the failing test names
       # into the job summary: that is readable without downloading the artifact.
