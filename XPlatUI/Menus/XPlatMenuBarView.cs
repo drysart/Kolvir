@@ -315,7 +315,14 @@ public sealed class XPlatMenuBarView : XPlatControl
         Invalidate();
     }
 
-    private int HitTestTitle(SKPoint location)
+    /// <summary>
+    /// True when <paramref name="overlay"/> is the catcher of the open drop-down, the one overlay a
+    /// press on a title has to see through.
+    /// </summary>
+    internal bool OwnsDismissCatcher(XPlatControl overlay) =>
+        _popup?.DismissCatcher is { } catcher && ReferenceEquals(catcher, overlay);
+
+    internal int HitTestTitle(SKPoint location)
     {
         for (var i = 0; i < _titles.Count; i++)
         {

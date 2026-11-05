@@ -661,7 +661,7 @@ public sealed class XPlatUiHost
     {
         _mousePosition = location;
 
-        var hit = HitTest(location);
+        var hit = HitTest(location, hover: true);
 
         if (!ReferenceEquals(hit, _hovered))
         {
@@ -1059,13 +1059,32 @@ public sealed class XPlatUiHost
         previous.RaiseSelectionCleared();
     }
 
-    private XPlatControl? HitTest(SKPoint location)
+    /// <summary>
+    /// Finds the control under a point. <paramref name="hover"/> asks for the control the pointer
+    /// belongs to, which is the one below an overlay that only exists to catch presses.
+    /// </summary>
+    private XPlatControl? HitTest(SKPoint location, bool hover = false)
     {
+        // A press on a title of the bar's own open menu belongs to the bar even while the dismiss
+        // catcher covers it, so clicking another title switches menus and clicking the open one
+        // closes it. Everywhere else, and over any other popup, the catcher keeps the press.
+        var titleBar = _menuBar is { } bar && bar.HitTestTitle(new SKPoint(
+            location.X - bar.Bounds.Left,
+            location.Y - bar.Bounds.Top)) >= 0 ? bar : null;
+
         if (_overlays is not null)
         {
             for (int i = _overlays.Count - 1; i >= 0; i--)
             {
-                if (_overlays[i].HitTest(location) is { } hit)
+                var overlay = _overlays[i];
+
+                if (overlay.PassesHoverThrough &&
+                    (hover || titleBar?.OwnsDismissCatcher(overlay) == true))
+                {
+                    continue;
+                }
+
+                if (overlay.HitTest(location) is { } hit)
                 {
                     return hit;
                 }

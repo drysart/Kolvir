@@ -110,6 +110,12 @@ public sealed class XPlatPopup : IDisposable
     /// <summary>Whether the popup is currently shown.</summary>
     public bool IsOpen => _open;
 
+    /// <summary>
+    /// The catcher this popup installed in the owning window to see outside presses, or null when
+    /// it installed none. A menu bar uses it to tell its own menu's catcher from another popup's.
+    /// </summary>
+    internal XPlatControl? DismissCatcher => _catcher;
+
     /// <summary>Where the popup's top left corner sits, in the owning host's coordinates.</summary>
     public SKPoint Location => _location;
 
@@ -359,6 +365,9 @@ internal sealed class XPlatPopupDismissCatcher : XPlatControl
         _popup = popup;
         Cursor = XPlatCursor.Default;
     }
+
+    // The catcher paints nothing, so the pointer still hovers whatever it covers.
+    internal override bool PassesHoverThrough => true;
 
     protected override void OnMouseDown(XPlatMouseEventArgs e)
     {
