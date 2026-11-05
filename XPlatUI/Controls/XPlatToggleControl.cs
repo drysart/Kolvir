@@ -20,7 +20,6 @@ namespace XPlatUI;
 /// </remarks>
 public abstract class XPlatToggleControl : XPlatControl
 {
-    private XPlatFont _font = XPlatTheme.DefaultFont;
     private XPlatCheckState _checkState;
     private XPlatContentAlignment _textAlign = XPlatContentAlignment.MiddleLeft;
     private Action<object>? _checkedChanged;
@@ -52,24 +51,6 @@ public abstract class XPlatToggleControl : XPlatControl
     {
         ArgumentNullException.ThrowIfNull(handler);
         _checkedChanged -= handler;
-    }
-
-    /// <summary>The label's font. Defaults to <see cref="XPlatTheme.DefaultFont"/>.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            Invalidate();
-            PerformLayout();
-        }
     }
 
     /// <summary>Where the label sits in the space the glyph leaves. Defaults to <see cref="XPlatContentAlignment.MiddleLeft"/>.</summary>
@@ -228,7 +209,7 @@ public abstract class XPlatToggleControl : XPlatControl
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var text = XPlatTextRenderer.Measure(Text, _font, float.PositiveInfinity, wrap: false);
+        var text = XPlatTextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
         return new SKSize(
             MathF.Ceiling(_glyphSize + _glyphGap + text.Width),
             MathF.Ceiling(MathF.Max(_glyphSize, text.Height)));
@@ -248,7 +229,7 @@ public abstract class XPlatToggleControl : XPlatControl
         }
 
         var label = new SKRect(glyph.Right + _glyphGap, rect.Top, rect.Right - Padding.Right, rect.Bottom);
-        XPlatTextRenderer.Draw(canvas, Text, _font, TextColor, label, _textAlign);
+        XPlatTextRenderer.Draw(canvas, Text, Font, TextColor, label, _textAlign);
     }
 
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)

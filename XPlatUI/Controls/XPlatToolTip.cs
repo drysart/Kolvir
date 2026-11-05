@@ -436,7 +436,6 @@ public sealed class XPlatToolTip : IDisposable
 /// </summary>
 internal sealed class XPlatToolTipView : XPlatControl
 {
-    private readonly XPlatFont _font = XPlatTheme.DefaultFont;
     private readonly float _maximumWidth;
     private string _text;
 
@@ -450,12 +449,12 @@ internal sealed class XPlatToolTipView : XPlatControl
         BorderWidth = 1f;
     }
 
-    protected override SKColor? DefaultBackColor => XPlatTheme.Surface;
+    protected override XPlatBackground DefaultBackground => XPlatBackground.FromThemeColor(XPlatThemeColor.Surface);
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         float wrapWidth = MathF.Max(0f, MathF.Min(_maximumWidth, availableSize.Width));
-        var measured = XPlatTextRenderer.Measure(_text, _font, wrapWidth, wrap: true);
+        var measured = XPlatTextRenderer.Measure(_text, Font, wrapWidth, wrap: true);
 
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
@@ -468,6 +467,6 @@ internal sealed class XPlatToolTipView : XPlatControl
         }
 
         var content = XPlatGeometry.Deflate(rect, Padding);
-        XPlatTextRenderer.Draw(canvas, _text, _font, ForeColor, content, XPlatContentAlignment.TopLeft, wrap: true);
+        XPlatTextRenderer.Draw(canvas, _text, Font, ForeColor, content, XPlatContentAlignment.TopLeft, wrap: true);
     }
 }

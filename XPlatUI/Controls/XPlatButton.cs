@@ -22,7 +22,6 @@ public enum XPlatButtonStyle
 /// </summary>
 public class XPlatButton : XPlatControl
 {
-    private XPlatFont _font = XPlatTheme.EmphasizedFont;
     private XPlatButtonStyle _style = XPlatButtonStyle.Primary;
 
     public XPlatButton()
@@ -40,16 +39,8 @@ public class XPlatButton : XPlatControl
         Text = text;
     }
 
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            _font = value;
-            Invalidate();
-        }
-    }
+    /// <summary>A button's own text is emphasized until the theme or an ancestor says otherwise.</summary>
+    protected override XPlatFont DefaultFont => XPlatTheme.EmphasizedFont;
 
     public XPlatButtonStyle Style
     {
@@ -68,7 +59,7 @@ public class XPlatButton : XPlatControl
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var measured = XPlatTextRenderer.Measure(Text, _font, float.PositiveInfinity, wrap: false);
+        var measured = XPlatTextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
 
@@ -100,7 +91,7 @@ public class XPlatButton : XPlatControl
 
         var (_, textColor) = ResolveColors();
         var content = XPlatGeometry.Deflate(rect, Padding);
-        XPlatTextRenderer.Draw(canvas, Text, _font, textColor, content, XPlatContentAlignment.MiddleCenter);
+        XPlatTextRenderer.Draw(canvas, Text, Font, textColor, content, XPlatContentAlignment.MiddleCenter);
     }
 
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)

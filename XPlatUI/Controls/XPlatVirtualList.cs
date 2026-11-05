@@ -37,7 +37,6 @@ public abstract class XPlatVirtualList : XPlatControl
     private readonly List<int> _selected = [];
     private readonly ReadOnlyCollection<int> _selectedView;
 
-    private XPlatFont _font = XPlatTheme.DefaultFont;
     private XPlatSelectionMode _selectionMode = XPlatSelectionMode.One;
     private string _emptyText = string.Empty;
 
@@ -100,28 +99,11 @@ public abstract class XPlatVirtualList : XPlatControl
     /// <param name="textColor">The colour the default drawing would have used for the row's text.</param>
     protected abstract void OnDrawItem(SKCanvas canvas, int index, SKRect bounds, XPlatDrawItemState state, SKColor textColor);
 
-    /// <summary>A list paints on the input fill, like the other fields, until <see cref="XPlatControl.BackColor"/> is assigned.</summary>
-    protected override SKColor? DefaultBackColor => XPlatTheme.InputBackground;
+    /// <summary>A list paints on the input fill, like the other fields, until <see cref="XPlatControl.Background"/> is assigned.</summary>
+    protected override XPlatBackground DefaultBackground => XPlatBackground.FromThemeColor(XPlatThemeColor.InputBackground);
 
-    /// <summary>Font used to draw the rows. The control does not take ownership of it.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            _measureDirty = true;
-            PerformLayout();
-            Invalidate();
-        }
-    }
+    /// <summary>Row height is a function of the font, so a font change means the rows are measured again.</summary>
+    protected override void OnAppearanceChanged() => _measureDirty = true;
 
     /// <summary>How many rows may be selected at once. Defaults to <see cref="XPlatSelectionMode.One"/>.</summary>
     public XPlatSelectionMode SelectionMode
@@ -486,7 +468,7 @@ public abstract class XPlatVirtualList : XPlatControl
     protected virtual int DefaultVisibleRows => 8;
 
     /// <summary>The row height used until <see cref="ItemHeight"/> is assigned.</summary>
-    protected virtual float DefaultItemHeight => MathF.Ceiling(_font.LineHeight + 10f);
+    protected virtual float DefaultItemHeight => MathF.Ceiling(Font.LineHeight + 10f);
 
     /// <summary>The row the focus rectangle is on, or -1. It is not the selection.</summary>
     protected int LeadIndex => _lead;
@@ -503,7 +485,7 @@ public abstract class XPlatVirtualList : XPlatControl
 
     /// <summary>Draws a row's text with the control's font, at <see cref="TextBoundsOf"/>.</summary>
     protected void DrawItemText(SKCanvas canvas, SKRect bounds, string text, SKColor color) =>
-        XPlatTextRenderer.Draw(canvas, text, _font, color, TextBoundsOf(bounds), XPlatContentAlignment.MiddleLeft);
+        XPlatTextRenderer.Draw(canvas, text, Font, color, TextBoundsOf(bounds), XPlatContentAlignment.MiddleLeft);
 
     /// <summary>
     /// Draws the thin rectangle that marks the row the keyboard is on, so it stays findable when
@@ -1379,7 +1361,7 @@ public abstract class XPlatVirtualList : XPlatControl
         XPlatTextRenderer.Draw(
             canvas,
             _emptyText,
-            _font,
+            Font,
             Enabled ? XPlatTheme.Placeholder : XPlatTheme.DisabledForeground,
             new SKRect(bounds.Left + TextInset, bounds.Top, bounds.Right - TextInset, bounds.Top + ItemHeight),
             XPlatContentAlignment.MiddleLeft);

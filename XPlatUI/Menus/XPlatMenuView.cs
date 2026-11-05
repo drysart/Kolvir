@@ -86,9 +86,6 @@ public sealed class XPlatMenuView : XPlatControl, IXPlatInputSink
     /// <summary>Row metrics, or null for <see cref="XPlatMenuMetrics.Default"/>.</summary>
     public XPlatMenuMetrics? Metrics { get; set; }
 
-    /// <summary>Label font, or null for <see cref="XPlatTheme.DefaultFont"/>.</summary>
-    public XPlatFont? Font { get; set; }
-
     /// <summary>
     /// Opacity of the surface, 0 to 1. Below 1 the menu is translucent so a compositor-supplied
     /// backdrop - the Windows 11 acrylic blur - shows through it.

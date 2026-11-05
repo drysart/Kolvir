@@ -30,6 +30,18 @@ public sealed class DemoUi
     private XPlatTextBox? _undoFocusTarget;
     private int _clicks;
 
+    // The inherited-appearance page. The fonts are the page's for the life of the window: controls
+    // never dispose a font they were handed, and the theme keeps the face it is given.
+    private XPlatPanel? _appearanceStage;
+    private XPlatLabel? _appearanceInherited;
+    private XPlatPanel? _appearanceNested;
+    private XPlatLabel? _appearanceLabel;
+    private XPlatLabel? _appearanceOverrides;
+    private XPlatLabel? _appearanceReadout;
+    private XPlatFont? _appearanceSubtreeFont;
+    private XPlatFont? _appearanceBigFont;
+    private XPlatFont? _appearanceFace;
+
     public DemoUi()
     {
         Root = BuildUi();
@@ -240,7 +252,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             AutoSize = false,
-            Height = 22f,
+            Height = 24f,
             Font = XPlatTheme.CaptionFont,
             ForeColorRole = XPlatThemeColor.MutedForeground,
             TextAlign = XPlatContentAlignment.TopLeft,
@@ -397,6 +409,7 @@ public sealed class DemoUi
         ("Text box spans", demo => Page(demo.BuildSpanDemo())),
         ("Undo and redo", demo => Page(demo.BuildUndoDemo())),
         ("Fonts from a file", demo => Page(demo.BuildFontDemo())),
+        ("Inherited appearance", demo => Page(demo.BuildAppearanceDemo())),
     };
 
     /// <summary>
@@ -4380,5 +4393,267 @@ public sealed class DemoUi
         return card;
 
         static string F(float value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>
+    /// The inherited appearance page: one panel that assigns a font and a foreground, what its
+    /// descendants make of it, one control that overrides both inside the subtree, and a label that
+    /// paints nothing on top of an ancestor that does. The buttons change the appearance of a live
+    /// tree - the panel's font, or the whole theme's face - and the text re-lays itself out.
+    /// </summary>
+    private XPlatPanel BuildAppearanceDemo()
+    {
+        // The page owns these for the life of the window: a control never disposes a font it was
+        // handed, and the theme keeps the face it is given.
+        _appearanceSubtreeFont ??= XPlatFont.FromBytes(DemoFont.Data, 14f);
+        _appearanceBigFont ??= XPlatFont.FromBytes(DemoFont.Data, 21f);
+        _appearanceFace ??= XPlatFont.FromBytes(DemoFont.Data);
+
+        var card = Card();
+        card.Controls.Add(Heading("Inherited appearance"));
+        card.Controls.Add(new XPlatLabel(
+            "Font, foreground and background are inherited down the tree, the way they are in WinForms. " +
+            "A control that assigns one answers for itself and for everything inside it; one that " +
+            "assigns none asks its parent and then falls back to its class default. Nothing is captured " +
+            "when a control is built, so changing the theme - or one panel's font - moves a live tree.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 56f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        });
+
+        var buttons = ButtonRow();
+        buttons.Height = 32f;
+
+        var grow = new XPlatButton("Grow the panel's font")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        grow.AddClickHandler(_ => SetAppearanceDemo(size: 21f));
+
+        var themeFace = new XPlatButton("Use the bundled face everywhere")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        themeFace.AddClickHandler(_ =>
+        {
+            XPlatTheme.UseFont(_appearanceFace);
+            UpdateAppearanceReadout();
+        });
+
+        var reset = new XPlatButton("Reset")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        reset.AddClickHandler(_ =>
+        {
+            _appearanceStage?.ClearFont();
+            XPlatTheme.FontFamily = null;
+            UpdateAppearanceReadout();
+        });
+
+        buttons.Controls.Add(grow);
+        buttons.Controls.Add(themeFace);
+        buttons.Controls.Add(reset);
+        card.Controls.Add(buttons);
+
+        _appearanceReadout = new XPlatLabel
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 62f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        card.Controls.Add(_appearanceReadout);
+
+        // The subtree: a panel that assigns a font, a foreground colour and a background role. Every
+        // control added below inherits all three unless it says otherwise.
+        var stage = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 214f,
+            Padding = new XPlatThickness(12f, 8f),
+            CornerRadius = 8f,
+            BorderWidth = 1f,
+            Font = _appearanceSubtreeFont,
+            Foreground = XPlatTheme.Accent,
+            Background = XPlatBackground.FromThemeColor(XPlatThemeColor.Secondary),
+        };
+        _appearanceStage = stage;
+
+        var inherited = new XPlatLabel("Inherits the panel's font, colour and background role.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 34f,
+        };
+        _appearanceInherited = inherited;
+
+        // A panel that paints a background of its own and assigns nothing: it takes the colour its
+        // parent assigned instead of its own surface, which is the inheritance doing its work.
+        var nested = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 76f,
+            Padding = new XPlatThickness(8f, 6f),
+            CornerRadius = 6f,
+            BorderWidth = 1f,
+        };
+        _appearanceNested = nested;
+
+        var noBackground = new XPlatLabel(
+            "This label paints nothing at all, so the colour behind it - the panel's, inherited one " +
+            "level up - is what shows. Its background resolves to None, not to a colour of its own.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        };
+        _appearanceLabel = noBackground;
+        nested.Controls.Add(noBackground);
+
+        // The one control that overrides the subtree it sits in.
+        var overrides = new XPlatLabel("This one assigns its own font and colour.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 24f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        };
+        _appearanceOverrides = overrides;
+
+        var button = new XPlatButton("A button under the same panel")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Ghost,
+            Margin = new XPlatThickness(0f, 6f, 0f, 0f),
+        };
+
+        stage.Controls.Add(inherited);
+        stage.Controls.Add(nested);
+        stage.Controls.Add(overrides);
+        stage.Controls.Add(button);
+        card.Controls.Add(stage);
+
+        card.Controls.Add(new XPlatLabel(
+            "Three background states, because two would be wrong: unset means \"ask my parent\", a " +
+            "colour answers for this control and everything under it, and \"paint nothing\" is a value " +
+            "of its own - a label keeps painting nothing wherever it sits, so it never gains a box it " +
+            "did not ask for. Only a colour is inherited: a layout container that paints nothing must " +
+            "not take the card inside it away with it.\n\n" +
+            "Nothing here is captured at construction. The effective font is read when text is " +
+            "measured and painted; what the parent chain contributes is walked once and cached, and " +
+            "dropped when an ancestor assigns a value or a control changes parent. Palette roles are " +
+            "resolved at paint time, so a palette swap is still just a repaint - but a font is the " +
+            "size of the text, so a font change lays the tree out again before the next frame.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 12f, 0f, 0f),
+        });
+
+        UpdateAppearanceReadout();
+        return card;
+    }
+
+    /// <summary>
+    /// Changes the font of the panel the demo subtree hangs off, which is the runtime half of the
+    /// page: the controls already exist, and their text is measured again at the new size.
+    /// </summary>
+    /// <param name="size">The size to give the subtree, or null to let it inherit again.</param>
+    public void SetAppearanceDemo(float? size)
+    {
+        if (!size.HasValue)
+        {
+            _appearanceStage?.ClearFont();
+        }
+        else if (_appearanceStage is not null && _appearanceBigFont is not null)
+        {
+            _appearanceStage.Font = size.Value >= 21f ? _appearanceBigFont : _appearanceSubtreeFont!;
+        }
+
+        UpdateAppearanceReadout();
+    }
+
+    /// <summary>Switches the application's font to the bundled face, or back to the system's.</summary>
+    /// <param name="bundled">True for the face the application carries, false for the platform's.</param>
+    public void SetAppearanceDemoFace(bool bundled)
+    {
+        if (bundled && _appearanceFace is not null)
+        {
+            XPlatTheme.UseFont(_appearanceFace);
+        }
+        else
+        {
+            XPlatTheme.FontFamily = null;
+        }
+
+        UpdateAppearanceReadout();
+    }
+
+    /// <summary>
+    /// Prints what the tree resolves to right now: the background state of each level, the font size
+    /// the labels ended up with, and the size of the text - which is what changes when a font does.
+    /// </summary>
+    private void UpdateAppearanceReadout()
+    {
+        if (_appearanceReadout is null)
+        {
+            return;
+        }
+
+        _appearanceReadout.Text =
+            $"panel: {Describe(_appearanceStage)}   |   " +
+            $"inherited label: {Describe(_appearanceInherited)}   |   " +
+            $"nested panel: {Describe(_appearanceNested)}\n" +
+            $"label that paints nothing: {Describe(_appearanceLabel)}\n" +
+            $"override inside the subtree: {Describe(_appearanceOverrides)}   |   " +
+            $"inherited label text: {S(_appearanceInherited is { } label ? label.Font.MeasureWidth(label.Text) : null)} px wide, " +
+            $"{S(_appearanceInherited?.Font.LineHeight)} px line height";
+
+        static string Describe(XPlatControl? control)
+        {
+            if (control is null)
+            {
+                return "-";
+            }
+
+            string background = control.Background switch
+            {
+                { IsNone: true } => "none",
+                { ThemeColor: { } role } => role.ToString(),
+                { Color: { } color } => $"#{color.Alpha:X2}{color.Red:X2}{color.Green:X2}{color.Blue:X2}",
+                _ => "inherit",
+            };
+
+            return $"{control.Font.Size:0.#} pt, {background}";
+        }
+
+        static string S(float? value) =>
+            value is { } v ? v.ToString("0.#", System.Globalization.CultureInfo.InvariantCulture) : "-";
     }
 }

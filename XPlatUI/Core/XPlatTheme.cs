@@ -216,6 +216,7 @@ public static class XPlatTheme
 
     private static string? _fontFamily;
     private static XPlatFont? _fontFace;
+    private static int _fontVersion = 1;
     private static XPlatFont _defaultFont = new(size: 13f);
     private static XPlatFont _captionFont = new(size: 11.5f);
     private static XPlatFont _emphasizedFont = new(size: 13f, weight: 600);
@@ -228,9 +229,11 @@ public static class XPlatTheme
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Assign it before creating controls: the theme fonts are rebuilt when it changes, and the
+    /// It can be assigned at any time: the theme fonts are rebuilt, and because a control resolves
+    /// its font when it measures or paints rather than when it is built, controls that already exist
+    /// pick the new face up - and re-lay out, since text at another face needs other room. The
     /// previous font objects are left undisposed because a control may still be holding one from a
-    /// paint pass. A handful of fonts is a few bytes, and this is a start-up only operation.
+    /// paint pass. A handful of fonts is a few bytes, and assigning one runs a handful of times.
     /// </para>
     /// <para>
     /// Assigning a family name also drops a face given to <see cref="UseFont"/>, so this is the way
@@ -271,8 +274,9 @@ public static class XPlatTheme
     /// <remarks>
     /// The theme fonts are rebuilt from the face, so <see cref="TitleFont"/>,
     /// <see cref="SectionFont"/> and <see cref="EmphasizedFont"/> become that face at their own sizes
-    /// rather than a bold or semibold one: a file holds one face, and no weight is synthesised. Call
-    /// it before creating controls, the way <see cref="FontFamily"/> is.
+    /// rather than a bold or semibold one: a file holds one face, and no weight is synthesised. It
+    /// can be called after the controls exist, the way <see cref="FontFamily"/> can: the effective
+    /// font is resolved when it is used, so a live tree switches to the new face and re-lays out.
     /// </remarks>
     public static void UseFont(XPlatFont face)
     {
@@ -299,8 +303,20 @@ public static class XPlatTheme
 
     public static XPlatFont SectionFont => _sectionFont;
 
+    /// <summary>
+    /// Changes whenever the theme fonts are rebuilt. A host compares it before laying out and
+    /// painting, so a face or size that changed under an existing tree is one more layout pass
+    /// rather than a control that keeps measuring with a font it no longer draws with.
+    /// </summary>
+    internal static int FontVersion => _fontVersion;
+
     private static void RebuildFonts()
     {
+        // Nothing caches a resolved theme font - the effective font is read when it is used - but
+        // what a control caches that was derived from one has to be dropped, and the layout of text
+        // at another size has to be re-run. This is how a host notices.
+        _fontVersion++;
+
         _defaultFont = ThemeFont(13f);
         _captionFont = ThemeFont(11.5f);
         _emphasizedFont = ThemeFont(13f, 600);

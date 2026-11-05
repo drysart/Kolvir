@@ -22,7 +22,6 @@ public class XPlatTextBox : XPlatControl
     private const float HorizontalCaretPadding = 2f;
 
     private readonly XPlatCaret _caret;
-    private XPlatFont _font = XPlatTheme.DefaultFont;
     private string _placeholderText = string.Empty;
     private int _caretIndex;
     private int _anchor;
@@ -63,8 +62,8 @@ public class XPlatTextBox : XPlatControl
         Text = text;
     }
 
-    /// <summary>An editable field is painted on the input fill until <see cref="XPlatControl.BackColor"/> is assigned.</summary>
-    protected override SKColor? DefaultBackColor => XPlatTheme.InputBackground;
+    /// <summary>An editable field is painted on the input fill until <see cref="XPlatControl.Background"/> is assigned.</summary>
+    protected override XPlatBackground DefaultBackground => XPlatBackground.FromThemeColor(XPlatThemeColor.InputBackground);
 
     /// <summary>
     /// The multi-line feature when this box opted into it, otherwise null.
@@ -168,23 +167,11 @@ public class XPlatTextBox : XPlatControl
     /// <summary>The area the text is laid out in: the client rect without <see cref="ContentPadding"/>.</summary>
     private protected SKRect TextRect => XPlatGeometry.Deflate(ClientRect, ContentPadding);
 
-    /// <summary>Font used to draw the text. The text box does not take ownership of it.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            ClampScroll();
-            Invalidate();
-        }
-    }
+    /// <summary>
+    /// Text at another size takes other room, so the horizontal scroll offset is clamped to what
+    /// the text now needs - a font that shrank must not leave the field scrolled past its end.
+    /// </summary>
+    protected override void OnAppearanceChanged() => ClampScroll();
 
     /// <summary>The insertion point's caret, which this text box owns and positions.</summary>
     public XPlatCaret Caret => _caret;
@@ -209,7 +196,7 @@ public class XPlatTextBox : XPlatControl
                 return SKRect.Empty;
             }
 
-            float lineHeight = _font.LineHeight;
+            float lineHeight = Font.LineHeight;
             float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
             float x = content.Left - _scrollX + MeasureX(DisplayText, _caretIndex);
             return new SKRect(x, top, x + _caret.Width, top + lineHeight);
@@ -419,8 +406,8 @@ public class XPlatTextBox : XPlatControl
         }
 
         var sample = Text.Length == 0 ? "W" : Text;
-        float width = MathF.Min(MathF.Ceiling(_font.MeasureWidth(sample)) + 4f, 320f);
-        return new SKSize(width, MathF.Ceiling(_font.LineHeight) + 2f);
+        float width = MathF.Min(MathF.Ceiling(Font.MeasureWidth(sample)) + 4f, 320f);
+        return new SKSize(width, MathF.Ceiling(Font.LineHeight) + 2f);
     }
 
     /// <summary>
@@ -453,7 +440,7 @@ public class XPlatTextBox : XPlatControl
         }
 
         var display = DisplayText;
-        float lineHeight = _font.LineHeight;
+        float lineHeight = Font.LineHeight;
         float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
         float originX = content.Left - _scrollX;
 
@@ -620,9 +607,9 @@ public class XPlatTextBox : XPlatControl
         PaintUnderText(canvas, content);
 
         var display = DisplayText;
-        float lineHeight = _font.LineHeight;
+        float lineHeight = Font.LineHeight;
         float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
-        float baseline = top + _font.BaselineOffset;
+        float baseline = top + Font.BaselineOffset;
         float originX = content.Left - _scrollX;
 
         canvas.Save();
@@ -646,7 +633,7 @@ public class XPlatTextBox : XPlatControl
         if (text.Length > 0)
         {
             paint.Color = color;
-            canvas.DrawText(text, originX, baseline, SKTextAlign.Left, _font.SkFont, paint);
+            canvas.DrawText(text, originX, baseline, SKTextAlign.Left, Font.SkFont, paint);
         }
 
         canvas.Restore();
@@ -1166,7 +1153,7 @@ public class XPlatTextBox : XPlatControl
         }
 
         float width = TextRect.Width;
-        float textWidth = _font.MeasureWidth(DisplayText);
+        float textWidth = Font.MeasureWidth(DisplayText);
         float max = MathF.Max(0f, textWidth - width + HorizontalCaretPadding + _caret.Width);
         _scrollX = Math.Clamp(_scrollX, 0f, max);
     }
@@ -1178,7 +1165,7 @@ public class XPlatTextBox : XPlatControl
             return 0f;
         }
 
-        return _font.MeasureWidth(index >= display.Length ? display : display[..index]);
+        return Font.MeasureWidth(index >= display.Length ? display : display[..index]);
     }
 
     private int IndexFromX(float xInControl)

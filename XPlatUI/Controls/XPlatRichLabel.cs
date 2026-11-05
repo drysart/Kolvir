@@ -46,7 +46,6 @@ public class XPlatRichLabel : XPlatControl
 
     private readonly XPlatTextSpanCollection _spans;
     private readonly Dictionary<string, XPlatFont> _derivedFonts = new(StringComparer.Ordinal);
-    private XPlatFont _font = XPlatTheme.DefaultFont;
     private Layout? _layout;
     private XPlatTextSpan? _hoverSpan;
     private XPlatTextSpan? _pressedSpan;
@@ -85,22 +84,15 @@ public class XPlatRichLabel : XPlatControl
     /// <summary>The formatted runs of this label, in flow order.</summary>
     public XPlatTextSpanCollection Spans => _spans;
 
-    /// <summary>Base font. Spans derive their own font from it. The label does not take ownership of it.</summary>
-    public XPlatFont Font
+    /// <summary>
+    /// Spans derive their own font from the effective font, and the layout is built from those, so
+    /// a font change - assigned here, inherited from an ancestor, or a new theme face - throws both
+    /// away. The layout pass that follows re-tokenizes with the new font.
+    /// </summary>
+    protected override void OnAppearanceChanged()
     {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            ClearDerivedFonts();
-            InvalidateLayout();
-        }
+        ClearDerivedFonts();
+        _layout = null;
     }
 
     /// <summary>When true (the default) lines break at the control's width.</summary>
@@ -1129,7 +1121,7 @@ public class XPlatRichLabel : XPlatControl
                     if (layout.Lines.Count == before)
                     {
                         // A blank line keeps the paragraph spacing of an empty line.
-                        layout.Lines.Add(new Line { Ascent = _font.BaselineOffset, Height = _font.LineHeight });
+                        layout.Lines.Add(new Line { Ascent = Font.BaselineOffset, Height = Font.LineHeight });
                     }
 
                     break;
@@ -1406,27 +1398,27 @@ public class XPlatRichLabel : XPlatControl
             return span.Font;
         }
 
-        int weight = span.Bold ? Math.Max(700, _font.Weight) : _font.Weight;
-        bool italic = span.Italic || _font.Italic;
-        float size = span.FontSize is { } spanSize ? spanSize : _font.Size;
+        int weight = span.Bold ? Math.Max(700, Font.Weight) : Font.Weight;
+        bool italic = span.Italic || Font.Italic;
+        float size = span.FontSize is { } spanSize ? spanSize : Font.Size;
         string? family = span.FontFamily;
 
-        if (weight == _font.Weight
-            && italic == _font.Italic
-            && MathF.Abs(size - _font.Size) < 0.01f
-            && (family is null || string.Equals(family, _font.FamilyName, StringComparison.Ordinal)))
+        if (weight == Font.Weight
+            && italic == Font.Italic
+            && MathF.Abs(size - Font.Size) < 0.01f
+            && (family is null || string.Equals(family, Font.FamilyName, StringComparison.Ordinal)))
         {
-            return _font;
+            return Font;
         }
 
-        string key = string.Concat(family ?? _font.FamilyName, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
+        string key = string.Concat(family ?? Font.FamilyName, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
         if (!_derivedFonts.TryGetValue(key, out var font))
         {
             // A span that names a family asks for a different family and is resolved by name. A span
             // that only changes weight, slant or size is derived from the label's own font, so a face
             // loaded from a file stays on that face instead of being looked up on the machine.
             font = family is null
-                ? _font.Derive(size, weight, italic)
+                ? Font.Derive(size, weight, italic)
                 : new XPlatFont(family, size, weight, italic);
             _derivedFonts[key] = font;
         }
@@ -1451,7 +1443,9 @@ public class XPlatRichLabel : XPlatControl
         public XPlatTextSpan Span = null!;
         public FragmentKind Kind;
         public string Text = string.Empty;
-        public XPlatFont Font = XPlatTheme.DefaultFont;
+
+        /// <summary>Assigned while the text is tokenized, from the label's effective font.</summary>
+        public XPlatFont Font = null!;
         public float Width;
         public float Height;
         public float OffsetY;

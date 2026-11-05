@@ -96,6 +96,14 @@ internal static class Program
             return FontChecks.Run(args.Length > 1 ? args[1] : null);
         }
 
+        // The inherited appearance model's headless harness: it builds real trees on the headless
+        // backend and checks where a font, a foreground and a background resolve to, including
+        // changes made after the controls exist. Like --render it needs no window and no display.
+        if (args.Length > 0 && args[0] == "--appearance-check")
+        {
+            return AppearanceChecks.Run(args.Length > 1 ? args[1] : null);
+        }
+
 #if !WINDOWS && !MACOS
         // Registers the native library resolver for the GTK/GDK/GLib bindings and opens the display,
         // so without one it ends the process with exit code 1. The backend does this too, but the
@@ -389,6 +397,18 @@ internal static class Program
         if (menu)
         {
             return (window, demo) => demo.OpenMenuDemo(window);
+        }
+
+        // The inherited-appearance page changes a live tree, so a screenshot of it after the change
+        // is a second picture of the same page: --page 33 --appearance-change shows the panel's font
+        // and the theme's face both swapped with every control already built.
+        if (Array.IndexOf(args, "--appearance-change") >= 0)
+        {
+            return (_, demo) =>
+            {
+                demo.SetAppearanceDemo(size: 21f);
+                demo.SetAppearanceDemoFace(bundled: true);
+            };
         }
 
         return spanMenu ? (window, demo) => demo.OpenSpanDemo(window) : null;

@@ -459,7 +459,6 @@ public class XPlatToolStrip : XPlatControl
     private readonly List<XPlatToolStripItem> _items = new();
     private readonly List<Entry> _layout = new();
     private XPlatToolStripItemCollection? _itemCollection;
-    private XPlatFont _font = XPlatTheme.DefaultFont;
     private XPlatToolStripItem? _hot;
     private XPlatToolStripItem? _pressed;
     private XPlatToolStripItem? _selected;
@@ -480,24 +479,11 @@ public class XPlatToolStrip : XPlatControl
     /// <summary>The items in the strip, in paint order.</summary>
     public IList<XPlatToolStripItem> Items => _itemCollection ??= new XPlatToolStripItemCollection(this, _items);
 
-    /// <summary>The font the items inherit when they do not set their own.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            if (ReferenceEquals(_font, value) || value is null)
-            {
-                return;
-            }
-
-            _font = value;
-            Invalidate();
-        }
-    }
+    /// <summary>The items inherit this strip's effective font when they do not set their own.</summary>
+    protected override void OnAppearanceChanged() => _layoutDirty = true;
 
     /// <inheritdoc />
-    protected override SKColor? DefaultBackColor => XPlatTheme.Surface;
+    protected override XPlatBackground DefaultBackground => XPlatBackground.FromThemeColor(XPlatThemeColor.Surface);
 
     /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
