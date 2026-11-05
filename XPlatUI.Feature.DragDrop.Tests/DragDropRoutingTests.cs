@@ -159,6 +159,10 @@ public sealed class DragDropRoutingTests
 
         Assert.AreEqual(1, recorder.Events.Count(e => e == "target:enter"), "the control is entered once");
         Assert.AreEqual(2, recorder.Events.Count(e => e == "target:over"), "and told about each movement after");
+        Assert.AreEqual(
+            0,
+            recorder.Events.Count(e => e == "target:leave"),
+            "a drag that stays over a control has not left it, so no leave is raised");
     }
 
     [TestMethod]
@@ -365,22 +369,28 @@ public sealed class DragDropRoutingTests
         var pointer = scene.CenterOf(target);
         var data = XPlatDataObject.FromText("payload");
 
+        router.DragEnter(pointer, data, Both);
+
         var effect = router.DragDrop(pointer, data, Both);
 
         Assert.IsNotNull(dropped, "the drop handler runs");
         Assert.AreSame(data, dropped.Data, "with the payload");
         Assert.AreEqual(XPlatDragDropEffects.Copy, effect);
         CollectionAssert.AreEqual(
-            new[] { "target:enter" },
+            new[] { "target:enter", "target:over" },
             recorder.Events.ToArray(),
-            "a drop is not a leave: the target is told the drag arrived and then that it landed");
+            "a drop is not a leave either: the target is entered, told the drag moved, and then told it landed");
 
         router.DragOver(pointer, data, Both);
 
-        CollectionAssert.AreEqual(
-            new[] { "target:enter", "target:enter" },
-            recorder.Events.ToArray(),
-            "and the next drag starts from nothing, so it arrives again");
+        Assert.AreEqual(
+            2,
+            recorder.Events.Count(e => e == "target:enter"),
+            "the drop cleared the target, so the next drag arrives again rather than moving");
+        Assert.AreEqual(
+            0,
+            recorder.Events.Count(e => e == "target:leave"),
+            "and in none of that was the control told the drag left it");
     }
 
     [TestMethod]
