@@ -31,9 +31,11 @@
   <ItemGroup>
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
     <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
-    <!-- Named because it is the project an application references: if it stops restoring, every
-         consumer is broken. Only its net10.0 inner build is ever built for this project. -->
-    <ProjectReference Include="..\XPlatUI.Backend\XPlatUI.Backend.csproj" />
+    <!-- XPlatUI.Backend (the selector) is deliberately not referenced. It lists all three platform
+         frameworks unconditionally, so restoring it needs the macOS workload on the machine doing
+         the restore - true on a developer's machine here, false on a stock GitHub runner. The suite
+         needs the headless backend and nothing else, and a reference that only works where a
+         workload happens to be installed is worse than no reference. -->
   </ItemGroup>
 
   <!-- The one embedded face is the demo's, reused rather than copied: one .ttf in the repository

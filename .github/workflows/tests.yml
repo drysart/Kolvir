@@ -1,0 +1,108 @@
+name: Tests
+
+# XPlatUI.Tests is a portable net10.0 assembly, so it needs no window server, no display and no
+# platform workload: every test drives XPlatUI through the headless backend. The matrix is the
+# point rather than a formality - the same tests run on all three platforms, which is what keeps
+# the portable claims honest, and a control that only behaves on one of them fails here.
+#
+# It runs on a pull request against master and on demand. Pushes are deliberately not a trigger,
+# for the same reason the macOS workflow is not: work in progress is built and tested locally,
+# where a run takes seconds, so a runner spinning up on every push to a feature branch only adds
+# latency. A merge to master does not need a rebuild either - the pull request that produced it
+# already ran the same tests. Use workflow_dispatch to verify a branch that has no pull request.
+
+on:
+  pull_request:
+    branches: [master]
+    paths:
+      - '.github/workflows/tests.yml'
+      - 'XPlatUI.Tests/**'
+      - 'XPlatUI/**'
+      - 'XPlatUI.Backend/**'
+      - 'XPlatUI.Backend.Headless/**'
+      - 'XPlatUI.Feature.*/**'
+      - 'XPlatUIDemo.App/Fonts/**'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+  workflow_dispatch:
+
+concurrency:
+  group: tests-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # The suite is deterministic by construction - a hand-driven clock, one embedded font, no network -
+  # so a rerun should not change the result, and a flaky run is a bug to fix rather than a retry.
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  test:
+    name: Test on ${{ matrix.os }}
+    # A platform that fails should not hide the other two: three results say whether a break is
+    # portable or platform-specific.
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest, macos-latest]
+    runs-on: ${{ matrix.os }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # Restoring the test project restores the library and the headless backend with it. It is a
+      # separate step so a restore failure is distinguishable from a test failure in the log.
+      - name: Restore
+        run: dotnet restore XPlatUI.Tests/XPlatUI.Tests.csproj --nologo
+
+      # The filter is the category contract: a test that can only run on one platform carries
+      # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
+      # the matrix runs is Core, Headless or Pixels. Keep this expression identical to the one in
+      # the README so a local run matches CI.
+      - name: Test
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj --no-restore --nologo \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=tests.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --collect:"XPlat Code Coverage" \
+            --blame-hang-timeout 5m 2>&1 | tee "$RUNNER_TEMP/test.log"
+
+      # MSBuild and test diagnostics are not workflow annotations, so lift the failing test names
+      # into the job summary: that is readable without downloading the artifact.
+      - name: Summarise failures
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '### Test diagnostics'
+            echo '```'
+            grep -E '^\s*(Failed|Error Message|Assert\.|Expected|Actual)' "$RUNNER_TEMP/test.log" | head -n 60 || true
+            echo '```'
+            echo '### Environment'
+            echo '```'
+            dotnet --version
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          grep -E '^\s*Failed ' "$RUNNER_TEMP/test.log" | head -n 10 | while IFS= read -r line; do
+            echo "::error::$line"
+          done || true
+
+      # The trx and the coverage report are the two things worth having after a red run, and the
+      # artifact is uploaded only then: a green run's report is already in the log.
+      - name: Upload test results
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results-${{ matrix.os }}
+          path: ${{ runner.temp }}/test-results
+          if-no-files-found: warn
