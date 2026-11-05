@@ -2613,6 +2613,11 @@ A few consequences worth knowing before you rely on them:
   that throws, because a length that changes underneath a running frame cannot be measured against.
 - **Values are assigned only when they change**, and a restarted set assigns its start values again
   even when they match what it finished on. A frame that changes nothing calls no callback.
+- **The clock stops at the end of the frame**, not in the middle of it. A finished handler that runs
+  from a frame therefore still sees `scheduler.IsRunning == true`, and a handler that starts or
+  restarts a set keeps the clock running rather than stopping and restarting it for one frame's work.
+  A set ended from application code - by `End()`, `Pause()` or `Dispose()` - stops the clock before
+  the call returns.
 - **A callback that throws is reported, not retried.** It goes to
   `XPlatApplication.AddUnhandledExceptionHandler` (the same route drag and drop uses) and the rest of
   the frame still runs, so one bad animation cannot freeze the others. With no application in the

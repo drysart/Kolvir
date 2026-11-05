@@ -232,6 +232,46 @@ public sealed class AnimationSchedulerTests : AnimationsTestBase
     }
 
     [TestMethod]
+    public void ASetThatFinishesOutsideAFrameStopsTheClockBeforeTheCallReturns()
+    {
+        using var harness = new AnimationHarness();
+        var set = harness.Set();
+        set.Add(XPlatValueAnimation.Create(0f, 1f, Hundred, _ => { }));
+
+        set.Start();
+        harness.Frame(40);
+
+        Assert.IsTrue(harness.Scheduler.IsRunning);
+
+        set.End();
+
+        Assert.IsFalse(
+            harness.Scheduler.IsRunning,
+            "ending from application code is not inside a frame, so the clock stops there and then");
+    }
+
+    [TestMethod]
+    public void ASetThatFinishesInsideAFrameStopsTheClockWhenTheFrameReturns()
+    {
+        using var harness = new AnimationHarness();
+        bool runningInsideHandler = false;
+
+        var set = harness.Set();
+        set.Add(XPlatValueAnimation.Create(0f, 1f, Hundred, _ => { }));
+        set.AddFinishedHandler(_ => runningInsideHandler = harness.Scheduler.IsRunning);
+
+        set.Start();
+        harness.Frame(100);
+
+        Assert.IsTrue(
+            runningInsideHandler,
+            "the handler runs before the frame is over, so the clock has not been stopped yet");
+        Assert.IsFalse(
+            harness.Scheduler.IsRunning,
+            "and it is stopped by the time the frame returns, so the application is idle");
+    }
+
+    [TestMethod]
     public void PausingTheOnlyRunningSetStopsTheClockAndResumingStartsIt()
     {
         using var harness = new AnimationHarness();

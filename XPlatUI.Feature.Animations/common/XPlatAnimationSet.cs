@@ -38,7 +38,10 @@ namespace XPlatUI.Animations;
 /// parameter (FEATURE-COST-POLICY.md §5.4), so the shape is
 /// <c>AddFinishedHandler(Action&lt;object&gt;)</c> and the argument is the
 /// <see cref="XPlatAnimationSet"/> whose timeline ended. The handler runs once per run, on the UI
-/// thread, after the values are already at their end.
+/// thread, after the values are already at their end. A set that ends inside a frame runs it before
+/// that frame returns, so <see cref="XPlatAnimationScheduler.IsRunning"/> still reads true from
+/// inside the handler; a handler that starts or restarts a set therefore keeps the clock running
+/// instead of stopping and starting it again.
 /// </para>
 /// <para>
 /// The animation list is fixed by the first <see cref="Start"/>: adding one after the timeline has

@@ -29,6 +29,15 @@ namespace XPlatUI.Animations;
 /// restart the wait underneath the frame it is running in.</item>
 /// </list>
 /// <para>
+/// One consequence is worth stating because it is observable: a set that finishes inside a frame
+/// runs its finished handler before the frame is over, so <see cref="IsRunning"/> still reports true
+/// from inside that handler and the clock stops when the frame returns. A set that finishes outside
+/// a frame - from <see cref="XPlatAnimationSet.End"/> called by application code, say - stops the
+/// clock before the call returns. The visible difference is only in that instant; what matters is
+/// that no frame is ever cut short and that the clock is never stopped and started again for one
+/// frame's worth of work.
+/// </para>
+/// <para>
 /// Time comes from a <see cref="System.TimeProvider"/> rather than from a frame counter, so a frame
 /// the platform is late for makes the animation skip ahead instead of slowing down, and so a test
 /// can move time by hand and drive a whole animation without sleeping. The wait itself comes from an
