@@ -87,6 +87,28 @@ public class XPlatTextBox : XPlatControl
     /// <summary>The insertion point's caret, which this text box owns and positions.</summary>
     public XPlatCaret Caret => _caret;
 
+    /// <summary>
+    /// Where the caret is, in this control's client coordinates. The autocomplete feature hangs its
+    /// suggestion list under it instead of repeating the text layout. Empty when the field has no
+    /// room to lay the text out.
+    /// </summary>
+    internal SKRect CaretBounds
+    {
+        get
+        {
+            var content = TextRect;
+            if (content.Width <= 0f || content.Height <= 0f)
+            {
+                return SKRect.Empty;
+            }
+
+            float lineHeight = _font.LineHeight;
+            float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
+            float x = content.Left - _scrollX + MeasureX(DisplayText, _caretIndex);
+            return new SKRect(x, top, x + _caret.Width, top + lineHeight);
+        }
+    }
+
     /// <summary>Index of the insertion point (0 .. <see cref="XPlatControl.Text"/>.Length).</summary>
     public int CaretIndex
     {
