@@ -806,19 +806,36 @@ public sealed class XPlatUiHost
     /// presenter.
     /// </summary>
     /// <remarks>
-    /// The menu comes from the hit control's <see cref="XPlatControl.ContextMenu"/> (or the nearest
-    /// ancestor that has one), then from <see cref="AddContextMenuOpeningHandler"/>, and finally
-    /// from the current selection, which offers Copy. Right-clicking never changes the selection,
-    /// so a menu can act on what the user already selected.
+    /// <para>
+    /// The control under the pointer composes the menu: its own <see cref="XPlatControl.ContextMenu"/>
+    /// (or the nearest ancestor's, or whatever it builds from its own state) is the starting point,
+    /// and the handlers it, its ancestors and finally this host added all receive that same
+    /// <see cref="XPlatContextMenuEventArgs.Menu"/> instance to add to. A text box contributes Cut,
+    /// Copy, Paste and Select All, so an annotation menu sits beside the ordinary editing commands
+    /// instead of replacing them.
+    /// </para>
+    /// <para>
+    /// A handler that wants a menu of its own assigns a new menu to
+    /// <see cref="XPlatContextMenuEventArgs.Menu"/> (or clears the one it was given), which is how
+    /// the control's contribution is suppressed. The handlers on the host are the application-wide
+    /// fallback: they run only when the control under the pointer ran no handler and supplied no
+    /// menu, so a text box's editing commands are never shadowed by a page menu. The selection's
+    /// **Copy** item is offered last, when nothing else has anything to show.
+    /// </para>
     /// </remarks>
     public bool ProcessContextMenu(SKPoint location) => Guard(() =>
     {
         var hit = HitTest(location);
-        var menu = hit?.BuildContextMenu();
-
-        if (menu is null || menu.IsEmpty)
+        var args = new XPlatContextMenuEventArgs(hit, location)
         {
-            var args = new XPlatContextMenuEventArgs(hit, location);
+            Menu = hit?.BuildContextMenu(),
+        };
+
+        bool handled = hit?.RaiseContextMenuOpening(args) ?? false;
+
+        var menu = args.Menu;
+        if (!handled && (menu is null || menu.IsEmpty))
+        {
             _contextMenuOpening?.Invoke(this, args);
             menu = args.Menu;
         }
@@ -1265,6 +1282,13 @@ public sealed class XPlatUiHost
     {
         for (var current = control; current is not null; current = current.Parent)
         {
+            // A scrollbar inside a selectable control is chrome, not content: the press belongs to
+            // the bar and must not begin, extend or release a selection of the control around it.
+            if (current is IXPlatSelectionBarrier)
+            {
+                return null;
+            }
+
             if (current.SelectionUnitCount > 0)
             {
                 return current;

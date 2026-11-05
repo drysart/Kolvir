@@ -4,6 +4,8 @@ using XPlatUI;
 using XPlatUI.AutoComplete;
 using XPlatUI.Backend.Headless;
 using XPlatUI.DragDrop;
+using XPlatUI.Multiline;
+using XPlatUI.Spans;
 using XDock = XPlatUI.DockStyle;
 
 namespace XPlatUI.Demo;
@@ -32,11 +34,14 @@ public sealed class DemoUi
 
         // A page that has no menu of its own still has to answer a right-click: the host asks for a
         // menu only after the control under the pointer has declined, and the native menu paths show
-        // nothing at all when nobody answers. The selection's Copy menu comes after this hook, so a
-        // page menu is only offered while there is nothing selected to copy.
+        // nothing at all when nobody answers. This one is genuinely application-wide - it belongs to
+        // the window, not to any one control - so it is the host's handler, and it runs last. The
+        // selection's Copy menu comes after it, so a page menu is only offered while there is
+        // nothing selected to copy. A text box keeps its own Cut/Copy/Paste menu, which is why the
+        // page menu is not offered over one.
         OnHostAvailable(Root, host => host.AddContextMenuOpeningHandler((_, args) =>
         {
-            if (host.Selection.IsEmpty)
+            if (host.Selection.IsEmpty && args.Control is not XPlatTextBox)
             {
                 args.Menu = BuildPageContextMenu();
             }
@@ -45,7 +50,6 @@ public sealed class DemoUi
 
     /// <summary>The root of the sample control tree.</summary>
     public XPlatControl Root { get; }
-
     /// <summary>Shows the page that holds the first text field and puts the caret in it, which then blinks.</summary>
     public void FocusFirstTextBox()
     {
@@ -381,6 +385,8 @@ public sealed class DemoUi
         ("Menus", demo => Page(demo.BuildMenuDemo())),
         ("Date and time", demo => Page(demo.BuildDateTimePickerDemo())),
         ("Text box autocomplete", demo => Page(demo.BuildAutoCompleteDemo())),
+        ("Multi-line text", demo => Page(demo.BuildMultilineDemo())),
+        ("Text box spans", demo => Page(demo.BuildSpanDemo())),
     };
 
     /// <summary>
@@ -3431,6 +3437,332 @@ public sealed class DemoUi
         });
 
         return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatTextBox"/> with <c>Multiline</c> on: a wrapped field holding more text than
+    /// fits, an unwrapped one that scrolls sideways, and a wrapped one with autocomplete. The
+    /// readout follows the caret's line and column, so the keyboard can be watched working.
+    /// </summary>
+    private XPlatPanel BuildMultilineDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Multi-line text"));
+
+        var readout = ScrollCaption("Line 1, column 1 - type, press Enter, then move with the arrows");
+        card.Controls.Add(readout);
+
+        var wrapped = new XPlatTextBox
+        {
+            Dock = XDock.Top,
+            Height = 96f,
+            Multiline = true,
+            PlaceholderText = "Write something",
+            Text =
+                "A multi-line text box wraps at word boundaries and lays its caret out on the visual " +
+                "line it is drawn on rather than on a single logical line.\n\n" +
+                "Enter inserts a line break and Ctrl+Enter is left for the form around it, because a " +
+                "field that spans lines still needs an accept gesture. Tab still moves the focus. Up " +
+                "and Down keep the column they started in, even across a short line, and Home and End " +
+                "work on the visual line rather than on the whole value.\n\n" +
+                "Drag the pointer across two lines to select them, then Ctrl+C and Ctrl+V: the line " +
+                "breaks survive the round trip. The bar on the right appears because this text is " +
+                "taller than the field, and the wheel scrolls it.",
+        };
+
+        wrapped.AddTextChangedHandler(_ => readout.Text = DescribeCaret(wrapped));
+        wrapped.AddKeyUpHandler((_, _) => readout.Text = DescribeCaret(wrapped));
+        wrapped.AddMouseUpHandler((_, _) => readout.Text = DescribeCaret(wrapped));
+        card.Controls.Add(Caption("Wrapped (WordWrap = true)"));
+        card.Controls.Add(wrapped);
+
+        var unwrapped = new XPlatTextBox
+        {
+            Dock = XDock.Top,
+            Height = 62f,
+            Multiline = true,
+            WordWrap = false,
+            Text =
+                "WordWrap = false keeps every logical line on one visual line and scrolls the field " +
+                "sideways instead, the way a code editor does: this sentence is deliberately long so " +
+                "that the horizontal bar at the bottom of the field has somewhere to go when the " +
+                "caret reaches the end of it.",
+        };
+
+        unwrapped.AddTextChangedHandler(_ => readout.Text = DescribeCaret(unwrapped));
+        unwrapped.AddKeyUpHandler((_, _) => readout.Text = DescribeCaret(unwrapped));
+        card.Controls.Add(Caption("Unwrapped (WordWrap = false)"));
+        card.Controls.Add(unwrapped);
+
+        var completing = new XPlatTextBox
+        {
+            Dock = XDock.Top,
+            Height = 78f,
+            Multiline = true,
+            AutoCompleteMode = XPlatAutoCompleteMode.SuggestAppend,
+            AutoCompleteSource = XPlatAutoCompleteSource.CustomSource,
+            PlaceholderText = "Type \"ap\" on any line",
+        };
+
+        foreach (string fruit in new[] { "Apple", "Apricot", "Banana", "Blueberry", "Cherry", "Mango", "Peach" })
+        {
+            completing.AutoCompleteCustomSource.Add(fruit);
+        }
+
+        card.Controls.Add(Caption("Autocomplete on a wrapped field"));
+        card.Controls.Add(completing);
+
+        card.Controls.Add(new XPlatLabel(
+            "The suggestion list hangs from the caret's own line, so it opens where the user is typing " +
+            "rather than under the bottom of a tall field. Taking a suggestion replaces the text on that " +
+            "line and leaves every other line alone, and the append modes complete nothing while the " +
+            "field spans lines, because a suffix cannot cross a line break.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 52f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 8f, 0f, 0f),
+        });
+
+        return card;
+    }
+
+    /// <summary>A small muted caption sitting above a field.</summary>
+    private static XPlatLabel Caption(string text) => new(text)
+    {
+        Dock = XDock.Top,
+        AutoSize = false,
+        Height = 20f,
+        Font = XPlatTheme.CaptionFont,
+        ForeColorRole = XPlatThemeColor.MutedForeground,
+        TextAlign = XPlatContentAlignment.BottomLeft,
+    };
+
+    /// <summary>The caret's logical line and column, and how much is selected, for the readout.</summary>
+    private static string DescribeCaret(XPlatTextBox box)
+    {
+        var text = box.Text;
+        int caret = Math.Clamp(box.CaretIndex, 0, text.Length);
+        int line = 0;
+        int lineStart = 0;
+
+        for (int i = 0; i < caret; i++)
+        {
+            if (text[i] == '\n')
+            {
+                line++;
+                lineStart = i + 1;
+            }
+        }
+
+        int column = caret - lineStart + 1;
+        int lines = 1;
+        foreach (char c in text)
+        {
+            if (c == '\n')
+            {
+                lines++;
+            }
+        }
+
+        return $"Line {line + 1} of {lines}, column {column} - {text.Length} characters, " +
+            $"{box.SelectionLength} selected";
+    }
+
+    /// <summary>
+    /// <see cref="XPlatTextBox"/> with annotation spans: a single-line field with three marked
+    /// words, and a wrapped multi-line field whose longest span crosses a soft wrap so it is drawn
+    /// on two visual lines. Right-clicking a squiggle reports the span that was hit, both in the
+    /// context menu and in the readout above the fields.
+    /// </summary>
+    private XPlatPanel BuildSpanDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Text box spans"));
+
+        var readout = ScrollCaption("Right-click a squiggle - the menu and this line name the span that was hit");
+        card.Controls.Add(readout);
+
+        const string sentence =
+            "The quick brown fox jumpped over the lazzy dog, and a grammer checker noticed.";
+        var single = new XPlatTextBox
+        {
+            Dock = XDock.Top,
+            Height = 32f,
+            Text = sentence,
+            Spans =
+            [
+                Spelling(sentence, "jumpped"),
+                Spelling(sentence, "lazzy"),
+                Grammar(sentence, "grammer"),
+            ],
+        };
+        AttachSpanMenu(single, readout);
+        card.Controls.Add(Caption("Single line - two spelling spans and one grammar span"));
+        card.Controls.Add(single);
+
+        const string paragraph =
+            "Spans are caller-owned: the box keeps the list by reference, never edits it, and clamps " +
+            "a stale span where it is drawn instead of dropping it. This whole sentence is one " +
+            "annotation, so its squiggly underline has to break at the end of the first visual line " +
+            "and pick up again at the start of the next one - that is what a wrapped multi-line " +
+            "field does, and it is why the marker is drawn once per visual line rather than once per " +
+            "annotation.\n" +
+            "Teh line below holds a short span of its own.";
+
+        var wrapped = new XPlatTextBox
+        {
+            Dock = XDock.Top,
+            Height = 122f,
+            Multiline = true,
+            Text = paragraph,
+            Spans =
+            [
+                FromTo(paragraph, "This whole sentence", "a wrapped multi-line"),
+                Grammar(paragraph, "Teh"),
+            ],
+        };
+        card.Controls.Add(Caption("Multi-line and wrapped - the long span crosses a soft wrap"));
+        card.Controls.Add(wrapped);
+        AttachSpanMenu(wrapped, readout);
+
+        card.Controls.Add(new XPlatLabel(
+            "A span declares a start index, a length and how its squiggle is drawn - colour, stroke " +
+            "weight, wave height and wavelength - and is meant to be subclassed, so a checker can hang " +
+            "its suggestion list or rule id on it. Assigning Spans replaces the whole set by reference, " +
+            "which is what a checker wants on every keystroke. The box never rewrites a span when the " +
+            "text changes: an out-of-range one is clamped where it is drawn and an empty one is " +
+            "skipped. The context menu event reports the span the right-click landed in through its " +
+            "Span property, correctly after scrolling and after re-wrapping.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 78f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 8f, 0f, 0f),
+        });
+
+        return card;
+    }
+
+    /// <summary>A span over one word, marked the way a spelling checker marks it.</summary>
+    private static XPlatTextBoxSpan Spelling(string text, string word) =>
+        new(text.IndexOf(word, StringComparison.Ordinal), word.Length) { Tag = word };
+
+    /// <summary>A span over one word in the accent colour, the way a grammar checker marks it.</summary>
+    private static XPlatTextBoxSpan Grammar(string text, string word) =>
+        new(text.IndexOf(word, StringComparison.Ordinal), word.Length)
+        {
+            Tag = word,
+            ThemeColor = XPlatThemeColor.Accent,
+        };
+
+    /// <summary>A span from the start of one word to the end of another, for a run of text.</summary>
+    private static XPlatTextBoxSpan FromTo(string text, string from, string to)
+    {
+        int start = text.IndexOf(from, StringComparison.Ordinal);
+        int end = text.IndexOf(to, StringComparison.Ordinal) + to.Length;
+
+        return new(start, Math.Max(0, end - start)) { Tag = text[start..end] };
+    }
+
+    /// <summary>
+    /// Gives one field the right-click behaviour of a text box that carries annotations, the way an
+    /// application would write it: the handler is attached to the control, so nothing outside the
+    /// control has to know which field was pressed, and it only <em>adds</em> to the menu the box
+    /// contributed. The result reads like an editor: the suggestions for the marked run, a
+    /// separator, then the ordinary Cut/Copy/Paste/Select All. The page-level menu stays a host
+    /// concern because it belongs to the window rather than to any one control.
+    /// </summary>
+    private void AttachSpanMenu(XPlatTextBox box, XPlatLabel readout)
+    {
+        box.AddContextMenuOpeningHandler(args =>
+        {
+            if (args.Span is not { } span || span.Tag is not string marked)
+            {
+                readout.Text = "The press missed every span - Span was null, so only the editing commands are offered";
+                return;
+            }
+
+            string word = marked.Length <= 24 ? marked : marked[..21] + "...";
+            readout.Text = $"Right-click hit the span on \"{word}\" - start {span.Start}, length {span.Length}";
+
+            var menu = args.Menu ??= new XPlatContextMenu();
+
+            // In front of the editing block, in reading order, then one separator between the two.
+            menu.Insert(0, new XPlatMenuItem("&Add to dictionary", () => SetStatus($"\"{word}\" added to the dictionary.")));
+            menu.Insert(0, new XPlatMenuItem($"&Ignore \"{word}\"", () => SetStatus($"\"{word}\" added to the ignore list.")));
+            menu.Insert(0, new XPlatMenuItem($"&Replace \"{word}\"", () => SetStatus($"Replace picked for \"{word}\".")));
+            menu.Insert(3, XPlatMenuItem.Separator);
+        });
+    }
+
+    /// <summary>
+    /// Right-clicks a squiggle on the spans page as if the pointer had gone there, which is what a
+    /// screenshot needs in order to show the context menu - and the readout - naming the span. It
+    /// goes through the same host entry point the platform uses, so it proves the dispatch, not a
+    /// shortcut around it.
+    /// </summary>
+    /// <param name="window">The window the sample is showing in.</param>
+    public void OpenSpanDemo(XPlatWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        // Nothing has painted yet, so the page has no bounds until something lays it out.
+        window.Host.PerformLayout();
+
+        if (FindSpannedBox(Root) is not { Spans: { Count: > 0 } spans } box)
+        {
+            return;
+        }
+
+        // The last visual-line segment rather than the first, so the picture proves that a span
+        // which crosses a soft wrap still resolves from the line it wrapped onto.
+        var rects = new List<SKRect>();
+        box.GetSelectionRects(spans[0].Start, spans[0].Length, rects);
+        if (rects.Count == 0)
+        {
+            return;
+        }
+
+        var segment = rects[^1];
+        var origin = box.GetPositionInHost();
+        window.Host.ProcessContextMenu(new SKPoint(origin.X + segment.MidX, origin.Y + segment.MidY));
+    }
+
+    /// <summary>
+    /// The field the screenshot path presses in: the wrapped one when the page has one, so a span
+    /// that crosses a soft wrap is the one that gets resolved, and any annotated field otherwise.
+    /// </summary>
+    private static XPlatTextBox? FindSpannedBox(XPlatControl control)
+    {
+        var found = Search(control, multilineOnly: true) ?? Search(control, multilineOnly: false);
+        return found;
+
+        static XPlatTextBox? Search(XPlatControl node, bool multilineOnly)
+        {
+            if (node is XPlatTextBox { Spans: { Count: > 0 } } box && (!multilineOnly || box.Multiline))
+            {
+                return box;
+            }
+
+            foreach (var child in node.Controls)
+            {
+                if (Search(child, multilineOnly) is { } match)
+                {
+                    return match;
+                }
+            }
+
+            return null;
+        }
     }
 
     /// <summary>A text box over a custom source, with the values the suggestion list filters.</summary>

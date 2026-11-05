@@ -1,5 +1,7 @@
 using System.Text;
 using SkiaSharp;
+using XPlatUI.Multiline;
+using XPlatUI.Spans;
 
 namespace XPlatUI;
 
@@ -57,6 +59,73 @@ public class XPlatTextBox : XPlatControl
     protected override SKColor? DefaultBackColor => XPlatTheme.InputBackground;
 
     /// <summary>
+    /// The multi-line feature when this box opted into it, otherwise null.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the whole seam between the text box and <c>XPlatUI.Multiline</c>, and the one thing
+    /// every text box in every application carries for a feature it may never use: a null reference
+    /// and a null check. Everything the feature does - measuring, painting, hit testing, the
+    /// scrollbars, the keys that mean something else once text spans lines - is called through this
+    /// interface, and the interface's only implementation is created by the extension property that
+    /// turns the feature on. An application that never sets <c>Multiline</c> therefore publishes
+    /// without the feature's code, which is what FEATURE-COST-POLICY.md §4's first rung asks for and
+    /// what a field or a member per multi-line concern could not deliver.
+    /// </para>
+    /// </remarks>
+    internal IXPlatTextBoxMultiline? MultilineFeature { get; set; }
+
+    /// <summary>
+    /// The span annotation feature when this box has spans, otherwise null. The second of the text
+    /// box's two nullable seams, and the same shape as <see cref="MultilineFeature"/>: drawing a
+    /// squiggle is the control's own paint path, so it cannot live outside the control, while every
+    /// type that knows how to draw one is named only by the extension property that installs this.
+    /// A box that never assigns <c>Spans</c> therefore carries the reference and a null check on the
+    /// paint path and publishes without the rest.
+    /// </summary>
+    internal IXPlatTextBoxSpanFeature? SpanFeature { get; set; }
+
+    /// <summary>True when the box edits several lines. Answers from the seam, so it costs one null check.</summary>
+    internal bool IsMultiline => MultilineFeature is not null;
+
+    /// <summary>The client area and padding the multi-line feature lays text out against.</summary>
+    internal XPlatTextBoxViewport Viewport => new(ClientRect, ContentPadding);
+
+    /// <summary>
+    /// The text as a value. A multi-line box normalises what it is given: CRLF and a lone CR become
+    /// the single line feed its line model uses, and a tab becomes spaces, because Tab moves the
+    /// focus here and the value has to stay something the box can draw. Every path - typing, paste,
+    /// insertion, a binding - therefore produces the same value for the same content, and text that
+    /// is copied out and pasted back is unchanged.
+    /// </summary>
+    public override string Text
+    {
+        get => base.Text;
+        set
+        {
+            var text = value ?? string.Empty;
+            base.Text = MultilineFeature?.SanitizeText(text) ?? text;
+        }
+    }
+
+    /// <summary>
+    /// Sets the selection anchor and the caret independently, which is what Shift-extension needs on
+    /// a field whose caret moves by visual line. <see cref="Select"/> always puts the caret at the
+    /// end of the range, so it cannot express an extension towards the left.
+    /// </summary>
+    internal void SetSelection(int anchor, int caretIndex)
+    {
+        ActivateCaret();
+
+        _anchor = Math.Clamp(anchor, 0, Text.Length);
+        _caretIndex = Math.Clamp(caretIndex, 0, Text.Length);
+
+        _caret.ResetBlink();
+        EnsureCaretVisible();
+        Invalidate();
+    }
+
+    /// <summary>
     /// The inset the text, caret and selection are laid out inside. Derived controls that draw
     /// their own chrome in the field, such as <see cref="XPlatNumericUpDown"/>'s spinner, widen
     /// it so the text stops short of what they draw instead of running underneath it.
@@ -96,6 +165,11 @@ public class XPlatTextBox : XPlatControl
     {
         get
         {
+            if (MultilineFeature is { } multiline)
+            {
+                return multiline.GetCaretBounds(this, Viewport);
+            }
+
             var content = TextRect;
             if (content.Width <= 0f || content.Height <= 0f)
             {
@@ -275,6 +349,14 @@ public class XPlatTextBox : XPlatControl
     public void InsertText(string text)
     {
         ArgumentNullException.ThrowIfNull(text);
+
+        // A line break survives insertion into a multi-line box, normalised the way every other path
+        // normalises one. A single-line box keeps exactly the behaviour it always had.
+        if (MultilineFeature is { } multiline)
+        {
+            text = multiline.SanitizeText(text);
+        }
+
         ReplaceRange(SelectionStart, SelectionLength, text);
     }
 
@@ -291,6 +373,11 @@ public class XPlatTextBox : XPlatControl
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
+        if (MultilineFeature is { } multiline)
+        {
+            return multiline.Measure(this, Viewport, availableSize);
+        }
+
         var sample = Text.Length == 0 ? "W" : Text;
         float width = MathF.Min(MathF.Ceiling(_font.MeasureWidth(sample)) + 4f, 320f);
         return new SKSize(width, MathF.Ceiling(_font.LineHeight) + 2f);
@@ -300,7 +387,10 @@ public class XPlatTextBox : XPlatControl
     /// Maps a point to the nearest character boundary rather than a proportion of the width, so
     /// a selection dragged into the box lands between two characters.
     /// </summary>
-    public override float GetSelectionOffset(SKPoint pointInLocal) => IndexFromX(pointInLocal.X);
+    public override float GetSelectionOffset(SKPoint pointInLocal) =>
+        MultilineFeature is { } multiline
+            ? multiline.GetIndexFromPoint(this, Viewport, pointInLocal)
+            : IndexFromX(pointInLocal.X);
 
     /// <summary>
     /// Adds the run of characters covered by the selection, using the same geometry as the box's
@@ -309,6 +399,12 @@ public class XPlatTextBox : XPlatControl
     public override void GetSelectionRects(int start, int length, List<SKRect> output)
     {
         ArgumentNullException.ThrowIfNull(output);
+
+        if (MultilineFeature is { } multiline)
+        {
+            multiline.GetSelectionRects(this, Viewport, start, length, output);
+            return;
+        }
 
         var content = TextRect;
         if (length <= 0 || content.Width <= 0f || content.Height <= 0f)
@@ -330,10 +426,41 @@ public class XPlatTextBox : XPlatControl
     }
 
     /// <summary>
+    /// Records which annotated span the press landed in before any handler sees the event, so the
+    /// answer is the one the frame showed rather than a hit test re-run later, when the field may
+    /// have been scrolled or re-wrapped underneath the pointer. A press outside every span, and a
+    /// press routed up from a child control, both record null.
+    /// </summary>
+    protected internal override bool RaiseContextMenuOpening(XPlatContextMenuEventArgs args)
+    {
+        if (SpanFeature is { } spans)
+        {
+            if (ReferenceEquals(args.Control, this))
+            {
+                var origin = GetPositionInHost();
+                args.Hit = spans.HitTest(this, new SKPoint(args.Location.X - origin.X, args.Location.Y - origin.Y));
+            }
+            else
+            {
+                args.Hit = null;
+            }
+        }
+
+        return base.RaiseContextMenuOpening(args);
+    }
+
+    /// <summary>
     /// Offers the editing commands the box supports - Cut, Copy, Paste and Select All - instead
     /// of the generic menu. Copy falls back to the host's selection when the box is only part of
     /// a larger selection, which is what the generic menu would have offered.
     /// </summary>
+    /// <remarks>
+    /// This is what a right-click over the box starts with: a handler adds its own items to it, so
+    /// an annotation menu sits beside the editing commands rather than replacing them. Each command
+    /// is enabled by the rule the command itself obeys - nothing selected means no Cut or Copy, a
+    /// read-only box means no Cut or Paste, an empty clipboard means no Paste, and empty text means
+    /// no Select All - so a disabled row here and a call that would have done nothing agree.
+    /// </remarks>
     protected internal override XPlatContextMenu? BuildContextMenu()
     {
         if (ContextMenu is not null || !Enabled)
@@ -342,11 +469,14 @@ public class XPlatTextBox : XPlatControl
         }
 
         bool hasSelection = HasSelection;
+        bool canWrite = !ReadOnly;
+        bool canPaste = canWrite && !string.IsNullOrEmpty(XPlatClipboard.GetText());
+
         return new XPlatContextMenu()
             .Add(new XPlatMenuItem("Cut", () => Cut())
             {
                 Shortcut = new XPlatShortcut(XPlatKey.X),
-                Enabled = !ReadOnly && hasSelection,
+                Enabled = canWrite && hasSelection,
             })
             .Add(new XPlatMenuItem("Copy", CopySelection)
             {
@@ -356,7 +486,7 @@ public class XPlatTextBox : XPlatControl
             .Add(new XPlatMenuItem("Paste", () => Paste())
             {
                 Shortcut = new XPlatShortcut(XPlatKey.V),
-                Enabled = !ReadOnly,
+                Enabled = canPaste,
             })
             .AddSeparator()
             .Add(new XPlatMenuItem("Select All", SelectAll)
@@ -396,11 +526,24 @@ public class XPlatTextBox : XPlatControl
 
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
+        if (MultilineFeature is { } multiline)
+        {
+            // The feature lays the text out and paints it; everything that has to sit under or over
+            // the glyphs is drawn here, so the order is the same on a one-line field.
+            var area = Viewport.Text;
+            PaintUnderText(canvas, area);
+            multiline.Paint(this, canvas, Viewport, _placeholderText);
+            PaintCaret(canvas, area);
+            return;
+        }
+
         var content = XPlatGeometry.Deflate(rect, ContentPadding);
         if (content.Width <= 0f || content.Height <= 0f)
         {
             return;
         }
+
+        PaintUnderText(canvas, content);
 
         var display = DisplayText;
         float lineHeight = _font.LineHeight;
@@ -412,14 +555,6 @@ public class XPlatTextBox : XPlatControl
         canvas.ClipRect(content);
 
         using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
-
-        if (HasSelection && Enabled)
-        {
-            float x1 = originX + MeasureX(display, SelectionStart);
-            float x2 = originX + MeasureX(display, SelectionStart + SelectionLength);
-            paint.Color = XPlatTheme.Selection;
-            canvas.DrawRect(new SKRect(x1, top, x2, top + lineHeight), paint);
-        }
 
         string text = display;
         var color = ForeColor;
@@ -440,8 +575,72 @@ public class XPlatTextBox : XPlatControl
             canvas.DrawText(text, originX, baseline, SKTextAlign.Left, _font.SkFont, paint);
         }
 
-        _caret.Draw(canvas, originX + MeasureX(display, _caretIndex), top, lineHeight);
+        canvas.Restore();
 
+        PaintCaret(canvas, content);
+    }
+
+    /// <summary>
+    /// Paints what a marker has to be drawn under or over: the selection highlight, then the
+    /// annotation squiggles, both clipped to the area the text is laid out in.
+    /// </summary>
+    /// <remarks>
+    /// The order the paint path uses is selection, squiggles, text, caret, on a one-line and a
+    /// multi-line field alike. The wash goes <em>under</em> the squiggle because the theme's
+    /// selection colour is caller-supplied and may be opaque, which would otherwise hide a marked
+    /// word exactly while the user is looking at it; a squiggle in its own colour survives the
+    /// translucent wash that is the usual case and stays legible under an opaque one. The glyphs go
+    /// over the squiggle so a descender is drawn on top of it instead of being cut by it, and the
+    /// caret goes last so a blinking caret is never covered by a marker.
+    /// </remarks>
+    private void PaintUnderText(SKCanvas canvas, SKRect area)
+    {
+        if (area.Width <= 0f || area.Height <= 0f)
+        {
+            return;
+        }
+
+        canvas.Save();
+        canvas.ClipRect(area);
+
+        if (HasSelection && Enabled && SelectionLength > 0)
+        {
+            var rects = new List<SKRect>();
+            GetSelectionRects(SelectionStart, SelectionLength, rects);
+            if (rects.Count > 0)
+            {
+                using var paint = new SKPaint
+                {
+                    IsAntialias = true,
+                    Style = SKPaintStyle.Fill,
+                    Color = XPlatTheme.Selection,
+                };
+
+                foreach (var selection in rects)
+                {
+                    canvas.DrawRect(selection, paint);
+                }
+            }
+        }
+
+        SpanFeature?.Paint(this, canvas);
+        canvas.Restore();
+    }
+
+    /// <summary>
+    /// Draws the caret, clipped to the area the text is laid out in. Last of all, so a squiggle or
+    /// a glyph can never cover it.
+    /// </summary>
+    private void PaintCaret(SKCanvas canvas, SKRect area)
+    {
+        if (area.Width <= 0f || area.Height <= 0f)
+        {
+            return;
+        }
+
+        canvas.Save();
+        canvas.ClipRect(area);
+        _caret.Draw(canvas, CaretBounds);
         canvas.Restore();
     }
 
@@ -464,7 +663,9 @@ public class XPlatTextBox : XPlatControl
         _selecting = true;
         CaptureMouse();
 
-        int index = IndexFromX(e.Location.X);
+        int index = MultilineFeature is { } multiline
+            ? multiline.GetIndexFromPoint(this, Viewport, e.Location)
+            : IndexFromX(e.Location.X);
         if (e.ClickCount >= 3)
         {
             SelectAll();
@@ -489,7 +690,11 @@ public class XPlatTextBox : XPlatControl
 
         if (_selecting)
         {
-            MoveCaretTo(IndexFromX(e.Location.X), extendSelection: true);
+            MoveCaretTo(
+                MultilineFeature is { } multiline
+                    ? multiline.GetIndexFromPoint(this, Viewport, e.Location)
+                    : IndexFromX(e.Location.X),
+                extendSelection: true);
         }
     }
 
@@ -517,6 +722,11 @@ public class XPlatTextBox : XPlatControl
 
         bool shift = (e.Modifiers & XPlatModifiers.Shift) != 0;
         bool control = (e.Modifiers & XPlatModifiers.Control) != 0;
+
+        if (MultilineFeature is { } multiline && multiline.OnKeyDown(this, Viewport, e))
+        {
+            return;
+        }
 
         switch (e.Key)
         {
@@ -621,6 +831,9 @@ public class XPlatTextBox : XPlatControl
     {
         _caretIndex = Math.Clamp(_caretIndex, 0, Text.Length);
         _anchor = Math.Clamp(_anchor, 0, Text.Length);
+
+        MultilineFeature?.OnTextChanged(this, Viewport);
+
         ClampScroll();
 
         base.OnTextChanged();
@@ -658,7 +871,46 @@ public class XPlatTextBox : XPlatControl
     protected override void OnBoundsChanged()
     {
         base.OnBoundsChanged();
+
+        // Layout has already run, so the scroll helper knows the new viewport and the caret can be
+        // brought back inside it.
         EnsureCaretVisible();
+    }
+
+    /// <summary>Positions the scrollbars, then the text they scroll. A single-line box has neither.</summary>
+    protected override void OnLayout()
+    {
+        base.OnLayout();
+        MultilineFeature?.Layout(this, Viewport);
+    }
+
+    /// <summary>
+    /// The scrollbars belong to the box but are not children of it: <see cref="XPlatScrollBars"/>
+    /// positions them itself and the container paints them last, exactly as <see cref="XPlatPanel"/>
+    /// does with its own.
+    /// </summary>
+    protected override void RenderChildren(SKCanvas canvas)
+    {
+        base.RenderChildren(canvas);
+        MultilineFeature?.RenderBars(canvas);
+    }
+
+    /// <summary>Lets a press land on a scrollbar instead of putting the caret where the thumb is.</summary>
+    protected override XPlatControl? HitTestChildren(SKPoint local) =>
+        MultilineFeature?.HitTestBar(local) ?? base.HitTestChildren(local);
+
+    /// <summary>
+    /// Turns the wheel over the text. The feature claims the turn only when it moved, so a box
+    /// already at its end hands the rest of the turn to the container around it.
+    /// </summary>
+    protected override void OnMouseWheel(XPlatMouseEventArgs e)
+    {
+        base.OnMouseWheel(e);
+
+        if (!e.Handled && MultilineFeature is { } multiline)
+        {
+            e.Handled = multiline.OnMouseWheel(this, e);
+        }
     }
 
     protected override void OnEnabledChanged()
@@ -670,6 +922,19 @@ public class XPlatTextBox : XPlatControl
         }
 
         base.OnEnabledChanged();
+    }
+
+    protected override void Dispose(bool disposing)
+    {
+        if (disposing)
+        {
+            SpanFeature?.Dispose();
+            SpanFeature = null;
+            MultilineFeature?.Dispose();
+            MultilineFeature = null;
+        }
+
+        base.Dispose(disposing);
     }
 
     private string DisplayText =>
@@ -741,6 +1006,12 @@ public class XPlatTextBox : XPlatControl
 
     private void EnsureCaretVisible()
     {
+        if (MultilineFeature is { } multiline)
+        {
+            multiline.EnsureCaretVisible(this, Viewport);
+            return;
+        }
+
         float width = TextRect.Width;
         if (width <= 0f)
         {
@@ -763,6 +1034,12 @@ public class XPlatTextBox : XPlatControl
 
     private void ClampScroll()
     {
+        if (MultilineFeature is { } multiline)
+        {
+            multiline.ClampScroll(this, Viewport);
+            return;
+        }
+
         float width = TextRect.Width;
         float textWidth = _font.MeasureWidth(DisplayText);
         float max = MathF.Max(0f, textWidth - width + HorizontalCaretPadding + _caret.Width);
@@ -884,8 +1161,17 @@ public class XPlatTextBox : XPlatControl
 
     private static bool IsWordChar(char c) => char.IsLetterOrDigit(c) || c == '_';
 
+    /// <summary>
+    /// Prepares text for the box: a multi-line box keeps its line breaks and normalises them, a
+    /// single-line box strips every control character so the field stays one line.
+    /// </summary>
+    private string Sanitize(string? text) =>
+        MultilineFeature is { } multiline
+            ? multiline.SanitizeText(text ?? string.Empty)
+            : SanitizeSingleLine(text);
+
     /// <summary>Strips control characters (including line breaks) so the field stays single-line.</summary>
-    private static string Sanitize(string? text)
+    internal static string SanitizeSingleLine(string? text)
     {
         if (string.IsNullOrEmpty(text))
         {

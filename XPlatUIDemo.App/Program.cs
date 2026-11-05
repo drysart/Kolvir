@@ -156,6 +156,13 @@ internal static class Program
             window.AddShownHandler(_ => demo.OpenMenuDemo(window));
         }
 
+        // The same idea for the spans page: right-click a squiggle as if the pointer had gone there,
+        // so a screenshot shows the menu - and the readout - naming the span that was hit.
+        if (Array.IndexOf(args, "--span-menu") >= 0)
+        {
+            window.AddShownHandler(_ => demo.OpenSpanDemo(window));
+        }
+
         window.Show();
 
         if (Array.IndexOf(args, "--focus") >= 0)
@@ -296,7 +303,7 @@ internal static class Program
             height,
             PageArgument(args),
             CreateMenuBar,
-            args.Contains("--menu") ? (window, demo) => demo.OpenMenuDemo(window) : null);
+            AfterShownArgument(args));
         Console.WriteLine($"Rendered {width}x{height} sample UI to {path}");
         // Printing what the render actually used makes it possible to tell a real visual difference
         // from a changed font or appearance when comparing renders from two builds.
@@ -326,6 +333,24 @@ internal static class Program
             "native" => XPlatMenuPresentation.Native,
             _ => XPlatMenuPresentation.Auto,
         };
+    }
+
+    /// <summary>
+    /// What a headless render should do after the window is up and before the frame is written:
+    /// open the menus page's context menu, right-click a span on the spans page, or nothing. Both
+    /// exist so a screenshot can show something that normally needs a click.
+    /// </summary>
+    private static Action<XPlatWindow, DemoUi>? AfterShownArgument(string[] args)
+    {
+        bool menu = Array.IndexOf(args, "--menu") >= 0;
+        bool spanMenu = Array.IndexOf(args, "--span-menu") >= 0;
+
+        if (menu)
+        {
+            return (window, demo) => demo.OpenMenuDemo(window);
+        }
+
+        return spanMenu ? (window, demo) => demo.OpenSpanDemo(window) : null;
     }
 
     /// <summary>The value of <c>--page</c>, or -1 when the sample should show its first page.</summary>

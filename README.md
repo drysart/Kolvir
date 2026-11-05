@@ -85,6 +85,8 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
+| `XPlatTextBox` + `XPlatUI.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
+| `XPlatTextBox` + `XPlatUI.Spans` | `TextBox` (spell-check marks) | `Spans` as an opt-in extension: caller-owned annotated runs drawn as a squiggly underline, wrapped and scrolled with the text, and the span a right-click landed in reported on the context-menu event args |
 | `XPlatNumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
 | `XPlatTrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
 | `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
@@ -1255,7 +1257,9 @@ label.
 ### Text box
 
 `XPlatTextBox` is a single-line editor: caret, selection, clipboard, password masking,
-placeholder text and horizontal scrolling are all implemented by the control itself.
+placeholder text and horizontal scrolling are all implemented by the control itself. Multi-line
+editing is a separate opt-in feature, described in [Multi-line text](#multi-line-text), and so are
+spell-checker style annotations, described in [Text box spans](#text-box-spans).
 
 | Member | Behaviour |
 | --- | --- |
@@ -1347,6 +1351,154 @@ city.AutoCompleteCustomSource.Add("Amsterdam");
 city.AutoCompleteCustomSource.Add("Athens");
 ```
 
+### Multi-line text
+
+`Multiline` turns the same `XPlatTextBox` into a multi-line editor. It is an opt-in extension in
+`XPlatUI.Multiline`, so a text box that never turns it on carries none of its state and an
+application that never imports the namespace carries none of its code. It adds:
+
+| Member | Behaviour |
+| --- | --- |
+| `Multiline` | Off by default. When true `Enter` inserts a line break, the text wraps or scrolls sideways, and a scrollbar appears when the content is taller than the box. Turning it off again drops the line breaks and releases the feature |
+| `WordWrap` | True by default. True wraps at word boundaries and never scrolls sideways; false keeps each logical line on one visual line and adds a horizontal bar |
+| `VerticalScrollBar`, `HorizontalScrollBar`, `VerticalOffset`, `HorizontalOffset` | The bars and the scroll state, for an application that wants to read them |
+
+```csharp
+using XPlatUI.Multiline;
+
+var notes = new XPlatTextBox
+{
+    Dock = XDock.Fill,
+    Multiline = true,
+    PlaceholderText = "Write something",
+};
+```
+
+The line model is visual: a logical line is the run between two line breaks, and word wrapping
+splits a logical line into further visual lines without inserting characters. The caret and the
+selection are still plain text indices, so `CaretIndex`, `Select`, `SelectionStart`,
+`SelectedText` and the control-level selection all keep working unchanged, and a selection may
+span any number of visual and logical lines. Soft wrapping breaks at the start of a word that does
+not fit, so the whitespace before it stays at the end of the line instead of opening the next one;
+a word wider than the box is broken between two of its own characters.
+
+Keyboard, in addition to the single-line keys: `Enter` inserts a line break, `Up`/`Down` move by
+visual line and keep the column they started in, even across a line that is too short to have one,
+`PageUp`/`PageDown` turn a page and take the view with them, and `Home`/`End` go to the start and
+end of the *visual* line the caret is drawn on. `Left`/`Right` move by character, so they cross a
+soft wrap and a line break the same way. `Ctrl+Home`/`Ctrl+End` still reach the start and end of
+the whole value.
+
+Three behaviours are deliberate and worth stating:
+
+* **`Enter` inserts a line break and `Ctrl+Enter` is left unhandled**, so a form around a
+  multi-line field still has an accept gesture; `Enter` in a single-line field is untouched.
+* **`Tab` still moves the focus.** A multi-line field here is not a code editor, and a tab that is
+  invisible in a proportional font is worse than one that leaves the field. Pasted tabs are
+  expanded to four spaces, so the value never contains a tab the user cannot type.
+* **Autocomplete completes one line at a time.** The suggestion list hangs from the caret's own
+  line rather than from the bottom of a tall field, a suggestion replaces the text on that line and
+  leaves every other line alone, the history source records nothing from a multi-line field, and
+  `Append`/`SuggestAppend` complete nothing at all - a suffix cannot cross a line break, and
+  rewriting a document from a single-line suggestion would throw away the rest of it - so both
+  behave as `Suggest`. Typing a line break closes the list, because the new line's empty prefix has
+  nothing to suggest.
+
+Scrolling reuses `XPlatScrollBars`, the helper the scrolling containers share, so the bars, the
+wheel, the drag and the clamping behave like every other scrolling control. The scrolled region is
+the text area inside the padding; a bar takes its gutter out of that area, so the text never runs
+underneath one.
+
+`MaxLength` counts characters, and a line break is one character, so a limit applies to the value
+the box actually holds rather than to a platform-specific encoding of it. Nothing is inserted past
+the limit, and an insertion that would cross it is cut where the limit falls.
+
+Line breaks are normalised on every path that brings text in - assignment, typing, paste and
+programmatic insertion - so `CRLF` and a lone `CR` both become the single `'\n'` the line model
+uses. Copy and cut hand out that value, and `Text` never holds a `\r`, so text that leaves and
+pastes back is unchanged.
+
+### Text box spans
+
+`Spans` marks runs of characters with a squiggly underline, the way a spelling or grammar checker
+marks a word. It is an opt-in extension in `XPlatUI.Spans`, so a text box that never assigns a list
+carries none of its state and an application that never imports the namespace carries none of its
+code. It adds:
+
+| Member | Behaviour |
+| --- | --- |
+| `Spans` | The annotated runs, or null. Assigning replaces the whole set; assigning null or an empty list removes the feature again |
+| `XPlatTextBoxSpan` | One run: `Start`, `Length`, `End`, the squiggle's `Color`/`ThemeColor`, its `Thickness`, `Amplitude` and `Wavelength`, and a `Tag` for the caller's own data |
+| `XPlatContextMenuEventArgs.Span` | The span the right-click landed in, or null, as an extension member on the existing context-menu event args |
+
+```csharp
+using XPlatUI.Spans;
+
+// A subclass hangs whatever the checker needs on the base type.
+sealed class SpellingError(int start, int length, string[] suggestions) : XPlatTextBoxSpan(start, length)
+{
+    public string[] Suggestions { get; } = suggestions;
+}
+
+// A grammar note is the same squiggle in a different colour and shape.
+var grammar = new XPlatTextBoxSpan(start, length) { ThemeColor = XPlatThemeColor.Accent };
+
+field.Spans = [ new SpellingError(start, length, ["their", "there"]), grammar ];
+
+// The field answers its own right-click, the way any control does. The menu it contributes already
+// holds Cut/Copy/Paste/Select All; the handler puts the suggestions in front of them.
+field.AddContextMenuOpeningHandler(args =>
+{
+    if (args.Span is not SpellingError error || args.Menu is not { } menu)
+    {
+        return;
+    }
+
+    menu.Insert(0, new XPlatMenuItem("&Add to dictionary", () => Ignore(error)));
+    menu.Insert(0, new XPlatMenuItem("&Ignore", () => Ignore(error)));
+    menu.Insert(0, new XPlatMenuItem("&Replace...", () => Suggest(error.Suggestions)));
+    menu.Insert(3, XPlatMenuItem.Separator);       // then the ordinary editing commands
+});
+```
+
+The squiggle is drawn from the same geometry the selection highlight uses - one rectangle per
+visual line, clipped to the text area and shifted by the scroll offset - so a span that crosses a
+soft wrap in a multi-line field is marked on both visual lines, a span on a line scrolled out of
+view is not drawn at all, and a span on a half-scrolled line is squeezed into the sliver that is
+left instead of being drawn past it.
+
+Vertically it sits in the space the font reserves under the letters: the band starts a small gap
+below the baseline and ends inside the descent, both of them fractions of the font size rather than
+pixel constants, so the marker follows the text at any size and any display scale. A glyph without
+a descender therefore never touches it, and a glyph with one crosses it.
+
+The paint order is selection highlight, squiggle, text, caret - the same on a one-line and a
+multi-line field. The wash goes under the squiggle because `XPlatTheme.Selection` is caller-supplied
+and may be opaque, which would otherwise hide a marked word exactly while the reader is looking at
+it, whereas a descender crossing the wave reads better than a wave cut out of the descender. A
+marked word therefore stays marked while it is selected, and the caret is never covered.
+
+Three contract decisions are worth stating:
+
+* **The list is caller-owned.** The box keeps the reference, never copies, reorders, merges or
+  mutates it, and never rewrites a span when the text changes. A checker that re-runs on every
+  keystroke can clear its own `List<XPlatTextBoxSpan>`, refill it, and assign it again: no
+  allocation on the box's side, one repaint, and the new contents are what is drawn.
+* **Stale spans are clamped, never thrown.** A span that starts past the end of the text draws
+  nothing and resolves no right-click, one that runs past the end is drawn up to the last
+  character, and a span with a length of zero is skipped. Editing the text under a set of spans is
+  therefore safe; keeping them in step is the caller's job, because only the caller knows what the
+  annotation meant.
+* **Overlaps are allowed.** Both spans paint, in list order, and a right-click inside both resolves
+  to the last one in the list - the one drawn on top.
+
+`Start` and `Length` are fixed at construction and a negative value throws
+`ArgumentOutOfRangeException`; a start or length beyond the current text is not an error, because
+a span is validated against the text that is drawn rather than the text that was there when it was
+made. The squiggle's shape is data rather than code: `Amplitude` sets how far the wave rises above
+and falls below its own centre line (zero draws a straight underline, which is how some editors
+mark a warning), and `Wavelength` sets one full cycle's width.
+
 ### Selection and the clipboard
 
 `Selectable` opts a control into pointer selection; `SelectionStyle` chooses between selecting
@@ -1363,7 +1515,7 @@ When a selection is copied, every control it touches contributes its own piece i
 | `GetSelectionText(start, length)` | The plain-text piece for a slice; override to control what a copy pastes into a text target |
 | `GetSelectionHtml(start, length)` | The HTML piece for the same slice, or `null` (default) to fall back to the escaped plain text |
 | `host.CopySelection()` | Writes both flavours to `XPlatClipboard`; `host.SelectionTextSeparator` joins the pieces |
-| `host.ProcessContextMenu(point)` | Builds the menu: the control's own `ContextMenu`, then the `AddContextMenuOpeningHandler` handlers, then a default **Copy** item |
+| `host.ProcessContextMenu(point)` | Builds the menu: the control's own handler, then its `ContextMenu`, then the `AddContextMenuOpeningHandler` handlers on the host, then a default **Copy** item |
 
 `XPlatRichLabel` overrides `GetSelectionHtml` so a copy keeps its formatting: `<b>`, `<i>`,
 `<u>`, `<s>` and a `<span style="...">` for colour and size overrides, wrapped around the
@@ -1406,6 +1558,8 @@ every platform and can carry icons, submenus and controls in a row.
 | Piece | What it does |
 | --- | --- |
 | `XPlatMenuItem` / `XPlatMenuBar` / `XPlatContextMenu` | The model: items, separators, submenus, checked and disabled state, shortcuts, icons and hosted controls |
+| `XPlatControl.AddContextMenuOpeningHandler` | A control's own right-click behaviour: runs for the control under the pointer, or the nearest ancestor that has one, and receives the menu the control contributed so it can add to it |
+| `XPlatUiHost.AddContextMenuOpeningHandler` | The window-wide fallback, run only when nothing under the pointer ran a handler or supplied a menu |
 | `XPlatMenuRenderer` | `Measure(menu, metrics, font, shadow, availableWidth, availableHeight)` lays the rows out and returns an `XPlatMenuLayout`: surface size, shadow margin, row bounds, scroll state, `HitTest` and `NextPickable`. `Paint(canvas, layout, hovered, surfaceAlpha, ..., scrollOffset)` draws the surface, drop shadow, hover pill, check column, icons, right-aligned shortcut hints and - for a menu that does not fit - the arrows at either end. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
 | `XPlatMenuMetrics` | Row height, padding, corner radii, shadow extent, the check/icon/control column widths and `ScrollIndicatorHeight`; `Default` is tuned to the Windows 11 menu |
 | `XPlatMenuView` | The control that shows one menu level, its in-menu controls and the submenu it has open |
@@ -1415,18 +1569,52 @@ every platform and can carry icons, submenus and controls in a row.
 
 `XPlatMenuRenderer` contains no platform code, so every backend draws the same menu from it.
 
-The control under the pointer answers first: `ProcessContextMenu` walks from the hit control up
-through its parents looking for a `ContextMenu`, and only then asks the application. A window that
-wants a menu over its empty space therefore has to answer itself:
+A context menu is **composed**, not replaced. The control under the pointer contributes its own
+menu first, and every handler after it receives that same menu to add to: a text box starts from
+Cut, Copy, Paste and Select All, each enabled by the rule its command obeys (nothing selected means
+no Cut or Copy, a read-only field means no Cut or Paste, an empty clipboard means no Paste, empty
+text means no Select All). A container can give every child the same handler, and nothing outside
+the control has to know which control was clicked:
 
 ```csharp
-host.AddContextMenuOpeningHandler((_, args) => args.Menu = BuildPageMenu());
+// Spell-check suggestions in front of the field's own editing commands, with one separator
+// between the two blocks. Attached once, where the field is built.
+field.AddContextMenuOpeningHandler(args =>
+{
+    if (args.Span is not { } span)
+    {
+        return;                                     // the editing commands stay as they are
+    }
+
+    var menu = args.Menu ??= new XPlatContextMenu();
+    menu.Insert(0, new XPlatMenuItem($"&Ignore \"{span.Tag}\"", () => Ignore(span)));
+    menu.Insert(0, new XPlatMenuItem($"&Replace \"{span.Tag}\"", () => Replace(span)));
+    menu.Insert(2, XPlatMenuItem.Separator);         // Cut / Copy / Paste follow
+});
+
+// The window's own menu over its empty space stays a window concern.
+host.AddContextMenuOpeningHandler((_, args) =>
+{
+    if (args.Control is not XPlatTextBox && host.Selection.IsEmpty)
+    {
+        args.Menu = BuildPageMenu();                // nothing under the pointer had one of its own
+    }
+});
 ```
 
-The selection's **Copy** menu is built after those handlers, so a handler that wants Copy to keep
-winning checks `host.Selection.IsEmpty` first. Answering matters: when control, handler and
-selection all decline, `ProcessContextMenu` shows nothing on any presenter, so a page with no
-menu-bearing control under the pointer looks unresponsive.
+The order `ProcessContextMenu` asks in is: the control's own menu (its `ContextMenu`, or the
+nearest ancestor's, or what it builds from its own state) handed to the control's handlers, then to
+its nearest ancestor with a handler, then - if no handler ran and no menu came out of that - to the
+host's handlers, and finally the selection's **Copy** menu. The host's handlers are the
+application-wide fallback, so a text box's editing commands are never shadowed by a page menu. The
+event arguments say where the menu came from - `Control` and `Location`, and for a text box with
+annotations the span that was hit.
+
+To suppress what the control contributed, replace `args.Menu` (`args.Menu = new XPlatContextMenu()`)
+or clear it (`args.Menu?.Clear()`) and add your own; a handler that only adds leaves the block
+intact. Answering matters: when control, handlers and selection all decline, `ProcessContextMenu`
+shows nothing on any presenter, so a page with no menu-bearing control under the pointer looks
+unresponsive. A window that wants a menu over its empty space therefore answers itself.
 
 ### Menus drawn by the library
 
