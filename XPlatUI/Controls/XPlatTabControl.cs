@@ -24,7 +24,6 @@ public class XPlatTabControl : XPlatControl
     private readonly List<SKRect> _tabRects = [];
     private readonly List<IDisposable> _captionTokens = [];
     private readonly List<string> _captions = [];
-    private XPlatFont _font;
     private Action<object>? _selectedIndexChanged;
     private int _selectedIndex = -1;
     private int _hotIndex = -1;
@@ -40,33 +39,16 @@ public class XPlatTabControl : XPlatControl
         Padding = new XPlatThickness(0f);
         MinimumSize = new SKSize(160f, 90f);
         Size = new SKSize(360f, 220f);
-        _font = XPlatTheme.DefaultFont;
     }
 
-    /// <summary>A tab control is a raised surface until <see cref="XPlatControl.BackColor"/> is assigned.</summary>
-    protected override SKColor? DefaultBackColor => XPlatTheme.Surface;
+    /// <summary>A tab control is a raised surface until <see cref="XPlatControl.Background"/> is assigned.</summary>
+    protected override XPlatBackground DefaultBackground => XPlatBackground.FromThemeColor(XPlatThemeColor.Surface);
 
     /// <summary>The pages of the control, in tab order.</summary>
     public XPlatControlCollection TabPages => Controls;
 
-    /// <summary>Font used to draw the captions. The control does not take ownership of it.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            _tabsDirty = true;
-            Invalidate();
-        }
-    }
+    /// <summary>The captions are measured with the effective font, so a font change re-measures them.</summary>
+    protected override void OnAppearanceChanged() => _tabsDirty = true;
 
     /// <summary>Index of the selected page, or -1 when there are no pages.</summary>
     public int SelectedIndex
@@ -422,7 +404,7 @@ public class XPlatTabControl : XPlatControl
             _captions.Add(caption);
 
             float width = Math.Clamp(
-                XPlatTextRenderer.Measure(caption, _font, float.PositiveInfinity, false).Width + (TabPadding * 2f),
+                XPlatTextRenderer.Measure(caption, Font, float.PositiveInfinity, false).Width + (TabPadding * 2f),
                 MinTabWidth,
                 MaxTabWidth);
 
@@ -516,7 +498,7 @@ public class XPlatTabControl : XPlatControl
             ? XPlatTheme.DisabledForeground
             : selected ? ForeColor : XPlatTheme.MutedForeground;
 
-        XPlatTextRenderer.Draw(canvas, _captions[index], _font, color, tab, XPlatContentAlignment.MiddleCenter);
+        XPlatTextRenderer.Draw(canvas, _captions[index], Font, color, tab, XPlatContentAlignment.MiddleCenter);
 
         if (selected)
         {

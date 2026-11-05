@@ -57,11 +57,20 @@ public class XPlatControl : IDisposable
     private XPlatControlCollection? _controls;
     private List<IDisposable>? _resources;
     private List<SKRect>? _selectionRects;
-    private SKColor? _backColor;
-    private bool _backColorAssigned;
-    private SKColor? _foreColor;
     private SKColor? _borderColor;
     private XPlatThemeColor _foreColorRole = XPlatThemeColor.Foreground;
+
+    // Appearance set on this control. Null (or, for the background, Inherit) means "not set here".
+    private XPlatFont? _font;
+    private XPlatBackground? _background;
+    private SKColor? _foreground;
+
+    // What the parent chain contributes. Resolved in one walk, then reused until something that
+    // can change the answer - a value set on an ancestor, or a new parent - drops it.
+    private bool _inheritedResolved;
+    private XPlatFont? _inheritedFont;
+    private XPlatBackground? _inheritedBackground;
+    private SKColor? _inheritedForeground;
 
     public XPlatControl()
     {
@@ -404,6 +413,11 @@ public class XPlatControl : IDisposable
             // Moving a subtree under a disabled container (or out of one) changes whether it is
             // enabled without touching a single Enabled flag, so re-read it here.
             UpdateEffectiveEnabled();
+
+            // The same for appearance: the effective font and colours come from wherever the
+            // control now sits, so what the old chain contributed is no longer the answer. The
+            // layout follows from the add or remove that moved it.
+            InvalidateAppearanceTree();
         }
     }
 
@@ -891,31 +905,175 @@ public class XPlatControl : IDisposable
     }
 
     /// <summary>
-    /// Background fill. Null means transparent. While it has never been assigned the control
-    /// paints <see cref="DefaultBackColor"/> instead, so it keeps following the theme.
+    /// The font this control draws with, inherited the way WinForms' <c>Font</c> is: a control that
+    /// sets one overrides it for itself and for every control under it, and a control that does not
+    /// asks its parent, then <see cref="DefaultFont"/> - its class default, which is where the walk
+    /// ends.
     /// </summary>
-    public SKColor? BackColor
+    /// <remarks>
+    /// <para>
+    /// The effective font is resolved when text is measured or painted, not when the control is
+    /// built, so a control created before the theme was configured still adopts it, and a theme
+    /// font can be changed - or a font assigned to a control in a live tree - without rebuilding
+    /// anything. What the parent chain contributes is cached: one walk up the chain the first time
+    /// the font is needed, dropped when an ancestor assigns a font or the control changes parent.
+    /// That keeps a glyph measurement to a field read plus one virtual call on the class default.
+    /// </para>
+    /// <para>
+    /// The font is not owned by the control: never dispose one that was inherited or that came from
+    /// <see cref="XPlatTheme"/>, and keep any font assigned here alive for as long as it is in use.
+    /// </para>
+    /// </remarks>
+    public XPlatFont Font
     {
-        get => _backColorAssigned ? _backColor : DefaultBackColor;
+        get
+        {
+            if (_font is { } local)
+            {
+                return local;
+            }
+
+            ResolveInheritedAppearance();
+            return _inheritedFont ?? DefaultFont;
+        }
         set
         {
-            if (_backColorAssigned && _backColor == value)
+            ArgumentNullException.ThrowIfNull(value);
+
+            if (ReferenceEquals(_font, value))
             {
                 return;
             }
 
-            _backColor = value;
-            _backColorAssigned = true;
-            Invalidate();
+            _font = value;
+
+            // Text is the size of the font, so this is a layout invalidation, not only a repaint.
+            InvalidateAppearanceTree();
+            UpdateLayoutAfterAppearanceChange();
         }
     }
 
     /// <summary>
-    /// Background painted while <see cref="BackColor"/> has never been assigned. The base control
-    /// is transparent; containers default to the theme surface and editable fields to the input
-    /// fill.
+    /// The font a control of this class draws with when no font has been assigned to it and no
+    /// ancestor sets one: the last step of the walk up the tree.
     /// </summary>
-    protected virtual SKColor? DefaultBackColor => null;
+    /// <remarks>
+    /// The theme supplies the roles, so this is what keeps today's look - a label is
+    /// <see cref="XPlatTheme.DefaultFont"/>, a button is <see cref="XPlatTheme.EmphasizedFont"/> -
+    /// without any control capturing a font at construction. It is read on every resolution, so a
+    /// class is free to vary it (a compact mode, say) and a theme change is picked up immediately.
+    /// </remarks>
+    protected virtual XPlatFont DefaultFont => XPlatTheme.DefaultFont;
+
+    /// <summary>Forgets the font assigned to this control, so it inherits one again.</summary>
+    public void ClearFont()
+    {
+        if (_font is null)
+        {
+            return;
+        }
+
+        _font = null;
+        InvalidateAppearanceTree();
+        UpdateLayoutAfterAppearanceChange();
+    }
+
+    /// <summary>
+    /// How this control fills its background. <see cref="XPlatBackground.Inherit"/> - the initial
+    /// value - asks the parent, so a colour assigned to a container answers for everything inside
+    /// it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Three assigned states, and the difference between the last two is the point:
+    /// <see cref="XPlatBackground.Inherit"/> (nothing set here, keep looking up),
+    /// <see cref="XPlatBackground.None"/> (paint nothing here) and an explicit colour. A
+    /// <c>null</c> colour would have to mean both "no value" and "draw nothing", and then a label
+    /// inside a filled panel would silently start painting a box of its own.
+    /// </para>
+    /// <para>
+    /// A control whose class default is <see cref="XPlatBackground.None"/> - a label, a toggle, any
+    /// control that draws no chrome - keeps painting nothing wherever it sits: the walk stops at its
+    /// own default. A control that does paint, such as a panel or a field, takes the nearest
+    /// ancestor's assigned colour first and its own default only if there is none, which is
+    /// WinForms' precedence of a local value over an inherited one over a default.
+    /// </para>
+    /// <para>
+    /// Only a colour is inherited, not <see cref="XPlatBackground.None"/>: a layout container that
+    /// paints nothing is the ordinary parent of a card or a field that does, and suppressing what is
+    /// inside it would take the card away with the container. A control that must not be filled
+    /// assigns None to itself.
+    /// </para>
+    /// <para>
+    /// A palette role assigned here or returned by <see cref="DefaultBackground"/> is resolved while
+    /// painting, so a theme change recolours a live control with no rebuild.
+    /// </para>
+    /// </remarks>
+    public XPlatBackground Background
+    {
+        get
+        {
+            if (_background is { } local)
+            {
+                return local;
+            }
+
+            var own = DefaultBackground;
+            if (own.IsNone)
+            {
+                return XPlatBackground.None;
+            }
+
+            ResolveInheritedAppearance();
+            return _inheritedBackground ?? own;
+        }
+        set
+        {
+            if (_background == value)
+            {
+                return;
+            }
+
+            _background = value;
+            InvalidateAppearanceTree();
+        }
+    }
+
+    /// <summary>
+    /// Background painted while <see cref="Background"/> has never been assigned and no ancestor
+    /// sets one. The base control paints nothing; containers default to the theme surface and
+    /// editable fields to the input fill.
+    /// </summary>
+    /// <remarks>
+    /// A theme role rather than a colour on purpose: the role is resolved at paint time, so a
+    /// palette swap recolours every control that never overrode it.
+    /// </remarks>
+    protected virtual XPlatBackground DefaultBackground => XPlatBackground.None;
+
+    /// <summary>
+    /// The WinForms name for <see cref="Background"/>: null when nothing is painted, otherwise the
+    /// colour that will be. Assigning null is <see cref="XPlatBackground.None"/> - an explicit "no
+    /// background" - rather than a return to inheritance; use <see cref="ClearBackground"/> for that.
+    /// </summary>
+    public SKColor? BackColor
+    {
+        get => Background.Color;
+        set => Background = value is { } color
+            ? XPlatBackground.FromColor(color)
+            : XPlatBackground.None;
+    }
+
+    /// <summary>Forgets the background assigned to this control, so it inherits one again.</summary>
+    public void ClearBackground()
+    {
+        if (_background is null)
+        {
+            return;
+        }
+
+        _background = null;
+        InvalidateAppearanceTree();
+    }
 
     /// <summary>
     /// How opaque the control and everything inside it is: 0 is invisible, 1 is fully opaque.
@@ -956,27 +1114,204 @@ public class XPlatControl : IDisposable
     /// when it punches a hole in a background that is otherwise solid.
     /// </remarks>
     public virtual bool Opaque =>
-        _opacity >= 1f && CornerRadius <= 0f && BackColor is { Alpha: 255 };
+        _opacity >= 1f && CornerRadius <= 0f && Background.Color is { Alpha: 255 };
 
     /// <summary>
-    /// Text colour. While it has never been assigned the control paints
-    /// <see cref="ForeColorRole"/>, which is how a label stays readable when the theme changes.
+    /// Text colour, inherited the way <see cref="Font"/> is: a colour assigned to a container
+    /// answers for the text of everything inside it, and a control that assigns none keeps
+    /// <see cref="ForeColorRole"/>.
     /// </summary>
-    public SKColor ForeColor
+    /// <remarks>
+    /// Only an assigned colour is inherited, not a role. A role is the class default - a group box
+    /// caption is <see cref="XPlatThemeColor.MutedForeground"/> whatever its labels are - so
+    /// inheriting one would change how existing trees look. The role is resolved when it is read,
+    /// which is what keeps a palette swap to a repaint.
+    /// </remarks>
+    public SKColor Foreground
     {
-        get => _foreColor ?? XPlatTheme.ColorOf(_foreColorRole);
-        set => _foreColor = value;
+        get
+        {
+            if (_foreground is { } local)
+            {
+                return local;
+            }
+
+            ResolveInheritedAppearance();
+            return _inheritedForeground ?? XPlatTheme.ColorOf(_foreColorRole);
+        }
+        set
+        {
+            if (_foreground == value)
+            {
+                return;
+            }
+
+            _foreground = value;
+            InvalidateAppearanceTree();
+        }
     }
 
-    /// <summary>
-    /// Palette entry used while <see cref="ForeColor"/> has never been assigned. Defaults to
-    /// <see cref="XPlatThemeColor.Foreground"/>; use <see cref="XPlatThemeColor.MutedForeground"/> for
-    /// secondary text.
-    /// </summary>
+    /// <summary>The WinForms name for <see cref="Foreground"/>.</summary>
+    public SKColor ForeColor
+    {
+        get => Foreground;
+        set => Foreground = value;
+    }
+
+    /// <summary>Palette entry used while neither this control nor an ancestor assigns a <see cref="Foreground"/>.</summary>
     public XPlatThemeColor ForeColorRole
     {
         get => _foreColorRole;
-        set => _foreColorRole = value;
+        set
+        {
+            if (_foreColorRole == value)
+            {
+                return;
+            }
+
+            _foreColorRole = value;
+            Invalidate();
+        }
+    }
+
+    /// <summary>Forgets the foreground colour assigned to this control, so it inherits one again.</summary>
+    public void ClearForeground()
+    {
+        if (_foreground is null)
+        {
+            return;
+        }
+
+        _foreground = null;
+        InvalidateAppearanceTree();
+    }
+
+    /// <summary>
+    /// Collects what the parent chain contributes to the three inherited properties in one walk,
+    /// and caches it. Each property takes the nearest ancestor that assigns it, which is what makes
+    /// an assignment on one control answer for everything under it.
+    /// </summary>
+    /// <remarks>
+    /// The walk stops as soon as all three have an answer, and the result is reused until
+    /// <see cref="InvalidateAppearanceTree"/> drops it, so measuring a glyph costs a field read
+    /// rather than a trip to the root. What is cached is only what an ancestor assigned; class
+    /// defaults and palette roles are resolved when they are read, so a theme change never leaves a
+    /// stale answer here.
+    /// </remarks>
+    private void ResolveInheritedAppearance()
+    {
+        if (_inheritedResolved)
+        {
+            return;
+        }
+
+        XPlatFont? font = null;
+        XPlatBackground? background = null;
+        SKColor? foreground = null;
+
+        for (var ancestor = _parent; ancestor is not null; ancestor = ancestor._parent)
+        {
+            font ??= ancestor._font;
+
+            // Only a colour is inherited, not "paint nothing". A container that draws no background
+            // of its own - a layout panel, a transparent row - is the normal parent of something
+            // that does, and it must not take the card inside it away with it. A control that wants
+            // no background assigns None to itself.
+            if (background is null && ancestor._background is { IsNone: false } inheritedBackground)
+            {
+                background = inheritedBackground;
+            }
+
+            foreground ??= ancestor._foreground;
+
+            if (font is not null && background is not null && foreground is not null)
+            {
+                break;
+            }
+        }
+
+        _inheritedFont = font;
+        _inheritedBackground = background;
+        _inheritedForeground = foreground;
+        _inheritedResolved = true;
+    }
+
+    /// <summary>
+    /// Drops the cached inherited appearance of this control and everything under it, and repaints
+    /// them. Called whenever a value that can answer for a descendant changes - one assigned here,
+    /// or a new parent - so no descendant ever has to watch its ancestors.
+    /// </summary>
+    internal void InvalidateAppearanceTree()
+    {
+        _inheritedResolved = false;
+        _inheritedFont = null;
+        _inheritedBackground = null;
+        _inheritedForeground = null;
+
+        OnAppearanceChanged();
+        Invalidate();
+
+        if (_controls is { Count: > 0 } children)
+        {
+            for (int i = 0; i < children.Count; i++)
+            {
+                children[i].InvalidateAppearanceTree();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Called when the effective appearance of this control may have changed: its own value was
+    /// assigned or cleared, an ancestor's was, or it moved. A control that caches something derived
+    /// from the effective font or colour - a measured row height, a set of derived fonts - drops it
+    /// here rather than comparing on every read.
+    /// </summary>
+    protected virtual void OnAppearanceChanged()
+    {
+    }
+
+    /// <summary>
+    /// Re-runs layout from the top, because a font is the size of the text and a text-sized control
+    /// has just changed its mind.
+    /// </summary>
+    internal void UpdateLayoutAfterAppearanceChange()
+    {
+        var root = this;
+        while (root._parent is { } parent)
+        {
+            root = parent;
+        }
+
+        // In a window the host owns the root's own bounds; a detached tree is its own root.
+        if (root._host is { } host)
+        {
+            host.PerformLayout();
+        }
+
+        root.PerformLayoutTree();
+    }
+
+    /// <summary>
+    /// Lays this control out and then every control under it, whatever their bounds say.
+    /// </summary>
+    /// <remarks>
+    /// A layout pass arranges a child and stops there unless the child's bounds changed, which is
+    /// what keeps adding one control to a big tree cheap. A font that changed inside a box that did
+    /// not move is exactly the case that rule misses: the text needs other room while the control
+    /// still has the same bounds, so every container between it and the root is laid out again here.
+    /// This runs when the appearance changes, not on every pass.
+    /// </remarks>
+    internal void PerformLayoutTree()
+    {
+        PerformLayout();
+
+        if (_controls is { Count: > 0 } children)
+        {
+            for (int i = 0; i < children.Count; i++)
+            {
+                children[i].PerformLayoutTree();
+            }
+        }
     }
 
     /// <summary>

@@ -19,7 +19,6 @@ public class XPlatComboBox : XPlatControl
 
     private readonly XPlatListBox _list;
     private readonly XPlatPopup _popup;
-    private XPlatFont _font;
     private Action<object>? _selectedIndexChanged;
     private bool _dropDownOpen;
     private string _typeAhead = string.Empty;
@@ -34,13 +33,14 @@ public class XPlatComboBox : XPlatControl
         Padding = new XPlatThickness(8f, 6f, 26f, 6f);
         MinimumSize = new SKSize(64f, 30f);
         Size = new SKSize(180f, 30f);
-        _font = XPlatTheme.DefaultFont;
 
+        // The list is not a child control - it lives in a popup, in a tree of its own - so it cannot
+        // inherit this combo box's font through the parent chain. It is handed the effective font
+        // when the list is shown instead, which also keeps it current without a snapshot.
         _list = new XPlatListBox
         {
             SelectionMode = XPlatSelectionMode.One,
             HorizontalScroll = XPlatScrollStyle.None,
-            Font = _font,
         };
 
         _list.AddSelectedIndexChangedHandler(OnListSelectedIndexChanged);
@@ -51,8 +51,8 @@ public class XPlatComboBox : XPlatControl
         _popup.AddClosedHandler(OnPopupClosed);
     }
 
-    /// <summary>A combo box is a field, so it paints on the input fill until <see cref="XPlatControl.BackColor"/> is assigned.</summary>
-    protected override SKColor? DefaultBackColor => XPlatTheme.InputBackground;
+    /// <summary>A combo box is a field, so it paints on the input fill until <see cref="XPlatControl.Background"/> is assigned.</summary>
+    protected override XPlatBackground DefaultBackground => XPlatBackground.FromThemeColor(XPlatThemeColor.InputBackground);
 
     /// <summary>The items the user can pick from.</summary>
     public XPlatListBox.ItemCollection Items => _list.Items;
@@ -62,25 +62,6 @@ public class XPlatComboBox : XPlatControl
 
     /// <summary>The list shown while the combo box is open.</summary>
     public XPlatListBox DropDownList => _list;
-
-    /// <summary>Font used to draw the selected item. The combo box does not take ownership of it.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            _list.Font = value;
-            Invalidate();
-        }
-    }
 
     /// <summary>Index of the selected item, or -1 when nothing is selected.</summary>
     public int SelectedIndex
@@ -160,6 +141,10 @@ public class XPlatComboBox : XPlatControl
             return;
         }
 
+        // The popup list has no parent to inherit from, and the font may have changed since the last
+        // time it was shown. Assigning the same font again is a no-op.
+        _list.Font = Font;
+
         var size = MeasureDropDown();
         var origin = GetPositionInHost();
         var location = new SKPoint(origin.X, origin.Y + Height);
@@ -201,12 +186,12 @@ public class XPlatComboBox : XPlatControl
 
         for (int i = 0; i < _list.ItemCount; i++)
         {
-            widest = MathF.Max(widest, XPlatTextRenderer.Measure(_list.GetItemText(i), _font, float.PositiveInfinity, false).Width);
+            widest = MathF.Max(widest, XPlatTextRenderer.Measure(_list.GetItemText(i), Font, float.PositiveInfinity, false).Width);
         }
 
         return new SKSize(
             MathF.Max(MinimumSize.Width, widest + Padding.Horizontal),
-            MathF.Max(MinimumSize.Height, _font.LineHeight + Padding.Vertical));
+            MathF.Max(MinimumSize.Height, Font.LineHeight + Padding.Vertical));
     }
 
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
@@ -238,7 +223,7 @@ public class XPlatComboBox : XPlatControl
 
         canvas.Save();
         canvas.ClipRect(content);
-        XPlatTextRenderer.Draw(canvas, text.Length > 0 ? text : EmptyText, _font, color, content);
+        XPlatTextRenderer.Draw(canvas, text.Length > 0 ? text : EmptyText, Font, color, content);
         canvas.Restore();
 
         PaintChevron(canvas, rect);

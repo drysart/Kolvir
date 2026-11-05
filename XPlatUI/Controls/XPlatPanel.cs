@@ -56,7 +56,8 @@ public class XPlatPanel : XPlatControl
     }
 
     /// <summary>A framed panel is a raised surface; a plain grouping container is transparent.</summary>
-    protected override SKColor? DefaultBackColor => ShowFrame ? XPlatTheme.Surface : null;
+    protected override XPlatBackground DefaultBackground =>
+        ShowFrame ? XPlatBackground.FromThemeColor(XPlatThemeColor.Surface) : XPlatBackground.None;
 
     /// <summary>When true the panel paints its background and border. Set false for a plain grouping container.</summary>
     public bool ShowFrame { get; set; } = true;

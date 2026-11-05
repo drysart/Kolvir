@@ -42,6 +42,11 @@ public sealed class XPlatUiHost
     private bool _debugHoldingContent;
     private System.Threading.Timer? _debugFrameTimer;
 
+    // The theme font generation the tree was last laid out for. A control resolves its font when it
+    // measures and paints, so a theme font change needs no rebuild - only another layout pass, which
+    // this one int compare asks for.
+    private int _themeFontVersion = XPlatTheme.FontVersion;
+
     public XPlatUiHost() => _selection = new XPlatSelection(this);
 
     /// <summary>Adds a handler that runs when the UI needs to be repainted.</summary>
@@ -280,6 +285,18 @@ public sealed class XPlatUiHost
     /// <summary>Arranges the menu bar across the top of the client area and the root below it.</summary>
     public void PerformLayout()
     {
+        // A theme font assigned after the controls exist changes how much room their text needs. The
+        // controls resolve the font themselves, so all the tree needs is to be told that caches
+        // derived from the old one are stale; the pass below re-measures everything anyway.
+        if (_themeFontVersion != XPlatTheme.FontVersion)
+        {
+            _themeFontVersion = XPlatTheme.FontVersion;
+            _root?.InvalidateAppearanceTree();
+            _menuBar?.InvalidateAppearanceTree();
+            _root?.PerformLayoutTree();
+            _menuBar?.PerformLayoutTree();
+        }
+
         var top = 0f;
 
         if (_menuBar is { } menuBar)
@@ -431,6 +448,17 @@ public sealed class XPlatUiHost
     public SKRectI Paint(SKCanvas canvas, bool full = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
+
+        // A font assigned to the theme or to a control after the last frame moved text that is
+        // already on screen, so the frame that shows it is laid out first. A repaint covers the
+        // whole surface either way: text that grew has taken room from something else.
+        if (_themeFontVersion != XPlatTheme.FontVersion)
+        {
+            // The layout pass notices the new generation, re-measures the tree and marks the whole
+            // surface dirty, so the frame that shows the new font is painted in one piece.
+            PerformLayout();
+            Invalidate();
+        }
 
         var whole = full || !PartialUpdates || _dirtyAll || _dirty.IsEmpty;
         var area = whole ? SurfaceBounds : _dirty.Bounds;

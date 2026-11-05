@@ -74,9 +74,6 @@ public sealed class XPlatMenuBarView : XPlatControl
     /// <summary>Height of the strip, in logical pixels, before the separating line.</summary>
     public float TitleHeight { get; set; } = 28f;
 
-    /// <summary>Label font, or null for <see cref="XPlatTheme.DefaultFont"/>.</summary>
-    public XPlatFont? Font { get; set; }
-
     /// <summary>The top-level menu whose drop-down is open, or -1 when none is.</summary>
     public int OpenIndex => _open;
 
@@ -167,7 +164,7 @@ public sealed class XPlatMenuBarView : XPlatControl
     /// <summary>Measures the strip: as wide as the titles and as tall as <see cref="TitleHeight"/>.</summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var font = Font ?? XPlatTheme.DefaultFont;
+        var font = Font;
         var x = Inset;
 
         _titles.Clear();
@@ -208,7 +205,7 @@ public sealed class XPlatMenuBarView : XPlatControl
             return;
         }
 
-        var font = Font ?? XPlatTheme.DefaultFont;
+        var font = Font;
         using var pill = new SKPaint { IsAntialias = true };
         using var text = new SKPaint { IsAntialias = true, Color = XPlatTheme.Foreground };
 

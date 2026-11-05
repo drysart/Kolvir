@@ -69,7 +69,8 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree), colours, focus, mouse/keyboard events; any control can host children |
+| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree), `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
+| `XPlatBackground` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
 | `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
@@ -1891,13 +1892,15 @@ var accent = XPlatTheme.ColorOf(XPlatThemeColor.Accent);
 e.g. `XPlatTheme.Accent = …`) runs the `XPlatTheme.AddChangedHandler` handlers and the next frame
 picks it up: controls never snapshot a colour at construction time.
 
-Controls resolve their colours while painting, so nothing has to be walked or re-applied:
+Controls resolve their colours while painting - through the inherited `Background`/`Foreground`
+when the control itself assigns nothing - so a palette change re-applies nothing:
 
 | Member | Meaning |
 | --- | --- |
-| `DefaultBackColor` | Override to return a palette colour, or `null` for "no background" |
-| `BackColor` | An explicitly assigned colour, otherwise `DefaultBackColor` |
-| `ForeColorRole` | The role used while `ForeColor` has not been assigned explicitly |
+| `Background` | The background state - inherited from an ancestor, painted from a colour or palette role, or nothing at all; see [Inherited appearance](#inherited-appearance) |
+| `BackColor` | The WinForms name for `Background`: the effective colour, or `null` when nothing is painted |
+| `DefaultBackground` | Override to return the palette role a control of this class paints - the base control paints nothing |
+| `ForeColorRole` | The role used while neither this control nor an ancestor assigns a `Foreground` |
 | `BorderColor` | An explicitly assigned colour, otherwise `XPlatTheme.Border` |
 | `Opacity` | Fades the control and everything inside it as one group, 0 to 1 |
 | `XPlatTextSpan.ThemeColor` | A role for one span of a rich label; `AddLink` uses `Accent` |
@@ -1920,6 +1923,97 @@ to the undocumented `uxtheme` `ShouldSystemUseDarkMode`), reacts to `WM_SETTINGC
 `WM_THEMECHANGED`, and darkens the title bar with
 `DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` - driven by `XPlatTheme.Changed`, so a manual
 palette change updates the chrome too.
+
+### Inherited appearance
+
+`Font`, `Foreground` and `Background` are properties of `XPlatControl`, and they are inherited down
+the tree the way WinForms' `Font`, `ForeColor` and `BackColor` are. Whatever a control assigns
+answers for itself and for everything inside it; a control that assigns none asks its parent, and a
+tree that assigns none falls back to the class default, which is where `XPlatTheme` supplies the
+role.
+
+```csharp
+var group = new XPlatPanel { Font = title, Foreground = XPlatTheme.Accent, Background = XPlatBackground.FromThemeColor(XPlatThemeColor.Secondary) };
+
+group.Controls.Add(new XPlatLabel("24 pt, accent, on the secondary colour"));       // inherits all three
+group.Controls.Add(new XPlatLabel("has its own") { Font = small });                 // overrides the font only
+group.Controls.Add(new XPlatTextBox());                                             // paints its own input fill
+```
+
+The precedence is the one WPF uses for an inherited property: **a value assigned here, then the
+nearest ancestor that assigns one, then this control's class default.** `DefaultFont` and
+`DefaultBackground` are the class defaults, and `XPlatTheme` is what they contain:
+
+| Member | Meaning |
+| --- | --- |
+| `Font` | The effective font: assigned here, else the nearest ancestor's, else `DefaultFont` |
+| `DefaultFont` | The font a control of this class draws with when nothing else answers; the base control returns `XPlatTheme.DefaultFont`, a button and a group box `EmphasizedFont` |
+| `ClearFont()` | Forget the font assigned here, so the control inherits one again |
+| `Foreground` (`ForeColor`) | The effective text colour, inherited the same way; `ForeColorRole` is the class default and is *not* inherited |
+| `Background` | An `XPlatBackground`: `Inherit`, `None`, or a colour or palette role |
+| `DefaultBackground` | The role this class paints when nothing else answers; `None` - the base control's answer - means it paints nothing |
+| `BackColor` | The WinForms name for `Background`: the effective colour, or `null` when nothing is painted |
+| `ClearBackground()`, `ClearForeground()` | Back to inheritance |
+
+Only an assigned value is inherited; a class default is not. That is what keeps today's look intact:
+a label inside a group box stays at `DefaultFont` rather than picking up the caption's
+`EmphasizedFont`, and a label under a panel that sets `ForeColorRole` keeps its own role rather than
+inheriting the panel's. Assign a `Foreground` when a whole subtree really should share one.
+
+**`Background` has three states, and the difference between the last two is the point.**
+
+* `XPlatBackground.Inherit` - the initial value: ask the parent.
+* `XPlatBackground.None` - paint nothing here.
+* a colour, or `XPlatBackground.FromThemeColor(role)` - paint that, here and for everything below.
+
+A nullable colour would have to mean both "no value" and "draw nothing", and then a label inside a
+filled panel would silently start painting a box of its own - with its own corners and opacity -
+the first time a panel got a colour. So a control whose class default is `None` (a label, a toggle,
+anything that draws no chrome) keeps painting nothing wherever it sits, and a control that does
+paint (a panel, a field) takes the nearest ancestor's assigned colour instead of its own default.
+Only a colour is inherited, not `None`: a layout container that paints nothing is the ordinary
+parent of a card that does, and suppressing what is inside it would take the card away with the
+container. A control that must not be filled assigns `None` to itself.
+
+**Nothing is captured when a control is built.** The effective font is resolved when text is
+measured and painted, never in a constructor, so a control created before the theme was configured
+still adopts it, and a live tree can be changed afterwards:
+
+```csharp
+var panel = new XPlatPanel();
+panel.Controls.Add(new XPlatLabel("measured at one size"));
+...                                   // the tree is built, laid out and on screen
+panel.Font = XPlatTheme.TitleFont;    // the label re-measures and the panel re-lays out
+XPlatTheme.FontFamily = "Inter";      // and the same for the theme, for every control that did not assign a font
+```
+
+What the parent chain contributes is walked once and cached on the control that asked - not on every
+glyph measurement. The cache is dropped for a control and everything under it when a value is
+assigned to an ancestor, when the control changes parent, or when the host sees a new theme font
+generation. Class defaults and palette roles are *not* cached: they are read when they are used, so
+a palette swap is still a repaint rather than a rebuild, exactly as before. A font is the size of
+the text, so any of these changes re-runs layout - `XPlatUiHost` lays the whole tree out again on the
+frame that follows a theme font change, and assigning a font re-measures from the root at once.
+
+Fonts are not owned by the control that draws with them. Never dispose one that was inherited or
+came from `XPlatTheme`; keep an assigned font alive for as long as it is in use, and let the theme
+own the face given to `XPlatTheme.UseFont`.
+
+The cost is the one [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §3 names for members on a type
+every application touches, and this feature is deliberately that: the three properties *are* the
+control's appearance, not an optional extra, so there is no lower rung to sit on. Measured on the
+trimmed `XPlatUI.Minimal` fixture, `win-x64`, publishing at the commit before this one and after it:
+8,651,264 -> 8,654,848 bytes, a difference of **+3,584 bytes (0.04%)** - the size of the three
+properties, their resolution and the per-class defaults, less the thirteen per-control font fields
+and properties they replace.
+
+The demo's appearance page - `--page 33` - puts a panel that assigns a font, a foreground colour and
+a background role on screen, with what its children make of them, one label that overrides both, and
+a label that paints nothing in front of a panel that does. Its buttons change the panel's font and
+the theme's face on a live tree; `--appearance-change` makes the same two changes before a
+`--render` writes the frame, so the page can be screenshotted before and after it.
+`XPlatUIDemoApp --appearance-check` runs the resolution rules headlessly and prints one line per
+check.
 
 ### Fonts
 
@@ -1964,11 +2058,15 @@ XPlatTheme.UseFont(XPlatFont.FromFile("Fonts/Inter-Regular.ttf"));   // a file
 XPlatTheme.UseFont(XPlatFont.FromBytes(embeddedFontBytes));          // or an embedded resource
 ```
 
-Call it before the controls are created. The theme's fonts are rebuilt from that face at their own
-sizes, so `DefaultFont`, `CaptionFont`, `TitleFont`, `SectionFont` and `EmphasizedFont` all come from
-it; because one file is one face, the large and emphasized ones are that face at their sizes rather
-than a bold one. Assigning `XPlatTheme.FontFamily` goes back to a family name, and the existing
-`XPlatApplicationOptions.FontFamily` path is unchanged.
+It can be called at any point in the application's life, not only before the controls exist: a
+control resolves its font when it measures and paints (see
+[Inherited appearance](#inherited-appearance)), so a live tree switches to the new face and lays
+itself out again on the next frame. The theme's fonts are rebuilt from that face at their own sizes,
+so `DefaultFont`, `CaptionFont`, `TitleFont`, `SectionFont` and `EmphasizedFont` all come from it;
+because one file is one face, the large and emphasized ones are that face at their sizes rather than
+a bold one. Assigning `XPlatTheme.FontFamily` goes back to a family name, and the existing
+`XPlatApplicationOptions.FontFamily` path is unchanged - and, like `UseFont`, it can be assigned
+after the controls exist.
 
 This lives on `XPlatTheme` rather than growing `XPlatApplicationOptions` on purpose. An option is
 read by `XPlatApplication` at start-up - a type every application runs - so a font read there would
@@ -1984,7 +2082,7 @@ flag on `XPlatFont` saying that a face is a single face, which fits in padding t
 had: no new per-instance field and no startup work. The loaders themselves are only reachable from
 the application code that calls them, and `XPlatApplicationOptions` keeps its old shape.
 
-The demo's font page - the last page, or `--page 32` - draws a label, a multi-line text box and a
+The demo's font page - `--page 32` - draws a label, a multi-line text box and a
 rich label with IBM Plex Sans Regular carried as an embedded resource (`XPlatUIDemo.App/Fonts`,
 OFL licensed), and prints the width and line height it measures against the system face's.
 `XPlatUIDemoApp --font-check` prints the same measurements headlessly so the numbers can be compared

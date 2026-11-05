@@ -8,8 +8,6 @@ namespace XPlatUI;
 /// </summary>
 public class XPlatLabel : XPlatControl
 {
-    private XPlatFont _font = XPlatTheme.DefaultFont;
-
     public XPlatLabel()
     {
         AutoSize = true;
@@ -20,23 +18,6 @@ public class XPlatLabel : XPlatControl
         : this()
     {
         Text = text;
-    }
-
-    /// <summary>Font used to draw the text. The label does not take ownership of it.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            Invalidate();
-        }
     }
 
     public XPlatContentAlignment TextAlign { get; set; } = XPlatContentAlignment.MiddleLeft;
@@ -50,7 +31,7 @@ public class XPlatLabel : XPlatControl
             ? MathF.Max(0f, availableSize.Width)
             : float.PositiveInfinity;
 
-        var measured = XPlatTextRenderer.Measure(Text, _font, maxWidth, WrapText && !float.IsInfinity(maxWidth));
+        var measured = XPlatTextRenderer.Measure(Text, Font, maxWidth, WrapText && !float.IsInfinity(maxWidth));
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
 
@@ -62,7 +43,7 @@ public class XPlatLabel : XPlatControl
         }
 
         var content = XPlatGeometry.Deflate(rect, Padding);
-        XPlatTextRenderer.Draw(canvas, Text, _font, ForeColor, content, TextAlign, WrapText);
+        XPlatTextRenderer.Draw(canvas, Text, Font, ForeColor, content, TextAlign, WrapText);
     }
 
     /// <summary>
@@ -78,17 +59,17 @@ public class XPlatLabel : XPlatControl
             return 0f;
         }
 
-        float lineHeight = _font.LineHeight;
+        float lineHeight = Font.LineHeight;
         if (lineHeight <= 0f)
         {
             return 0f;
         }
 
-        float top = XPlatTextRenderer.GetBlockTop(content, _font, lines.Count, TextAlign);
+        float top = XPlatTextRenderer.GetBlockTop(content, Font, lines.Count, TextAlign);
         int index = Math.Clamp((int)MathF.Floor((pointInLocal.Y - top) / lineHeight), 0, lines.Count - 1);
 
         var line = lines[index];
-        float left = XPlatTextRenderer.GetLineLeft(content, _font, line.Text, TextAlign);
+        float left = XPlatTextRenderer.GetLineLeft(content, Font, line.Text, TextAlign);
         return line.Start + OffsetInLine(line.Text, pointInLocal.X - left);
     }
 
@@ -110,8 +91,8 @@ public class XPlatLabel : XPlatControl
         }
 
         int end = start + length;
-        float lineHeight = _font.LineHeight;
-        float top = XPlatTextRenderer.GetBlockTop(content, _font, lines.Count, TextAlign);
+        float lineHeight = Font.LineHeight;
+        float top = XPlatTextRenderer.GetBlockTop(content, Font, lines.Count, TextAlign);
 
         for (int i = 0; i < lines.Count; i++)
         {
@@ -123,16 +104,16 @@ public class XPlatLabel : XPlatControl
                 continue;
             }
 
-            float left = XPlatTextRenderer.GetLineLeft(content, _font, line.Text, TextAlign);
-            float x1 = left + _font.MeasureWidth(line.Text[..(from - line.Start)]);
-            float x2 = left + _font.MeasureWidth(line.Text[..(to - line.Start)]);
+            float left = XPlatTextRenderer.GetLineLeft(content, Font, line.Text, TextAlign);
+            float x1 = left + Font.MeasureWidth(line.Text[..(from - line.Start)]);
+            float x2 = left + Font.MeasureWidth(line.Text[..(to - line.Start)]);
             float lineTop = top + (i * lineHeight);
             output.Add(new SKRect(x1, lineTop, MathF.Max(x1, x2), lineTop + lineHeight));
         }
     }
 
     private List<XPlatTextLine> BuildLines(SKRect content) =>
-        XPlatTextRenderer.BuildTextLines(Text, _font, content.Width, WrapText);
+        XPlatTextRenderer.BuildTextLines(Text, Font, content.Width, WrapText);
 
     /// <summary>Index of the character boundary in <paramref name="line"/> nearest to <paramref name="x"/>.</summary>
     private int OffsetInLine(string line, float x)
@@ -141,7 +122,7 @@ public class XPlatLabel : XPlatControl
         float bestDistance = MathF.Abs(x);
         for (int i = 1; i <= line.Length; i++)
         {
-            float distance = MathF.Abs(_font.MeasureWidth(line[..i]) - x);
+            float distance = MathF.Abs(Font.MeasureWidth(line[..i]) - x);
             if (distance < bestDistance)
             {
                 bestDistance = distance;

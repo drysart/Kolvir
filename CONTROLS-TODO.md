@@ -38,6 +38,10 @@ a reviewer should ask for each one rather than infer it.
   derives from `XPlatToggleControl`, and follows the conventions the others follow:
   - the constructor sets `TabStop`, `Cursor`, `Padding` and `MinimumSize`; anything that measures its
 	own text also sets `AutoSize`;
+  - it never captures a font or a colour when it is constructed: a control that draws with another
+	role overrides `DefaultFont` / `DefaultBackground` (`EmphasizedFont` for a button, the input fill
+	for a field), and the effective appearance is read when text is measured and painted - see
+	[Inherited appearance](README.md#inherited-appearance);
   - there is a `XPlatXxx(string text)` convenience constructor where text is meaningful;
   - `MeasureContent` answers `AutoSize`, and the paint path uses `XPlatPainter.Fill`,
 	`XPlatPainter.DrawBorder` and `XPlatPainter.DrawFocusRing` rather than raw canvas state;

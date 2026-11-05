@@ -14,8 +14,6 @@ namespace XPlatUI;
 /// </remarks>
 public class XPlatGroupBox : XPlatPanel
 {
-    private XPlatFont _font = XPlatTheme.EmphasizedFont;
-
     public XPlatGroupBox()
     {
         // The panel's own chrome would draw a second, complete border; the caption needs a break
@@ -36,26 +34,11 @@ public class XPlatGroupBox : XPlatPanel
         Text = caption;
     }
 
-    /// <summary>The caption's font. Defaults to <see cref="XPlatTheme.EmphasizedFont"/>.</summary>
-    public XPlatFont Font
-    {
-        get => _font;
-        set
-        {
-            ArgumentNullException.ThrowIfNull(value);
-            if (ReferenceEquals(_font, value))
-            {
-                return;
-            }
-
-            _font = value;
-            Invalidate();
-            PerformLayout();
-        }
-    }
+    /// <summary>The caption is emphasized until the theme or an ancestor says otherwise.</summary>
+    protected override XPlatFont DefaultFont => XPlatTheme.EmphasizedFont;
 
     /// <summary>The height of the band the caption sits in, and the top of the content area.</summary>
-    protected float CaptionBand => string.IsNullOrEmpty(Text) ? 0f : MathF.Ceiling(_font.LineHeight) + 2f;
+    protected float CaptionBand => string.IsNullOrEmpty(Text) ? 0f : MathF.Ceiling(Font.LineHeight) + 2f;
 
     protected override SKRect ContentBounds =>
         new(ClientRect.Left, ClientRect.Top + CaptionBand, ClientRect.Right, ClientRect.Bottom);
@@ -84,7 +67,7 @@ public class XPlatGroupBox : XPlatPanel
             return;
         }
 
-        var measured = XPlatTextRenderer.Measure(Text, _font, float.PositiveInfinity, wrap: false);
+        var measured = XPlatTextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
         float left = rect.Left + Padding.Left;
         var caption = new SKRect(left, rect.Top, left + MathF.Ceiling(measured.Width), rect.Top + band);
 
@@ -101,7 +84,7 @@ public class XPlatGroupBox : XPlatPanel
         XPlatTextRenderer.Draw(
             canvas,
             Text,
-            _font,
+            Font,
             Enabled ? ForeColor : XPlatTheme.DisabledForeground,
             caption,
             XPlatContentAlignment.MiddleLeft);
