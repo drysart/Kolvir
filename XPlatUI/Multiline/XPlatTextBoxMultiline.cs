@@ -76,6 +76,10 @@ internal sealed class XPlatTextBoxMultiline : IXPlatTextBoxMultiline
         // the box starts from is already the one the line model understands.
         textBox.Text = feature.SanitizeText(textBox.Text);
 
+        // The value has just changed shape - line breaks are now kept rather than dropped - so an
+        // entry recorded against the one-line value cannot be applied to this one.
+        textBox.UndoFeature?.ClearHistory();
+
         feature._scroll.Vertical = XPlatScrollStyle.Automatic;
         feature._scroll.Horizontal = feature._wordWrap ? XPlatScrollStyle.None : XPlatScrollStyle.Automatic;
         textBox.PerformLayout();
@@ -96,6 +100,11 @@ internal sealed class XPlatTextBoxMultiline : IXPlatTextBoxMultiline
         feature.Dispose();
 
         textBox.Text = XPlatTextBox.SanitizeSingleLine(textBox.Text);
+
+        // The line breaks are gone from the value, so every entry recorded against the multi-line
+        // text describes offsets this value does not have.
+        textBox.UndoFeature?.ClearHistory();
+
         textBox.PerformLayout();
         textBox.Invalidate();
     }
@@ -587,6 +596,10 @@ internal sealed class XPlatTextBoxMultiline : IXPlatTextBoxMultiline
     /// <inheritdoc />
     public void ClampScroll(XPlatTextBox textBox, XPlatTextBoxViewport viewport) =>
         _scroll.ScrollTo(_scroll.HorizontalOffset, _scroll.VerticalOffset);
+
+    /// <inheritdoc />
+    public void ScrollTo(XPlatTextBox textBox, XPlatTextBoxViewport viewport, float horizontal, float vertical) =>
+        _scroll.ScrollTo(horizontal, vertical);
 
     /// <inheritdoc />
     public void Dispose()

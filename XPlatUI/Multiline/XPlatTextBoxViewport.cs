@@ -93,6 +93,13 @@ internal interface IXPlatTextBoxMultiline
     /// <summary>Clamps the scroll offsets to the range the content now has.</summary>
     void ClampScroll(XPlatTextBox textBox, XPlatTextBoxViewport viewport);
 
+    /// <summary>
+    /// Moves the view to the given offsets, clamped to what the content allows. The undo history
+    /// uses it to put the view back where an edit was made; a single-line box scrolls itself from
+    /// the caret instead and has no equivalent.
+    /// </summary>
+    void ScrollTo(XPlatTextBox textBox, XPlatTextBoxViewport viewport, float horizontal, float vertical);
+
     /// <summary>The vertical scrollbar, or null until the content first needs one.</summary>
     XPlatScrollBar? VerticalScrollBar { get; }
 

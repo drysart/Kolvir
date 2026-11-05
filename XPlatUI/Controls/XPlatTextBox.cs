@@ -2,6 +2,7 @@ using System.Text;
 using SkiaSharp;
 using XPlatUI.Multiline;
 using XPlatUI.Spans;
+using XPlatUI.Undo;
 
 namespace XPlatUI;
 
@@ -31,6 +32,13 @@ public class XPlatTextBox : XPlatControl
     private bool _readOnly;
     private bool _isPassword;
     private char _passwordChar = '\u2022';
+
+    /// <summary>
+    /// True while <see cref="ReplaceRange"/> is assigning <see cref="Text"/> on the user's behalf,
+    /// so the setter knows the change is already recorded as that edit rather than as a
+    /// programmatic assignment.
+    /// </summary>
+    private bool _editingRange;
 
     public XPlatTextBox()
     {
@@ -85,6 +93,17 @@ public class XPlatTextBox : XPlatControl
     /// </summary>
     internal IXPlatTextBoxSpanFeature? SpanFeature { get; set; }
 
+    /// <summary>
+    /// The undo history when this box opted into it, otherwise null. The third of the text box's
+    /// nullable seams, and the same shape as the other two: every edit the control makes funnels
+    /// through <see cref="ReplaceRange"/>, and a programmatic assignment through the
+    /// <see cref="Text"/> setter, so those are the only places that have to ask the history what to
+    /// record. The entries, the coalescing rule and the depth cap are named only by the extension
+    /// property that installs this, so a box that never turns <c>UndoEnabled</c> on carries the
+    /// reference and the null checks and publishes without the rest.
+    /// </summary>
+    internal IXPlatTextBoxUndoFeature? UndoFeature { get; set; }
+
     /// <summary>True when the box edits several lines. Answers from the seam, so it costs one null check.</summary>
     internal bool IsMultiline => MultilineFeature is not null;
 
@@ -104,7 +123,21 @@ public class XPlatTextBox : XPlatControl
         set
         {
             var text = value ?? string.Empty;
-            base.Text = MultilineFeature?.SanitizeText(text) ?? text;
+            var sanitized = MultilineFeature?.SanitizeText(text) ?? text;
+
+            // A programmatic assignment is a change the history records as one entry, so a document
+            // loaded into the field can be taken back out. An assignment of the value the box
+            // already holds never gets here - the base setter ignores it and so does this - which is
+            // what keeps a two-way binding that echoes each keystroke back out of the history.
+            if (_editingRange || UndoFeature is not { } undo || string.Equals(Text, sanitized, StringComparison.Ordinal))
+            {
+                base.Text = sanitized;
+                return;
+            }
+
+            undo.BeginAssign(this, Text);
+            base.Text = sanitized;
+            undo.EndEdit(this);
         }
     }
 
@@ -196,6 +229,13 @@ public class XPlatTextBox : XPlatControl
     public int SelectionLength => Math.Abs(_caretIndex - _anchor);
 
     public bool HasSelection => _caretIndex != _anchor;
+
+    /// <summary>
+    /// The fixed end of the selection, which is where a right-to-left drag started. It is separate
+    /// from <see cref="CaretIndex"/> so a selection has a direction; the undo history records it
+    /// with each entry so undo can restore a selection the way it was made.
+    /// </summary>
+    internal int SelectionAnchor => _anchor;
 
     public string SelectedText => HasSelection ? Text.Substring(SelectionStart, SelectionLength) : string.Empty;
 
@@ -450,16 +490,33 @@ public class XPlatTextBox : XPlatControl
     }
 
     /// <summary>
-    /// Offers the editing commands the box supports - Cut, Copy, Paste and Select All - instead
-    /// of the generic menu. Copy falls back to the host's selection when the box is only part of
-    /// a larger selection, which is what the generic menu would have offered.
+    /// Offers the editing commands the box supports - Undo and Redo when the box has a history, then
+    /// Cut, Copy, Paste and Select All - instead of the generic menu. Copy falls back to the host's
+    /// selection when the box is only part of a larger selection, which is what the generic menu
+    /// would have offered.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// This is what a right-click over the box starts with: a handler adds its own items to it, so
     /// an annotation menu sits beside the editing commands rather than replacing them. Each command
     /// is enabled by the rule the command itself obeys - nothing selected means no Cut or Copy, a
     /// read-only box means no Cut or Paste, an empty clipboard means no Paste, and empty text means
     /// no Select All - so a disabled row here and a call that would have done nothing agree.
+    /// </para>
+    /// <para>
+    /// Undo and Redo are contributed only by a box that has the history at all, which is a box the
+    /// application opted into with <c>UndoEnabled</c>. A box without one has nothing to undo and
+    /// nothing that could ever light the rows up, so it gets no rows for them: the history is
+    /// opt-in, and a feature that was never turned on should not take up space in a menu the
+    /// consumer did not design around it. A box that <em>has</em> the history but cannot use it at
+    /// this moment - a read-only field, or an empty stack - still shows both rows, disabled, so the
+    /// rows do not appear and disappear at the user as the stack changes; their enabled state is
+    /// <c>CanUndo</c> and <c>CanRedo</c> as the menu is built.
+    /// </para>
+    /// <para>
+    /// The rows run the same operation the keyboard does, so a click and a key press are the same
+    /// edit, and both put the caret back where the entry says it was.
+    /// </para>
     /// </remarks>
     protected internal override XPlatContextMenu? BuildContextMenu()
     {
@@ -472,7 +529,24 @@ public class XPlatTextBox : XPlatControl
         bool canWrite = !ReadOnly;
         bool canPaste = canWrite && !string.IsNullOrEmpty(XPlatClipboard.GetText());
 
-        return new XPlatContextMenu()
+        var menu = new XPlatContextMenu();
+
+        if (UndoFeature is { } undo)
+        {
+            menu.Add(new XPlatMenuItem("Undo", () => undo.Undo(this))
+                {
+                    Shortcut = new XPlatShortcut(XPlatKey.Z),
+                    Enabled = canWrite && undo.CanUndo,
+                })
+                .Add(new XPlatMenuItem("Redo", () => undo.Redo(this))
+                {
+                    Shortcut = new XPlatShortcut(XPlatKey.Z, XPlatModifiers.Control | XPlatModifiers.Shift),
+                    Enabled = canWrite && undo.CanRedo,
+                })
+                .AddSeparator();
+        }
+
+        return menu
             .Add(new XPlatMenuItem("Cut", () => Cut())
             {
                 Shortcut = new XPlatShortcut(XPlatKey.X),
@@ -723,6 +797,15 @@ public class XPlatTextBox : XPlatControl
         bool shift = (e.Modifiers & XPlatModifiers.Shift) != 0;
         bool control = (e.Modifiers & XPlatModifiers.Control) != 0;
 
+        // The history sees the undo keys first, so neither the multi-line keys nor the editing
+        // commands below can shadow Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z. Control is the library's
+        // accelerator modifier; on macOS a Command chord never reaches the view at all, so the
+        // AppKit backend's Edit menu feeds these same keys in through the host instead.
+        if (UndoFeature is { } undo && undo.OnKeyDown(this, e))
+        {
+            return;
+        }
+
         if (MultilineFeature is { } multiline && multiline.OnKeyDown(this, Viewport, e))
         {
             return;
@@ -928,6 +1011,8 @@ public class XPlatTextBox : XPlatControl
     {
         if (disposing)
         {
+            UndoFeature?.Dispose();
+            UndoFeature = null;
             SpanFeature?.Dispose();
             SpanFeature = null;
             MultilineFeature?.Dispose();
@@ -971,11 +1056,51 @@ public class XPlatTextBox : XPlatControl
             }
         }
 
+        // The history is told before the caret and anchor move, so the entry keeps the insertion
+        // point the user made the edit from. A non-zero selection makes the change an entry of its
+        // own, which is why its length is part of the answer.
+        UndoFeature?.BeginEdit(this, start, length, replacement, HasSelection ? SelectionLength : 0);
+
         _anchor = _caretIndex = start + replacement.Length;
-        Text = Text.Remove(start, length).Insert(start, replacement);
+        _editingRange = true;
+        try
+        {
+            Text = Text.Remove(start, length).Insert(start, replacement);
+        }
+        finally
+        {
+            _editingRange = false;
+        }
 
         _caret.ResetBlink();
         EnsureCaretVisible();
+        Invalidate();
+        UndoFeature?.EndEdit(this);
+    }
+
+    /// <summary>
+    /// Applies one entry of the undo history verbatim: no <see cref="MaxLength"/> clamp, no
+    /// read-only test and no recording, because the history has already decided what belongs in the
+    /// text. Undoing a paste larger than the current limit has to restore it in full, and undoing
+    /// anything at all must not appear in the history as a new edit.
+    /// </summary>
+    internal void ApplyHistoryEdit(int start, int length, string replacement)
+    {
+        start = Math.Clamp(start, 0, Text.Length);
+        length = Math.Clamp(length, 0, Text.Length - start);
+
+        _anchor = _caretIndex = start + replacement.Length;
+        _editingRange = true;
+        try
+        {
+            Text = Text.Remove(start, length).Insert(start, replacement);
+        }
+        finally
+        {
+            _editingRange = false;
+        }
+
+        _caret.ResetBlink();
         Invalidate();
     }
 
