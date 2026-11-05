@@ -2927,3 +2927,22 @@ Windows reference pack with it - then opens each package and fails unless it car
 and a dependency group for every platform. That check exists because both omissions are silent in
 NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. §4 of the
 policy has the details.
+
+### Tests come with the change
+
+A change is not finished until the behaviour it adds is covered, and the tests land in the same
+pull request rather than a follow-up. A bug fix carries a regression test that fails before the fix
+and passes after it; a new feature carries tests for the behaviour it introduces, including the
+public surface an application is meant to use.
+
+- They go in `XPlatUI.Tests`, or in the feature's own `XPlatUI.Feature.*.Tests` assembly when the
+  work lives outside the core library - the same place the surrounding tests for that area live,
+  rather than a new file of their own.
+- They run headless, on all three platforms, with no display, window server or network, and under
+  the same category filter the [Tests workflow](.github/workflows/tests.yml) uses.
+- They cover the behaviour, not incidental internals: what an application can see and depend on,
+  through the host's own input entry points rather than by calling private helpers.
+
+The suite's own conventions - a hand-driven clock, the pinned font, no shared state between tests -
+are what make that possible; [Running the tests](#running-the-tests) describes them. The same rule is
+one of the bullets in "What done means" in [CONTROLS-TODO.md](CONTROLS-TODO.md#2-what-done-means).

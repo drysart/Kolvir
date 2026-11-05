@@ -60,6 +60,12 @@ a reviewer should ask for each one rather than infer it.
 - It has a README section (in the `Design` table as well as its own `###` section) and a demo page
   appended to `Demos` in `XPlatUIDemo.App/DemoUi.cs` - appended, not inserted, because `--page N`
   and the render harness address pages by index.
+- Its behaviour is covered by tests in `XPlatUI.Tests` - or in the feature's own
+  `XPlatUI.Feature.*.Tests` assembly when the control is part of a feature package - written in the
+  same change rather than a follow-up. The suite runs headless with no display, window server or
+  network, so the same tests run on Windows, macOS and GTK4, and what they cover is the public
+  behaviour an application depends on (through the host's own input entry points where input is the
+  subject) rather than incidental internals. A bug fix carries a test that fails before it.
 - It is verified on Windows, macOS and GTK4: a headless `--render` of the new page on all three, plus
   a real-window check wherever the control's value is interaction (a popup, a drag, a keyboard path).
 - The pull request names the rung of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §4 it sits on
