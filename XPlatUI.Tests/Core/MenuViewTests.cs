@@ -196,4 +196,84 @@ public sealed class MenuViewTests : HeadlessTestBase
         view.SetItems(new[] { new XPlatMenuItem("Replaced") });
         Assert.AreEqual(1, view.Items.Count, "SetItems replaces the rows");
     }
+
+    [TestMethod]
+    public void TheLayoutPlacesOneRowPerItemFromTheTopDown()
+    {
+        var first = new XPlatMenuItem("First");
+        var disabled = new XPlatMenuItem("Disabled") { Enabled = false };
+        var last = new XPlatMenuItem("Last");
+
+        using var view = new XPlatMenuView(new[]
+        {
+            first,
+            XPlatMenuItem.Separator,
+            disabled,
+            last,
+        });
+        using var scene = HeadlessScene.Create(view, 240f, 220f);
+
+        view.HighlightFirst();
+        scene.Render();
+
+        var layout = view.Layout;
+        Assert.IsNotNull(layout, "measuring a menu produces a layout");
+        Assert.AreEqual(4, layout.Rows.Count, "one row per item, separators included");
+
+        float previousBottom = float.NegativeInfinity;
+        for (int i = 0; i < layout.Rows.Count; i++)
+        {
+            var row = layout.Rows[i];
+            Assert.IsTrue(row.Bounds.Height > 0f, $"row {i} has height");
+            Assert.IsTrue(row.Bounds.Top >= previousBottom - 0.01f, $"row {i} starts below the one before it");
+            Assert.IsTrue(
+                row.Bounds.Left >= layout.SurfaceBounds.Left - 0.01f &&
+                row.Bounds.Right <= layout.SurfaceBounds.Right + 0.01f,
+                $"row {i} stays inside the menu's surface");
+            previousBottom = row.Bounds.Bottom;
+        }
+
+        Assert.IsTrue(layout.Rows[0].IsPickable, "an ordinary enabled item is pickable");
+        Assert.IsFalse(layout.Rows[1].IsPickable, "a separator is not");
+        Assert.IsFalse(layout.Rows[2].IsPickable, "a disabled item is not");
+        Assert.IsTrue(layout.Rows[3].IsPickable);
+        Assert.AreEqual(0, layout.FirstPickable, "the first pickable row is the first item here");
+    }
+
+    [TestMethod]
+    public void AMenuReportsWhetherItScrolls()
+    {
+        var few = new XPlatMenuView(new[] { new XPlatMenuItem("One"), new XPlatMenuItem("Two") });
+        using (few)
+        using (var scene = HeadlessScene.Create(few, 240f, 220f))
+        {
+            few.HighlightFirst();
+            scene.Render();
+
+            Assert.IsNotNull(few.Layout);
+            Assert.IsFalse(few.Layout.IsScrollable, "a menu that fits does not scroll");
+            Assert.AreEqual(0f, few.Layout.MaxScroll);
+        }
+
+        var many = new XPlatMenuItem[40];
+        for (int i = 0; i < many.Length; i++)
+        {
+            many[i] = new XPlatMenuItem($"Row {i}");
+        }
+
+        var longMenu = new XPlatMenuView(many) { MaximumSurfaceHeight = 120f };
+        using (longMenu)
+        using (var scene = HeadlessScene.Create(longMenu, 300f, 300f))
+        {
+            longMenu.HighlightFirst();
+            scene.Render();
+
+            Assert.IsNotNull(longMenu.Layout);
+            Assert.IsTrue(longMenu.Layout.IsScrollable, "a menu taller than its maximum surface scrolls");
+            Assert.IsTrue(longMenu.Layout.MaxScroll > 0f);
+            Assert.IsTrue(
+                longMenu.Layout.ContentHeight > longMenu.Layout.SurfaceSize.Height,
+                "its content is taller than the surface it is shown in");
+        }
+    }
 }
