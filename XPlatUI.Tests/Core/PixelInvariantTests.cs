@@ -30,9 +30,9 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         var button = new XPlatButton("Go") { Dock = DockStyle.Fill, CornerRadius = 0f };
         using var scene = HeadlessScene.Create(button, 200f, 60f);
 
-        var centre = scene.PixelAt((int)button.Width / 2, (int)button.Height / 2);
+        var fill = scene.PixelAt(FillX(button), (int)button.Height / 2);
 
-        Assert.AreEqual(XPlatTheme.Accent, centre, "a primary button's fill is the accent role");
+        Assert.AreEqual(XPlatTheme.Accent, fill, "a primary button's fill is the accent role");
     }
 
     [TestMethod]
@@ -42,9 +42,9 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         using var scene = HeadlessScene.Create(button, 200f, 60f);
         button.Enabled = false;
 
-        var centre = scene.PixelAt((int)button.Width / 2, (int)button.Height / 2);
+        var fill = scene.PixelAt(FillX(button), (int)button.Height / 2);
 
-        Assert.AreEqual(XPlatTheme.DisabledBackground, centre, "a disabled control is visibly disabled");
+        Assert.AreEqual(XPlatTheme.DisabledBackground, fill, "a disabled control is visibly disabled");
     }
 
     [TestMethod]
@@ -120,6 +120,13 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         Assert.AreEqual(XPlatTheme.Surface, dark, "the next frame should use the dark surface role");
         Assert.AreNotEqual(light, dark, "and the two palettes should not agree");
     }
+
+    /// <summary>
+    /// A point inside a button's fill but clear of its centred caption. Sampling the centre lands on
+    /// the text, and an antialiased glyph edge blends the fill with the text colour - which is what
+    /// the first macOS run caught: the fill was right, the pixel was not fill.
+    /// </summary>
+    private static int FillX(XPlatControl button) => Math.Max(4, (int)(button.Width * 0.1f));
 
     /// <summary>True when any pixel of <paramref name="bitmap"/> is exactly <paramref name="colour"/>.</summary>
     private static bool ContainsColour(SKBitmap bitmap, SKColor colour)
