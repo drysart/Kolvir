@@ -84,6 +84,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
+| `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
 | `XPlatNumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
 | `XPlatTrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
 | `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
@@ -1304,6 +1305,47 @@ which hands back an `XPlatTimer` the control owns and that is disposed with it. 
 from the backend's `CreateTimer`, so a control asks for an interval and the platform decides how to
 honour it; the underlying timer is created on the first `Start`, so a timer that never runs never
 asks for one.
+
+### Text box autocomplete
+
+Autocomplete is an opt-in extension in `XPlatUI.AutoComplete`, so a text box that never turns it
+on carries none of its state and an application that never imports the namespace carries none of
+its code. It adds the members a WinForms text box has:
+
+| Member | Behaviour |
+| --- | --- |
+| `AutoCompleteMode` | `None` (the default), `Suggest`, `Append` or `SuggestAppend` |
+| `AutoCompleteSource` | `CustomSource` (the values in `AutoCompleteCustomSource`) or `HistoryList` (the values the user has committed in this box) |
+| `AutoCompleteCustomSource` | The values to suggest; read on every change, so adding one takes effect on the next keystroke |
+
+The suggestion list is an `XPlatListBox` in an `XPlatPopup` under the caret, so it can leave the
+window when the platform layer provides popup windows. It never takes the keyboard: the text box
+keeps the caret and forwards the keys to the list, the way the combo box does with its drop-down.
+`Up`/`Down` move the highlight, `Enter` takes it, `Escape` closes the list without clearing the
+text, and `Tab` closes it on the way to the next control. `Down` (or `Alt+Down`) on a closed field
+opens the list with every value.
+
+`Suggest` only shows the list. `Append` only completes: the rest of the first match is appended to
+what was typed and selected, so the next keystroke replaces it. `SuggestAppend` does both. The
+filter always runs against what the user typed, never against the appended text, and a deletion
+never re-completes, so `Backspace` and `Delete` always delete something. Disabling the box closes
+the list, and a read-only box neither opens it nor completes.
+
+`HistoryList` records a value when the user commits it - with `Enter`, by taking a suggestion, or
+by leaving the field - deduplicated case-insensitively, most recent first, and capped at 64 values
+so it cannot grow without bound.
+
+```csharp
+using XPlatUI.AutoComplete;
+
+var city = new XPlatTextBox
+{
+    AutoCompleteMode = XPlatAutoCompleteMode.SuggestAppend,
+    AutoCompleteSource = XPlatAutoCompleteSource.CustomSource,
+};
+city.AutoCompleteCustomSource.Add("Amsterdam");
+city.AutoCompleteCustomSource.Add("Athens");
+```
 
 ### Selection and the clipboard
 

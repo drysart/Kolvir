@@ -1,6 +1,7 @@
 using System.Diagnostics;
 using SkiaSharp;
 using XPlatUI;
+using XPlatUI.AutoComplete;
 using XPlatUI.Backend.Headless;
 using XPlatUI.DragDrop;
 using XDock = XPlatUI.DockStyle;
@@ -379,6 +380,7 @@ public sealed class DemoUi
         ("Status and tool strips", demo => Page(demo.BuildToolStripDemo())),
         ("Menus", demo => Page(demo.BuildMenuDemo())),
         ("Date and time", demo => Page(demo.BuildDateTimePickerDemo())),
+        ("Text box autocomplete", demo => Page(demo.BuildAutoCompleteDemo())),
     };
 
     /// <summary>
@@ -3304,19 +3306,19 @@ public sealed class DemoUi
         var shortPicker = new XPlatDateTimePicker(new DateTime(2026, 11, 4, 9, 30, 0));
         shortPicker.AddValueChangedHandler(_ =>
             readout.Text = $"Value: {shortPicker.Value:yyyy-MM-dd HH:mm}");
-        card.Controls.Add(DateRow("Short (typed or picked)", shortPicker));
+        card.Controls.Add(CaptionRow("Short (typed or picked)", shortPicker));
 
-        card.Controls.Add(DateRow("Long", new XPlatDateTimePicker(new DateTime(2026, 11, 4))
+        card.Controls.Add(CaptionRow("Long", new XPlatDateTimePicker(new DateTime(2026, 11, 4))
         {
             Format = XPlatDateTimePickerFormat.Long,
         }));
 
-        card.Controls.Add(DateRow("Time", new XPlatDateTimePicker(new DateTime(2026, 11, 4, 9, 30, 0))
+        card.Controls.Add(CaptionRow("Time", new XPlatDateTimePicker(new DateTime(2026, 11, 4, 9, 30, 0))
         {
             Format = XPlatDateTimePickerFormat.Time,
         }));
 
-        card.Controls.Add(DateRow(
+        card.Controls.Add(CaptionRow(
             "Custom (yyyy-MM-dd HH:mm)",
             new XPlatDateTimePicker(new DateTime(2026, 11, 4, 9, 30, 0))
             {
@@ -3325,18 +3327,18 @@ public sealed class DemoUi
             }));
 
         DateTime today = DateTime.Today;
-        card.Controls.Add(DateRow("Bounded (today +/- 7 days)", new XPlatDateTimePicker(today)
+        card.Controls.Add(CaptionRow("Bounded (today +/- 7 days)", new XPlatDateTimePicker(today)
         {
             MinDate = today.AddDays(-7),
             MaxDate = today.AddDays(7),
         }));
 
-        card.Controls.Add(DateRow("Empty (placeholder)", new XPlatDateTimePicker
+        card.Controls.Add(CaptionRow("Empty (placeholder)", new XPlatDateTimePicker
         {
             PlaceholderText = "Pick a date",
         }));
 
-        card.Controls.Add(DateRow("Disabled", new XPlatDateTimePicker(new DateTime(2026, 11, 4))
+        card.Controls.Add(CaptionRow("Disabled", new XPlatDateTimePicker(new DateTime(2026, 11, 4))
         {
             Enabled = false,
         }));
@@ -3361,8 +3363,95 @@ public sealed class DemoUi
         return card;
     }
 
-    /// <summary>A caption with a wide date field on the right, so the fields line up.</summary>
-    private static XPlatPanel DateRow(string caption, XPlatControl field)
+    /// <summary>
+    /// <see cref="XPlatTextBox"/> autocomplete: the three modes over a custom source, the history
+    /// source, and a disabled field. The readout follows whichever field was typed in last, so the
+    /// completed text can be watched while the suffix is selected.
+    /// </summary>
+    private XPlatPanel BuildAutoCompleteDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Text box autocomplete"));
+
+        var readout = ScrollCaption("SuggestAppend: type \"ap\" to see \"Apple\" completed and listed");
+        card.Controls.Add(readout);
+
+        string[] fruits =
+        [
+            "Apple", "Apricot", "Banana", "Blackberry", "Blueberry", "Cherry", "Cranberry", "Grape",
+            "Lemon", "Lime", "Mango", "Orange", "Peach", "Pear", "Pineapple", "Plum", "Raspberry",
+            "Strawberry",
+        ];
+
+        var suggest = AutoCompleteBox(XPlatAutoCompleteMode.Suggest, fruits);
+        suggest.PlaceholderText = "Type a letter";
+        suggest.AddTextChangedHandler(_ => readout.Text = $"Suggest: \"{suggest.Text}\"");
+        card.Controls.Add(CaptionRow("Suggest (CustomSource)", suggest));
+
+        var suggestAppend = AutoCompleteBox(XPlatAutoCompleteMode.SuggestAppend, fruits);
+        suggestAppend.PlaceholderText = "Type a letter";
+        suggestAppend.AddTextChangedHandler(_ => readout.Text =
+            $"SuggestAppend: \"{suggestAppend.Text}\" ({suggestAppend.SelectionLength} selected)");
+        card.Controls.Add(CaptionRow("SuggestAppend (CustomSource)", suggestAppend));
+
+        var append = AutoCompleteBox(XPlatAutoCompleteMode.Append, fruits);
+        append.PlaceholderText = "Type a letter";
+        append.AddTextChangedHandler(_ => readout.Text =
+            $"Append: \"{append.Text}\" ({append.SelectionLength} selected)");
+        card.Controls.Add(CaptionRow("Append (CustomSource)", append));
+
+        var history = new XPlatTextBox
+        {
+            AutoCompleteMode = XPlatAutoCompleteMode.Suggest,
+            AutoCompleteSource = XPlatAutoCompleteSource.HistoryList,
+            PlaceholderText = "Enter a value, then type it again",
+        };
+        history.AddTextChangedHandler(_ => readout.Text = $"HistoryList: \"{history.Text}\"");
+        card.Controls.Add(CaptionRow("HistoryList (Suggest)", history));
+
+        var disabled = AutoCompleteBox(XPlatAutoCompleteMode.Suggest, fruits);
+        disabled.Enabled = false;
+        disabled.Text = "Cannot be suggested";
+        card.Controls.Add(CaptionRow("Disabled", disabled));
+
+        card.Controls.Add(new XPlatLabel(
+            "Typing opens the list under the caret. Up and Down move the highlight, Enter takes it, " +
+            "Escape closes the list without clearing the text, and the box keeps the caret the whole " +
+            "time. In the two append modes the rest of the first match is appended and selected, so " +
+            "the next keystroke replaces it instead of adding to it.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 66f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 6f, 0f, 0f),
+        });
+
+        return card;
+    }
+
+    /// <summary>A text box over a custom source, with the values the suggestion list filters.</summary>
+    private static XPlatTextBox AutoCompleteBox(XPlatAutoCompleteMode mode, IEnumerable<string> values)
+    {
+        var box = new XPlatTextBox
+        {
+            AutoCompleteMode = mode,
+            AutoCompleteSource = XPlatAutoCompleteSource.CustomSource,
+        };
+
+        foreach (string value in values)
+        {
+            box.AutoCompleteCustomSource.Add(value);
+        }
+
+        return box;
+    }
+
+    /// <summary>A caption with a wide field on the right, so a column of fields lines up.</summary>
+    private static XPlatPanel CaptionRow(string caption, XPlatControl field)
     {
         var row = new XPlatPanel
         {
