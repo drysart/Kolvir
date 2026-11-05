@@ -267,6 +267,11 @@ var notes = new XPlatTextBox { TabIndex = 2, Dock = DockStyle.Fill, Multiline = 
 var ok = new XPlatButton("OK") { TabIndex = 1, Dock = DockStyle.Bottom };   // visited second
 ```
 
+The demo's **Tab order** page - `--page 34` - is the same rules by hand: it was created in a
+different order from its indices, carries a nested container whose children order among themselves,
+a scrollable panel that is a tab stop, two controls that share an index, and two that are meant to be
+skipped, with a readout naming whatever has the focus, its `TabIndex` and its place in the sequence.
+
 ### Handlers
 
 There are no C# events. Every notification is a pair of methods, `Add<Name>Handler` and
