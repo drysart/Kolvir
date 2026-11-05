@@ -166,7 +166,8 @@ dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj \
 A rung-3 feature is a package of its own, so its tests are an assembly of their own:
 
 ```
-dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj
+dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj \
+  -p:TargetFramework=net10.0
 ```
 
 `XPlatUI.Feature.DragDrop.Tests` uses the same categories, plus `Feature` and `DragDrop`, and the
@@ -174,6 +175,16 @@ same filter. It targets plain `net10.0` on every platform even though the featur
 platform: the tests only touch the feature's `common/` folder, and a test project that targeted
 `net10.0-macos` would need the .NET for macOS SDK with an exactly matching Xcode on whichever Mac
 builds it, which is a requirement no test project should impose.
+
+`-p:TargetFramework=net10.0` is what keeps that promise on a machine that has no macOS workload.
+`XPlatUI.Feature.DragDrop` lists `net10.0-windows;net10.0-macos;net10.0` unconditionally, because one
+`dotnet pack` has to produce all three dependency groups, and restore follows every framework in the
+reference graph rather than only the inner build the tests bind. Restoring or testing the test
+project without the property therefore resolves the `net10.0-macos` inner build, finds
+`XPlatUI.Backend.AppKit` behind it and stops with `NETSDK1147`. The property selects the single
+portable inner build instead; the plural `-p:TargetFrameworks=` does not work as a switch, because it
+reaches the restore graph and not the referenced projects' builds. The `Tests` workflow passes it on
+both its restore and its test step, so a local run with it matches CI.
 
 That suite drives the feature's router and per-control state directly, and the feature project grants
 it `InternalsVisibleTo` for exactly that. Both types are internal on purpose - an application never
