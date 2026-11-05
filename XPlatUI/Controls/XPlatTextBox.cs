@@ -14,8 +14,8 @@ namespace XPlatUI;
 /// </summary>
 /// <remarks>
 /// The caret is an <see cref="XPlatCaret"/>, so it looks and blinks like the caret of every other
-/// editable control and only runs a timer while this text box has focus. Adapters only need to
-/// install a platform clipboard into <see cref="XPlatClipboard.Current"/>.
+/// editable control and only runs a timer while this text box has focus and is displayed. Adapters
+/// only need to install a platform clipboard into <see cref="XPlatClipboard.Current"/>.
 /// </remarks>
 public class XPlatTextBox : XPlatControl
 {

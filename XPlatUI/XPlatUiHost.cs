@@ -19,6 +19,9 @@ public sealed class XPlatUiHost
     private Action<object>? _invalidated;
     private Action<object>? _framePainted;
     private Action<object>? _cursorChanged;
+    private XPlatWindow? _window;
+    private IDisposable? _windowShownToken;
+    private IDisposable? _windowClosedToken;
     private Action<object, XPlatContextMenuEventArgs>? _contextMenuOpening;
     private readonly XPlatSelection _selection;
     private XPlatControl? _root;
@@ -171,7 +174,49 @@ public sealed class XPlatUiHost
     /// The window this host draws, or null when the host is used standalone. Assigned by
     /// <see cref="XPlatWindow"/> so that code inside a control can parent dialogs on its window.
     /// </summary>
-    public XPlatWindow? Window { get; set; }
+    /// <remarks>
+    /// The host follows the window's own lifecycle: the tree is told when the window appears, so a
+    /// control that was waiting to be seen (the marquee progress bar, the caret) can start, and
+    /// again when it closes, so nothing is left ticking for a window nobody is looking at.
+    /// </remarks>
+    public XPlatWindow? Window
+    {
+        get => _window;
+        set
+        {
+            if (ReferenceEquals(_window, value))
+            {
+                return;
+            }
+
+            DetachWindow();
+            _window = value;
+
+            if (value is not null)
+            {
+                _windowShownToken = value.AddShownHandler(OnWindowDisplayChanged);
+                _windowClosedToken = value.AddClosedHandler(OnWindowClosed);
+            }
+
+            _root?.UpdateDisplayed();
+        }
+    }
+
+    private void OnWindowDisplayChanged(object sender) => _root?.UpdateDisplayed();
+
+    private void OnWindowClosed(object sender)
+    {
+        DetachWindow();
+        _root?.UpdateDisplayed();
+    }
+
+    private void DetachWindow()
+    {
+        _windowShownToken?.Dispose();
+        _windowClosedToken?.Dispose();
+        _windowShownToken = null;
+        _windowClosedToken = null;
+    }
 
     /// <summary>Resolves <typeparamref name="TService"/> from <see cref="Services"/>, or null when there is none.</summary>
     /// <typeparam name="TService">The service to resolve.</typeparam>

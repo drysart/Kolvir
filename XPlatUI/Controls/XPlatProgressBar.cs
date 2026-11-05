@@ -10,8 +10,10 @@ namespace XPlatUI;
 /// </summary>
 /// <remarks>
 /// The control takes no input and holds no focus - it is a readout, like the WinForms
-/// <c>ProgressBar</c>. Only a marquee bar starts a timer, and only while it is visible and an
-/// <see cref="XPlatApplication"/> is running the loop that delivers its ticks.
+/// <c>ProgressBar</c>. Only a marquee bar starts a timer, and only while it is
+/// <see cref="XPlatControl.IsDisplayed"/> and an <see cref="XPlatApplication"/> is running the loop
+/// that delivers its ticks: a bar that is hidden, inside a hidden container, or in a window that is
+/// not on screen stops, and starts again when it is shown.
 /// </remarks>
 public class XPlatProgressBar : XPlatControl
 {
@@ -125,12 +127,8 @@ public class XPlatProgressBar : XPlatControl
             _style = value;
 
             // A bar that is no longer a marquee stops sweeping now; one that has become a marquee
-            // starts on its next paint, when there is something on screen to animate.
-            if (value != XPlatProgressBarStyle.Marquee)
-            {
-                _marquee?.Stop();
-            }
-
+            // starts now too, provided there is something on screen to animate.
+            UpdateMarquee();
             Invalidate();
         }
     }
@@ -206,14 +204,16 @@ public class XPlatProgressBar : XPlatControl
         }
     }
 
-    protected override void OnVisibleChanged()
+    protected override void OnDisplayedChanged()
     {
-        base.OnVisibleChanged();
+        base.OnDisplayedChanged();
+        UpdateMarquee();
+    }
 
-        if (!Visible)
-        {
-            _marquee?.Stop();
-        }
+    protected override void OnEnabledChanged()
+    {
+        base.OnEnabledChanged();
+        UpdateMarquee();
     }
 
     private void PaintContinuous(SKCanvas canvas, SKRect track, SKColor color)
@@ -263,13 +263,22 @@ public class XPlatProgressBar : XPlatControl
             CornerRadius);
     }
 
-    /// <summary>Runs the marquee clock only while there is a frame loop to drive it.</summary>
+    /// <summary>
+    /// Runs the marquee clock only while the bar is on screen and there is a frame loop to drive it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="XPlatControl.IsDisplayed"/> is what makes the decision: a bar that is hidden, sits
+    /// under a hidden container, has been taken off its host, or lives in a window that was never
+    /// shown or has closed has nothing to animate and stops. This is called on every paint (for a
+    /// host that paints a tree it never showed) and from <see cref="OnDisplayedChanged"/> and
+    /// <see cref="OnEnabledChanged"/>, which is how a bar that is not being painted - because it is
+    /// not visible - still finds out that it should stop.
+    /// </remarks>
     private void UpdateMarquee()
     {
         bool run = _style == XPlatProgressBarStyle.Marquee
-            && Visible
+            && IsDisplayed
             && Enabled
-            && Host is not null
             && XPlatApplication.Current is not null;
 
         if (!run)
@@ -327,6 +336,14 @@ public class XPlatProgressBar : XPlatControl
 
     private void OnMarqueeTick(object sender)
     {
+        // The control tree belongs to the caller, so this timer can outlive the application. Once
+        // that happens XPlatTimer ticks inline on a pool thread, which must not touch the UI.
+        if (XPlatApplication.Current is null || !IsDisplayed)
+        {
+            _marquee?.Stop();
+            return;
+        }
+
         // Measured, not assumed: the platform's timer granularity rarely matches the interval it
         // was asked for, and a display-driven interval is not exact either. Advancing by the time
         // that actually passed is what keeps MarqueeSweepsPerSecond a real unit.

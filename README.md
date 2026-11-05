@@ -72,7 +72,7 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree), `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
+| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
 | `XPlatBackground` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
 | `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
@@ -288,6 +288,34 @@ The demo's **Tab order** page - `--page 34` - is the same rules by hand: it was 
 different order from its indices, carries a nested container whose children order among themselves,
 a scrollable panel that is a tab stop, two controls that share an index, and two that are meant to be
 skipped, with a readout naming whatever has the focus, its `TabIndex` and its place in the sequence.
+
+### Visibility and display state
+
+`Visible` is the flag a control owns, and like `Enabled` it is only one of the answers that matter:
+hiding a container hides everything inside it, and a window that was never shown shows nothing at
+all. Two computed properties carry the rest, so a control that does work on a timer never has to
+watch its ancestors itself:
+
+| Member | Meaning |
+| --- | --- |
+| `Visible` | The control's own flag; setting it is what an application does |
+| `EffectiveVisible` | That flag and every container above it - the answer to "would a paint reach this control" |
+| `IsDisplayed` | `EffectiveVisible` and attached to a host and inside a window that has been shown and has not closed - the answer to "would the user see it" |
+| `OnDisplayedChanged()` | Called on a control, and then down its subtree, when either answer changes: `Visible` was assigned, the control changed parent, the root was attached or detached, or the window was shown or closed |
+
+The marquee progress bar and the caret are the two controls whose clocks hang off this: they start
+when the control becomes displayed and stop the moment it stops being, including when only a
+container or the window changed, with no timer left running for a window nobody is looking at.
+
+```csharp
+var busy = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+busy.IsDisplayed;      // false until the window is shown
+card.Visible = false;  // the sweep stops; the bar is still Visible itself
+card.Visible = true;   // and starts again from the phase it stopped at
+```
+
+`IsDisplayed` is about being shown, not about being on-screen: a minimized or fully covered window
+still counts as displayed, because no window system reports occlusion to a client portably.
 
 ### Handlers
 
@@ -807,9 +835,12 @@ input, so it is neither focusable nor a tab stop.
 | `Style` | `Continuous`, `Blocks` (a segmented fill) or `Marquee` |
 | `MarqueeAnimationSpeed` | How often a marquee frame is drawn. Null, the default, is the display's own frame time; a `TimeSpan` pins it |
 
-Only a `Marquee` bar starts a timer, and only while it is visible, attached and there is an
-application to tick it, so an idle continuous bar costs nothing. A continuous bar repaints only the
-strip the value actually crossed.
+Only a `Marquee` bar starts a timer, and only while it is `IsDisplayed` - its own `Visible`,
+every container above it and a window that has been shown and has not closed - and there is an
+application to tick it, so an idle continuous bar costs nothing. Hiding the bar, hiding a container
+around it, taking it out of the window or closing the window stops the sweep; showing it again
+resumes from the phase it stopped at, with the one timer the bar built. A continuous bar repaints
+only the strip the value actually crossed.
 
 A marquee that leaves `MarqueeAnimationSpeed` null asks
 `XPlatScreen.RefreshRate` for the refresh rate of the display the window is on and animates at that
@@ -975,8 +1006,10 @@ only falls back to hanging off the control when the pointer's position is not kn
 | `IsVisible`, `Hide()` | The current tip |
 
 A tip is only scheduled while the pointer is actually resting on the control, and the timer is
-disposed with the tool tip, so an idle application runs nothing. `Dispose` the instance when the
-controls it describes go away.
+disposed with the tool tip, so an idle application runs nothing. A control that stops being
+displayed - hidden, moved into a hidden container, or in a window that has closed - takes its
+pending or drawn tip with it and stops the delay, because there is no mouse-leave to say so when a
+container goes away. `Dispose` the instance when the controls it describes go away.
 
 ```csharp
 using var tips = new XPlatToolTip { InitialDelay = 500 };
@@ -1432,8 +1465,9 @@ The library itself stays platform free, so one thing remains the adapter's job:
   (`Win32Clipboard.cs`), which publishes a real `HTML Format` payload.
 
 The caret is a control of its own: `XPlatCaret` owns the timer that blinks it and follows its
-control's focus and enabled state, so it only runs while the caret is actually on screen and an
-idle application has no timer running at all. `XPlatTextBox.Caret` exposes the instance it uses, so
+control's focus, enabled state and display state, so it only runs while the caret is actually on
+screen - hiding a container above a focused field stops the blink, and showing it again resumes it -
+and an idle application has no timer running at all. `XPlatTextBox.Caret` exposes the instance it uses, so
 its interval, width and color can be changed, and a new editable control gets the same caret with
 `new XPlatCaret(this)`. A control that animates something else does the same through `CreateTimer`,
 which hands back an `XPlatTimer` the control owns and that is disposed with it. The wait itself comes

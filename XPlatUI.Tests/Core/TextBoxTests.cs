@@ -287,6 +287,46 @@ public sealed class TextBoxTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AFocusedFieldInAWindowThatWasNeverShownRunsNoBlinkTimer()
+    {
+        var backend = new TestApplicationBackend();
+        var box = new XPlatTextBox("hello") { Dock = DockStyle.Fill };
+
+        using var scene = HeadlessScene.Create(backend, box, 320f, 60f);
+        box.Focus();
+        scene.Paint();
+
+        Assert.IsTrue(box.IsFocused);
+        Assert.IsFalse(backend.Timer.IsRunning, "a window nobody has shown has no caret to blink");
+    }
+
+    [TestMethod]
+    public void HidingTheContainerOfAFocusedFieldStopsItsBlink()
+    {
+        var backend = new TestApplicationBackend();
+        var box = new XPlatTextBox("hello") { Dock = DockStyle.Fill };
+        var panel = new XPlatPanel { Dock = DockStyle.Fill, Padding = XPlatThickness.Empty, BorderWidth = 0f };
+        panel.Controls.Add(box);
+
+        using var scene = HeadlessScene.Create(backend, panel, 320f, 120f);
+        box.Focus();
+
+        scene.RunWhileShown(() =>
+        {
+            Assert.IsTrue(backend.Timer.IsRunning, "a focused field on screen blinks");
+
+            panel.Visible = false;
+
+            Assert.IsFalse(backend.Timer.IsRunning, "an invisible container leaves no caret to blink");
+            Assert.IsTrue(box.IsFocused, "and the field keeps the focus, which is why the caret has to watch for this");
+
+            panel.Visible = true;
+
+            Assert.IsTrue(backend.Timer.IsRunning, "showing the field again resumes the blink");
+        });
+    }
+
+    [TestMethod]
     public void ANumericFieldStartsAtItsMinimumAndIsClampedToItsRange()
     {
         using var field = new XPlatNumericUpDown();

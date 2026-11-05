@@ -14,6 +14,14 @@ namespace XPlatUI;
 /// focus handling and no disposal in the control itself.
 /// </para>
 /// <para>
+/// The blink also stops while the control is not <see cref="XPlatControl.IsDisplayed"/>, which is
+/// the case a focus check cannot see: hiding a container above a focused control leaves the focus
+/// where it was, so without this a panel taken off screen would go on blinking a caret nobody can
+/// look at. <see cref="ShouldPaint"/> asks for less - <see cref="XPlatControl.EffectiveVisible"/>
+/// rather than the window state - because a paint only happens when something is drawing the tree,
+/// and a harness renders a window it never showed on purpose.
+/// </para>
+/// <para>
 /// The caret knows nothing about text. A control works out where the caret belongs and hands that
 /// rectangle to <see cref="Draw(SKCanvas, SKRect)"/>, which paints nothing while the caret is in
 /// its hidden blink phase, so a paint method never has to test the blink state itself.
@@ -52,6 +60,7 @@ public sealed class XPlatCaret : IDisposable
         owner.AddGotFocusHandler(OnOwnerGotFocus);
         owner.AddLostFocusHandler(OnOwnerLostFocus);
         owner.AddEnabledChangedHandler(OnOwnerEnabledChanged);
+        owner.AddDisplayedChangedHandler(OnOwnerDisplayedChanged);
         owner.Own(this);
     }
 
@@ -83,9 +92,15 @@ public sealed class XPlatCaret : IDisposable
 
     /// <summary>
     /// Whether a paint should draw the caret: it is active, in its visible phase, and its control
-    /// is focused and enabled.
+    /// is focused, enabled and <see cref="XPlatControl.EffectiveVisible"/>.
     /// </summary>
-    public bool ShouldPaint => _active && _visible && _owner.IsFocused && _owner.Enabled;
+    public bool ShouldPaint => _active && _visible && _owner.IsFocused && _owner.Enabled && _owner.EffectiveVisible;
+
+    /// <summary>
+    /// Whether the blink has any reason to run: the caret is taken, and its control is focused,
+    /// enabled and <see cref="XPlatControl.IsDisplayed"/>.
+    /// </summary>
+    private bool ShouldBlink => _active && _owner.IsFocused && _owner.Enabled && _owner.IsDisplayed;
 
     /// <summary>
     /// Takes the caret and restarts the blink, so it appears solid the moment the user starts
@@ -122,7 +137,7 @@ public sealed class XPlatCaret : IDisposable
         }
 
         _visible = true;
-        _timer.Enabled = _active && _owner.IsFocused && _owner.Enabled;
+        _timer.Enabled = ShouldBlink;
     }
 
     /// <summary>Draws the caret over <paramref name="bounds"/> if it should currently be visible.</summary>
@@ -171,6 +186,7 @@ public sealed class XPlatCaret : IDisposable
         _owner.RemoveGotFocusHandler(OnOwnerGotFocus);
         _owner.RemoveLostFocusHandler(OnOwnerLostFocus);
         _owner.RemoveEnabledChangedHandler(OnOwnerEnabledChanged);
+        _owner.RemoveDisplayedChangedHandler(OnOwnerDisplayedChanged);
 
         _timer.Dispose();
     }
@@ -185,14 +201,32 @@ public sealed class XPlatCaret : IDisposable
         _timer.Stop();
     }
 
-    private void OnOwnerEnabledChanged(object sender) =>
-        _timer.Enabled = _active && _owner.IsFocused && _owner.Enabled;
+    private void OnOwnerEnabledChanged(object sender) => _timer.Enabled = ShouldBlink;
+
+    /// <summary>
+    /// Stops the blink when the control stops being displayed, and starts it again when it comes
+    /// back. A hidden container keeps the focus, so nothing else would tell the caret: the control
+    /// is still focused and enabled, and only the display state says there is nothing to blink for.
+    /// </summary>
+    private void OnOwnerDisplayedChanged(object sender)
+    {
+        if (_owner.IsDisplayed)
+        {
+            _timer.Enabled = ShouldBlink;
+            return;
+        }
+
+        // Coming back should show a solid caret rather than one mid-blink, the same way leaving and
+        // returning to the control does.
+        _visible = true;
+        _timer.Stop();
+    }
 
     private void OnTick(object sender)
     {
         // The control tree belongs to the caller, so this timer can outlive the application. Once
         // that happens XPlatTimer ticks inline on a pool thread, which must not touch the UI.
-        if (XPlatApplication.Current is null || !_active || !_owner.IsFocused || !_owner.Enabled)
+        if (XPlatApplication.Current is null || !_active || !_owner.IsFocused || !_owner.Enabled || !_owner.IsDisplayed)
         {
             _visible = true;
             _timer.Stop();

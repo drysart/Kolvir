@@ -117,6 +117,25 @@ internal sealed class HeadlessScene : IDisposable
         return new HeadlessScene(application, backend, window, windowBackend);
     }
 
+    /// <summary>
+    /// Shows the scene's window and runs <paramref name="body"/> once it is on screen, which is the
+    /// only moment a window is really visible: <see cref="XPlatWindow.Show"/> outside
+    /// <see cref="XPlatApplication.Run"/> only registers the window for the run that shows it.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="XPlatApplication.Run"/> tears the application down when it returns, so a test
+    /// asserts inside the handler rather than afterwards.
+    /// </remarks>
+    /// <param name="body">What to assert while the window is up.</param>
+    public void RunWhileShown(Action body)
+    {
+        ArgumentNullException.ThrowIfNull(body);
+
+        Window.AddShownHandler(_ => body());
+        Window.Show();
+        _application.Run();
+    }
+
     /// <summary>Paints the whole tree and returns the bitmap the test can sample.</summary>
     public SKBitmap Render()
     {

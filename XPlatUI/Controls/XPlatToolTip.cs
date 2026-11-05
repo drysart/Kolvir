@@ -157,6 +157,11 @@ public sealed class XPlatToolTip : IDisposable
         {
             EnterToken = control.AddMouseEnterHandler(OnOwnerEnter),
             LeaveToken = control.AddMouseLeaveHandler(OnOwnerLeave),
+
+            // A control that stops being displayed takes its pending or shown bubble with it, and
+            // this is how the tool tip hears about it: there is no mouse-leave when a container is
+            // hidden or a window closes.
+            DisplayedToken = control.AddDisplayedChangedHandler(OnOwnerDisplayedChanged),
         };
 
         _entries.Add(control, entry);
@@ -198,7 +203,7 @@ public sealed class XPlatToolTip : IDisposable
             return;
         }
 
-        if (!_active || !_entries.TryGetValue(control, out var entry) || !control.Enabled || !control.Visible)
+        if (!_active || !_entries.TryGetValue(control, out var entry) || !control.Enabled || !control.EffectiveVisible)
         {
             return;
         }
@@ -242,6 +247,31 @@ public sealed class XPlatToolTip : IDisposable
         }
     }
 
+    /// <summary>
+    /// Takes down the tip a control no longer has on screen. The tip is about a control the user is
+    /// pointing at, so a control that was hidden, moved into a hidden container or lost its window
+    /// has nothing left to explain - and no reason to keep a delay running.
+    /// </summary>
+    private void OnOwnerDisplayedChanged(object sender)
+    {
+        if (_disposed || sender is not XPlatControl control || control.IsDisplayed)
+        {
+            return;
+        }
+
+        if (_phase == Phase.Waiting && ReferenceEquals(_pending, control))
+        {
+            _pending = null;
+            ClosePopup();
+            return;
+        }
+
+        if (_popup is { } popup && ReferenceEquals(popup.Owner, control))
+        {
+            ClosePopup();
+        }
+    }
+
     private void OnTick(object sender)
     {
         if (_disposed)
@@ -263,7 +293,7 @@ public sealed class XPlatToolTip : IDisposable
 
             // The pointer can leave a control without the host ever raising the leave - a popup
             // opening over it, for instance - so the delay re-checks what the tick is for.
-            if (!control.Enabled || !control.Visible || control.Host is null || !control.IsMouseOver)
+            if (!control.Enabled || !control.EffectiveVisible || control.Host is null || !control.IsMouseOver)
             {
                 ClosePopup();
                 return;
@@ -415,8 +445,10 @@ public sealed class XPlatToolTip : IDisposable
     {
         entry.EnterToken?.Dispose();
         entry.LeaveToken?.Dispose();
+        entry.DisplayedToken?.Dispose();
         entry.EnterToken = null;
         entry.LeaveToken = null;
+        entry.DisplayedToken = null;
     }
 
     private sealed class ToolTipEntry
@@ -428,6 +460,8 @@ public sealed class XPlatToolTip : IDisposable
         public IDisposable? EnterToken { get; set; }
 
         public IDisposable? LeaveToken { get; set; }
+
+        public IDisposable? DisplayedToken { get; set; }
     }
 }
 
