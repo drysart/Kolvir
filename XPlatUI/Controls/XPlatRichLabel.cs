@@ -1409,20 +1409,25 @@ public class XPlatRichLabel : XPlatControl
         int weight = span.Bold ? Math.Max(700, _font.Weight) : _font.Weight;
         bool italic = span.Italic || _font.Italic;
         float size = span.FontSize is { } spanSize ? spanSize : _font.Size;
-        string family = span.FontFamily ?? _font.FamilyName;
+        string? family = span.FontFamily;
 
         if (weight == _font.Weight
             && italic == _font.Italic
             && MathF.Abs(size - _font.Size) < 0.01f
-            && string.Equals(family, _font.FamilyName, StringComparison.Ordinal))
+            && (family is null || string.Equals(family, _font.FamilyName, StringComparison.Ordinal)))
         {
             return _font;
         }
 
-        string key = string.Concat(family, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
+        string key = string.Concat(family ?? _font.FamilyName, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
         if (!_derivedFonts.TryGetValue(key, out var font))
         {
-            font = new XPlatFont(family, size, weight, italic);
+            // A span that names a family asks for a different family and is resolved by name. A span
+            // that only changes weight, slant or size is derived from the label's own font, so a face
+            // loaded from a file stays on that face instead of being looked up on the machine.
+            font = family is null
+                ? _font.Derive(size, weight, italic)
+                : new XPlatFont(family, size, weight, italic);
             _derivedFonts[key] = font;
         }
 

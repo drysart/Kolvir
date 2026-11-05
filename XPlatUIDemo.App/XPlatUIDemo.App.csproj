@@ -50,6 +50,14 @@
     <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
   </ItemGroup>
 
+  <!-- The demo's bundled face. It travels inside the assembly rather than beside the executable,
+       because that is what a trimmed single-file publish can carry, and because the point of the
+       feature is a face the machine may not have. Fonts/OFL.txt is its licence. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fonts\IBMPlexSans-Regular.ttf"
+                      LogicalName="XPlatUI.Demo.App.Fonts.IBMPlexSans-Regular.ttf" />
+  </ItemGroup>
+
   <!-- Exactly one backend and one feature per TFM, and only the ones that TFM can actually use. The
        feature is a package like any other: leaving it out still compiles, and the window simply
        never becomes a drop target. -->

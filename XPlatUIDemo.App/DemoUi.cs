@@ -396,6 +396,7 @@ public sealed class DemoUi
         ("Multi-line text", demo => Page(demo.BuildMultilineDemo())),
         ("Text box spans", demo => Page(demo.BuildSpanDemo())),
         ("Undo and redo", demo => Page(demo.BuildUndoDemo())),
+        ("Fonts from a file", demo => Page(demo.BuildFontDemo())),
     };
 
     /// <summary>
@@ -4293,5 +4294,91 @@ public sealed class DemoUi
 
         canvas.Flush();
         return surface.Snapshot();
+    }
+
+    /// <summary>
+    /// A face that travels with the application instead of coming from the machine: every control on
+    /// this page draws with IBM Plex Sans Regular read out of the assembly's resources, and the
+    /// readout compares its measurements with the machine's own face.
+    /// </summary>
+    private XPlatPanel BuildFontDemo()
+    {
+        const string sample = "XPlatUI";
+
+        // The page owns these fonts for the life of the window: a control never disposes a font it was
+        // handed, and the theme fonts are held the same way.
+        var loaded = XPlatFont.FromBytes(DemoFont.Data);
+        var system = new XPlatFont(loaded.Size);
+
+        var card = Card();
+        card.Controls.Add(Heading("Fonts from a file"));
+        card.Controls.Add(ScrollCaption(
+            $"{loaded.FamilyName}, {F(loaded.Size)} pt, read from this app's embedded resources - not a family this machine has"));
+
+        card.Controls.Add(Caption("A label"));
+        card.Controls.Add(new XPlatLabel(
+            "This label draws with the face in the file. Its glyph advances, line height and baseline " +
+            "are the same on Windows, macOS and Linux, which a family name cannot promise: the same name " +
+            "resolves to a different physical face on each desktop.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 62f,
+            WrapText = true,
+            Font = loaded,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        card.Controls.Add(Caption("A multi-line text box"));
+        card.Controls.Add(new XPlatTextBox
+        {
+            Dock = XDock.Top,
+            Height = 108f,
+            Multiline = true,
+            Font = loaded,
+            Text =
+                "The caret, the wrap points and the selection geometry all come from the same face, so a " +
+                "test that pins this file sees the same layout on every platform.\n\n" +
+                "Nothing is looked up by name here: the bytes are the face. That is what makes a golden " +
+                "image possible, and what lets a trimmed application carry its own brand.",
+        });
+
+        card.Controls.Add(Caption("A rich label: spans change size and colour and stay on this face"));
+        var rich = new XPlatRichLabel
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            WrapText = true,
+            Font = loaded,
+        };
+
+        rich.AddText("The same face in ");
+        rich.AddSpan(new XPlatTextSpan("a larger size") { FontSize = 17f });
+        rich.AddText(", in ");
+        rich.AddSpan(new XPlatTextSpan("the accent colour") { ThemeColor = XPlatThemeColor.Accent });
+        rich.AddText(", and in ");
+        rich.AddSpan(new XPlatTextSpan("a bold span") { Bold = true });
+        rich.AddText(
+            " - which stays this face rather than falling back to a system font, because one file holds " +
+            "one face and no weight is invented.");
+        card.Controls.Add(rich);
+
+        card.Controls.Add(new XPlatLabel(
+            $"Measured here: \"{sample}\" is {F(loaded.MeasureWidth(sample))} px in the loaded face and " +
+            $"{F(system.MeasureWidth(sample))} px in the system face ({system.FamilyName}); line height " +
+            $"{F(loaded.LineHeight)} against {F(system.LineHeight)}.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 10f, 0f, 0f),
+        });
+
+        return card;
+
+        static string F(float value) => value.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture);
     }
 }
