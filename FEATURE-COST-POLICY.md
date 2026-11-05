@@ -935,7 +935,20 @@ application that never opted in still paid 16,432 bytes for them on osx-arm64, b
 `XPlatUiHost` and virtuals on `XPlatControl` made them reachable from types that are always
 retained. Nothing in `XPlatUI` may name a feature type, on any platform, for exactly this reason.
 
-Scrolling is the rung 1 worked example. `XPlatScrollBar` and the scrolling half of `XPlatPanel` are
+`XPlatUI.Feature.Animations` is the case where the package is the whole story and the number that
+matters is zero. Nothing in `XPlatUI` or the backends changed - the diff against `c1af86b` over the
+core library, its tests and all four backends is empty - so an application that does not reference
+the package cannot contain a line of it, and the measurement confirms the construction: the fixture
+publishes at 3,201,024 bytes on win-x64 both before and after, a delta of 0. The use check is the
+same fixture with the package referenced, `AddAnimations()` called and one eased animation started:
+it publishes at 3,438,080 bytes, so the feature costs 237,056 bytes when an application actually uses
+it (7.4 percent of the fixture, and the whole of the timeline, its easings, its blends and one
+`TimeProvider`-driven frame clock). The publish was made with `-p:TrimmerSingleWarn=false` and
+reported no IL2xxx or IL3xxx warning, which is what a feature made of arithmetic and a delegate is
+supposed to look like. Only win-x64 was weighed: unlike a platform feature, there is no native half
+for the other two platforms to pay differently for.
+
+Scrolling is the rung 1 worked example... `XPlatScrollBar` and the scrolling half of `XPlatPanel` are
 reached only by an application that names them, and the fixture publishes at 3,070,976 bytes with
 them in the tree - the same number as before they existed. The one always-retained member is
 `XPlatControl.GetChildOffset`, a `protected internal virtual` returning `SKPoint.Empty` that

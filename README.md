@@ -2623,10 +2623,10 @@ A few consequences worth knowing before you rely on them:
   the frame still runs, so one bad animation cannot freeze the others. With no application in the
   process there is nowhere to report it and the exception surfaces at the caller.
 
-The demo's **Animations** page runs four of them at once - a block that eases across its track, a bar
-that blends two colours on a different curve, and three tiles that arrive in a stagger - with
-Start, Pause, Resume, Restart and End wired to the one set, and a readout that is itself an animated
-value.
+The demo's **Animations** page runs nine animations on one timeline - a block that eases across its
+track, a bar that blends two colours on a different curve, three tiles that each arrive in a stagger
+of position and opacity, and a readout that is itself an animated value - with Start, Pause, Resume,
+Restart and End wired to the one set.
 
 ## Writing a backend
 
