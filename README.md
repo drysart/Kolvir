@@ -961,8 +961,10 @@ only falls back to hanging off the control when the pointer's position is not kn
 | `IsVisible`, `Hide()` | The current tip |
 
 A tip is only scheduled while the pointer is actually resting on the control, and the timer is
-disposed with the tool tip, so an idle application runs nothing. `Dispose` the instance when the
-controls it describes go away.
+disposed with the tool tip, so an idle application runs nothing. A control that stops being
+displayed - hidden, moved into a hidden container, or in a window that has closed - takes its
+pending or drawn tip with it and stops the delay, because there is no mouse-leave to say so when a
+container goes away. `Dispose` the instance when the controls it describes go away.
 
 ```csharp
 using var tips = new XPlatToolTip { InitialDelay = 500 };

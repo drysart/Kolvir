@@ -212,6 +212,81 @@ public sealed class PopupTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void HidingTheControlsContainerCancelsThePendingTipAndItsDelay()
+    {
+        var backend = new TestApplicationBackend();
+        var button = new XPlatButton("Go") { Dock = DockStyle.Fill };
+        var panel = new XPlatPanel { Dock = DockStyle.Fill, Padding = XPlatThickness.Empty, BorderWidth = 0f };
+        panel.Controls.Add(button);
+
+        using var scene = HeadlessScene.Create(backend, panel, 300f, 120f);
+        using var toolTip = new XPlatToolTip { InitialDelay = 600 };
+        toolTip.SetToolTip(button, "A tip");
+
+        scene.MoveTo(button);
+        Assert.IsTrue(backend.Timer.IsRunning, "the hover starts the delay");
+
+        panel.Visible = false;
+
+        Assert.IsFalse(backend.Timer.IsRunning, "a control nobody can see has no tip to wait for");
+        Assert.IsFalse(toolTip.IsVisible);
+
+        backend.Timer.Fire();
+        backend.Drain();
+
+        Assert.IsFalse(toolTip.IsVisible, "and the delay that was already running cannot bring one back");
+    }
+
+    [TestMethod]
+    public void HidingTheControlsContainerTakesADrawnTipAndItsDelayDown()
+    {
+        var backend = new TestApplicationBackend();
+        var button = new XPlatButton("Go") { Dock = DockStyle.Fill };
+        var panel = new XPlatPanel { Dock = DockStyle.Fill, Padding = XPlatThickness.Empty, BorderWidth = 0f };
+        panel.Controls.Add(button);
+
+        using var scene = HeadlessScene.Create(backend, panel, 300f, 120f);
+        using var toolTip = new XPlatToolTip { InitialDelay = 100, AutoPopDelay = 5_000 };
+        toolTip.SetToolTip(button, "A tip");
+
+        scene.MoveTo(button);
+        backend.Timer.Fire();
+        backend.Drain();
+
+        Assert.IsTrue(toolTip.IsVisible);
+        Assert.IsTrue(backend.Timer.IsRunning, "the auto-pop delay is counting down");
+
+        panel.Visible = false;
+
+        Assert.IsFalse(toolTip.IsVisible, "the bubble belongs to a control that is gone from the screen");
+        Assert.IsFalse(backend.Timer.IsRunning, "and nothing is left counting down for it");
+    }
+
+    [TestMethod]
+    public void ClosingTheWindowTakesTheTipAndItsDelayDown()
+    {
+        var backend = new TestApplicationBackend();
+        var button = new XPlatButton("Go") { Dock = DockStyle.Fill };
+
+        using var scene = HeadlessScene.Create(backend, button, 300f, 100f);
+        using var toolTip = new XPlatToolTip { InitialDelay = 100, AutoPopDelay = 5_000 };
+        toolTip.SetToolTip(button, "A tip");
+
+        scene.RunWhileShown(() =>
+        {
+            scene.MoveTo(button);
+            backend.Timer.Fire();
+            backend.Drain();
+            Assert.IsTrue(toolTip.IsVisible);
+
+            scene.Window.Close();
+
+            Assert.IsFalse(toolTip.IsVisible, "the bubble goes with the window");
+            Assert.IsFalse(backend.Timer.IsRunning, "and so does the delay that would have hidden it");
+        });
+    }
+
+    [TestMethod]
     public void AZeroDelayShowsTheTipAtOnce()
     {
         var backend = new TestApplicationBackend();
