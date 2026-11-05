@@ -1,9 +1,11 @@
 name: Tests
 
-# XPlatUI.Tests is a portable net10.0 assembly, so it needs no window server, no display and no
-# platform workload: every test drives XPlatUI through the headless backend. The matrix is the
-# point rather than a formality - the same tests run on all three platforms, which is what keeps
-# the portable claims honest, and a control that only behaves on one of them fails here.
+# Both suites are portable net10.0 assemblies, so they need no window server, no display and no
+# platform workload: every test drives XPlatUI through the headless backend. That is why no leg of
+# this workflow installs a workload - the macOS build and feature pack workflows are the only jobs
+# that do, because they compile or pack the net10.0-macos target. The matrix is the point rather than
+# a formality - the same tests run on all three platforms, which is what keeps the portable claims
+# honest, and a control that only behaves on one of them fails here.
 #
 # It runs on a pull request against master and on demand. Pushes are deliberately not a trigger,
 # for the same reason the macOS workflow is not: work in progress is built and tested locally,
@@ -61,10 +63,23 @@ jobs:
       # the log. Each test project is restored on its own rather than the whole solution: the
       # solution lists every platform backend and the platform workloads they need, and a runner
       # has none of those workloads installed.
+      #
+      # The core suite is portable as it stands: XPlatUI.Tests references the library and the
+      # headless backend and, on purpose, not XPlatUI.Backend, whose three-framework list would bring
+      # the workload in with it. The feature suite needs one property to be equally portable.
+      # XPlatUI.Feature.DragDrop lists net10.0-windows;net10.0-macos;net10.0 unconditionally, because
+      # a single `dotnet pack` needs all three at once, and restore follows every framework in the
+      # reference graph rather than only the inner build the test project binds. A plain restore
+      # therefore resolves the net10.0-macos inner build, finds XPlatUI.Backend.AppKit behind it and
+      # stops with NETSDK1147 on a machine with no workload. -p:TargetFramework=net10.0 pins restore
+      # to the single inner build the tests actually run against - the same narrowing the feature
+      # project's own comment recommends for local work. The plural -p:TargetFrameworks= does not
+      # work as a switch, because it reaches the restore graph and not the referenced projects'
+      # builds.
       - name: Restore
         run: |
           dotnet restore XPlatUI.Tests/XPlatUI.Tests.csproj --nologo
-          dotnet restore XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --nologo
+          dotnet restore XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -86,11 +101,17 @@ jobs:
       # than a folder inside the core suite. It runs under the same category filter, so a
       # platform-only test opts out the same way there. `tee -a` keeps both runs in one log, which
       # is what the failure summary below reads.
+      #
+      # -p:TargetFramework=net10.0 repeats the narrowing the restore step applies, and it has to:
+      # --no-restore builds the graph from the global properties it is given, and `dotnet test` on a
+      # net10.0 project would otherwise walk into the feature's net10.0-macos inner build and ask
+      # for the workload this job deliberately does not install.
       - name: Test the drag and drop feature
         shell: bash
         run: |
           set -o pipefail
           dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --no-restore --nologo \
+            -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=dragdrop.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
