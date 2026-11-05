@@ -163,6 +163,17 @@ internal sealed class HeadlessScene : IDisposable
     public void Key(XPlatKey key, XPlatModifiers modifiers = XPlatModifiers.None) =>
         Host.ProcessKeyDown(key, modifiers);
 
+    /// <summary>Releases <paramref name="key"/>.</summary>
+    public void KeyUp(XPlatKey key, XPlatModifiers modifiers = XPlatModifiers.None) =>
+        Host.ProcessKeyUp(key, modifiers);
+
+    /// <summary>Presses and releases <paramref name="key"/>, the way a real keystroke arrives.</summary>
+    public void TypeKey(XPlatKey key, XPlatModifiers modifiers = XPlatModifiers.None)
+    {
+        Host.ProcessKeyDown(key, modifiers);
+        Host.ProcessKeyUp(key, modifiers);
+    }
+
     /// <summary>Types <paramref name="text"/> as if the keyboard had produced it.</summary>
     public void Type(string text) => Host.ProcessTextInput(text);
 
