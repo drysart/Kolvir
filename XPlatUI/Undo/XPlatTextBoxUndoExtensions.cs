@@ -38,7 +38,9 @@ namespace XPlatUI.Undo;
 /// <b>The insertion point travels with the entry.</b> Each entry records the caret and the
 /// selection on both sides of the change, and undo and redo put them back, including the direction
 /// of a selection made right to left. Undoing therefore leaves the caret where the user was typing
-/// rather than at the start or the end of the value.
+/// rather than at the start or the end of the value. An assignment that shortens the value is
+/// recorded against the caret and selection the clamp left - the end of the new text is as far as
+/// they can go - so a redo lands the insertion point where the assignment did.
 /// </description>
 /// </item>
 /// <item>

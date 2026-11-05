@@ -1,5 +1,6 @@
 using SkiaSharp;
 using XPlatUI;
+using XPlatUI.Multiline;
 
 namespace XPlatUI.Tests;
 
@@ -172,6 +173,68 @@ public sealed class TextBoxTests : HeadlessTestBase
 
         box.CaretIndex = -5;
         Assert.AreEqual(0, box.CaretIndex, "and at the start");
+    }
+
+    [TestMethod]
+    public void AssigningShorterTextClampsTheCaret()
+    {
+        using var scene = Box("abcdef", out var box);
+
+        box.CaretIndex = 6;
+        box.Text = "abc";
+
+        Assert.AreEqual(3, box.CaretIndex, "a shorter value should take the caret to its end, not to the start");
+        Assert.IsFalse(box.HasSelection);
+    }
+
+    [TestMethod]
+    public void AssigningShorterTextClampsTheSelection()
+    {
+        using var scene = Box("abcdef", out var box);
+
+        box.Select(1, 4);
+        box.Text = "abc";
+
+        Assert.AreEqual(1, box.SelectionStart, "the selection should keep its start where the new text still has room");
+        Assert.AreEqual(2, box.SelectionLength, "and end at the new end of the text");
+        Assert.AreEqual(3, box.CaretIndex);
+    }
+
+    [TestMethod]
+    public void AssigningTheValueTheBoxAlreadyHoldsLeavesTheCaretAlone()
+    {
+        using var scene = Box("abcdef", out var box);
+
+        box.CaretIndex = 4;
+        box.Text = "abcdef";
+
+        Assert.AreEqual(4, box.CaretIndex, "an assignment of the value the box holds is not an edit and moves nothing");
+    }
+
+    [TestMethod]
+    public void APasswordFieldsCaretIsClampedAgainstTheRealText()
+    {
+        using var scene = Box("secret", out var box);
+
+        box.IsPassword = true;
+        box.CaretIndex = 6;
+        box.Text = "ab";
+
+        Assert.AreEqual(2, box.CaretIndex, "the caret indexes the text, not the mask");
+        Assert.AreEqual("ab", box.Text);
+    }
+
+    [TestMethod]
+    public void AssigningShorterTextClampsTheCaretOfAMultiLineField()
+    {
+        var multiline = new XPlatTextBox("one\ntwo\nthree") { Multiline = true };
+        using var scene = Box("one\ntwo\nthree", out var box, multiline);
+
+        box.CaretIndex = box.Text.Length;
+        box.Text = "ab\ncd";
+
+        Assert.AreEqual(5, box.CaretIndex, "the clamp is against the whole multi-line value, not its last line");
+        Assert.IsFalse(box.HasSelection);
     }
 
     [TestMethod]

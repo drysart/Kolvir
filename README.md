@@ -1372,7 +1372,7 @@ spell-checker style annotations, described in [Text box spans](#text-box-spans).
 
 | Member | Behaviour |
 | --- | --- |
-| `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line |
+| `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line. Assigning a shorter value clamps the caret and the selection to the new end rather than resetting them, and assigning the value the field already holds does nothing - which is what makes an echo binding free |
 | `CaretIndex`, `SelectionStart`, `SelectionLength`, `SelectedText`, `HasSelection` | Selection state; the caret is `0 … Text.Length` |
 | `Caret` | The `XPlatCaret` that draws and blinks the insertion point; its `BlinkInterval`, `Width` and `Color` can be changed |
 | `Select(start, length)`, `SelectAll()`, `ClearSelection()` | Programmatic selection |

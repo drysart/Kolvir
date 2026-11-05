@@ -296,7 +296,10 @@ internal sealed class XPlatTextBoxUndoFeature : IXPlatTextBoxUndoFeature
             entry.ReadsInsertedFromBox = false;
         }
 
-        entry.AnchorAfter = textBox.CaretIndex;
+        // An assignment's entry has to carry the selection the clamp left, not just a collapsed
+        // caret: the box may still have room for the selection it had, and a redo of the assignment
+        // that dropped it would not match what the assignment actually did.
+        entry.AnchorAfter = textBox.SelectionAnchor;
         entry.CaretAfter = textBox.CaretIndex;
         entry.ScrollXAfter = ScrollOf(textBox).X;
         entry.ScrollYAfter = ScrollOf(textBox).Y;
