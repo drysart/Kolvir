@@ -242,6 +242,36 @@ host.ProcessTextInput("a");
 `host.AddInvalidatedHandler` tells the adapter to repaint; `host.AddCursorChangedHandler` lets it
 update the native cursor.
 
+### Focus and tab order
+
+`Tab` and `Shift+Tab` walk the controls that are both `TabStop` and `Focusable`, skipping anything
+invisible or disabled and anything inside an invisible or disabled container. The order is the one
+WinForms has, because an application author coming from it will expect it:
+
+- **Per container.** Each container visits its own children in `TabIndex` order, so a control inside
+  a nested panel is ordered against its siblings there and never against the controls outside that
+  panel. The lowest index is visited first; the default, 0, leaves the children in the order they
+  were added.
+- **Equal indices keep tree order.** Two controls with the same `TabIndex` are visited in the order
+  they were added, so the walk is deterministic rather than dependent on how a sort permutes equals.
+  With every index at its default that makes the whole walk plain tree order.
+- **A focusable container is one step.** A container that is itself a `TabStop` - a split container,
+  for instance - takes its own place among its siblings, and its children are visited straight after
+  it: index 1 on a container puts the container, then its contents, between index 0 and index 2.
+- **It wraps.** `Tab` at the last stop goes back to the first, and `Shift+Tab` at the first goes to
+  the last; `host.FocusedControl` is the control the walk landed on.
+
+```csharp
+var name = new XPlatTextBox { TabIndex = 0, Dock = DockStyle.Top };
+var notes = new XPlatTextBox { TabIndex = 2, Dock = DockStyle.Fill, Multiline = true };
+var ok = new XPlatButton("OK") { TabIndex = 1, Dock = DockStyle.Bottom };   // visited second
+```
+
+The demo's **Tab order** page - `--page 34` - is the same rules by hand: it was created in a
+different order from its indices, carries a nested container whose children order among themselves,
+a scrollable panel that is a tab stop, two controls that share an index, and two that are meant to be
+skipped, with a readout naming whatever has the focus, its `TabIndex` and its place in the sequence.
+
 ### Handlers
 
 There are no C# events. Every notification is a pair of methods, `Add<Name>Handler` and
@@ -1347,7 +1377,7 @@ spell-checker style annotations, described in [Text box spans](#text-box-spans).
 
 | Member | Behaviour |
 | --- | --- |
-| `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line |
+| `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line. Assigning a shorter value clamps the caret and the selection to the new end rather than resetting them, and assigning the value the field already holds does nothing - which is what makes an echo binding free |
 | `CaretIndex`, `SelectionStart`, `SelectionLength`, `SelectedText`, `HasSelection` | Selection state; the caret is `0 … Text.Length` |
 | `Caret` | The `XPlatCaret` that draws and blinks the insertion point; its `BlinkInterval`, `Width` and `Color` can be changed |
 | `Select(start, length)`, `SelectAll()`, `ClearSelection()` | Programmatic selection |
@@ -2902,3 +2932,22 @@ Windows reference pack with it - then opens each package and fails unless it car
 and a dependency group for every platform. That check exists because both omissions are silent in
 NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. §4 of the
 policy has the details.
+
+### Tests come with the change
+
+A change is not finished until the behaviour it adds is covered, and the tests land in the same
+pull request rather than a follow-up. A bug fix carries a regression test that fails before the fix
+and passes after it; a new feature carries tests for the behaviour it introduces, including the
+public surface an application is meant to use.
+
+- They go in `XPlatUI.Tests`, or in the feature's own `XPlatUI.Feature.*.Tests` assembly when the
+  work lives outside the core library - the same place the surrounding tests for that area live,
+  rather than a new file of their own.
+- They run headless, on all three platforms, with no display, window server or network, and under
+  the same category filter the [Tests workflow](.github/workflows/tests.yml) uses.
+- They cover the behaviour, not incidental internals: what an application can see and depend on,
+  through the host's own input entry points rather than by calling private helpers.
+
+The suite's own conventions - a hand-driven clock, the pinned font, no shared state between tests -
+are what make that possible; [Running the tests](#running-the-tests) describes them. The same rule is
+one of the bullets in "What done means" in [CONTROLS-TODO.md](CONTROLS-TODO.md#2-what-done-means).

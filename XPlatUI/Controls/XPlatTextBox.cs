@@ -131,13 +131,32 @@ public class XPlatTextBox : XPlatControl
             if (_editingRange || UndoFeature is not { } undo || string.Equals(Text, sanitized, StringComparison.Ordinal))
             {
                 base.Text = sanitized;
+                ClampSelectionToText();
                 return;
             }
 
             undo.BeginAssign(this, Text);
             base.Text = sanitized;
+
+            // The entry records where the assignment left the insertion point, so the clamp has to
+            // happen before the history is told about it - otherwise a redo would put the caret back
+            // where it was and drop a selection the new value still has room for.
+            ClampSelectionToText();
             undo.EndEdit(this);
         }
+    }
+
+    /// <summary>
+    /// Keeps the insertion point and the selection inside the value the box now holds. An
+    /// assignment that gives the box shorter text takes the caret and the anchor with it instead of
+    /// leaving either past the end, which is what a native field does and what stops an updated
+    /// field from appearing to jump. Both indices count the real text, so a multi-line value clamps
+    /// against its whole length and a password field against the characters it masks.
+    /// </summary>
+    private void ClampSelectionToText()
+    {
+        _caretIndex = Math.Clamp(_caretIndex, 0, Text.Length);
+        _anchor = Math.Clamp(_anchor, 0, Text.Length);
     }
 
     /// <summary>
@@ -899,8 +918,7 @@ public class XPlatTextBox : XPlatControl
 
     protected override void OnTextChanged()
     {
-        _caretIndex = Math.Clamp(_caretIndex, 0, Text.Length);
-        _anchor = Math.Clamp(_anchor, 0, Text.Length);
+        ClampSelectionToText();
 
         MultilineFeature?.OnTextChanged(this, Viewport);
 

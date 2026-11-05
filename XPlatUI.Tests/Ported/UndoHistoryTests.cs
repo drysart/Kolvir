@@ -431,6 +431,60 @@ public sealed class UndoHistoryTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AnAssignmentRecordsTheCaretAndSelectionItClampedTo()
+    {
+        WithBox((box, host, clock) =>
+        {
+            box.UndoEnabled = true;
+            box.Text = "abcdef";
+            box.ClearUndoStack();
+
+            // A selection made right to left, both ends past where the shorter value will end.
+            box.CaretIndex = 5;
+            for (int i = 0; i < 4; i++)
+            {
+                host.ProcessKeyDown(XPlatKey.Left, XPlatModifiers.Shift);
+            }
+
+            box.Text = "abc";
+
+            Assert.AreEqual(1, box.CaretIndex, "the assignment should clamp the caret");
+            Assert.AreEqual(1, box.SelectionStart);
+            Assert.AreEqual(2, box.SelectionLength, "and the anchor with it");
+
+            box.Undo();
+
+            Assert.AreEqual("abcdef", box.Text);
+            Assert.AreEqual(1, box.CaretIndex, "undo should put the caret back where the assignment took it from");
+            Assert.AreEqual(5, box.SelectionStart + box.SelectionLength, "with the selection it replaced");
+
+            box.Redo();
+
+            Assert.AreEqual("abc", box.Text);
+            Assert.AreEqual(1, box.CaretIndex, "redo should land where the assignment left the caret");
+            Assert.AreEqual(1, box.SelectionStart);
+            Assert.AreEqual(2, box.SelectionLength, "and restore the selection the clamp left, not a collapsed one");
+        });
+    }
+
+    [TestMethod]
+    public void AnAssignmentOfTheValueTheBoxHoldsRecordsNothingAndKeepsTheCaret()
+    {
+        WithBox((box, host, clock) =>
+        {
+            box.UndoEnabled = true;
+            box.Text = "abcdef";
+            box.ClearUndoStack();
+            box.CaretIndex = 4;
+
+            box.Text = "abcdef";
+
+            Assert.AreEqual(0, box.UndoCount, "an assignment that changes nothing is not an edit");
+            Assert.AreEqual(4, box.CaretIndex, "and it leaves the insertion point where it was");
+        });
+    }
+
+    [TestMethod]
     public void TheStateChangedHandlerFollowsTheHistory()
     {
         WithBox((box, host, clock) =>

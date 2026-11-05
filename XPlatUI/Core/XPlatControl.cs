@@ -700,7 +700,11 @@ public class XPlatControl : IDisposable
     /// </summary>
     public virtual XPlatCursor GetCursorAt(SKPoint pointInLocal) => Cursor;
 
-    /// <summary>True when the control participates in Tab navigation.</summary>
+    /// <summary>True when the control participates in Tab navigation. Defaults to false.</summary>
+    /// <remarks>
+    /// A control is a tab stop only when this and <see cref="Focusable"/> are both true; see
+    /// <see cref="TabIndex"/> for the order the stops are visited in.
+    /// </remarks>
     public bool TabStop { get; set; }
 
     /// <summary>True when the control may hold keyboard focus. Defaults to true.</summary>
@@ -731,6 +735,19 @@ public class XPlatControl : IDisposable
         }
     }
 
+    /// <summary>
+    /// Where this control sits in the Tab order of its container. Lower values come first; the
+    /// default, 0, leaves every control in the order it was added.
+    /// </summary>
+    /// <remarks>
+    /// The index orders a control against its siblings only, the way WinForms nests tab order: each
+    /// container sorts its own children by this value, so a control inside a nested panel does not
+    /// sort against controls outside it. A container that is itself a <see cref="TabStop"/> takes
+    /// its own place among its siblings and its children are visited straight after it, which is
+    /// what makes a focusable container - a split container, say - one step in the order rather
+    /// than something its children are interleaved with. Controls with equal indices keep the order
+    /// they were added in, so the walk is deterministic.
+    /// </remarks>
     public int TabIndex { get; set; }
 
     public bool IsFocused { get; private set; }
