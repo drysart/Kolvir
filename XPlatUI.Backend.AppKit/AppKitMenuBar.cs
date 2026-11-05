@@ -14,8 +14,10 @@ namespace XPlatUI.Backend.AppKit;
 /// </para>
 /// <para>
 /// The Edit menu is not decoration. AppKit consumes a menu's key equivalent before the view ever
-/// sees the key, so Cut, Copy, Paste and Select All only reach the focused control because the
-/// items route them back into the UI host.
+/// sees the key, so Cut, Copy, Paste, Select All, Undo and Redo only reach the focused control
+/// because the items route them back into the UI host. Undo and redo are there for the text box's
+/// history: the model's own gesture is Ctrl+Z, which macOS spells Cmd+Z, and a Command chord never
+/// arrives at a view.
 /// </para>
 /// </remarks>
 internal static class AppKitMenuBar
@@ -59,6 +61,14 @@ internal static class AppKitMenuBar
     {
         var menu = new NSMenu("Edit") { AutoEnablesItems = false };
 
+        // Undo and redo ride the same seam Cut, Copy and Paste do: AppKit consumes a Command
+        // chord before the view sees it, so the bar takes it and feeds the model's accelerator
+        // into the focused control, which decides what the key means. An upper-case key
+        // equivalent is how AppKit spells Shift, so "Z" is Cmd+Shift+Z and the model is handed
+        // the Ctrl+Y spelling of redo.
+        menu.AddItem(Accelerator("Undo", "z", XPlatKey.Z, application));
+        menu.AddItem(Accelerator("Redo", "Z", XPlatKey.Y, application));
+        menu.AddItem(NSMenuItem.SeparatorItem);
         menu.AddItem(Accelerator("Cut", "x", XPlatKey.X, application));
         menu.AddItem(Accelerator("Copy", "c", XPlatKey.C, application));
         menu.AddItem(Accelerator("Paste", "v", XPlatKey.V, application));

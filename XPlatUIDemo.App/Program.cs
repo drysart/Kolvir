@@ -79,6 +79,15 @@ internal static class Program
             return RenderSample(args);
         }
 
+        // The undo history's headless input harness: it drives real text boxes through the host's
+        // input entry points on the headless backend and checks what the history made of it. It has
+        // to run before any toolkit is touched for the same reason --render does, and it exits
+        // non-zero when a check fails so it can gate a build.
+        if (args.Length > 0 && args[0] == "--undo-check")
+        {
+            return UndoChecks.Run(args.Length > 1 ? args[1] : null);
+        }
+
 #if !WINDOWS && !MACOS
         // Registers the native library resolver for the GTK/GDK/GLib bindings and opens the display,
         // so without one it ends the process with exit code 1. The backend does this too, but the
@@ -161,6 +170,13 @@ internal static class Program
         if (Array.IndexOf(args, "--span-menu") >= 0)
         {
             window.AddShownHandler(_ => demo.OpenSpanDemo(window));
+        }
+
+        // And for the undo page: put the caret in its field, so a script can drive the history
+        // without hunting for the box with the pointer.
+        if (Array.IndexOf(args, "--undo-focus") >= 0)
+        {
+            window.AddShownHandler(_ => demo.FocusUndoDemo());
         }
 
         window.Show();

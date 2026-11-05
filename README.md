@@ -87,6 +87,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
 | `XPlatTextBox` + `XPlatUI.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
 | `XPlatTextBox` + `XPlatUI.Spans` | `TextBox` (spell-check marks) | `Spans` as an opt-in extension: caller-owned annotated runs drawn as a squiggly underline, wrapped and scrolled with the text, and the span a right-click landed in reported on the context-menu event args |
+| `XPlatTextBox` + `XPlatUI.Undo` | `TextBox.UndoEnabled` | `UndoEnabled`, `CanUndo`/`CanRedo`, `Undo()`, `Redo()` and `ClearUndoStack()` as an opt-in extension: a coalescing history (five-second runs of typing or deleting, one entry per selection replacement) that records the caret, the selection and a multi-line field's scroll offsets with each entry |
 | `XPlatNumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
 | `XPlatTrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
 | `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
@@ -1499,6 +1500,112 @@ made. The squiggle's shape is data rather than code: `Amplitude` sets how far th
 and falls below its own centre line (zero draws a straight underline, which is how some editors
 mark a warning), and `Wavelength` sets one full cycle's width.
 
+### Text box undo and redo
+
+`UndoEnabled` gives a text box an undo history. It is an opt-in extension in `XPlatUI.Undo`, so a
+text box that never turns it on carries none of its state and an application that never imports the
+namespace carries none of its code. It adds:
+
+| Member | Behaviour |
+| --- | --- |
+| `UndoEnabled` | Off by default. True keeps a history; turning it off again releases it and drops what it held |
+| `CanUndo`, `CanRedo` | Whether `Undo()`/`Redo()` would change the text. Both report false while the box is `ReadOnly` |
+| `UndoCount`, `RedoCount` | How many entries each side holds |
+| `Undo()`, `Redo()` | Take the newest entry back out of the value, or put it back. Each returns false when there was nothing to do |
+| `ClearUndoStack()` | Drops both sides and leaves the text and the insertion point alone. A no-op on a box that never enabled the history |
+| `AddUndoStateChangedHandler` / `RemoveUndoStateChangedHandler` | Called after an edit is recorded, undone, redone or dropped - every moment `CanUndo` or `CanRedo` can change - so a menu or a pair of buttons can follow the field |
+| `XPlatUndoClock.Current` | The time source the five-second window is measured from. Defaults to `TimeProvider.System` |
+
+```csharp
+using XPlatUI.Undo;
+
+var notes = new XPlatTextBox
+{
+    Multiline = true,
+    UndoEnabled = true,
+};
+
+notes.AddUndoStateChangedHandler(_ => refreshUndoButtons());   // Ctrl+Z is already the box's own
+refreshUndoButtons();
+
+void refreshUndoButtons()
+{
+    undoButton.Enabled = notes.CanUndo;
+    redoButton.Enabled = notes.CanRedo;
+}
+```
+
+`Ctrl+Z` undoes; `Ctrl+Y` and `Ctrl+Shift+Z` both redo, which is the GTK and modern Windows
+spelling for redo as well as the one Windows has always had. On macOS the same gestures are
+`Cmd+Z` and `Cmd+Shift+Z`: AppKit consumes a Command chord before a view ever sees it, so the
+AppKit backend's own Edit menu carries **Undo** and **Redo** next to Cut, Copy, Paste and Select
+All and routes them back into the UI host, exactly as it already does for the editing commands.
+The physical Control key works there too, because `XPlatModifiers.Control` is what the AppKit
+backend reports for it.
+
+Six behaviours are deliberate and worth stating:
+
+* **A run of characters is one entry.** Each character joins the entry before it while it arrives
+  within five seconds of the *previous character*; a longer pause starts a new entry, and the
+  five-second mark itself still belongs to the run. Backspace and Delete coalesce by the same rule
+  on runs of their own, so a burst of typing undoes as one step, a burst of deleting undoes as one
+  step, and the two never merge into one entry.
+* **A change over a non-zero selection is always one entry of its own**, and it ends any run. Undo
+  therefore restores the replaced text in one step instead of un-replacing it a character at a time.
+  Characters typed *after* that replacement are a new run, so a word typed over a selection is two
+  entries: the replaced run, then the rest of the word.
+* **The insertion point is part of every entry.** Each one records the caret and the selection on
+  both sides of the change, including the direction of a right-to-left selection, and undo and redo
+  put them back - so the caret returns to where the user was typing rather than to position 0 or to
+  the end of the value.
+* **A programmatic `Text` assignment is undoable when it changes the value, and free when it does
+  not.** The setter already ignores an assignment of the value the box holds, so a two-way binding
+  that echoes each keystroke back writes the same string, records nothing and does not break the
+  running character entry. An assignment that really changes the value - a document loaded into the
+  field, a form resetting it - is one entry that restores the previous value. A binding that
+  *transforms* what it echoes (trimming, upper-casing) is the one case that records an entry per
+  write, so call `ClearUndoStack()` after loading data, or leave `UndoEnabled` off on such a field.
+* **Read-only has no undo.** A read-only field records nothing, `CanUndo` and `CanRedo` report false,
+  and `Undo()`/`Redo()` do nothing. The history is kept rather than dropped, so a field that is
+  locked for a while gets it back when it is unlocked. `ClearUndoStack()` still works.
+* **The history has a depth and a memory cap.** It keeps the newest 100 entries, and drops the
+  oldest whenever that, or a one-million-character budget for the text the two stacks pin, is
+  exceeded. An entry is a delta - the run it replaced, the run it inserted, two insertion points
+  and the scroll offsets - so typing in a large multi-line document costs a few bytes an entry
+  rather than a copy of the document. A paste larger than the budget keeps its own entry and drops
+  everything older, so the history can never pin an unbounded amount of memory.
+
+Undo and redo are ordinary text changes as far as the rest of the toolkit is concerned, which is
+what makes them cooperate with the two features that also watch the value:
+
+* **Spans are the caller's, as always.** The box never rewrites a `Spans` list, so undo restores
+  text and leaves the annotations describing the text they were computed for. A checker re-marks
+  after the change - `AddTextChangedHandler(_ => Remark(field))` covers typing, paste and undo with
+  one line - and a stale span is clamped where it is drawn rather than throwing.
+* **Autocomplete treats undo as an assignment.** It adopts the restored value, drops any inline
+  completion that was pending and closes the suggestion list, so there is no half-applied
+  completion for the next keystroke to extend.
+* **Multi-line fields record the view with the entry.** Undo restores the caret, scrolls it into
+  view, and then puts the recorded scroll offsets back, so the view returns to where the edit was
+  made. Undo spans line breaks like any other character. Turning `Multiline` on or off clears the
+  history, because the value changes shape - line breaks are added to or dropped from it - and an
+  entry from one shape cannot be applied to the other.
+
+The history runs no timer. The five-second window is measured from `XPlatUndoClock.Current` at the
+moment of each edit, so an idle application has nothing ticking for it, and a test can replace the
+clock and drive the whole history - gaps and all - without sleeping.
+
+**Undo and Redo also lead the box's context menu.** The block a box contributes to a right-click is
+now Undo, Redo, a separator, Cut, Copy, Paste, a separator, Select All, the order an editor reads
+in. Both rows are enabled by the value the menu is built from - `CanUndo` and `CanRedo`, so a
+read-only field shows them disabled - and both run the same operation the keys do, which means a
+click and `Ctrl+Z` are the same edit and both put the caret back. A box that never turned
+`UndoEnabled` on gets **no** Undo or Redo rows at all: it has no history to offer, and a consumer who
+did not ask for one should not have two rows in the menu they designed appear for it. A box that
+*has* the history keeps both rows even when they are disabled, so the menu does not change shape as
+the stack fills and empties. Because the rows are part of the control's own block, a handler that
+replaces `args.Menu` still replaces all of it, Undo and Redo included.
+
 ### Selection and the clipboard
 
 `Selectable` opts a control into pointer selection; `SelectionStyle` chooses between selecting
@@ -1542,8 +1649,9 @@ A text box is selectable by default and does not paint a second overlay: `GetSel
 `GetSelectionRects` bridge the host's selection into the same `IndexFromX`/`MeasureX` axis the
 caret already uses, so the single-selection rule above still holds.
 
-A text box also builds its own menu - **Cut**, **Copy**, **Paste** and **Select All**, with their
-shortcuts and per-item `Enabled` states - so a right-click inside one always opens a menu. Its
+A text box also builds its own menu - **Undo** and **Redo** when the box has an undo history, then
+**Cut**, **Copy**, **Paste** and **Select All**, with their shortcuts and per-item `Enabled` states
+- so a right-click inside one always opens a menu. Its
 **Copy** falls back to `host.CopySelection()` when the box has no selection of its own, which is
 what makes copying a multi-control selection work no matter which control was right-clicked.
 
@@ -1571,7 +1679,8 @@ every platform and can carry icons, submenus and controls in a row.
 
 A context menu is **composed**, not replaced. The control under the pointer contributes its own
 menu first, and every handler after it receives that same menu to add to: a text box starts from
-Cut, Copy, Paste and Select All, each enabled by the rule its command obeys (nothing selected means
+Undo and Redo when it has an undo history, then Cut, Copy, Paste and Select All, each enabled by the
+rule its command obeys (nothing selected means
 no Cut or Copy, a read-only field means no Cut or Paste, an empty clipboard means no Paste, empty
 text means no Select All). A container can give every child the same handler, and nothing outside
 the control has to know which control was clicked:
@@ -2268,7 +2377,12 @@ XPlatUIDemoApp.exe --render out.png 1280 820 --page 3
 
 Add `--light` or `--dark` to either mode to force an appearance instead of using the system one; the
 header's **Switch appearance** button flips it at runtime. `--page` picks a stage page by index in
-both modes, which is what makes a single page renderable on its own. `--classic-menus` forces the old
+both modes, which is what makes a single page renderable on its own. `--undo-check [report.txt]`
+runs the undo history's headless input harness instead: it drives real text boxes through the
+host's own input entry points with a clock the harness moves by hand, prints one line per check and
+exits non-zero when any of them fails (the report file is for Windows, where the sample has no
+console of its own). `--undo-focus` puts the caret in the undo page's field, the way `--span-menu`
+opens a menu a script cannot click. `--classic-menus` forces the old
 `TrackPopupMenuEx` context menus. The sample UI is laid out for a 1280 x 820 client area at 96 DPI
 points and the backend scales the Skia canvas by `GetDpiForWindow(hwnd) / 96`, sizing its client
 area to `1280 x 820` multiplied by that scale (clamped to the monitor work area) so the demo is
