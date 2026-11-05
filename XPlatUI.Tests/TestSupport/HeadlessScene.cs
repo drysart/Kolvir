@@ -159,6 +159,14 @@ internal sealed class HeadlessScene : IDisposable
         Release(control, modifiers);
     }
 
+    /// <summary>Moves to, presses and releases at a point in host coordinates.</summary>
+    public void ClickAt(SKPoint point, XPlatModifiers modifiers = XPlatModifiers.None, int clickCount = 1)
+    {
+        Host.ProcessMouseMove(point);
+        Host.ProcessMouseDown(point, XPlatMouseButtons.Left, modifiers, clickCount);
+        Host.ProcessMouseUp(point, XPlatMouseButtons.Left, modifiers);
+    }
+
     /// <summary>Presses and holds <paramref name="key"/>.</summary>
     public void Key(XPlatKey key, XPlatModifiers modifiers = XPlatModifiers.None) =>
         Host.ProcessKeyDown(key, modifiers);
