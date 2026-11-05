@@ -8,4 +8,5 @@
   <Project Path="XPlatUI/XPlatUI.csproj" />
   <Project Path="XPlatUI.Feature.DragDrop/XPlatUI.Feature.DragDrop.csproj" />
   <Project Path="XPlatUI.Minimal/XPlatUI.Minimal.csproj" />
+  <Project Path="XPlatUI.Tests/XPlatUI.Tests.csproj" />
 </Solution>
