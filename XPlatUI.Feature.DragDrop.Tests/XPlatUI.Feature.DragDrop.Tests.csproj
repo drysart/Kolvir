@@ -5,16 +5,15 @@
        part of the core suite either.
 
        The feature is split by platform - `common/` plus one of windows, macos or linux compiled per
-       target framework - so the test project takes the same shape the demo app takes and builds the
-       half of the feature this machine can actually run. The tests themselves are platform-neutral
-       and only touch `common/`. -->
+       target framework - but these tests only touch `common/`, so the project takes one portable
+       target framework and the reference resolves the `net10.0` (linux) inner build of the feature
+       on every machine. That keeps the assembly buildable everywhere, which matters: a test project
+       targeting net10.0-macos would need the .NET for macOS SDK with a matching Xcode on whichever
+       mac builds it, and a test project has no business imposing that. Driving a real drag needs
+       the platform hook and a native window; that is what the demo application is for. -->
 
   <PropertyGroup>
-    <TargetFramework Condition="$([MSBuild]::IsOSPlatform('windows'))">net10.0-windows</TargetFramework>
-    <TargetFramework Condition="$([MSBuild]::IsOSPlatform('osx'))">net10.0-macos</TargetFramework>
-    <TargetFramework Condition="$([MSBuild]::IsOSPlatform('linux'))">net10.0</TargetFramework>
-    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
-    <SupportedOSPlatformVersion Condition="$([MSBuild]::IsOSPlatform('osx'))">14.0</SupportedOSPlatformVersion>
+    <TargetFramework>net10.0</TargetFramework>
 
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
