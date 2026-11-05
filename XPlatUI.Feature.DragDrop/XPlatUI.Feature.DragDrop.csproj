@@ -26,6 +26,18 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
+  <!-- The routing the feature does is internal on purpose: an application never names
+       XPlatDragDropRouter or XPlatDragDropState, and the library ships no public API for them, which
+       is what keeps the feature out of an application that never opts in. The tests drive those two
+       types directly, because the behaviour they carry is real behaviour - which control a drag
+       reaches, when it is told the drag arrived or left, what effect the target settles on - and it
+       regresses silently if nothing watches it. This grants visibility to the feature's own test
+       assembly and nothing else; no new public API was added for testing, and XPlatUI.Tests and the
+       core library are untouched. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop.Tests" />
+  </ItemGroup>
+
   <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
        and each platform folder only into the one framework that can use it. A file added to
        `common/` needs no build change, which is the point of doing it by folder. -->
