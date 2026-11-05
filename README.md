@@ -91,6 +91,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatListView` | `ListView` | `List` and `Details` views over the same virtualized rows: columns, header-click sorting, grid lines |
 | `XPlatTreeView` | `TreeView` | Indented nodes with expanders and optional check boxes; the flattened visible nodes are the rows |
 | `XPlatComboBox` | `ComboBox` | Edit field plus a drop-down list shown in a popup, so it can leave the window |
+| `XPlatDateTimePicker` | `DateTimePicker` | Editable date and time field with a calendar in a popup: `Value`/`MinDate`/`MaxDate`, four formats, segment stepping and culture-aware typed parsing |
 | `XPlatTabControl` / `XPlatTabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
 | `XPlatToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
 | `XPlatToolStrip` / `XPlatStatusStrip` | `ToolStrip` / `StatusStrip` | A docked bar of *items* - button, label, separator, spring, progress bar - painted in one pass and taken as a single tab stop |
@@ -752,6 +753,48 @@ var size = new XPlatComboBox { Dock = DockStyle.Top, EmptyText = "Choose a size"
 size.Items.AddRange("Small", "Medium", "Large");
 size.AddSelectedIndexChangedHandler(sender => Console.WriteLine(((XPlatComboBox)sender).SelectedText));
 ```
+
+### Date and time pickers
+
+`XPlatDateTimePicker` is an editable date field with a calendar in a popup. The field is an
+`XPlatTextBox`, so typing, selection, the clipboard and the caret work the way they do everywhere
+else; the calendar is a control drawn inside an `XPlatPopup`, so it can hang past the window when
+the platform layer provides popup windows. As with the combo box, the field keeps the keyboard
+while the popup is open.
+
+| Member | Behaviour |
+| --- | --- |
+| `Value` | `DateTime?`; null is the empty field, and a value outside the bounds is clamped |
+| `MinDate`, `MaxDate` | The allowed range of dates (defaults: `DateTime.MinValue` and `DateTime.MaxValue`); a clamped value keeps its time of day |
+| `Format`, `CustomFormat` | `Short`, `Long`, `Time` or `CustomFormat`; patterns come from the current culture |
+| `IsDropDownOpen`, `OpenDropDown()`, `CloseDropDown()` | The calendar |
+| `AddValueChangedHandler` | Called with the picker when `Value` changes |
+
+Typed text is parsed against the current culture and the current `Format` when the edit is
+committed: on Enter, when the focus leaves, or when the calendar opens. Nothing is parsed while the
+user is still typing, so a half-typed date is never rewritten under the caret. An entry that cannot
+be parsed reverts to the last good value instead of throwing, and Escape does the same on demand. A
+date-only entry keeps the time of day the field already held, and a time-only entry keeps its date.
+Culture-aware formatting and parsing come from `System.Globalization`, which every project already
+uses.
+
+The calendar opens below the field and flips above it when there is no room, clamped to the display
+when the platform layer reports one. It draws a month and year header with previous and next
+buttons, a weekday row that follows the culture's first day of the week, a six-week grid with today
+outlined and the value filled in, and Today and Clear buttons in the footer. Days outside
+`MinDate`..`MaxDate` are muted and cannot be picked.
+
+```csharp
+var when = new XPlatDateTimePicker(DateTime.Now) { Format = XPlatDateTimePickerFormat.Short };
+when.MinDate = DateTime.Today;
+when.MaxDate = DateTime.Today.AddYears(1);
+when.AddValueChangedHandler(sender => Console.WriteLine(((XPlatDateTimePicker)sender).Value));
+```
+
+Left and right move between the date's segments (the month, the day, the year...), Up and Down step
+the segment under the caret, and Page Up/Page Down step the month. While the calendar is open the
+arrows move its highlight, Enter takes it, and Escape closes it. Alt+Down opens the calendar and
+Alt+Up closes it.
 
 ### Tab controls
 

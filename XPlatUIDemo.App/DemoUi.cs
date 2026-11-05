@@ -378,6 +378,7 @@ public sealed class DemoUi
         ("Link labels", demo => Page(demo.BuildLinkLabelDemo())),
         ("Status and tool strips", demo => Page(demo.BuildToolStripDemo())),
         ("Menus", demo => Page(demo.BuildMenuDemo())),
+        ("Date and time", demo => Page(demo.BuildDateTimePickerDemo())),
     };
 
     /// <summary>
@@ -3286,6 +3287,110 @@ public sealed class DemoUi
         });
 
         return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatDateTimePicker"/>: the four formats, a bounded one, an empty one and a
+    /// disabled one, plus a readout so committing typed text can be watched.
+    /// </summary>
+    private XPlatPanel BuildDateTimePickerDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Date and time"));
+
+        var readout = ScrollCaption("Value: 2026-11-04 09:30");
+        card.Controls.Add(readout);
+
+        var shortPicker = new XPlatDateTimePicker(new DateTime(2026, 11, 4, 9, 30, 0));
+        shortPicker.AddValueChangedHandler(_ =>
+            readout.Text = $"Value: {shortPicker.Value:yyyy-MM-dd HH:mm}");
+        card.Controls.Add(DateRow("Short (typed or picked)", shortPicker));
+
+        card.Controls.Add(DateRow("Long", new XPlatDateTimePicker(new DateTime(2026, 11, 4))
+        {
+            Format = XPlatDateTimePickerFormat.Long,
+        }));
+
+        card.Controls.Add(DateRow("Time", new XPlatDateTimePicker(new DateTime(2026, 11, 4, 9, 30, 0))
+        {
+            Format = XPlatDateTimePickerFormat.Time,
+        }));
+
+        card.Controls.Add(DateRow(
+            "Custom (yyyy-MM-dd HH:mm)",
+            new XPlatDateTimePicker(new DateTime(2026, 11, 4, 9, 30, 0))
+            {
+                Format = XPlatDateTimePickerFormat.CustomFormat,
+                CustomFormat = "yyyy-MM-dd HH:mm",
+            }));
+
+        DateTime today = DateTime.Today;
+        card.Controls.Add(DateRow("Bounded (today +/- 7 days)", new XPlatDateTimePicker(today)
+        {
+            MinDate = today.AddDays(-7),
+            MaxDate = today.AddDays(7),
+        }));
+
+        card.Controls.Add(DateRow("Empty (placeholder)", new XPlatDateTimePicker
+        {
+            PlaceholderText = "Pick a date",
+        }));
+
+        card.Controls.Add(DateRow("Disabled", new XPlatDateTimePicker(new DateTime(2026, 11, 4))
+        {
+            Enabled = false,
+        }));
+
+        card.Controls.Add(new XPlatLabel(
+            "Click the calendar button, or press Alt+Down, to pick a date. Typing is parsed against the " +
+            "current culture when the edit is committed - on Enter, when the focus leaves, or when the " +
+            "calendar opens - and an entry that cannot be parsed reverts to the last good value. " +
+            "Left/Right move between the segments, Up/Down step the segment under the caret, and " +
+            "Page Up/Down step the month.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 78f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 6f, 0f, 0f),
+        });
+
+        return card;
+    }
+
+    /// <summary>A caption with a wide date field on the right, so the fields line up.</summary>
+    private static XPlatPanel DateRow(string caption, XPlatControl field)
+    {
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 34f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        };
+
+        row.Controls.Add(new XPlatLabel(caption)
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            Font = XPlatTheme.DefaultFont,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+            Margin = new XPlatThickness(0f, 0f, 12f, 0f),
+        });
+
+        field.Dock = XDock.Right;
+        field.Width = 240f;
+        row.Controls.Add(field);
+
+        return row;
     }
 
     /// <summary>
