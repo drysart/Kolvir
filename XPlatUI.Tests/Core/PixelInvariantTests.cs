@@ -121,6 +121,53 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         Assert.AreNotEqual(light, dark, "and the two palettes should not agree");
     }
 
+    [TestMethod]
+    public void StretchImageFillsTheBoxAndNormalDoesNot()
+    {
+        var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
+        Assert.IsTrue(image.Load(RedPng(4, 2)), "the fixture image should decode");
+
+        using var scene = HeadlessScene.Create(image, 100f, 100f);
+
+        Assert.AreEqual(SKColors.Red, scene.PixelAt(2, 2), "a stretched image reaches the corner");
+
+        image.SizeMode = XPlatSizeMode.Normal;
+        Assert.AreNotEqual(SKColors.Red, scene.PixelAt(2, 2), "a natural-size image is drawn at 4x2 and centred");
+
+        var centre = scene.PixelAt(50, 50);
+        Assert.AreEqual(SKColors.Red, centre, "but it is still painted in the middle of the box");
+    }
+
+    [TestMethod]
+    public void ZoomKeepsTheAspectRatioAndLeavesBands()
+    {
+        var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.Zoom };
+        Assert.IsTrue(image.Load(RedPng(4, 2)), "the fixture image should decode");
+
+        using var scene = HeadlessScene.Create(image, 100f, 100f);
+
+        // 4x2 zoomed into 100x100 becomes 100x50, so the middle row is image and the top row is not.
+        Assert.AreEqual(SKColors.Red, scene.PixelAt(50, 50), "the zoomed image covers the middle");
+        Assert.AreNotEqual(SKColors.Red, scene.PixelAt(50, 2), "and leaves the bands above and below");
+    }
+
+    /// <summary>A solid red PNG, so an image assertion is about geometry rather than content.</summary>
+    private static MemoryStream RedPng(int width, int height)
+    {
+        using var bitmap = new SKBitmap(width, height);
+        using (var canvas = new SKCanvas(bitmap))
+        {
+            canvas.Clear(SKColors.Red);
+        }
+
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        var stream = new MemoryStream();
+        data.SaveTo(stream);
+        stream.Position = 0;
+        return stream;
+    }
+
     /// <summary>
     /// A point inside a button's fill but clear of its centred caption. Sampling the centre lands on
     /// the text, and an antialiased glyph edge blends the fill with the text colour - which is what
