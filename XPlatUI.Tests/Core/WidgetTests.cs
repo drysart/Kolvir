@@ -49,6 +49,178 @@ public sealed class WidgetTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AMarqueeBarInAWindowThatWasNeverShownRunsNoTimer()
+    {
+        var backend = new TestApplicationBackend();
+        var bar = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+
+        using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
+
+        // A harness paints a window it never showed; that is a frame, not the user seeing it.
+        scene.Paint();
+
+        Assert.IsFalse(backend.Timer.IsRunning, "a bar in a window nobody has shown has nothing to animate");
+    }
+
+    [TestMethod]
+    public void ShowingTheWindowStartsTheMarqueeTimerAndHidingTheBarStopsIt()
+    {
+        var backend = new TestApplicationBackend();
+        var bar = new XPlatProgressBar
+        {
+            Dock = DockStyle.Fill,
+            Style = XPlatProgressBarStyle.Marquee,
+            MarqueeAnimationSpeed = TimeSpan.FromMilliseconds(40),
+        };
+
+        using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
+
+        WhenShown(scene, () =>
+        {
+            Assert.IsTrue(backend.Timer.IsRunning, "a bar on screen should be sweeping");
+            Assert.AreEqual(
+                TimeSpan.FromMilliseconds(40),
+                backend.Timer.Interval,
+                "at the speed the application asked for");
+
+            bar.Visible = false;
+
+            Assert.IsFalse(backend.Timer.IsRunning, "a hidden bar has nothing to animate");
+
+            bar.Visible = true;
+
+            Assert.IsTrue(backend.Timer.IsRunning, "and showing it starts the sweep again");
+        });
+    }
+
+    [TestMethod]
+    public void HidingAContainerStopsTheMarqueeTimerOfTheBarInsideIt()
+    {
+        var backend = new TestApplicationBackend();
+        var bar = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+        var panel = new XPlatPanel { Dock = DockStyle.Fill, Padding = XPlatThickness.Empty, BorderWidth = 0f };
+        panel.Controls.Add(bar);
+
+        using var scene = HeadlessScene.Create(backend, panel, 240f, 60f);
+        scene.Paint();
+
+        WhenShown(scene, () =>
+        {
+            Assert.IsTrue(backend.Timer.IsRunning);
+
+            panel.Visible = false;
+
+            Assert.IsFalse(backend.Timer.IsRunning, "an invisible container hides the bar, so its clock stops");
+
+            panel.Visible = true;
+
+            Assert.IsTrue(backend.Timer.IsRunning, "and the bar sweeps again once the container is back");
+        });
+    }
+
+    [TestMethod]
+    public void ClosingTheWindowStopsTheMarqueeTimer()
+    {
+        var backend = new TestApplicationBackend();
+        var bar = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+
+        using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
+        scene.Paint();
+
+        WhenShown(scene, () =>
+        {
+            Assert.IsTrue(backend.Timer.IsRunning);
+
+            scene.Window.Close();
+
+            Assert.IsFalse(backend.Timer.IsRunning, "a closed window has nothing left to animate");
+        });
+    }
+
+    [TestMethod]
+    public void AMarqueeBarAddedToAShownWindowStartsAndStopsWhenItIsRemoved()
+    {
+        var backend = new TestApplicationBackend();
+        var bar = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+        var host = new XPlatPanel { Dock = DockStyle.Fill, Padding = XPlatThickness.Empty, BorderWidth = 0f };
+
+        using var scene = HeadlessScene.Create(backend, host, 240f, 60f);
+        scene.Paint();
+
+        WhenShown(scene, () =>
+        {
+            Assert.IsFalse(backend.Timer.IsRunning, "the bar is not in the tree yet");
+
+            host.Controls.Add(bar);
+
+            Assert.IsTrue(backend.Timer.IsRunning, "adding it to a window on screen starts the sweep");
+
+            host.Controls.Remove(bar);
+
+            Assert.IsFalse(backend.Timer.IsRunning, "and taking it out of the window stops it");
+        });
+    }
+
+    [TestMethod]
+    public void TogglingTheMarqueeStyleWhileTheWindowIsNotShownLeavesNoTimerRunning()
+    {
+        var backend = new TestApplicationBackend();
+        var bar = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+
+        using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
+
+        scene.Paint();
+        bar.Style = XPlatProgressBarStyle.Continuous;
+        bar.Style = XPlatProgressBarStyle.Marquee;
+        scene.Paint();
+
+        Assert.IsFalse(backend.Timer.IsRunning, "nothing about a window nobody showed makes the bar animate");
+    }
+
+    [TestMethod]
+    public void AResumedMarqueeKeepsItsPhaseAndReusesItsOneTimer()
+    {
+        var backend = new TestApplicationBackend();
+        var bar = new XPlatProgressBar
+        {
+            Dock = DockStyle.Fill,
+            Style = XPlatProgressBarStyle.Marquee,
+            MarqueeAnimationSpeed = TimeSpan.FromSeconds(1),
+        };
+
+        using var scene = HeadlessScene.Create(backend, bar, 240f, 40f);
+
+        WhenShown(scene, () =>
+        {
+            // The first tick after a start advances by exactly one interval, so the phase after it
+            // is a known fraction of the sweep rather than anything the wall clock decided.
+            backend.Timer.Fire();
+            backend.Drain();
+
+            using var afterOneTick = scene.Render();
+
+            for (int i = 0; i < 3; i++)
+            {
+                bar.Visible = false;
+                bar.Visible = true;
+            }
+
+            Assert.AreEqual(1, backend.Timer.Attachments, "resuming reuses the one timer the bar built");
+            Assert.IsTrue(backend.Timer.IsRunning);
+
+            backend.Timer.Fire();
+            backend.Drain();
+
+            using var afterResume = scene.Render();
+
+            CollectionAssert.AreNotEqual(
+                afterOneTick.Bytes,
+                afterResume.Bytes,
+                "the sweep resumes from where it stopped instead of jumping back to its start");
+        });
+    }
+
+    [TestMethod]
     public void ATrackBarClampsItsValueAndReportsEachChange()
     {
         using var bar = new XPlatTrackBar();
@@ -397,6 +569,18 @@ public sealed class WidgetTests : HeadlessTestBase
 
         strip.Items.Add(button);
         Assert.IsTrue(strip.TabStop, "adding an interactive item makes the strip one tab stop");
+    }
+
+    /// <summary>
+    /// Shows the scene's window and runs <paramref name="body"/> once it is on screen, which is the
+    /// only moment a window is really visible: <see cref="XPlatWindow.Show"/> outside
+    /// <see cref="XPlatApplication.Run"/> only registers it.
+    /// </summary>
+    private static void WhenShown(HeadlessScene scene, Action body)
+    {
+        scene.Window.AddShownHandler(_ => body());
+        scene.Window.Show();
+        scene.Application.Run();
     }
 
     /// <summary>Encodes a small solid PNG so the image control has real bytes to decode.</summary>

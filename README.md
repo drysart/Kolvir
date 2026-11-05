@@ -69,7 +69,7 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree), `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
+| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
 | `XPlatBackground` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
 | `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
@@ -790,9 +790,12 @@ input, so it is neither focusable nor a tab stop.
 | `Style` | `Continuous`, `Blocks` (a segmented fill) or `Marquee` |
 | `MarqueeAnimationSpeed` | How often a marquee frame is drawn. Null, the default, is the display's own frame time; a `TimeSpan` pins it |
 
-Only a `Marquee` bar starts a timer, and only while it is visible, attached and there is an
-application to tick it, so an idle continuous bar costs nothing. A continuous bar repaints only the
-strip the value actually crossed.
+Only a `Marquee` bar starts a timer, and only while it is `IsDisplayed` - its own `Visible`,
+every container above it and a window that has been shown and has not closed - and there is an
+application to tick it, so an idle continuous bar costs nothing. Hiding the bar, hiding a container
+around it, taking it out of the window or closing the window stops the sweep; showing it again
+resumes from the phase it stopped at, with the one timer the bar built. A continuous bar repaints
+only the strip the value actually crossed.
 
 A marquee that leaves `MarqueeAnimationSpeed` null asks
 `XPlatScreen.RefreshRate` for the refresh rate of the display the window is on and animates at that

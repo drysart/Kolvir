@@ -41,6 +41,9 @@ public class XPlatControl : IDisposable
     private bool _visible = true;
     private bool _enabled = true;
     private bool _effectiveEnabled = true;
+    private bool _effectiveVisible;
+    private bool _displayed;
+    private Action<object>? _displayedChanged;
     private XPlatControl? _parent;
     private float _opacity = 1f;
     private bool _autoSize;
@@ -411,8 +414,10 @@ public class XPlatControl : IDisposable
             _parent = value;
 
             // Moving a subtree under a disabled container (or out of one) changes whether it is
-            // enabled without touching a single Enabled flag, so re-read it here.
+            // enabled without touching a single Enabled flag, so re-read it here. The same goes
+            // for a hidden container, and for a host that belongs to a different window.
             UpdateEffectiveEnabled();
+            UpdateDisplayed();
 
             // The same for appearance: the effective font and colours come from wherever the
             // control now sits, so what the old chain contributed is no longer the answer. The
@@ -608,8 +613,37 @@ public class XPlatControl : IDisposable
             }
 
             OnVisibleChanged();
+            UpdateDisplayed();
         }
     }
+
+    /// <summary>
+    /// Whether the control and every container above it are <see cref="Visible"/>. Hiding a
+    /// container hides everything inside it, so this is the flag a control that does work on a
+    /// timer asks about rather than the one it owns.
+    /// </summary>
+    /// <remarks>
+    /// The getter walks the parent chain rather than caching, so a subtree moved under a hidden
+    /// container answers correctly the moment it is attached. Setting <see cref="Visible"/> only
+    /// records the control's own flag; <see cref="UpdateDisplayed"/> is what notices that the
+    /// answer for the subtree changed and fires <see cref="OnDisplayedChanged"/> down it.
+    /// </remarks>
+    public bool EffectiveVisible => _visible && (Parent?.EffectiveVisible ?? true);
+
+    /// <summary>
+    /// Whether the user can actually see this control: it is <see cref="EffectiveVisible"/>,
+    /// attached to a host, and in a window that has been shown and has not closed.
+    /// </summary>
+    /// <remarks>
+    /// A control in a window that has never been shown is not displayed even though its own
+    /// <see cref="Visible"/> is true, and neither is one whose root has been taken off a host. A
+    /// host with no window of its own - the harnesses draw through one - has nothing that could
+    /// hide it, so controls attached to it count as displayed.
+    /// </remarks>
+    public bool IsDisplayed =>
+        EffectiveVisible
+        && Host is not null
+        && (Window is not { } window || (window.IsShown && !window.IsClosed));
 
     /// <summary>
     /// Whether the control accepts input. Disabling a container disables everything inside it, so
@@ -1880,7 +1914,11 @@ public class XPlatControl : IDisposable
     private static byte OpacityAlpha(float opacity) =>
         (byte)Math.Clamp(MathF.Round(opacity * 255f), 0f, 255f);
 
-    internal void AttachHost(XPlatUiHost? host) => _host = host;
+    internal void AttachHost(XPlatUiHost? host)
+    {
+        _host = host;
+        UpdateDisplayed();
+    }
 
     /// <summary>Called after a child is added. Re-runs layout and repaints.</summary>
     internal virtual void OnControlAdded(XPlatControl control)
@@ -2115,6 +2153,66 @@ public class XPlatControl : IDisposable
     {
         _enabledChanged?.Invoke(this);
         Invalidate();
+    }
+
+    /// <summary>
+    /// Adds a handler that runs when <see cref="EffectiveVisible"/> or <see cref="IsDisplayed"/>
+    /// changed, for a collaborator that is not a control and cannot override the method.
+    /// </summary>
+    internal IDisposable AddDisplayedChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _displayedChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDisplayedChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDisplayedChangedHandler"/> added.</summary>
+    internal void RemoveDisplayedChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _displayedChanged -= handler;
+    }
+
+    /// <summary>
+    /// Called when this control started or stopped being visible to the user, either because of
+    /// its own flag or because of a container or a window above it. Controls that animate override
+    /// this to start and stop their clock.
+    /// </summary>
+    /// <remarks>
+    /// The call is how a control learns about a hidden ancestor, or about the window closing,
+    /// without watching them itself: <see cref="UpdateDisplayed"/> walks the subtree from whatever
+    /// changed.
+    /// </remarks>
+    protected virtual void OnDisplayedChanged() => _displayedChanged?.Invoke(this);
+
+    /// <summary>
+    /// Re-reads <see cref="EffectiveVisible"/> and <see cref="IsDisplayed"/> and, when either
+    /// changed, tells this control and then its whole subtree. Every path that can change the
+    /// answer - a visibility flag, a new parent, a new host, the window being shown or closed -
+    /// ends here.
+    /// </summary>
+    internal void UpdateDisplayed()
+    {
+        bool effective = EffectiveVisible;
+        bool displayed = IsDisplayed;
+        if (effective == _effectiveVisible && displayed == _displayed)
+        {
+            return;
+        }
+
+        _effectiveVisible = effective;
+        _displayed = displayed;
+        OnDisplayedChanged();
+
+        if (_controls is not { Count: > 0 } children)
+        {
+            return;
+        }
+
+        for (int i = 0; i < children.Count; i++)
+        {
+            children[i].UpdateDisplayed();
+        }
     }
 
     /// <summary>

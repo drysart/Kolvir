@@ -33,10 +33,18 @@ internal sealed class ManualTimerBackend : IXPlatTimerBackend
     /// <summary>How many times the library started the timer.</summary>
     public int Starts { get; private set; }
 
+    /// <summary>
+    /// How many timers the library bound to this backend. A control that reuses one
+    /// <see cref="XPlatTimer"/> across many starts attaches once, so a count above one is a timer
+    /// that was thrown away and rebuilt - which is what a leak per visibility change looks like.
+    /// </summary>
+    public int Attachments { get; private set; }
+
     /// <summary>Binds the tick a new <see cref="XPlatTimer"/> wants and hands this backend back.</summary>
     public IXPlatTimerBackend Attach(Action tick)
     {
         _tick = tick;
+        Attachments++;
         return this;
     }
 
