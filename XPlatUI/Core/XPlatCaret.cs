@@ -96,7 +96,10 @@ public sealed class XPlatCaret : IDisposable
     /// </summary>
     public bool ShouldPaint => _active && _visible && _owner.IsFocused && _owner.Enabled && _owner.EffectiveVisible;
 
-    /// <summary>Whether the blink has any reason to run: the caret is taken, and its control is.</summary>
+    /// <summary>
+    /// Whether the blink has any reason to run: the caret is taken, and its control is focused,
+    /// enabled and <see cref="XPlatControl.IsDisplayed"/>.
+    /// </summary>
     private bool ShouldBlink => _active && _owner.IsFocused && _owner.Enabled && _owner.IsDisplayed;
 
     /// <summary>

@@ -272,6 +272,34 @@ different order from its indices, carries a nested container whose children orde
 a scrollable panel that is a tab stop, two controls that share an index, and two that are meant to be
 skipped, with a readout naming whatever has the focus, its `TabIndex` and its place in the sequence.
 
+### Visibility and display state
+
+`Visible` is the flag a control owns, and like `Enabled` it is only one of the answers that matter:
+hiding a container hides everything inside it, and a window that was never shown shows nothing at
+all. Two computed properties carry the rest, so a control that does work on a timer never has to
+watch its ancestors itself:
+
+| Member | Meaning |
+| --- | --- |
+| `Visible` | The control's own flag; setting it is what an application does |
+| `EffectiveVisible` | That flag and every container above it - the answer to "would a paint reach this control" |
+| `IsDisplayed` | `EffectiveVisible` and attached to a host and inside a window that has been shown and has not closed - the answer to "would the user see it" |
+| `OnDisplayedChanged()` | Called on a control, and then down its subtree, when either answer changes: `Visible` was assigned, the control changed parent, the root was attached or detached, or the window was shown or closed |
+
+The marquee progress bar and the caret are the two controls whose clocks hang off this: they start
+when the control becomes displayed and stop the moment it stops being, including when only a
+container or the window changed, with no timer left running for a window nobody is looking at.
+
+```csharp
+var busy = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+busy.IsDisplayed;      // false until the window is shown
+card.Visible = false;  // the sweep stops; the bar is still Visible itself
+card.Visible = true;   // and starts again from the phase it stopped at
+```
+
+`IsDisplayed` is about being shown, not about being on-screen: a minimized or fully covered window
+still counts as displayed, because no window system reports occlusion to a client portably.
+
 ### Handlers
 
 There are no C# events. Every notification is a pair of methods, `Add<Name>Handler` and
