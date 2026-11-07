@@ -918,6 +918,65 @@ internal static class NativeMethods
     [DllImport("user32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
     internal static extern int MessageBoxW(IntPtr hwnd, string text, string caption, uint type);
 
+    // The font dialog. ChooseFontW is the old common dialog, not the shell's IFileDialog family,
+    // because no modern replacement exists: it is modal on its own loop and needs no apartment.
+    internal const uint CfScreenFonts = 0x00000001;
+    internal const uint CfInittLogFontStruct = 0x00000040;
+    internal const uint CfLimitSize = 0x00002000;
+    internal const uint CfForceFontExist = 0x00010000;
+    internal const uint CfScalableOnly = 0x00020000;
+    internal const uint CfNoVertFonts = 0x01000000;
+
+    /// <summary>
+    /// <c>LOGFONTW</c>, the font description <c>ChooseFontW</c> edits. Only the fields the dialog
+    /// reads and writes are named; the rest keep the native layout.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal unsafe struct LOGFONTW
+    {
+        public int lfHeight;
+        public int lfWidth;
+        public int lfEscapement;
+        public int lfOrientation;
+        public int lfWeight;
+        public byte lfItalic;
+        public byte lfUnderline;
+        public byte lfStrikeOut;
+        public byte lfCharSet;
+        public byte lfOutPrecision;
+        public byte lfClipPrecision;
+        public byte lfQuality;
+        public byte lfPitchAndFamily;
+
+        /// <summary><c>WCHAR lfFaceName[LF_FACESIZE]</c>, stored in place so the struct stays blittable.</summary>
+        public fixed char lfFaceName[32];
+    }
+
+    /// <summary><c>CHOOSEFONT</c>; the names and the two alignment words follow the native header.</summary>
+    [StructLayout(LayoutKind.Sequential, CharSet = CharSet.Unicode)]
+    internal struct CHOOSEFONT
+    {
+        public int lStructSize;
+        public IntPtr hwndOwner;
+        public IntPtr hDC;
+        public IntPtr lpLogFont;
+        public int iPointSize;
+        public uint Flags;
+        public int rgbColors;
+        public IntPtr lCustData;
+        public IntPtr lpfnHook;
+        public IntPtr lpTemplateName;
+        public IntPtr hInstance;
+        public IntPtr lpszStyle;
+        public ushort nFontType;
+        public ushort reservedAlignment;
+        public int nSizeMin;
+        public int nSizeMax;
+    }
+
+    [DllImport("comdlg32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    internal static extern bool ChooseFontW(ref CHOOSEFONT chooseFont);
+
     // Shell execution, used to hand a URI to whatever handler owns its scheme.
     internal const int SwShowNormal = 1;
 

@@ -1,7 +1,7 @@
 namespace XPlatUI;
 
 /// <summary>
-/// The platform's message box and file dialogs. Every backend, headless included, registers one
+/// The platform's message box, file and font dialogs. Every backend, headless included, registers one
 /// through <see cref="IXPlatApplicationBackend.RegisterServices"/>; an application reaches it
 /// through <c>XPlatApplication.Dialogs</c> or
 /// <c>Services.GetService&lt;IXPlatDialogService&gt;()</c>.
@@ -46,4 +46,15 @@ public interface IXPlatDialogService
     /// nested loop.
     /// </summary>
     string? PickFolder(XPlatFileDialogOptions options, XPlatWindow? owner);
+
+    /// <summary>
+    /// Asks for a font and returns what the user chose, or null when the user cancelled. Blocks in a
+    /// nested loop.
+    /// </summary>
+    /// <remarks>
+    /// The result is a value, not an <see cref="XPlatFont"/>: the caller owns whatever font it
+    /// builds from it. The dialog lists the families the operating system has installed, so a face
+    /// loaded from a file is not offered unless the OS knows about it as well.
+    /// </remarks>
+    XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner);
 }

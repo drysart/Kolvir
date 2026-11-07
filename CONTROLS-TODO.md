@@ -18,7 +18,7 @@ The tiers were set when the library had twelve controls and they still describe 
 | --- | --- | --- |
 | 1 - common input | `XPlatCheckBox`, `XPlatRadioButton`, `XPlatProgressBar`, `XPlatGroupBox` | shipped |
 | 2 - popup-based | the popup layer (`IXPlatPopupService`, `XPlatPopup`, one popup window per backend), `XPlatComboBox`, `XPlatTabControl`/`XPlatTabPage`, `XPlatToolTip` | shipped |
-| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | in-library menus, `XPlatDateTimePicker` and text-box autocomplete shipped; drag previews in §3 |
+| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | in-library menus, `XPlatDateTimePicker` and text-box autocomplete shipped; drag previews in Ã‚Â§3 |
 | 3 - large list controls | `XPlatVirtualList` (the shared row base), `XPlatListView`, `XPlatTreeView` | shipped |
 | 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | shipped |
 
@@ -68,7 +68,7 @@ a reviewer should ask for each one rather than infer it.
   subject) rather than incidental internals. A bug fix carries a test that fails before it.
 - It is verified on Windows, macOS and GTK4: a headless `--render` of the new page on all three, plus
   a real-window check wherever the control's value is interaction (a popup, a drag, a keyboard path).
-- The pull request names the rung of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) §4 it sits on
+- The pull request names the rung of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) Ã‚Â§4 it sits on
   and says why it could not sit lower.
 
 ## 3. Unlocked by the popup layer
@@ -98,7 +98,6 @@ listing them is that a reviewer can say "this next" without re-deriving the gap.
 | Control | What is missing | Cost |
 | --- | --- | --- |
 | A colour dialog | `XPlatColorPicker` shipped, so an application can put a picker on a page, but `IXPlatDialogService` covers files and message boxes only and there is still no modal colour chooser. The dialog is one more seam in `XPlatUI/Platform`, implemented by all four backends. | Medium |
-| A font dialog | Pairs with the font loading that shipped (`XPlatFont.FromFile`, `XPlatTheme.UseFont`): choose family, size and weight and see the preview. Same seam shape as the colour dialog. | Low to medium |
 | `XPlatSplitButton` / `XPlatDropDownButton` | `XPlatToolStrip` has buttons, labels, progress, separators and springs, but no button that is both a command and a menu. The popup layer and the menu system already do the hard part, so this is mostly composition. | Low |
 | `XPlatExpander` | `XPlatGroupBox` is static. Collapsible sections are the normal shape of a settings page, and there is nothing to collapse with. | Low |
 | A validation error provider | The error *icon*, the message, and the plumbing that maps a validation result onto a control. The span squiggles that shipped draw the underline; what is missing is the provider an application hands its validation rules to, in the shape WinForms' `ErrorProvider` has. | Low to medium |
@@ -138,10 +137,10 @@ Recorded so the decision is not re-litigated every time someone asks:
 
 ## 6. Suggested order
 
-1. **Drag previews** (§3.1) - small, and independent of everything above.
-2. **The small batch in §4.1** - `XPlatSplitButton`, `XPlatExpander`, `XPlatWrapPanel`, the busy
+1. **Drag previews** (Ã‚Â§3.1) - small, and independent of everything above.
+2. **The small batch in Ã‚Â§4.1** - `XPlatSplitButton`, `XPlatExpander`, `XPlatWrapPanel`, the busy
    indicator and the toast. Five small controls, each independently shippable, none of them waiting
    on anything.
 3. **The colour dialog** - the picker shipped as `XPlatColorPicker`; the dialog is the last
    obviously missing dialog in the platform seam.
-4. Then the rest of §4.1 in the order listed, and §4.3 only once one of them has a plan document.
+4. Then the rest of Ã‚Â§4.1 in the order listed, and Ã‚Â§4.3 only once one of them has a plan document.

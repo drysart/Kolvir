@@ -112,6 +112,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatFont` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
 | `XPlatTheme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
+| `IXPlatDialogService.PickFont` | `FontDialog` | The platform's own font chooser: returns an `XPlatFontSelection` (family, size, weight, italic) or null when cancelled; the caller creates and owns the `XPlatFont` |
 | `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
 | `IXPlatLauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
 | `XPlatUI.Tests` | a test project | One portable `net10.0` MSTest assembly that drives the library through the headless backend, so a control is exercised with no display; a test that can only run on one platform carries a `Platform.*` category rather than being skipped by accident |
@@ -2318,6 +2319,91 @@ the identities that make a pinned face portable can be compared on every runner,
 `--embedded-font` applies the face to the whole sample UI, including a `--render`, which is the
 application-wide path in one switch.
 
+### Font dialog
+
+`PickFont` is the platform's own font chooser, reached through the same dialog service as files and
+message boxes:
+
+```csharp
+var choice = window.Application.Dialogs.PickFont(
+    new XPlatFontDialogOptions
+    {
+        Title = "Choose a font",
+        InitialFamilyName = preview.Font.FamilyName,
+        InitialSize = preview.Font.Size,
+        InitialWeight = preview.Font.Weight,
+        InitialItalic = preview.Font.Italic,
+        MinimumSize = 6f,
+        MaximumSize = 48f,
+    },
+    window);
+
+if (choice is null)
+{
+    return;                       // cancelled; nothing changed
+}
+
+var font = choice.CreateFont();   // the caller owns this one
+preview.Font = font;
+```
+
+The result is an `XPlatFontSelection`, not an `XPlatFont`, and that is deliberate. `XPlatFont` is
+`IDisposable` and owns a typeface, so a dialog returning one would leave the caller guessing whether
+the dialog kept a reference, whether the control it assigns it to owns it, and who disposes the one
+that was there before. A selection is an inert value with `FamilyName`, `Size`, `Weight` and
+`Italic`; `CreateFont()` is the one-line way to turn it into a font the caller owns. `null` is the
+only cancellation answer, so there is no "okay but empty" case to check for.
+
+Sizes are **logical pixels**, the unit `XPlatFont.Size` uses. Windows and GTK show point sizes and
+the backend converts them at 96 DPI; macOS points and the library's logical pixels are the same
+unit. A size the user did not change is handed back exactly as it went in rather than round-tripped
+through a unit that cannot represent every pixel size.
+
+The implementation is the native chooser on every platform: `ChooseFontW` on Windows,
+`NSFontPanel` on macOS and `Gtk.FontChooserDialog` on GTK, each under the nested-loop contract in
+[the dialog seam](APPLICATION-MODEL.md#9-dialogs). Windows' `CHOOSEFONT` and GTK's dialog already
+run a modal loop. macOS is the odd one: `NSFontPanel` is a floating panel that does not own a loop
+or even have OK and Cancel. The backend adds an accessory view with **Select** and **Cancel**, hides
+the panel's close and minimize buttons, and runs the panel in an application-modal session until one
+of those is pressed. Return selects, Escape cancels, and a `finally` aborts the session if anything
+else throws, so the synchronous contract is real rather than a panel left floating over a caller
+that already returned. The backend's common-mode poll timer keeps `Invoke` work flowing through the
+nested loop, exactly as it does for an `NSAlert`. Because `NSFontPanel` is shared and AppKit
+remembers its frame in the application's defaults, every modal presentation gives it a frame of at
+least 600 by 400 points, centred on the owner window (or on the visible screen when there is no
+owner) and clamped inside the visible frame of the screen the owner is on, in points rather than
+backing pixels.
+
+Weight is the OpenType value `XPlatFont.Weight` reports - 400 regular, 700 bold - which `LOGFONT`
+and Pango use directly. AppKit does not: `NSFontManager` reports a 0-15 index where 5 is regular and
+9 is bold. `XPlatFontMapping` holds that translation in one place, and the nine common weights (100
+through 900 in hundreds) round-trip exactly; anything between them snaps to the nearest face the
+platform has, because that is what the font panel can select. The same class holds the point/pixel
+conversion, so the arithmetic is unit-tested instead of being duplicated in three backends.
+
+The dialog lists the families the operating system has installed. A face loaded with
+`XPlatFont.FromFile`, `FromStream` or `FromBytes` is not a system font unless the application also
+registered it with the OS, so it does not appear - and if a loaded face is the current font, the
+dialog opens on the nearest installed family instead. That is documented rather than half-supported:
+a backend cannot tell an arbitrary loaded face from an installed one, and offering to add it would
+promise a system-wide result the platform does not give.
+
+The demo's **Font dialog** page opens the chooser, then applies the result to a panel so the labels,
+a nested panel and a button all inherit it. It is appended after the colour picker's page: the
+colour picker is index 36 and the font dialog is index 37.
+`XPlatUI.Tests`' `FontDialogTests` covers the scripted headless answer, cancellation, the options
+round-trip and every pure conversion; the native dialogs themselves are the part that only a real
+window can prove.
+
+This is **rung 1**: nothing runs and no dialog code is reachable unless the application calls
+`PickFont`. The `XPlatUI.Minimal` fixture publishes at 3,203,072 bytes on `win-x64` both before and
+after the change, a delta of 0, and the published image contains neither `comdlg32` nor
+`ChooseFontW`. The use check - the same fixture with one `PickFont` call - publishes at 3,207,680
+bytes (+4,608, 0.14%), contains the `comdlg32` import and publishes with
+`-p:TrimmerSingleWarn=false` reporting no IL2xxx or IL3xxx warning. Unlike a new always-registered
+service, the method added here sits behind `XPlatApplication.Dialogs`, which the fixture never
+calls, so the whole dialog service is trimmed in an application that does not use it.
+
 ### Opacity and transparency
 
 There are two ways to make a control see-through, and they are not the same thing.
@@ -2777,8 +2863,8 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
    because a popup belongs to one owner host rather than to the application, and because leaving it
    null is a valid implementation: the overlay fallback then draws every popup inside the window.
 
-Two contract details are easy to miss. `ShowMessage`, `OpenFile`, `SaveFile`, `SelectFolder` and
-`ShowDialog` are **synchronous** but re-enter the platform loop, so a backend has to tolerate a
+Two contract details are easy to miss. `ShowMessage`, `OpenFile`, `SaveFile`, `PickFolder`,
+`PickFont` and `ShowDialog` are **synchronous** but re-enter the platform loop, so a backend has to tolerate a
 nested loop and keep dispatching `Invoke` callbacks inside it. And `MenuBar` is per window: on macOS
 a backend draws the bar in the window like any other platform, and additionally mirrors the active
 window's bar into the single global macOS menu bar, because AppKit requires one to exist and the

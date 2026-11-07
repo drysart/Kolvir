@@ -1,12 +1,14 @@
 using AppKit;
+using CoreGraphics;
 using Foundation;
 using UniformTypeIdentifiers;
 
 namespace XPlatUI.Backend.AppKit;
 
 /// <summary>
-/// The macOS <see cref="IXPlatDialogService"/>: <c>NSAlert</c> for messages and
-/// <c>NSOpenPanel</c>/<c>NSSavePanel</c> for open, save and folder picking.
+/// The macOS <see cref="IXPlatDialogService"/>: <c>NSAlert</c> for messages,
+/// <c>NSOpenPanel</c>/<c>NSSavePanel</c> for open, save and folder picking, and <c>NSFontPanel</c>
+/// for fonts.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -111,6 +113,221 @@ internal sealed class AppKitDialogService : IXPlatDialogService
         Configure(panel, options);
 
         return Run(panel);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <para>
+    /// <c>NSFontPanel</c> is not a modal dialog: it is a floating panel that stays open while the
+    /// application keeps running, so it has no loop of its own and no OK or Cancel of its own. This
+    /// implementation gives it both. A small accessory view at the bottom of the panel carries
+    /// Select and Cancel, and the panel is put into an application-modal session with
+    /// <c>RunModalForWindow</c> until one of them is pressed. That is a genuine nested run loop on
+    /// the calling thread, which is what <see cref="IXPlatDialogService"/> requires; the backend's
+    /// common-mode poll timer keeps <see cref="IXPlatApplicationBackend.Invoke"/> work flowing
+    /// through it. Escape cancels and Return selects through the buttons' key equivalents.
+    /// </para>
+    /// <para>
+    /// The panel's close and minimize buttons are hidden for the duration. Closing a window does not
+    /// end a modal session by itself, so leaving those buttons available would give the user a way
+    /// to dismiss the panel while this call stayed blocked forever. Select and Cancel are the only
+    /// exits, and <c>finally</c> aborts the session if anything else goes wrong.
+    /// </para>
+    /// <para>
+    /// <c>NSFontPanel</c> is shared and long-lived, and AppKit restores its last frame from the
+    /// application's <c>NSWindow Frame NSFontPanel</c> default. Left alone that can present a small
+    /// panel at an old position, possibly partly off-screen or far from the window it belongs to.
+    /// Every modal presentation therefore computes its own frame: at least 600 by 400, centred on
+    /// the owner's window (or on the visible screen when there is no owner) and clamped inside the
+    /// visible frame of the screen the owner is on. The arithmetic is in AppKit points; scaling by
+    /// the backing factor would double the frame on a Retina display.
+    /// </para>
+    /// </remarks>
+    public XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var size = options.ClampSize(options.InitialSize);
+        var weight = XPlatFontMapping.ClampWeight(options.InitialWeight);
+        var appKitWeight = (IntPtr)XPlatFontMapping.ToAppKitWeight(weight);
+
+        // AppKit expresses weight through the face selected for a family plus the Bold/Unbold
+        // trait; the manager's weight index chooses among the faces the family actually has.
+        var traits = NSFontTraitMask.Unbold | NSFontTraitMask.Unitalic;
+        if (weight >= XPlatFontMapping.BoldWeight)
+        {
+            traits = (traits & ~NSFontTraitMask.Unbold) | NSFontTraitMask.Bold;
+        }
+
+        if (options.InitialItalic)
+        {
+            traits = (traits & ~NSFontTraitMask.Unitalic) | NSFontTraitMask.Italic;
+        }
+
+        var manager = NSFontManager.SharedFontManager;
+        var initial = string.IsNullOrWhiteSpace(options.InitialFamilyName)
+            ? null
+            : manager.FontWithFamily(options.InitialFamilyName, traits, appKitWeight, size);
+        initial ??= NSFont.SystemFontOfSize(size)!;
+
+        var panel = NSFontPanel.SharedFontPanel;
+
+        // SetSelectedFont seeds the panel's visible selection, not just the manager's notion of it:
+        // SetPanelFont alone leaves the face list on the family's regular face even when the font
+        // handed to it is bold, italic or both.
+        panel.SetPanelFont(initial, false);
+        manager.SetSelectedFont(initial, false);
+
+        var accepted = false;
+        var selectButton = NSButton.CreateButton("Select", () =>
+        {
+            accepted = true;
+            NSApplication.SharedApplication.StopModal();
+        });
+        var cancelButton = NSButton.CreateButton("Cancel", () =>
+        {
+            accepted = false;
+            NSApplication.SharedApplication.StopModal();
+        });
+        selectButton.Frame = new CGRect(166, 6, 88, 26);
+        cancelButton.Frame = new CGRect(72, 6, 88, 26);
+        selectButton.KeyEquivalent = "\r";
+        cancelButton.KeyEquivalent = "\u001b";
+
+        var accessory = new NSView(new CGRect(0, 0, 260, 38));
+        accessory.AddSubview(selectButton);
+        accessory.AddSubview(cancelButton);
+        panel.AccessoryView = accessory;
+
+        // Setting the accessory can change the panel's natural size, so the frame is computed after
+        // it. Ordering the shared panel front can then restore AppKit's remembered frame, which is
+        // why it is applied again once the panel is on screen.
+        var panelFrame = ModalFrameFor(panel, owner);
+        panel.SetFrame(panelFrame, false);
+
+        var closeButton = panel.StandardWindowButton(NSWindowButton.CloseButton);
+        var minimizeButton = panel.StandardWindowButton(NSWindowButton.MiniaturizeButton);
+        var closeWasHidden = closeButton?.Hidden ?? false;
+        var minimizeWasHidden = minimizeButton?.Hidden ?? false;
+
+        if (closeButton is not null)
+        {
+            closeButton.Hidden = true;
+        }
+
+        if (minimizeButton is not null)
+        {
+            minimizeButton.Hidden = true;
+        }
+
+        NSFont? chosen = null;
+
+        try
+        {
+            panel.MakeKeyAndOrderFront(null!);
+            panel.SetFrame(panelFrame, true);
+
+            // The panel does not run this itself; this is the modal session the interface promises.
+            NSApplication.SharedApplication.RunModalForWindow(panel);
+
+            if (!accepted)
+            {
+                return null;
+            }
+
+            chosen = manager.SelectedFont;
+            chosen ??= manager.ConvertFont(initial) ?? initial;
+        }
+        finally
+        {
+            // A throw inside the session must not leave the application modal to the panel.
+            if (ReferenceEquals(NSApplication.SharedApplication.ModalWindow, panel))
+            {
+                NSApplication.SharedApplication.AbortModal();
+            }
+
+            panel.OrderOut(null!);
+            panel.AccessoryView = null;
+
+            selectButton.RemoveFromSuperview();
+            cancelButton.RemoveFromSuperview();
+            selectButton.Dispose();
+            cancelButton.Dispose();
+            accessory.Dispose();
+
+            if (closeButton is not null)
+            {
+                closeButton.Hidden = closeWasHidden;
+            }
+
+            if (minimizeButton is not null)
+            {
+                minimizeButton.Hidden = minimizeWasHidden;
+            }
+        }
+
+        var resultFont = chosen ?? initial;
+        var family = resultFont.FamilyName;
+        if (string.IsNullOrWhiteSpace(family))
+        {
+            family = string.IsNullOrWhiteSpace(options.InitialFamilyName) ? "sans-serif" : options.InitialFamilyName;
+        }
+
+        var pointSize = (float)resultFont.PointSize;
+        var chosenSize = pointSize > 0f ? options.ClampSize(pointSize) : size;
+        var chosenWeight = XPlatFontMapping.FromAppKitWeight((int)(long)manager.WeightOfFont(resultFont));
+        var chosenItalic = (manager.TraitsOfFont(resultFont) & NSFontTraitMask.Italic) != 0;
+
+        return new XPlatFontSelection(family, chosenSize, chosenWeight, chosenItalic);
+    }
+
+    /// <summary>The smallest frame a modal font choice is presented in, in AppKit points.</summary>
+    private const double MinimumFontPanelWidth = 600;
+
+    /// <summary>The smallest frame a modal font choice is presented in, in AppKit points.</summary>
+    private const double MinimumFontPanelHeight = 400;
+
+    /// <summary>Space kept between the modal font panel and the visible screen edge, in points.</summary>
+    private const double FontPanelScreenMargin = 24;
+
+    /// <summary>
+    /// The frame a modal font choice is presented in: centred on the owner window when there is
+    /// one, otherwise on the visible screen, clamped to stay inside that screen.
+    /// </summary>
+    private static CGRect ModalFrameFor(NSFontPanel panel, XPlatWindow? owner)
+    {
+        var window = (owner?.Backend as AppKitWindowBackend)?.Window;
+
+        // AppKit frames are points, so the backing scale factor is deliberately not applied: on a
+        // Retina display the points are already the right size for SetFrame.
+        var screen = window?.Screen ?? NSScreen.MainScreen;
+        if (screen is null)
+        {
+            return panel.Frame;
+        }
+
+        var visible = screen.VisibleFrame;
+        var maxWidth = Math.Max(1, visible.Width - (2 * FontPanelScreenMargin));
+        var maxHeight = Math.Max(1, visible.Height - (2 * FontPanelScreenMargin));
+
+        // A stored frame may be smaller than the content needs or larger than the screen allows.
+        var width = Math.Min(Math.Max(panel.Frame.Width, MinimumFontPanelWidth), maxWidth);
+        var height = Math.Min(Math.Max(panel.Frame.Height, MinimumFontPanelHeight), maxHeight);
+
+        var anchor = window?.Frame ?? visible;
+        var x = anchor.GetMidX() - (width / 2);
+        var y = anchor.GetMidY() - (height / 2);
+
+        var minimumX = visible.X + FontPanelScreenMargin;
+        var minimumY = visible.Y + FontPanelScreenMargin;
+        var maximumX = Math.Max(minimumX, visible.GetMaxX() - FontPanelScreenMargin - width);
+        var maximumY = Math.Max(minimumY, visible.GetMaxY() - FontPanelScreenMargin - height);
+
+        return new CGRect(
+            Math.Clamp(x, minimumX, maximumX),
+            Math.Clamp(y, minimumY, maximumY),
+            width,
+            height);
     }
 
     private static void Configure(NSSavePanel panel, XPlatFileDialogOptions options)

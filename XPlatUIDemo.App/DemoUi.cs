@@ -22,7 +22,6 @@ public sealed class DemoUi
     private XPlatLabel _statusLabel = null!;
     private XPlatLabel _counterLabel = null!;
     private XPlatButton _primaryButton = null!;
-    private XPlatButton _dialogAnchor = null!;
     private XPlatListBox _navList = null!;
     private XPlatPanel _stage = null!;
     private XPlatControl[] _pages = null!;
@@ -42,6 +41,14 @@ public sealed class DemoUi
     private XPlatFont? _appearanceSubtreeFont;
     private XPlatFont? _appearanceBigFont;
     private XPlatFont? _appearanceFace;
+
+    // The font dialog page. The fonts are the page's for the life of the window, like the
+    // appearance page's: a control never disposes a font it was handed, and a paint may still be
+    // using the previous one when the next choice arrives.
+    private XPlatPanel? _fontDialogStage;
+    private XPlatLabel? _fontDialogReadout;
+    private XPlatFontSelection? _fontDialogSelection;
+    private readonly List<XPlatFont> _fontDialogFonts = [];
 
     public DemoUi()
     {
@@ -414,6 +421,7 @@ public sealed class DemoUi
         ("Tab order", demo => Page(demo.BuildTabOrderDemo())),
         ("Animations", demo => Page(demo.BuildAnimationDemo())),
         ("Colour picker", demo => Page(demo.BuildColorPickerDemo())),
+        ("Font dialog", demo => Page(demo.BuildFontDialogDemo())),
     };
 
     /// <summary>
@@ -666,8 +674,6 @@ public sealed class DemoUi
         row.Controls.Add(DialogButton("Save file", () => ShowFileDialog(DialogKind.Save)));
         row.Controls.Add(DialogButton("Pick folder", () => ShowFileDialog(DialogKind.Folder)));
 
-        _dialogAnchor = messageBox;
-
         section.Controls.Add(row);
         return section;
     }
@@ -751,8 +757,13 @@ public sealed class DemoUi
         Folder,
     }
 
-    /// <summary>The window the demo is shown in, used to parent the dialogs.</summary>
-    private XPlatWindow? OwnerWindow => _dialogAnchor.Window;
+    /// <summary>
+    /// The window the demo is shown in, used to parent the dialogs. It is resolved from the root at
+    /// call time rather than from a control on one page: only the page being viewed is attached to
+    /// the window, so a control on another page has no <see cref="XPlatControl.Window"/> and would
+    /// make a dialog opened from here silently do nothing.
+    /// </summary>
+    private XPlatWindow? OwnerWindow => Root.Window;
 
     /// <summary>
     /// Shows a small window owned by the window hosting the sample. Ownership is what makes a
@@ -5287,6 +5298,233 @@ public sealed class DemoUi
 
     private static string DescribeColorPicker(XPlatColorPicker picker) =>
         $"{picker.ColorMode}  #{picker.Color.Red:X2}{picker.Color.Green:X2}{picker.Color.Blue:X2}";
+
+    /// <summary>
+    /// The font dialog page: the platform's own chooser, the choice it returned, and a subtree that
+    /// switches to that font so the inherited-appearance path is visible at the same time.
+    /// </summary>
+    private XPlatPanel BuildFontDialogDemo()
+    {
+        var initial = XPlatTheme.DefaultFont;
+        _fontDialogSelection = SelectionOf(initial);
+
+        // The page owns this font for the life of the window. Controls never dispose a font they
+        // were handed, so replacing it means keeping it rather than letting the next paint race a
+        // Dispose.
+        var font = _fontDialogSelection.CreateFont();
+        _fontDialogFonts.Add(font);
+
+        var card = Card();
+        card.Controls.Add(Heading("Font dialog"));
+        card.Controls.Add(new XPlatLabel(
+            "PickFont shows the platform's own font chooser - ChooseFont on Windows, NSFontPanel on " +
+            "macOS and GtkFontChooserDialog on GTK - and returns a value describing the choice, or " +
+            "null when the dialog was cancelled. The value is not a font: the caller builds and owns " +
+            "the XPlatFont.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 58f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        });
+
+        _fontDialogReadout = new XPlatLabel
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 44f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        card.Controls.Add(_fontDialogReadout);
+
+        var buttons = ButtonRow();
+
+        var choose = new XPlatButton("Choose font...")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        choose.AddClickHandler(_ => ShowFontDialog());
+
+        var reset = new XPlatButton("Reset")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        reset.AddClickHandler(_ => ResetFontDialog());
+
+        buttons.Controls.Add(choose);
+        buttons.Controls.Add(reset);
+        card.Controls.Add(buttons);
+
+        // The subtree: the panel assigns the chosen font and everything under it inherits it,
+        // including the button, whose class default is the theme's emphasized font.
+        var stage = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 236f,
+            Padding = new XPlatThickness(14f, 10f),
+            CornerRadius = 8f,
+            BorderWidth = 1f,
+            Font = font,
+            Background = XPlatBackground.FromThemeColor(XPlatThemeColor.Secondary),
+        };
+        _fontDialogStage = stage;
+
+        stage.Controls.Add(new XPlatLabel(
+            "The quick brown fox jumps over the lazy dog. This label inherits the panel's font, so " +
+            "the whole subtree re-lays itself out when the choice changes.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 74f,
+            WrapText = true,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        var nested = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 72f,
+            Padding = new XPlatThickness(10f, 6f),
+            CornerRadius = 6f,
+            BorderWidth = 1f,
+        };
+
+        nested.Controls.Add(new XPlatLabel(
+            "This label sits in a nested panel that assigns nothing, so it takes the font from one " +
+            "level up - the same font, at the same size.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        stage.Controls.Add(nested);
+        stage.Controls.Add(new XPlatButton("A button under the same panel")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Ghost,
+            Margin = new XPlatThickness(0f, 8f, 0f, 0f),
+        });
+        card.Controls.Add(stage);
+
+        card.Controls.Add(new XPlatLabel(
+            "The dialog lists the families the operating system has installed. A face loaded with " +
+            "XPlatFont.FromFile is not a system font unless the OS knows it too, so it does not " +
+            "appear here; that is documented rather than half-supported.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 10f, 0f, 0f),
+        });
+
+        UpdateFontDialogReadout();
+        return card;
+    }
+
+    private void ShowFontDialog()
+    {
+        if (OwnerWindow is not { } owner || _fontDialogSelection is not { } current)
+        {
+            return;
+        }
+
+        var chosen = owner.Application.Dialogs.PickFont(
+            new XPlatFontDialogOptions
+            {
+                Title = "Choose a font",
+                InitialFamilyName = current.FamilyName,
+                InitialSize = current.Size,
+                InitialWeight = current.Weight,
+                InitialItalic = current.Italic,
+                MinimumSize = 6f,
+                MaximumSize = 48f,
+            },
+            owner);
+
+        if (chosen is null)
+        {
+            SetStatus("Font dialog cancelled; the preview is unchanged.");
+            return;
+        }
+
+        ApplyFontSelection(chosen);
+        SetStatus($"Chose {DescribeSelection(chosen)}.");
+    }
+
+    private void ResetFontDialog()
+    {
+        _fontDialogStage?.ClearFont();
+
+        if (_fontDialogStage is { } stage)
+        {
+            _fontDialogSelection = SelectionOf(stage.Font);
+        }
+
+        UpdateFontDialogReadout();
+        SetStatus("The preview inherits the theme's font again.");
+    }
+
+    private void ApplyFontSelection(XPlatFontSelection selection)
+    {
+        _fontDialogSelection = selection;
+
+        // The page owns every font it makes. Keeping the previous one alive is deliberate: a paint
+        // may still be holding it when the assignment lands, and a handful of fonts is nothing.
+        var font = selection.CreateFont();
+        _fontDialogFonts.Add(font);
+
+        if (_fontDialogStage is not null)
+        {
+            _fontDialogStage.Font = font;
+        }
+
+        UpdateFontDialogReadout();
+    }
+
+    private void UpdateFontDialogReadout()
+    {
+        if (_fontDialogReadout is null || _fontDialogSelection is not { } selection)
+        {
+            return;
+        }
+
+        var effective = _fontDialogStage?.Font;
+        _fontDialogReadout.Text =
+            $"Selection: {DescribeSelection(selection)}." +
+            (effective is null
+                ? string.Empty
+                : $"\nThe subtree reports {effective.FamilyName}, {effective.Size:0.#} logical px, " +
+                  $"weight {effective.Weight}, {(effective.Italic ? "italic" : "upright")}.");
+    }
+
+    private static XPlatFontSelection SelectionOf(XPlatFont font) =>
+        new(string.IsNullOrWhiteSpace(font.FamilyName) ? "sans-serif" : font.FamilyName,
+            font.Size,
+            font.Weight,
+            font.Italic);
+
+    private static string DescribeSelection(XPlatFontSelection selection) =>
+        $"{selection.FamilyName}, {selection.Size:0.#} logical px, weight {selection.Weight}, " +
+        (selection.Italic ? "italic" : "upright");
 
     /// <summary>
     /// A panel that draws the focus ring when it has the focus. A plain panel has no chrome of its

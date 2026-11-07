@@ -186,8 +186,8 @@ public sealed partial class XPlatApplication : IDisposable
     public IReadOnlyList<XPlatScreen> Screens => _screens ??= Backend.GetScreens();
 
     /// <summary>
-    /// The platform's message, file and folder dialogs. Never null: every backend registers one,
-    /// because dialogs are part of v1.
+    /// The platform's message, file, folder and font dialogs. Never null: every backend registers
+    /// one, because dialogs are part of v1.
     /// </summary>
     /// <exception cref="InvalidOperationException">The backend registered no <see cref="IXPlatDialogService"/>.</exception>
     public IXPlatDialogService Dialogs => _dialogs ??= Services.GetService<IXPlatDialogService>()
