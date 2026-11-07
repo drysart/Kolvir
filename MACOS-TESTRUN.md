@@ -135,3 +135,41 @@ keystrokes, with no involvement of the bundle's Launch Services entry.
   comparing renders, or the comparison will be of two themes rather than two builds.
 - **A modal dialog that never gets focus** looks like a dialog that never opened. If a modal window
   appears but ignores Enter and Escape, check it was activated before suspecting the dialog itself.
+
+## Close the app when you are finished testing
+
+Always leave the Mac host as you found it: **no demo app still running**. A session that leaves the
+app up causes real problems for whoever comes next — a later launch fights the instance that is
+already there, synthetic input lands in the wrong process, a screenshot shows someone else's window,
+and a modal dialog left open can block the next test. Do this at the end of every run, whether the
+test passed or failed:
+
+```sh
+# Close the app and the `dotnet run` that started it.
+pkill -f XPlatUIDemoApp
+pkill -f "dotnet run --project XPlatUIDemo.App"
+
+# Confirm nothing is left: both commands must print nothing.
+pgrep -fl XPlatUIDemoApp
+pgrep -fl "dotnet run --project XPlatUIDemo.App"
+```
+
+Close any modal window the test opened before killing the process where you can, so a half-finished
+dialog cannot be left on screen by a process that exits mid-session. If you started the app from a
+script, stop that script too rather than leaving it waiting on a child that no longer exists.
+
+The same applies to a harness or a temporary build directory: remove what you created, and leave the
+shared checkout on its own branch with a clean `git status`.
+
+This is not a macOS-only rule — the Windows and Linux hosts are test machines too, and a demo left
+running there causes the same confusion. Close it the same way after every run:
+
+```powershell
+# Windows
+Stop-Process -Id (Get-Process XPlatUIDemoApp).Id
+```
+
+```sh
+# Linux
+pkill -f XPlatUIDemoApp
+```
