@@ -20,7 +20,10 @@ namespace XPlatUI;
 /// </remarks>
 public sealed class XPlatFontDialogOptions
 {
-    /// <summary>Title bar text. Null lets the platform use its default.</summary>
+    /// <summary>
+    /// Title bar text, used by GTK. Windows' <c>ChooseFont</c> has no title parameter and the macOS
+    /// panel has no title of its own, so both use their platform title and ignore this.
+    /// </summary>
     public string? Title { get; set; }
 
     /// <summary>
@@ -41,10 +44,18 @@ public sealed class XPlatFontDialogOptions
     /// <summary>True when the initial selection is italic.</summary>
     public bool InitialItalic { get; set; }
 
-    /// <summary>The smallest size the dialog offers, in logical pixels.</summary>
+    /// <summary>
+    /// The smallest size the dialog offers, in logical pixels. Windows enforces the range in the
+    /// dialog itself; GTK and the macOS font panel have no size limits, so there the chosen size is
+    /// clamped to the range after the dialog closes instead.
+    /// </summary>
     public float MinimumSize { get; set; } = 1f;
 
-    /// <summary>The largest size the dialog offers, in logical pixels.</summary>
+    /// <summary>
+    /// The largest size the dialog offers, in logical pixels. Windows enforces the range in the
+    /// dialog itself; GTK and the macOS font panel have no size limits, so there the chosen size is
+    /// clamped to the range after the dialog closes instead.
+    /// </summary>
     public float MaximumSize { get; set; } = 200f;
 
     /// <summary>

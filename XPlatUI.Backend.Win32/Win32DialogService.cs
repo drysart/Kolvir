@@ -135,7 +135,11 @@ internal sealed class Win32DialogService : IXPlatDialogService
 
         var initialSize = options.ClampSize(options.InitialSize);
         var initialPoints = XPlatFontMapping.PixelsToPoints(initialSize);
-        var initialTenths = (int)MathF.Round(initialPoints * 10f);
+
+        // ChooseFont's size field is in whole points, so it displays and returns the nearest one.
+        // Recording that rounded value is what lets an untouched dialog hand the caller's pixel
+        // size back exactly instead of turning 13 px into 13.33 px on every open.
+        var initialTenths = (int)MathF.Round(initialPoints) * 10;
 
         var logFont = new NativeMethods.LOGFONTW
         {

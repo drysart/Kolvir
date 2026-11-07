@@ -162,7 +162,12 @@ internal sealed class AppKitDialogService : IXPlatDialogService
         initial ??= NSFont.SystemFontOfSize(size)!;
 
         var panel = NSFontPanel.SharedFontPanel;
+
+        // SetSelectedFont seeds the panel's visible selection, not just the manager's notion of it:
+        // SetPanelFont alone leaves the face list on the family's regular face even when the font
+        // handed to it is bold, italic or both.
         panel.SetPanelFont(initial, false);
+        manager.SetSelectedFont(initial, false);
 
         var accepted = false;
         var selectButton = NSButton.CreateButton("Select", () =>

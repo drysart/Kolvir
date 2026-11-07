@@ -91,6 +91,12 @@ internal sealed class Gtk4DialogService : IXPlatDialogService
     /// contract is met by running the default main context until its response signal arrives. The
     /// dialog is modal to its owner and GTK keeps painting the rest of the application while that
     /// loop runs.
+    /// <para>
+    /// A font description assigned before the chooser is mapped is discarded when its family list
+    /// finishes populating. The dialog is therefore mapped transparent, the requested description
+    /// is retried until the chooser reports it, and only then is the dialog revealed - so it opens
+    /// on the caller's font rather than on whatever family the list happened to finish with.
+    /// </para>
     /// </remarks>
     public XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner)
     {
@@ -112,7 +118,6 @@ internal sealed class Gtk4DialogService : IXPlatDialogService
 
         var dialog = Gtk.FontChooserDialog.New(options.Title ?? FallbackTitle, ParentOf(owner));
         dialog.Modal = true;
-        dialog.SetFontDesc(initial);
 
         var response = int.MinValue;
         dialog.OnResponse += (_, value) => response = value.ResponseId;
@@ -129,11 +134,44 @@ internal sealed class Gtk4DialogService : IXPlatDialogService
             return true;
         };
 
+        uint initialSource = 0;
+        var attempts = 0;
+
         try
         {
+            // The chooser populates its family list asynchronously and only then keeps a
+            // description assigned to it; anything set before that is overwritten by the default
+            // family. The dialog is mapped transparently, the requested font is retried until the
+            // chooser reports it, and only then does the dialog become visible - so a caller sees
+            // its own font when the window appears rather than the list's first family.
+            dialog.SetOpacity(0.0);
             dialog.Present();
 
             var context = GLib.MainContext.Default();
+            initialSource = GLib.Functions.TimeoutAdd(0, 50, () =>
+            {
+                if (response != int.MinValue)
+                {
+                    dialog.SetOpacity(1.0);
+                    return false;
+                }
+
+                dialog.FontDesc = initial;
+
+                using var check = dialog.GetFontDesc();
+                var applied = check is not null
+                    && string.Equals(check.GetFamily(), initial.GetFamily(), StringComparison.Ordinal)
+                    && check.GetSize() == initial.GetSize();
+
+                if (applied || ++attempts >= 40)
+                {
+                    dialog.SetOpacity(1.0);
+                    return false;
+                }
+
+                return true;
+            });
+
             while (response == int.MinValue)
             {
                 context.Iteration(true);
@@ -173,9 +211,21 @@ internal sealed class Gtk4DialogService : IXPlatDialogService
         }
         finally
         {
+            if (initialSource != 0)
+            {
+                GLib.Functions.SourceRemove(initialSource);
+            }
+
             // Destroy drops the toplevel's native reference; the managed wrapper is collected the
-            // same way the other GTK dialogs here are left to be.
+            // same way the other GTK dialogs here are left to be. Flushing the pending unmap and
+            // destroy events matters when the caller opens another dialog immediately: GTK maps the
+            // next one only after the previous toplevel has really gone.
             dialog.Destroy();
+
+            var context = GLib.MainContext.Default();
+            for (var index = 0; index < 16 && context.Iteration(false); index++)
+            {
+            }
         }
     }
 
