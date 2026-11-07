@@ -975,12 +975,16 @@ public interface IXPlatDialogService
 	string? OpenFile(XPlatFileDialogOptions options, XPlatWindow? owner);
 	string? SaveFile(XPlatFileDialogOptions options, XPlatWindow? owner);
 	string? PickFolder(XPlatFileDialogOptions options, XPlatWindow? owner);
+	XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner);
 }
 ```
 
-Backed by `MessageBoxW` / `IFileDialog` on Windows, `NSAlert` / `NSOpenPanel` on macOS, and
-`Gtk.AlertDialog` / `Gtk.FileDialog` on GTK. `IFileDialog` rather than `GetOpenFileNameW` because only
-the former can pick a *folder* (`FOS_PICKFOLDERS`), and `PickFolder` is one of the four calls. The
+Backed by `MessageBoxW` / `IFileDialog` / `ChooseFontW` on Windows, `NSAlert` / `NSOpenPanel` /
+`NSFontPanel` on macOS, and `Gtk.AlertDialog` / `Gtk.FileDialog` / `Gtk.FontChooserDialog` on GTK.
+`IFileDialog` rather than `GetOpenFileNameW` because only the former can pick a *folder*
+(`FOS_PICKFOLDERS`), and `PickFolder` is one of the calls. `PickFont` returns an
+`XPlatFontSelection` value rather than an `XPlatFont`, so the caller owns the font it builds; null is
+cancellation. The
 service arrives through `RegisterServices` (§5.6)
 rather than as a nullable member on the backend interface, so the headless backend supplies a scripted
 implementation instead of a native one — which is also how modal-dialog code paths become testable.
