@@ -87,7 +87,43 @@ Two separable halves, and only the first belongs to the library proper:
 
 Do (1) first. (2) is worth its own plan document, the way selection got one.
 
-## 4. Deliberately not planned
+## 4. Controls not yet built
+
+Everything here is absent from the library today, ordered by how often an ordinary desktop
+application reaches for it. The costs are honest estimates of the work, not commitments: the point of
+listing them is that a reviewer can say "this next" without re-deriving the gap.
+
+### 4.1 Reached for in most applications
+
+| Control | What is missing | Cost |
+| --- | --- | --- |
+| A colour picker and a colour dialog | `IXPlatDialogService` covers files and message boxes only, so an application with settings, theming or any drawing surface has nothing. The picker is a popup control; the dialog is one more seam in `XPlatUI/Platform`, implemented by all four backends. | Medium |
+| A font dialog | Pairs with the font loading that shipped (`XPlatFont.FromFile`, `XPlatTheme.UseFont`): choose family, size and weight and see the preview. Same seam shape as the colour dialog. | Low to medium |
+| `XPlatSplitButton` / `XPlatDropDownButton` | `XPlatToolStrip` has buttons, labels, progress, separators and springs, but no button that is both a command and a menu. The popup layer and the menu system already do the hard part, so this is mostly composition. | Low |
+| `XPlatExpander` | `XPlatGroupBox` is static. Collapsible sections are the normal shape of a settings page, and there is nothing to collapse with. | Low |
+| A validation error provider | The error *icon*, the message, and the plumbing that maps a validation result onto a control. The span squiggles that shipped draw the underline; what is missing is the provider an application hands its validation rules to, in the shape WinForms' `ErrorProvider` has. | Low to medium |
+| `XPlatMaskedTextBox` | Input masks for dates, phone numbers, currency and the like. `XPlatNumericUpDown` covers numbers and `XPlatDateTimePicker` covers dates; free-form masked text has no answer. | Medium |
+| `XPlatWrapPanel` | Items flowing onto the next line at a width, which is what tag rows, button groups and thumbnail grids want. `XPlatStackPanel` never wraps and `XPlatTableLayoutPanel` needs its columns known up front. | Low |
+| A busy indicator and an overlay | A long operation needs something that is not a determinate `XPlatProgressBar`. A spinner plus a modal overlay that blocks input while work runs. | Low |
+| `XPlatToast` / notification banner | Transient success and error messages that do not need a dialog. Cheap now that `XPlatUI.Feature.Animations` supplies the fade and slide. | Low |
+
+### 4.2 Worth having, but not in the way of building an application
+
+`XPlatBadge` (a count or dot on a tab or button), a breadcrumb bar, wizard/stepper chrome,
+`XPlatRating`, an avatar or chip control, a zoomable and pannable canvas for diagram and image
+viewers, and animated expand/collapse, which the animation feature now makes a small job.
+
+### 4.3 Expensive, and deliberately not decided
+
+Not excluded the way section 5's list is - these are wanted, but each is large enough that it needs a
+plan document and a decision rather than a line in this table.
+
+| Not yet decided | What it would take |
+| --- | --- |
+| Editable rich text | `XPlatRichLabel` is display-only and the text-box spans are annotation, not formatting. In-place bold, italic and colour editing needs a document model, a formatting toolbar and a caret that understands runs - a project of its own, not a control. |
+| Charts | Arguably belongs to an application rather than to a control toolkit, the same argument that keeps printing out. If it does belong here, it needs a plan for axes, scales, series types and hit-testing. |
+
+## 5. Deliberately not planned
 
 Recorded so the decision is not re-litigated every time someone asks:
 
@@ -100,6 +136,12 @@ Recorded so the decision is not re-litigated every time someone asks:
 | Ribbon | Nobody wants it back. |
 | Printing / print preview | Belongs to an application, not to a Skia-drawn control toolkit. |
 
-## 5. Suggested order
+## 6. Suggested order
 
 1. **Drag previews** (§3.1) - small, and independent of everything above.
+2. **The small batch in §4.1** - `XPlatSplitButton`, `XPlatExpander`, `XPlatWrapPanel`, the busy
+   indicator and the toast. Five small controls, each independently shippable, none of them waiting
+   on anything.
+3. **The colour picker and its dialog** - the gap an application with any settings surface hits
+   first, and the last obviously missing dialog in the platform seam.
+4. Then the rest of §4.1 in the order listed, and §4.3 only once one of them has a plan document.
