@@ -1,9 +1,9 @@
 namespace XPlatUI.Backend.Gtk4;
 
 /// <summary>
-/// The GTK4 dialog service: message boxes come from <see cref="Gtk.AlertDialog"/> and file pickers
-/// from <see cref="Gtk.FileDialog"/>, so dialogs look and behave like the rest of the desktop
-/// instead of being drawn by SkiaSharp.
+/// The GTK4 dialog service: message boxes come from <see cref="Gtk.AlertDialog"/>, file pickers
+/// from <see cref="Gtk.FileDialog"/> and fonts from <see cref="Gtk.FontChooserDialog"/>, so dialogs
+/// look and behave like the rest of the desktop instead of being drawn by SkiaSharp.
 /// </summary>
 /// <remarks>
 /// Both GTK4 dialog APIs are asynchronous, while <see cref="IXPlatDialogService"/> is deliberately
@@ -84,6 +84,96 @@ internal sealed class Gtk4DialogService : IXPlatDialogService
 
         return Complete(dialog.SelectFolderAsync(ParentOf(owner)));
     }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>Gtk.FontChooserDialog</c> is asynchronous like the other GTK4 dialogs, so the synchronous
+    /// contract is met by running the default main context until its response signal arrives. The
+    /// dialog is modal to its owner and GTK keeps painting the rest of the application while that
+    /// loop runs.
+    /// </remarks>
+    public XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var initialSize = options.ClampSize(options.InitialSize);
+        var initialUnits = ToPangoUnits(initialSize);
+
+        // A font description is a copy, so it is disposed after the dialog has read it.
+        using var initial = Pango.FontDescription.New();
+        if (!string.IsNullOrWhiteSpace(options.InitialFamilyName))
+        {
+            initial.SetFamily(options.InitialFamilyName);
+        }
+
+        initial.SetSize(initialUnits);
+        initial.SetWeight((Pango.Weight)XPlatFontMapping.ClampWeight(options.InitialWeight));
+        initial.SetStyle(options.InitialItalic ? Pango.Style.Italic : Pango.Style.Normal);
+
+        var dialog = Gtk.FontChooserDialog.New(options.Title ?? FallbackTitle, ParentOf(owner));
+        dialog.Modal = true;
+        dialog.SetFontDesc(initial);
+
+        var response = int.MinValue;
+        dialog.OnResponse += (_, value) => response = value.ResponseId;
+
+        try
+        {
+            dialog.Present();
+
+            var context = GLib.MainContext.Default();
+            while (response == int.MinValue)
+            {
+                context.Iteration(true);
+            }
+
+            // Anything other than Select is the user closing the dialog: Cancel, Escape or the
+            // window manager's close request all arrive here under a different response.
+            if (response != (int)Gtk.ResponseType.Ok)
+            {
+                return null;
+            }
+
+            using var chosen = dialog.GetFontDesc();
+            if (chosen is null)
+            {
+                var fallbackFamily = string.IsNullOrWhiteSpace(options.InitialFamilyName) ? "sans-serif" : options.InitialFamilyName;
+                return new XPlatFontSelection(fallbackFamily, initialSize, XPlatFontMapping.ClampWeight(options.InitialWeight), options.InitialItalic);
+            }
+
+            var family = chosen.GetFamily();
+            if (string.IsNullOrWhiteSpace(family))
+            {
+                family = string.IsNullOrWhiteSpace(options.InitialFamilyName) ? "sans-serif" : options.InitialFamilyName;
+            }
+
+            // Pango sizes are in points. A size unchanged from the one the dialog was seeded with
+            // keeps the caller's exact pixel value; a changed one is converted back through 96 DPI.
+            var chosenUnits = chosen.GetSize();
+            var size = chosenUnits == initialUnits
+                ? initialSize
+                : options.ClampSize(FromPangoUnits(chosenUnits));
+
+            var style = chosen.GetStyle();
+            var italic = style is Pango.Style.Italic or Pango.Style.Oblique;
+
+            return new XPlatFontSelection(family, size, (int)chosen.GetWeight(), italic);
+        }
+        finally
+        {
+            dialog.Destroy();
+            dialog.Dispose();
+        }
+    }
+
+    /// <summary>Pango stores font sizes as points multiplied by this factor.</summary>
+    private const int PangoUnitsPerPoint = 1024;
+
+    private static int ToPangoUnits(float pixels) =>
+        (int)MathF.Round(XPlatFontMapping.PixelsToPoints(pixels) * PangoUnitsPerPoint);
+
+    private static float FromPangoUnits(int units) =>
+        XPlatFontMapping.PointsToPixels(units / (float)PangoUnitsPerPoint);
 
     private static void Configure(Gtk.FileDialog dialog, XPlatFileDialogOptions options)
     {
