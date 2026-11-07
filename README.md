@@ -2368,7 +2368,11 @@ the panel's close and minimize buttons, and runs the panel in an application-mod
 of those is pressed. Return selects, Escape cancels, and a `finally` aborts the session if anything
 else throws, so the synchronous contract is real rather than a panel left floating over a caller
 that already returned. The backend's common-mode poll timer keeps `Invoke` work flowing through the
-nested loop, exactly as it does for an `NSAlert`.
+nested loop, exactly as it does for an `NSAlert`. Because `NSFontPanel` is shared and AppKit
+remembers its frame in the application's defaults, every modal presentation gives it a frame of at
+least 600 by 400 points, centred on the owner window (or on the visible screen when there is no
+owner) and clamped inside the visible frame of the screen the owner is on, in points rather than
+backing pixels.
 
 Weight is the OpenType value `XPlatFont.Weight` reports - 400 regular, 700 bold - which `LOGFONT`
 and Pango use directly. AppKit does not: `NSFontManager` reports a 0-15 index where 5 is regular and

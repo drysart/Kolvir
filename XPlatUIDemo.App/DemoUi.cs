@@ -22,7 +22,6 @@ public sealed class DemoUi
     private XPlatLabel _statusLabel = null!;
     private XPlatLabel _counterLabel = null!;
     private XPlatButton _primaryButton = null!;
-    private XPlatButton _dialogAnchor = null!;
     private XPlatListBox _navList = null!;
     private XPlatPanel _stage = null!;
     private XPlatControl[] _pages = null!;
@@ -675,8 +674,6 @@ public sealed class DemoUi
         row.Controls.Add(DialogButton("Save file", () => ShowFileDialog(DialogKind.Save)));
         row.Controls.Add(DialogButton("Pick folder", () => ShowFileDialog(DialogKind.Folder)));
 
-        _dialogAnchor = messageBox;
-
         section.Controls.Add(row);
         return section;
     }
@@ -760,8 +757,13 @@ public sealed class DemoUi
         Folder,
     }
 
-    /// <summary>The window the demo is shown in, used to parent the dialogs.</summary>
-    private XPlatWindow? OwnerWindow => _dialogAnchor.Window;
+    /// <summary>
+    /// The window the demo is shown in, used to parent the dialogs. It is resolved from the root at
+    /// call time rather than from a control on one page: only the page being viewed is attached to
+    /// the window, so a control on another page has no <see cref="XPlatControl.Window"/> and would
+    /// make a dialog opened from here silently do nothing.
+    /// </summary>
+    private XPlatWindow? OwnerWindow => Root.Window;
 
     /// <summary>
     /// Shows a small window owned by the window hosting the sample. Ownership is what makes a
