@@ -16,6 +16,7 @@ public sealed class HeadlessDialogService : IXPlatDialogService
     private readonly List<XPlatFileDialogOptions> _openFiles = [];
     private readonly List<XPlatFileDialogOptions> _saveFiles = [];
     private readonly List<XPlatFileDialogOptions> _folders = [];
+    private readonly List<XPlatFontDialogOptions> _fonts = [];
 
     /// <summary>Answers <see cref="ShowMessage"/>. Defaults to <see cref="XPlatDialogResult.Cancel"/>.</summary>
     public Func<XPlatMessageBoxOptions, XPlatWindow?, XPlatDialogResult> MessageHandler { get; set; } =
@@ -30,6 +31,10 @@ public sealed class HeadlessDialogService : IXPlatDialogService
     /// <summary>Answers <see cref="PickFolder"/>. Defaults to null, meaning the user cancelled.</summary>
     public Func<XPlatFileDialogOptions, XPlatWindow?, string?> PickFolderHandler { get; set; } = static (_, _) => null;
 
+    /// <summary>Answers <see cref="PickFont"/>. Defaults to null, meaning the user cancelled.</summary>
+    public Func<XPlatFontDialogOptions, XPlatWindow?, XPlatFontSelection?> FontHandler { get; set; } =
+        static (_, _) => null;
+
     /// <summary>Every message box request, in order.</summary>
     public IReadOnlyList<XPlatMessageBoxOptions> Messages => _messages;
 
@@ -41,6 +46,9 @@ public sealed class HeadlessDialogService : IXPlatDialogService
 
     /// <summary>Every folder request, in order.</summary>
     public IReadOnlyList<XPlatFileDialogOptions> PickFolderRequests => _folders;
+
+    /// <summary>Every font request, in order.</summary>
+    public IReadOnlyList<XPlatFontDialogOptions> FontRequests => _fonts;
 
     /// <inheritdoc />
     public XPlatDialogResult ShowMessage(XPlatMessageBoxOptions options, XPlatWindow? owner)
@@ -76,5 +84,14 @@ public sealed class HeadlessDialogService : IXPlatDialogService
 
         _folders.Add(options);
         return PickFolderHandler(options, owner);
+    }
+
+    /// <inheritdoc />
+    public XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        _fonts.Add(options);
+        return FontHandler(options, owner);
     }
 }
