@@ -67,7 +67,7 @@ public class XPlatColorPicker : XPlatControl
     private const float LabelWidth = 30f;
     private const float SectionGap = 8f;
     private const float PreferredSquare = 168f;
-    private const float NarrowLayoutWidth = 260f;
+    private const float NarrowLayoutWidth = 210f;
     private const int HueMaximum = 359;
 
     private static readonly string[] RgbLabels = ["R", "G", "B"];
