@@ -144,6 +144,28 @@ public enum XPlatDrawItemState
     Hot = 8,
 }
 
+/// <summary>
+/// Which colour space an <see cref="XPlatColorPicker"/> shows its three component fields in.
+/// </summary>
+/// <remarks>
+/// <see cref="Hsv"/> is the space design tools call HSB; the enum uses one name for it rather than
+/// carrying a synonym. <see cref="Rgb"/> and <see cref="Hsv"/> share the same saturation/value
+/// square, because RGB has no two-axis shape of its own; <see cref="Hsl"/> has its own
+/// saturation/lightness square. A mode change is a display change only: the colour is never
+/// converted through the components, so switching modes leaves <c>Color</c> exactly as it was.
+/// </remarks>
+public enum XPlatColorMode
+{
+    /// <summary>Three 0-255 channel fields: red, green and blue. The square is the HSV square.</summary>
+    Rgb = 0,
+
+    /// <summary>Hue in degrees (0-359), saturation and lightness as percentages (0-100).</summary>
+    Hsl = 1,
+
+    /// <summary>Hue in degrees (0-359), saturation and value as percentages (0-100). HSB is the same space.</summary>
+    Hsv = 2,
+}
+
 /// <summary>Mouse cursor requested by a control.</summary>
 public enum XPlatCursor
 {

@@ -94,6 +94,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTextBox` + `XPlatUI.Undo` | `TextBox.UndoEnabled` | `UndoEnabled`, `CanUndo`/`CanRedo`, `Undo()`, `Redo()` and `ClearUndoStack()` as an opt-in extension: a coalescing history (five-second runs of typing or deleting, one entry per selection replacement) that records the caret, the selection and a multi-line field's scroll offsets with each entry |
 | `XPlatNumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
 | `XPlatTrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
+| `XPlatColorPicker` | `ColorDialog` (the picker half) | Spectrum square with saturation across and value or lightness down, a hue strip beside it, three component fields and a hex field; `ColorMode` switches the fields between RGB, HSL and HSV without changing the colour |
 | `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
 | `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
 | `XPlatListView` | `ListView` | `List` and `Details` views over the same virtualized rows: columns, header-click sorting, grid lines |
@@ -1050,6 +1051,72 @@ var amount = new XPlatNumericUpDown(1.5m)
 
 var zoom = new XPlatTrackBar { Minimum = 25f, Maximum = 400f, Value = 100f, TickFrequency = 25f };
 zoom.AddValueChangedHandler(_ => SetStatus($"Zoom {zoom.Value:0}%"));
+```
+
+### Colour picker
+
+`XPlatColorPicker` is a spectrum square with a hue strip beside it, three component fields and a
+hex field. The square's horizontal axis is saturation, from zero at the left to full at the right;
+its vertical axis is value in RGB and HSV and lightness in HSL, full at the top and zero at the
+bottom. The hue strip carries the third axis with 0 degrees (red) at the top and 359 at the bottom.
+RGB and HSV share the same square because RGB has no two-axis shape of its own; HSL has its own
+saturation/lightness square, whose top and bottom rows are white and black all the way across
+because lightness alone decides the colour there.
+
+`ColorMode` decides what the three component fields show, and it is a display change only:
+switching between `Rgb`, `Hsl` and `Hsv` never converts the colour through the components, so
+`Color` is preserved exactly and no `AddColorChangedHandler` notification is raised. The fields are
+rewritten from the colour - and the hue is remembered - when the mode changes; they do not keep the
+text of the space they were showing. HSB is the same space as HSV, so the enum has no separate
+`Hsb` value; a value read from a design tool that calls it HSB belongs in `Hsv`.
+
+The hue is kept as an axis of its own rather than read back from the colour every time. That is
+what stops a grey from sending the square to red and the H field to zero: a grey has no hue of its
+own, so the picker keeps the last hue it had and the square stays on that hue while saturation or
+lightness takes the colour to grey.
+
+| Mode | Components | Range |
+| --- | --- | --- |
+| `Rgb` | R, G, B | 0-255 each |
+| `Hsl` | H, S, L | 0-359 degrees, then 0-100 percent |
+| `Hsv` | H, S, V | 0-359 degrees, then 0-100 percent |
+
+The component fields parse as they are typed, so a valid value updates the picker immediately and
+an out-of-range one is clamped on the way in: typing `300` into a channel holds the colour at 255
+and typing `400` into the hue holds it at 359. The text is not rewritten underneath the user while
+the edit is in progress; Enter, the focus leaving, or one of the arrow keys puts the field back to
+the value actually held. Enter then moves the focus on rather than staying in the field, Escape
+puts the field back without committing, the arrow keys step by one and Page Up / Page Down by ten.
+A field selects its contents when it takes the focus, so a value can be replaced by typing.
+
+The hex field takes an HTML/CSS colour: `#RRGGBB`, the `#RGB` shorthand, or either without the
+leading hash, in upper or lower case. It writes back uppercase `#RRGGBB`. A complete valid value is
+applied while it is typed; an incomplete or malformed one leaves the colour alone, and Enter or
+leaving the field rewrites it from the current colour. The picker edits the three colour channels,
+so the alpha a colour arrives with is preserved through every edit and is never shown; an alpha
+hex form is not accepted rather than being guessed at as either ARGB or RGBA.
+
+The square's image is generated from the current hue at the resolution the canvas is painting at,
+and it is cached per hue, space and physical size. A repaint, a hover, a focus change or a marker
+move reuses that image; only a new hue, a switch to or from `Hsl`, or a resize regenerates it, and
+that is what keeps a drag in the square from paying for a per-pixel loop per frame. The hue strip
+is a linear gradient shader and needs no cache.
+
+Pressing in the square focuses it and starts a drag whose value follows the pointer; leaving the
+square clamps to the nearest edge and the drag continues until the button is released. The arrow
+keys move saturation by one percent and value or lightness by one percent, Page Up and Page Down
+move value or lightness by ten, and Home and End put saturation at its ends. The hue strip moves one
+degree per arrow press and ten per page press, and Home and End jump to 0 and 359. Tab visits the
+square, the hue strip, the three component fields and then the hex field.
+
+```csharp
+var picker = new XPlatColorPicker
+{
+    Color = new SKColor(0x33, 0x66, 0x99),
+    ColorMode = XPlatColorMode.Hsv,
+};
+
+picker.AddColorChangedHandler(_ => SetStatus($"Chose #{picker.Color.Red:X2}{picker.Color.Green:X2}{picker.Color.Blue:X2}"));
 ```
 
 ### Link labels

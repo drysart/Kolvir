@@ -413,6 +413,7 @@ public sealed class DemoUi
         ("Inherited appearance", demo => Page(demo.BuildAppearanceDemo())),
         ("Tab order", demo => Page(demo.BuildTabOrderDemo())),
         ("Animations", demo => Page(demo.BuildAnimationDemo())),
+        ("Colour picker", demo => Page(demo.BuildColorPickerDemo())),
     };
 
     /// <summary>
@@ -5185,6 +5186,107 @@ public sealed class DemoUi
 
         return card;
     }
+
+    /// <summary>
+    /// The spectrum colour picker, one instance per colour space plus a narrow one. Each column
+    /// carries a live readout of the colour it is producing, so dragging one square shows what the
+    /// same value looks like in the other two modes, and the narrow instance shows the component
+    /// fields stacking instead of sharing a row.
+    /// </summary>
+    private XPlatPanel BuildColorPickerDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Colour picker"));
+
+        card.Controls.Add(new XPlatLabel(
+            "The square runs saturation left to right and value (RGB, HSV) or lightness (HSL) top to " +
+            "bottom; the strip on the right is hue, red at the top. HSB is the same space as HSV.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 42f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 318f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f),
+        };
+
+        row.Controls.Add(BuildColorPickerColumn("RGB", XPlatColorMode.Rgb, 250f));
+        row.Controls.Add(BuildColorPickerColumn("HSV (HSB)", XPlatColorMode.Hsv, 250f));
+        row.Controls.Add(BuildColorPickerColumn("HSL", XPlatColorMode.Hsl, 250f));
+        row.Controls.Add(BuildColorPickerColumn("Narrow: fields stack", XPlatColorMode.Hsl, 170f));
+
+        card.Controls.Add(row);
+        return card;
+    }
+
+    private XPlatPanel BuildColorPickerColumn(string title, XPlatColorMode mode, float width)
+    {
+        var column = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = width,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 10f, 0f),
+        };
+
+        var picker = new XPlatColorPicker
+        {
+            Dock = XDock.Top,
+            Height = 280f,
+            ColorMode = mode,
+            Color = new SKColor(0x33, 0x66, 0x99),
+        };
+
+        var readout = new XPlatLabel(DescribeColorPicker(picker))
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 20f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.Accent,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+            Selectable = true,
+        };
+
+        picker.AddColorChangedHandler(_ => readout.Text = DescribeColorPicker(picker));
+
+        column.Controls.Add(new XPlatLabel(title)
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 18f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.BottomLeft,
+        });
+
+        column.Controls.Add(picker);
+        column.Controls.Add(readout);
+        return column;
+    }
+
+    private static string DescribeColorPicker(XPlatColorPicker picker) =>
+        $"{picker.ColorMode}  #{picker.Color.Red:X2}{picker.Color.Green:X2}{picker.Color.Blue:X2}";
 
     /// <summary>
     /// A panel that draws the focus ring when it has the focus. A plain panel has no chrome of its
