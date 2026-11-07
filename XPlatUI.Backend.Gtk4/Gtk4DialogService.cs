@@ -117,6 +117,18 @@ internal sealed class Gtk4DialogService : IXPlatDialogService
         var response = int.MinValue;
         dialog.OnResponse += (_, value) => response = value.ResponseId;
 
+        // A window-manager close is a cancel, and stopping the pump here means a dialog that never
+        // emits a response cannot leave the caller blocked.
+        dialog.OnCloseRequest += (_, _) =>
+        {
+            if (response == int.MinValue)
+            {
+                response = (int)Gtk.ResponseType.Cancel;
+            }
+
+            return true;
+        };
+
         try
         {
             dialog.Present();
@@ -161,8 +173,9 @@ internal sealed class Gtk4DialogService : IXPlatDialogService
         }
         finally
         {
+            // Destroy drops the toplevel's native reference; the managed wrapper is collected the
+            // same way the other GTK dialogs here are left to be.
             dialog.Destroy();
-            dialog.Dispose();
         }
     }
 

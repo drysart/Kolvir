@@ -187,11 +187,15 @@ internal sealed class Win32DialogService : IXPlatDialogService
         // The dialog reports tenths of a point. When it comes back with the value it was seeded
         // with, the caller's own size is kept exactly rather than round-tripped through a unit that
         // cannot represent every pixel size.
-        var size = choose.iPointSize == initialTenths
+        var size = choose.iPointSize == initialTenths || choose.iPointSize <= 0
             ? initialSize
             : options.ClampSize(XPlatFontMapping.PointsToPixels(choose.iPointSize / 10f));
 
-        return new XPlatFontSelection(family, size, logFont.lfWeight, logFont.lfItalic != 0);
+        // LOGFONT uses 0 as "the face's own default", which is regular for every family that has
+        // one; passing that through would produce a weight of 1.
+        var weight = logFont.lfWeight == 0 ? XPlatFontMapping.NormalWeight : logFont.lfWeight;
+
+        return new XPlatFontSelection(family, size, weight, logFont.lfItalic != 0);
     }
 
     /// <summary>Copies a family name into the fixed face-name buffer, truncating at the native limit.</summary>
