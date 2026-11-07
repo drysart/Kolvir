@@ -58,8 +58,7 @@ Measured: the process stays alive, and `pgrep -fl XPlatUIDemoApp` shows the bina
 reported Finder while the demo was running. That is fine for looking at a window yourself, and fine
 for any headless check, but it matters for **synthetic input**: macOS delivers synthesised keystrokes
 and clicks to the frontmost application, so they will go to whatever is frontmost instead of the demo,
-which makes a working feature look broken. Activate the app before driving input — click it, or use
-the route below.
+which makes a working feature look broken. See "Making the app frontmost without Launch Services" below for the one-line fix, which was measured working.
 
 ## The other route that works: `open -n`
 
@@ -90,12 +89,46 @@ Launch Services entirely.
 | A check that drives real clicks or keystrokes | `open -n …app --args --page N`, because it makes the app frontmost |
 | Anything at all | build first; `dotnet run` without the profile draws nothing |
 
-## Other things that bite on this host
+## Driving the app with `osascript`, and the `-25211` trap
 
-- **`osascript` may be refused.** System Events returned `not allowed assistive access (-25211)` on
-  this host on 2026-11-07, which is a TCC permission change rather than a fault in the app. If
-  `osascript` is refused, drive input with a CGEvent helper instead, and do not conclude the feature
-  is broken because keystrokes went nowhere.
+`osascript` and System Events **work** on this host over SSH; accessibility is already granted
+(`AXIsProcessTrusted()` reports `true`, and UI-element queries against a named process succeed). Do
+not go looking for TCC settings to change, and do not switch to a CGEvent helper for that reason.
+
+There is one AppleScript form that fails, and it is worth knowing by name because the error message
+blames permissions:
+
+```
+tell application "System Events" to get name of every window of every process whose name contains "XPlat"
+→ System Events got an error: osascript is not allowed assistive access. (-25211)
+```
+
+Enumerating the **windows of every** process reaches into applications that do not expose themselves
+to accessibility, and System Events fails on the first one it cannot read. Address the process
+directly instead, which works:
+
+```sh
+osascript -e 'tell application "System Events" to tell process "XPlatUIDemoApp" to get name of every window'
+# → XPlat UI - AppKit
+```
+
+Note the names: the **process** is `XPlatUIDemoApp`, while the **window** is titled `XPlat UI - AppKit`.
+
+## Making the app frontmost without Launch Services
+
+The launch-profile route does not activate the app, which matters because macOS delivers synthesised
+input to the frontmost application. Activate it explicitly — measured working:
+
+```sh
+osascript -e 'tell application "System Events" to set frontmost of process "XPlatUIDemoApp" to true'
+osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'
+# → XPlatUIDemoApp
+```
+
+So `dotnet run --launch-profile mac` followed by that activation is enough to drive real clicks and
+keystrokes, with no involvement of the bundle's Launch Services entry.
+
+## Other things that bite on this host
 - **Screenshots** are 3840×2160 on this display (Retina 2×). Window origins reported by the windowing
   layer are in points; multiply by two for pixels.
 - **The app follows the desktop appearance** and opens dark under a dark desktop. Pass `--light` when
