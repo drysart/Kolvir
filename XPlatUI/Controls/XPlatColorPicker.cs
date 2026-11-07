@@ -1290,7 +1290,10 @@ public class XPlatColorPicker : XPlatControl
             CornerRadius = 5f;
             Padding = new XPlatThickness(4f, 4f);
             MinimumSize = new SKSize(0f, 28f);
-            MaxLength = 3;
+
+            // One character more than a valid value holds, so an out-of-range paste is clamped
+            // rather than silently cut down to a different number.
+            MaxLength = 4;
         }
 
         internal void Sync(int value)
@@ -1412,7 +1415,10 @@ public class XPlatColorPicker : XPlatControl
             CornerRadius = 5f;
             Padding = new XPlatThickness(4f, 4f);
             MinimumSize = new SKSize(0f, 28f);
-            MaxLength = 7;
+
+            // One more than "#RRGGBB" holds, so a pasted alpha form reaches the parser and is
+            // rejected rather than being cut down to a different, valid colour.
+            MaxLength = 9;
             PlaceholderText = "#RRGGBB";
         }
 

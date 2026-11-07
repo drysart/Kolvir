@@ -377,7 +377,7 @@ public sealed class ColorPickerTests : HeadlessTestBase
 
         picker.Color = new SKColor(255, 0, 0, 128);
         scene.Host.SetFocus(hex);
-        hex.Text = "#11223344";
+        scene.Type("#11223344");
         scene.Key(XPlatKey.Enter);
 
         Assert.AreEqual(new SKColor(255, 0, 0, 128), picker.Color, "the alpha form is rejected, not read as a colour");
