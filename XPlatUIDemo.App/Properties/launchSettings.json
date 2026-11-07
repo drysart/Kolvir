@@ -8,6 +8,10 @@
       "environmentVariables": {
         "XPLATUI_DEBUG_PAINT": "1"
       }
+    },
+    "mac": {
+      "commandName": "Executable",
+      "executablePath": "XPlatUIDemo.App/bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app/Contents/MacOS/XPlatUIDemoApp"
     }
   }
 }
