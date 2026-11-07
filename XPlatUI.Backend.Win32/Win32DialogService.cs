@@ -5,8 +5,8 @@ using System.Runtime.InteropServices.Marshalling;
 namespace XPlatUI.Backend.Win32;
 
 /// <summary>
-/// The Windows <see cref="IXPlatDialogService"/>: <c>MessageBoxW</c> for messages and the
-/// <c>IFileDialog</c> family for open, save and folder picking.
+/// The Windows <see cref="IXPlatDialogService"/>: <c>MessageBoxW</c> for messages, the
+/// <c>IFileDialog</c> family for open, save and folder picking, and <c>ChooseFontW</c> for fonts.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -113,6 +113,112 @@ internal sealed class Win32DialogService : IXPlatDialogService
             FileOpenDialogOptions.PickFolders | FileOpenDialogOptions.PathMustExist,
             options,
             owner);
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// <c>ChooseFontW</c> runs its own modal message loop on the calling thread, so it satisfies the
+    /// nested-loop requirement without this class pumping anything. It is plain <c>comdlg32</c> and
+    /// needs neither COM nor an apartment, so unlike the shell file dialogs it works on an MTA
+    /// thread too.
+    /// </remarks>
+    public unsafe XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        var ownerHandle = HandleOf(owner);
+        var dpi = ownerHandle != IntPtr.Zero ? NativeMethods.GetDpiForWindow(ownerHandle) : NativeMethods.GetDpiForSystem();
+        if (dpi == 0)
+        {
+            dpi = 96;
+        }
+
+        var initialSize = options.ClampSize(options.InitialSize);
+        var initialPoints = XPlatFontMapping.PixelsToPoints(initialSize);
+        var initialTenths = (int)MathF.Round(initialPoints * 10f);
+
+        var logFont = new NativeMethods.LOGFONTW
+        {
+            // A logical pixel is 1/96 inch and a point is 1/72, so the device height the dialog
+            // starts from is the logical size scaled by the display's DPI.
+            lfHeight = -(int)MathF.Round(initialSize * dpi / 96f),
+            lfWeight = XPlatFontMapping.ClampWeight(options.InitialWeight),
+            lfItalic = (byte)(options.InitialItalic ? 1 : 0),
+            lfCharSet = 1, // DEFAULT_CHARSET
+        };
+
+        // The struct is a local, so its address is stable for the duration of the call and the
+        // fixed buffer never needs a pin. Passing the pointer keeps the struct blittable, which
+        // matters under NativeAOT.
+        var font = &logFont;
+        SetFaceName(font, options.InitialFamilyName);
+
+        var minimumPoints = Math.Max(1, (int)MathF.Round(XPlatFontMapping.PixelsToPoints(options.ClampSize(options.MinimumSize))));
+        var maximumPoints = Math.Max(minimumPoints, (int)MathF.Round(XPlatFontMapping.PixelsToPoints(options.ClampSize(options.MaximumSize))));
+
+        var choose = new NativeMethods.CHOOSEFONT
+        {
+            lStructSize = Marshal.SizeOf<NativeMethods.CHOOSEFONT>(),
+            hwndOwner = ownerHandle,
+            lpLogFont = (IntPtr)font,
+            iPointSize = initialTenths,
+            Flags = NativeMethods.CfScreenFonts
+                | NativeMethods.CfInittLogFontStruct
+                | NativeMethods.CfLimitSize
+                | NativeMethods.CfForceFontExist
+                | NativeMethods.CfScalableOnly
+                | NativeMethods.CfNoVertFonts,
+            nSizeMin = minimumPoints,
+            nSizeMax = maximumPoints,
+        };
+
+        if (!NativeMethods.ChooseFontW(ref choose))
+        {
+            // False covers Cancel and a dialog that could not be created; both are "no choice".
+            return null;
+        }
+
+        var family = FaceNameOf(font);
+        if (string.IsNullOrWhiteSpace(family))
+        {
+            family = string.IsNullOrWhiteSpace(options.InitialFamilyName) ? "sans-serif" : options.InitialFamilyName;
+        }
+
+        // The dialog reports tenths of a point. When it comes back with the value it was seeded
+        // with, the caller's own size is kept exactly rather than round-tripped through a unit that
+        // cannot represent every pixel size.
+        var size = choose.iPointSize == initialTenths
+            ? initialSize
+            : options.ClampSize(XPlatFontMapping.PointsToPixels(choose.iPointSize / 10f));
+
+        return new XPlatFontSelection(family, size, logFont.lfWeight, logFont.lfItalic != 0);
+    }
+
+    /// <summary>Copies a family name into the fixed face-name buffer, truncating at the native limit.</summary>
+    private static unsafe void SetFaceName(NativeMethods.LOGFONTW* logFont, string? family)
+    {
+        if (string.IsNullOrEmpty(family))
+        {
+            return;
+        }
+
+        var length = Math.Min(family.Length, 31);
+        for (var index = 0; index < length; index++)
+        {
+            logFont->lfFaceName[index] = family[index];
+        }
+    }
+
+    /// <summary>Reads the NUL-terminated face name out of the fixed buffer.</summary>
+    private static unsafe string FaceNameOf(NativeMethods.LOGFONTW* logFont)
+    {
+        var length = 0;
+        while (length < 32 && logFont->lfFaceName[length] != '\0')
+        {
+            length++;
+        }
+
+        return length == 0 ? string.Empty : new string(logFont->lfFaceName, 0, length);
     }
 
     /// <summary>
