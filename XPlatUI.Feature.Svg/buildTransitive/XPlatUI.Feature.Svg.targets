@@ -1,0 +1,125 @@
+<Project>
+
+  <!-- Build assets for anything that references XPlatUI.Feature.Svg. A NuGet consumer gets this
+	   automatically, because it is packed into buildTransitive/; this repository's own projects use a
+	   ProjectReference, which imports nothing, so Directory.Build.targets imports it explicitly. Both
+	   routes end up in the same place, which is why the file lives here rather than in an app.
+
+	   The feature renders SVG through Svg.Skia, which shapes <text> with HarfBuzzSharp - a native
+	   library of its own, separate from SkiaSharp's. A NativeAOT publish emits a single native
+	   executable, so that library cannot simply sit next to it either. These targets compress the copy
+	   the build already resolved for this platform and embed it in the consuming application, which
+	   HarfBuzzNativeLoader extracts and loads before the first shaped text. Set
+	   $(EmbedHarfBuzzSharpNative) to false to leave the library as a loose file beside the executable
+	   instead. -->
+
+  <PropertyGroup>
+	<!-- Decided once, here, so every target below shares one condition. This mirrors
+		 XPlatUI/buildTransitive/XPlatUI.targets, including the reason the test is shaped this way:
+
+		 OutputType is part of the test because PublishAot can arrive as a global property, and a
+		 global property reaches every project the publish touches: a class library that references
+		 the feature is then built with PublishAot set while having no runtime identifier and
+		 therefore no native assets to find. Only an application has anything to embed a library in.
+
+		 macOS is excluded for the reason the core targets give, and the measurement behind it is in
+		 README.md: a NativeAOT macOS publish is an .app bundle, whose native libraries are loose
+		 files inside it, and the AOT image links the dylib at load time rather than resolving the
+		 import at call time. -->
+	<_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative
+		Condition="'$(_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative)' == ''
+				   and '$(PublishAot)' == 'true'
+				   and '$(EmbedHarfBuzzSharpNative)' != 'false'
+				   and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')
+				   and !$([MSBuild]::IsOSPlatform('osx'))">true</_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative>
+  </PropertyGroup>
+
+  <UsingTask TaskName="XPlatUIFeatureSvgGZipFile"
+			 TaskFactory="RoslynCodeTaskFactory"
+			 AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+	<ParameterGroup>
+	  <Source ParameterType="System.String" Required="true" />
+	  <Destination ParameterType="System.String" Required="true" />
+	</ParameterGroup>
+	<Task>
+	  <Using Namespace="System.IO" />
+	  <Using Namespace="System.IO.Compression" />
+	  <Code Type="Fragment" Language="cs"><![CDATA[
+		using (var input = File.OpenRead(Source))
+		using (var output = File.Create(Destination))
+		using (var gzip = new GZipStream(output, CompressionLevel.Optimal))
+		{
+			input.CopyTo(gzip);
+		}
+	  ]]></Code>
+	</Task>
+  </UsingTask>
+
+  <!-- Finds the HarfBuzz library the package graph resolved for this platform and registers the
+	   compressed copy as an embedded resource. It hooks CreateManifestResourceNames for the same
+	   reason the core targets do: that is what turns @(EmbeddedResource) into compiler inputs.
+
+	   The file name is discovered rather than configured per target framework, and the extension is
+	   checked too, because the same package ships symbol files with the same stem and only the
+	   library itself is wanted.
+
+	   A missing library is not an error here, unlike in the core targets. HarfBuzz is optional per
+	   platform - on Windows libSkiaSharp shapes text itself - so an application is free to exclude
+	   the native asset packages, and the feature then carries no native of its own. The loader finds
+	   no archive and leaves the platform's default probing alone. -->
+  <Target Name="_XPlatUIFeatureSvgLocateHarfBuzzSharpNative"
+		  Condition="'$(_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative)' == 'true'"
+		  DependsOnTargets="ResolvePackageAssets"
+		  BeforeTargets="CreateManifestResourceNames">
+	<ItemGroup>
+	  <_XPlatUIFeatureSvgHarfBuzzSharpNative Include="@(NativeCopyLocalItems)"
+											 Condition="'%(NativeCopyLocalItems.Filename)' == 'libHarfBuzzSharp'
+														and ('%(NativeCopyLocalItems.Extension)' == '.dll'
+															 or '%(NativeCopyLocalItems.Extension)' == '.so'
+															 or '%(NativeCopyLocalItems.Extension)' == '.dylib')" />
+	</ItemGroup>
+	<PropertyGroup>
+	  <!-- IntermediateOutputPath is only known at execution time, so the archive path is computed
+		   here. Forward slashes so the same path works on Windows and Unix. -->
+	  <_XPlatUIFeatureSvgHarfBuzzSharpNativeFileName>@(_XPlatUIFeatureSvgHarfBuzzSharpNative->'%(Filename)%(Extension)')</_XPlatUIFeatureSvgHarfBuzzSharpNativeFileName>
+	  <_XPlatUIFeatureSvgHarfBuzzSharpArchive>$(IntermediateOutputPath)native/$(_XPlatUIFeatureSvgHarfBuzzSharpNativeFileName).gz</_XPlatUIFeatureSvgHarfBuzzSharpArchive>
+	</PropertyGroup>
+	<ItemGroup Condition="'@(_XPlatUIFeatureSvgHarfBuzzSharpNative)' != ''">
+	  <!-- The logical name is the contract with HarfBuzzNativeLoader, which looks it up by the file
+		   name it expects: XPlatUI.Feature.Svg.Native.<file>.gz. -->
+	  <EmbeddedResource Include="$(_XPlatUIFeatureSvgHarfBuzzSharpArchive)"
+						LogicalName="XPlatUI.Feature.Svg.Native.$(_XPlatUIFeatureSvgHarfBuzzSharpNativeFileName).gz">
+		<Type>Non-Resx</Type>
+		<WithCulture>false</WithCulture>
+	  </EmbeddedResource>
+	</ItemGroup>
+  </Target>
+
+  <Target Name="_XPlatUIFeatureSvgCompressHarfBuzzSharpNative"
+		  Condition="'$(_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative)' == 'true'
+					 and '@(_XPlatUIFeatureSvgHarfBuzzSharpNative)' != ''"
+		  DependsOnTargets="_XPlatUIFeatureSvgLocateHarfBuzzSharpNative"
+		  BeforeTargets="CreateManifestResourceNames"
+		  Inputs="@(_XPlatUIFeatureSvgHarfBuzzSharpNative->'%(FullPath)')"
+		  Outputs="$(_XPlatUIFeatureSvgHarfBuzzSharpArchive)">
+	<MakeDir Directories="$(IntermediateOutputPath)native" />
+	<XPlatUIFeatureSvgGZipFile Source="@(_XPlatUIFeatureSvgHarfBuzzSharpNative->'%(FullPath)')"
+							   Destination="$(_XPlatUIFeatureSvgHarfBuzzSharpArchive)" />
+  </Target>
+
+  <!-- The library now lives inside the executable, so keep it - and the symbol file that shares its
+	   name - out of the publish directory. What is left is the executable and its own symbol file
+	   (.pdb on Windows, .dbg on Linux), which the native compiler writes outside this item list.
+	   Matching the stem rather than the exact file is what catches libHarfBuzzSharp.pdb, which the
+	   Win32 asset package ships beside the DLL. -->
+  <Target Name="_XPlatUIFeatureSvgExcludeHarfBuzzSharpNativeFromPublish"
+		  Condition="'$(_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative)' == 'true'
+					 and '$(_XPlatUIFeatureSvgHarfBuzzSharpNativeFileName)' != ''"
+		  AfterTargets="ComputeFilesToPublish">
+	<ItemGroup>
+	  <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+							 Condition="'%(ResolvedFileToPublish.Filename)' == 'libHarfBuzzSharp'" />
+	</ItemGroup>
+  </Target>
+
+</Project>

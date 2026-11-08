@@ -34,6 +34,18 @@
        closure rather than its extras (section 4). -->
   <ItemGroup>
     <PackageReference Include="Svg.Skia" Version="5.2.3" />
+    <!-- Named explicitly because this assembly's loader registers a resolver against HarfBuzzSharp's
+         assembly by type, and a build asset cannot do that through a type it only inherits
+         transitively. The version matches the one Svg.Skia resolves; a later Svg.Skia that wants a
+         newer HarfBuzzSharp fails restore loudly with a downgrade error rather than silently
+         embedding the wrong native. -->
+    <PackageReference Include="HarfBuzzSharp" Version="14.2.0" />
+  </ItemGroup>
+
+  <!-- Build assets. A NuGet consumer imports these automatically; this repository's own projects get
+       them from Directory.Build.targets, because a ProjectReference imports no build assets. -->
+  <ItemGroup>
+    <None Include="buildTransitive\XPlatUI.Feature.Svg.targets" Pack="true" PackagePath="buildTransitive\" />
   </ItemGroup>
 
   <!-- The cache is internal: an application names the provider and the Load helpers, never the cache,
