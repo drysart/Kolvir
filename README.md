@@ -1039,15 +1039,23 @@ measures as its header when folded, and as much of its content as the progress a
 the two agree without guessing which one a section is.
 
 On its own the fold is a jump. Animating it belongs to `XPlatUI.Feature.Animations`, which this
-control does not reference: that package drives `ExpandProgress` from a timeline, so the arrow and
-the height move together without the control carrying any of the animation code.
+control does not reference; that package adds an `ExpandDuration` extension member and animates
+`ExpandProgress`, so with one line the arrow and the height move together over the duration, and with
+none the control behaves exactly as described above.
 
 ```csharp
 var appearance = new XPlatExpander("Appearance") { Dock = DockStyle.Top, Height = 180f };
 appearance.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
 appearance.AddExpandedChangedHandler(sender =>
     Console.WriteLine(((XPlatExpander)sender).IsExpanded ? "opened" : "closed"));
+
+// With XPlatUI.Feature.Animations referenced and AddAnimations() called:
+appearance.ExpandDuration = TimeSpan.FromMilliseconds(180);
 ```
+
+A collapse that starts while the section is still opening turns round from wherever it has got to,
+a duration removed mid-flight settles the section exactly where `IsExpanded` says it belongs, and an
+application that never registered the clock snaps instead of leaving a section frozen half open.
 
 ### Combo boxes
 
@@ -3079,10 +3087,24 @@ A few consequences worth knowing before you rely on them:
   the frame still runs, so one bad animation cannot freeze the others. With no application in the
   process there is nowhere to report it and the exception surfaces at the caller.
 
+A **control gains its animation as an extension member**, not as a property the library carries:
+`XPlatExpander` has `ExpandDuration`, contributed by this package and stored in a weak table keyed
+by the control (FEATURE-COST-POLICY.md §5). A section given one animates its `ExpandProgress` on the
+application's clock, which moves the content height and the arrow together; a section given none
+does exactly what the control does on its own. Because the duration is not on the control, an
+application that never references the package pays nothing for it, and because the control asks the
+application for the scheduler, an application that set a duration without calling `AddAnimations()`
+gets a snap rather than a section stuck half open:
+
+```csharp
+appearance.ExpandDuration = TimeSpan.FromMilliseconds(180);   // null, the default, jumps
+```
+
 The demo's **Animations** page runs nine animations on one timeline - a block that eases across its
 track, a bar that blends two colours on a different curve, three tiles that each arrive in a stagger
 of position and opacity, and a readout that is itself an animated value - with Start, Pause, Resume,
-Restart and End wired to the one set.
+Restart and End wired to the one set. The demo's **Expander** page puts an animated section beside an
+instant one, which is the shortest way to see what the duration buys.
 
 ## Writing a backend
 

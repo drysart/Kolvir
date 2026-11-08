@@ -6165,11 +6165,12 @@ public sealed class DemoUi
         card.Controls.Add(new XPlatLabel(
             "A header with a chevron and content that folds away under it. Clicking the header, " +
             "or Enter, Space, Left and Right while it has the focus, expands and collapses the " +
-            "section; the control shrinks to its header and comes back at the height it had.")
+            "section. The first one below animates the fold, the second jumps - the same control, " +
+            "with and without a duration from the animations package.")
         {
             Dock = XDock.Top,
             AutoSize = false,
-            Height = 42f,
+            Height = 56f,
             WrapText = true,
             Font = XPlatTheme.CaptionFont,
             ForeColorRole = XPlatThemeColor.MutedForeground,
@@ -6180,7 +6181,7 @@ public sealed class DemoUi
         var column = new XPlatPanel
         {
             Dock = XDock.Top,
-            Height = 330f,
+            Height = 340f,
             ShowFrame = false,
             IsCard = false,
             BackColor = null,
@@ -6189,12 +6190,13 @@ public sealed class DemoUi
             Padding = new XPlatThickness(0f),
         };
 
-        var appearance = new XPlatExpander("Appearance")
+        var animated = new XPlatExpander("Animated - 180 ms")
         {
             Dock = XDock.Top,
-            Height = 150f,
+            Height = 128f,
             Margin = new XPlatThickness(0f, 0f, 0f, 12f),
         };
+        animated.ExpandDuration = TimeSpan.FromMilliseconds(180);
         foreach (string caption in new[] { "Show grid", "Snap to grid", "Show rulers" })
         {
             var box = new XPlatCheckBox(caption)
@@ -6205,31 +6207,37 @@ public sealed class DemoUi
                 Margin = new XPlatThickness(0f, 0f, 0f, 4f),
             };
             box.AddCheckedChangedHandler(_ => SetStatus($"{box.Text} is {Describe(box.CheckState)}."));
-            appearance.Controls.Add(box);
+            animated.Controls.Add(box);
         }
 
-        appearance.AddExpandedChangedHandler(sender =>
-            SetStatus(((XPlatExpander)sender).IsExpanded
-                ? "Appearance expanded."
-                : "Appearance collapsed to its header."));
+        animated.AddExpandedChangedHandler(sender =>
+        {
+            var section = (XPlatExpander)sender;
+            SetStatus(section.IsExpanded
+                ? "The animated section is opening - the arrow turns as the content unfolds."
+                : "The animated section is closing - progress and arrow come down together.");
+        });
 
-        column.Controls.Add(appearance);
+        column.Controls.Add(animated);
 
-        var advanced = new XPlatExpander("Advanced")
+        var instant = new XPlatExpander("Instant - no duration")
         {
             Dock = XDock.Top,
-            Height = 110f,
-            IsExpanded = false,
+            Height = 104f,
             Margin = new XPlatThickness(0f, 0f, 0f, 12f),
         };
-        advanced.Controls.Add(new XPlatCheckBox("Trace layout") { Dock = XDock.Top, AutoSize = true });
-        advanced.Controls.Add(new XPlatCheckBox("Cache layers") { Dock = XDock.Top, AutoSize = true });
-        column.Controls.Add(advanced);
+        instant.Controls.Add(new XPlatCheckBox("Trace layout") { Dock = XDock.Top, AutoSize = true });
+        instant.Controls.Add(new XPlatCheckBox("Cache layers") { Dock = XDock.Top, AutoSize = true });
+        instant.AddExpandedChangedHandler(sender =>
+            SetStatus(((XPlatExpander)sender).IsExpanded
+                ? "The instant section opened, all at once."
+                : "The instant section jumped shut to its header."));
+        column.Controls.Add(instant);
 
         var disabled = new XPlatExpander("Network (disabled)")
         {
             Dock = XDock.Top,
-            Height = 90f,
+            Height = 84f,
             Enabled = false,
         };
         disabled.Controls.Add(new XPlatCheckBox("Use a proxy") { Dock = XDock.Top, AutoSize = true });
@@ -6239,8 +6247,10 @@ public sealed class DemoUi
 
         card.Controls.Add(new XPlatLabel(
             "A folded section keeps its content in the tree but arranges it into nothing, so the " +
-            "children come back exactly as they were. Animating the fold is the animations " +
-            "package's job, which this control deliberately does not reference.")
+            "children come back exactly as they were. ExpandProgress is what the fold is drawn " +
+            "from - height and arrow together - and it follows IsExpanded on its own, so the " +
+            "section without a duration behaves as it always did. The duration is an extension " +
+            "member from XPlatUI.Feature.Animations, which this control does not reference.")
         {
             Dock = XDock.Fill,
             AutoSize = false,

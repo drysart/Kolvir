@@ -132,7 +132,7 @@ Recorded so the decision is not re-litigated every time someone asks:
 ## 6. Suggested order
 
 1. **Drag previews** (Ã‚Â§3.1) - small, and independent of everything above.
-2. **The small batch in Ã‚Â§4.1** - `XPlatSplitButton`, `XPlatExpander`, `XPlatWrapPanel`, the busy
-   indicator and the toast. Five small controls, each independently shippable, none of them waiting
-   on anything.
+2. **The small batch in Ã‚Â§4.1** - landed: `XPlatSplitButton`, `XPlatExpander` (and its animated
+   fold in `XPlatUI.Feature.Animations`), `XPlatWrapPanel`, the busy indicator and the overlay, and
+   the toast. Five small controls, each shipped on its own.
 3. Then the rest of Ã‚Â§4.1 in the order listed, and Ã‚Â§4.3 only once one of them has a plan document.

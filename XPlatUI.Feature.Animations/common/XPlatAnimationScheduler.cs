@@ -137,6 +137,14 @@ public sealed class XPlatAnimationScheduler : IDisposable
         _frames.Dispose();
     }
 
+    /// <summary>
+    /// The scheduler the running application registered with <c>AddAnimations()</c>, or null when it
+    /// registered none - which is what a feature asks before it starts an animation, because a
+    /// feature that animates has to snap when the application never opted in.
+    /// </summary>
+    internal static XPlatAnimationScheduler? FindRegistered() =>
+        XPlatApplication.Current?.Services.GetService(typeof(XPlatAnimationScheduler)) as XPlatAnimationScheduler;
+
     /// <summary>Adds <paramref name="set"/> to the frame and starts the clock if it is not running.</summary>
     /// <param name="set">The set that has just started or resumed.</param>
     internal void Attach(XPlatAnimationSet set)
