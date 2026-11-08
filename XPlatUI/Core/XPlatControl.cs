@@ -2255,7 +2255,14 @@ public class XPlatControl : IDisposable
     /// Adds a handler that runs when <see cref="EffectiveVisible"/> or <see cref="IsDisplayed"/>
     /// changed, for a collaborator that is not a control and cannot override the method.
     /// </summary>
-    internal IDisposable AddDisplayedChangedHandler(Action<object> handler)
+    /// <remarks>
+    /// The library uses it for the tool tip, which is not a control and has to take a bubble down
+    /// when the control it belongs to is hidden. It is public for the same reason and for the same
+    /// kind of caller: a feature package in its own assembly gets no friend access, so a feature
+    /// that starts on a control becoming visible - a layer fading in, say - needs this rather than
+    /// an override it cannot write.
+    /// </remarks>
+    public IDisposable AddDisplayedChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
         _displayedChanged += handler;
@@ -2263,7 +2270,7 @@ public class XPlatControl : IDisposable
     }
 
     /// <summary>Removes a handler that <see cref="AddDisplayedChangedHandler"/> added.</summary>
-    internal void RemoveDisplayedChangedHandler(Action<object> handler)
+    public void RemoveDisplayedChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
         _displayedChanged -= handler;

@@ -194,6 +194,64 @@ public sealed class ToastTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void TheProgressFollowsShowAndDismissWhicheverWayItIsDriven()
+    {
+        using var toast = new XPlatToast("Saved");
+
+        Assert.AreEqual(0d, toast.ShowProgress, 0.000001d, "a message that was never shown has not come in");
+
+        toast.Show();
+
+        Assert.AreEqual(1d, toast.ShowProgress, 0.000001d);
+        Assert.AreEqual(1f, toast.Opacity, 0.000001f, "and the message is drawn from it, so it is opaque");
+
+        toast.Dismiss();
+
+        Assert.AreEqual(0d, toast.ShowProgress, 0.000001d);
+        Assert.AreEqual(0f, toast.Opacity, 0.000001f);
+        Assert.IsFalse(toast.Visible, "reaching the bottom of the range is what takes it off the screen");
+
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => toast.ShowProgress = double.NaN);
+    }
+
+    [TestMethod]
+    public void AHandlerThatTakesTheDismissalOverKeepsTheMessageUpUntilItSaysOtherwise()
+    {
+        using var toast = new XPlatToast("Saved");
+        using var scene = HeadlessScene.Create(toast, 320f, 80f);
+
+        int dismissed = 0;
+        toast.AddDismissedHandler(_ => dismissed++);
+
+        toast.AddDismissingHandler(sender =>
+        {
+            // The contract the feature package relies on: assigning the value the progress already
+            // has is what counts as taking the transition over, so the control does not snap and
+            // does not remove the message.
+            var control = (XPlatToast)sender;
+            control.ShowProgress = control.ShowProgress;
+        });
+
+        toast.Show();
+        toast.Dismiss();
+
+        Assert.IsFalse(toast.IsOpen, "the dismissal has been asked for");
+        Assert.IsTrue(toast.Visible, "but the message is still on the screen");
+        Assert.AreEqual(1d, toast.ShowProgress, 0.000001d);
+        Assert.AreEqual(0, dismissed);
+        Assert.IsFalse(toast.TabStop, "and it has already left the Tab order on its way out");
+        Assert.IsFalse(toast.Focusable);
+
+        toast.ShowProgress = 0d;
+
+        Assert.IsFalse(toast.Visible, "bringing the progress down is what removes it");
+        Assert.AreEqual(1, dismissed, "once");
+
+        toast.ShowProgress = 0d;
+        Assert.AreEqual(1, dismissed, "and settling on 0 a second time does not remove it again");
+    }
+
+    [TestMethod]
     public void TheToastMeasuresItsMessagePlusItsChrome()
     {
         using var toast = new XPlatToast("Saved");
