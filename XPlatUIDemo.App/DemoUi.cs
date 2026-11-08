@@ -5778,7 +5778,9 @@ public sealed class DemoUi
             toast.Severity = severity;
             toast.Duration = seconds is { } value ? TimeSpan.FromSeconds(value) : null;
             toast.Show();
-            SetStatus($"Showing a {severity} toast.");
+            SetStatus(severity is XPlatToastSeverity.Error or XPlatToastSeverity.Info
+                ? $"Showing an {severity} toast."
+                : $"Showing a {severity} toast.");
         });
 
         return button;
