@@ -98,6 +98,10 @@ public class XPlatExpander : XPlatPanel
                 Height = HeaderHeight;
             }
 
+            // The section just changed how much room it needs, so whatever is docked below it has
+            // to move: a control that changes its own height is the only one that knows a layout
+            // pass is due outside the one that placed it.
+            Parent?.PerformLayout();
             PerformLayout();
             Invalidate();
             _expandedChanged?.Invoke(this);

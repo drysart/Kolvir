@@ -5839,7 +5839,13 @@ public sealed class DemoUi
             Margin = new XPlatThickness(0f, 0f, 8f, 0f),
         };
         heavy.AddClickHandler(_ => SetStatus("A spinner's ring thickness is a property, not a theme value."));
-        row.Controls.Add(new XPlatBusyIndicator { Dock = XDock.Left, Thickness = 5f, Margin = new XPlatThickness(0f, 4f, 8f, 0f) });
+
+        row.Controls.Add(new XPlatBusyIndicator
+        {
+            Dock = XDock.Left,
+            Thickness = 5f,
+            Margin = new XPlatThickness(0f, 4f, 8f, 0f),
+        });
         row.Controls.Add(heavy);
 
         card.Controls.Add(row);

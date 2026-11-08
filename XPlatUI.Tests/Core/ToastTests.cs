@@ -147,6 +147,8 @@ public sealed class ToastTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(toast, 320f, 60f);
 
+        toast.Show();
+
         var info = scene.PixelAt(12, 30);
 
         toast.Severity = XPlatToastSeverity.Error;
@@ -156,6 +158,39 @@ public sealed class ToastTests : HeadlessTestBase
 
         toast.BarColor = new SKColor(0x12, 0x34, 0x56);
         Assert.AreEqual(new SKColor(0x12, 0x34, 0x56), scene.PixelAt(12, 30), "an application can brand its own");
+    }
+
+    [TestMethod]
+    public void ShowingAToastDockedToAnEdgeMakesRoomForIt()
+    {
+        var content = new XPlatLabel("Content") { Dock = DockStyle.Fill, AutoSize = false };
+        var toast = new XPlatToast("Saved") { Dock = DockStyle.Bottom, Duration = null };
+
+        var card = new XPlatPanel
+        {
+            Dock = DockStyle.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = XPlatThickness.Empty,
+        };
+
+        card.Controls.Add(content);
+        card.Controls.Add(toast);
+
+        using var scene = HeadlessScene.Create(card, 320f, 220f);
+
+        float room = content.Height;
+        Assert.IsFalse(toast.Visible, "a toast nobody has shown takes no room");
+
+        toast.Show();
+        Assert.IsTrue(content.Height < room, "the page makes room for the message");
+        Assert.AreEqual(content.Bounds.Bottom, toast.Top, "which is docked under it");
+
+        toast.Dismiss();
+        Assert.AreEqual(room, content.Height, "and the room comes back when it goes");
     }
 
     [TestMethod]

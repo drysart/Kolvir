@@ -76,6 +76,9 @@ public class XPlatToast : XPlatControl
         BorderWidth = 1f;
         Padding = new XPlatThickness(22f, 10f, 40f, 10f);
         MinimumSize = new SKSize(160f, 40f);
+
+        // A message nobody has asked for yet takes no room in the layout; Show puts it up.
+        Visible = false;
     }
 
     /// <summary>Creates a closed toast whose message is <paramref name="text"/>.</summary>
@@ -186,6 +189,10 @@ public class XPlatToast : XPlatControl
 
         _open = true;
         Visible = true;
+
+        // Showing or hiding a docked control changes how much room its container has to share out,
+        // and only the container can move the siblings.
+        Parent?.PerformLayout();
         UpdateTimer();
         Invalidate();
     }
@@ -204,6 +211,7 @@ public class XPlatToast : XPlatControl
         ReleaseMouseCapture();
         _timer?.Stop();
         Visible = false;
+        Parent?.PerformLayout();
         Invalidate();
         _dismissed?.Invoke(this);
     }

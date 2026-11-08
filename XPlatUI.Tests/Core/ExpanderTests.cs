@@ -156,6 +156,36 @@ public sealed class ExpanderTests : HeadlessTestBase
         Assert.AreNotEqual(default, surface);
     }
 
+    [TestMethod]
+    public void CollapsingASectionMovesTheSectionBelowIt()
+    {
+        var first = new XPlatExpander("First") { Dock = DockStyle.Top, Height = 120f };
+        var second = new XPlatExpander("Second") { Dock = DockStyle.Top, Height = 80f };
+
+        var root = new XPlatPanel
+        {
+            Dock = DockStyle.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = XPlatThickness.Empty,
+        };
+
+        root.Controls.Add(first);
+        root.Controls.Add(second);
+
+        using var scene = HeadlessScene.Create(root, 420f, 320f);
+
+        float before = second.Top;
+
+        first.IsExpanded = false;
+
+        Assert.IsTrue(second.Top < before, "the section below belongs where the collapsed one ended");
+        Assert.AreEqual(first.Bounds.Bottom, second.Top, "which is immediately under its header");
+    }
+
     private static (XPlatExpander Expander, XPlatControl Child) Build(out HeadlessScene scene)
     {
         var expander = new XPlatExpander("Appearance")
