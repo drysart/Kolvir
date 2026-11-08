@@ -3594,6 +3594,55 @@ published with AOT. macOS is deliberately left out: an `.app` bundle already car
 libraries as loose files, so there is nothing to fold into a single executable, and the bundle *is*
 the deliverable. See [Bundle size](#bundle-size).
 
+### The SVG feature's second native library
+
+`XPlatUI.Feature.Svg` renders `<text>` through Svg.Skia, which shapes it with **HarfBuzzSharp** - a
+native library of its own, separate from SkiaSharp's. A publish of an application that shows an SVG
+used to drop `libHarfBuzzSharp.dll`/`.so`/`.dylib` beside the executable even though `libSkiaSharp`
+had stopped being loose. The feature now carries build assets of its own (`buildTransitive/` in its
+package, imported by `Directory.Build.targets` here) that do exactly what the core ones do: find the
+native the build resolved, gzip it, embed it in the application as
+`XPlatUI.Feature.Svg.Native.libHarfBuzzSharp.dll.gz` (or `.so`/`.dylib`), and keep it out of the
+publish output. `HarfBuzzNativeLoader`, in the feature assembly, extracts it on first use to
+`%LOCALAPPDATA%\XPlatUI\native\harfbuzz\<version>-<size>\` (`~/.local/share/...` on Linux, `~/Library/
+Application Support/...` on macOS) and redirects HarfBuzzSharp's P/Invoke at it.
+
+Three things about it are worth knowing rather than discovering:
+
+- **It needs no call.** The loader runs from a module initializer, so an application that calls
+  `AddSvgImages()` - or touches anything else in the feature - has the resolver in place before the
+  first shaped `<text>` without adding a line to `Main`. What that guarantees is precisely "the
+  assembly was touched": an application that references the package and never executes a line of it
+  pays nothing and the initializer never runs (and under NativeAOT, with the assembly trimmed away,
+  there is nothing left to run). It is not a promise that `AddSvgImages()` specifically was called.
+- **The resolver belongs to HarfBuzzSharp's assembly, not SkiaSharp's.** Both loaders register
+  against different assemblies, which is why they coexist. If an application has already registered
+  its own HarfBuzz resolver, `NativeLibrary.SetDllImportResolver` refuses a second one; the loader
+  treats that as somebody else's decision, leaves the default probing alone and does not fail
+  startup. The library is extracted either way, so that resolver can point at it if it wants to.
+- **`EmbedHarfBuzzSharpNative`** is the opt-out, beside `EmbedSkiaSharpNative` and with the same
+  default: unset means embedded in an AOT publish. Set it to `false` and the publish is the
+  executable plus a loose `libHarfBuzzSharp.*` again.
+
+A Windows or Linux `dotnet publish -c Release -r <rid> -p:PublishAot=true` now emits **the
+executable and its own symbol file, and nothing else** - no `libSkiaSharp.*` and no
+`libHarfBuzzSharp.*`. Measured on the demo app:
+
+| RID | executable before | executable after | loose native removed |
+| --- | --- | --- | --- |
+| win-x64 | 22,616,576 | 23,661,568 (+1,044,992) | 2,065,248 |
+| linux-x64 | 23,056,880 | 24,294,000 (+1,237,120) | 3,059,496 |
+
+macOS is excluded here too, and this one was measured rather than copied. An XPlatUI macOS
+application publishes as a `net10.0-macos` **`.app` bundle** even with `PublishAot` on, and its AOT
+executable records the dylib as a *load-time* dependency: `otool -L` lists
+`@executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib`, so deleting the file stops dyld
+before any managed code runs and a resolver could never help. A plain `net10.0` Mach-O AOT build is
+a different shape, and it *does* work - a probe published that way extracted the dylib to
+`~/Library/Application Support/XPlatUI/native/harfbuzz/` and shaped text with it, which is why the
+exclusion is about the bundle and not about what macOS allows. The demo's macOS bundle is unchanged
+by this: executable 15,790,224 → 15,790,256 bytes, HarfBuzz still loose inside the bundle.
+
 ## Running the application
 
 ```

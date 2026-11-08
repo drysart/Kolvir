@@ -22,10 +22,14 @@
 		 the feature is then built with PublishAot set while having no runtime identifier and
 		 therefore no native assets to find. Only an application has anything to embed a library in.
 
-		 macOS is excluded for the reason the core targets give, and the measurement behind it is in
-		 README.md: a NativeAOT macOS publish is an .app bundle, whose native libraries are loose
-		 files inside it, and the AOT image links the dylib at load time rather than resolving the
-		 import at call time. -->
+		 macOS is excluded, as it is in the core targets, but for a measured reason rather than a
+		 copied one: an XPlatUI macOS application is a net10.0-macos publish, which is an .app
+		 bundle even with PublishAot on, and the AOT image records
+		 @executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib as a load-time dependency
+		 (otool -L shows the LC_LOAD_DYLIB). Removing it from the bundle stops dyld before any
+		 managed code runs, so a resolver could not help. Extraction itself does work on macOS - a
+		 plain net10.0 Mach-O AOT build loads the cached dylib and shapes text - so the exclusion is
+		 about the bundle, not about the platform. README.md records both measurements. -->
 	<_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative
 		Condition="'$(_XPlatUIFeatureSvgEmbedHarfBuzzSharpNative)' == ''
 				   and '$(PublishAot)' == 'true'
