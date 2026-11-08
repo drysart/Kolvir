@@ -92,6 +92,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
 | `XPlatBusyIndicator` | - | An indeterminate spinner: a ring with a rotating arc, on a timer that runs only while it is on screen and busy |
 | `XPlatOverlay` | - | A modal layer: dims what is under it, takes every press and swallows every key while it shows |
+| `XPlatToast` | - | A transient message bar: an accent bar coloured by severity, a message and a close glyph, dismissed by a countdown or by the user |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
 | `XPlatTextBox` + `XPlatUI.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
@@ -940,6 +941,41 @@ busy.Controls.Add(new XPlatLabel("Loading the project...") { Dock = DockStyle.Fi
 overlay.Controls.Add(busy);                          // centred by ChildAlignment
 
 page.Controls.Add(overlay);                          // over the content, while the work runs
+```
+
+### Toast
+
+`XPlatToast` is the message that does not need a dialog: an accent bar, one line of text and a close
+glyph, which takes itself away after a few seconds. It is an ordinary control rather than a window,
+so the application decides where transient messages belong - docked across the top of a page, at the
+bottom of a card, beside the row that saved - and the layout moves around it, which a floating window
+would not.
+
+| Member | Behaviour |
+| --- | --- |
+| `Text` | The message |
+| `Severity` | `Info`, `Success`, `Warning` or `Error`, which is what the accent bar is coloured for |
+| `BarColor` | Overrides the severity's colour, for an application that brands its own messages |
+| `Duration` | How long it shows before dismissing itself; `XPlatToast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
+| `Show()`, `Dismiss()`, `IsOpen` | The message state, so one control can be built once and reused |
+| `AddDismissedHandler` | Runs once the message went, whether by its countdown, its close glyph or the keyboard |
+
+The countdown is a timer and follows the rule the marquee bar set: it runs only while the message is
+open and `IsDisplayed` and there is an application to deliver the ticks, so a toast on a page the
+user has switched away from stops rather than expiring unseen. The close glyph dismisses on a press
+released over it, a press that slides off does nothing, and a focused toast answers Escape, Enter and
+Space. The fade and slide a toast usually has belongs to `XPlatUI.Feature.Animations`; this control
+does not reference that package.
+
+```csharp
+var toast = new XPlatToast("Project saved") { Dock = DockStyle.Bottom, Severity = XPlatToastSeverity.Success };
+page.Controls.Add(toast);
+
+toast.Show();                                        // up, and counting down from four seconds
+toast.Text = "Could not reach the server";
+toast.Severity = XPlatToastSeverity.Error;
+toast.Duration = null;                               // an error waits for the user
+toast.Show();
 ```
 
 ### Group box

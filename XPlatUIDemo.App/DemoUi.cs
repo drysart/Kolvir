@@ -433,6 +433,7 @@ public sealed class DemoUi
         ("Expander", demo => Page(demo.BuildExpanderDemo())),
         ("Wrap panel", demo => Page(demo.BuildWrapPanelDemo())),
         ("Busy indicator and overlay", demo => Page(demo.BuildBusyOverlayDemo())),
+        ("Toast", demo => Page(demo.BuildToastDemo())),
     };
 
     /// <summary>
@@ -5682,6 +5683,106 @@ public sealed class DemoUi
 
     private static string DescribeColor(SKColor color) =>
         $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2} (R {color.Red}, G {color.Green}, B {color.Blue})";
+
+    /// <summary>
+    /// <see cref="XPlatToast"/>: the four severities, each dismissed by its own countdown or by the
+    /// close glyph, with the message docked at the bottom of the page like a real one.
+    /// </summary>
+    private XPlatPanel BuildToastDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Toast"));
+
+        card.Controls.Add(new XPlatLabel(
+            "A transient message bar. The accent bar is coloured for the severity, the message " +
+            "sits beside it, and the toast dismisses itself after the duration it was given - or " +
+            "the user closes it. It is an ordinary control, so a page makes room for it.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 58f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var toast = new XPlatToast(
+            "Project saved to disk - the toast dismisses itself after four seconds.")
+        {
+            Dock = XDock.Bottom,
+            Severity = XPlatToastSeverity.Success,
+            Margin = new XPlatThickness(0f, 12f, 0f, 0f),
+        };
+        toast.AddDismissedHandler(_ => SetStatus("The toast went away - by its countdown or by the close glyph."));
+
+        var row = ButtonRow();
+        row.Height = 34f;
+        row.Margin = new XPlatThickness(0f, 0f, 0f, 8f);
+
+        row.Controls.Add(ToastButton("Success", XPlatToastSeverity.Success,
+            "Project saved to disk - the toast dismisses itself after four seconds.", 4, toast));
+
+        row.Controls.Add(ToastButton("Info", XPlatToastSeverity.Info,
+            "Three files were re-indexed in the background.", 4, toast));
+
+        row.Controls.Add(ToastButton("Warning", XPlatToastSeverity.Warning,
+            "The export finished, but two images could not be embedded.", 5, toast));
+
+        row.Controls.Add(ToastButton("Error", XPlatToastSeverity.Error,
+            "Could not reach the server. This one stays until it is dismissed.", null, toast));
+
+        card.Controls.Add(row);
+
+        card.Controls.Add(new XPlatLabel(
+            "A toast with no duration stays up: an error usually waits for the user to acknowledge " +
+            "it, while a success can go away on its own. The countdown pauses while the toast is " +
+            "not on screen, so a message cannot expire behind a page the user switched away from.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        card.Controls.Add(toast);
+
+        // The page opens with a message up, so a screenshot of it shows the control.
+        toast.Show();
+
+        return card;
+    }
+
+    /// <summary>One of the toast page's buttons: sets the severity and the message, and shows it.</summary>
+    private XPlatButton ToastButton(
+        string text,
+        XPlatToastSeverity severity,
+        string message,
+        int? seconds,
+        XPlatToast toast)
+    {
+        var button = new XPlatButton(text)
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+
+        button.AddClickHandler(_ =>
+        {
+            toast.Text = message;
+            toast.Severity = severity;
+            toast.Duration = seconds is { } value ? TimeSpan.FromSeconds(value) : null;
+            toast.Show();
+            SetStatus($"Showing a {severity} toast.");
+        });
+
+        return button;
+    }
 
     /// <summary>
     /// <see cref="XPlatBusyIndicator"/> and <see cref="XPlatOverlay"/>: a spinner on its own, and the
