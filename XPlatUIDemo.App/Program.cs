@@ -3,6 +3,7 @@ using XPlatUI;
 using XPlatUI.Animations;
 using XPlatUI.Demo;
 using XPlatUI.DragDrop;
+using XPlatUI.Svg;
 
 #if WINDOWS
 using XPlatUI.Backend.Win32;
@@ -110,9 +111,9 @@ internal static class Program
             SingleInstance = true,
 
             // The sample takes drops on its root panel and on a text box, so it opts into the drag
-            // and drop feature. This is the only place the feature is named, and leaving it out is
-            // what keeps it out of an application that does not want it.
-            ConfigureServices = services => services.AddDragDrop().AddAnimations(),
+            // and drop feature. It shows SVG icons, so it opts into the SVG feature the same way;
+            // leaving either out is what keeps it out of an application that does not want it.
+            ConfigureServices = services => services.AddDragDrop().AddAnimations().AddSvgImages(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,

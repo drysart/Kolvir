@@ -39,6 +39,9 @@ XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one
 XPlatUI.Feature.Animations/ timeline animations, as a separate package: same layout, all portable
   common/                 the set, the value animations, the easings and the app-wide frame clock
   windows/ macos/ linux/  empty: an animation is arithmetic, a clock and an invalidation
+XPlatUI.Feature.Svg/      SVG images, as a separate package: same layout, all portable
+  common/                 the format provider, the parse cache, the currentColor load helpers
+  windows/ macos/ linux/  empty: Svg.Skia renders to an SKPicture on every platform
 XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
 ```
 
@@ -114,7 +117,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatMenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
 | `XPlatMenuPresenter` | `ToolStripDropDown` plumbing | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, on every backend, one popup per level of the chain |
 | `XPlatMenuPresentation` | - | Chooses the library's menus or the platform's, per application |
-| `XPlatImage` | `PictureBox` | Holds and draws an `SKPicture`: `Picture`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers that decode a bitmap and record it into a picture |
+| `XPlatImage` | `PictureBox` | Holds and draws an `SKPicture`: `Picture`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers that ask the registered image format providers for a picture (the built-in one reads PNG, JPEG, WebP, GIF, BMP and ICO; `XPlatUI.Feature.Svg` adds SVG) |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatFont` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
 | `XPlatTheme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
@@ -3178,6 +3181,291 @@ Restart and End wired to the one set. The demo's **Expander** page puts an anima
 instant one, which is the shortest way to see what the duration buys; **Toast animation** puts a
 switch on the same page that takes both durations away, and **Overlay fade** shows a layer dimming in
 over the panel it holds still.
+
+### SVG images
+
+SVG is a package of its own, `XPlatUI.Feature.Svg`, built on [Svg.Skia]. A vector renderer is not
+something a toolkit can trim down to nothing, so it does not live in `XPlatUI`: an application that
+shows no SVG does not reference the package and therefore does not contain it
+(FEATURE-COST-POLICY.md §4, rung 3). Reference it and opt in:
+
+```csharp
+using XPlatUI.Svg;
+
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddSvgImages(),
+};
+```
+
+or, without a service container, `using var svg = XPlatSvg.AddSvgImages();`. Both register a
+**format provider** with the control, which is the seam the next section describes, and after that
+nothing about the call site changes:
+
+```csharp
+var icon = new XPlatImage { SizeMode = XPlatSizeMode.Zoom };
+icon.Load("icons/star.svg");          // the same call that reads a PNG
+```
+
+#### How a format gets in: the provider seam
+
+`XPlatImage` reads PNG, JPEG, WebP, GIF, BMP and ICO with nothing installed, and that does not
+change: the built-in decoder is itself a provider, at priority 0, so an application that never
+references this package behaves exactly as it did before the seam existed. Anything else arrives
+through `IXPlatImageFormatProvider`:
+
+```csharp
+public interface IXPlatImageFormatProvider
+{
+    string Name { get; }
+    int Priority { get; }
+    bool CanDecode(ReadOnlySpan<byte> header);
+    SKPicture? Decode(Stream stream, string? extensionHint);
+}
+```
+
+A provider is *asked about the first 512 bytes* and, if it claims them, is handed the whole seekable
+stream and returns the `SKPicture` the control draws. There is no reflection, no assembly scanning
+and no registration by attribute: a provider is an instance a call registers,
+`XPlatImageFormats.Add(provider)`, which returns a handle that unregisters it. A feature package's
+`Add…()` call is that call with the package's provider in it.
+
+The rules, which are the part worth reading before writing one:
+
+| Situation | What happens |
+| --- | --- |
+| Two providers claim the same bytes | The higher `Priority` wins; at equal priority the later registration wins. A load never tries a second provider for the same bytes. |
+| A provider throws while sniffing | It has not claimed the bytes - the exception is swallowed and the next provider is asked - because identifying a stream must not be able to fail a load. |
+| The claiming provider throws | The load returns false and raises `AddLoadFailedHandler` with an `XPlatImageFormatException` naming the provider, with what it threw as the inner exception. It does **not** fall through to the next claim: the bytes were identified, and handing a document one parser refused to another is how a refused file gets read anyway. |
+| The claiming provider returns null | The same, without an inner exception. |
+| No provider claims the bytes | False, and nothing raised - the contract a stream that is not an image has always had. That is also what an SVG is before `AddSvgImages()` runs. |
+| The provider is unregistered while a picture is alive | Supported. A picture is self-contained, so removing a provider changes what future loads do and nothing else; the picture is not disposed and keeps drawing. |
+
+`Load(path)` passes the file extension to the provider as a hint, because a path has one; `Load(Stream)`
+has only bytes, so a provider has to identify itself from the content. A non-seekable stream is
+buffered so that every provider is promised a stream it can rewind.
+
+#### Sizing, and what `viewBox` means to `AutoSize`
+
+The picture's bounds are the document's natural size, and that is what `AutoSize` measures and what
+every `XPlatSizeMode` scales from:
+
+| Document | Natural size |
+| --- | --- |
+| `viewBox="0 0 24 24"`, no width or height | 24 x 24 |
+| `width="48" height="24" viewBox="0 0 24 12"` | 48 x 24 - the document's own size wins |
+| `width="60" height="20" viewBox="0 0 30 30" preserveAspectRatio="none"` | 60 x 20 |
+| `viewBox="10 20 30 40"` | 30 x 40, recorded from the content's own origin |
+
+Give the root element a `viewBox`. A document with no `viewBox` and no width or height has no
+intrinsic size, and the renderer resolves that to a one-pixel picture rather than failing - a real
+icon always has one.
+
+#### Recolouring: `currentColor`
+
+An icon that draws with `currentColor` can follow the palette, and nothing else can be recoloured
+without rewriting the document:
+
+```csharp
+image.LoadSvg("icons/badge.svg", XPlatTheme.Foreground);
+```
+
+The colour is resolved **while the document is parsed**, because that is when the renderer resolves
+`currentColor`, so the parse cache is keyed on the colour as well as the bytes. Two colours of one
+document are two parses; every load after that at either colour is a cache hit and a fresh recording.
+Switching a small palette back and forth therefore settles and stops parsing, which is what makes it
+safe to reload icons on a theme change:
+
+```csharp
+XPlatTheme.AddChangedHandler(_ => image.LoadSvg("icons/badge.svg", XPlatTheme.Foreground));
+```
+
+`LoadSvg` is the one part of the feature that does not need `AddSvgImages()`: it goes straight to the
+renderer, and it takes ownership of what it loads (`DisposePictureWithControl` is left set). A
+document that fails to parse returns false from it rather than raising, because it is not `Load`; use
+`Load` when a failure has to reach an `AddLoadFailedHandler` subscription.
+
+#### Caching
+
+A document is parsed once per (content, colour) and the parsed result is reused: each load gets a
+fresh recording of it - a few hundred bytes of display list - so that the control's ownership rule
+never disposes something the cache is still handing out, and two controls showing one icon draw two
+recordings of one parse. The cache holds 64 entries and evicts the oldest, so an application that
+renders an SVG per database row does not leak; `XPlatSvg.ClearCache()` empties it, and a control's
+recording outlives the parsed document it came from.
+
+#### Security
+
+A document is data from outside the program, and the refusals are the feature's, not the renderer's
+defaults. Each line below is measured, and the reason is stated because "the renderer does not do
+it today" is not the same claim as "this feature refuses it":
+
+- **External references resolve to nothing.** A `file://` URL, a bare `http(s)` location and a
+  relative sibling file were each tried against three external-resource policies and two load
+  routes, and none of them appeared in the output - Svg.Skia's asset loader does not fetch a
+  document's references, it substitutes a broken-image placeholder. The feature narrows that further
+  rather than relying on it: the policy it parses with is *same-document and data: only*, so a
+  `<use href="#shape">` and a `data:` URI resolve and nothing else may, whatever a future renderer
+  learns to fetch. A document parsed from a stream also has no base URI, so there is nothing for a
+  relative reference to resolve against.
+- **Script does not run.** `<script>` elements and `onload`-style attributes have no effect: the
+  document is parsed in the renderer's secure processing mode, JavaScript is off, and there is no
+  scripting runtime to run it with even if it were not.
+- **Entity expansion is refused by this feature.** A document that declares a DOCTYPE or an ENTITY
+  is rejected before it is parsed, in both UTF-8 and UTF-16, because entity expansion is unbounded
+  work on a document of any size. This one is the feature's own check and it is load-bearing:
+  removing it makes the entity-bomb test fail, because the renderer happily expands the document.
+- **The document cap is one megabyte.** The whole document is in memory by the time it is parsed, so
+  the limit is one the library chose rather than one it inherited.
+- **Malformed input surfaces through `AddLoadFailedHandler`** as an `XPlatImageFormatException` with
+  the parser's exception inside it. It never throws out of `Load`, and the picture from a previous
+  load stays on screen.
+
+#### What actually renders
+
+Measured against Svg.Skia 5.2.3 with the settings above. This is not full SVG 1.1, and the gaps are
+listed rather than implied:
+
+| SVG feature | Support |
+| --- | --- |
+| `rect`, `circle`, `ellipse`, `line`, `polyline`, `polygon`, `path` (including arcs) | Yes |
+| `g`, `transform`, `viewBox`, `preserveAspectRatio`, nested `<svg>` | Yes |
+| `fill`/`stroke` with colours, `opacity`, `stroke-dasharray`, line joins and caps | Yes |
+| Linear and radial gradients, `pattern` | Yes |
+| `clipPath`, `mask` | Yes |
+| `use`, `symbol` | Yes |
+| `text`, `tspan`, `text-anchor`, font family and size | Yes, through the system's fonts. On Linux Svg.Skia shapes it with the HarfBuzz native, which is the reason this package carries 2-3 MB of native library; on Windows `<text>` renders without it |
+| Filters: `feGaussianBlur`, `feDropShadow`, `feColorMatrix`, and the rest of the SVG 1.1 set | Yes |
+| CSS in a `<style>` element and `class` selectors | Yes; `@import` is not followed |
+| `data:` URI images | Yes |
+| `marker` | Partially: markers draw, but `markerWidth`/`markerHeight` scaling is not applied, so a marker is drawn in user units |
+| SMIL animation (`<animate>`, `<animateTransform>`, `<set>`) | No: the document is rendered as a static frame |
+| SVG fonts (`<font>` inside the document) | Passed through, not exercised here |
+| `foreignObject` | No: its content is not drawn |
+| External images, external CSS, external `<use>` | Refused by design - see Security |
+
+The demo's **SVG icons**, **SVG recolour** and **SVG and a raster twin** pages show all of the
+above that a viewer needs to believe: the first at five sizes, the second following the palette, and
+the third comparing a vector disc with a 16-pixel PNG of itself blown up to 96.
+
+The rows that fail silently if they regress - a gradient that comes out flat, text that parses and
+draws nothing because nothing shaped it, a filter that is parsed and ignored - are pixel assertions
+in `SvgFidelityTests` rather than only a claim in this table: the gradient is sampled at both stops
+and in the middle, the pattern at both halves of a tile, the blur three units outside the shape
+against an unfiltered twin, and the transform and clip path at the pixels they decide.
+
+#### What it costs
+
+Measured the way FEATURE-COST-POLICY.md §8 says to: one fixture, published twice, with the project
+reference to `XPlatUI.Feature.Svg` and the `AddSvgImages()` call switched off and on by a property,
+so the two numbers differ by the feature and nothing else. The feature build calls `AddSvgImages()`,
+loads a document through `Load`, draws the picture and writes it out. `PublishAot`,
+`-p:EmbedSkiaSharpNative=false`, three RIDs. The fixture is `XPlatUI.Minimal` with one `XPlatImage`
+on its page - 88 KB above the policy's 3,203,072 floor on win-x64, which is what an image control
+costs before any format is added:
+
+| Measurement | win-x64 | linux-x64 | osx-arm64 |
+| --- | --- | --- | --- |
+| Executable, feature not referenced (the floor) | 3,292,160 | 4,218,192 | 4,383,216 |
+| Executable, feature used | 15,759,360 | 17,032,224 | 14,653,248 |
+| Delta | +12,467,200 (3.8x the floor) | +12,814,032 (3.0x) | +10,270,032 (2.3x) |
+| HarfBuzz native beside it | 2,065,248 | 3,059,496 | 2,901,024 |
+| Whole publish folder, feature not referenced | 16,195,936 | 16,480,600 | 21,585,363 |
+| Whole publish folder, feature used | 30,728,384 | 32,354,128 | 34,756,558 |
+| Delta | +14,532,448 | +15,873,528 | +13,171,195 |
+
+The publish reported no IL2xxx or IL3xxx warning on any of the three, with
+`-p:TrimmerSingleWarn=false`, so the cost is code that is genuinely reachable rather than trimming
+that gave up.
+
+##### Where the bytes are
+
+Attributed from the ILC map file (`-p:IlcGenerateMapFile=true`) by summing the machine-code bytes of
+every node under its assembly, win-x64, feature build minus floor build. Code is 10.7 MB of the
+12.5 MB the executable grows; the rest is metadata and data sections.
+
+| Where | Bytes | What it is |
+| --- | --- | --- |
+| `Svg.SceneGraph` | +928,964 | the renderer that walks the document and issues Skia commands |
+| `Svg.Custom` | +748,340 | the XML parser and the SVG element model |
+| `Svg.Skia` | +153,740 | the Svg-to-Skia bridge |
+| `Svg.Animation` | +87,426 | SMIL |
+| `Svg.Model` | +60,995 | shared model types |
+| `ShimSkiaSharp` | +115,301 | the immediate-mode drawing model Svg.Skia renders through |
+| `ExCSS` | +330,302 | the CSS parser behind `<style>` and `class` |
+| `HarfBuzzSharp` | +36,791 | the managed half of text shaping |
+| `XPlatUI.Feature.Svg` | +5,690 | this package: the provider, the cache, the secure parse |
+| `System.Private.CoreLib` | +1,402,755 | generic instantiations, string and collection code the model pulls in |
+| `System.Net` | +757,892 | the HTTP stack, see below |
+| `System.Private.Xml` | +332,912 | the XML reader the document is parsed with |
+| `System.Text` | +306,977 | encodings, plus `System.Text.RegularExpressions` |
+| `System.Linq`, `System.Collections` | +356,704 | the model's queries and maps |
+| `System.Security` | +109,989 | TLS, pulled in behind `System.Net` |
+| `System.Diagnostics` | +53,684 | stack traces |
+| linker bookkeeping, unrelated vtables and boxed statics | +4,775,243 | metadata blobs, stack-trace mapping, frozen segments, vtables |
+
+So the SVG stack itself - the seven assemblies above `XPlatUI.Feature.Svg` - is **2.47 MB**. The
+other 8.3 MB is what the BCL adds once a large generic-heavy model with an XML parser, a CSS parser
+and a regex engine becomes reachable, plus the linker's own metadata. That is the shape of the
+number, and it is why "trim the SVG packages" does not get far.
+
+##### What was tried, and what it measured
+
+- **Trim descriptors.** Every `svg.*` package and `shimskiasharp` ship no `ILLink` descriptor, no
+  `.props`/`.targets` and no `IsTrimmable=false`. Nothing in the packages roots anything; the
+  trimmer is doing its job and the cost is reachable code, not a rooting accident.
+- **`Svg.Animation`.** SMIL costs 87,426 bytes of code. It cannot be dropped without forking
+  `Svg.Custom`, which puts `SvgAnimationElement` in the element hierarchy that every document is
+  parsed into, and `Svg.Skia`, which enumerates animation elements. 0.8% of the delta, for a fork.
+- **HarfBuzz natives.** This is the one place the packages waste real bytes - 2.1 MB on win-x64,
+  3.1 MB on linux-x64, 2.9 MB on osx-arm64 - and the measurement says the three platforms disagree
+  about whether it can go:
+  - win-x64: it can be removed. With `libHarfBuzzSharp.dll` deleted and the three
+    `HarfBuzzSharp.NativeAssets.*` packages excluded, `<text>` renders pixel-identically, because
+    the Windows `libSkiaSharp.dll` shapes text itself.
+  - linux-x64: it cannot. `Svg.Skia` reaches HarfBuzz for `<text>` and the load fails with
+    `DllNotFoundException`, surfaced correctly as an `XPlatImageFormatException` through
+    `AddLoadFailedHandler` rather than thrown at the paint thread.
+  - osx-arm64: it cannot, and not even later - the AOT image links
+    `@executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib` at load time, so removing
+    the file stops the process from starting at all.
+
+  So the native stays, and text is the reason it is there. A Windows-only exclusion is technically
+  possible and not worth a platform-special case that would make `Load` behave differently on one
+  RID.
+- **`-p:IlcOptimizationPreference=Size`.** No gain: 15,762,432 against 15,759,360, 3 KB larger.
+- **`-p:StackTraceSupport=false -p:IlcGenerateStackTraceData=false`.** Saves 965,120 bytes on
+  win-x64, 1,261,664 on linux-x64 and 1,103,424 on osx-arm64, and it is worth knowing about - but
+  it is a whole-application policy that takes away exception stack traces everywhere and shrinks
+  the floor too. It is not a feature's lever, and this package does not set it. With it, the
+  executable delta falls to +11.5 MB on all three RIDs.
+
+##### The verdict
+
+10 MB of managed code is what this costs, and it cannot be trimmed further from this side. 2.5 MB
+of it is SVG, 8.3 MB is BCL the SVG model drags along, and the two things that would move it
+materially are outside the package: the HTTP stack, which enters through
+`Svg.SvgElement`'s static constructor calling `new HttpClient()` unconditionally and through
+`WebRequest` in `Svg.Model.Services.SvgService.GetImageFromWeb` and
+`Svg.Skia.SkiaSvgAssetLoader.OpenFontResourceStream` (about 0.87 MB of code with TLS behind it, and
+dead for an icon), and SMIL. Both need a fork of Svg.Skia, not a knob here. Nothing else on the
+list pays this: it is rung 3, so an application that does not reference the package is the floor,
+unchanged, and an application that does should know it is buying a document renderer rather than a
+icon loader - the demo's *SVG and a raster twin* page is the trade to look at before deciding.
+
+What the fixture proves, and what it does not: it proves the whole path an application uses - the
+provider, the secure parse, the cache, the recording and the control's paint - so the numbers are
+what opting in costs. It does not prove that a document using more of SVG pulls nothing more: it has
+one gradient, one `<text>` and no filter, and a program that uses filters and masks keeps code this
+one trims.
+
+The seam every application does pay is small. `XPlatUI.Minimal` publishes at 3,203,072 before and
+after this change - the same bytes, because it names no image - and a fixture that is the floor plus
+one `XPlatImage` loading a PNG publishes at 3,325,440 against 3,318,784 at `1b63ea1`, so the
+provider list, the interface and the header sniff cost 6,656 bytes to an application that shows an
+image and never adds a format.
+
+[Svg.Skia]: https://github.com/wieslawsoltes/Svg.Skia
 
 ## Writing a backend
 

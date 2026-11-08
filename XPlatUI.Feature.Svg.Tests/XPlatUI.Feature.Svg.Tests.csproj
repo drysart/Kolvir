@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The SVG feature's own suite, in an assembly of its own because the feature is a package of its
+       own: a rung-3 feature is not part of the core library, so its tests are not part of the core
+       suite either.
+
+       The feature splits by platform - `common/` plus one of windows, macos or linux compiled per
+       target framework - but these tests only touch `common/`, so the project takes one portable
+       target framework and the reference resolves the `net10.0` inner build of the feature on every
+       machine. That is what keeps the assembly runnable everywhere: a test project targeting
+       net10.0-macos would need the .NET for macOS SDK with a matching Xcode on whichever machine
+       builds it. Rendering an SVG is portable, so one inner build is the whole feature.
+
+       Restoring from this project needs -p:TargetFramework=net10.0, exactly as the other feature
+       suites do: the feature lists all three frameworks unconditionally for `dotnet pack`, and a
+       plain restore follows every framework in the reference graph, including the macOS one whose
+       workload no runner has. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>XPlatUI.Svg.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- The layout tests build a real application and window on the headless backend, which needs
+       SkiaSharp's native library on the two platforms whose main package does not carry one. The
+       feature brings HarfBuzz's native with it for text; that is a property of the feature rather
+       than of this project. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.Svg\XPlatUI.Feature.Svg.csproj" />
+    <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>
