@@ -1011,19 +1011,36 @@ painted under the caption.
 
 | Member | Behaviour |
 | --- | --- |
-| `IsExpanded` | Whether the content is showing. Collapsing remembers the height and shrinks to the header; expanding restores it |
+| `IsExpanded` | The state the section is heading for. Collapsing remembers the height and shrinks to the header; expanding restores it |
+| `ExpandProgress` | How far open it is drawn, 0 to 1, clamped. It follows `IsExpanded` on its own, and is what an animation drives |
+| `ArrowRotationDegrees` | How far the chevron is turned: 0 points right, 90 points down. Exactly `ExpandProgress * 90` |
 | `ExpandedHeight` | The height the content shows at, which is what expanding puts back |
-| `AddExpandedChangedHandler` | Runs after `IsExpanded` really changed |
+| `AddExpandedChangedHandler` | Runs when `IsExpanded` changed, before the progress follows it |
+| `AddExpandProgressChangedHandler` | Runs when the progress moved |
 | the header | A press and release on it toggles the section; Enter, Space, Left and Right do the same from the keyboard |
 
-A folded expander arranges its content into nothing: the children are still in the tree, so they
-come back on expand, but they occupy no area, are not painted and are not hit tested. An
-`AutoSize` expander needs none of the height remembering - it measures as its header when folded -
-so the two agree without guessing which one a section is.
+There are two states and only one of them is the caller's. `IsExpanded` is the target - what was
+asked for, what the header toggles - and `ExpandProgress` is the visual state: 0 folded, 1 open,
+anything between a section that is half open. Nothing animating, the two always agree, because
+changing `IsExpanded` moves the progress itself; an application never assigns `ExpandProgress` and
+never has to. They disagree only while something is driving the progress, which is the whole reason
+the number is public: a section that is half open is expanded by `IsExpanded` and 0.5 by
+`ExpandProgress`.
 
-The fold is a jump rather than an animation on purpose: animated expand and collapse belongs to
-`XPlatUI.Feature.Animations`, and this control does not reference that package, so an application
-that wants the slide opts into it.
+Both the content height and the arrow come from that one number, so they cannot drift apart. The
+chevron is a single shape turned by `ArrowRotationDegrees`: pointing right at 0 and exactly a quarter
+turn clockwise - pointing down - at 1.
+
+A folded expander arranges its content into nothing: the children are still in the tree, so they
+come back on expand, but they occupy no area, are not painted and are not hit tested. Part-way open
+they are laid out in the room that is left and clipped at the folded edge, so a fold in progress
+shows the top of the content. An `AutoSize` expander needs none of the height remembering - it
+measures as its header when folded, and as much of its content as the progress allows otherwise - so
+the two agree without guessing which one a section is.
+
+On its own the fold is a jump. Animating it belongs to `XPlatUI.Feature.Animations`, which this
+control does not reference: that package drives `ExpandProgress` from a timeline, so the arrow and
+the height move together without the control carrying any of the animation code.
 
 ```csharp
 var appearance = new XPlatExpander("Appearance") { Dock = DockStyle.Top, Height = 180f };

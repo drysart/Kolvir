@@ -21,9 +21,29 @@ namespace XPlatUI;
 /// collapsed - so the two agree without the control having to guess which one it is.
 /// </para>
 /// <para>
+/// <b>Two states, one of them the user's.</b> <see cref="IsExpanded"/> is the target - what the
+/// caller asked for, what the header toggles, what the keyboard folds and unfolds.
+/// <see cref="ExpandProgress"/> is the visual state: 0 folded, 1 fully open, anything between a
+/// section that is half open. With nothing animating the two always agree, because changing
+/// <see cref="IsExpanded"/> moves the progress itself; a caller never assigns
+/// <see cref="ExpandProgress"/> and never has to. They disagree only while something is driving the
+/// progress, which is why the number exists at all: a section that is half open is expanded by
+/// <see cref="IsExpanded"/> - that is where it is going - and 0.5 by
+/// <see cref="ExpandProgress"/> - that is where it is.
+/// </para>
+/// <para>
+/// The progress drives everything visual, the content height and the chevron's rotation both, so
+/// there is one number to animate rather than two that can drift apart. The arrow is one chevron
+/// turned by <see cref="ArrowRotationDegrees"/>: pointing right at 0 and exactly a quarter turn
+/// clockwise - pointing down - at 1, which is why the folded and open arrows cannot end up being
+/// drawn as different shapes.
+/// </para>
+/// <para>
 /// The expand and collapse is a jump, deliberately. Animating it is
 /// <c>XPlatUI.Feature.Animations</c> work, and the control does not reference that package: an
-/// application that wants the fade or slide opts into it the way it opts into any other feature.
+/// application that wants the slide opts into it the way it opts into any other feature.
+/// <c>ExpandDuration</c> there animates this same progress, so the two never disagree about what
+/// the section is doing.
 /// </para>
 /// </remarks>
 public class XPlatExpander : XPlatPanel
@@ -31,9 +51,12 @@ public class XPlatExpander : XPlatPanel
     private const float ChevronWidth = 18f;
 
     private Action<object>? _expandedChanged;
+    private Action<object>? _progressChanged;
     private bool _expanded = true;
     private bool _headerHot;
     private bool _headerPressed;
+    private bool _progressSteered;
+    private double _progress = 1d;
     private float _expandedHeight;
 
     public XPlatExpander()
@@ -54,7 +77,17 @@ public class XPlatExpander : XPlatPanel
         Text = header;
     }
 
-    /// <summary>Raised after <see cref="IsExpanded"/> changed.</summary>
+    /// <summary>
+    /// Raised when <see cref="IsExpanded"/> changed, before <see cref="ExpandProgress"/> follows it.
+    /// </summary>
+    /// <remarks>
+    /// The order is the contract: a handler that assigns <see cref="ExpandProgress"/> while it runs
+    /// takes the transition over, and the control then leaves the progress where that handler put
+    /// it instead of jumping it to the new target. That is the one case where the progress is
+    /// allowed to disagree with <see cref="IsExpanded"/>, and it is how an animation starts from
+    /// wherever the section happens to be - including from halfway through a fold that has not
+    /// finished - rather than from the target it is heading for.
+    /// </remarks>
     public IDisposable AddExpandedChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -69,10 +102,30 @@ public class XPlatExpander : XPlatPanel
         _expandedChanged -= handler;
     }
 
+    /// <summary>Raised after <see cref="ExpandProgress"/> changed by a worthwhile amount.</summary>
+    public IDisposable AddExpandProgressChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _progressChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveExpandProgressChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddExpandProgressChangedHandler"/> added.</summary>
+    public void RemoveExpandProgressChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _progressChanged -= handler;
+    }
+
     /// <summary>
-    /// Whether the content is showing. Collapsing shrinks the control to its header and remembers
+    /// Whether the content is showing: the state the section is heading for. Collapsing remembers
     /// the height it had; expanding restores it.
     /// </summary>
+    /// <remarks>
+    /// Changing it moves <see cref="ExpandProgress"/> to match, one way or the other, unless a
+    /// handler of <see cref="AddExpandedChangedHandler"/> drives the progress itself. So a half
+    /// open section is expanded here and 0.5 there.
+    /// </remarks>
     public bool IsExpanded
     {
         get => _expanded;
@@ -85,28 +138,80 @@ public class XPlatExpander : XPlatPanel
 
             _expanded = value;
 
-            if (value)
-            {
-                if (_expandedHeight > HeaderHeight)
-                {
-                    Height = _expandedHeight;
-                }
-            }
-            else if (Height > HeaderHeight)
-            {
-                _expandedHeight = Height;
-                Height = HeaderHeight;
-            }
-
-            // The section just changed how much room it needs, so whatever is docked below it has
-            // to move: a control that changes its own height is the only one that knows a layout
-            // pass is due outside the one that placed it.
-            Parent?.PerformLayout();
-            PerformLayout();
-            Invalidate();
+            // Raised before the progress follows, so a handler can take the transition over. The
+            // flag it leaves behind is what tells the snap below to stand down.
+            _progressSteered = false;
             _expandedChanged?.Invoke(this);
+
+            if (!_progressSteered)
+            {
+                ExpandProgress = value ? 1d : 0d;
+            }
         }
     }
+
+    /// <summary>
+    /// How far open the section is drawn, from 0 to 1: the content's height and the chevron's
+    /// rotation both come from it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It follows <see cref="IsExpanded"/> on its own, so an application that never animates never
+    /// assigns it. It is public because something else - <c>ExpandDuration</c> in
+    /// <c>XPlatUI.Feature.Animations</c> - drives it a frame at a time, and because a value that a
+    /// control is drawn from is worth being able to read.
+    /// </para>
+    /// <para>
+    /// Out of range values are clamped: below 0 folds it, above 1 opens it fully. A section driven
+    /// by an animation that overshoots its ease therefore lands on its target instead of drawing
+    /// past it. NaN is not a progress and is rejected.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="value"/> is NaN.</exception>
+    public double ExpandProgress
+    {
+        get => _progress;
+        set
+        {
+            if (double.IsNaN(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "The progress must be a number.");
+            }
+
+            // Set before the early-out below: a driver that wants the transition held where it is -
+            // a fold starting from halfway - assigns the value it already has, and that has to count
+            // as taking the transition over just as much as a move would.
+            _progressSteered = true;
+
+            double clamped = Math.Clamp(value, 0d, 1d);
+            if (Math.Abs(clamped - _progress) < 0.000001d)
+            {
+                return;
+            }
+
+            // Leaving full expansion: the height it is at now is the one to come back to. Taken
+            // before the height changes, and only off the top of the range, so a fold that is
+            // reversed halfway still remembers the height a whole section had.
+            if (_progress >= 1d && !AutoSize && Height > HeaderHeight)
+            {
+                _expandedHeight = Height;
+            }
+
+            _progress = clamped;
+            ApplyProgress();
+            _progressChanged?.Invoke(this);
+        }
+    }
+
+    /// <summary>
+    /// How far the chevron is turned, in degrees clockwise: 0 points right for a folded section and
+    /// 90 points down for an open one.
+    /// </summary>
+    /// <remarks>
+    /// The arrow is painted at exactly this angle, so a test that pins it is pinning what the
+    /// screen shows rather than a number that happens to sit beside it.
+    /// </remarks>
+    public double ArrowRotationDegrees => _progress * 90d;
 
     /// <summary>The height the content is showing at, which collapsing remembers and expanding restores.</summary>
     public float ExpandedHeight => _expandedHeight > HeaderHeight ? _expandedHeight : Height;
@@ -127,19 +232,27 @@ public class XPlatExpander : XPlatPanel
         float headerWidth = ChevronWidth + 2f +
                             XPlatTextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false).Width;
 
-        if (!_expanded)
+        if (_progress <= 0d)
         {
             return new SKSize(headerWidth, header);
         }
 
+        // Measured as a whole section and then folded to the progress, so an AutoSize expander
+        // animates its height too instead of jumping to the fully open measurement on the first
+        // frame.
         var content = base.MeasureContent(new SKSize(availableSize.Width, MathF.Max(0f, availableSize.Height - header)));
-        return new SKSize(MathF.Max(headerWidth, content.Width), content.Height + header);
+        return new SKSize(
+            MathF.Max(headerWidth, content.Width),
+            (content.Height * (float)_progress) + header);
     }
 
     protected override SKSize ArrangeChildren(SKRect area)
     {
-        if (_expanded)
+        if (_progress > 0d)
         {
+            // Half open the children are laid out in the room that is left; the panel's viewport
+            // clips whatever hangs past the folded edge, so a fold in progress shows the top of the
+            // content rather than nothing at all.
             return base.ArrangeChildren(area);
         }
 
@@ -154,10 +267,10 @@ public class XPlatExpander : XPlatPanel
         return SKSize.Empty;
     }
 
-    /// <summary>A folded expander paints nothing of its content, so the walk is skipped entirely.</summary>
+    /// <summary>A perfectly folded expander paints nothing of its content, so the walk is skipped entirely.</summary>
     protected override void RenderScrolledChildren(SKCanvas canvas)
     {
-        if (_expanded)
+        if (_progress > 0d)
         {
             base.RenderScrolledChildren(canvas);
         }
@@ -165,7 +278,7 @@ public class XPlatExpander : XPlatPanel
 
     /// <summary>While folded the only thing under the pointer is the header, which is this control.</summary>
     protected override XPlatControl? HitTestChildren(SKPoint local) =>
-        _expanded ? base.HitTestChildren(local) : null;
+        _progress > 0d ? base.HitTestChildren(local) : null;
 
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
@@ -200,7 +313,7 @@ public class XPlatExpander : XPlatPanel
             XPlatTextRenderer.Draw(canvas, Text, Font, color, caption, XPlatContentAlignment.MiddleLeft);
         }
 
-        if (_expanded)
+        if (_progress > 0d)
         {
             // The hairline separates the header from the content; folded, the panel's own border is
             // already the bottom edge and a second line would read as a gap.
@@ -350,25 +463,46 @@ public class XPlatExpander : XPlatPanel
 
     private bool IsInHeader(SKPoint point) => point.Y < HeaderHeight;
 
+    /// <summary>
+    /// Puts the section where <see cref="ExpandProgress"/> says: its own height first, then whatever
+    /// is docked under it, which has to move with the fold.
+    /// </summary>
+    private void ApplyProgress()
+    {
+        if (!AutoSize)
+        {
+            float open = ExpandedHeight;
+            Height = HeaderHeight + (MathF.Max(0f, open - HeaderHeight) * (float)_progress);
+
+            // Fully open is the height worth remembering: it is the one a later fold has to come back
+            // to, and reading it here is what keeps a fold reversed halfway from remembering the
+            // height it happened to be at.
+            if (_progress >= 1d && Height > HeaderHeight)
+            {
+                _expandedHeight = Height;
+            }
+        }
+
+        // The section just changed how much room it needs, so whatever is docked below it has to
+        // move: a control that changes its own height is the only one that knows a layout pass is
+        // due outside the one that placed it.
+        Parent?.PerformLayout();
+        PerformLayout();
+        Invalidate();
+    }
+
     private void PaintChevron(SKCanvas canvas, SKRect cell, SKColor color)
     {
         float centerX = cell.MidX;
         float centerY = cell.MidY;
         float half = 3.5f;
 
+        // One chevron, pointing right, turned by the progress. Drawing a second shape for the open
+        // state is what let the two arrows drift apart; there is nothing left to drift.
         using var builder = new SKPathBuilder();
-        if (_expanded)
-        {
-            builder.MoveTo(centerX - half, centerY - (half * 0.5f));
-            builder.LineTo(centerX + half, centerY - (half * 0.5f));
-            builder.LineTo(centerX, centerY + (half * 0.7f));
-        }
-        else
-        {
-            builder.MoveTo(centerX - (half * 0.5f), centerY - half);
-            builder.LineTo(centerX + (half * 0.7f), centerY);
-            builder.LineTo(centerX - (half * 0.5f), centerY + half);
-        }
+        builder.MoveTo(centerX - (half * 0.5f), centerY - half);
+        builder.LineTo(centerX + (half * 0.7f), centerY);
+        builder.LineTo(centerX - (half * 0.5f), centerY + half);
 
         using var path = builder.Snapshot();
         using var paint = new SKPaint
@@ -381,6 +515,15 @@ public class XPlatExpander : XPlatPanel
             StrokeJoin = SKStrokeJoin.Round,
         };
 
+        if (ArrowRotationDegrees == 0d)
+        {
+            canvas.DrawPath(path, paint);
+            return;
+        }
+
+        canvas.Save();
+        canvas.RotateDegrees((float)ArrowRotationDegrees, centerX, centerY);
         canvas.DrawPath(path, paint);
+        canvas.Restore();
     }
 }
