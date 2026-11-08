@@ -432,6 +432,7 @@ public sealed class DemoUi
         ("Split buttons", demo => Page(demo.BuildSplitButtonDemo())),
         ("Expander", demo => Page(demo.BuildExpanderDemo())),
         ("Wrap panel", demo => Page(demo.BuildWrapPanelDemo())),
+        ("Busy indicator and overlay", demo => Page(demo.BuildBusyOverlayDemo())),
     };
 
     /// <summary>
@@ -5681,6 +5682,199 @@ public sealed class DemoUi
 
     private static string DescribeColor(SKColor color) =>
         $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2} (R {color.Red}, G {color.Green}, B {color.Blue})";
+
+    /// <summary>
+    /// <see cref="XPlatBusyIndicator"/> and <see cref="XPlatOverlay"/>: a spinner on its own, and the
+    /// same spinner inside a layer that stops the panel underneath from being driven.
+    /// </summary>
+    private XPlatPanel BuildBusyOverlayDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Busy indicator and overlay"));
+
+        card.Controls.Add(new XPlatLabel(
+            "Two controls, because they answer two questions. The spinner says the work is running; " +
+            "the overlay stops the user from driving the window while it does. Putting the spinner " +
+            "inside the overlay is the usual combination.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 42f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var row = ButtonRow();
+        row.Height = 40f;
+
+        var spinner = new XPlatBusyIndicator { Dock = XDock.Left, Margin = new XPlatThickness(0f, 4f, 12f, 0f) };
+        row.Controls.Add(spinner);
+
+        var toggle = new XPlatButton("Stop the spinner")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        toggle.AddClickHandler(_ =>
+        {
+            spinner.IsBusy = !spinner.IsBusy;
+            toggle.Text = spinner.IsBusy ? "Stop the spinner" : "Start the spinner";
+            SetStatus(spinner.IsBusy
+                ? "The spinner is going round again - and it has stopped its timer while it was still."
+                : "The spinner is still, and its timer is stopped: an idle spinner costs nothing.");
+        });
+        row.Controls.Add(toggle);
+
+        var heavy = new XPlatButton("A heavier one")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Ghost,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        heavy.AddClickHandler(_ => SetStatus("A spinner's ring thickness is a property, not a theme value."));
+        row.Controls.Add(new XPlatBusyIndicator { Dock = XDock.Left, Thickness = 5f, Margin = new XPlatThickness(0f, 4f, 8f, 0f) });
+        row.Controls.Add(heavy);
+
+        card.Controls.Add(row);
+
+        // The shell that gets blocked: its content and the layer are both Fill children, so they
+        // cover the same area and the layer is above it.
+        var shell = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 170f,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(14f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        var content = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var readout = new XPlatLabel("Nothing has been done yet.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 24f,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        };
+
+        var action = new XPlatButton("Do something in the blocked panel")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        int actions = 0;
+        action.AddClickHandler(_ =>
+        {
+            actions++;
+            readout.Text = $"The panel's button has been pressed {actions} time(s).";
+            SetStatus("The panel's button works while the layer is hidden.");
+        });
+
+        var box = new XPlatCheckBox("A control under the layer") { Dock = XDock.Top, AutoSize = true };
+
+        content.Controls.Add(action);
+        content.Controls.Add(box);
+        content.Controls.Add(readout);
+
+        var busyCard = new XPlatPanel
+        {
+            AutoSize = false,
+            Size = new SKSize(260f, 76f),
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(12f),
+        };
+        busyCard.Controls.Add(new XPlatBusyIndicator
+        {
+            Dock = XDock.Left,
+            Margin = new XPlatThickness(0f, 0f, 14f, 0f),
+        });
+        busyCard.Controls.Add(new XPlatLabel("Loading the project...")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+            ForeColorRole = XPlatThemeColor.Foreground,
+        });
+
+        // The page opens with the layer up, so the blocked state is what a screenshot of the page
+        // shows; "Unblock" releases it and "Block the panel" puts it back.
+        var overlay = new XPlatOverlay();
+        overlay.Controls.Add(busyCard);
+
+        shell.Controls.Add(content);
+        shell.Controls.Add(overlay);
+        card.Controls.Add(shell);
+
+        var layerRow = ButtonRow();
+        layerRow.Height = 32f;
+
+        var block = new XPlatButton("Block the panel")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        block.AddClickHandler(_ =>
+        {
+            overlay.Visible = true;
+            block.Enabled = false;
+            SetStatus("The panel is blocked: its button takes no press and the keyboard goes nowhere.");
+        });
+
+        var unblock = new XPlatButton("Unblock")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        unblock.AddClickHandler(_ =>
+        {
+            overlay.Visible = false;
+            block.Enabled = true;
+            SetStatus("The panel is free again, and the keyboard is back on whatever had the focus.");
+        });
+
+        layerRow.Controls.Add(block);
+        layerRow.Controls.Add(unblock);
+        card.Controls.Add(layerRow);
+
+        card.Controls.Add(new XPlatLabel(
+            "The layer takes the presses by being the topmost control over the panel, and the keys " +
+            "by joining the window as an input sink while it is on screen - the same seam an open " +
+            "menu uses. Its dimming is the palette's background, so it follows a theme change.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
 
     /// <summary>
     /// <see cref="XPlatWrapPanel"/>: a tag row that wraps at the page's width, a column flow of

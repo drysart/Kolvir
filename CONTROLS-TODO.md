@@ -99,8 +99,7 @@ listing them is that a reviewer can say "this next" without re-deriving the gap.
 | --- | --- | --- |
 | A validation error provider | The error *icon*, the message, and the plumbing that maps a validation result onto a control. The span squiggles that shipped draw the underline; what is missing is the provider an application hands its validation rules to, in the shape WinForms' `ErrorProvider` has. | Low to medium |
 | `XPlatMaskedTextBox` | Input masks for dates, phone numbers, currency and the like. `XPlatNumericUpDown` covers numbers and `XPlatDateTimePicker` covers dates; free-form masked text has no answer. | Medium |
-| `XPlatWrapPanel` | Items flowing onto the next line at a width, which is what tag rows, button groups and thumbnail grids want. `XPlatStackPanel` never wraps and `XPlatTableLayoutPanel` needs its columns known up front. | Low |
-| A busy indicator and an overlay | A long operation needs something that is not a determinate `XPlatProgressBar`. A spinner plus a modal overlay that blocks input while work runs. | Low |
+| `XPlatToast` / notification banner | Transient success and error messages that do not need a dialog. Cheap now that `XPlatUI.Feature.Animations` supplies the fade and slide. | Low |
 
 ### 4.2 Worth having, but not in the way of building an application
 

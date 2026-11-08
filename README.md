@@ -90,6 +90,8 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatCheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
 | `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
+| `XPlatBusyIndicator` | - | An indeterminate spinner: a ring with a rotating arc, on a timer that runs only while it is on screen and busy |
+| `XPlatOverlay` | - | A modal layer: dims what is under it, takes every press and swallows every key while it shows |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
 | `XPlatTextBox` + `XPlatUI.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
@@ -901,6 +903,43 @@ var calmer = new XPlatProgressBar
     Style = XPlatProgressBarStyle.Marquee,
     MarqueeAnimationSpeed = TimeSpan.FromMilliseconds(50),   // ignore the display's own rate
 };
+```
+
+### Busy indicator and overlay
+
+A long operation needs a readout that is not a determinate bar, and often a way to stop the user
+from driving the window while it runs. Those are two controls rather than one, because the two
+questions have independent answers: a spinner is useful on its own (in a status strip, in a dialog,
+next to the row that is loading), and a modal layer is useful with content that is not a spinner (a
+confirmation panel, a progress row, a form). Folding them together would put a timer in every
+application that only wanted a blocker, and a dimming surface in every application that only wanted
+a spinner.
+
+| Control | Member | Behaviour |
+| --- | --- | --- |
+| `XPlatBusyIndicator` | `IsBusy` | Whether the ring is going round; defaults to true, and clearing it stops the clock |
+| | `Thickness`, `AnimationSpeed` | The width of the ring, and how often the sweep advances |
+| `XPlatOverlay` | `Dim` | How much of what is under it is covered, 0 to 1, painted with the palette's background so it darkens a light window and lightens a dark one |
+| | `ChildAlignment` | Where a child that is not docked sits; `MiddleCenter` by default |
+
+The spinner is the second control whose value is time, so it obeys the rule the marquee bar set: it
+runs a timer only while it is `IsDisplayed` and `IsBusy` and there is an application to deliver the
+ticks, and it stops otherwise. The layer is an ordinary control, so it takes the presses by being
+the topmost thing in its container; putting it beside the content it holds still means both are
+`DockStyle.Fill` and cover the same area - a child docked to an edge keeps its band and is not
+covered. Keyboard input follows the focus rather than the pointer, so the layer also joins the
+window as an `IXPlatInputSink` while it is on screen: every key and every typed character stops
+there, which is the same seam an open menu uses. Hiding or disabling the layer gives the keyboard
+back.
+
+```csharp
+var overlay = new XPlatOverlay();                    // Dock = Fill
+var busy = new XPlatPanel { AutoSize = false, Size = new SKSize(220f, 72f) };
+busy.Controls.Add(new XPlatBusyIndicator { Dock = DockStyle.Left, Margin = new XPlatThickness(16f) });
+busy.Controls.Add(new XPlatLabel("Loading the project...") { Dock = DockStyle.Fill });
+overlay.Controls.Add(busy);                          // centred by ChildAlignment
+
+page.Controls.Add(overlay);                          // over the content, while the work runs
 ```
 
 ### Group box
