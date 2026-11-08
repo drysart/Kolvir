@@ -7,4 +7,9 @@
 
   <Import Project="$(MSBuildThisFileDirectory)XPlatUI\buildTransitive\XPlatUI.targets" />
 
+  <!-- The same arrangement for the SVG feature's own native library. Both files are inert unless an
+	   application publishes with AOT, so importing them here changes nothing about the library, the
+	   backends, the tests or a normal demo run. -->
+  <Import Project="$(MSBuildThisFileDirectory)XPlatUI.Feature.Svg\buildTransitive\XPlatUI.Feature.Svg.targets" />
+
 </Project>

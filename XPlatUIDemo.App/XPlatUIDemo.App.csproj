@@ -87,5 +87,7 @@
 
   <!-- The SkiaSharp native library is embedded in an AOT publish by XPlatUI's own build assets
        (XPlatUI/buildTransitive/XPlatUI.targets), so no application has to carry that MSBuild. Set
-       EmbedSkiaSharpNative to false to keep the library as a loose file beside the executable. -->
+       EmbedSkiaSharpNative to false to keep the library as a loose file beside the executable. The
+       SVG feature's HarfBuzz native is embedded by its own build assets the same way, and needs no
+       switch here at all: an application that publishes with AOT gets both folded in. -->
 </Project>
