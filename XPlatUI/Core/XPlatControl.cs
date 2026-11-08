@@ -631,6 +631,28 @@ public class XPlatControl : IDisposable
     public bool EffectiveVisible => _visible && (Parent?.EffectiveVisible ?? true);
 
     /// <summary>
+    /// Whether the controls inside this one can be reached - by Tab, by focus, by anything that
+    /// walks the tree. True for every control that shows its children; a container that keeps them
+    /// in the tree while showing nothing of them reports false.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A collapsed <see cref="XPlatExpander"/> is the case this exists for. It cannot hide its
+    /// content - the section is still there, and folding is a matter of how much of it is drawn -
+    /// so hiding is not available to it, and without this a Tab walk would happily enter a section
+    /// that is showing nothing. Reporting it here instead means the rules that already step over an
+    /// invisible or disabled subtree step over a folded section too, without knowing what a folded
+    /// section is.
+    /// </para>
+    /// <para>
+    /// Containers that hide their children outright - the pages of an
+    /// <see cref="XPlatTabControl"/>, say - do not need to override it: they set
+    /// <see cref="Visible"/>, which <see cref="EffectiveVisible"/> already accounts for.
+    /// </para>
+    /// </remarks>
+    protected internal virtual bool IsContentReachable => true;
+
+    /// <summary>
     /// Whether the user can actually see this control: it is <see cref="EffectiveVisible"/>,
     /// attached to a host, and in a window that has been shown and has not closed.
     /// </summary>
@@ -644,6 +666,80 @@ public class XPlatControl : IDisposable
         EffectiveVisible
         && Host is not null
         && (Window is not { } window || (window.IsShown && !window.IsClosed));
+
+    /// <summary>
+    /// Whether the control can be reached right now: it is <see cref="EffectiveVisible"/> and
+    /// <see cref="Enabled"/>, and no container above it has stopped showing its content.
+    /// </summary>
+    /// <remarks>
+    /// This is the tree walk the Tab order and <see cref="XPlatUiHost.SetFocus"/> both ask, so a
+    /// control inside a collapsed section is left out of the order and cannot be focused by
+    /// anything else either. It is answered from the tree every time rather than cached, because a
+    /// section can be folded while a control inside it holds the focus.
+    /// </remarks>
+    internal bool IsReachable =>
+        EffectiveVisible
+        && Enabled
+        && (Parent is not { } parent || (parent.IsReachable && parent.IsContentReachable));
+
+    /// <summary>
+    /// Moves the focus out of this control's subtree when a control inside it holds the focus and
+    /// the subtree has just stopped being reachable - the case this is for is a container that has
+    /// stopped showing its content, such as an expander that was just folded.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The focus goes to the nearest control from here upwards that can still take it, which is
+    /// this control itself when only its content went away - the header of a folded section - and
+    /// an ancestor when this control is the one that went away. With nothing above it to take the
+    /// focus it is cleared.
+    /// </para>
+    /// <para>
+    /// Hiding or disabling a container is deliberately not one of the callers. A hidden container
+    /// keeps the focus its child held, which is documented behaviour with a test behind it - a
+    /// field inside a hidden panel keeps the caret so that showing the panel again resumes it - and
+    /// this change does not revisit that. A collapsed expander is a different thing: the section is
+    /// still there and the rest of the page is still usable, so the focus belongs somewhere the
+    /// user can see.
+    /// </para>
+    /// </remarks>
+    internal void ReleaseFocusFromSubtree()
+    {
+        if (Host is not { } host || host.FocusedControl is not { } focused)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(focused, this) || !IsAncestorOf(focused))
+        {
+            return;
+        }
+
+        for (var candidate = this; candidate is not null; candidate = candidate.Parent)
+        {
+            if (candidate.Focusable && candidate.IsReachable)
+            {
+                host.SetFocus(candidate);
+                return;
+            }
+        }
+
+        host.SetFocus(null);
+    }
+
+    /// <summary>Whether <paramref name="control"/> is somewhere below this one in the tree.</summary>
+    private bool IsAncestorOf(XPlatControl control)
+    {
+        for (var current = control.Parent; current is not null; current = current.Parent)
+        {
+            if (ReferenceEquals(current, this))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// Whether the control accepts input. Disabling a container disables everything inside it, so

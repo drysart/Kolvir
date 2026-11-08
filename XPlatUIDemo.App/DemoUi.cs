@@ -429,6 +429,11 @@ public sealed class DemoUi
         ("Colour picker", demo => Page(demo.BuildColorPickerDemo())),
         ("Font dialog", demo => Page(demo.BuildFontDialogDemo())),
         ("Colour dialog", demo => Page(demo.BuildColorDialogDemo())),
+        ("Split buttons", demo => Page(demo.BuildSplitButtonDemo())),
+        ("Expander", demo => Page(demo.BuildExpanderDemo())),
+        ("Wrap panel", demo => Page(demo.BuildWrapPanelDemo())),
+        ("Busy indicator and overlay", demo => Page(demo.BuildBusyOverlayDemo())),
+        ("Toast", demo => Page(demo.BuildToastDemo())),
     };
 
     /// <summary>
@@ -5678,6 +5683,707 @@ public sealed class DemoUi
 
     private static string DescribeColor(SKColor color) =>
         $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2} (R {color.Red}, G {color.Green}, B {color.Blue})";
+
+    /// <summary>
+    /// <see cref="XPlatToast"/>: the four severities, each dismissed by its own countdown or by the
+    /// close glyph, with the message docked at the bottom of the page like a real one.
+    /// </summary>
+    private XPlatPanel BuildToastDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Toast"));
+
+        card.Controls.Add(new XPlatLabel(
+            "A transient message bar. The accent bar is coloured for the severity, the message " +
+            "sits beside it, and the toast dismisses itself after the duration it was given - or " +
+            "the user closes it. It is an ordinary control, so a page makes room for it.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 58f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var toast = new XPlatToast(
+            "Project saved to disk - the toast dismisses itself after four seconds.")
+        {
+            Dock = XDock.Bottom,
+            Severity = XPlatToastSeverity.Success,
+            Margin = new XPlatThickness(0f, 12f, 0f, 0f),
+        };
+        toast.AddDismissedHandler(_ => SetStatus("The toast went away - by its countdown or by the close glyph."));
+
+        var row = ButtonRow();
+        row.Height = 34f;
+        row.Margin = new XPlatThickness(0f, 0f, 0f, 8f);
+
+        row.Controls.Add(ToastButton("Success", XPlatToastSeverity.Success,
+            "Project saved to disk - the toast dismisses itself after four seconds.", 4, toast));
+
+        row.Controls.Add(ToastButton("Info", XPlatToastSeverity.Info,
+            "Three files were re-indexed in the background.", 4, toast));
+
+        row.Controls.Add(ToastButton("Warning", XPlatToastSeverity.Warning,
+            "The export finished, but two images could not be embedded.", 5, toast));
+
+        row.Controls.Add(ToastButton("Error", XPlatToastSeverity.Error,
+            "Could not reach the server. This one stays until it is dismissed.", null, toast));
+
+        card.Controls.Add(row);
+
+        card.Controls.Add(new XPlatLabel(
+            "A toast with no duration stays up: an error usually waits for the user to acknowledge " +
+            "it, while a success can go away on its own. The countdown pauses while the toast is " +
+            "not on screen, so a message cannot expire behind a page the user switched away from.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        card.Controls.Add(toast);
+
+        // The page opens with a message up, so a screenshot of it shows the control.
+        toast.Show();
+
+        return card;
+    }
+
+    /// <summary>One of the toast page's buttons: sets the severity and the message, and shows it.</summary>
+    private XPlatButton ToastButton(
+        string text,
+        XPlatToastSeverity severity,
+        string message,
+        int? seconds,
+        XPlatToast toast)
+    {
+        var button = new XPlatButton(text)
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+
+        button.AddClickHandler(_ =>
+        {
+            toast.Text = message;
+            toast.Severity = severity;
+            toast.Duration = seconds is { } value ? TimeSpan.FromSeconds(value) : null;
+            toast.Show();
+            SetStatus(severity is XPlatToastSeverity.Error or XPlatToastSeverity.Info
+                ? $"Showing an {severity} toast."
+                : $"Showing a {severity} toast.");
+        });
+
+        return button;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatBusyIndicator"/> and <see cref="XPlatOverlay"/>: a spinner on its own, and the
+    /// same spinner inside a layer that stops the panel underneath from being driven.
+    /// </summary>
+    private XPlatPanel BuildBusyOverlayDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Busy indicator and overlay"));
+
+        card.Controls.Add(new XPlatLabel(
+            "Two controls, because they answer two questions. The spinner says the work is running; " +
+            "the overlay stops the user from driving the window while it does. Putting the spinner " +
+            "inside the overlay is the usual combination.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 42f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var row = ButtonRow();
+        row.Height = 40f;
+
+        var spinner = new XPlatBusyIndicator { Dock = XDock.Left, Margin = new XPlatThickness(0f, 4f, 12f, 0f) };
+        row.Controls.Add(spinner);
+
+        var toggle = new XPlatButton("Stop the spinner")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        toggle.AddClickHandler(_ =>
+        {
+            spinner.IsBusy = !spinner.IsBusy;
+            toggle.Text = spinner.IsBusy ? "Stop the spinner" : "Start the spinner";
+            SetStatus(spinner.IsBusy
+                ? "The spinner is going round again - and it has stopped its timer while it was still."
+                : "The spinner is still, and its timer is stopped: an idle spinner costs nothing.");
+        });
+        row.Controls.Add(toggle);
+
+        var heavy = new XPlatButton("A heavier one")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Ghost,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        heavy.AddClickHandler(_ => SetStatus("A spinner's ring thickness is a property, not a theme value."));
+
+        row.Controls.Add(new XPlatBusyIndicator
+        {
+            Dock = XDock.Left,
+            Thickness = 5f,
+            Margin = new XPlatThickness(0f, 4f, 8f, 0f),
+        });
+        row.Controls.Add(heavy);
+
+        // A spinner in a box that is deliberately nothing like square - wide and short, with the box
+        // drawn round it so the control's shape is visible. The circle comes from the shorter side
+        // and is centred, so it reads as a spinner rather than as a stretched oval.
+        var wideBox = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = 240f,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 2f, 4f, 0f),
+        };
+        wideBox.Controls.Add(new XPlatBusyIndicator { Dock = XDock.Fill, Thickness = 5f });
+        row.Controls.Add(wideBox);
+
+        card.Controls.Add(row);
+
+        // The shell that gets blocked: its content and the layer are both Fill children, so they
+        // cover the same area and the layer is above it.
+        var shell = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 170f,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(14f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        var content = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var readout = new XPlatLabel("Nothing has been done yet.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 24f,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        };
+
+        var action = new XPlatButton("Do something in the blocked panel")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        int actions = 0;
+        action.AddClickHandler(_ =>
+        {
+            actions++;
+            readout.Text = $"The panel's button has been pressed {actions} time(s).";
+            SetStatus("The panel's button works while the layer is hidden.");
+        });
+
+        var box = new XPlatCheckBox("A control under the layer") { Dock = XDock.Top, AutoSize = true };
+
+        content.Controls.Add(action);
+        content.Controls.Add(box);
+        content.Controls.Add(readout);
+
+        var busyCard = new XPlatPanel
+        {
+            AutoSize = false,
+            Size = new SKSize(260f, 76f),
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(12f),
+        };
+        busyCard.Controls.Add(new XPlatBusyIndicator
+        {
+            Dock = XDock.Left,
+            Margin = new XPlatThickness(0f, 0f, 14f, 0f),
+        });
+        busyCard.Controls.Add(new XPlatLabel("Loading the project...")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+            ForeColorRole = XPlatThemeColor.Foreground,
+        });
+
+        // The page opens with the layer up, so the blocked state is what a screenshot of the page
+        // shows; "Unblock" releases it and "Block the panel" puts it back.
+        var overlay = new XPlatOverlay();
+        overlay.Controls.Add(busyCard);
+
+        shell.Controls.Add(content);
+        shell.Controls.Add(overlay);
+        card.Controls.Add(shell);
+
+        var layerRow = ButtonRow();
+        layerRow.Height = 32f;
+
+        var block = new XPlatButton("Block the panel")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        block.AddClickHandler(_ =>
+        {
+            overlay.Visible = true;
+            block.Enabled = false;
+            SetStatus("The panel is blocked: its button takes no press and the keyboard goes nowhere.");
+        });
+
+        var unblock = new XPlatButton("Unblock")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        unblock.AddClickHandler(_ =>
+        {
+            overlay.Visible = false;
+            block.Enabled = true;
+            SetStatus("The panel is free again, and the keyboard is back on whatever had the focus.");
+        });
+
+        layerRow.Controls.Add(block);
+        layerRow.Controls.Add(unblock);
+        card.Controls.Add(layerRow);
+
+        card.Controls.Add(new XPlatLabel(
+            "The layer takes the presses by being the topmost control over the panel, and the keys " +
+            "by joining the window as an input sink while it is on screen - the same seam an open " +
+            "menu uses. Its dimming is the palette's background, so it follows a theme change. The " +
+            "wide box in the row above is a spinner in a very un-square control, and it is still " +
+            "a circle in the middle of it.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatWrapPanel"/>: a tag row that wraps at the page's width, a column flow of
+    /// swatches, and a row whose items are of different heights so the stretch is visible.
+    /// </summary>
+    private XPlatPanel BuildWrapPanelDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Wrap panel"));
+
+        card.Controls.Add(new XPlatLabel(
+            "Items flow along one axis and start a new line when the next one does not fit. Rows " +
+            "that wrap downwards are the default; columns that wrap to the right are the other " +
+            "orientation. A line is as broad as its broadest item, so Stretch - the default across " +
+            "a line - makes the rest of the line match it.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 58f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        });
+
+        card.Controls.Add(new XPlatLabel("Tags")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 22f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        var tags = new XPlatWrapPanel
+        {
+            Dock = XDock.Top,
+            Height = 96f,
+            Spacing = 6f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 14f),
+        };
+
+        foreach (string tag in new[]
+        {
+            "design", "layout", "skia", "cross-platform", "aot", "trimming",
+            "popups", "menus", "text", "accessibility", "windows", "macos",
+            "linux", "tests",
+        })
+        {
+            var chip = new XPlatButton(tag)
+            {
+                AutoSize = true,
+                Style = XPlatButtonStyle.Secondary,
+            };
+            chip.AddClickHandler(_ => SetStatus($"Tag \"{tag}\" clicked - the flow wrapped around it."));
+            tags.Controls.Add(chip);
+        }
+
+        card.Controls.Add(tags);
+
+        card.Controls.Add(new XPlatLabel("Heights across one line")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 22f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        var heights = new XPlatWrapPanel
+        {
+            Dock = XDock.Top,
+            Height = 56f,
+            Spacing = 8f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 14f),
+        };
+
+        var stretched = new XPlatPanel
+        {
+            AutoSize = false,
+            Size = new SKSize(120f, 24f),
+            CornerRadius = 4f,
+            BackColor = new SKColor(0x33, 0x66, 0x99),
+        };
+        heights.Controls.Add(stretched);
+
+        var centred = new XPlatPanel
+        {
+            AutoSize = false,
+            Size = new SKSize(120f, 24f),
+            CornerRadius = 4f,
+            BackColor = new SKColor(0x2A, 0x9D, 0x8F),
+            VerticalAlignment = XPlatAlignment.Center,
+        };
+        heights.Controls.Add(centred);
+
+        // The tallest item sets the line, and the Stretched one beside it fills that height.
+        heights.Controls.Add(new XPlatPanel
+        {
+            AutoSize = false,
+            Size = new SKSize(120f, 44f),
+            CornerRadius = 4f,
+            BackColor = new SKColor(0xD9, 0x82, 0x2B),
+        });
+
+        card.Controls.Add(heights);
+
+        card.Controls.Add(new XPlatLabel("Columns, wrapping to the right")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 22f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        var swatches = new XPlatWrapPanel
+        {
+            Dock = XDock.Top,
+            Height = 120f,
+            Orientation = XPlatStackOrientation.Vertical,
+            Spacing = 4f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 14f),
+        };
+
+        var palette = new[]
+        {
+            new SKColor(0x33, 0x66, 0x99), new SKColor(0x2A, 0x9D, 0x8F),
+            new SKColor(0xD9, 0x82, 0x2B), new SKColor(0xB0, 0x3A, 0x3A),
+            new SKColor(0x6A, 0x4C, 0x93), new SKColor(0x4C, 0x7A, 0x34),
+            new SKColor(0x88, 0x88, 0x88),
+        };
+
+        for (int index = 0; index < palette.Length; index++)
+        {
+            var swatch = new XPlatPanel
+            {
+                AutoSize = false,
+                Size = new SKSize(44f, 26f),
+                CornerRadius = 4f,
+                BorderWidth = 1f,
+                BackColor = palette[index],
+            };
+            swatch.AddClickHandler(_ => SetStatus(
+                $"Swatch #{index + 1} is {DescribeColor(palette[index])}; the column wrapped where it ran out of height."));
+            swatches.Controls.Add(swatch);
+        }
+
+        card.Controls.Add(swatches);
+
+        card.Controls.Add(new XPlatLabel(
+            "The swatches run down the 120-pixel column and start a second column when the height " +
+            "runs out, which is the same layout with the axes swapped.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// <see cref="XPlatExpander"/>: the settings-page shape, one section open and one folded, with a
+    /// disabled one to show that the cascade reaches the header as well as the content.
+    /// </summary>
+    private XPlatPanel BuildExpanderDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Expander"));
+
+        card.Controls.Add(new XPlatLabel(
+            "A header with a chevron and content that folds away under it. Clicking the header, " +
+            "or Enter, Space, Left and Right while it has the focus, expands and collapses the " +
+            "section. The first one below animates the fold, the second jumps - the same control, " +
+            "with and without a duration from the animations package.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 56f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var column = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 340f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var animated = new XPlatExpander("Animated - 180 ms")
+        {
+            Dock = XDock.Top,
+            Height = 128f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+        animated.ExpandDuration = TimeSpan.FromMilliseconds(180);
+        foreach (string caption in new[] { "Show grid", "Snap to grid", "Show rulers" })
+        {
+            var box = new XPlatCheckBox(caption)
+            {
+                Dock = XDock.Top,
+                AutoSize = true,
+                Checked = caption != "Show rulers",
+                Margin = new XPlatThickness(0f, 0f, 0f, 4f),
+            };
+            box.AddCheckedChangedHandler(_ => SetStatus($"{box.Text} is {Describe(box.CheckState)}."));
+            animated.Controls.Add(box);
+        }
+
+        // Tab is the point of this page as much as the fold is, so every stop says its name when
+        // it takes the focus: Tab skips the boxes of a folded section and comes back to them when
+        // it opens, and folding a section under one of its own boxes brings the focus up to the
+        // header here.
+        WatchFocus(animated, "the animated section's header");
+        foreach (var box in animated.Controls)
+        {
+            WatchFocus(box, $"the animated section's \u201c{box.Text}\u201d box");
+        }
+
+        animated.AddExpandedChangedHandler(sender =>
+        {
+            var section = (XPlatExpander)sender;
+            SetStatus(section.IsExpanded
+                ? "The animated section is opening - the arrow turns as the content unfolds."
+                : "The animated section is closing - progress and arrow come down together.");
+        });
+
+        column.Controls.Add(animated);
+
+        var instant = new XPlatExpander("Instant - no duration")
+        {
+            Dock = XDock.Top,
+            Height = 104f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+        instant.Controls.Add(new XPlatCheckBox("Trace layout") { Dock = XDock.Top, AutoSize = true });
+        instant.Controls.Add(new XPlatCheckBox("Cache layers") { Dock = XDock.Top, AutoSize = true });
+        WatchFocus(instant, "the instant section's header");
+        foreach (var box in instant.Controls)
+        {
+            WatchFocus(box, $"the instant section's \u201c{box.Text}\u201d box");
+        }
+        instant.AddExpandedChangedHandler(sender =>
+            SetStatus(((XPlatExpander)sender).IsExpanded
+                ? "The instant section opened, all at once."
+                : "The instant section jumped shut to its header."));
+        column.Controls.Add(instant);
+
+        var disabled = new XPlatExpander("Network (disabled)")
+        {
+            Dock = XDock.Top,
+            Height = 84f,
+            Enabled = false,
+        };
+        disabled.Controls.Add(new XPlatCheckBox("Use a proxy") { Dock = XDock.Top, AutoSize = true });
+        column.Controls.Add(disabled);
+
+        card.Controls.Add(column);
+
+        card.Controls.Add(new XPlatLabel(
+            "A folded section keeps its content in the tree but arranges it into nothing, so the " +
+            "children come back exactly as they were. ExpandProgress is what the fold is drawn " +
+            "from - height and arrow together - and it follows IsExpanded on its own, so the " +
+            "section without a duration behaves as it always did. The duration is an extension " +
+            "member from XPlatUI.Feature.Animations, which this control does not reference. " +
+            "Tab is the other half of the fold: it steps over the boxes of a folded section and " +
+            "goes back into them when it opens, and folding a section under one of its own boxes " +
+            "brings the focus up to the header - the box it was on is no longer reachable.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// Names a control in the status line when it takes the focus, so the demo says out loud what
+    /// Tab is doing - which is the only way to see a skipped stop by hand.
+    /// </summary>
+    private void WatchFocus(XPlatControl control, string name) =>
+        control.AddGotFocusHandler(_ => SetStatus($"Focus is on {name}."));
+
+    /// <summary>
+    /// <see cref="XPlatSplitButton"/> and <see cref="XPlatDropDownButton"/>: the main area runs one
+    /// command and the arrow opens the menu, with a disabled one beside them to show the greying.
+    /// </summary>
+    private XPlatPanel BuildSplitButtonDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Split buttons"));
+
+        card.Controls.Add(new XPlatLabel(
+            "A split button is a command with a menu: the label runs the default action and the " +
+            "arrow opens the drop-down. The drop-down button has no second half - pressing it " +
+            "anywhere opens the menu.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 42f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var row = ButtonRow();
+        row.Height = 40f;
+
+        var save = new XPlatSplitButton("Save")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        save.AddClickHandler(_ => SetStatus("Split button: the main area ran Save."));
+        save.Menu.Add("Save as...", () => SetStatus("Split button: Save as... chosen from the menu."));
+        save.Menu.Add("Save a copy", () => SetStatus("Split button: Save a copy chosen from the menu."));
+        save.Menu.AddSeparator();
+        save.Menu.Add("Export as PDF", () => SetStatus("Split button: Export as PDF chosen from the menu."));
+        row.Controls.Add(save);
+
+        var more = new XPlatDropDownButton("More actions")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        more.AddClickHandler(_ => SetStatus("Drop-down button: the menu opened from the whole face."));
+        more.Menu.Add("Rename", () => SetStatus("Drop-down button: Rename chosen from the menu."));
+        more.Menu.Add("Archive", () => SetStatus("Drop-down button: Archive chosen from the menu."));
+        row.Controls.Add(more);
+
+        var disabled = new XPlatSplitButton("Disabled")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Enabled = false,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        disabled.Menu.Add("Never shown");
+        row.Controls.Add(disabled);
+
+        card.Controls.Add(row);
+
+        card.Controls.Add(new XPlatLabel(
+            "The arrow is part of the measured width, Enter and Space run the default action, and " +
+            "Down opens the menu. The menu is the library's own, so it opens submenus and leaves " +
+            "the window the same way every other menu does.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
 
     /// <summary>
     /// A panel that draws the focus ring when it has the focus. A plain panel has no chrome of its

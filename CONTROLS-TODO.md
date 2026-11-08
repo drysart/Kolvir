@@ -97,13 +97,8 @@ listing them is that a reviewer can say "this next" without re-deriving the gap.
 
 | Control | What is missing | Cost |
 | --- | --- | --- |
-| `XPlatSplitButton` / `XPlatDropDownButton` | `XPlatToolStrip` has buttons, labels, progress, separators and springs, but no button that is both a command and a menu. The popup layer and the menu system already do the hard part, so this is mostly composition. | Low |
-| `XPlatExpander` | `XPlatGroupBox` is static. Collapsible sections are the normal shape of a settings page, and there is nothing to collapse with. | Low |
 | A validation error provider | The error *icon*, the message, and the plumbing that maps a validation result onto a control. The span squiggles that shipped draw the underline; what is missing is the provider an application hands its validation rules to, in the shape WinForms' `ErrorProvider` has. | Low to medium |
 | `XPlatMaskedTextBox` | Input masks for dates, phone numbers, currency and the like. `XPlatNumericUpDown` covers numbers and `XPlatDateTimePicker` covers dates; free-form masked text has no answer. | Medium |
-| `XPlatWrapPanel` | Items flowing onto the next line at a width, which is what tag rows, button groups and thumbnail grids want. `XPlatStackPanel` never wraps and `XPlatTableLayoutPanel` needs its columns known up front. | Low |
-| A busy indicator and an overlay | A long operation needs something that is not a determinate `XPlatProgressBar`. A spinner plus a modal overlay that blocks input while work runs. | Low |
-| `XPlatToast` / notification banner | Transient success and error messages that do not need a dialog. Cheap now that `XPlatUI.Feature.Animations` supplies the fade and slide. | Low |
 
 ### 4.2 Worth having, but not in the way of building an application
 
@@ -137,7 +132,7 @@ Recorded so the decision is not re-litigated every time someone asks:
 ## 6. Suggested order
 
 1. **Drag previews** (Ã‚Â§3.1) - small, and independent of everything above.
-2. **The small batch in Ã‚Â§4.1** - `XPlatSplitButton`, `XPlatExpander`, `XPlatWrapPanel`, the busy
-   indicator and the toast. Five small controls, each independently shippable, none of them waiting
-   on anything.
+2. **The small batch in Ã‚Â§4.1** - landed: `XPlatSplitButton`, `XPlatExpander` (and its animated
+   fold in `XPlatUI.Feature.Animations`), `XPlatWrapPanel`, the busy indicator and the overlay, and
+   the toast. Five small controls, each shipped on its own.
 3. Then the rest of Ã‚Â§4.1 in the order listed, and Ã‚Â§4.3 only once one of them has a plan document.

@@ -1040,6 +1040,13 @@ public sealed class XPlatUiHost
     }
 
     /// <summary>Moves keyboard focus to the given control (null clears focus).</summary>
+    /// <remarks>
+    /// A control that cannot be reached - disabled, not focusable, or inside a container that has
+    /// stopped showing its content, such as the section of a collapsed expander - is not focused.
+    /// The Tab order already leaves such a control out; this is what stops anything else, a
+    /// programmatic <see cref="XPlatControl.Focus"/> included, from putting the focus where the
+    /// user cannot see it.
+    /// </remarks>
     public void SetFocus(XPlatControl? control)
     {
         if (ReferenceEquals(_focused, control))
@@ -1047,7 +1054,7 @@ public sealed class XPlatUiHost
             return;
         }
 
-        if (control is { Enabled: false } || control is { Focusable: false })
+        if (control is not null && (!control.Focusable || !control.IsReachable))
         {
             return;
         }
@@ -1419,13 +1426,17 @@ public sealed class XPlatUiHost
     /// <para>
     /// Only the order changes here. Which controls are eligible is unchanged: a control is a stop
     /// when it is <see cref="XPlatControl.TabStop"/> and <see cref="XPlatControl.Focusable"/>, and
-    /// an invisible or disabled control - or one inside an invisible or disabled container - takes
-    /// no part in the walk at all.
+    /// an invisible or disabled control - or one inside an invisible or disabled container, or one
+    /// inside a container that has stopped showing its content - takes no part in the walk at all.
+    /// That last case is a collapsed <see cref="XPlatExpander"/>: its section stays in the tree but
+    /// is showing nothing, so nothing inside it is a stop. The walk asks the control rather than
+    /// knowing what kind of container it is looking at, which is what lets any container that
+    /// arranges its children to nothing say the same thing.
     /// </para>
     /// </remarks>
     private static void CollectFocusable(XPlatControl? control, List<XPlatControl> output)
     {
-        if (control is null || !control.Visible || !control.Enabled)
+        if (control is null || !control.IsReachable)
         {
             return;
         }

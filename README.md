@@ -78,15 +78,21 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
 | `XPlatSplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
+| `XPlatWrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
 | `XPlatGroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
+| `XPlatExpander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
 | `XPlatScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
 | `XPlatLabel` | `Label` | Nine-way alignment, optional word wrap |
 | `XPlatLinkLabel` | `LinkLabel` | A rich label styled as a link that hands its URI to the desktop through `IXPlatLauncher` |
 | `XPlatRichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
 | `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
+| `XPlatSplitButton` / `XPlatDropDownButton` | `ToolStripSplitButton` / `ToolStripDropDownButton` | One button that is both a command and a menu: the main area raises a click and the arrow opens `Menu` in a popup; a drop-down button opens the menu from its whole face |
 | `XPlatCheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
 | `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
+| `XPlatBusyIndicator` | - | An indeterminate spinner: a ring with a rotating arc, on a timer that runs only while it is on screen and busy |
+| `XPlatOverlay` | - | A modal layer: dims what is under it, takes every press and swallows every key while it shows |
+| `XPlatToast` | - | A transient message bar: an accent bar coloured by severity, a message and a close glyph, dismissed by a countdown or by the user |
 | `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
 | `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
 | `XPlatTextBox` + `XPlatUI.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
@@ -280,6 +286,12 @@ WinForms has, because an application author coming from it will expect it:
   it: index 1 on a container puts the container, then its contents, between index 0 and index 2.
 - **It wraps.** `Tab` at the last stop goes back to the first, and `Shift+Tab` at the first goes to
   the last; `host.FocusedControl` is the control the walk landed on.
+- **A container whose content is not showing takes no stops.** A collapsed `XPlatExpander` is the
+  case: its section is still in the tree - folding is a matter of how much is drawn, not of hiding -
+  so its children are left out of the walk even though they are `Visible`. The container answers
+  this itself, by overriding `IsContentReachable`, so any container that arranges its children to
+  nothing is treated the same way. `SetFocus`, and so `Focus()`, refuse such a control as well: a
+  control the user cannot see cannot be focused by anything.
 
 ```csharp
 var name = new XPlatTextBox { TabIndex = 0, Dock = DockStyle.Top };
@@ -343,6 +355,34 @@ ones after it and reaches the `AddUnhandledExceptionHandler` handlers.
 `Add` returns an `IDisposable` token that removes the handler when it is disposed, so a scope can own
 a subscription without storing the callback. A caller that already holds the callback can pass it to
 `Remove` and skip the token.
+
+### Wrap panel
+
+`XPlatWrapPanel` lays its children out along one axis and starts a new line whenever the next one
+would not fit - rows left to right that wrap downwards, the default, or columns top to bottom that
+wrap to the right. It is the layout a tag row, a group of buttons or a thumbnail grid wants, which
+`XPlatStackPanel` cannot do at all and `XPlatTableLayoutPanel` can only do with the columns known up
+front.
+
+| Member | Behaviour |
+| --- | --- |
+| `Orientation` | `Horizontal` (rows that wrap down) or `Vertical` (columns that wrap right) |
+| `Spacing` | The gap between two items on a line and between two lines; margins apply on top of it |
+| `HorizontalAlignment` / `VerticalAlignment` on each child | Across the line: `Stretch` (the default) fills the line's breadth, the others keep the item's own size at that edge or in the middle |
+
+A line is as broad as its broadest item, and that is only known once the whole line is measured, so
+a pass measures the run first and places it second. An item wider than the panel is not lost: it
+takes a line of its own and overflows, which is what makes the scrollbar appear. Docked children are
+not part of the run - they take their edge first, the way they do in any panel - so a header or a
+footer sits above or below the flow.
+
+```csharp
+var tags = new XPlatWrapPanel { Dock = DockStyle.Fill, Spacing = 6f };
+foreach (var tag in new[] { "design", "layout", "skia", "cross-platform" })
+{
+    tags.Controls.Add(new XPlatButton(tag) { AutoSize = true });
+}
+```
 
 ### Split container
 
@@ -872,6 +912,81 @@ var calmer = new XPlatProgressBar
 };
 ```
 
+### Busy indicator and overlay
+
+A long operation needs a readout that is not a determinate bar, and often a way to stop the user
+from driving the window while it runs. Those are two controls rather than one, because the two
+questions have independent answers: a spinner is useful on its own (in a status strip, in a dialog,
+next to the row that is loading), and a modal layer is useful with content that is not a spinner (a
+confirmation panel, a progress row, a form). Folding them together would put a timer in every
+application that only wanted a blocker, and a dimming surface in every application that only wanted
+a spinner.
+
+| Control | Member | Behaviour |
+| --- | --- | --- |
+| `XPlatBusyIndicator` | `IsBusy` | Whether the ring is going round; defaults to true, and clearing it stops the clock |
+| | `Thickness`, `AnimationSpeed` | The width of the ring, and how often the sweep advances |
+| `XPlatOverlay` | `Dim` | How much of what is under it is covered, 0 to 1, painted with the palette's background so it darkens a light window and lightens a dark one |
+| | `ChildAlignment` | Where a child that is not docked sits; `MiddleCenter` by default |
+
+The spinner is the second control whose value is time, so it obeys the rule the marquee bar set: it
+runs a timer only while it is `IsDisplayed` and `IsBusy` and there is an application to deliver the
+ticks, and it stops otherwise. It is also always a circle: the shorter of the control's two sides is
+the diameter and the ring is centred in the room that leaves, so a spinner in a wide row or a tall
+column is round and in the middle rather than an oval stretched to the control's edges, and the same
+side sets the stroke so a wide control does not get a heavier ring. The layer is an ordinary control,
+so it takes the presses by being the topmost thing in its container; putting it beside the content it
+holds still means both are `DockStyle.Fill` and cover the same area - a child docked to an edge keeps
+its band and is not covered. Keyboard input follows the focus rather than the pointer, so the layer
+also joins the window as an `IXPlatInputSink` while it is on screen: every key and every typed
+character stops there, which is the same seam an open menu uses. Hiding or disabling the layer gives
+the keyboard back.
+
+```csharp
+var overlay = new XPlatOverlay();                    // Dock = Fill
+var busy = new XPlatPanel { AutoSize = false, Size = new SKSize(220f, 72f) };
+busy.Controls.Add(new XPlatBusyIndicator { Dock = DockStyle.Left, Margin = new XPlatThickness(16f) });
+busy.Controls.Add(new XPlatLabel("Loading the project...") { Dock = DockStyle.Fill });
+overlay.Controls.Add(busy);                          // centred by ChildAlignment
+
+page.Controls.Add(overlay);                          // over the content, while the work runs
+```
+
+### Toast
+
+`XPlatToast` is the message that does not need a dialog: an accent bar, one line of text and a close
+glyph, which takes itself away after a few seconds. It is an ordinary control rather than a window,
+so the application decides where transient messages belong - docked across the top of a page, at the
+bottom of a card, beside the row that saved - and the layout moves around it, which a floating window
+would not.
+
+| Member | Behaviour |
+| --- | --- |
+| `Text` | The message |
+| `Severity` | `Info`, `Success`, `Warning` or `Error`, which is what the accent bar is coloured for |
+| `BarColor` | Overrides the severity's colour, for an application that brands its own messages |
+| `Duration` | How long it shows before dismissing itself; `XPlatToast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
+| `Show()`, `Dismiss()`, `IsOpen` | The message state, so one control can be built once and reused |
+| `AddDismissedHandler` | Runs once the message went, whether by its countdown, its close glyph or the keyboard |
+
+The countdown is a timer and follows the rule the marquee bar set: it runs only while the message is
+open and `IsDisplayed` and there is an application to deliver the ticks, so a toast on a page the
+user has switched away from stops rather than expiring unseen. The close glyph dismisses on a press
+released over it, a press that slides off does nothing, and a focused toast answers Escape, Enter and
+Space. The fade and slide a toast usually has belongs to `XPlatUI.Feature.Animations`; this control
+does not reference that package.
+
+```csharp
+var toast = new XPlatToast("Project saved") { Dock = DockStyle.Bottom, Severity = XPlatToastSeverity.Success };
+page.Controls.Add(toast);
+
+toast.Show();                                        // up, and counting down from four seconds
+toast.Text = "Could not reach the server";
+toast.Severity = XPlatToastSeverity.Error;
+toast.Duration = null;                               // an error waits for the user
+toast.Show();
+```
+
 ### Group box
 
 `XPlatGroupBox` is a labelled frame: the caption sits in a break in the top edge and the content is
@@ -894,6 +1009,76 @@ and none of the content takes input. Only the flag that was set is remembered: a
 disabled on its own stays disabled when its container is enabled again, and one that was only
 disabled by its container comes back with it. Moving a subtree under a disabled container disables
 it the same way, without touching a single `Enabled` flag on the children.
+
+### Expander
+
+`XPlatExpander` is the collapsible version of a group box: a header with a chevron and a caption,
+and the content folded away under it. It is an `XPlatPanel`, so the content keeps the docking,
+scrolling and child management of one, and the header is taken out of the layout by overriding the
+content bounds rather than by adding to the padding - a scrolled child can never be arranged or
+painted under the caption.
+
+| Member | Behaviour |
+| --- | --- |
+| `IsExpanded` | The state the section is heading for. Collapsing remembers the height and shrinks to the header; expanding restores it |
+| `ExpandProgress` | How far open it is drawn, 0 to 1, clamped. It follows `IsExpanded` on its own, and is what an animation drives |
+| `ArrowRotationDegrees` | How far the chevron is turned: 0 points right, 90 points down. Exactly `ExpandProgress * 90` |
+| `ExpandedHeight` | The height the content shows at, which is what expanding puts back |
+| `AddExpandedChangedHandler` | Runs when `IsExpanded` changed, before the progress follows it |
+| `AddExpandProgressChangedHandler` | Runs when the progress moved |
+| the header | A press and release on it toggles the section; Enter, Space, Left and Right do the same from the keyboard |
+
+There are two states and only one of them is the caller's. `IsExpanded` is the target - what was
+asked for, what the header toggles - and `ExpandProgress` is the visual state: 0 folded, 1 open,
+anything between a section that is half open. Nothing animating, the two always agree, because
+changing `IsExpanded` moves the progress itself; an application never assigns `ExpandProgress` and
+never has to. They disagree only while something is driving the progress, which is the whole reason
+the number is public: a section that is half open is expanded by `IsExpanded` and 0.5 by
+`ExpandProgress`.
+
+Both the content height and the arrow come from that one number, so they cannot drift apart. The
+chevron is a single shape turned by `ArrowRotationDegrees`: pointing right at 0 and exactly a quarter
+turn clockwise - pointing down - at 1.
+
+A folded expander arranges its content into nothing: the children are still in the tree, so they
+come back on expand, but they occupy no area, are not painted and are not hit tested. Part-way open
+they are laid out in the room that is left and clipped at the folded edge, so a fold in progress
+shows the top of the content. An `AutoSize` expander needs none of the height remembering - it
+measures as its header when folded, and as much of its content as the progress allows otherwise - so
+the two agree without guessing which one a section is.
+
+The keyboard follows the target rather than the fold. The header is a tab stop and keeps its place
+in the order whether the section is open or shut; the content is a tab stop only while `IsExpanded`
+is true, because a folded expander reports `IsContentReachable` false. The answer changes the moment
+`IsExpanded` is set, not when the fold finishes, so a section on its way shut takes no new focus and
+does not change its mind at the last frame. If a control inside the content holds the focus when the
+section is collapsed - by click, by the keyboard, by an animation finishing - the focus moves to the
+header, the nearest thing the user was looking at, rather than being left on a control that is no
+longer on screen. The order is re-read every time Tab is pressed, so a section folded and unfolded
+under the keyboard behaves the way it looks.
+
+Hiding a container is deliberately different: it keeps the focus its child held, so a field inside a
+hidden panel keeps its caret and picks it up again when the panel is shown. That is a documented
+behaviour with a test behind it, and a fold is not a hide.
+
+On its own the fold is a jump. Animating it belongs to `XPlatUI.Feature.Animations`, which this
+control does not reference; that package adds an `ExpandDuration` extension member and animates
+`ExpandProgress`, so with one line the arrow and the height move together over the duration, and with
+none the control behaves exactly as described above.
+
+```csharp
+var appearance = new XPlatExpander("Appearance") { Dock = DockStyle.Top, Height = 180f };
+appearance.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
+appearance.AddExpandedChangedHandler(sender =>
+    Console.WriteLine(((XPlatExpander)sender).IsExpanded ? "opened" : "closed"));
+
+// With XPlatUI.Feature.Animations referenced and AddAnimations() called:
+appearance.ExpandDuration = TimeSpan.FromMilliseconds(180);
+```
+
+A collapse that starts while the section is still opening turns round from wherever it has got to,
+a duration removed mid-flight settles the section exactly where `IsExpanded` says it belongs, and an
+application that never registered the clock snaps instead of leaving a section frozen half open.
 
 ### Combo boxes
 
@@ -1169,6 +1354,42 @@ toolbar.Items.Add(new XPlatToolStripButton("Save"));
 toolbar.Items.Add(new XPlatToolStripSeparator());
 toolbar.Items.Add(new XPlatToolStripSpring());
 toolbar.Items.Add(new XPlatToolStripLabel("UTF-8"));
+```
+
+### Split buttons
+
+`XPlatSplitButton` is one button with two halves: the main area is the default action and the arrow
+at its right edge opens `Menu`. `XPlatDropDownButton` is the same control with the halves merged -
+pressing anywhere opens the menu, and `AddClickHandler` still runs, which mirrors the WinForms
+`ToolStripDropDownButton`.
+
+| Member | Behaviour |
+| --- | --- |
+| `Menu` | The `XPlatContextMenu` the arrow opens: items, submenus, separators and mnemonics |
+| `ArrowWidth` | Width of the arrow region, 24 logical pixels by default; it is part of the measured width |
+| `IsDropDownOpen`, `OpenDropDown()`, `CloseDropDown()` | The menu's state |
+| `AddClickHandler` | The default action: a press and release in the main area, or Enter/Space while focused |
+
+What separates the two halves is where the press started: a press that begins in the arrow and is
+released over the label does nothing, the way a press that wanders off an ordinary button does. The
+arrow region darkens under the pointer so it is clear which half is about to be hit. `Down` opens the
+menu from the keyboard; once it is open the menu owns the keyboard, so its own arrows, Enter and
+Escape are what move and dismiss it.
+
+The menu is the library's own `XPlatMenuView` in an `XPlatPopup` shown by `XPlatMenuPresenter`, so it
+draws the same on all three platforms, opens submenus in popups of their own, and can leave the
+window when the backend provides popup windows. Nothing is built until the menu is first opened, and
+disabling or hiding the button closes an open menu.
+
+```csharp
+var save = new XPlatSplitButton("Save") { Dock = DockStyle.Top, AutoSize = true };
+save.AddClickHandler(_ => document.Save());          // the main area
+save.Menu.Add("Save as...", () => document.SaveAs());
+save.Menu.Add("Export as PDF", () => document.Export());
+
+var more = new XPlatDropDownButton("More") { Dock = DockStyle.Top, AutoSize = true };
+more.Menu.Add("Rename", () => document.Rename());
+more.Menu.Add("Archive", () => document.Archive());
 ```
 
 ### Popups
@@ -2889,10 +3110,24 @@ A few consequences worth knowing before you rely on them:
   the frame still runs, so one bad animation cannot freeze the others. With no application in the
   process there is nowhere to report it and the exception surfaces at the caller.
 
+A **control gains its animation as an extension member**, not as a property the library carries:
+`XPlatExpander` has `ExpandDuration`, contributed by this package and stored in a weak table keyed
+by the control (FEATURE-COST-POLICY.md §5). A section given one animates its `ExpandProgress` on the
+application's clock, which moves the content height and the arrow together; a section given none
+does exactly what the control does on its own. Because the duration is not on the control, an
+application that never references the package pays nothing for it, and because the control asks the
+application for the scheduler, an application that set a duration without calling `AddAnimations()`
+gets a snap rather than a section stuck half open:
+
+```csharp
+appearance.ExpandDuration = TimeSpan.FromMilliseconds(180);   // null, the default, jumps
+```
+
 The demo's **Animations** page runs nine animations on one timeline - a block that eases across its
 track, a bar that blends two colours on a different curve, three tiles that each arrive in a stagger
 of position and opacity, and a readout that is itself an animated value - with Start, Pause, Resume,
-Restart and End wired to the one set.
+Restart and End wired to the one set. The demo's **Expander** page puts an animated section beside an
+instant one, which is the shortest way to see what the duration buys.
 
 ## Writing a backend
 

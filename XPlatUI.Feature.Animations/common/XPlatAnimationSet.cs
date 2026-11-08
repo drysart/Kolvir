@@ -411,8 +411,7 @@ public sealed class XPlatAnimationSet : IDisposable
             return existing;
         }
 
-        return _scheduler =
-            XPlatApplication.Current?.Services.GetService(typeof(XPlatAnimationScheduler)) as XPlatAnimationScheduler
+        return _scheduler = XPlatAnimationScheduler.FindRegistered()
             ?? throw new InvalidOperationException(
                 "No XPlatAnimationScheduler is registered for this application. Call services.AddAnimations() " +
                 "from XPlatApplicationOptions.ConfigureServices, or pass a scheduler to the XPlatAnimationSet " +
