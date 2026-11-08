@@ -430,6 +430,7 @@ public sealed class DemoUi
         ("Font dialog", demo => Page(demo.BuildFontDialogDemo())),
         ("Colour dialog", demo => Page(demo.BuildColorDialogDemo())),
         ("Split buttons", demo => Page(demo.BuildSplitButtonDemo())),
+        ("Expander", demo => Page(demo.BuildExpanderDemo())),
     };
 
     /// <summary>
@@ -5679,6 +5680,106 @@ public sealed class DemoUi
 
     private static string DescribeColor(SKColor color) =>
         $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2} (R {color.Red}, G {color.Green}, B {color.Blue})";
+
+    /// <summary>
+    /// <see cref="XPlatExpander"/>: the settings-page shape, one section open and one folded, with a
+    /// disabled one to show that the cascade reaches the header as well as the content.
+    /// </summary>
+    private XPlatPanel BuildExpanderDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Expander"));
+
+        card.Controls.Add(new XPlatLabel(
+            "A header with a chevron and content that folds away under it. Clicking the header, " +
+            "or Enter, Space, Left and Right while it has the focus, expands and collapses the " +
+            "section; the control shrinks to its header and comes back at the height it had.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 42f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var column = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 330f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var appearance = new XPlatExpander("Appearance")
+        {
+            Dock = XDock.Top,
+            Height = 150f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+        foreach (string caption in new[] { "Show grid", "Snap to grid", "Show rulers" })
+        {
+            var box = new XPlatCheckBox(caption)
+            {
+                Dock = XDock.Top,
+                AutoSize = true,
+                Checked = caption != "Show rulers",
+                Margin = new XPlatThickness(0f, 0f, 0f, 4f),
+            };
+            box.AddCheckedChangedHandler(_ => SetStatus($"{box.Text} is {Describe(box.CheckState)}."));
+            appearance.Controls.Add(box);
+        }
+
+        appearance.AddExpandedChangedHandler(sender =>
+            SetStatus(((XPlatExpander)sender).IsExpanded
+                ? "Appearance expanded."
+                : "Appearance collapsed to its header."));
+
+        column.Controls.Add(appearance);
+
+        var advanced = new XPlatExpander("Advanced")
+        {
+            Dock = XDock.Top,
+            Height = 110f,
+            IsExpanded = false,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+        advanced.Controls.Add(new XPlatCheckBox("Trace layout") { Dock = XDock.Top, AutoSize = true });
+        advanced.Controls.Add(new XPlatCheckBox("Cache layers") { Dock = XDock.Top, AutoSize = true });
+        column.Controls.Add(advanced);
+
+        var disabled = new XPlatExpander("Network (disabled)")
+        {
+            Dock = XDock.Top,
+            Height = 90f,
+            Enabled = false,
+        };
+        disabled.Controls.Add(new XPlatCheckBox("Use a proxy") { Dock = XDock.Top, AutoSize = true });
+        column.Controls.Add(disabled);
+
+        card.Controls.Add(column);
+
+        card.Controls.Add(new XPlatLabel(
+            "A folded section keeps its content in the tree but arranges it into nothing, so the " +
+            "children come back exactly as they were. Animating the fold is the animations " +
+            "package's job, which this control deliberately does not reference.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
 
     /// <summary>
     /// <see cref="XPlatSplitButton"/> and <see cref="XPlatDropDownButton"/>: the main area runs one

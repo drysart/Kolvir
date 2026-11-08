@@ -97,7 +97,6 @@ listing them is that a reviewer can say "this next" without re-deriving the gap.
 
 | Control | What is missing | Cost |
 | --- | --- | --- |
-| `XPlatExpander` | `XPlatGroupBox` is static. Collapsible sections are the normal shape of a settings page, and there is nothing to collapse with. | Low |
 | A validation error provider | The error *icon*, the message, and the plumbing that maps a validation result onto a control. The span squiggles that shipped draw the underline; what is missing is the provider an application hands its validation rules to, in the shape WinForms' `ErrorProvider` has. | Low to medium |
 | `XPlatMaskedTextBox` | Input masks for dates, phone numbers, currency and the like. `XPlatNumericUpDown` covers numbers and `XPlatDateTimePicker` covers dates; free-form masked text has no answer. | Medium |
 | `XPlatWrapPanel` | Items flowing onto the next line at a width, which is what tag rows, button groups and thumbnail grids want. `XPlatStackPanel` never wraps and `XPlatTableLayoutPanel` needs its columns known up front. | Low |

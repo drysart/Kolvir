@@ -79,6 +79,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
 | `XPlatSplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
 | `XPlatGroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
+| `XPlatExpander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
 | `XPlatScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
 | `XPlatLabel` | `Label` | Nine-way alignment, optional word wrap |
 | `XPlatLinkLabel` | `LinkLabel` | A rich label styled as a link that hands its URI to the desktop through `IXPlatLauncher` |
@@ -895,6 +896,37 @@ and none of the content takes input. Only the flag that was set is remembered: a
 disabled on its own stays disabled when its container is enabled again, and one that was only
 disabled by its container comes back with it. Moving a subtree under a disabled container disables
 it the same way, without touching a single `Enabled` flag on the children.
+
+### Expander
+
+`XPlatExpander` is the collapsible version of a group box: a header with a chevron and a caption,
+and the content folded away under it. It is an `XPlatPanel`, so the content keeps the docking,
+scrolling and child management of one, and the header is taken out of the layout by overriding the
+content bounds rather than by adding to the padding - a scrolled child can never be arranged or
+painted under the caption.
+
+| Member | Behaviour |
+| --- | --- |
+| `IsExpanded` | Whether the content is showing. Collapsing remembers the height and shrinks to the header; expanding restores it |
+| `ExpandedHeight` | The height the content shows at, which is what expanding puts back |
+| `AddExpandedChangedHandler` | Runs after `IsExpanded` really changed |
+| the header | A press and release on it toggles the section; Enter, Space, Left and Right do the same from the keyboard |
+
+A folded expander arranges its content into nothing: the children are still in the tree, so they
+come back on expand, but they occupy no area, are not painted and are not hit tested. An
+`AutoSize` expander needs none of the height remembering - it measures as its header when folded -
+so the two agree without guessing which one a section is.
+
+The fold is a jump rather than an animation on purpose: animated expand and collapse belongs to
+`XPlatUI.Feature.Animations`, and this control does not reference that package, so an application
+that wants the slide opts into it.
+
+```csharp
+var appearance = new XPlatExpander("Appearance") { Dock = DockStyle.Top, Height = 180f };
+appearance.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
+appearance.AddExpandedChangedHandler(sender =>
+    Console.WriteLine(((XPlatExpander)sender).IsExpanded ? "opened" : "closed"));
+```
 
 ### Combo boxes
 
