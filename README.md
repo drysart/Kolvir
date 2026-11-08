@@ -3604,8 +3604,9 @@ package, imported by `Directory.Build.targets` here) that do exactly what the co
 native the build resolved, gzip it, embed it in the application as
 `XPlatUI.Feature.Svg.Native.libHarfBuzzSharp.dll.gz` (or `.so`/`.dylib`), and keep it out of the
 publish output. `HarfBuzzNativeLoader`, in the feature assembly, extracts it on first use to
-`%LOCALAPPDATA%\XPlatUI\native\harfbuzz\<version>-<size>\` (`~/.local/share/...` on Linux, `~/Library/
-Application Support/...` on macOS) and redirects HarfBuzzSharp's P/Invoke at it.
+`%LOCALAPPDATA%\XPlatUI\native\harfbuzz\<version>-<size>\` (`~/.local/share/XPlatUI/native/harfbuzz`
+on Linux, `~/Library/Application Support/XPlatUI/native/harfbuzz` on macOS) and redirects
+HarfBuzzSharp's P/Invoke at it.
 
 Three things about it are worth knowing rather than discovering:
 
