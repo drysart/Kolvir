@@ -10,6 +10,8 @@
   <Project Path="XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj" />
   <Project Path="XPlatUI.Feature.DragDrop/XPlatUI.Feature.DragDrop.csproj" />
   <Project Path="XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj" />
+  <Project Path="XPlatUI.Feature.Svg/XPlatUI.Feature.Svg.csproj" />
+  <Project Path="XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj" />
   <Project Path="XPlatUI.Minimal/XPlatUI.Minimal.csproj" />
   <Project Path="XPlatUI.Tests/XPlatUI.Tests.csproj" />
 </Solution>

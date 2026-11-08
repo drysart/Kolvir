@@ -52,8 +52,11 @@
     <!-- The animations feature is portable end to end - arithmetic, a clock and an invalidation -
          so this is the single unconditional line FEATURE-COST-POLICY.md section 4 describes: the
          framework the application builds for selects the matching lib/ folder, and nothing here has
-         to be conditioned on the platform to pick the right one. -->
+         to be conditioned on the platform to pick the right one. The SVG feature is portable in
+         exactly the same way: Svg.Skia renders to an SKPicture on all three platforms, and its
+         HarfBuzz native comes along per-platform from the package's own dependency groups. -->
     <ProjectReference Include="..\XPlatUI.Feature.Animations\XPlatUI.Feature.Animations.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.Svg\XPlatUI.Feature.Svg.csproj" />
   </ItemGroup>
 
   <!-- The demo's bundled face. It travels inside the assembly rather than beside the executable,

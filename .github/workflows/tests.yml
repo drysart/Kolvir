@@ -1,6 +1,6 @@
 name: Tests
 
-# All three suites are portable net10.0 assemblies, so they need no window server, no display and
+# All four suites are portable net10.0 assemblies, so they need no window server, no display and
 # no platform workload: every test drives XPlatUI through the headless backend, and the animation
 # suite drives its own clock and frame source rather than a real timer. That is why no leg of this
 # workflow installs a workload - the macOS build and feature pack workflows are the only jobs
@@ -82,6 +82,7 @@ jobs:
           dotnet restore XPlatUI.Tests/XPlatUI.Tests.csproj --nologo
           dotnet restore XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -132,6 +133,22 @@ jobs:
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=animations.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The SVG feature's suite. Same wiring again, and the same -p:TargetFramework=net10.0
+      # narrowing: the feature lists all three frameworks unconditionally so that one `dotnet pack`
+      # produces the package. Everything in it renders to an SKPicture offscreen and reads pixels
+      # back, so no display is involved; the security cases (an external reference, a script, an
+      # entity bomb) are documents that must be refused, which is as headless as a test gets.
+      - name: Test the SVG feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj --no-restore --nologo \
+            -p:TargetFramework=net10.0 \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=svg.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

@@ -7,6 +7,7 @@ using XPlatUI.Backend.Headless;
 using XPlatUI.DragDrop;
 using XPlatUI.Multiline;
 using XPlatUI.Spans;
+using XPlatUI.Svg;
 using XPlatUI.Undo;
 using XDock = XPlatUI.DockStyle;
 
@@ -58,6 +59,11 @@ public sealed class DemoUi
 
     public DemoUi()
     {
+        // The sample is also rendered headlessly, where no ConfigureServices runs, so the SVG
+        // provider is registered here as well as in Program.cs. The call is idempotent, which is
+        // what makes that safe rather than doubled.
+        XPlatSvg.AddSvgImages();
+
         Root = BuildUi();
 
         // A page that has no menu of its own still has to answer a right-click: the host asks for a
@@ -436,6 +442,9 @@ public sealed class DemoUi
         ("Toast", demo => Page(demo.BuildToastDemo())),
         ("Toast animation", demo => Page(demo.BuildToastAnimationDemo())),
         ("Overlay fade", demo => Page(demo.BuildOverlayFadeDemo())),
+        ("SVG icons", demo => Page(BuildSvgIconGallery())),
+        ("SVG recolour", demo => Page(BuildSvgRecolourDemo())),
+        ("SVG and a raster twin", demo => Page(BuildSvgRasterTwinDemo())),
     };
 
     /// <summary>
@@ -3256,6 +3265,377 @@ public sealed class DemoUi
     }
 
     private void UpdateCounter() => _counterLabel.Text = $"Button clicks: {_clicks}";
+
+    /// <summary>The sizes the icon gallery draws each document at.</summary>
+    private static readonly float[] SvgIconSizes = [16f, 24f, 32f, 48f, 64f];
+
+    /// <summary>
+    /// A gallery: five documents, each drawn at five sizes.
+    /// </summary>
+    /// <remarks>
+    /// Every one of them is loaded through <see cref="XPlatImage.Load(Stream)"/> rather than through
+    /// the recolour helper, so what the page shows is the path an application gets for free once
+    /// <c>AddSvgImages()</c> has run: the same <c>Load</c> call it already makes for a PNG.
+    /// </remarks>
+    private static XPlatPanel BuildSvgIconGallery()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("SVG icons"));
+
+        card.Controls.Add(new XPlatLabel(
+            "Five documents at 16, 24, 32, 48 and 64 pixels. Each is parsed once and the same "
+            + "picture is re-recorded for each control, at whatever size the control asks for.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 34f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+
+        foreach (var (name, source) in new[]
+                 {
+                     ("Star", DemoIcons.Star),
+                     ("Gear", DemoIcons.Gear),
+                     ("Heart", DemoIcons.Heart),
+                     ("Tick", DemoIcons.Tick),
+                     ("Disc", DemoIcons.Disc),
+                 })
+        {
+            var row = ThumbnailRow();
+            row.Controls.Add(new XPlatLabel(name)
+            {
+                Dock = XDock.Left,
+                Width = 64f,
+                AutoSize = false,
+                Font = XPlatTheme.CaptionFont,
+                ForeColorRole = XPlatThemeColor.MutedForeground,
+                TextAlign = XPlatContentAlignment.MiddleLeft,
+            });
+
+            foreach (float size in SvgIconSizes)
+            {
+                row.Controls.Add(SvgCell(source, size));
+            }
+
+            card.Controls.Add(row);
+        }
+
+        return card;
+    }
+
+    /// <summary>
+    /// <c>currentColor</c> following the palette, which is the one part of an SVG a theme can change.
+    /// </summary>
+    /// <remarks>
+    /// The colours are resolved while each document is parsed, so a palette change reloads the
+    /// documents rather than repainting them. Two colours of the same icon are two cache entries and
+    /// a third switch back to the first parses nothing, which is why following the palette this way
+    /// does not cost a parse per frame or per theme toggle.
+    /// </remarks>
+    private static XPlatPanel BuildSvgRecolourDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("SVG recolour"));
+
+        card.Controls.Add(new XPlatLabel(
+            "The same document resolved to four fixed colours, then to three theme roles. The bottom "
+            + "row follows the palette - switch the appearance from the header and it recolours with "
+            + "everything else, which is what a fixed fill above cannot do.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 40f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+
+        var fixedRow = ThumbnailRow();
+        foreach (var (label, colour) in new (string, SKColor)[]
+                 {
+                     ("Foreground", new SKColor(0x22, 0x22, 0x22)),
+                     ("Accent", new SKColor(0x2f, 0x6f, 0xd0)),
+                     ("Warning", new SKColor(0xc0, 0x6a, 0x00)),
+                     ("Error", new SKColor(0xc4, 0x2b, 0x2b)),
+                 })
+        {
+            fixedRow.Controls.Add(RecolourCell(DemoIcons.CurrentColorBadge, 40f, colour, label));
+        }
+
+        card.Controls.Add(fixedRow);
+
+        var themeRow = ThumbnailRow();
+        var themed = new List<(XPlatImage Image, string Role)>();
+
+        foreach (string role in new[] { "Foreground", "Accent", "Muted" })
+        {
+            var cell = new XPlatPanel
+            {
+                Dock = XDock.Left,
+                Width = 120f,
+                ShowFrame = false,
+                IsCard = false,
+                BackColor = null,
+                BorderWidth = 0f,
+                CornerRadius = 0f,
+                Padding = new XPlatThickness(4f),
+            };
+
+            cell.Controls.Add(new XPlatLabel("Theme: " + role)
+            {
+                Dock = XDock.Bottom,
+                Height = 18f,
+                AutoSize = false,
+                Font = XPlatTheme.CaptionFont,
+                ForeColorRole = XPlatThemeColor.MutedForeground,
+                TextAlign = XPlatContentAlignment.TopLeft,
+            });
+
+            var image = new XPlatImage
+            {
+                Dock = XDock.Fill,
+                AutoSize = false,
+                SizeMode = XPlatSizeMode.Zoom,
+                ImageAlign = XPlatContentAlignment.MiddleCenter,
+            };
+
+            Reload(image, DemoIcons.CurrentColorBadge, ThemeColour(role));
+            themed.Add((image, role));
+            cell.Controls.Add(image);
+            themeRow.Controls.Add(cell);
+        }
+
+        card.Controls.Add(themeRow);
+
+        card.Controls.Add(new XPlatLabel("The badge is drawn with currentColor, so one document is every colour.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 22f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        // Reloading on a palette change is what makes the row follow the theme. It is one call per
+        // image and no parse for a colour already seen, because the cache is keyed on the colour.
+        // The subscription is never disposed: the handler lives as long as the process, which is
+        // what a demo wants and an application would tie to its window instead.
+        XPlatTheme.AddChangedHandler(_ =>
+        {
+            foreach (var (image, role) in themed)
+            {
+                Reload(image, DemoIcons.CurrentColorBadge, ThemeColour(role));
+            }
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// The same artwork as vector and as a thumbnail blown up, which is the argument for the feature
+    /// rather than a feature of it.
+    /// </summary>
+    private static XPlatPanel BuildSvgRasterTwinDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("SVG and a raster twin"));
+
+        card.Controls.Add(new XPlatLabel(
+            "The same document drawn at 96 pixels, and the same document rendered once to a 16 pixel "
+            + "PNG and then drawn at 96 pixels. The vector stays sharp because it is painted at the "
+            + "size it is shown; the raster cannot.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 46f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+
+        var row = ThumbnailRow(height: 128f);
+        row.Controls.Add(RasterTwinCell("SVG, drawn at 96", vector: true));
+        row.Controls.Add(RasterTwinCell("A 16 pixel PNG at 96", vector: false));
+        card.Controls.Add(row);
+
+        return card;
+    }
+
+    private static SKColor ThemeColour(string role) => role switch
+    {
+        "Accent" => XPlatTheme.Accent,
+        "Muted" => XPlatTheme.MutedForeground,
+        _ => XPlatTheme.Foreground,
+    };
+
+    private static XPlatPanel ThumbnailRow(float height = 72f) => new()
+    {
+        Dock = XDock.Top,
+        Height = height,
+        ShowFrame = false,
+        IsCard = false,
+        BackColor = null,
+        BorderWidth = 0f,
+        CornerRadius = 0f,
+        Padding = new XPlatThickness(0f),
+        Margin = new XPlatThickness(0f, 0f, 0f, 4f),
+    };
+
+    /// <summary>One icon at one size, in a cell the gallery can line up.</summary>
+    private static XPlatPanel SvgCell(string source, float size)
+    {
+        var cell = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = size + 20f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(6f),
+        };
+
+        var image = new XPlatImage
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.Zoom,
+            ImageAlign = XPlatContentAlignment.MiddleCenter,
+        };
+
+        using (var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(source)))
+        {
+            image.Load(stream);
+        }
+
+        cell.Controls.Add(image);
+        return cell;
+    }
+
+    /// <summary>One recoloured icon with the colour named under it.</summary>
+    private static XPlatPanel RecolourCell(string source, float size, SKColor colour, string label)
+    {
+        var cell = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = 120f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(4f),
+        };
+
+        cell.Controls.Add(new XPlatLabel(label)
+        {
+            Dock = XDock.Bottom,
+            Height = 18f,
+            AutoSize = false,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        var image = new XPlatImage
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.Zoom,
+            ImageAlign = XPlatContentAlignment.MiddleCenter,
+        };
+
+        Reload(image, source, colour);
+        cell.Controls.Add(image);
+        return cell;
+    }
+
+    private static XPlatPanel RasterTwinCell(string caption, bool vector)
+    {
+        var cell = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = 200f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(4f),
+        };
+
+        cell.Controls.Add(new XPlatLabel(caption)
+        {
+            Dock = XDock.Bottom,
+            Height = 18f,
+            AutoSize = false,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        // A fixed 96x96 box, so both cells are drawn at exactly the same size and the only
+        // difference between them is the source the 96 pixels came from.
+        var image = new XPlatImage
+        {
+            Dock = XDock.Left,
+            AutoSize = false,
+            Width = 96f,
+            Height = 96f,
+            SizeMode = XPlatSizeMode.StretchImage,
+            ImageAlign = XPlatContentAlignment.MiddleCenter,
+        };
+
+        if (vector)
+        {
+            using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(DemoIcons.Disc));
+            image.Load(stream);
+        }
+        else
+        {
+            image.Load(new MemoryStream(RasteriseSvg(DemoIcons.Disc, 16)));
+        }
+
+        cell.Controls.Add(image);
+        return cell;
+    }
+
+    /// <summary>Renders a document once to a PNG of the requested size, the way a build step would.</summary>
+    private static byte[] RasteriseSvg(string source, int size)
+    {
+        var provider = new XPlatSvgImageFormatProvider();
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(source));
+        using var picture = provider.Decode(stream, "svg")
+                            ?? throw new InvalidOperationException("The demo icon did not render.");
+
+        using var surface = SKSurface.Create(new SKImageInfo(size, size));
+        surface.Canvas.Clear(SKColors.Transparent);
+
+        var bounds = picture.CullRect;
+        surface.Canvas.Scale(size / bounds.Width, size / bounds.Height);
+        surface.Canvas.DrawPicture(picture);
+
+        using var image = surface.Snapshot();
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
+    private static void Reload(XPlatImage image, string source, SKColor colour)
+    {
+        using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(source));
+        image.LoadSvg(stream, colour);
+    }
 
     /// <summary>
     /// Drop-down lists, including the two cases the popup layer exists for: a list longer than its
