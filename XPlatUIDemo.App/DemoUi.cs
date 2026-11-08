@@ -3232,9 +3232,12 @@ public sealed class DemoUi
             SizeMode = XPlatSizeMode.Zoom,
             ImageAlign = XPlatContentAlignment.MiddleCenter,
             CornerRadius = 8f,
-            DisposeImageWithControl = true,
+            DisposePictureWithControl = true,
         };
-        image.Image = CreateGradientImage(320, 200);
+        using (var gradient = CreateGradientPng(320, 200))
+        {
+            image.Load(gradient);
+        }
         faded.Controls.Add(image);
         card.Controls.Add(faded);
 
@@ -4306,7 +4309,12 @@ public sealed class DemoUi
         return single.Length <= 60 ? single : string.Concat(single.AsSpan(0, 60), "...");
     }
 
-    private static SKImage CreateGradientImage(int width, int height)
+    /// <summary>
+    /// Encodes the gradient the images page shows. A PNG rather than a picture: the page is meant to
+    /// exercise the bitmap path an application takes, and Phase 1 has to leave that page looking
+    /// exactly as it did.
+    /// </summary>
+    private static MemoryStream CreateGradientPng(int width, int height)
     {
         var info = new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul);
         using var surface = SKSurface.Create(info);
@@ -4335,7 +4343,13 @@ public sealed class DemoUi
         }
 
         canvas.Flush();
-        return surface.Snapshot();
+
+        using var image = surface.Snapshot();
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        var stream = new MemoryStream();
+        data.SaveTo(stream);
+        stream.Position = 0;
+        return stream;
     }
 
     /// <summary>

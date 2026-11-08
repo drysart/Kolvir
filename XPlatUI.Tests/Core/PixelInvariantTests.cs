@@ -151,6 +151,198 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         Assert.AreNotEqual(SKColors.Red, scene.PixelAt(50, 2), "and leaves the bands above and below");
     }
 
+    [TestMethod]
+    public void AnImagesSizeModeAndAlignmentPlaceThePictureWhereTheyDid()
+    {
+        var image = new XPlatImage { Dock = DockStyle.Fill, CornerRadius = 0f };
+        using var scene = HeadlessScene.Create(image, 100f, 100f);
+        Assert.IsTrue(image.Load(RedPng(4, 2)), "the fixture image should decode");
+
+        foreach (var mode in Enum.GetValues<XPlatSizeMode>())
+        {
+            image.SizeMode = mode;
+
+            foreach (var alignment in Enum.GetValues<XPlatContentAlignment>())
+            {
+                image.ImageAlign = alignment;
+                var expected = ExpectedDestination(mode, alignment);
+                using var bitmap = scene.Render();
+
+                string where = $"{mode}/{alignment}";
+                Assert.AreEqual(
+                    SKColors.Red, bitmap.GetPixel((int)expected.Left, (int)expected.Top), $"{where}: the destination's top-left");
+                Assert.AreEqual(
+                    SKColors.Red, bitmap.GetPixel((int)expected.Right - 1, (int)expected.Bottom - 1), $"{where}: the destination's bottom-right");
+                Assert.AreEqual(
+                    SKColors.Red,
+                    bitmap.GetPixel(
+                        (int)(expected.Left + (expected.Width / 2f)),
+                        (int)(expected.Top + (expected.Height / 2f))),
+                    $"{where}: the destination's middle");
+
+                if (expected.Left > 0f)
+                {
+                    Assert.AreNotEqual(
+                        SKColors.Red,
+                        bitmap.GetPixel(0, (int)(expected.Top + (expected.Height / 2f))),
+                        $"{where}: nothing is drawn left of the destination");
+                }
+
+                if (expected.Top > 0f)
+                {
+                    Assert.AreNotEqual(
+                        SKColors.Red,
+                        bitmap.GetPixel((int)(expected.Left + (expected.Width / 2f)), 0),
+                        $"{where}: nothing is drawn above the destination");
+                }
+
+                if (expected.Right < 100f)
+                {
+                    Assert.AreNotEqual(
+                        SKColors.Red,
+                        bitmap.GetPixel(99, (int)(expected.Top + (expected.Height / 2f))),
+                        $"{where}: nothing is drawn right of the destination");
+                }
+
+                if (expected.Bottom < 100f)
+                {
+                    Assert.AreNotEqual(
+                        SKColors.Red,
+                        bitmap.GetPixel((int)(expected.Left + (expected.Width / 2f)), 99),
+                        $"{where}: nothing is drawn below the destination");
+                }
+            }
+        }
+    }
+
+    [TestMethod]
+    public void AnImageWithNoPicturePaintsItsPlaceholder()
+    {
+        var placeholder = new SKColor(0xFF00C853);
+        var image = new XPlatImage
+        {
+            Dock = DockStyle.Fill,
+            CornerRadius = 0f,
+            PlaceholderColor = placeholder,
+        };
+
+        using var scene = HeadlessScene.Create(image, 60f, 40f);
+
+        Assert.AreEqual(placeholder, scene.PixelAt(30, 20), "a control with no picture shows its placeholder");
+    }
+
+    [TestMethod]
+    public void ARecordedPicturePaintsExactlyWhatADirectImageDrawWould()
+    {
+        byte[] png = PatternPng(7, 3);
+
+        // The background the image is painted over, from the same control with nothing to draw.
+        // A scene owns an application, so it is disposed before the next one is created.
+        using var background = RenderBackground();
+
+        var image = new XPlatImage { Dock = DockStyle.Fill, CornerRadius = 0f };
+        Assert.IsTrue(image.Load(new MemoryStream(png)), "the fixture image should decode");
+        using var scene = HeadlessScene.Create(image, 101f, 67f);
+
+        using var decoded = SKBitmap.Decode(png);
+        using var reference = SKImage.FromBitmap(decoded);
+
+        // 101x67 is deliberately awkward: Zoom scales by a fractional factor and lands on a
+        // fractional top, which is where a recording mistake shows as half-pixel seams.
+        float zoomScale = MathF.Min(101f / 7f, 67f / 3f);
+        float zoomWidth = 7f * zoomScale;
+        float zoomHeight = 3f * zoomScale;
+        var zoom = new SKRect(
+            (101f - zoomWidth) / 2f,
+            (67f - zoomHeight) / 2f,
+            (101f + zoomWidth) / 2f,
+            (67f + zoomHeight) / 2f);
+
+        foreach (var (mode, destination) in new[]
+        {
+            (XPlatSizeMode.StretchImage, new SKRect(0f, 0f, 101f, 67f)),
+            (XPlatSizeMode.Zoom, zoom),
+            (XPlatSizeMode.Normal, new SKRect(47f, 32f, 54f, 35f)),
+        })
+        {
+            image.SizeMode = mode;
+            using var actual = scene.Render();
+
+            using var expected = new SKBitmap(actual.Info);
+            using (var canvas = new SKCanvas(expected))
+            {
+                canvas.DrawBitmap(
+                    background,
+                    0f,
+                    0f,
+                    new SKSamplingOptions(SKFilterMode.Nearest),
+                    null);
+                using var paint = new SKPaint { IsAntialias = true };
+                canvas.DrawImage(
+                    reference,
+                    destination,
+                    new SKSamplingOptions(SKFilterMode.Linear, SKMipmapMode.Linear),
+                    paint);
+                canvas.Flush();
+            }
+
+            for (int y = 0; y < actual.Height; y++)
+            {
+                for (int x = 0; x < actual.Width; x++)
+                {
+                    Assert.AreEqual(
+                        expected.GetPixel(x, y),
+                        actual.GetPixel(x, y),
+                        $"{mode}: the picture replay differs from a direct draw at ({x},{y})");
+                }
+            }
+        }
+    }
+
+    /// <summary>An empty image control's frame, which is what the image is drawn over.</summary>
+    private static SKBitmap RenderBackground()
+    {
+        var empty = new XPlatImage { Dock = DockStyle.Fill, CornerRadius = 0f };
+        using var scene = HeadlessScene.Create(empty, 101f, 67f);
+        return scene.Render();
+    }
+
+    /// <summary>Where a 4x2 picture lands in a 100x100 box, for every mode and alignment.</summary>
+    private static SKRect ExpectedDestination(XPlatSizeMode mode, XPlatContentAlignment alignment)
+    {
+        float width = mode == XPlatSizeMode.StretchImage ? 100f : mode == XPlatSizeMode.Zoom ? 100f : 4f;
+        float height = mode == XPlatSizeMode.StretchImage ? 100f : mode == XPlatSizeMode.Zoom ? 50f : 2f;
+
+        bool centerX = alignment is XPlatContentAlignment.TopCenter or XPlatContentAlignment.MiddleCenter or XPlatContentAlignment.BottomCenter;
+        bool rightX = alignment is XPlatContentAlignment.TopRight or XPlatContentAlignment.MiddleRight or XPlatContentAlignment.BottomRight;
+        bool centerY = alignment is XPlatContentAlignment.MiddleLeft or XPlatContentAlignment.MiddleCenter or XPlatContentAlignment.MiddleRight;
+        bool bottomY = alignment is XPlatContentAlignment.BottomLeft or XPlatContentAlignment.BottomCenter or XPlatContentAlignment.BottomRight;
+
+        float left = centerX ? (100f - width) / 2f : rightX ? 100f - width : 0f;
+        float top = centerY ? (100f - height) / 2f : bottomY ? 100f - height : 0f;
+        return new SKRect(left, top, left + width, top + height);
+    }
+
+    /// <summary>A PNG whose pixels differ, so sampling and placement are visible in the output.</summary>
+    private static byte[] PatternPng(int width, int height)
+    {
+        using var bitmap = new SKBitmap(new SKImageInfo(width, height, SKColorType.Bgra8888, SKAlphaType.Premul));
+        for (int y = 0; y < height; y++)
+        {
+            for (int x = 0; x < width; x++)
+            {
+                bitmap.SetPixel(
+                    x,
+                    y,
+                    new SKColor((byte)(20 + (x * 31)), (byte)(10 + (y * 61)), (byte)(120 + (x * 7) + (y * 11))));
+            }
+        }
+
+        using var image = SKImage.FromBitmap(bitmap);
+        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
+        return data.ToArray();
+    }
+
     /// <summary>A solid red PNG, so an image assertion is about geometry rather than content.</summary>
     private static MemoryStream RedPng(int width, int height)
     {

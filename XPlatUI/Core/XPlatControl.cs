@@ -1257,7 +1257,7 @@ public class XPlatControl : IDisposable
     /// <see cref="BackColor"/>, <see cref="CornerRadius"/> and <see cref="Opacity"/>, so a control
     /// whose background is transparent, whose corners are rounded or which is faded is reported as
     /// not opaque without anything having to be told. Override it when a control paints over its
-    /// whole bounds by other means - an <see cref="XPlatImage"/> covered by an opaque bitmap - or
+    /// whole bounds by other means - an <see cref="XPlatImage"/> showing an opaque picture - or
     /// when it punches a hole in a background that is otherwise solid.
     /// </remarks>
     public virtual bool Opaque =>

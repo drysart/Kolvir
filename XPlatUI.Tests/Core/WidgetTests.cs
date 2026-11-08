@@ -1,3 +1,4 @@
+using System.Reflection;
 using SkiaSharp;
 using XPlatUI;
 
@@ -522,9 +523,10 @@ public sealed class WidgetTests : HeadlessTestBase
         image.AddLoadFailedHandler((_, _) => failures++);
 
         Assert.IsTrue(image.Load(PngBytes(4, 2)), "a PNG stream should load");
-        Assert.IsNotNull(image.Image);
-        Assert.AreEqual(4, image.Image!.Width);
-        Assert.AreEqual(2, image.Image.Height);
+        Assert.IsNotNull(image.Picture, "a loaded bitmap is recorded into a picture");
+        var bounds = image.Picture!.CullRect;
+        Assert.AreEqual(4f, bounds.Width, "the picture's bounds are the file's width");
+        Assert.AreEqual(2f, bounds.Height, "and its height");
         Assert.AreEqual(0, failures, "a successful load reports nothing");
 
         Assert.IsFalse(image.Load(new MemoryStream([1, 2, 3, 4])), "a stream that is not an image fails");
@@ -532,6 +534,116 @@ public sealed class WidgetTests : HeadlessTestBase
         string missing = Path.Combine(Path.GetTempPath(), $"xplatui-missing-{Guid.NewGuid():N}.png");
         Assert.IsFalse(image.Load(missing), "a missing file fails too");
         Assert.AreEqual(1, failures, "and the file failure is reported to the handler");
+    }
+
+    [TestMethod]
+    public void AnImagesAutoSizeMeasuresItsPicture()
+    {
+        // A picture recorded here rather than loaded: this is what a vector renderer or an
+        // animation player hands the control, and its bounds are the only size the control has.
+        using var picture = RecordPicture(30, 20);
+
+        var image = new XPlatImage { Picture = picture };
+        var host = new XPlatPanel { Padding = XPlatThickness.Empty };
+        host.Controls.Add(image);
+
+        using var scene = HeadlessScene.Create(host, 200f, 100f);
+
+        Assert.AreEqual(30f, image.Width, "AutoSize is the picture's width");
+        Assert.AreEqual(20f, image.Height, "and its height");
+    }
+
+    [TestMethod]
+    public void ReplacingAnImagesPictureReleasesThePreviousOne()
+    {
+        using var image = new XPlatImage();
+        Assert.IsTrue(image.Load(PngBytes(4, 2)), "the first fixture image should load");
+        var previous = image.Picture!;
+
+        Assert.IsTrue(image.Load(PngBytes(6, 3)), "the second fixture image should load");
+        var current = image.Picture!;
+
+        Assert.AreNotSame(previous, current, "the load replaced the picture");
+        Assert.IsTrue(IsDisposed(previous), "the picture the control owned is disposed when it is replaced, so it does not leak");
+        Assert.IsFalse(IsDisposed(current), "and the new one is live");
+        Assert.AreEqual(6f, current.CullRect.Width, "with the new file's width");
+    }
+
+    [TestMethod]
+    public void DisposingAnImageReleasesItsPictureAndLeavesASiblingDrawing()
+    {
+        var host = new XPlatPanel { Padding = XPlatThickness.Empty };
+
+        var disposed = new XPlatImage { Dock = DockStyle.Top, Height = 40f };
+        Assert.IsTrue(disposed.Load(PngBytes(64, 48)), "the fixture image should load");
+        var disposedPicture = disposed.Picture!;
+
+        var sibling = new XPlatImage { Dock = DockStyle.Fill };
+        Assert.IsTrue(sibling.Load(PngBytes(4, 2)), "the sibling's fixture image should load");
+
+        host.Controls.Add(disposed);
+        host.Controls.Add(sibling);
+
+        using var scene = HeadlessScene.Create(host, 100f, 100f);
+        scene.Paint();
+
+        host.Controls.Remove(disposed);
+        disposed.Dispose();
+
+        using var bitmap = scene.Render();
+        Assert.AreEqual(SKColors.Red, bitmap.GetPixel(50, 50), "a sibling still paints after the other control was disposed");
+        Assert.IsTrue(IsDisposed(disposedPicture), "and the disposed control released the picture it owned");
+    }
+
+    [TestMethod]
+    public void DisposingAnImageLeavesAPictureItDoesNotOwnAlive()
+    {
+        // Phase 2 hands one picture to a control it did not record. Disposing that control must not
+        // pull the picture out from under whoever still draws it.
+        using var picture = RecordPicture(4, 2);
+
+        var first = new XPlatImage { Picture = picture };
+        var second = new XPlatImage { Picture = picture };
+        var host = new XPlatPanel { Padding = XPlatThickness.Empty };
+        host.Controls.Add(first);
+        host.Controls.Add(second);
+        first.Dock = DockStyle.Top;
+        first.Height = 40f;
+        second.Dock = DockStyle.Fill;
+
+        using var scene = HeadlessScene.Create(host, 100f, 100f);
+        host.Controls.Remove(first);
+        first.Dispose();
+
+        Assert.IsFalse(IsDisposed(picture), "a picture the control does not own outlives the control");
+
+        using var bitmap = scene.Render();
+        Assert.AreEqual(SKColors.Red, bitmap.GetPixel(50, 50), "the sibling still draws the shared picture");
+    }
+
+    /// <summary>A picture drawn directly, with no bitmap behind it.</summary>
+    private static SKPicture RecordPicture(int width, int height)
+    {
+        using var recorder = new SKPictureRecorder();
+        var canvas = recorder.BeginRecording(new SKRect(0f, 0f, width, height));
+        using var paint = new SKPaint { Color = SKColors.Red };
+        canvas.DrawRect(new SKRect(0f, 0f, width, height), paint);
+        return recorder.EndRecording();
+    }
+
+    /// <summary>
+    /// True when SkiaSharp has released the picture. A disposed <see cref="SKPicture"/> throws
+    /// nothing when one of its members is called - the native call reads a freed handle and takes
+    /// the process down - so the disposal flag SkiaSharp keeps internal is the only safe way to
+    /// observe that the control disposed it.
+    /// </summary>
+    private static bool IsDisposed(SKPicture picture)
+    {
+        var property = typeof(SKPicture).GetProperty(
+            "IsDisposed",
+            BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance);
+        Assert.IsNotNull(property, "SkiaSharp no longer exposes the disposal flag this test reads");
+        return (bool)property.GetValue(picture)!;
     }
 
     [TestMethod]
