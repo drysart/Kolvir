@@ -928,6 +928,7 @@ a spinner.
 | | `Thickness`, `AnimationSpeed` | The width of the ring, and how often the sweep advances |
 | `XPlatOverlay` | `Dim` | How much of what is under it is covered, 0 to 1, painted with the palette's background so it darkens a light window and lightens a dark one |
 | | `ChildAlignment` | Where a child that is not docked sits; `MiddleCenter` by default |
+| | `FadeDuration` | `XPlatUI.Feature.Animations` only: how long the layer takes to dim in, or null - the default - to appear at once |
 
 The spinner is the second control whose value is time, so it obeys the rule the marquee bar set: it
 runs a timer only while it is `IsDisplayed` and `IsBusy` and there is an application to deliver the
@@ -941,6 +942,19 @@ its band and is not covered. Keyboard input follows the focus rather than the po
 also joins the window as an `IXPlatInputSink` while it is on screen: every key and every typed
 character stops there, which is the same seam an open menu uses. Hiding or disabling the layer gives
 the keyboard back.
+
+On its own the layer appears at full strength in one frame. `XPlatUI.Feature.Animations` adds a
+`FadeDuration` extension member, which dims the layer in over that duration when it becomes visible -
+and only then, because a layer on screen is what a fade is for:
+
+```csharp
+// With XPlatUI.Feature.Animations referenced and AddAnimations() called:
+overlay.FadeDuration = TimeSpan.FromMilliseconds(120);
+overlay.Visible = true;                              // dims in, holding the keyboard throughout
+```
+
+There is deliberately no fade out: the layer is taken off the screen by assigning `Visible`, and a
+fade out would mean the control holding on to a hidden layer until a clock it may not have finished.
 
 ```csharp
 var overlay = new XPlatOverlay();                    // Dock = Fill
@@ -968,13 +982,34 @@ would not.
 | `Duration` | How long it shows before dismissing itself; `XPlatToast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
 | `Show()`, `Dismiss()`, `IsOpen` | The message state, so one control can be built once and reused |
 | `AddDismissedHandler` | Runs once the message went, whether by its countdown, its close glyph or the keyboard |
+| `ShowProgress` | How far the message has come in, 0 to 1, clamped. It follows `IsOpen` on its own, it is the message's opacity and how far it sits out of its docked edge, and it is what an animation drives |
+| `AddShowingHandler`, `AddDismissingHandler` | Run before `Show` and `Dismiss` move the progress; a handler that assigns `ShowProgress` takes the transition over |
 
 The countdown is a timer and follows the rule the marquee bar set: it runs only while the message is
 open and `IsDisplayed` and there is an application to deliver the ticks, so a toast on a page the
 user has switched away from stops rather than expiring unseen. The close glyph dismisses on a press
 released over it, a press that slides off does nothing, and a focused toast answers Escape, Enter and
-Space. The fade and slide a toast usually has belongs to `XPlatUI.Feature.Animations`; this control
-does not reference that package.
+Space.
+
+A dismissal is over when `ShowProgress` reaches 0, not when `Dismiss` is called, so a message driven
+by an animation stays on screen until the transition finishes and is taken out of the layout then.
+Everything that brings the progress to 0 removes it - including a transition that was cancelled - so
+a toast can never be left half faded over the page. A message on its way out has already left the Tab
+order and given up the focus, and coming back with `Show` puts both back.
+
+On its own the message is a jump in and a jump out. `XPlatUI.Feature.Animations` adds `ShowDuration`
+and `DismissDuration` extension members over exactly that seam, which fade and slide the message in
+from the edge it is docked against and reverse it on the way out:
+
+```csharp
+// With XPlatUI.Feature.Animations referenced and AddAnimations() called:
+toast.ShowDuration = TimeSpan.FromMilliseconds(240);
+toast.DismissDuration = TimeSpan.FromMilliseconds(180);
+```
+
+The fade and the slide come from the one `ShowProgress` number, so they cannot disagree, and the
+slide is a single translate of the whole control rather than a change to its geometry - the accent
+bar, the glyph and the text keep their shape all the way in.
 
 ```csharp
 var toast = new XPlatToast("Project saved") { Dock = DockStyle.Bottom, Severity = XPlatToastSeverity.Success };
@@ -3123,11 +3158,26 @@ gets a snap rather than a section stuck half open:
 appearance.ExpandDuration = TimeSpan.FromMilliseconds(180);   // null, the default, jumps
 ```
 
+The same shape covers the two controls that had no animation of their own:
+
+| Control | Extension member | What it drives |
+| --- | --- | --- |
+| `XPlatExpander` | `ExpandDuration` | `ExpandProgress`, so the height and the chevron fold together |
+| `XPlatToast` | `ShowDuration`, `DismissDuration` | `ShowProgress`, so the message fades and slides in from its docked edge and reverses on the way out |
+| `XPlatOverlay` | `FadeDuration` | `Opacity`, so the layer - and the card inside it - dims in as one picture |
+
+Each of the three progress values follows its control on its own, so none of them is state that only
+an animation can reach: `ExpandProgress` follows `IsExpanded`, `ShowProgress` follows `IsOpen`, and
+`Opacity` defaults to fully opaque and is clamped. A duration removed mid-flight settles the control
+on its target in every case, and no scheduler means a snap.
+
 The demo's **Animations** page runs nine animations on one timeline - a block that eases across its
 track, a bar that blends two colours on a different curve, three tiles that each arrive in a stagger
 of position and opacity, and a readout that is itself an animated value - with Start, Pause, Resume,
 Restart and End wired to the one set. The demo's **Expander** page puts an animated section beside an
-instant one, which is the shortest way to see what the duration buys.
+instant one, which is the shortest way to see what the duration buys; **Toast animation** puts a
+switch on the same page that takes both durations away, and **Overlay fade** shows a layer dimming in
+over the panel it holds still.
 
 ## Writing a backend
 

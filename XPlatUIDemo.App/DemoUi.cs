@@ -434,6 +434,8 @@ public sealed class DemoUi
         ("Wrap panel", demo => Page(demo.BuildWrapPanelDemo())),
         ("Busy indicator and overlay", demo => Page(demo.BuildBusyOverlayDemo())),
         ("Toast", demo => Page(demo.BuildToastDemo())),
+        ("Toast animation", demo => Page(demo.BuildToastAnimationDemo())),
+        ("Overlay fade", demo => Page(demo.BuildOverlayFadeDemo())),
     };
 
     /// <summary>
@@ -6373,6 +6375,268 @@ public sealed class DemoUi
             "The arrow is part of the measured width, Enter and Space run the default action, and " +
             "Down opens the menu. The menu is the library's own, so it opens submenus and leaves " +
             "the window the same way every other menu does.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// The toast's fade and slide, from <c>XPlatUI.Feature.Animations</c>. One message with a
+    /// duration for each direction, and a switch that takes both durations away so the difference
+    /// is a press away rather than a sentence.
+    /// </summary>
+    private XPlatPanel BuildToastAnimationDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Toast animation"));
+
+        card.Controls.Add(new XPlatLabel(
+            "The same control with a duration from the animations package. Press Show and it fades " +
+            "in while sliding out of the edge it is docked against; press Dismiss and it reverses, " +
+            "and only leaves the layout when the transition is over. Untick Instant and press them " +
+            "again to watch it without the animation - the message appears and goes in one frame.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 58f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var toast = new XPlatToast("Project saved to disk - watch it slide in from the bottom edge.")
+        {
+            Dock = XDock.Bottom,
+            Severity = XPlatToastSeverity.Success,
+            Duration = null,
+            Margin = new XPlatThickness(0f, 12f, 0f, 0f),
+        };
+        toast.ShowDuration = TimeSpan.FromMilliseconds(240);
+        toast.DismissDuration = TimeSpan.FromMilliseconds(180);
+        toast.AddDismissedHandler(_ => SetStatus("The toast has gone - the layout closed up behind it."));
+
+        var row = ButtonRow();
+        row.Height = 34f;
+        row.Margin = new XPlatThickness(0f, 0f, 0f, 8f);
+
+        var show = new XPlatButton("Show")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        show.AddClickHandler(_ =>
+        {
+            toast.Show();
+            SetStatus($"Showing over {toast.ShowDuration?.TotalMilliseconds} ms - it is already taking its room.");
+        });
+
+        var dismiss = new XPlatButton("Dismiss")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        dismiss.AddClickHandler(_ =>
+        {
+            toast.Dismiss();
+            SetStatus(
+                $"Dismissing over {toast.DismissDuration?.TotalMilliseconds} ms - it is out of the Tab order " +
+                "before the transition starts.");
+        });
+
+        var instant = new XPlatCheckBox("Instant - no duration") { Dock = XDock.Left, AutoSize = true };
+        instant.AddCheckedChangedHandler(_ =>
+        {
+            var duration = instant.Checked ? (TimeSpan?)null : TimeSpan.FromMilliseconds(240);
+            toast.ShowDuration = duration;
+            toast.DismissDuration = instant.Checked ? (TimeSpan?)null : TimeSpan.FromMilliseconds(180);
+            SetStatus(instant.Checked
+                ? "No durations: the toast is the control it always was."
+                : "Durations are back: Show and Dismiss animate again.");
+        });
+
+        row.Controls.Add(show);
+        row.Controls.Add(dismiss);
+        row.Controls.Add(instant);
+        card.Controls.Add(row);
+
+        card.Controls.Add(new XPlatLabel(
+            "ShowProgress is the one number the message is drawn from: its opacity, and how far it " +
+            "has come in from its docked edge. The two durations animate that number, so the fade " +
+            "and the slide cannot disagree, and the message is taken off the screen when the number " +
+            "reaches 0 rather than when Dismiss is called - which is why a cancelled dismissal still " +
+            "ends with the toast gone. The close glyph and Escape both work while it is up.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        card.Controls.Add(toast);
+
+        // The page opens with the message up, so a screenshot of it shows the control.
+        toast.Show();
+
+        return card;
+    }
+
+    /// <summary>
+    /// The overlay's fade-in, from <c>XPlatUI.Feature.Animations</c>: the layer dims in over the
+    /// panel instead of appearing at full strength in one frame.
+    /// </summary>
+    private XPlatPanel BuildOverlayFadeDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Overlay fade"));
+
+        card.Controls.Add(new XPlatLabel(
+            "The same blocker as the busy-and-overlay page, with a duration: it dims in over the " +
+            "panel it covers, and it is holding the keyboard from the first frame rather than from " +
+            "the end of the fade. Block and unblock it to watch it come in again.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 42f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var shell = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 170f,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(14f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        };
+
+        var content = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var readout = new XPlatLabel("Nothing has been done yet.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 24f,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        };
+
+        var action = new XPlatButton("Do something in the blocked panel")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        int actions = 0;
+        action.AddClickHandler(_ =>
+        {
+            actions++;
+            readout.Text = $"The panel's button has been pressed {actions} time(s).";
+            SetStatus("The panel's button works while the layer is hidden.");
+        });
+
+        content.Controls.Add(action);
+        content.Controls.Add(new XPlatCheckBox("A control under the layer") { Dock = XDock.Top, AutoSize = true });
+        content.Controls.Add(readout);
+
+        var busyCard = new XPlatPanel
+        {
+            AutoSize = false,
+            Size = new SKSize(260f, 76f),
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(12f),
+        };
+        busyCard.Controls.Add(new XPlatBusyIndicator
+        {
+            Dock = XDock.Left,
+            Margin = new XPlatThickness(0f, 0f, 14f, 0f),
+        });
+        busyCard.Controls.Add(new XPlatLabel("Loading the project...")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+            ForeColorRole = XPlatThemeColor.Foreground,
+        });
+
+        // The layer starts up, so the page opens with the blocked state on screen and the fade is
+        // the first thing it does when the window appears.
+        var overlay = new XPlatOverlay();
+        overlay.FadeDuration = TimeSpan.FromMilliseconds(160);
+        overlay.Controls.Add(busyCard);
+
+        shell.Controls.Add(content);
+        shell.Controls.Add(overlay);
+        card.Controls.Add(shell);
+
+        var layerRow = ButtonRow();
+        layerRow.Height = 32f;
+
+        var block = new XPlatButton("Block the panel")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Enabled = false,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        block.AddClickHandler(_ =>
+        {
+            overlay.Visible = true;
+            block.Enabled = false;
+            SetStatus("The panel is blocked again, and the layer dims in over it.");
+        });
+
+        var unblock = new XPlatButton("Unblock")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        unblock.AddClickHandler(_ =>
+        {
+            overlay.Visible = false;
+            block.Enabled = true;
+            SetStatus("The panel is free again. There is no fade out: hiding the layer hides it.");
+        });
+
+        layerRow.Controls.Add(block);
+        layerRow.Controls.Add(unblock);
+        card.Controls.Add(layerRow);
+
+        card.Controls.Add(new XPlatLabel(
+            "The fade is the layer's Opacity, so the dimming and the card inside it composite as one " +
+            "picture rather than each blending with what is under it. Only coming in animates: a " +
+            "fade out would mean the control holding on to a hidden layer, so assigning Visible " +
+            "still takes it away at once - the application's word for what is on screen stays true.")
         {
             Dock = XDock.Fill,
             AutoSize = false,

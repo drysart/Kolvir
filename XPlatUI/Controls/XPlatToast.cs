@@ -41,6 +41,16 @@ public enum XPlatToastSeverity
 /// this kind of message usually has belongs to <c>XPlatUI.Feature.Animations</c>; this control does
 /// not reference that package, so an application that wants the transition opts into it.
 /// </para>
+/// <para>
+/// <b>The seam an animation uses.</b> <see cref="ShowProgress"/> is the one number the message is
+/// drawn from - the opacity, and how far it has come in from its docked edge - and it follows
+/// <see cref="IsOpen"/> on its own, so an application that never animates never assigns it. A
+/// handler of <see cref="AddShowingHandler"/> or <see cref="AddDismissingHandler"/> that assigns it
+/// while the change is being raised has taken the transition over, which is how the feature package
+/// drives it a frame at a time. A dismissal is over when the progress reaches 0 rather than when
+/// <see cref="Dismiss"/> is called, so the message is taken off the screen by whatever brings the
+/// progress down - and a progress that is put on 0 by anything else removes it just the same.
+/// </para>
 /// </remarks>
 public class XPlatToast : XPlatControl
 {
@@ -48,6 +58,9 @@ public class XPlatToast : XPlatControl
     public static readonly TimeSpan DefaultDuration = TimeSpan.FromSeconds(4);
 
     private const float BarWidth = 4f;
+
+    /// <summary>How far the message travels at most as it comes in, in logical pixels.</summary>
+    private const float SlideReach = 20f;
 
     // The accent bar's colours, chosen to read on both the light and the dark surface. They are bar
     // colours rather than text colours, so they do not have to carry a contrast ratio against the
@@ -58,6 +71,8 @@ public class XPlatToast : XPlatControl
     private static readonly SKColor ErrorColor = new(0xFFC93C37);
 
     private Action<object>? _dismissed;
+    private Action<object>? _showing;
+    private Action<object>? _dismissing;
     private XPlatToastSeverity _severity = XPlatToastSeverity.Info;
     private TimeSpan? _duration = DefaultDuration;
     private SKColor? _barColor;
@@ -65,6 +80,14 @@ public class XPlatToast : XPlatControl
     private bool _closeHot;
     private bool _closePressed;
     private XPlatTimer? _timer;
+    private double _progress;
+    private bool _progressSteered;
+    private bool _removalPending;
+    private SKPoint _slideDirection = new(0f, -1f);
+    private SKPoint _slide;
+    private bool _keyboardTaken;
+    private bool _tabStopBeforeDismiss = true;
+    private bool _focusableBeforeDismiss = true;
 
     public XPlatToast()
     {
@@ -104,6 +127,123 @@ public class XPlatToast : XPlatControl
     {
         ArgumentNullException.ThrowIfNull(handler);
         _dismissed -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs when the message is about to come in, before
+    /// <see cref="ShowProgress"/> follows.
+    /// </summary>
+    /// <remarks>
+    /// The order is the contract, the way it is for <see cref="XPlatExpander.AddExpandedChangedHandler"/>:
+    /// a handler that assigns <see cref="ShowProgress"/> while it runs has taken the transition
+    /// over, and the control does not snap the progress to 1. Assigning the value it already has
+    /// counts, so an animation can hold the message where it is and drive it from there.
+    /// </remarks>
+    public IDisposable AddShowingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _showing += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveShowingHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddShowingHandler"/> added.</summary>
+    public void RemoveShowingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _showing -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs when the message is about to go, before <see cref="ShowProgress"/>
+    /// follows it down.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same contract as <see cref="AddShowingHandler"/>: a handler that assigns
+    /// <see cref="ShowProgress"/> has taken the transition over, and the message stays on screen
+    /// until something brings the progress to 0.
+    /// </para>
+    /// <para>
+    /// From the moment this is raised the message is no longer open, so it has already left the Tab
+    /// order and given up the focus - it must not be reachable on its way out. Coming back with
+    /// <see cref="Show"/> puts both back.
+    /// </para>
+    /// </remarks>
+    public IDisposable AddDismissingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dismissing += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveDismissingHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDismissingHandler"/> added.</summary>
+    public void RemoveDismissingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _dismissing -= handler;
+    }
+
+    /// <summary>
+    /// How far the message has come in, from 0 to 1: 0 is fully gone and 1 is fully in place.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The one number the message is drawn from. At anything below 1 it is faded - its
+    /// <see cref="XPlatControl.Opacity"/> is this value, so the whole message composites as one -
+    /// and it is drawn short of where the layout put it, out of the edge of its container that it
+    /// is docked against. The step is a single translate, so nothing about the control is stretched
+    /// on the way: the accent bar stays a bar and the close glyph stays square.
+    /// </para>
+    /// <para>
+    /// It follows <see cref="IsOpen"/> on its own, so an application that never animates never
+    /// assigns it: a message that has not been shown is at 0, and <see cref="Show"/> puts it at 1 in
+    /// the same call. It is public because something else - <c>ShowDuration</c> and
+    /// <c>DismissDuration</c> in <c>XPlatUI.Feature.Animations</c> - drives it a frame at a time,
+    /// and because the value a control is drawn from is worth being able to read.
+    /// </para>
+    /// <para>
+    /// Out of range values are clamped, so an animation that overshoots its ease lands on its end
+    /// state rather than drawing past it. A message that is no longer open leaves the screen the
+    /// moment the progress reaches 0, whatever brought it there.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="value"/> is NaN.</exception>
+    public double ShowProgress
+    {
+        get => _progress;
+        set
+        {
+            if (double.IsNaN(value))
+            {
+                throw new ArgumentOutOfRangeException(nameof(value), value, "The progress must be a number.");
+            }
+
+            // Set before the early-out below, for the same reason ExpandProgress does: holding the
+            // progress where it is counts as taking the transition over just as much as moving it.
+            _progressSteered = true;
+
+            double clamped = Math.Clamp(value, 0d, 1d);
+            bool moved = Math.Abs(clamped - _progress) >= 0.000001d;
+
+            _progress = clamped;
+
+            // Kept in step even when the value did not move. A message that has never been shown
+            // reads 0 here and is still a plain opaque control, and the hold that an animation
+            // starts with is the assignment that puts the two back together - before the first
+            // frame, so the message never paints at full strength on its way in.
+            Opacity = (float)clamped;
+
+            if (moved)
+            {
+                UpdateSlide();
+                Invalidate();
+            }
+
+            // Checked on every assignment rather than only on a change, because the message can be
+            // dismissed with the progress already at 0 - shown and dismissed in the same turn, for
+            // instance - and that still has to take it off the screen.
+            RemoveIfDismissed();
+        }
     }
 
     /// <summary>What the message is reporting. Defaults to <see cref="XPlatToastSeverity.Info"/>.</summary>
@@ -188,16 +328,32 @@ public class XPlatToast : XPlatControl
         }
 
         _open = true;
+
+        // A show that arrives while the message is still fading out turns round: the removal the
+        // dismissal was heading for is off, and the message has its keyboard flags back.
+        _removalPending = false;
+        GiveKeyboardBack();
+
         Visible = true;
 
         // Showing or hiding a docked control changes how much room its container has to share out,
-        // and only the container can move the siblings.
+        // and only the container can move the siblings. Done before the edge is worked out, so the
+        // message comes in from where the layout has just put it.
         Parent?.PerformLayout();
+        _slideDirection = SlideDirection();
         UpdateTimer();
+
+        MoveProgress(1d, dismissing: false);
         Invalidate();
     }
 
     /// <summary>Hides the message, stops its countdown and raises <see cref="AddDismissedHandler"/>.</summary>
+    /// <remarks>
+    /// With nothing animating the message goes at once. With a handler of
+    /// <see cref="AddDismissingHandler"/> driving <see cref="ShowProgress"/> it stays on the screen,
+    /// out of reach of the keyboard, until that progress reaches 0 - which is what removes it and
+    /// raises <see cref="AddDismissedHandler"/>, once.
+    /// </remarks>
     public void Dismiss()
     {
         if (!_open)
@@ -206,14 +362,15 @@ public class XPlatToast : XPlatControl
         }
 
         _open = false;
+        _removalPending = true;
         _closePressed = false;
         _closeHot = false;
         ReleaseMouseCapture();
         _timer?.Stop();
-        Visible = false;
-        Parent?.PerformLayout();
+        TakeKeyboardOutOfReach();
         Invalidate();
-        _dismissed?.Invoke(this);
+
+        MoveProgress(0d, dismissing: true);
     }
 
     /// <summary>The rectangle the close glyph is drawn in, in client coordinates.</summary>
@@ -236,6 +393,8 @@ public class XPlatToast : XPlatControl
 
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
+        bool shifted = BeginSlide(canvas);
+
         base.OnPaintBackground(canvas, rect);
 
         XPlatPainter.DrawBorder(canvas, rect, BorderColor, BorderWidth <= 0f ? 1f : BorderWidth, CornerRadius);
@@ -264,10 +423,17 @@ public class XPlatToast : XPlatControl
             var fill = _closePressed ? XPlatTheme.SecondaryPressed : XPlatTheme.SecondaryHover;
             XPlatPainter.Fill(canvas, close, fill, 4f);
         }
+
+        if (shifted)
+        {
+            canvas.Restore();
+        }
     }
 
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
+        bool shifted = BeginSlide(canvas);
+
         var color = Enabled ? ForeColor : XPlatTheme.DisabledForeground;
         var content = XPlatGeometry.Deflate(rect, Padding);
 
@@ -287,6 +453,11 @@ public class XPlatToast : XPlatControl
         }
 
         PaintCloseGlyph(canvas, CloseBounds, Enabled ? XPlatTheme.MutedForeground : XPlatTheme.DisabledForeground);
+
+        if (shifted)
+        {
+            canvas.Restore();
+        }
     }
 
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
@@ -481,6 +652,186 @@ public class XPlatToast : XPlatControl
         }
 
         Dismiss();
+    }
+
+    /// <summary>
+    /// Moves the message to <paramref name="target"/>, unless a handler takes the transition over.
+    /// </summary>
+    private void MoveProgress(double target, bool dismissing)
+    {
+        // The contract is the expander's: a handler that assigns ShowProgress while the change is
+        // being raised has taken the transition over, and the snap below stands down. Assigning the
+        // value the progress already has counts, which is how an animation holds the message where
+        // it is before driving it.
+        _progressSteered = false;
+
+        if (dismissing)
+        {
+            _dismissing?.Invoke(this);
+        }
+        else
+        {
+            _showing?.Invoke(this);
+        }
+
+        if (!_progressSteered)
+        {
+            ShowProgress = target;
+        }
+    }
+
+    /// <summary>
+    /// Takes the message off the screen once it has finished going: it was told to dismiss, and its
+    /// progress has reached 0.
+    /// </summary>
+    /// <remarks>
+    /// Every assignment of <see cref="ShowProgress"/> ends here, so no route can leave a toast
+    /// half faded and still on the screen. The pending flag is what keeps it to one removal, which
+    /// matters because a dismissal that lands exactly on 0 and then settles there assigns the same
+    /// value twice.
+    /// </remarks>
+    private void RemoveIfDismissed()
+    {
+        if (!_removalPending || _progress > 0d)
+        {
+            return;
+        }
+
+        _removalPending = false;
+        _closePressed = false;
+        _closeHot = false;
+        ReleaseMouseCapture();
+        _timer?.Stop();
+        Visible = false;
+        Parent?.PerformLayout();
+        Invalidate();
+        _dismissed?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Stops a message that is on its way out from taking the keyboard: it leaves the Tab order,
+    /// gives up the focus, and the focus moves to whatever above it can still take it.
+    /// </summary>
+    /// <remarks>
+    /// The two flags are put back when the message comes back, so an application that never
+    /// dismissed it never sees a change, and one that set either of them keeps its choice.
+    /// </remarks>
+    private void TakeKeyboardOutOfReach()
+    {
+        if (_keyboardTaken)
+        {
+            return;
+        }
+
+        _keyboardTaken = true;
+        _tabStopBeforeDismiss = TabStop;
+        _focusableBeforeDismiss = Focusable;
+        TabStop = false;
+        Focusable = false;
+
+        // The toast is not focusable any more, so this moves the focus up to the nearest ancestor
+        // that can take it rather than leaving it on the control that is leaving.
+        ReleaseFocusFromSubtree();
+    }
+
+    /// <summary>Puts back the Tab stop and focus flags <see cref="TakeKeyboardOutOfReach"/> took away.</summary>
+    private void GiveKeyboardBack()
+    {
+        if (!_keyboardTaken)
+        {
+            return;
+        }
+
+        _keyboardTaken = false;
+        TabStop = _tabStopBeforeDismiss;
+        Focusable = _focusableBeforeDismiss;
+    }
+
+    /// <summary>
+    /// Which way the message travels as it comes in: one unit step out of the edge of the space it
+    /// sits in that it is docked against, so a message along the top of a page slides down and one
+    /// at the bottom slides up.
+    /// </summary>
+    /// <remarks>
+    /// A message that spans the width of that space is a band, and it is docked to the top or the
+    /// bottom even though a band flush with the top is also flush with both sides; one that spans
+    /// the height is docked to a side. Anything smaller takes whichever edge it is nearest.
+    /// </remarks>
+    private SKPoint SlideDirection()
+    {
+        if (Parent is not { } parent)
+        {
+            return new SKPoint(0f, -1f);
+        }
+
+        var area = parent.ClientRect;
+        var bounds = Bounds;
+
+        float left = bounds.Left - area.Left;
+        float right = area.Right - bounds.Right;
+        float top = bounds.Top - area.Top;
+        float bottom = area.Bottom - bounds.Bottom;
+
+        bool spansWidth = bounds.Width >= area.Width - 1f;
+        bool spansHeight = bounds.Height >= area.Height - 1f;
+
+        if (spansWidth && !spansHeight)
+        {
+            return top <= bottom ? new SKPoint(0f, -1f) : new SKPoint(0f, 1f);
+        }
+
+        if (spansHeight && !spansWidth)
+        {
+            return left <= right ? new SKPoint(-1f, 0f) : new SKPoint(1f, 0f);
+        }
+
+        float nearest = MathF.Min(MathF.Min(top, bottom), MathF.Min(left, right));
+
+        if (nearest == top)
+        {
+            return new SKPoint(0f, -1f);
+        }
+
+        if (nearest == bottom)
+        {
+            return new SKPoint(0f, 1f);
+        }
+
+        return nearest == left ? new SKPoint(-1f, 0f) : new SKPoint(1f, 0f);
+    }
+
+    /// <summary>
+    /// Puts the message where its progress says: exactly on its layout slot at 1, and a short way
+    /// out of its docked edge at 0.
+    /// </summary>
+    /// <remarks>
+    /// The step is one translate of the whole control, never a change to its geometry, so the
+    /// accent bar, the close glyph and the text keep their shape all the way in - a slide that
+    /// scaled the control would turn the square glyph into a rectangle.
+    /// </remarks>
+    private void UpdateSlide()
+    {
+        float height = Bounds.Height > 0f ? Bounds.Height : MinimumSize.Height;
+        float reach = MathF.Min(SlideReach, MathF.Max(4f, height * 0.5f));
+        float away = (float)(1d - _progress) * reach;
+
+        _slide = new SKPoint(_slideDirection.X * away, _slideDirection.Y * away);
+    }
+
+    /// <summary>
+    /// Moves the canvas to where the message is while it is on its way in or out, and reports
+    /// whether it did - false is the case for every toast that never animates.
+    /// </summary>
+    private bool BeginSlide(SKCanvas canvas)
+    {
+        if (_slide.X == 0f && _slide.Y == 0f)
+        {
+            return false;
+        }
+
+        canvas.Save();
+        canvas.Translate(_slide.X, _slide.Y);
+        return true;
     }
 
     private static void PaintCloseGlyph(SKCanvas canvas, SKRect cell, SKColor color)

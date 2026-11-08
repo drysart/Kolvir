@@ -103,8 +103,8 @@ listing them is that a reviewer can say "this next" without re-deriving the gap.
 ### 4.2 Worth having, but not in the way of building an application
 
 `XPlatBadge` (a count or dot on a tab or button), a breadcrumb bar, wizard/stepper chrome,
-`XPlatRating`, an avatar or chip control, a zoomable and pannable canvas for diagram and image
-viewers, and animated expand/collapse, which the animation feature now makes a small job.
+`XPlatRating`, an avatar or chip control, and a zoomable and pannable canvas for diagram and image
+viewers.
 
 ### 4.3 Expensive, and deliberately not decided
 
