@@ -55,6 +55,10 @@ public interface IXPlatImageFormatProvider
     /// <see cref="Decode"/>.
     /// </param>
     /// <returns>True when the bytes are this format's.</returns>
+    /// <remarks>
+    /// A provider that throws here has not claimed the bytes: the exception is swallowed and the
+    /// next provider is asked, because identifying a stream must not be able to fail a load.
+    /// </remarks>
     bool CanDecode(ReadOnlySpan<byte> header);
 
     /// <summary>

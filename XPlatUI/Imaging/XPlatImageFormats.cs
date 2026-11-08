@@ -146,7 +146,25 @@ public static class XPlatImageFormats
         for (int index = 0; index < providers.Length; index++)
         {
             var provider = providers[index];
-            if (provider.Priority >= bestPriority && provider.CanDecode(header))
+            if (provider.Priority < bestPriority)
+            {
+                continue;
+            }
+
+            bool claims;
+            try
+            {
+                claims = provider.CanDecode(header);
+            }
+            catch (Exception ex) when (ex is not OutOfMemoryException)
+            {
+                // A provider that cannot answer the question has not claimed the bytes. Deciding it
+                // here rather than letting the exception out of Load is what keeps a buggy provider
+                // from turning a load of a PNG into an exception on the paint thread.
+                claims = false;
+            }
+
+            if (claims)
             {
                 found = provider;
                 bestPriority = provider.Priority;

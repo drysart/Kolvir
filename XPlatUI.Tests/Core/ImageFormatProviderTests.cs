@@ -155,6 +155,23 @@ public sealed class ImageFormatProviderTests
         }
     }
 
+    [TestMethod]
+    public void AProviderThatThrowsWhileSniffingHasNotClaimedTheBytes()
+    {
+        // Identifying a stream runs for every provider, so a bug there must not be able to turn a
+        // load into an exception on the paint thread. It counts as "not mine" and the next provider
+        // - here the built-in one - continues to answer.
+        var broken = new StandIn("broken-sniff", priority: 9, magic: "MAGIC", width: 11f) { ThrowsFromCanDecode = true };
+        Register(broken);
+
+        using var image = new XPlatImage();
+        Assert.IsTrue(image.Load(new MemoryStream(Png(4, 2))), "a PNG still loads past a provider that threw");
+
+        using var magic = new XPlatImage();
+        Assert.IsFalse(magic.Load(Stream("MAGIC")), "and bytes nobody else claims still fail quietly");
+        Assert.AreEqual(0, broken.Decodes, "the broken provider was never asked to decode");
+    }
+
     private IDisposable Register(IXPlatImageFormatProvider provider)
     {
         var registration = XPlatImageFormats.Add(provider);
@@ -184,13 +201,18 @@ public sealed class ImageFormatProviderTests
 
         internal bool Throws { get; init; }
 
+        internal bool ThrowsFromCanDecode { get; init; }
+
         internal bool ReturnsNull { get; init; }
 
         public string Name => name;
 
         public int Priority => priority;
 
-        public bool CanDecode(ReadOnlySpan<byte> header) => header.StartsWith(System.Text.Encoding.ASCII.GetBytes(magic));
+        public bool CanDecode(ReadOnlySpan<byte> header) =>
+            ThrowsFromCanDecode
+                ? throw new InvalidOperationException("this provider cannot answer questions")
+                : header.StartsWith(System.Text.Encoding.ASCII.GetBytes(magic));
 
         public SKPicture? Decode(Stream stream, string? extensionHint)
         {

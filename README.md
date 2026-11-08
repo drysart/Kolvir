@@ -3235,6 +3235,7 @@ The rules, which are the part worth reading before writing one:
 | Situation | What happens |
 | --- | --- |
 | Two providers claim the same bytes | The higher `Priority` wins; at equal priority the later registration wins. A load never tries a second provider for the same bytes. |
+| A provider throws while sniffing | It has not claimed the bytes - the exception is swallowed and the next provider is asked - because identifying a stream must not be able to fail a load. |
 | The claiming provider throws | The load returns false and raises `AddLoadFailedHandler` with an `XPlatImageFormatException` naming the provider, with what it threw as the inner exception. It does **not** fall through to the next claim: the bytes were identified, and handing a document one parser refused to another is how a refused file gets read anyway. |
 | The claiming provider returns null | The same, without an inner exception. |
 | No provider claims the bytes | False, and nothing raised - the contract a stream that is not an image has always had. That is also what an SVG is before `AddSvgImages()` runs. |

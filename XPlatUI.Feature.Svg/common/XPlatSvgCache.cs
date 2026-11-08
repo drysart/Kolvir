@@ -19,16 +19,7 @@ internal sealed class XPlatSvgCacheEntry : IDisposable
 {
     private SKSvg? _svg;
 
-    internal XPlatSvgCacheEntry(string key, SKSvg svg)
-    {
-        Key = key;
-        _svg = svg;
-    }
-
-    internal string Key { get; }
-
-    /// <summary>The document's natural bounds, which is what the control measures.</summary>
-    internal SKRect Bounds => (_svg ?? throw new ObjectDisposedException(nameof(XPlatSvgCacheEntry))).Picture!.CullRect;
+    internal XPlatSvgCacheEntry(SKSvg svg) => _svg = svg;
 
     /// <summary>A recording the caller owns and disposes.</summary>
     internal SKPicture Record() => XPlatSvgDocument.Record(_svg ?? throw new ObjectDisposedException(nameof(XPlatSvgCacheEntry)));
@@ -79,13 +70,9 @@ internal static class XPlatSvgCache
     private static readonly Queue<string> Order = new();
 
     private static int _parses;
-    private static int _hits;
 
     /// <summary>How many documents have been parsed, for the tests that claim "parsed once".</summary>
     internal static int ParseCount => Volatile.Read(ref _parses);
-
-    /// <summary>How many loads were served from the cache.</summary>
-    internal static int HitCount => Volatile.Read(ref _hits);
 
     /// <summary>How many entries are held.</summary>
     internal static int Count
@@ -108,7 +95,6 @@ internal static class XPlatSvgCache
         {
             if (Entries.TryGetValue(key, out var existing))
             {
-                Interlocked.Increment(ref _hits);
                 return existing;
             }
         }
@@ -123,11 +109,10 @@ internal static class XPlatSvgCache
                 // Another thread parsed the same document while this one was parsing: keep theirs
                 // so both loads share one entry's lifetime.
                 parsed.Dispose();
-                Interlocked.Increment(ref _hits);
                 return existing;
             }
 
-            var entry = new XPlatSvgCacheEntry(key, parsed);
+            var entry = new XPlatSvgCacheEntry(parsed);
             Entries.Add(key, entry);
             Order.Enqueue(key);
 
