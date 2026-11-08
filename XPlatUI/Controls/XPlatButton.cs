@@ -199,7 +199,12 @@ public class XPlatButton : XPlatControl
         base.OnEnabledChanged();
     }
 
-    private (SKColor? Fill, SKColor Text) ResolveColors()
+    /// <summary>
+    /// The fill and the text colour for the current style and state. A subclass that paints the
+    /// button in parts - a split button's arrow region, for one - draws with the same answer
+    /// instead of re-deriving it.
+    /// </summary>
+    protected (SKColor? Fill, SKColor Text) ResolveColors()
     {
         if (!Enabled)
         {

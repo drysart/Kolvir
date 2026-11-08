@@ -84,6 +84,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatLinkLabel` | `LinkLabel` | A rich label styled as a link that hands its URI to the desktop through `IXPlatLauncher` |
 | `XPlatRichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
 | `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
+| `XPlatSplitButton` / `XPlatDropDownButton` | `ToolStripSplitButton` / `ToolStripDropDownButton` | One button that is both a command and a menu: the main area raises a click and the arrow opens `Menu` in a popup; a drop-down button opens the menu from its whole face |
 | `XPlatCheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
 | `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
 | `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
@@ -1169,6 +1170,42 @@ toolbar.Items.Add(new XPlatToolStripButton("Save"));
 toolbar.Items.Add(new XPlatToolStripSeparator());
 toolbar.Items.Add(new XPlatToolStripSpring());
 toolbar.Items.Add(new XPlatToolStripLabel("UTF-8"));
+```
+
+### Split buttons
+
+`XPlatSplitButton` is one button with two halves: the main area is the default action and the arrow
+at its right edge opens `Menu`. `XPlatDropDownButton` is the same control with the halves merged -
+pressing anywhere opens the menu, and `AddClickHandler` still runs, which mirrors the WinForms
+`ToolStripDropDownButton`.
+
+| Member | Behaviour |
+| --- | --- |
+| `Menu` | The `XPlatContextMenu` the arrow opens: items, submenus, separators and mnemonics |
+| `ArrowWidth` | Width of the arrow region, 24 logical pixels by default; it is part of the measured width |
+| `IsDropDownOpen`, `OpenDropDown()`, `CloseDropDown()` | The menu's state |
+| `AddClickHandler` | The default action: a press and release in the main area, or Enter/Space while focused |
+
+What separates the two halves is where the press started: a press that begins in the arrow and is
+released over the label does nothing, the way a press that wanders off an ordinary button does. The
+arrow region darkens under the pointer so it is clear which half is about to be hit. `Down` opens the
+menu from the keyboard; once it is open the menu owns the keyboard, so its own arrows, Enter and
+Escape are what move and dismiss it.
+
+The menu is the library's own `XPlatMenuView` in an `XPlatPopup` shown by `XPlatMenuPresenter`, so it
+draws the same on all three platforms, opens submenus in popups of their own, and can leave the
+window when the backend provides popup windows. Nothing is built until the menu is first opened, and
+disabling or hiding the button closes an open menu.
+
+```csharp
+var save = new XPlatSplitButton("Save") { Dock = DockStyle.Top, AutoSize = true };
+save.AddClickHandler(_ => document.Save());          // the main area
+save.Menu.Add("Save as...", () => document.SaveAs());
+save.Menu.Add("Export as PDF", () => document.Export());
+
+var more = new XPlatDropDownButton("More") { Dock = DockStyle.Top, AutoSize = true };
+more.Menu.Add("Rename", () => document.Rename());
+more.Menu.Add("Archive", () => document.Archive());
 ```
 
 ### Popups

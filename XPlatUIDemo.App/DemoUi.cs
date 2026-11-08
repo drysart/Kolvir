@@ -429,6 +429,7 @@ public sealed class DemoUi
         ("Colour picker", demo => Page(demo.BuildColorPickerDemo())),
         ("Font dialog", demo => Page(demo.BuildFontDialogDemo())),
         ("Colour dialog", demo => Page(demo.BuildColorDialogDemo())),
+        ("Split buttons", demo => Page(demo.BuildSplitButtonDemo())),
     };
 
     /// <summary>
@@ -5678,6 +5679,86 @@ public sealed class DemoUi
 
     private static string DescribeColor(SKColor color) =>
         $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2} (R {color.Red}, G {color.Green}, B {color.Blue})";
+
+    /// <summary>
+    /// <see cref="XPlatSplitButton"/> and <see cref="XPlatDropDownButton"/>: the main area runs one
+    /// command and the arrow opens the menu, with a disabled one beside them to show the greying.
+    /// </summary>
+    private XPlatPanel BuildSplitButtonDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Split buttons"));
+
+        card.Controls.Add(new XPlatLabel(
+            "A split button is a command with a menu: the label runs the default action and the " +
+            "arrow opens the drop-down. The drop-down button has no second half - pressing it " +
+            "anywhere opens the menu.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 42f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 12f),
+        });
+
+        var row = ButtonRow();
+        row.Height = 40f;
+
+        var save = new XPlatSplitButton("Save")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        save.AddClickHandler(_ => SetStatus("Split button: the main area ran Save."));
+        save.Menu.Add("Save as...", () => SetStatus("Split button: Save as... chosen from the menu."));
+        save.Menu.Add("Save a copy", () => SetStatus("Split button: Save a copy chosen from the menu."));
+        save.Menu.AddSeparator();
+        save.Menu.Add("Export as PDF", () => SetStatus("Split button: Export as PDF chosen from the menu."));
+        row.Controls.Add(save);
+
+        var more = new XPlatDropDownButton("More actions")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        more.AddClickHandler(_ => SetStatus("Drop-down button: the menu opened from the whole face."));
+        more.Menu.Add("Rename", () => SetStatus("Drop-down button: Rename chosen from the menu."));
+        more.Menu.Add("Archive", () => SetStatus("Drop-down button: Archive chosen from the menu."));
+        row.Controls.Add(more);
+
+        var disabled = new XPlatSplitButton("Disabled")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Enabled = false,
+            Style = XPlatButtonStyle.Secondary,
+        };
+        disabled.Menu.Add("Never shown");
+        row.Controls.Add(disabled);
+
+        card.Controls.Add(row);
+
+        card.Controls.Add(new XPlatLabel(
+            "The arrow is part of the measured width, Enter and Space run the default action, and " +
+            "Down opens the menu. The menu is the library's own, so it opens submenus and leaves " +
+            "the window the same way every other menu does.")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+        });
+
+        return card;
+    }
 
     /// <summary>
     /// A panel that draws the focus ring when it has the focus. A plain panel has no chrome of its
