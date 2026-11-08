@@ -20,6 +20,12 @@ namespace XPlatUI;
 /// application to deliver its ticks. Hiding it, hiding a container around it, closing the window or
 /// clearing <see cref="IsBusy"/> stops it, and an application with nothing busy runs no timer.
 /// </para>
+/// <para>
+/// It is always a circle, whatever shape the control is: the shorter of its two sides is the
+/// diameter and the ring is centred in the room that leaves, so a spinner in a wide row or a tall
+/// column is round and in the middle rather than an oval stretched to the control's edges. The same
+/// side sets the stroke, so a wide control does not get a heavier ring.
+/// </para>
 /// </remarks>
 public class XPlatBusyIndicator : XPlatControl
 {
@@ -122,6 +128,37 @@ public class XPlatBusyIndicator : XPlatControl
     /// <summary>An auto-sized spinner is its minimum size, which is what an overlay centres.</summary>
     protected override SKSize MeasureContent(SKSize availableSize) => MinimumSize;
 
+    /// <summary>
+    /// The circle the ring is drawn on, for a client area of <paramref name="bounds"/>: the shorter
+    /// side of it, centred in whichever room is left, with the stroke kept inside that circle.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Both axes come from the one side because a spinner is a circle. Reading the width for one and
+    /// the height for the other - which is what insetting a rectangle by the stroke does - draws an
+    /// oval in any control that is not square, and a spinner in a wide row or a column is not square
+    /// as often as it is. The spare room is split evenly, so a circle in a rectangle sits in the
+    /// middle of it rather than being stretched across it.
+    /// </para>
+    /// <para>
+    /// The stroke is measured against that same side rather than against either edge, so a wide
+    /// control does not get a heavier ring, and it is capped at half the side so the hole in the
+    /// middle never closes up.
+    /// </para>
+    /// </remarks>
+    internal static SKRect RingBounds(SKRect bounds, float thickness)
+    {
+        float side = MathF.Min(bounds.Width, bounds.Height);
+        float stroke = MathF.Min(thickness, side / 2f);
+        float radius = MathF.Max(0f, (side - stroke) / 2f);
+
+        return new SKRect(
+            bounds.MidX - radius,
+            bounds.MidY - radius,
+            bounds.MidX + radius,
+            bounds.MidY + radius);
+    }
+
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         UpdateTimer();
@@ -132,11 +169,7 @@ public class XPlatBusyIndicator : XPlatControl
             return;
         }
 
-        var ring = new SKRect(
-            rect.Left + (thickness / 2f),
-            rect.Top + (thickness / 2f),
-            rect.Right - (thickness / 2f),
-            rect.Bottom - (thickness / 2f));
+        var ring = RingBounds(rect, thickness);
 
         if (ring.Width <= 0f || ring.Height <= 0f)
         {
@@ -154,7 +187,9 @@ public class XPlatBusyIndicator : XPlatControl
             StrokeWidth = thickness,
         })
         {
-            canvas.DrawOval(ring, paint);
+            // A circle rather than an oval: the ring is the whole shape, and a control that is not
+            // square still shows a round spinner in the middle of it.
+            canvas.DrawCircle(ring.MidX, ring.MidY, ring.Width / 2f, paint);
         }
 
         using (var paint = new SKPaint

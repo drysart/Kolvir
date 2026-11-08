@@ -223,6 +223,67 @@ public sealed class BusyOverlayTests : HeadlessTestBase
         Assert.AreNotEqual(XPlatTheme.Background, half);
     }
 
+    [TestMethod]
+    public void TheRingIsACircleInAControlThatIsNotSquare()
+    {
+        // The shorter side is the diameter and the spare room is split evenly, so the box the ring
+        // is drawn in is square and sits in the middle of the control whichever way it is stretched.
+        foreach (var (width, height) in new[] { (200f, 80f), (80f, 200f), (120f, 120f) })
+        {
+            var bounds = new SKRect(0f, 0f, width, height);
+            var ring = XPlatBusyIndicator.RingBounds(bounds, 3f);
+
+            Assert.AreEqual(ring.Width, ring.Height, 0.001f, $"{width}x{height}: the ring's box is square");
+            Assert.AreEqual(MathF.Min(width, height) - 3f, ring.Width, 0.001f,
+                $"{width}x{height}: and its diameter is the shorter side less the stroke");
+            Assert.AreEqual(bounds.MidX, ring.MidX, 0.001f, $"{width}x{height}: the circle is centred across");
+            Assert.AreEqual(bounds.MidY, ring.MidY, 0.001f, $"{width}x{height}: and down");
+        }
+    }
+
+    [TestMethod]
+    public void TheRingIsCentredInTheRoomTheControlIsGivenRatherThanAtItsOrigin()
+    {
+        var bounds = new SKRect(10f, 40f, 210f, 120f);
+        var ring = XPlatBusyIndicator.RingBounds(bounds, 4f);
+
+        Assert.AreEqual(bounds.MidX, ring.MidX, 0.001f);
+        Assert.AreEqual(bounds.MidY, ring.MidY, 0.001f);
+        Assert.AreEqual(80f - 4f, ring.Width, 0.001f, "the height is the shorter side, wherever the control sits");
+    }
+
+    [TestMethod]
+    public void AWideSpinnerPaintsItsRingInsideASquareInTheMiddle()
+    {
+        var root = Muted();
+        root.BackColor = new SKColor(0x20, 0x20, 0x20);
+
+        var spinner = new XPlatBusyIndicator { Dock = DockStyle.Fill, Thickness = 6f };
+        root.Controls.Add(spinner);
+
+        using var scene = HeadlessScene.Create(root, 200f, 80f);
+
+        var background = new SKColor(0x20, 0x20, 0x20);
+        using var bitmap = scene.Render();
+
+        // The centre row of an 80-high control: an oval would reach within the stroke of x = 0 and
+        // x = 200, a circle of diameter 80 sits between 60 and 140.
+        int left = int.MaxValue, right = int.MinValue;
+        for (int x = 0; x < bitmap.Width; x++)
+        {
+            if (bitmap.GetPixel(x, bitmap.Height / 2) != background)
+            {
+                left = Math.Min(left, x);
+                right = Math.Max(right, x);
+            }
+        }
+
+        Assert.IsTrue(left < int.MaxValue, "the ring should have been painted");
+        Assert.IsTrue(left >= 55, $"the ring starts at {left}, well inside the left edge");
+        Assert.IsTrue(right <= 145, $"and ends at {right}, well inside the right edge");
+        Assert.AreEqual(200, left + right, 6, "which puts its middle in the control's middle");
+    }
+
     private static XPlatPanel Muted() => new()
     {
         Dock = DockStyle.Fill,

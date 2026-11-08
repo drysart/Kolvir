@@ -5850,6 +5850,21 @@ public sealed class DemoUi
         });
         row.Controls.Add(heavy);
 
+        // A spinner in a box that is deliberately nothing like square - wide and short, with the box
+        // drawn round it so the control's shape is visible. The circle comes from the shorter side
+        // and is centred, so it reads as a spinner rather than as a stretched oval.
+        var wideBox = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = 240f,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 2f, 4f, 0f),
+        };
+        wideBox.Controls.Add(new XPlatBusyIndicator { Dock = XDock.Fill, Thickness = 5f });
+        row.Controls.Add(wideBox);
+
         card.Controls.Add(row);
 
         // The shell that gets blocked: its content and the layer are both Fill children, so they
@@ -5972,7 +5987,9 @@ public sealed class DemoUi
         card.Controls.Add(new XPlatLabel(
             "The layer takes the presses by being the topmost control over the panel, and the keys " +
             "by joining the window as an input sink while it is on screen - the same seam an open " +
-            "menu uses. Its dimming is the palette's background, so it follows a theme change.")
+            "menu uses. Its dimming is the palette's background, so it follows a theme change. The " +
+            "wide box in the row above is a spinner in a very un-square control, and it is still " +
+            "a circle in the middle of it.")
         {
             Dock = XDock.Fill,
             AutoSize = false,

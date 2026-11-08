@@ -931,13 +931,16 @@ a spinner.
 
 The spinner is the second control whose value is time, so it obeys the rule the marquee bar set: it
 runs a timer only while it is `IsDisplayed` and `IsBusy` and there is an application to deliver the
-ticks, and it stops otherwise. The layer is an ordinary control, so it takes the presses by being
-the topmost thing in its container; putting it beside the content it holds still means both are
-`DockStyle.Fill` and cover the same area - a child docked to an edge keeps its band and is not
-covered. Keyboard input follows the focus rather than the pointer, so the layer also joins the
-window as an `IXPlatInputSink` while it is on screen: every key and every typed character stops
-there, which is the same seam an open menu uses. Hiding or disabling the layer gives the keyboard
-back.
+ticks, and it stops otherwise. It is also always a circle: the shorter of the control's two sides is
+the diameter and the ring is centred in the room that leaves, so a spinner in a wide row or a tall
+column is round and in the middle rather than an oval stretched to the control's edges, and the same
+side sets the stroke so a wide control does not get a heavier ring. The layer is an ordinary control,
+so it takes the presses by being the topmost thing in its container; putting it beside the content it
+holds still means both are `DockStyle.Fill` and cover the same area - a child docked to an edge keeps
+its band and is not covered. Keyboard input follows the focus rather than the pointer, so the layer
+also joins the window as an `IXPlatInputSink` while it is on screen: every key and every typed
+character stops there, which is the same seam an open menu uses. Hiding or disabling the layer gives
+the keyboard back.
 
 ```csharp
 var overlay = new XPlatOverlay();                    // Dock = Fill
