@@ -3348,6 +3348,12 @@ The demo's **SVG icons**, **SVG recolour** and **SVG and a raster twin** pages s
 above that a viewer needs to believe: the first at five sizes, the second following the palette, and
 the third comparing a vector disc with a 16-pixel PNG of itself blown up to 96.
 
+The rows that fail silently if they regress - a gradient that comes out flat, text that parses and
+draws nothing because nothing shaped it, a filter that is parsed and ignored - are pixel assertions
+in `SvgFidelityTests` rather than only a claim in this table: the gradient is sampled at both stops
+and in the middle, the pattern at both halves of a tile, the blur three units outside the shape
+against an unfiltered twin, and the transform and clip path at the pixels they decide.
+
 #### What it costs
 
 Measured the way FEATURE-COST-POLICY.md §8 says to: one fixture, published twice, with the project
