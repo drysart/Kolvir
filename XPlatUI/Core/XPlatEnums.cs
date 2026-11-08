@@ -93,7 +93,7 @@ public enum XPlatContentAlignment
     BottomRight = 8,
 }
 
-/// <summary>How an <see cref="XPlatImage"/> scales its bitmap inside its bounds.</summary>
+/// <summary>How an <see cref="XPlatImage"/> scales its picture inside its bounds.</summary>
 public enum XPlatSizeMode
 {
     /// <summary>Draws the image at its natural size, anchored top-left.</summary>

@@ -114,7 +114,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatMenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
 | `XPlatMenuPresenter` | `ToolStripDropDown` plumbing | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, on every backend, one popup per level of the chain |
 | `XPlatMenuPresentation` | - | Chooses the library's menus or the platform's, per application |
-| `XPlatImage` | `PictureBox` | `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers |
+| `XPlatImage` | `PictureBox` | Holds and draws an `SKPicture`: `Picture`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers that decode a bitmap and record it into a picture |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatFont` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
 | `XPlatTheme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |

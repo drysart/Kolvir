@@ -17,6 +17,83 @@ namespace XPlatUI.Tests;
 public sealed class HeadlessSceneTests : HeadlessTestBase
 {
     [TestMethod]
+    public void WorkQueuedFromSeveralThreadsWhileDrainingRunsExactlyOnce()
+    {
+        // This is a stress test, not a proof: it reproduces the shape the backend really sees - a
+        // timer tick posting from a pool thread while the render thread drains - and the size is
+        // chosen where the unsynchronized queue failed on every run measured. Four producers and
+        // 25,000 posts each is about 100,000 items; at 4 x 50,000 every round threw from the drain.
+        // A pass means the queue did not lose an item, hand back a null slot, or reorder.
+        const int Producers = 4;
+        const int PerProducer = 25_000;
+
+        var backend = new HeadlessApplicationBackend();
+        long ran = 0;
+
+        var producers = Enumerable.Range(0, Producers)
+            .Select(_ => Task.Run(() =>
+            {
+                for (int index = 0; index < PerProducer; index++)
+                {
+                    backend.Invoke(() => Interlocked.Increment(ref ran), synchronous: false);
+                }
+            }))
+            .ToArray();
+
+        while (!producers.All(producer => producer.IsCompleted))
+        {
+            backend.DrainPending();
+        }
+
+        backend.DrainPending();
+
+        Assert.AreEqual(
+            (long)Producers * PerProducer,
+            Interlocked.Read(ref ran),
+            "every action posted from a timer thread should run exactly once");
+    }
+
+    [TestMethod]
+    public void ASeriesOfPendingItemsRunsInTheOrderTheyWereQueued()
+    {
+        var backend = new HeadlessApplicationBackend();
+        var order = new List<int>();
+
+        for (int index = 0; index < 100; index++)
+        {
+            int captured = index;
+            backend.Invoke(() => order.Add(captured), synchronous: false);
+        }
+
+        backend.DrainPending();
+
+        CollectionAssert.AreEqual(Enumerable.Range(0, 100).ToList(), order, "a drain must keep the queue's order");
+    }
+
+    [TestMethod]
+    public void WorkPostedByAHandlerRunsAfterTheItemsThatWereAlreadyQueued()
+    {
+        // A queued action is allowed to post more work - an animation frame does exactly that - and
+        // the new item has to run after everything that was waiting when the drain started.
+        var backend = new HeadlessApplicationBackend();
+        var order = new List<string>();
+
+        backend.Invoke(() =>
+        {
+            order.Add("first");
+            backend.Invoke(() => order.Add("posted"), synchronous: false);
+        }, synchronous: false);
+        backend.Invoke(() => order.Add("second"), synchronous: false);
+
+        backend.DrainPending();
+
+        CollectionAssert.AreEqual(
+            new[] { "first", "second", "posted" },
+            order,
+            "work posted during a drain should run after the batch it interrupted");
+    }
+
+    [TestMethod]
     public void ASceneBuildsAWindowWithALaidOutRoot()
     {
         var root = new XPlatPanel { Dock = DockStyle.Fill };

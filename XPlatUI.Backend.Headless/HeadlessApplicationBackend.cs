@@ -23,7 +23,12 @@ public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
 {
     private Action<object>? _activated;
     private Action<object, XPlatSecondInstanceEventArgs>? _secondInstance;
-    private readonly Queue<Action> _pending = new();
+
+    // Copied out and swapped rather than drained in place. The drain runs handlers outside the
+    // lock, so a handler that posts more work appends to the queue the next pass takes, and a
+    // timer thread is never blocked behind a handler that takes a while.
+    private readonly object _pendingGate = new();
+    private Queue<Action> _pending = new();
     private XPlatApplication? _application;
     private int _exitCode;
 
@@ -100,7 +105,10 @@ public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
             return;
         }
 
-        _pending.Enqueue(action);
+        lock (_pendingGate)
+        {
+            _pending.Enqueue(action);
+        }
     }
 
     /// <inheritdoc />
@@ -143,14 +151,56 @@ public sealed class HeadlessApplicationBackend : IXPlatApplicationBackend
     }
 
     /// <inheritdoc />
-    public void Shutdown() => _pending.Clear();
+    public void Shutdown()
+    {
+        lock (_pendingGate)
+        {
+            _pending.Clear();
+        }
+    }
 
     /// <summary>Runs the work queued by <see cref="Invoke"/> with <c>synchronous: false</c>.</summary>
+    /// <remarks>
+    /// <para>
+    /// The queue has one consumer - this method, on the render thread - and several producers:
+    /// every timer tick posts from a pool thread, and a handler that posts more work posts from this
+    /// one. A bare <see cref="Queue{T}"/> cannot take that, and its failure is not a clean
+    /// exception: two concurrent enqueues can leave the count ahead of the slots, so a later
+    /// <c>TryDequeue</c> returns <c>true</c> with a null item and the drain calls it - which is the
+    /// <see cref="NullReferenceException"/> that used to abort a headless render of an animated
+    /// page.
+    /// </para>
+    /// <para>
+    /// One batch is taken under the lock and run outside it. Holding the lock for the whole drain
+    /// would work, but it would block every timer thread behind the slowest handler, and a handler
+    /// that waits for a timer would deadlock. The swap instead puts work posted during a batch at
+    /// the end of the next one. Order is kept both ways: a batch runs in the order it was enqueued,
+    /// and work posted during it runs after that batch, never before. A <c>ConcurrentQueue</c> would
+    /// also be safe, but it buys nothing for one consumer and hides the batch boundary this method
+    /// actually relies on.
+    /// </para>
+    /// </remarks>
     public void DrainPending()
     {
-        while (_pending.TryDequeue(out var action))
+        while (true)
         {
-            action();
+            Queue<Action> batch;
+
+            lock (_pendingGate)
+            {
+                if (_pending.Count == 0)
+                {
+                    return;
+                }
+
+                batch = _pending;
+                _pending = new Queue<Action>();
+            }
+
+            foreach (var action in batch)
+            {
+                action();
+            }
         }
     }
 
