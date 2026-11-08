@@ -377,6 +377,176 @@ public sealed class ExpanderTests : HeadlessTestBase
         Assert.AreEqual(first.Bounds.Bottom, second.Top, "which always sits immediately under the fold");
     }
 
+    [TestMethod]
+    public void TabSkipsTheContentOfACollapsedExpander()
+    {
+        var (before, expander, child, after, scene) = BuildSection();
+        using var _ = scene;
+
+        expander.IsExpanded = false;
+
+        before.Focus();
+        scene.Key(XPlatKey.Tab);
+
+        Assert.AreSame(expander, scene.Host.FocusedControl, "the header stays a tab stop, in its own place");
+
+        scene.Key(XPlatKey.Tab);
+
+        Assert.AreSame(after, scene.Host.FocusedControl, "and the folded content is stepped over");
+        Assert.IsFalse(child.IsFocused);
+    }
+
+    [TestMethod]
+    public void ShiftTabSkipsTheContentOfACollapsedExpander()
+    {
+        var (_, expander, child, after, scene) = BuildSection();
+        using var _ = scene;
+
+        expander.IsExpanded = false;
+
+        after.Focus();
+        scene.Key(XPlatKey.Tab, XPlatModifiers.Shift);
+
+        Assert.AreSame(expander, scene.Host.FocusedControl, "going backwards skips the folded content too");
+        Assert.IsFalse(child.IsFocused);
+    }
+
+    [TestMethod]
+    public void ExpandingPutsTheContentBackInItsTabPosition()
+    {
+        var (before, expander, child, after, scene) = BuildSection();
+        using var _ = scene;
+
+        before.Focus();
+        scene.Key(XPlatKey.Tab);
+        scene.Key(XPlatKey.Tab);
+
+        Assert.AreSame(child, scene.Host.FocusedControl, "an open section's content is what comes next");
+
+        scene.Key(XPlatKey.Tab);
+
+        Assert.AreSame(after, scene.Host.FocusedControl);
+    }
+
+    [TestMethod]
+    public void CollapsingTakesTheContentOutOfTheOrderAgain()
+    {
+        var (before, expander, child, after, scene) = BuildSection();
+        using var _ = scene;
+
+        // The order is asked for each time rather than remembered, so the section can be folded
+        // and unfolded under the keyboard as often as the user likes.
+        before.Focus();
+        scene.Key(XPlatKey.Tab);
+        scene.Key(XPlatKey.Tab);
+        Assert.AreSame(child, scene.Host.FocusedControl);
+
+        expander.IsExpanded = false;
+
+        Assert.AreSame(expander, scene.Host.FocusedControl, "the section under the focus hands it to the header");
+
+        scene.Key(XPlatKey.Tab);
+
+        Assert.AreSame(after, scene.Host.FocusedControl, "and the content is out of the order again");
+
+        expander.IsExpanded = true;
+        expander.Focus();
+        scene.Key(XPlatKey.Tab);
+
+        Assert.AreSame(child, scene.Host.FocusedControl, "opening it again puts it back where it was");
+    }
+
+    [TestMethod]
+    public void CollapsingUnderTheFocusMovesItToTheHeader()
+    {
+        var (_, expander, child, _, scene) = BuildSection();
+        using var _ = scene;
+
+        child.Focus();
+        Assert.IsTrue(child.IsFocused, "the content can be focused while the section is open");
+
+        expander.IsExpanded = false;
+
+        Assert.AreSame(expander, scene.Host.FocusedControl, "focus goes to the header, not nowhere");
+        Assert.IsTrue(expander.IsFocused);
+        Assert.IsFalse(child.IsFocused);
+    }
+
+    [TestMethod]
+    public void AFoldedExpanderCannotBeFocusedIntoFromTheOutside()
+    {
+        var (_, expander, child, _, scene) = BuildSection();
+        using var _ = scene;
+
+        expander.IsExpanded = false;
+
+        child.Focus();
+
+        Assert.IsFalse(child.IsFocused, "focusing a hidden control is refused rather than obeyed");
+        Assert.IsNull(scene.Host.FocusedControl);
+    }
+
+    [TestMethod]
+    public void CollapsingASectionAncestorOfTheFocusedContentMovesTheFocusIn()
+    {
+        var (_, expander, child, _, scene) = BuildSection();
+        using var _ = scene;
+
+        // One level deeper than the control itself, so the walk out has to look up the tree rather
+        // than at the immediate parent.
+        var group = new XPlatPanel
+        {
+            Dock = DockStyle.Top,
+            Height = 40f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = XPlatThickness.Empty,
+        };
+
+        var deep = new XPlatButton("Deep") { Dock = DockStyle.Top, Height = 30f };
+        group.Controls.Add(deep);
+        expander.Controls.Add(group);
+        scene.Host.PerformLayout();
+
+        deep.Focus();
+        Assert.IsTrue(deep.IsFocused);
+
+        expander.IsExpanded = false;
+
+        Assert.AreSame(expander, scene.Host.FocusedControl, "a control two containers down is still inside the section");
+    }
+
+    private static (XPlatButton Before, XPlatExpander Expander, XPlatControl Child, XPlatButton After, HeadlessScene Scene)
+        BuildSection()
+    {
+        var expander = new XPlatExpander("Appearance") { Dock = DockStyle.Top, Height = 120f };
+        var child = new XPlatCheckBox("Show grid") { Dock = DockStyle.Top, AutoSize = true };
+        expander.Controls.Add(child);
+
+        var before = new XPlatButton("Before") { Dock = DockStyle.Top, Height = 32f };
+        var after = new XPlatButton("After") { Dock = DockStyle.Top, Height = 32f };
+
+        var root = new XPlatPanel
+        {
+            Dock = DockStyle.Fill,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = XPlatThickness.Empty,
+        };
+
+        root.Controls.Add(before);
+        root.Controls.Add(expander);
+        root.Controls.Add(after);
+
+        return (before, expander, child, after, HeadlessScene.Create(root, 420f, 320f));
+    }
+
     private static (XPlatExpander Expander, XPlatControl Child) Build(out HeadlessScene scene)
     {
         var expander = new XPlatExpander("Appearance")

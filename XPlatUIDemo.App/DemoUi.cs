@@ -6210,6 +6210,16 @@ public sealed class DemoUi
             animated.Controls.Add(box);
         }
 
+        // Tab is the point of this page as much as the fold is, so every stop says its name when
+        // it takes the focus: Tab skips the boxes of a folded section and comes back to them when
+        // it opens, and folding a section under one of its own boxes brings the focus up to the
+        // header here.
+        WatchFocus(animated, "the animated section's header");
+        foreach (var box in animated.Controls)
+        {
+            WatchFocus(box, $"the animated section's \u201c{box.Text}\u201d box");
+        }
+
         animated.AddExpandedChangedHandler(sender =>
         {
             var section = (XPlatExpander)sender;
@@ -6228,6 +6238,11 @@ public sealed class DemoUi
         };
         instant.Controls.Add(new XPlatCheckBox("Trace layout") { Dock = XDock.Top, AutoSize = true });
         instant.Controls.Add(new XPlatCheckBox("Cache layers") { Dock = XDock.Top, AutoSize = true });
+        WatchFocus(instant, "the instant section's header");
+        foreach (var box in instant.Controls)
+        {
+            WatchFocus(box, $"the instant section's \u201c{box.Text}\u201d box");
+        }
         instant.AddExpandedChangedHandler(sender =>
             SetStatus(((XPlatExpander)sender).IsExpanded
                 ? "The instant section opened, all at once."
@@ -6250,7 +6265,10 @@ public sealed class DemoUi
             "children come back exactly as they were. ExpandProgress is what the fold is drawn " +
             "from - height and arrow together - and it follows IsExpanded on its own, so the " +
             "section without a duration behaves as it always did. The duration is an extension " +
-            "member from XPlatUI.Feature.Animations, which this control does not reference.")
+            "member from XPlatUI.Feature.Animations, which this control does not reference. " +
+            "Tab is the other half of the fold: it steps over the boxes of a folded section and " +
+            "goes back into them when it opens, and folding a section under one of its own boxes " +
+            "brings the focus up to the header - the box it was on is no longer reachable.")
         {
             Dock = XDock.Fill,
             AutoSize = false,
@@ -6262,6 +6280,13 @@ public sealed class DemoUi
 
         return card;
     }
+
+    /// <summary>
+    /// Names a control in the status line when it takes the focus, so the demo says out loud what
+    /// Tab is doing - which is the only way to see a skipped stop by hand.
+    /// </summary>
+    private void WatchFocus(XPlatControl control, string name) =>
+        control.AddGotFocusHandler(_ => SetStatus($"Focus is on {name}."));
 
     /// <summary>
     /// <see cref="XPlatSplitButton"/> and <see cref="XPlatDropDownButton"/>: the main area runs one

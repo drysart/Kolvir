@@ -45,6 +45,16 @@ namespace XPlatUI;
 /// <c>ExpandDuration</c> there animates this same progress, so the two never disagree about what
 /// the section is doing.
 /// </para>
+/// <para>
+/// <b>The keyboard follows the target, not the fold.</b> The header is a tab stop and stays where
+/// it is in the order whether the section is open or shut. The content is not: folded, nothing
+/// inside the section is a tab stop and nothing inside it can be focused, because
+/// <see cref="XPlatControl.IsContentReachable"/> is false there. Which answer a collapsing section
+/// gives is settled by <see cref="IsExpanded"/> the moment it is set, so a fold in progress takes
+/// no new focus and does not change its mind at the last frame. Collapsing while a control inside
+/// the content holds the focus hands that focus to the header - the nearest thing the user was
+/// looking at - rather than leaving it on a control that is no longer on screen.
+/// </para>
 /// </remarks>
 public class XPlatExpander : XPlatPanel
 {
@@ -147,8 +157,29 @@ public class XPlatExpander : XPlatPanel
             {
                 ExpandProgress = value ? 1d : 0d;
             }
+
+            if (!value)
+            {
+                // The target is what the section is doing, so it is authoritative from the moment
+                // it is set rather than from the moment the fold finishes: a section on its way
+                // shut is out of the Tab order already, and focus inside it has nowhere to be.
+                ReleaseFocusFromSubtree();
+            }
         }
     }
+
+    /// <summary>
+    /// Whether the content can be reached, which it can only be while the section is expanded.
+    /// </summary>
+    /// <remarks>
+    /// Folded, the children stay in the tree - that is what lets the section show them again - but
+    /// the control arranges them to nothing and paints none of them, so they are not reachable and
+    /// the Tab order steps over them. The question is answered from
+    /// <see cref="IsExpanded"/> rather than from <see cref="ExpandProgress"/> so a section that is
+    /// folding is already shut to the keyboard: it does not take the focus back halfway through,
+    /// and it does not decide at the last frame either.
+    /// </remarks>
+    protected internal override bool IsContentReachable => _expanded;
 
     /// <summary>
     /// How far open the section is drawn, from 0 to 1: the content's height and the chevron's

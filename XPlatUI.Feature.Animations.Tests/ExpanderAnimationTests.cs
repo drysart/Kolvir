@@ -177,6 +177,34 @@ public sealed class ExpanderAnimationTests : AnimationsTestBase
             () => scene.Expander.ExpandDuration = TimeSpan.FromMilliseconds(-1));
     }
 
+    [TestMethod]
+    public void ACollapsingSectionTakesNoNewFocusWhileItFolds()
+    {
+        using var scene = AnimatedScene.Create(TwoHundred);
+
+        var expander = scene.Expander;
+
+        scene.Child.Focus();
+        Assert.IsTrue(scene.Child.IsFocused);
+
+        expander.IsExpanded = false;
+
+        // The target is set, the frame has not run: the section is still drawn nearly whole, and
+        // the keyboard has already left it. That is the rule - the target decides, from the moment
+        // it is set - rather than the fold deciding as it goes.
+        Assert.IsTrue(expander.ExpandProgress > 0.9d, "the fold has not moved yet");
+        Assert.AreSame(expander, scene.Host.FocusedControl, "and the focus still went to the header");
+
+        scene.Host.ProcessKeyDown(XPlatKey.Tab);
+
+        Assert.AreSame(scene.After, scene.Host.FocusedControl, "a fold in progress is stepped over");
+
+        scene.Harness.Frame(200);
+
+        Assert.AreEqual(0d, expander.ExpandProgress, 0.000001d);
+        Assert.AreSame(scene.After, scene.Host.FocusedControl, "and the end of the fold changes nothing");
+    }
+
     /// <summary>
     /// One expander in a laid-out window, an application the feature was registered with, and the
     /// harness whose clock and frames the test drives.
@@ -184,18 +212,23 @@ public sealed class ExpanderAnimationTests : AnimationsTestBase
     private sealed class AnimatedScene : IDisposable
     {
         private readonly XPlatApplication _application;
+        private readonly XPlatUiHost _host;
 
         private AnimatedScene(
             AnimationHarness harness,
             XPlatApplication application,
+            XPlatUiHost host,
             XPlatExpander expander,
             XPlatControl child,
+            XPlatButton after,
             float headerHeight)
         {
             Harness = harness;
             _application = application;
+            _host = host;
             Expander = expander;
             Child = child;
+            After = after;
             HeaderHeight = headerHeight;
         }
 
@@ -204,6 +237,12 @@ public sealed class ExpanderAnimationTests : AnimationsTestBase
         public XPlatExpander Expander { get; }
 
         public XPlatControl Child { get; }
+
+        /// <summary>The control after the section in the Tab order.</summary>
+        public XPlatButton After { get; }
+
+        /// <summary>The host of the window, for the tests that drive the keyboard.</summary>
+        public XPlatUiHost Host => _host;
 
         public float HeaderHeight { get; }
 
@@ -247,6 +286,11 @@ public sealed class ExpanderAnimationTests : AnimationsTestBase
 
             root.Controls.Add(expander);
 
+            // Something after the section for the Tab order to arrive at, which is how the tests
+            // see that the folded content was stepped over rather than merely never reached.
+            var after = new XPlatButton("After") { Dock = DockStyle.Top, Height = 32f };
+            root.Controls.Add(after);
+
             var window = new XPlatWindow("expander", root) { ClientSize = new SKSize(420f, 320f) };
             window.Host.PerformLayout();
 
@@ -261,7 +305,7 @@ public sealed class ExpanderAnimationTests : AnimationsTestBase
                 expander.ExpandDuration = value;
             }
 
-            return new AnimatedScene(harness, application, expander, child, header);
+            return new AnimatedScene(harness, application, window.Host, expander, child, after, header);
         }
 
         public void Dispose()

@@ -286,6 +286,12 @@ WinForms has, because an application author coming from it will expect it:
   it: index 1 on a container puts the container, then its contents, between index 0 and index 2.
 - **It wraps.** `Tab` at the last stop goes back to the first, and `Shift+Tab` at the first goes to
   the last; `host.FocusedControl` is the control the walk landed on.
+- **A container whose content is not showing takes no stops.** A collapsed `XPlatExpander` is the
+  case: its section is still in the tree - folding is a matter of how much is drawn, not of hiding -
+  so its children are left out of the walk even though they are `Visible`. The container answers
+  this itself, by overriding `IsContentReachable`, so any container that arranges its children to
+  nothing is treated the same way. `SetFocus`, and so `Focus()`, refuse such a control as well: a
+  control the user cannot see cannot be focused by anything.
 
 ```csharp
 var name = new XPlatTextBox { TabIndex = 0, Dock = DockStyle.Top };
@@ -1037,6 +1043,20 @@ they are laid out in the room that is left and clipped at the folded edge, so a 
 shows the top of the content. An `AutoSize` expander needs none of the height remembering - it
 measures as its header when folded, and as much of its content as the progress allows otherwise - so
 the two agree without guessing which one a section is.
+
+The keyboard follows the target rather than the fold. The header is a tab stop and keeps its place
+in the order whether the section is open or shut; the content is a tab stop only while `IsExpanded`
+is true, because a folded expander reports `IsContentReachable` false. The answer changes the moment
+`IsExpanded` is set, not when the fold finishes, so a section on its way shut takes no new focus and
+does not change its mind at the last frame. If a control inside the content holds the focus when the
+section is collapsed - by click, by the keyboard, by an animation finishing - the focus moves to the
+header, the nearest thing the user was looking at, rather than being left on a control that is no
+longer on screen. The order is re-read every time Tab is pressed, so a section folded and unfolded
+under the keyboard behaves the way it looks.
+
+Hiding a container is deliberately different: it keeps the focus its child held, so a field inside a
+hidden panel keeps its caret and picks it up again when the panel is shown. That is a documented
+behaviour with a test behind it, and a fold is not a hide.
 
 On its own the fold is a jump. Animating it belongs to `XPlatUI.Feature.Animations`, which this
 control does not reference; that package adds an `ExpandDuration` extension member and animates
