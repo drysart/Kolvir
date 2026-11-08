@@ -78,6 +78,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
 | `XPlatSplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
+| `XPlatWrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
 | `XPlatGroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
 | `XPlatExpander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
 | `XPlatScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
@@ -345,6 +346,34 @@ ones after it and reaches the `AddUnhandledExceptionHandler` handlers.
 `Add` returns an `IDisposable` token that removes the handler when it is disposed, so a scope can own
 a subscription without storing the callback. A caller that already holds the callback can pass it to
 `Remove` and skip the token.
+
+### Wrap panel
+
+`XPlatWrapPanel` lays its children out along one axis and starts a new line whenever the next one
+would not fit - rows left to right that wrap downwards, the default, or columns top to bottom that
+wrap to the right. It is the layout a tag row, a group of buttons or a thumbnail grid wants, which
+`XPlatStackPanel` cannot do at all and `XPlatTableLayoutPanel` can only do with the columns known up
+front.
+
+| Member | Behaviour |
+| --- | --- |
+| `Orientation` | `Horizontal` (rows that wrap down) or `Vertical` (columns that wrap right) |
+| `Spacing` | The gap between two items on a line and between two lines; margins apply on top of it |
+| `HorizontalAlignment` / `VerticalAlignment` on each child | Across the line: `Stretch` (the default) fills the line's breadth, the others keep the item's own size at that edge or in the middle |
+
+A line is as broad as its broadest item, and that is only known once the whole line is measured, so
+a pass measures the run first and places it second. An item wider than the panel is not lost: it
+takes a line of its own and overflows, which is what makes the scrollbar appear. Docked children are
+not part of the run - they take their edge first, the way they do in any panel - so a header or a
+footer sits above or below the flow.
+
+```csharp
+var tags = new XPlatWrapPanel { Dock = DockStyle.Fill, Spacing = 6f };
+foreach (var tag in new[] { "design", "layout", "skia", "cross-platform" })
+{
+    tags.Controls.Add(new XPlatButton(tag) { AutoSize = true });
+}
+```
 
 ### Split container
 
