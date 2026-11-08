@@ -3334,7 +3334,7 @@ listed rather than implied:
 | Linear and radial gradients, `pattern` | Yes |
 | `clipPath`, `mask` | Yes |
 | `use`, `symbol` | Yes |
-| `text`, `tspan`, `text-anchor`, font family and size | Yes, through the system's fonts and HarfBuzz shaping - this is what the HarfBuzz native is for |
+| `text`, `tspan`, `text-anchor`, font family and size | Yes, through the system's fonts. On Linux Svg.Skia shapes it with the HarfBuzz native, which is the reason this package carries 2-3 MB of native library; on Windows `<text>` renders without it |
 | Filters: `feGaussianBlur`, `feDropShadow`, `feColorMatrix`, and the rest of the SVG 1.1 set | Yes |
 | CSS in a `<style>` element and `class` selectors | Yes; `@import` is not followed |
 | `data:` URI images | Yes |
@@ -3350,43 +3350,114 @@ the third comparing a vector disc with a 16-pixel PNG of itself blown up to 96.
 
 #### What it costs
 
-Measured the way FEATURE-COST-POLICY.md §8 says to: `XPlatUI.Minimal` plus the feature actually
-used - `AddSvgImages()` called, a document loaded through `Load`, and the picture drawn -
-published with `PublishAot` and `-p:EmbedSkiaSharpNative=false`, on all three RIDs:
+Measured the way FEATURE-COST-POLICY.md §8 says to: one fixture, published twice, with the project
+reference to `XPlatUI.Feature.Svg` and the `AddSvgImages()` call switched off and on by a property,
+so the two numbers differ by the feature and nothing else. The feature build calls `AddSvgImages()`,
+loads a document through `Load`, draws the picture and writes it out. `PublishAot`,
+`-p:EmbedSkiaSharpNative=false`, three RIDs. The fixture is `XPlatUI.Minimal` with one `XPlatImage`
+on its page - 88 KB above the policy's 3,203,072 floor on win-x64, which is what an image control
+costs before any format is added:
 
 | Measurement | win-x64 | linux-x64 | osx-arm64 |
 | --- | --- | --- | --- |
-| Minimal fixture (the floor) | 3,203,072 | 4,205,216 | 4,383,216 |
-| The same fixture using SVG | 15,754,752 | 17,027,840 | 14,653,248 |
-| Delta | +12,551,680 (+392%) | +12,822,624 (+305%) | +10,270,032 (+234%) |
-| HarfBuzz native, beside the executable | +2,065,248 | +3,059,496 | +2,901,024 |
+| Executable, feature not referenced (the floor) | 3,292,160 | 4,218,192 | 4,383,216 |
+| Executable, feature used | 15,759,360 | 17,032,224 | 14,653,248 |
+| Delta | +12,467,200 (3.8x the floor) | +12,814,032 (3.0x) | +10,270,032 (2.3x) |
+| HarfBuzz native beside it | 2,065,248 | 3,059,496 | 2,901,024 |
+| Whole publish folder, feature not referenced | 16,195,936 | 16,480,600 | 21,585,363 |
+| Whole publish folder, feature used | 30,728,384 | 32,354,128 | 34,756,558 |
+| Delta | +14,532,448 | +15,873,528 | +13,171,195 |
 
 The publish reported no IL2xxx or IL3xxx warning on any of the three, with
 `-p:TrimmerSingleWarn=false`, so the cost is code that is genuinely reachable rather than trimming
-that gave up. It is also not the API the fixture chose: parsing the same document through Svg.Skia
-directly (`CreateFromSvg` and `DrawPicture`) published at 15,723,520 on win-x64, 512 bytes less, so
-essentially all of the delta is the document model, the parser and the renderer that any SVG
-implementation that draws this much needs.
+that gave up.
+
+##### Where the bytes are
+
+Attributed from the ILC map file (`-p:IlcGenerateMapFile=true`) by summing the machine-code bytes of
+every node under its assembly, win-x64, feature build minus floor build. Code is 10.7 MB of the
+12.5 MB the executable grows; the rest is metadata and data sections.
+
+| Where | Bytes | What it is |
+| --- | --- | --- |
+| `Svg.SceneGraph` | +928,964 | the renderer that walks the document and issues Skia commands |
+| `Svg.Custom` | +748,340 | the XML parser and the SVG element model |
+| `Svg.Skia` | +153,740 | the Svg-to-Skia bridge |
+| `Svg.Animation` | +87,426 | SMIL |
+| `Svg.Model` | +60,995 | shared model types |
+| `ShimSkiaSharp` | +115,301 | the immediate-mode drawing model Svg.Skia renders through |
+| `ExCSS` | +330,302 | the CSS parser behind `<style>` and `class` |
+| `HarfBuzzSharp` | +36,791 | the managed half of text shaping |
+| `XPlatUI.Feature.Svg` | +5,690 | this package: the provider, the cache, the secure parse |
+| `System.Private.CoreLib` | +1,402,755 | generic instantiations, string and collection code the model pulls in |
+| `System.Net` | +757,892 | the HTTP stack, see below |
+| `System.Private.Xml` | +332,912 | the XML reader the document is parsed with |
+| `System.Text` | +306,977 | encodings, plus `System.Text.RegularExpressions` |
+| `System.Linq`, `System.Collections` | +356,704 | the model's queries and maps |
+| `System.Security` | +109,989 | TLS, pulled in behind `System.Net` |
+| `System.Diagnostics` | +53,684 | stack traces |
+| linker bookkeeping, unrelated vtables and boxed statics | +4,775,243 | metadata blobs, stack-trace mapping, frozen segments, vtables |
+
+So the SVG stack itself - the seven assemblies above `XPlatUI.Feature.Svg` - is **2.47 MB**. The
+other 8.3 MB is what the BCL adds once a large generic-heavy model with an XML parser, a CSS parser
+and a regex engine becomes reachable, plus the linker's own metadata. That is the shape of the
+number, and it is why "trim the SVG packages" does not get far.
+
+##### What was tried, and what it measured
+
+- **Trim descriptors.** Every `svg.*` package and `shimskiasharp` ship no `ILLink` descriptor, no
+  `.props`/`.targets` and no `IsTrimmable=false`. Nothing in the packages roots anything; the
+  trimmer is doing its job and the cost is reachable code, not a rooting accident.
+- **`Svg.Animation`.** SMIL costs 87,426 bytes of code. It cannot be dropped without forking
+  `Svg.Custom`, which puts `SvgAnimationElement` in the element hierarchy that every document is
+  parsed into, and `Svg.Skia`, which enumerates animation elements. 0.8% of the delta, for a fork.
+- **HarfBuzz natives.** This is the one place the packages waste real bytes - 2.1 MB on win-x64,
+  3.1 MB on linux-x64, 2.9 MB on osx-arm64 - and the measurement says the three platforms disagree
+  about whether it can go:
+  - win-x64: it can be removed. With `libHarfBuzzSharp.dll` deleted and the three
+    `HarfBuzzSharp.NativeAssets.*` packages excluded, `<text>` renders pixel-identically, because
+    the Windows `libSkiaSharp.dll` shapes text itself.
+  - linux-x64: it cannot. `Svg.Skia` reaches HarfBuzz for `<text>` and the load fails with
+    `DllNotFoundException`, surfaced correctly as an `XPlatImageFormatException` through
+    `AddLoadFailedHandler` rather than thrown at the paint thread.
+  - osx-arm64: it cannot, and not even later - the AOT image links
+    `@executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib` at load time, so removing
+    the file stops the process from starting at all.
+
+  So the native stays, and text is the reason it is there. A Windows-only exclusion is technically
+  possible and not worth a platform-special case that would make `Load` behave differently on one
+  RID.
+- **`-p:IlcOptimizationPreference=Size`.** No gain: 15,762,432 against 15,759,360, 3 KB larger.
+- **`-p:StackTraceSupport=false -p:IlcGenerateStackTraceData=false`.** Saves 965,120 bytes on
+  win-x64, 1,261,664 on linux-x64 and 1,103,424 on osx-arm64, and it is worth knowing about - but
+  it is a whole-application policy that takes away exception stack traces everywhere and shrinks
+  the floor too. It is not a feature's lever, and this package does not set it. With it, the
+  executable delta falls to +11.5 MB on all three RIDs.
+
+##### The verdict
+
+10 MB of managed code is what this costs, and it cannot be trimmed further from this side. 2.5 MB
+of it is SVG, 8.3 MB is BCL the SVG model drags along, and the two things that would move it
+materially are outside the package: the HTTP stack, which enters through
+`Svg.SvgElement`'s static constructor calling `new HttpClient()` unconditionally and through
+`WebRequest` in `Svg.Model.Services.SvgService.GetImageFromWeb` and
+`Svg.Skia.SkiaSvgAssetLoader.OpenFontResourceStream` (about 0.87 MB of code with TLS behind it, and
+dead for an icon), and SMIL. Both need a fork of Svg.Skia, not a knob here. Nothing else on the
+list pays this: it is rung 3, so an application that does not reference the package is the floor,
+unchanged, and an application that does should know it is buying a document renderer rather than a
+icon loader - the demo's *SVG and a raster twin* page is the trade to look at before deciding.
 
 What the fixture proves, and what it does not: it proves the whole path an application uses - the
-provider, the secure parse, the cache, the recording and the control's paint - and it means the
-numbers are what opting in costs. It does not prove that a document using `<text>` and a filter
-pulls nothing more, because the fixture's document has one small `<text>` and no filter; a program
-that uses those keeps code this one trims. And it is a rung-3 feature, so the number applies only to
-an application that references the package: an application that does not is the floor, unchanged.
+provider, the secure parse, the cache, the recording and the control's paint - so the numbers are
+what opting in costs. It does not prove that a document using more of SVG pulls nothing more: it has
+one gradient, one `<text>` and no filter, and a program that uses filters and masks keeps code this
+one trims.
 
-The seam is the part every application does pay, and it is small. `XPlatUI.Minimal` publishes at
-3,203,072 before and after this change - the same bytes, because it names no image - and a fixture
-that is the floor plus one `XPlatImage` loading a PNG publishes at 3,325,440 against 3,318,784 at
-`1b63ea1`, so the provider list, the interface and the header sniff cost 6,656 bytes to an
-application that shows an image and never adds a format.
-
-The 12.5 MB delta is 4x the fixture on Windows, and that is the sentence to read plainly: Svg.Skia
-is not a small dependency and packaging does not make it one. What rung 3 buys is that nothing pays
-it except an application that asked for SVG. For scale, the other features in the repository cost
-151 KB (drag and drop) and 237 KB (animations); this one costs 12.5 MB, and an application that
-wants to shave it should consider rasterising its icons at build time (the demo's *SVG and a raster
-twin* page shows the trade).
+The seam every application does pay is small. `XPlatUI.Minimal` publishes at 3,203,072 before and
+after this change - the same bytes, because it names no image - and a fixture that is the floor plus
+one `XPlatImage` loading a PNG publishes at 3,325,440 against 3,318,784 at `1b63ea1`, so the
+provider list, the interface and the header sniff cost 6,656 bytes to an application that shows an
+image and never adds a format.
 
 [Svg.Skia]: https://github.com/wieslawsoltes/Svg.Skia
 
