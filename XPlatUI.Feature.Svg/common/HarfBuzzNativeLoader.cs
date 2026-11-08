@@ -21,9 +21,10 @@ namespace XPlatUI.Svg;
 /// The two resolvers coexist because they are registered against different assemblies:
 /// <see cref="Blob"/> is HarfBuzzSharp's, and the core library registers its own against SkiaSharp's.
 /// That is also why <see cref="ModuleInitializer"/> is the entry point rather than a call an
-/// application has to make in <c>Main</c>: the feature assembly is only touched when an application
-/// opts into SVG, and the resolver has to be in place before the first shaped text, not before some
-/// specific statement.
+/// application has to make in <c>Main</c>: the initializer owns the timing. A framework-dependent
+/// run triggers it the first time the feature is used; a NativeAOT image runs it during startup,
+/// before <c>Main</c>. Either way it lands before the first shaped text rather than wherever an
+/// application happened to put a call.
 /// </para>
 /// <para>
 /// The resource belongs to the <em>application</em>, not to this assembly, because the copy to embed

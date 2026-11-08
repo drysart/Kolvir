@@ -3611,16 +3611,22 @@ HarfBuzzSharp's P/Invoke at it.
 Three things about it are worth knowing rather than discovering:
 
 - **It needs no call.** The loader runs from a module initializer, so an application that calls
-  `AddSvgImages()` - or touches anything else in the feature - has the resolver in place before the
-  first shaped `<text>` without adding a line to `Main`. What that guarantees is precisely "the
-  assembly was touched": an application that references the package and never executes a line of it
-  pays nothing and the initializer never runs (and under NativeAOT, with the assembly trimmed away,
-  there is nothing left to run). It is not a promise that `AddSvgImages()` specifically was called.
+  `AddSvgImages()` has the resolver in place before the first shaped `<text>` without adding a line
+  to `Main`. The guarantee is about the assembly, not about `AddSvgImages()` specifically: a
+  framework-dependent run runs the initializer the first time the feature is touched, so an
+  application that only references the package never loads it and pays nothing; a NativeAOT publish
+  either trims the assembly away when nothing uses it - measured: no cache directory appears and
+  nothing runs - or runs its initializer during startup, before `Main` - also measured: the cache
+  exists by the first line of `Main`. Either way the cost lands only on applications that use the
+  feature.
 - **The resolver belongs to HarfBuzzSharp's assembly, not SkiaSharp's.** Both loaders register
   against different assemblies, which is why they coexist. If an application has already registered
-  its own HarfBuzz resolver, `NativeLibrary.SetDllImportResolver` refuses a second one; the loader
-  treats that as somebody else's decision, leaves the default probing alone and does not fail
-  startup. The library is extracted either way, so that resolver can point at it if it wants to.
+  its own HarfBuzz resolver, `NativeLibrary.SetDllImportResolver` refuses a second one ("A resolver
+  is already set for the assembly"); the loader treats that as somebody else's decision, leaves the
+  default probing alone and does not fail startup. The library is extracted either way, so that
+  resolver can point at it if it wants to. Under NativeAOT that cannot happen from `Main` - the
+  initializer has already run - so this is a framework-dependent-build possibility, and the guard
+  exists for it.
 - **`EmbedHarfBuzzSharpNative`** is the opt-out, beside `EmbedSkiaSharpNative` and with the same
   default: unset means embedded in an AOT publish. Set it to `false` and the publish is the
   executable plus a loose `libHarfBuzzSharp.*` again.
