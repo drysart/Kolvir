@@ -56,6 +56,7 @@
          exactly the same way: Svg.Skia renders to an SKPicture on all three platforms, and its
          HarfBuzz native comes along per-platform from the package's own dependency groups. -->
     <ProjectReference Include="..\XPlatUI.Feature.Animations\XPlatUI.Feature.Animations.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.AnimatedGif\XPlatUI.Feature.AnimatedGif.csproj" />
     <ProjectReference Include="..\XPlatUI.Feature.Svg\XPlatUI.Feature.Svg.csproj" />
   </ItemGroup>
 

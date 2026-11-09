@@ -4,13 +4,13 @@ using SkiaSharp;
 namespace XPlatUI.Svg.Tests;
 
 /// <summary>
-/// The opt-in: the direct call, the service-collection call, and what unregistering does to work
-/// that is already on screen.
+/// The opt-in: what registering the provider does to one factory, what a container does for an
+/// application, and what the factory does with providers that fail or decline.
 /// </summary>
 /// <remarks>
-/// An image format is process state, so these tests are about a list rather than a container: the
-/// call adds a provider, the handle takes it away, and a picture already handed to a control is not
-/// affected either way.
+/// Registration is a startup concern here, so these tests compose a factory rather than mutate a
+/// process-wide list: <c>services.AddSvgImages()</c> adds a provider to a collection, and the factory
+/// the application resolves is built from what that collection holds.
 /// </remarks>
 [TestClass]
 [TestCategory("Feature")]
@@ -18,91 +18,73 @@ namespace XPlatUI.Svg.Tests;
 public sealed class SvgRegistrationTests : SvgTestBase
 {
     [TestMethod]
-    public void WithoutTheOptInAnSvgStreamIsNotClaimed()
+    public void WithoutTheProviderAnSvgIsNotAnImage()
     {
-        // Nothing registered: the feature is referenced and in the process, and a load of an SVG is
-        // simply an unknown format - false, no failure reported, exactly as an unknown raster is.
-        using var image = new XPlatImage();
-        int failures = 0;
-        image.AddLoadFailedHandler((_, _) => failures++);
+        // A factory with no SVG provider: the feature is referenced and in the output, and the bytes
+        // are simply not an image, exactly as an unknown raster is not.
+        var factory = new XPlatImageDataFactory();
 
-        Assert.IsFalse(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), "SVG is not read until it is turned on");
-        Assert.AreEqual(0, failures, "and an unclaimed stream reports nothing");
-        Assert.IsNull(image.Picture, "nothing was drawn");
+        var failure = Assert.ThrowsExactly<XPlatImageFormatException>(
+            () => factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square)));
+
+        Assert.AreEqual(string.Empty, failure.ProviderName, "nothing claimed the bytes");
     }
 
     [TestMethod]
-    public void AddSvgImagesTurnsItOnAndTheHandleTurnsItOffAgain()
+    public void OneFactoryLoadsSvgAndPngWithTheSameCall()
     {
-        using (XPlatSvg.AddSvgImages())
-        {
-            using var image = new XPlatImage();
-            Assert.IsTrue(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), "a registered provider claims the bytes");
-        }
+        // The one-stop-shop claim, tested as itself: no branching at the call site, and one factory
+        // produces both.
+        using var svg = Factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
+        using var png = Factory.LoadFromStream(new MemoryStream(SvgFixtures.Png(SvgFixtures.Blue)));
 
-        using var after = new XPlatImage();
-        Assert.IsFalse(after.Load(SvgFixtures.Stream(SvgFixtures.Square)), "and disposing the handle stops future loads");
+        Assert.AreEqual(10f, svg.NaturalSize.Width, 0.01f, "the SVG came back at the document's size");
+        Assert.AreEqual(4f, png.NaturalSize.Width, 0.5f, "and the PNG at the file's");
     }
 
     [TestMethod]
-    public void RegisteringTwiceRegistersOnce()
+    public void TheServiceCollectionOptInPutsTheProviderInTheContainer()
     {
-        var first = XPlatSvg.AddSvgImages();
-        var second = XPlatSvg.AddSvgImages();
-
-        // Disposing one handle must not unregister a provider the other still claims.
-        first.Dispose();
-        using var image = new XPlatImage();
-        Assert.IsTrue(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), "the second registration still stands");
-
-        second.Dispose();
-        using var after = new XPlatImage();
-        Assert.IsFalse(after.Load(SvgFixtures.Stream(SvgFixtures.Square)), "and the last one to go turns it off");
-    }
-
-    [TestMethod]
-    public void TheServiceCollectionOptInRegistersIt()
-    {
-        // The DI form exists so the opt-in sits where every other feature's does. It is the same
-        // registration, so it outlives the collection that carried it - which is the behaviour the
-        // class documents and this test pins.
         var services = new ServiceCollection();
         var returned = services.AddSvgImages();
 
         Assert.AreSame(services, returned, "the call chains");
 
-        using var image = new XPlatImage();
-        Assert.IsTrue(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), "SVG is on");
+        using var provider = services.BuildServiceProvider();
+        var formats = provider.GetServices<IXPlatImageFormatProvider>().ToArray();
 
-        // Put the process back: the registration is not owned by a container.
-        var provider = new XPlatSvgImageFormatProvider();
-        Assert.IsTrue(XPlatImageFormats.Remove(XPlatSvgImageFormatProvider.Shared), "the provider was on the list");
+        Assert.AreEqual(1, formats.Length, "the container holds the SVG provider");
+        Assert.AreSame(XPlatSvgImageFormatProvider.Shared, formats[0]);
+
+        using var data = new XPlatImageDataFactory(formats).LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
+        Assert.AreEqual(10f, data.NaturalSize.Width, 0.01f, "and a factory built from it reads SVG");
     }
 
     [TestMethod]
-    public void UnregisteringDoesNotDisturbAPictureThatIsAlreadyLoaded()
+    public void AnApplicationResolvesAFactoryBuiltFromItsDeclaredFormats()
     {
-        var handle = RegisterSvg();
-        using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        Assert.IsTrue(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), "loads while registered");
+        // What an application actually does: declare the feature, resolve the factory, assign the
+        // result. This is the path the demo takes, minus the window.
+        using var scene = SvgScene.Create(
+            new XPlatPanel(),
+            10f,
+            10f,
+            services => services.AddSvgImages());
 
-        handle.Dispose();
+        var factory = XPlatApplication.Current!.Services.GetRequiredService<IXPlatImageDataFactory>();
+        using var data = factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
 
-        using var scene = SvgScene.Create(image, 40f, 40f);
-        Assert.AreEqual(SvgFixtures.Blue, scene.PixelAt(20, 20), "and still draws after the provider is gone");
+        Assert.AreEqual(10f, data.NaturalSize.Width, 0.01f, "the application's factory knows about SVG");
     }
 
     [TestMethod]
     public void AProviderThatThrowsFailsTheLoadAndNamesItself()
     {
-        Register(new ThrowingProvider());
-        using var image = new XPlatImage();
-        Exception? reported = null;
-        using var subscription = image.AddLoadFailedHandler((_, e) => reported = e);
+        var factory = FactoryWith(XPlatSvgImageFormatProvider.Shared, new ThrowingProvider());
 
-        Assert.IsFalse(image.Load(new MemoryStream(ThrowingProvider.Bytes())), "a throwing provider fails the load");
+        var failure = Assert.ThrowsExactly<XPlatImageFormatException>(
+            () => factory.LoadFromStream(new MemoryStream(ThrowingProvider.Bytes())));
 
-        var failure = (XPlatImageFormatException)reported!;
         Assert.AreEqual("throwing", failure.ProviderName, "the failure names the provider that claimed the bytes");
         Assert.IsInstanceOfType<InvalidOperationException>(failure.InnerException, "and keeps what it threw");
     }
@@ -110,28 +92,26 @@ public sealed class SvgRegistrationTests : SvgTestBase
     [TestMethod]
     public void AProviderThatClaimsNothingIsNeverAskedToDecode()
     {
-        var provider = new FussyProvider();
-        Register(provider);
-        using var image = new XPlatImage();
-        int failures = 0;
-        image.AddLoadFailedHandler((_, _) => failures++);
+        var fussy = new FussyProvider();
+        var factory = FactoryWith(XPlatSvgImageFormatProvider.Shared, fussy);
 
-        Assert.IsFalse(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), "nothing claimed what an SVG is not");
-        Assert.AreEqual(0, provider.Decodes, "and the provider was never asked to decode");
-        Assert.AreEqual(0, failures, "so nothing was reported");
+        using var data = factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
+
+        Assert.AreEqual(10f, data.NaturalSize.Width, 0.01f, "the provider that claimed the bytes produced the data");
+        Assert.AreEqual(0, fussy.Decodes, "and the one that declined was never asked to decode");
     }
 
     [TestMethod]
-    public void ARegisteredProviderOutranksTheBuiltInRasterDecoder()
+    public void ARegisteredProviderOutranksTheSvgProviderForTheBytesItClaims()
     {
-        // The built-in decoder is priority 0, so a provider above it wins even for bytes both could
-        // read. This is how an application replaces a decoder it does not like.
-        var provider = new ReplacingProvider();
-        Register(provider);
+        // Priority, not order: the replacing provider claims SVG bytes above the SVG provider, so it
+        // is the one that decodes them.
+        var replacing = new ReplacingProvider();
+        var factory = FactoryWith(XPlatSvgImageFormatProvider.Shared, replacing);
 
-        using var image = new XPlatImage();
-        Assert.IsTrue(image.Load(new MemoryStream(SvgFixtures.Png(SvgFixtures.Blue))), "the PNG loads");
-        Assert.AreEqual(ReplacingProvider.Size, image.Picture!.CullRect.Width, 0.01f, "through the registered provider");
+        using var data = factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
+
+        Assert.AreEqual(ReplacingProvider.Size, data.NaturalSize.Width, 0.01f, "the higher priority provider produced it");
     }
 
     /// <summary>Claims a private magic number and throws when asked to decode it.</summary>
@@ -145,7 +125,7 @@ public sealed class SvgRegistrationTests : SvgTestBase
 
         public bool CanDecode(ReadOnlySpan<byte> header) => header.StartsWith("THROW"u8);
 
-        public SKPicture? Decode(Stream stream, string? extensionHint) =>
+        public XPlatImageData Create(Stream stream, string? extensionHint, IXPlatImageFormatOptions? options) =>
             throw new InvalidOperationException("this provider is broken on purpose");
     }
 
@@ -160,31 +140,31 @@ public sealed class SvgRegistrationTests : SvgTestBase
 
         public bool CanDecode(ReadOnlySpan<byte> header) => false;
 
-        public SKPicture? Decode(Stream stream, string? extensionHint)
+        public XPlatImageData Create(Stream stream, string? extensionHint, IXPlatImageFormatOptions? options)
         {
             Decodes++;
-            return null;
+            return null!;
         }
     }
 
-    /// <summary>Takes over PNG and draws a fixed square, so the difference is visible in the bounds.</summary>
+    /// <summary>Takes over SVG and draws a fixed square, so the difference is visible in the bounds.</summary>
     private sealed class ReplacingProvider : IXPlatImageFormatProvider
     {
         internal const float Size = 33f;
 
         public string Name => "replacing";
 
-        public int Priority => 5;
+        public int Priority => 500;
 
-        public bool CanDecode(ReadOnlySpan<byte> header) => header.StartsWith((ReadOnlySpan<byte>)[0x89, 0x50, 0x4E, 0x47]);
+        public bool CanDecode(ReadOnlySpan<byte> header) => XPlatSvgDocument.LooksLikeSvg(header);
 
-        public SKPicture? Decode(Stream stream, string? extensionHint)
+        public XPlatImageData Create(Stream stream, string? extensionHint, IXPlatImageFormatOptions? options)
         {
             using var recorder = new SKPictureRecorder();
             var canvas = recorder.BeginRecording(new SKRect(0f, 0f, Size, Size));
             using var paint = new SKPaint { Color = SKColors.Magenta };
             canvas.DrawRect(0f, 0f, Size, Size, paint);
-            return recorder.EndRecording();
+            return XPlatImageData.FromPicture(recorder.EndRecording(), disposePictureWithData: true);
         }
     }
 }

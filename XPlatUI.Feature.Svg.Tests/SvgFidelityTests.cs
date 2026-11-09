@@ -1,4 +1,4 @@
-﻿using SkiaSharp;
+using SkiaSharp;
 
 namespace XPlatUI.Svg.Tests;
 
@@ -90,7 +90,6 @@ public sealed class SvgFidelityTests : SvgTestBase
     [TestMethod]
     public void ALinearGradientRunsBetweenItsStops()
     {
-        using var registered = RegisterSvg();
         using var image = Load(Gradient);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -108,7 +107,6 @@ public sealed class SvgFidelityTests : SvgTestBase
     [TestMethod]
     public void ARadialGradientIsBrightestAtItsCentre()
     {
-        using var registered = RegisterSvg();
         using var image = Load(RadialGradient);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -122,7 +120,6 @@ public sealed class SvgFidelityTests : SvgTestBase
     [TestMethod]
     public void APatternTilesItsContent()
     {
-        using var registered = RegisterSvg();
         using var image = Load(Pattern);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -150,7 +147,6 @@ public sealed class SvgFidelityTests : SvgTestBase
     [TestMethod]
     public void TextIsDrawnWithARealFont()
     {
-        using var registered = RegisterSvg();
         using var image = Load(Text);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -176,7 +172,6 @@ public sealed class SvgFidelityTests : SvgTestBase
     [TestMethod]
     public void AGaussianBlurSpreadsInkPastTheShape()
     {
-        using var registered = RegisterSvg();
         using var image = Load(SharpAndBlurred);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -195,7 +190,6 @@ public sealed class SvgFidelityTests : SvgTestBase
     [TestMethod]
     public void ATransformMovesTheShape()
     {
-        using var registered = RegisterSvg();
         using var image = Load(TranslatedAndClipped);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -211,7 +205,6 @@ public sealed class SvgFidelityTests : SvgTestBase
     [TestMethod]
     public void AClipPathConfinesWhatItCovers()
     {
-        using var registered = RegisterSvg();
         using var image = Load(TranslatedAndClipped);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -226,15 +219,10 @@ public sealed class SvgFidelityTests : SvgTestBase
 
     private static bool IsRed(SKColor colour) => colour.Red > 200 && colour.Green < 60 && colour.Blue < 60;
 
-    private static XPlatImage Load(string svg)
+    private XPlatImage Load(string svg)
     {
         var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        if (!image.Load(SvgFixtures.Stream(svg)))
-        {
-            image.Dispose();
-            Assert.Fail("the document should load");
-        }
-
+        image.Image = Factory.LoadFromStream(SvgFixtures.Stream(svg));
         return image;
     }
 }

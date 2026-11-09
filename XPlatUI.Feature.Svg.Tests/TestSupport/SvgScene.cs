@@ -28,9 +28,15 @@ internal sealed class SvgScene : IDisposable
 
     internal HeadlessWindowBackend Backend { get; }
 
-    internal static SvgScene Create(XPlatControl? root, float width, float height)
+    internal static SvgScene Create(
+        XPlatControl? root,
+        float width,
+        float height,
+        Action<Microsoft.Extensions.DependencyInjection.IServiceCollection>? configureServices = null)
     {
-        var application = new XPlatApplication(new HeadlessApplicationBackend());
+        var application = new XPlatApplication(
+            new HeadlessApplicationBackend(),
+            new XPlatApplicationOptions { ConfigureServices = configureServices });
         var window = new XPlatWindow("XPlatUI svg test", root) { ClientSize = new SKSize(width, height) };
         var backend = (HeadlessWindowBackend)window.Backend;
         window.Host.PerformLayout();

@@ -22,7 +22,6 @@ public sealed class SvgSizeModeTests : SvgTestBase
     [TestMethod]
     public void StretchImageFillsTheBoxAndNormalDoesNot()
     {
-        using var registered = RegisterSvg();
         var image = Load(sizeMode: XPlatSizeMode.StretchImage);
 
         using (var scene = SvgScene.Create(image, HostSize, HostSize))
@@ -39,7 +38,6 @@ public sealed class SvgSizeModeTests : SvgTestBase
     [TestMethod]
     public void ZoomKeepsTheAspectRatioAndLeavesBands()
     {
-        using var registered = RegisterSvg();
         var image = Load(sizeMode: XPlatSizeMode.Zoom);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -51,7 +49,6 @@ public sealed class SvgSizeModeTests : SvgTestBase
     [TestMethod]
     public void CenterImageDrawsTheDocumentAtItsOwnSize()
     {
-        using var registered = RegisterSvg();
         var image = Load(sizeMode: XPlatSizeMode.CenterImage);
         using var scene = SvgScene.Create(image, HostSize, HostSize);
 
@@ -63,7 +60,6 @@ public sealed class SvgSizeModeTests : SvgTestBase
     [TestMethod]
     public void EveryModePlacesTheDocumentWhereTheBitmapsTestAlreadySaysItDoes()
     {
-        using var registered = RegisterSvg();
         var image = Load(sizeMode: XPlatSizeMode.Normal);
 
         // The same expectations as the core suite's bitmap test, driven through a vector document:
@@ -88,7 +84,7 @@ public sealed class SvgSizeModeTests : SvgTestBase
         }
     }
 
-    private static XPlatImage Load(XPlatSizeMode sizeMode)
+    private XPlatImage Load(XPlatSizeMode sizeMode)
     {
         var image = new XPlatImage
         {
@@ -98,7 +94,7 @@ public sealed class SvgSizeModeTests : SvgTestBase
             ImageAlign = XPlatContentAlignment.MiddleCenter,
         };
 
-        Assert.IsTrue(image.Load(SvgFixtures.Stream(SvgFixtures.WideRectangle)), "the fixture document should load");
+        image.Image = Factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.WideRectangle));
         return image;
     }
 }

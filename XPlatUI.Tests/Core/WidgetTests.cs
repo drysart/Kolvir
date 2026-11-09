@@ -516,111 +516,69 @@ public sealed class WidgetTests : HeadlessTestBase
     }
 
     [TestMethod]
-    public void AnImageLoadsFromAStreamAndReportsWhatItShows()
+    public void AnImageIsWhatTheFactoryProduced()
     {
-        using var image = new XPlatImage();
-        int failures = 0;
-        image.AddLoadFailedHandler((_, _) => failures++);
+        using var data = new XPlatImageDataFactory().LoadFromStream(PngBytes(4, 2));
 
-        Assert.IsTrue(image.Load(PngBytes(4, 2)), "a PNG stream should load");
-        Assert.IsNotNull(image.Picture, "a loaded bitmap is recorded into a picture");
-        var bounds = image.Picture!.CullRect;
-        Assert.AreEqual(4f, bounds.Width, "the picture's bounds are the file's width");
-        Assert.AreEqual(2f, bounds.Height, "and its height");
-        Assert.AreEqual(0, failures, "a successful load reports nothing");
+        using var image = new XPlatImage { Image = data };
 
-        Assert.IsFalse(image.Load(new MemoryStream([1, 2, 3, 4])), "a stream that is not an image fails");
-
-        string missing = Path.Combine(Path.GetTempPath(), $"xplatui-missing-{Guid.NewGuid():N}.png");
-        Assert.IsFalse(image.Load(missing), "a missing file fails too");
-        Assert.AreEqual(1, failures, "and the file failure is reported to the handler");
+        Assert.AreSame(data, image.Image, "the control shows what it was handed");
+        Assert.AreEqual(4f, data.NaturalSize.Width, "the data is as wide as the file");
+        Assert.AreEqual(2f, data.NaturalSize.Height, "and as tall");
     }
 
     [TestMethod]
-    public void AnImagesAutoSizeMeasuresItsPicture()
+    public void AnImagesAutoSizeMeasuresItsImagesNaturalSize()
     {
-        // A picture recorded here rather than loaded: this is what a vector renderer or an
-        // animation player hands the control, and its bounds are the only size the control has.
+        // A picture recorded here rather than decoded: this is what a vector renderer or an animation
+        // player hands the control, and its bounds are the only size the control has.
         using var picture = RecordPicture(30, 20);
+        using var data = XPlatImageData.FromPicture(picture);
 
-        var image = new XPlatImage { Picture = picture };
+        var image = new XPlatImage { Image = data };
         var host = new XPlatPanel { Padding = XPlatThickness.Empty };
         host.Controls.Add(image);
 
         using var scene = HeadlessScene.Create(host, 200f, 100f);
 
-        Assert.AreEqual(30f, image.Width, "AutoSize is the picture's width");
+        Assert.AreEqual(30f, image.Width, "AutoSize is the image's natural width");
         Assert.AreEqual(20f, image.Height, "and its height");
     }
 
     [TestMethod]
-    public void ReplacingAnImagesPictureReleasesThePreviousOne()
+    public void ReassigningAnImagesImageLeavesThePreviousOneAlive()
     {
-        using var image = new XPlatImage();
-        Assert.IsTrue(image.Load(PngBytes(4, 2)), "the first fixture image should load");
-        var previous = image.Picture!;
+        // The control does not own what it shows - the WinForms PictureBox convention - so replacing
+        // the image must not dispose the one it replaced.
+        using var first = XPlatImageData.FromPicture(RecordPicture(4, 2), disposePictureWithData: true);
+        using var second = XPlatImageData.FromPicture(RecordPicture(6, 3), disposePictureWithData: true);
 
-        Assert.IsTrue(image.Load(PngBytes(6, 3)), "the second fixture image should load");
-        var current = image.Picture!;
+        using var image = new XPlatImage { Image = first };
+        image.Image = second;
 
-        Assert.AreNotSame(previous, current, "the load replaced the picture");
-        Assert.IsTrue(IsDisposed(previous), "the picture the control owned is disposed when it is replaced, so it does not leak");
-        Assert.IsFalse(IsDisposed(current), "and the new one is live");
-        Assert.AreEqual(6f, current.CullRect.Width, "with the new file's width");
+        Assert.AreSame(second, image.Image, "the new image replaced the old one");
+        Assert.IsNotNull(first.CurrentFrame, "and the one it replaced is still usable");
+        Assert.AreEqual(6f, second.NaturalSize.Width, "with the new image's width");
     }
 
     [TestMethod]
-    public void DisposingAnImageReleasesItsPictureAndLeavesASiblingDrawing()
+    public void DisposingAnImageLeavesItsDataUsableInAnotherControl()
     {
-        var host = new XPlatPanel { Padding = XPlatThickness.Empty };
+        using var data = XPlatImageData.FromPicture(RecordPicture(4, 2), disposePictureWithData: true);
 
-        var disposed = new XPlatImage { Dock = DockStyle.Top, Height = 40f };
-        Assert.IsTrue(disposed.Load(PngBytes(64, 48)), "the fixture image should load");
-        var disposedPicture = disposed.Picture!;
-
-        var sibling = new XPlatImage { Dock = DockStyle.Fill };
-        Assert.IsTrue(sibling.Load(PngBytes(4, 2)), "the sibling's fixture image should load");
-
-        host.Controls.Add(disposed);
-        host.Controls.Add(sibling);
-
-        using var scene = HeadlessScene.Create(host, 100f, 100f);
-        scene.Paint();
-
-        host.Controls.Remove(disposed);
-        disposed.Dispose();
-
-        using var bitmap = scene.Render();
-        Assert.AreEqual(SKColors.Red, bitmap.GetPixel(50, 50), "a sibling still paints after the other control was disposed");
-        Assert.IsTrue(IsDisposed(disposedPicture), "and the disposed control released the picture it owned");
-    }
-
-    [TestMethod]
-    public void DisposingAnImageLeavesAPictureItDoesNotOwnAlive()
-    {
-        // Phase 2 hands one picture to a control it did not record. Disposing that control must not
-        // pull the picture out from under whoever still draws it.
-        using var picture = RecordPicture(4, 2);
-
-        var first = new XPlatImage { Picture = picture };
-        var second = new XPlatImage { Picture = picture };
-        var host = new XPlatPanel { Padding = XPlatThickness.Empty };
-        host.Controls.Add(first);
-        host.Controls.Add(second);
-        first.Dock = DockStyle.Top;
-        first.Height = 40f;
-        second.Dock = DockStyle.Fill;
-
-        using var scene = HeadlessScene.Create(host, 100f, 100f);
-        host.Controls.Remove(first);
+        var first = new XPlatImage { Image = data };
         first.Dispose();
 
-        Assert.IsFalse(IsDisposed(picture), "a picture the control does not own outlives the control");
+        var second = new XPlatImage
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = XPlatSizeMode.StretchImage,
+            Image = data,
+        };
 
-        using var bitmap = scene.Render();
-        Assert.AreEqual(SKColors.Red, bitmap.GetPixel(50, 50), "the sibling still draws the shared picture");
+        using var scene = HeadlessScene.Create(second, 40f, 40f);
+        Assert.AreEqual(SKColors.Red, scene.PixelAt(20, 20), "the same data still draws after the first control was disposed");
     }
-
     /// <summary>A picture drawn directly, with no bitmap behind it.</summary>
     private static SKPicture RecordPicture(int width, int height)
     {

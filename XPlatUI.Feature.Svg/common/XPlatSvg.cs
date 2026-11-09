@@ -1,35 +1,36 @@
 namespace XPlatUI.Svg;
 
 /// <summary>
-/// The SVG feature's opt-in for callers that do not use a service container.
+/// The SVG feature's cache controls.
 /// </summary>
 /// <remarks>
 /// <para>
-/// This is the whole of what an application has to do: one call, and <see cref="XPlatImage"/> reads
-/// SVG. It is the same call <c>services.AddSvgImages()</c> makes, because an image format is process
-/// state rather than a service a window resolves - the bytes on the stream are the only thing that
-/// decides which provider runs.
+/// There is no registration call here: an application turns SVG on with
+/// <see cref="XPlatSvgServiceCollectionExtensions.AddSvgImages"/>, while it declares its services, and
+/// the factory it resolves consults this package's provider. That is the whole opt-in. There is
+/// deliberately no SVG-specific loader either - <c>factory.LoadFromStream(stream)</c> reads an SVG
+/// once the provider is in the container and a PNG whether it is or not, which is the point of
+/// "load this image" not depending on which formats happen to be enabled.
 /// </para>
 /// <para>
-/// The handle is what lets a test or a scope undo the call. Disposing it does not touch a picture
-/// that has already been loaded: a picture is self-contained, and removing a provider only changes
-/// what future loads can do.
+/// What is left here is the parse cache, which is a property of this package rather than of loading
+/// an image: a theme editor that knows its icon set changed, and a test that counts parses, are the
+/// two things that need it.
 /// </para>
 /// </remarks>
 /// <example>
 /// <code>
-/// using var svg = XPlatSvg.AddSvgImages();
-/// image.Load("icons/star.svg");
+/// // in an application's ConfigureServices:
+/// services.AddSvgImages();
+///
+/// // anywhere afterwards, an SVG is an image like any other:
+/// image.Image = factory.LoadFromPath("icons/star.svg");
 /// </code>
 /// </example>
 public static class XPlatSvg
 {
-    /// <summary>Registers the SVG provider. Calling it twice registers it once.</summary>
-    /// <returns>A handle that unregisters it when disposed.</returns>
-    public static IDisposable AddSvgImages() => XPlatImageFormats.Add(XPlatSvgImageFormatProvider.Shared);
-
     /// <summary>
-    /// Empties the parse cache. Controls that are already showing a document keep drawing it.
+    /// Empties the parse cache. Documents that are already rendered keep drawing.
     /// </summary>
     /// <remarks>
     /// Nothing calls this in a normal application: the cache is bounded, so it cannot grow without

@@ -32,17 +32,16 @@ public sealed class SvgSecurityTests : SvgTestBase
     [TestMethod]
     public void AnExternalFileImageIsNotRead()
     {
-        using var registered = RegisterSvg();
         string path = WriteSecretPng();
         try
         {
             string reference = path.Replace('\\', '/');
             using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-            Assert.IsTrue(image.Load(SvgFixtures.Stream($"""
+            Load(image, SvgFixtures.Stream($"""
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
                   <image width="10" height="10" href="file:///{reference}"/>
                 </svg>
-                """)), "the document still loads, because it is a document");
+                """));
 
             using var scene = SvgScene.Create(image, 40f, 40f);
             Assert.IsFalse(ContainsSecret(scene), "a file reference is not resolved");
@@ -58,17 +57,16 @@ public sealed class SvgSecurityTests : SvgTestBase
     {
         // The control experiment for the test above: the same pixels, referenced from inside the
         // document instead of from the file system, do appear.
-        using var registered = RegisterSvg();
         string path = WriteSecretPng();
         string base64 = Convert.ToBase64String(File.ReadAllBytes(path));
         File.Delete(path);
 
         using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        Assert.IsTrue(image.Load(SvgFixtures.Stream($"""
+        Load(image, SvgFixtures.Stream($"""
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
               <image width="10" height="10" href="data:image/png;base64,{base64}"/>
             </svg>
-            """)), "a document carrying its own pixels loads");
+            """));
 
         using var scene = SvgScene.Create(image, 40f, 40f);
         Assert.IsTrue(ContainsSecret(scene), "and draws them");
@@ -77,16 +75,15 @@ public sealed class SvgSecurityTests : SvgTestBase
     [TestMethod]
     public void AWindowsStyleXlinkHrefIsNotResolvedEither()
     {
-        using var registered = RegisterSvg();
         string path = WriteSecretPng();
         try
         {
             string reference = path.Replace('\\', '/');
             using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-            Assert.IsTrue(image.Load(SvgFixtures.Stream($"""
+            Load(image, SvgFixtures.Stream($"""
                 <svg xmlns="http://www.w3.org/2000/svg" xmlns:xlink="http://www.w3.org/1999/xlink"
                      viewBox="0 0 10 10"><image xlink:href="file:///{reference}" width="10" height="10"/></svg>
-                """)), "the document loads");
+                """));
 
             using var scene = SvgScene.Create(image, 40f, 40f);
             Assert.IsFalse(ContainsSecret(scene), "xlink:href is held to the same rule as href");
@@ -100,16 +97,15 @@ public sealed class SvgSecurityTests : SvgTestBase
     [TestMethod]
     public void ANetworkReferenceIsNotFetched()
     {
-        using var registered = RegisterSvg();
         using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
 
         // Port 9 is discard: nothing listens, so a resolver that tried would block or fail. The
         // assertion is that nothing is attempted, which is what keeps a load off the network.
-        Assert.IsTrue(image.Load(SvgFixtures.Stream("""
+        Load(image, SvgFixtures.Stream("""
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
               <image width="10" height="10" href="http://127.0.0.1:9/nothing.png"/>
             </svg>
-            """)), "the document loads");
+            """));
 
         using var scene = SvgScene.Create(image, 40f, 40f);
         Assert.IsFalse(ContainsSecret(scene), "and fetches nothing");
@@ -118,17 +114,16 @@ public sealed class SvgSecurityTests : SvgTestBase
     [TestMethod]
     public void AUseReferenceToAnotherFileLoadsNoPartOfIt()
     {
-        using var registered = RegisterSvg();
         string path = WriteSecretSvg();
         try
         {
             string reference = path.Replace('\\', '/');
             using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-            Assert.IsTrue(image.Load(SvgFixtures.Stream($"""
+            Load(image, SvgFixtures.Stream($"""
                 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
                   <use href="file:///{reference}#shape"/>
                 </svg>
-                """)), "the document loads");
+                """));
 
             using var scene = SvgScene.Create(image, 40f, 40f);
             Assert.IsFalse(ContainsSecret(scene), "a use of an element in another file resolves nothing");
@@ -142,15 +137,14 @@ public sealed class SvgSecurityTests : SvgTestBase
     [TestMethod]
     public void ScriptInADocumentDoesNotRun()
     {
-        using var registered = RegisterSvg();
         using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
 
-        Assert.IsTrue(image.Load(SvgFixtures.Stream("""
+        Load(image, SvgFixtures.Stream("""
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
               <script>document.documentElement.setAttribute('fill', '#ff4500');</script>
               <rect width="10" height="10" fill="#00aa00"/>
             </svg>
-            """)), "the document loads");
+            """));
 
         using var scene = SvgScene.Create(image, 40f, 40f);
         var pixel = scene.PixelAt(20, 20);
@@ -162,14 +156,13 @@ public sealed class SvgSecurityTests : SvgTestBase
     [TestMethod]
     public void AnEventHandlerAttributeDoesNotRunEither()
     {
-        using var registered = RegisterSvg();
         using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
 
-        Assert.IsTrue(image.Load(SvgFixtures.Stream("""
+        Load(image, SvgFixtures.Stream("""
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10">
               <rect width="10" height="10" fill="#00aa00" onload="this.setAttribute('fill', '#ff4500')"/>
             </svg>
-            """)), "the document loads");
+            """));
 
         using var scene = SvgScene.Create(image, 40f, 40f);
         var pixel = scene.PixelAt(20, 20);
@@ -181,12 +174,7 @@ public sealed class SvgSecurityTests : SvgTestBase
     [TestMethod]
     public void AnEntityBombIsRefusedBeforeItIsParsed()
     {
-        using var registered = RegisterSvg();
-        using var image = new XPlatImage();
-        Exception? reported = null;
-        using var subscription = image.AddLoadFailedHandler((_, e) => reported = e);
-
-        Assert.IsFalse(image.Load(SvgFixtures.Stream("""
+        var failure = Assert.ThrowsExactly<XPlatImageFormatException>(() => Factory.LoadFromStream(SvgFixtures.Stream("""
             <!DOCTYPE svg [
               <!ENTITY a "aaaaaaaaaa">
               <!ENTITY b "&a;&a;&a;&a;&a;&a;&a;&a;&a;&a;">
@@ -194,28 +182,26 @@ public sealed class SvgSecurityTests : SvgTestBase
               <!ENTITY d "&c;&c;&c;&c;&c;&c;&c;&c;&c;&c;">
             ]>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text x="0" y="5">&d;</text></svg>
-            """)), "a document that declares entities does not load");
+            """)));
 
-        Assert.IsInstanceOfType<XPlatImageFormatException>(reported, "the failure comes through the provider");
-        StringAssert.Contains(reported!.InnerException!.Message, "DTD", "and says what was refused");
+        Assert.AreEqual("svg", failure.ProviderName, "the failure comes through the provider");
+        StringAssert.Contains(failure.InnerException!.Message, "DTD", "and says what was refused");
     }
 
     [TestMethod]
     public void AnExternalEntityDeclarationIsRefusedToo()
     {
-        using var registered = RegisterSvg();
         using var image = new XPlatImage();
 
-        Assert.IsFalse(image.Load(SvgFixtures.Stream("""
+        Assert.ThrowsExactly<XPlatImageFormatException>(() => Factory.LoadFromStream(SvgFixtures.Stream("""
             <!DOCTYPE svg [ <!ENTITY xxe SYSTEM "file:///etc/passwd"> ]>
             <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><text>&xxe;</text></svg>
-            """)), "an external entity is refused with the rest of them");
+            """)));
     }
 
     [TestMethod]
     public void ADocumentLargerThanTheCapIsRefused()
     {
-        using var registered = RegisterSvg();
         using var image = new XPlatImage();
 
         var oversized = new System.Text.StringBuilder(
@@ -227,7 +213,7 @@ public sealed class SvgSecurityTests : SvgTestBase
 
         oversized.Append("--></svg>");
 
-        Assert.IsFalse(image.Load(SvgFixtures.Stream(oversized.ToString())), "a megabyte of comment is not an icon");
+        Assert.ThrowsExactly<XPlatImageFormatException>(() => Factory.LoadFromStream(SvgFixtures.Stream(oversized.ToString())));
     }
 
     private static string WriteSecretPng()

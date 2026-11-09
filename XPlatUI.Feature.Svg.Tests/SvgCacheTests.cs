@@ -13,14 +13,12 @@ public sealed class SvgCacheTests : SvgTestBase
     [TestMethod]
     public void OneDocumentLoadedTwiceIsParsedOnce()
     {
-        using var registered = RegisterSvg();
         XPlatSvg.ClearCache();
         int parsed = XPlatSvgCache.ParseCount;
 
         for (int load = 0; load < 5; load++)
         {
-            using var image = new XPlatImage();
-            Assert.IsTrue(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), $"load {load} should succeed");
+            using var data = Factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
         }
 
         Assert.AreEqual(parsed + 1, XPlatSvgCache.ParseCount, "the document is parsed once and recorded five times");
@@ -30,18 +28,15 @@ public sealed class SvgCacheTests : SvgTestBase
     [TestMethod]
     public void TwoDifferentDocumentsAreTwoEntries()
     {
-        using var registered = RegisterSvg();
         XPlatSvg.ClearCache();
         int parsed = XPlatSvgCache.ParseCount;
 
-        using (var first = new XPlatImage())
+        using (Factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square)))
         {
-            Assert.IsTrue(first.Load(SvgFixtures.Stream(SvgFixtures.Square)), "the square loads");
         }
 
-        using (var second = new XPlatImage())
+        using (Factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.WideRectangle)))
         {
-            Assert.IsTrue(second.Load(SvgFixtures.Stream(SvgFixtures.WideRectangle)), "the rectangle loads");
         }
 
         Assert.AreEqual(parsed + 2, XPlatSvgCache.ParseCount, "different bytes are a different parse");
@@ -49,42 +44,35 @@ public sealed class SvgCacheTests : SvgTestBase
     }
 
     [TestMethod]
-    public void EveryLoadGetsAPictureItCanDispose()
+    public void EveryLoadGetsItsOwnRecording()
     {
-        // Two controls showing one icon must not share one picture: a loaded picture belongs to the
-        // control, so the second load disposing would take the first control's picture with it.
-        using var registered = RegisterSvg();
+        // Two controls showing one icon must not share one picture: the data owns what it was given,
+        // so two loads of the same document are two recordings of one parse.
         XPlatSvg.ClearCache();
 
-        var first = new XPlatImage();
-        var second = new XPlatImage();
+        using var first = Factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
+        using var second = Factory.LoadFromStream(SvgFixtures.Stream(SvgFixtures.Square));
 
-        Assert.IsTrue(first.Load(SvgFixtures.Stream(SvgFixtures.Square)), "the first control loads");
-        Assert.IsTrue(second.Load(SvgFixtures.Stream(SvgFixtures.Square)), "the second loads the same document");
+        Assert.AreNotSame(first.CurrentFrame, second.CurrentFrame, "each load gets its own recording");
 
-        Assert.AreNotSame(first.Picture, second.Picture, "each control gets its own recording");
-
+        var image = new XPlatImage { Image = first, Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
         second.Dispose();
 
-        using var scene = SvgScene.Create(first, 40f, 40f);
+        using var scene = SvgScene.Create(image, 40f, 40f);
         Assert.AreEqual(SvgFixtures.Blue, scene.PixelAt(20, 20), "and the first still draws after the second is gone");
     }
 
     [TestMethod]
     public void TheCacheIsBounded()
     {
-        using var registered = RegisterSvg();
         XPlatSvg.ClearCache();
 
         // More distinct documents than the cache holds: the oldest go, and nothing throws while it
         // happens. A cache that only grew would be a leak with a hash function in front of it.
         for (int index = 0; index < XPlatSvgCache.Capacity + 8; index++)
         {
-            using var image = new XPlatImage();
-            Assert.IsTrue(
-                image.Load(SvgFixtures.Stream(
-                    $"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="{index + 1}" height="10"/></svg>""")),
-                $"document {index} should load");
+            using var data = Factory.LoadFromStream(SvgFixtures.Stream(
+                $"""<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 10 10"><rect width="{index + 1}" height="10"/></svg>"""));
         }
 
         Assert.IsLessThanOrEqualTo(XPlatSvgCache.Capacity, XPlatSvgCache.Count, "the cache stops at its capacity");
@@ -93,13 +81,13 @@ public sealed class SvgCacheTests : SvgTestBase
     [TestMethod]
     public void ClearingTheCacheDoesNotDisturbAPictureAlreadyDrawn()
     {
-        using var registered = RegisterSvg();
-        var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        Assert.IsTrue(image.Load(SvgFixtures.Stream(SvgFixtures.Square)), "loads");
+        var image = Show(SvgFixtures.Stream(SvgFixtures.Square));
+        image.Dock = DockStyle.Fill;
+        image.SizeMode = XPlatSizeMode.StretchImage;
 
         XPlatSvg.ClearCache();
 
         using var scene = SvgScene.Create(image, 40f, 40f);
-        Assert.AreEqual(SvgFixtures.Blue, scene.PixelAt(20, 20), "the control's recording outlives the parsed document");
+        Assert.AreEqual(SvgFixtures.Blue, scene.PixelAt(20, 20), "the recording outlives the parsed document");
     }
 }
