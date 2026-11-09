@@ -80,6 +80,19 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     /// <inheritdoc />
     public XPlatUiHost Host => _host;
 
+    /// <summary>
+    /// What this window is presenting with, for a one-line diagnostic: <c>metal</c> when the Metal
+    /// tiers are live, or <c>cpu (...)</c> with the step that put it there; <c>cpu (no window)</c>
+    /// before the native window exists.
+    /// </summary>
+    public string GraphicsPath => _view?.GraphicsPath ?? "cpu (no window)";
+
+    /// <summary>
+    /// The Metal device name when <see cref="GraphicsPath"/> is <c>metal</c>, or null on the CPU
+    /// path.
+    /// </summary>
+    public string? GraphicsRenderer => _view?.GraphicsRenderer;
+
     /// <inheritdoc />
     public float ScaleFactor => _scale;
 
@@ -606,7 +619,14 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         window.ReleaseWhenClosed(false);
         window.Delegate = _delegate;
 
-        var view = new AppKitSkiaView(_host)
+        // The same application option the Win32 backend honours. Its platform default is off on
+        // macOS (Metal is slower on light text-heavy pages and much faster on image-heavy ones, so
+        // the application decides), and an explicit assignment or --no-hardware-acceleration is
+        // already applied there. Resolved once, when the window is created, because the
+        // presentation choice does not change while a window is open.
+        var useHardwareAcceleration = _application.Application?.Options.GfxHardwareAcceleration ?? false;
+
+        var view = new AppKitSkiaView(_host, useHardwareAcceleration)
         {
             AutoresizingMask = NSViewResizingMask.WidthSizable | NSViewResizingMask.HeightSizable,
         };
@@ -617,6 +637,10 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         _view = view;
         _scale = (float)window.BackingScaleFactor;
         _reportedState = CurrentState();
+
+        // The layer and backing scale exist now, so the presentation path can be decided before
+        // the window reports itself shown and the demo prints its one line.
+        view.PrepareGraphics();
 
         // A context menu is anchored to the view that shows it, so it can only be built now.
         _presenter = _useXPlatMenus

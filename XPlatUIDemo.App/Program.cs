@@ -100,6 +100,12 @@ internal static class Program
             ForcedDarkMode = ForcedDarkMode(args),
             MenuPresentation = MenuPresentationArgument(args),
 
+            // Assign the switch explicitly so the demo is the showcase on every platform. Windows
+            // and Linux already default it on, but macOS defaults it off (Metal is slower on light
+            // content), so this is what turns the accelerated path on there.
+            // --no-hardware-acceleration is the off switch everywhere.
+            GfxHardwareAcceleration = Array.IndexOf(args, "--no-hardware-acceleration") < 0,
+
             // The application-wide icon: the Dock tile on macOS, the taskbar and Alt-Tab on Windows,
             // and the default icon name for every GTK window. Windows also shows it in the title bar
             // because XPlatWindow inherits this when it is created.
@@ -173,7 +179,10 @@ internal static class Program
         {
             // The same entry point as the Measure button, so a script can capture the BENCH line
             // without a pointer. It no-ops unless the measured-rendering page is the one showing.
-            window.AddShownHandler(_ => demo.StartBenchmark());
+            // --partial-damage selects the row the on-page toggle would, so all four rows can be
+            // captured headlessly.
+            var partialDamage = Array.IndexOf(args, "--partial-damage") >= 0;
+            window.AddShownHandler(_ => demo.StartBenchmark(partialDamage));
         }
 
         // Opens the menus page's context menu as if the box had been right-clicked, which is what a
@@ -220,9 +229,24 @@ internal static class Program
                         : $"gfx: {win32.GraphicsPath}");
             }
         });
+#elif MACOS
+        // The AppKit backend makes the same decision the Win32 one does: Metal when the option is
+        // on and every step of the stack came up, otherwise the CPU CGImage path with the reason.
+        // The footer and the measured-rendering page then describe macOS exactly as they do Windows.
+        window.AddShownHandler(_ =>
+        {
+            if (window.Backend is AppKitWindowBackend appKit)
+            {
+                demo.SetGraphicsInfo(appKit.GraphicsPath, appKit.GraphicsRenderer);
+                Console.WriteLine(
+                    appKit.GraphicsRenderer is { } renderer
+                        ? $"gfx: {appKit.GraphicsPath}; renderer: {renderer}"
+                        : $"gfx: {appKit.GraphicsPath}");
+            }
+        });
 #else
-        // GTK4 and AppKit have no accelerated present path in this change; the footer still names
-        // the path so a screenshot from any platform says what produced its numbers.
+        // GTK4 has no accelerated present path in this change; the footer still names the path so a
+        // screenshot from any platform says what produced its numbers.
         demo.SetGraphicsInfo("cpu (platform backend)", null);
 #endif
 

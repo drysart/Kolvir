@@ -8,8 +8,6 @@ namespace XPlatUI;
 /// </summary>
 public sealed class XPlatApplicationOptions
 {
-    private bool _gfxHardwareAcceleration = true;
-    private bool _gfxHardwareAccelerationAssigned;
     private IReadOnlyList<string>? _commandLine;
 
     /// <summary>Creates options with defaults taken from this process's own command line.</summary>
@@ -29,8 +27,8 @@ public sealed class XPlatApplicationOptions
     /// </param>
     public XPlatApplicationOptions(IReadOnlyList<string>? commandLine)
     {
-        CommandLine = commandLine;
-        _gfxHardwareAcceleration = !HasNoHardwareAccelerationSwitch(ResolveCommandLine());
+        _commandLine = commandLine;
+        GfxHardwareAcceleration = DefaultHardwareAcceleration(ResolveCommandLine());
     }
 
     /// <summary>
@@ -85,25 +83,17 @@ public sealed class XPlatApplicationOptions
     /// application understands.
     /// </para>
     /// <para>
-    /// Assigning this property after construction re-evaluates the command-line default of
-    /// <see cref="GfxHardwareAcceleration"/> until that property has been assigned explicitly. A
-    /// launcher that assigns this property after the options exist is still advised to assign
-    /// <see cref="GfxHardwareAcceleration"/> in the same place: the application may already have
-    /// read the options, and an explicit assignment always wins over the switch.
+    /// Assigning this property after construction does <b>not</b> retroactively apply its switches
+    /// to options the constructor already defaulted, including
+    /// <see cref="GfxHardwareAcceleration"/>. Pass the arguments to
+    /// <see cref="XPlatApplicationOptions(IReadOnlyList{string})"/> when a launcher supplies its own
+    /// command line, or assign <see cref="GfxHardwareAcceleration"/> yourself as well.
     /// </para>
     /// </remarks>
     public IReadOnlyList<string>? CommandLine
     {
         get => _commandLine;
-        set
-        {
-            _commandLine = value;
-
-            if (!_gfxHardwareAccelerationAssigned)
-            {
-                _gfxHardwareAcceleration = !HasNoHardwareAccelerationSwitch(ResolveCommandLine());
-            }
-        }
+        set => _commandLine = value;
     }
 
     /// <summary>
@@ -115,38 +105,49 @@ public sealed class XPlatApplicationOptions
         CommandLine ?? Environment.GetCommandLineArgs()[1..];
 
     /// <summary>
-    /// Windows only: true to let the Win32 backend draw with an OpenGL (WGL) surface when the
-    /// machine has a working OpenGL implementation. True by default, and false when
-    /// <see cref="ResolveCommandLine"/> carries <c>--no-hardware-acceleration</c>.
+    /// True to let a backend draw with an accelerated surface when the machine has a working GPU
+    /// implementation. <b>True by default on Windows and Linux, false on macOS</b>, and false
+    /// everywhere when <see cref="ResolveCommandLine"/> carries <c>--no-hardware-acceleration</c>.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The constructor reads the command line once, from <see cref="CommandLine"/> when that is
-    /// assigned or from the process's own arguments otherwise. Because
-    /// <see cref="CommandLine"/> is settable after construction, a launcher that assigns it later
-    /// cannot retroactively change a value the application has already read; assigning it
-    /// re-evaluates the default only until this property itself is assigned. Assign both properties
-    /// together when the launcher owns the command line - <c>{ CommandLine = args,
-    /// GfxHardwareAcceleration = !args.Contains("--no-hardware-acceleration") }</c> - rather than
-    /// relying on the order.
+    /// The platform defaults differ because the measured results differ. On Windows the Win32
+    /// backend's WGL path wins for both light and heavy content, so acceleration is on unless the
+    /// machine cannot provide it. On macOS the AppKit backend's Metal path is content-dependent -
+    /// measured on a physical M4 at 1280 x 820, it is **1.6x slower** for a full frame of a light,
+    /// text-heavy page (2.85 ms against 1.82 ms on the CPU rasteriser) and **15x faster** for an
+    /// image-heavy one (0.75 ms against 13.2 ms) - so the default is the CPU path and an
+    /// application whose content is heavy opts in by assigning this property true. The demo does
+    /// so explicitly, which is what makes it the showcase.
+    /// </para>
+    /// <para>
+    /// Linux defaults to true for consistency with Windows even though the GTK4 backend has no
+    /// accelerated path yet; a backend that cannot accelerate ignores the flag and stays on the
+    /// CPU, so the default costs nothing.
+    /// </para>
+    /// <para>
+    /// The constructor computes the default once: on Windows and Linux true, on macOS false, and
+    /// false on every platform when the resolved command line carries
+    /// <c>--no-hardware-acceleration</c>. Pass the arguments to the
+    /// <see cref="XPlatApplicationOptions(IReadOnlyList{string})"/> overload when a launcher owns
+    /// them; assigning <see cref="CommandLine"/> later does not re-apply the switch.
     /// </para>
     /// <para>
     /// An explicit assignment always wins, so setting this to true after a
     /// <c>--no-hardware-acceleration</c> launch keeps acceleration on. The setting is a decision the
-    /// window makes when it allocates its drawing surface: the fallback to the DIB path is silent
-    /// and the window never fails because acceleration was requested but unavailable. Every other
-    /// backend, and every popup, menu and headless surface, ignores it.
+    /// window makes when it allocates its drawing surface: the fallback to the CPU path is silent
+    /// and the window never fails because acceleration was requested but unavailable. Popups,
+    /// menus, headless surfaces and backends with no accelerated path ignore it.
     /// </para>
     /// </remarks>
-    public bool GfxHardwareAcceleration
-    {
-        get => _gfxHardwareAcceleration;
-        set
-        {
-            _gfxHardwareAcceleration = value;
-            _gfxHardwareAccelerationAssigned = true;
-        }
-    }
+    public bool GfxHardwareAcceleration { get; set; }
+
+    /// <summary>
+    /// The value <see cref="GfxHardwareAcceleration"/> takes before any explicit assignment: off on
+    /// macOS, on elsewhere, and off everywhere for <c>--no-hardware-acceleration</c>.
+    /// </summary>
+    private static bool DefaultHardwareAcceleration(IReadOnlyList<string> arguments) =>
+        !OperatingSystem.IsMacOS() && !HasNoHardwareAccelerationSwitch(arguments);
 
     private static bool HasNoHardwareAccelerationSwitch(IReadOnlyList<string> arguments)
     {

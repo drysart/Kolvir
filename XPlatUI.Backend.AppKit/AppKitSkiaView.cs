@@ -56,9 +56,13 @@ internal sealed class AppKitSkiaView : NSView
     private static readonly string[] DragTypes = [FileUrlType, PlainTextType];
 
     private readonly XPlatUiHost _host;
+    private readonly bool _useHardwareAcceleration;
 
     private NSTrackingArea? _trackingArea;
     private bool _tracksPointerInBackgroundWindow;
+    private AppKitMetalSurface? _metal;
+    private string _gfxReason = "cpu (not created)";
+    private bool _metalUnavailable;
     private SKBitmap? _bitmap;
     private SKSurface? _skia;
     private CGDataProvider? _provider;
@@ -86,11 +90,23 @@ internal sealed class AppKitSkiaView : NSView
     private long _reportedFrames;
 
     /// <summary>Creates a view that draws and drives <paramref name="host"/>.</summary>
-    public AppKitSkiaView(XPlatUiHost host)
+    /// <param name="host">The control tree to paint.</param>
+    /// <param name="hardwareAcceleration">
+    /// True to try the Metal tiers before the CPU <c>CGImage</c> path. Popup windows leave this
+    /// false, which is the equivalent of the Win32 backend keeping its popups on the DIB.
+    /// </param>
+    public AppKitSkiaView(XPlatUiHost host, bool hardwareAcceleration = false)
     {
         ArgumentNullException.ThrowIfNull(host);
 
         _host = host;
+        _useHardwareAcceleration = hardwareAcceleration;
+
+        if (!hardwareAcceleration)
+        {
+            _gfxReason = "cpu (disabled)";
+        }
+
         _host.AddInvalidatedHandler(OnHostInvalidated);
         _host.AddCursorChangedHandler(OnHostCursorChanged);
         XPlatTheme.AddChangedHandler(OnThemeChanged);
@@ -152,8 +168,43 @@ internal sealed class AppKitSkiaView : NSView
         }
     }
 
+    /// <summary>
+    /// A move to a display with a different scale changes the device-pixel size without changing
+    /// the frame. The CPU path notices in <see cref="EnsureBuffer"/>; the Metal path notices when
+    /// <see cref="AppKitMetalSurface.EnsureSize"/> sees the new pixel size, and either way the
+    /// frame has to be asked for.
+    /// </summary>
+    public override void DidChangeBackingProperties()
+    {
+        base.DidChangeBackingProperties();
+        NeedsDisplay = true;
+    }
+
     /// <summary>The platform independent UI host this view paints.</summary>
     public XPlatUiHost Host => _host;
+
+    /// <summary>
+    /// What this view is presenting with, for a one-line diagnostic: <c>metal</c> when the Metal
+    /// tiers are live, or <c>cpu (...)</c> with the step that put it there.
+    /// </summary>
+    internal string GraphicsPath => _metal is not null ? "metal" : _gfxReason;
+
+    /// <summary>The Metal device name when <see cref="GraphicsPath"/> is <c>metal</c>, else null.</summary>
+    internal string? GraphicsRenderer => _metal?.Renderer;
+
+    /// <summary>
+    /// Builds the Metal stack once the view has its window and backing scale, so the presentation
+    /// path is decided before the window reports itself shown. Calling it again does nothing.
+    /// </summary>
+    internal void PrepareGraphics()
+    {
+        if (!_useHardwareAcceleration || _metal is not null || _metalUnavailable)
+        {
+            return;
+        }
+
+        TryCreateMetal(Bounds, BackingScaleOf());
+    }
 
     /// <summary>Top-left origin, y down: the coordinate space the UI library draws in.</summary>
     public override bool IsFlipped => true;
@@ -225,7 +276,7 @@ internal sealed class AppKitSkiaView : NSView
             return;
         }
 
-        var scale = Math.Max((int)Math.Round(Window is null ? 1d : (double)Window.BackingScaleFactor), 1);
+        var scale = BackingScaleOf();
         SyncHostSize();
 
         // Resizing the host lays its children out, which asks for a repaint - but this frame is
@@ -233,6 +284,29 @@ internal sealed class AppKitSkiaView : NSView
         // satisfied. Asking for another frame on its behalf would double the work of every step of
         // a live resize.
         _invalidationDuringDraw = false;
+
+        // The backend creates its surface when the window is really shown, and a window shown
+        // before PrepareGraphics has run falls in here on its first draw.
+        if (_metal is null && !_metalUnavailable && _useHardwareAcceleration)
+        {
+            TryCreateMetal(bounds, scale);
+        }
+
+        if (_metal is not null)
+        {
+            try
+            {
+                DrawMetal(bounds, scale);
+            }
+            catch (Exception ex)
+            {
+                // A paint that throws must not escape UpdateLayer; the next frame is the CPU path.
+                Trace($"metal draw threw {ex.GetType().Name}: {ex.Message}");
+                DropMetal($"cpu (metal draw threw {ex.GetType().Name})");
+            }
+
+            return;
+        }
 
         EnsureBuffer((int)Math.Round(bounds.Width), (int)Math.Round(bounds.Height), scale);
 
@@ -273,6 +347,163 @@ internal sealed class AppKitSkiaView : NSView
 
         // A window that painted is a window whose last complaint is out of date.
         _diagnostic = null;
+    }
+
+    private int BackingScaleOf() =>
+        Math.Max((int)Math.Round(Window is null ? 1d : (double)Window.BackingScaleFactor), 1);
+
+    /// <summary>
+    /// Tries to bring the Metal stack up at the view's current size. A failure is remembered for
+    /// the life of the window, exactly as the Win32 probe is, so a window that fell back does not
+    /// retry a losing probe on every frame.
+    /// </summary>
+    private void TryCreateMetal(CGRect bounds, int scale)
+    {
+        var hostLayer = Layer;
+
+        if (hostLayer is null)
+        {
+            // AppKit has not made the backing layer yet; this is not a reason to give up, because
+            // the next draw asks again.
+            _gfxReason = "cpu (no host layer)";
+            return;
+        }
+
+        var width = Math.Max((int)Math.Round(bounds.Width) * scale, 1);
+        var height = Math.Max((int)Math.Round(bounds.Height) * scale, 1);
+        var frame = new CGRect(0, 0, bounds.Width, bounds.Height);
+
+        var metal = AppKitMetalSurface.TryCreate(hostLayer, frame, width, height, scale, out var reason);
+
+        _gfxReason = reason;
+
+        if (metal is null)
+        {
+            _metalUnavailable = true;
+            Trace($"gfx: {reason}");
+            return;
+        }
+
+        _metal = metal;
+        _metalUnavailable = false;
+        Trace($"gfx: {reason} ({metal.Renderer})");
+    }
+
+    /// <summary>
+    /// Presents one frame through Metal. The retained tier paints only the host's damage into the
+    /// persistent offscreen surface and blits the whole buffer; the direct tier paints a fresh
+    /// drawable in full. A drawable that is not available skips the frame rather than spinning.
+    /// </summary>
+    private void DrawMetal(CGRect bounds, int scale)
+    {
+        var metal = _metal!;
+        var width = (int)Math.Round(bounds.Width) * scale;
+        var height = (int)Math.Round(bounds.Height) * scale;
+
+        if (width <= 0 || height <= 0)
+        {
+            Trace($"metal draw skipped: empty drawable {width}x{height}");
+            return;
+        }
+
+        if (!metal.EnsureSize(width, height, scale))
+        {
+            DropMetal("cpu (invalid drawable size)");
+            return;
+        }
+
+        // The backing layer can be replaced when the view moves between windows; a sublayer that
+        // was attached to the old one would never be composited.
+        if (Layer is { } hostLayer && metal.Layer is { } metalLayer &&
+            !ReferenceEquals(metalLayer.SuperLayer, hostLayer))
+        {
+            hostLayer.AddSublayer(metalLayer);
+        }
+
+        if (metal.HasRetainedBuffer && metal.Surface is { } retained)
+        {
+            var damaged = _host.IsUpdatePending
+                || metal.NeedsFullRepaint
+                || _paintedGeneration != _bufferGeneration;
+
+            if (AppKitMetalTrace.IsEnabled)
+            {
+                AppKitMetalTrace.Write(
+                    $"frame {width}x{height} retained damaged={damaged} full={metal.NeedsFullRepaint}");
+            }
+
+            if (damaged)
+            {
+                // The offscreen contents are undefined when it is created, and a resize or scale
+                // change makes them so again; TakeNeedsFull is what forces that first frame full.
+                var full = metal.TakeNeedsFull() || _paintedGeneration != _bufferGeneration;
+                _paintedGeneration = _bufferGeneration;
+                PaintHost(retained, full, scale, bounds);
+            }
+
+            var result = metal.PresentRetained();
+
+            if (result == AppKitMetalPresentResult.Skipped)
+            {
+                return;
+            }
+
+            if (result == AppKitMetalPresentResult.RetryDirect)
+            {
+                // The retained buffer failed mid-frame. Repaint this one frame against a fresh
+                // drawable and present it; the next frame stays on the direct tier.
+                var retry = metal.PresentDirect(surface => PaintHost(surface, full: true, scale, bounds));
+
+                if (retry == AppKitMetalPresentResult.Lost)
+                {
+                    DropMetal("cpu (metal context lost)");
+                }
+
+                return;
+            }
+
+            if (result == AppKitMetalPresentResult.Lost)
+            {
+                DropMetal("cpu (metal context lost)");
+            }
+
+            return;
+        }
+
+        // The direct tier has no retained contents, so every frame it serves is a full frame.
+        var direct = metal.PresentDirect(surface => PaintHost(surface, full: true, scale, bounds));
+
+        if (direct == AppKitMetalPresentResult.Lost)
+        {
+            DropMetal("cpu (metal context lost)");
+        }
+    }
+
+    private SKRectI PaintHost(SKSurface surface, bool full, int scale, CGRect bounds)
+    {
+        var canvas = surface.Canvas;
+        canvas.Save();
+        canvas.Scale(scale);
+        canvas.ClipRect(new SKRect(0, 0, (float)bounds.Width, (float)bounds.Height));
+        var area = _host.Paint(canvas, full);
+        canvas.Restore();
+        canvas.Flush();
+        return area;
+    }
+
+    /// <summary>
+    /// Drops the Metal stack and returns the view to its CPU path for the rest of its life. The
+    /// CPU buffer may never have been allocated, so the next frame builds it and paints in full.
+    /// </summary>
+    private void DropMetal(string reason)
+    {
+        _metal?.Dispose();
+        _metal = null;
+        _metalUnavailable = true;
+        _gfxReason = reason;
+        _bufferGeneration++;
+        NeedsDisplay = true;
+        Trace($"gfx: {reason}");
     }
 
     /// <summary>
@@ -588,6 +819,9 @@ internal sealed class AppKitSkiaView : NSView
                 _trackingArea.Dispose();
                 _trackingArea = null;
             }
+
+            _metal?.Dispose();
+            _metal = null;
 
             ReleaseBuffer();
 
