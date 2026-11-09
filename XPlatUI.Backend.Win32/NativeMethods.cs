@@ -734,12 +734,21 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")]
     internal static extern bool BitBlt(IntPtr hdc, int x, int y, int cx, int cy, IntPtr hdcSrc, int x1, int y1, uint rop);
 
-    // opengl32 - the WGL pixel-format entry points, the context and the one core GL query needed to
-    // describe the framebuffer. The pixel-format calls are resolved from opengl32 rather than
-    // gdi32 on purpose: gdi32's versions route through the system's ICD registration, which hands
-    // back a system format number that wglCreateContext then rejects on a machine whose ICD is not
-    // registered. The opengl32 exports are the driver-level ones every caller is supposed to use,
-    // and they work the same on real hardware.
+    // gdi32 - the app-facing pixel-format calls. These route through the display driver to the
+    // registered ICD, which is what a vendor driver expects. They are tried first on a throwaway
+    // window; the opengl32 wgl* pair below is the fallback for a stack that stands in for the whole
+    // implementation (Mesa).
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern int ChoosePixelFormat(IntPtr hdc, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern bool SetPixelFormat(IntPtr hdc, int format, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern int DescribePixelFormat(IntPtr hdc, int format, uint nBytes, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    // opengl32 - the ICD-facing pixel-format calls, the context and the core GL queries needed to
+    // describe the framebuffer. Never assumed to be the only face: the flavour probe decides.
     [DllImport("opengl32.dll", SetLastError = true)]
     internal static extern int wglChoosePixelFormat(IntPtr hdc, ref PIXELFORMATDESCRIPTOR ppfd);
 
@@ -794,8 +803,25 @@ internal static class NativeMethods
         uint dwFlags);
 
     // kernel32.
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetLastError();
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     internal static extern IntPtr GetModuleHandleW(string? lpModuleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    internal static extern unsafe uint GetEnvironmentVariableW(string lpName, char* lpBuffer, uint nSize);
+
+    [DllImport("kernel32.dll")]
+    internal static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern unsafe bool WriteFile(
+        IntPtr hFile,
+        byte* lpBuffer,
+        uint nNumberOfBytesToWrite,
+        out uint lpNumberOfBytesWritten,
+        IntPtr lpOverlapped);
 
     [DllImport("kernel32.dll")]
     internal static extern bool AttachConsole(uint dwProcessId);

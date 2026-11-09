@@ -21,21 +21,324 @@ namespace XPlatUI.Backend.Win32;
 /// <c>WM_PAINT</c>. Nothing schedules GL work on a timer or a worker.
 /// </para>
 /// </remarks>
+internal static class Win32GlTrace
+{
+    private const int StdErrorHandle = -12;
+    private const int MaxTraceBytes = 1024;
+
+    private static readonly bool Enabled = ResolveEnabled();
+
+    internal static unsafe void Write(string message)
+    {
+        if (!Enabled)
+        {
+            return;
+        }
+
+        // Console.Error costs about 75 KB in a trimmed native image, which this opt-in diagnostic
+        // does not justify. Write the UTF-8 bytes to the standard error handle directly instead.
+        byte* buffer = stackalloc byte[MaxTraceBytes];
+        int length = Encode("xplatui-gl: ", buffer, 0);
+
+        length = Encode(message, buffer, length);
+
+        if (length < MaxTraceBytes)
+        {
+            buffer[length++] = (byte)'\n';
+        }
+
+        IntPtr handle = NativeMethods.GetStdHandle(StdErrorHandle);
+
+        if (handle != IntPtr.Zero && handle != new IntPtr(-1))
+        {
+            NativeMethods.WriteFile(handle, buffer, (uint)length, out _, IntPtr.Zero);
+        }
+    }
+
+    private static unsafe int Encode(string text, byte* buffer, int offset)
+    {
+        for (int i = 0; i < text.Length && offset < MaxTraceBytes - 4; i++)
+        {
+            char c = text[i];
+
+            if (c < 0x80)
+            {
+                buffer[offset++] = (byte)c;
+            }
+            else if (c < 0x800)
+            {
+                buffer[offset++] = (byte)(0xC0 | (c >> 6));
+                buffer[offset++] = (byte)(0x80 | (c & 0x3F));
+            }
+            else if (char.IsHighSurrogate(c) && i + 1 < text.Length && char.IsLowSurrogate(text[i + 1]))
+            {
+                int codePoint = char.ConvertToUtf32(c, text[++i]);
+                buffer[offset++] = (byte)(0xF0 | (codePoint >> 18));
+                buffer[offset++] = (byte)(0x80 | ((codePoint >> 12) & 0x3F));
+                buffer[offset++] = (byte)(0x80 | ((codePoint >> 6) & 0x3F));
+                buffer[offset++] = (byte)(0x80 | (codePoint & 0x3F));
+            }
+            else
+            {
+                buffer[offset++] = (byte)(0xE0 | (c >> 12));
+                buffer[offset++] = (byte)(0x80 | ((c >> 6) & 0x3F));
+                buffer[offset++] = (byte)(0x80 | (c & 0x3F));
+            }
+        }
+
+        return offset;
+    }
+
+    private static unsafe bool ResolveEnabled()
+    {
+        char* buffer = stackalloc char[8];
+        uint length = NativeMethods.GetEnvironmentVariableW("XPLATUI_GL_TRACE", buffer, 8);
+
+        if (length is 0 or > 8)
+        {
+            return false;
+        }
+
+        return buffer[0] == '1' || buffer[0] is 't' or 'T';
+    }
+}
+
+/// <summary>Which family of pixel-format entry points a context is created with.</summary>
+/// <remarks>
+/// The three pixel-format calls have two faces on Windows. <c>gdi32</c>'s
+/// <c>ChoosePixelFormat</c>/<c>SetPixelFormat</c>/<c>DescribePixelFormat</c> are the app-facing ones
+/// and route through the display driver to the registered ICD, which is what a real vendor driver
+/// expects. <c>opengl32</c> exports its own <c>wgl*</c> versions, which are the ICD-facing side;
+/// Mesa implements those as the stand-in stack and a real ICD may not. Neither can be assumed, so
+/// each is tried on a throwaway window before the real window spends its one-shot pixel format.
+/// </remarks>
+internal enum Win32GlFlavor
+{
+    /// <summary><c>gdi32</c> <c>ChoosePixelFormat</c>/<c>SetPixelFormat</c>, the app-facing pair.</summary>
+    Gdi32,
+
+    /// <summary><c>opengl32</c> <c>wglChoosePixelFormat</c>/<c>wglSetPixelFormat</c>, the ICD-facing pair.</summary>
+    Opengl32,
+}
+
+/// <summary>Tries one flavour on one window and returns a live context or a bare failure detail.</summary>
+internal interface IWin32GlFlavorTester
+{
+    /// <summary>
+    /// Sets a pixel format on <paramref name="hwnd"/> with <paramref name="flavor"/> and creates a
+    /// WGL context for it. A failure must leave no context live and returns a short detail such as
+    /// <c>gdi: no wgl context (error 0)</c>. The returned object is disposed by the probe, which is
+    /// all the selection needs; the real window's creation asks for the concrete context.
+    /// </summary>
+    IDisposable? TryCreate(IntPtr hwnd, Win32GlFlavor flavor, out string failure);
+}
+
+/// <summary>Creates and destroys the hidden 1 x 1 windows the flavour probe spends.</summary>
+internal interface IWin32ProbeWindowFactory
+{
+    IntPtr Create();
+
+    void Destroy(IntPtr hwnd);
+}
+
+/// <summary>
+/// The production probe: chooses a flavour on throwaway windows, then builds the real context on the
+/// window the caller handed over.
+/// </summary>
 internal interface IWin32GlProbe
 {
     /// <summary>
-    /// Sets a pixel format on the window and creates a WGL context for it, or returns null when the
-    /// machine has no usable OpenGL implementation. A failure must leave nothing live behind.
+    /// Tests each flavour on its own throwaway window and returns the first one that produced a
+    /// live context, or null with a combined failure detail when neither did.
     /// </summary>
-    Win32GlContext? TryCreate(IntPtr hwnd);
+    Win32GlFlavor? SelectFlavor(out string failure);
+
+    /// <summary>Builds the chosen flavour's context on the real window.</summary>
+    Win32GlContext? TryCreate(IntPtr hwnd, Win32GlFlavor flavor, out string failure);
 }
 
-/// <summary>The production probe: WGL on the window's own device context.</summary>
+/// <summary>The production probe.</summary>
 internal sealed class Win32GlProbe : IWin32GlProbe
 {
-    internal static Win32GlProbe Instance { get; } = new();
+    private static readonly Win32GlFlavor[] Flavors =
+    [
+        // The app-facing pair first, because that is what a real vendor ICD expects. A stack that
+        // is standing in for the whole thing - Mesa - fails here after spending the throwaway
+        // window's format, and the opengl32 pair on a fresh window is what rescues it.
+        Win32GlFlavor.Gdi32,
+        Win32GlFlavor.Opengl32,
+    ];
 
-    public Win32GlContext? TryCreate(IntPtr hwnd) => Win32GlContext.TryCreate(hwnd);
+    private readonly IWin32GlFlavorTester _tester;
+    private readonly IWin32ProbeWindowFactory _windows;
+
+    internal Win32GlProbe(IWin32GlFlavorTester tester, IWin32ProbeWindowFactory windows)
+    {
+        ArgumentNullException.ThrowIfNull(tester);
+        ArgumentNullException.ThrowIfNull(windows);
+
+        _tester = tester;
+        _windows = windows;
+    }
+
+    internal static Win32GlProbe Instance { get; } = new(new Win32GlFlavorTester(), new Win32ProbeWindowFactory());
+
+    public Win32GlFlavor? SelectFlavor(out string failure) =>
+        Win32GlFlavorSelection.Select(_tester, _windows, out failure);
+
+    public Win32GlContext? TryCreate(IntPtr hwnd, Win32GlFlavor flavor, out string failure) =>
+        _tester.TryCreate(hwnd, flavor, out failure) as Win32GlContext;
+
+    /// <summary>The order the flavours are tried in, exposed for the trace and the tests.</summary>
+    internal static IReadOnlyList<Win32GlFlavor> Order => Flavors;
+}
+
+/// <summary>The flavour decision, split from the native windows so a test can drive every case.</summary>
+internal static class Win32GlFlavorSelection
+{
+    /// <summary>
+    /// Tries each flavour on a fresh throwaway window. The real window is never passed to this
+    /// method, which is what guarantees a failed probe cannot consume its one-shot pixel format.
+    /// </summary>
+    internal static Win32GlFlavor? Select(
+        IWin32GlFlavorTester tester,
+        IWin32ProbeWindowFactory windows,
+        out string failure)
+    {
+        ArgumentNullException.ThrowIfNull(tester);
+        ArgumentNullException.ThrowIfNull(windows);
+
+        var failures = new List<string>(2);
+
+        foreach (var flavor in Win32GlProbe.Order)
+        {
+            var probeWindow = windows.Create();
+
+            if (probeWindow == IntPtr.Zero)
+            {
+                failures.Add($"{Name(flavor)}: no probe window");
+                Win32GlTrace.Write($"{Name(flavor)}: no probe window");
+                continue;
+            }
+
+            try
+            {
+                var context = tester.TryCreate(probeWindow, flavor, out var detail);
+
+                if (context is not null)
+                {
+                    context.Dispose();
+                    Win32GlTrace.Write($"{Name(flavor)}: live context on probe window, selected");
+                    failure = string.Empty;
+                    return flavor;
+                }
+
+                failures.Add(detail);
+                Win32GlTrace.Write(detail);
+            }
+            catch (Exception exception)
+            {
+                failures.Add($"{Name(flavor)}: threw {exception.GetType().Name}");
+                Win32GlTrace.Write($"{Name(flavor)}: threw {exception.GetType().Name}");
+            }
+            finally
+            {
+                windows.Destroy(probeWindow);
+            }
+        }
+
+        // Report the flavour that was tried last as the headline reason, in the same vocabulary the
+        // individual steps use, and keep the other flavour's reason after it. A screenshot then
+        // names the failing step rather than a generic "no context".
+        failure = failures.Count switch
+        {
+            0 => "no gl context",
+            1 => failures[0],
+            _ => Combine(failures),
+        };
+
+        return null;
+    }
+
+    private static string Combine(List<string> failures)
+    {
+        string combined = Detail(failures[^1]);
+
+        for (int i = 0; i < failures.Count - 1; i++)
+        {
+            combined += "; " + failures[i];
+        }
+
+        return combined;
+    }
+
+    private static string Detail(string failure)
+    {
+        int separator = failure.IndexOf(": ", StringComparison.Ordinal);
+
+        return separator < 0 ? failure : failure[(separator + 2)..];
+    }
+
+    internal static string Name(Win32GlFlavor flavor) => flavor switch
+    {
+        Win32GlFlavor.Gdi32 => "gdi",
+        Win32GlFlavor.Opengl32 => "wgl",
+        _ => flavor.ToString(),
+    };
+}
+
+/// <summary>Creates the hidden probe window. <c>STATIC</c> is a system class, so nothing registers.</summary>
+internal sealed class Win32ProbeWindowFactory : IWin32ProbeWindowFactory
+{
+    public IntPtr Create() => NativeMethods.CreateWindowExW(
+        0,
+        "STATIC",
+        string.Empty,
+        NativeMethods.WsPopup,
+        0,
+        0,
+        1,
+        1,
+        IntPtr.Zero,
+        IntPtr.Zero,
+        NativeMethods.GetModuleHandleW(null),
+        IntPtr.Zero);
+
+    public void Destroy(IntPtr hwnd)
+    {
+        if (hwnd != IntPtr.Zero)
+        {
+            NativeMethods.DestroyWindow(hwnd);
+        }
+    }
+}
+
+/// <summary>The production flavour tester: the actual WGL calls on one window.</summary>
+internal sealed class Win32GlFlavorTester : IWin32GlFlavorTester
+{
+    public IDisposable? TryCreate(IntPtr hwnd, Win32GlFlavor flavor, out string failure)
+    {
+        var context = Win32GlContext.TryCreate(hwnd, flavor, out failure);
+
+        if (context is null)
+        {
+            return null;
+        }
+
+        // A live WGL context is not enough: the generic GDI OpenGL 1.1 stack creates one and then
+        // has no extensions Skia can use. Validating the Skia side here, before the real window's
+        // one-shot pixel format is spent, is what keeps the DIB path untouched on such a machine.
+        var skiaFailure = Win32GlSurface.ProbeSkia(context);
+
+        if (skiaFailure is not null)
+        {
+            context.Dispose();
+            failure = $"{Win32GlFlavorSelection.Name(flavor)}: {skiaFailure}";
+            return null;
+        }
+
+        return context;
+    }
 }
 
 /// <summary>
@@ -69,22 +372,30 @@ internal sealed class Win32GlContext : IDisposable
     /// <summary>The framebuffer's multisample count, queried from GL rather than assumed.</summary>
     internal int Samples => _samples;
 
-    /// <summary>The framebuffer's stencil depth, queried from GL/PFD rather than assumed.</summary>
+    /// <summary>The framebuffer's stencil depth, taken from the described pixel format.</summary>
     internal int StencilBits => _stencilBits;
 
     /// <summary>Vendor and renderer, so a screenshot says which GPU produced its numbers.</summary>
     internal string Renderer { get; }
 
-    internal static Win32GlContext? TryCreate(IntPtr hwnd)
+    /// <summary>
+    /// Builds a context with one flavour. Every failure returns a bare detail naming the step and
+    /// the Win32 error where there is one; the caller wraps it in <c>cpu (...)</c>.
+    /// </summary>
+    internal static Win32GlContext? TryCreate(IntPtr hwnd, Win32GlFlavor flavor, out string failure)
     {
         if (hwnd == IntPtr.Zero)
         {
+            failure = "no window";
             return null;
         }
 
+        string name = Win32GlFlavorSelection.Name(flavor);
         var dc = NativeMethods.GetDC(hwnd);
+
         if (dc == IntPtr.Zero)
         {
+            failure = $"{name}: no dc (error {NativeMethods.GetLastError()})";
             return null;
         }
 
@@ -104,51 +415,82 @@ internal sealed class Win32GlContext : IDisposable
                 cStencilBits = 8,
             };
 
-            // wglChoosePixelFormat/wglSetPixelFormat, not gdi32's ChoosePixelFormat/SetPixelFormat:
-            // the wgl exports go through the ICD that wglCreateContext will use, while the gdi32
-            // ones can hand back a system format number that wglCreateContext rejects.
-            int format = NativeMethods.wglChoosePixelFormat(dc, ref descriptor);
+            int format = flavor == Win32GlFlavor.Gdi32
+                ? NativeMethods.ChoosePixelFormat(dc, ref descriptor)
+                : NativeMethods.wglChoosePixelFormat(dc, ref descriptor);
+
+            int chooseError = (int)NativeMethods.GetLastError();
+
             if (format == 0)
             {
                 NativeMethods.ReleaseDC(hwnd, dc);
+                failure = $"{name}: no pixel format (error {chooseError})";
+                return null;
+            }
+
+            bool set = flavor == Win32GlFlavor.Gdi32
+                ? NativeMethods.SetPixelFormat(dc, format, ref descriptor)
+                : NativeMethods.wglSetPixelFormat(dc, format, ref descriptor);
+
+            int setError = (int)NativeMethods.GetLastError();
+
+            if (!set)
+            {
+                NativeMethods.ReleaseDC(hwnd, dc);
+                failure = $"{name}: set pixel format failed (error {setError})";
                 return null;
             }
 
             // A window's pixel format can be set once and never changed, which is why the whole GL
             // stack either comes up on this call or the window stays on the DIB path for its life.
-            if (!NativeMethods.wglSetPixelFormat(dc, format, ref descriptor))
-            {
-                NativeMethods.ReleaseDC(hwnd, dc);
-                return null;
-            }
-
+            // The probe decides the flavour on throwaway windows precisely so this call is only
+            // made on the real window with a flavour that already proved itself.
             var actual = new NativeMethods.PIXELFORMATDESCRIPTOR
             {
                 nSize = (ushort)Marshal.SizeOf<NativeMethods.PIXELFORMATDESCRIPTOR>(),
             };
 
-            if (NativeMethods.wglDescribePixelFormat(
+            int described = flavor == Win32GlFlavor.Gdi32
+                ? NativeMethods.DescribePixelFormat(
                     dc,
                     format,
                     (uint)Marshal.SizeOf<NativeMethods.PIXELFORMATDESCRIPTOR>(),
-                    ref actual) == 0
-                || (actual.dwFlags & NativeMethods.PfdDoubleBuffer) == 0)
+                    ref actual)
+                : NativeMethods.wglDescribePixelFormat(
+                    dc,
+                    format,
+                    (uint)Marshal.SizeOf<NativeMethods.PIXELFORMATDESCRIPTOR>(),
+                    ref actual);
+
+            if (described == 0)
             {
                 NativeMethods.ReleaseDC(hwnd, dc);
+                failure = $"{name}: describe pixel format failed (error {NativeMethods.GetLastError()})";
+                return null;
+            }
+
+            if ((actual.dwFlags & NativeMethods.PfdDoubleBuffer) == 0)
+            {
+                NativeMethods.ReleaseDC(hwnd, dc);
+                failure = $"{name}: pixel format has no double buffer";
                 return null;
             }
 
             context = NativeMethods.wglCreateContext(dc);
+
             if (context == IntPtr.Zero)
             {
                 NativeMethods.ReleaseDC(hwnd, dc);
+                failure = $"{name}: no wgl context (error {NativeMethods.GetLastError()})";
                 return null;
             }
 
             if (!NativeMethods.wglMakeCurrent(dc, context))
             {
+                int error = (int)NativeMethods.GetLastError();
                 NativeMethods.wglDeleteContext(context);
                 NativeMethods.ReleaseDC(hwnd, dc);
+                failure = $"{name}: wglMakeCurrent failed (error {error})";
                 return null;
             }
 
@@ -184,6 +526,12 @@ internal sealed class Win32GlContext : IDisposable
 
             string renderer = DescribeRenderer();
 
+            Win32GlTrace.Write(
+                $"{name}: format={format} colorBits={actual.cColorBits} " +
+                $"stencilBits={Math.Max(stencilBits, 0)} samples={Math.Max(samples, 0)} " +
+                $"renderer=\"{renderer}\"");
+
+            failure = string.Empty;
             return new Win32GlContext(
                 hwnd,
                 dc,
@@ -192,7 +540,7 @@ internal sealed class Win32GlContext : IDisposable
                 Math.Max(stencilBits, 0),
                 renderer);
         }
-        catch (Exception)
+        catch (Exception exception)
         {
             if (context != IntPtr.Zero)
             {
@@ -201,6 +549,7 @@ internal sealed class Win32GlContext : IDisposable
             }
 
             NativeMethods.ReleaseDC(hwnd, dc);
+            failure = $"{name}: gl init threw {exception.GetType().Name}";
             return null;
         }
     }
@@ -299,9 +648,48 @@ internal sealed class Win32GlSurface : IDisposable
     internal bool MakeCurrent() => _context.MakeCurrent();
 
     /// <summary>
-    /// Builds the whole stack or nothing: interface, Skia context, render target and surface each
-    /// can fail, and a caller that gets null must be able to stay on the CPU path with no GL state
-    /// left behind.
+    /// Validates that Skia can use this native context, without creating a window-sized surface.
+    /// Used by the flavour probe on its throwaway window so a stack that has WGL but no usable GL
+    /// interface never spends the real window's pixel format.
+    /// </summary>
+    internal static string? ProbeSkia(Win32GlContext context)
+    {
+        if (!context.MakeCurrent())
+        {
+            return "no current context";
+        }
+
+        GRGlInterface? glInterface = null;
+
+        try
+        {
+            // The interface is the step that fails on a GDI Generic OpenGL 1.1 stack: it has a
+            // context but none of the extensions Skia needs. Validating it here is enough to keep
+            // the real window's one-shot format untouched on such a machine, and it avoids creating
+            // a second GPU context just to throw it away.
+            glInterface = GRGlInterface.Create();
+
+            if (glInterface is null)
+            {
+                return "no gl interface";
+            }
+
+            return glInterface.Validate() ? null : "interface invalid";
+        }
+        catch (Exception exception)
+        {
+            return $"gl init threw {exception.GetType().Name}";
+        }
+        finally
+        {
+            glInterface?.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// Builds the whole stack or nothing: the probe picks a flavour, then the interface, Skia
+    /// context, render target and surface each can fail, and a caller that gets null must be able to
+    /// stay on the CPU path with no GL state left behind.
     /// </summary>
     internal static Win32GlSurface? TryCreate(
         IntPtr hwnd,
@@ -324,19 +712,41 @@ internal sealed class Win32GlSurface : IDisposable
             return null;
         }
 
-        Win32GlContext? nativeContext;
+        Win32GlFlavor? flavor;
+
         try
         {
-            nativeContext = probe.TryCreate(hwnd);
+            flavor = probe.SelectFlavor(out var flavorFailure);
+
+            if (flavor is null)
+            {
+                reason = $"cpu ({flavorFailure})";
+                return null;
+            }
+
+            Win32GlTrace.Write($"using {Win32GlFlavorSelection.Name(flavor.Value)} on the real window");
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            nativeContext = null;
+            reason = $"cpu (gl probe threw {exception.GetType().Name})";
+            return null;
         }
 
-        if (nativeContext is null)
+        Win32GlContext? nativeContext;
+
+        try
         {
-            reason = "cpu (no gl context)";
+            nativeContext = probe.TryCreate(hwnd, flavor.Value, out var contextFailure);
+
+            if (nativeContext is null)
+            {
+                reason = $"cpu ({contextFailure})";
+                return null;
+            }
+        }
+        catch (Exception exception)
+        {
+            reason = $"cpu (gl context threw {exception.GetType().Name})";
             return null;
         }
 
@@ -352,19 +762,28 @@ internal sealed class Win32GlSurface : IDisposable
             }
 
             var glInterface = GRGlInterface.Create();
-            if (glInterface is null || !glInterface.Validate())
+
+            if (glInterface is null)
             {
-                glInterface?.Dispose();
                 reason = "cpu (no gl interface)";
                 surface.Dispose();
                 return null;
             }
 
+            if (!glInterface.Validate())
+            {
+                glInterface.Dispose();
+                reason = "cpu (interface invalid)";
+                surface.Dispose();
+                return null;
+            }
+
             var grContext = GRContext.CreateGl(glInterface);
+
             if (grContext is null)
             {
                 glInterface.Dispose();
-                reason = "cpu (no skia gl context)";
+                reason = "cpu (no gr context)";
                 surface.Dispose();
                 return null;
             }
@@ -382,9 +801,9 @@ internal sealed class Win32GlSurface : IDisposable
             reason = "gl";
             return surface;
         }
-        catch (Exception)
+        catch (Exception exception)
         {
-            reason = "cpu (gl init failed)";
+            reason = $"cpu (gl init threw {exception.GetType().Name})";
             surface.Dispose();
             return null;
         }
@@ -418,12 +837,12 @@ internal sealed class Win32GlSurface : IDisposable
     {
         if (_contextState is null)
         {
-            return "cpu (no skia gl context)";
+            return "cpu (no gr context)";
         }
 
         if (_contextState.IsAbandoned)
         {
-            return "cpu (skia gl context abandoned)";
+            return "cpu (gr context abandoned)";
         }
 
         if (!_context.MakeCurrent())
@@ -471,7 +890,7 @@ internal sealed class Win32GlSurface : IDisposable
         if (surface is null)
         {
             target.Dispose();
-            return $"cpu (no skia surface: {width}x{height}, {samples} samples, {_context.StencilBits} stencil)";
+            return $"cpu (no surface: {width}x{height}, {samples} samples, {_context.StencilBits} stencil)";
         }
 
         _target = target;

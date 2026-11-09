@@ -3995,12 +3995,17 @@ The rules the implementation follows:
 - **GL and GDI never present the same window.** When GL comes up the retained DIB is released and
   `WM_PAINT` paints and swaps the whole surface; it does not `BitBlt`. `WM_PRINTCLIENT` paints one
   CPU frame into a temporary DIB so screenshots and visual capture still work.
-- **The pixel format comes from `opengl32`, not `gdi32`.** `wglChoosePixelFormat`,
-  `wglSetPixelFormat` and `wglDescribePixelFormat` route through the ICD that
-  `wglCreateContext` will use; the `gdi32` equivalents can return a system format number that
-  `wglCreateContext` rejects. The framebuffer's sample count comes from `GL_SAMPLES` and its
-  stencil depth from the described pixel format, and both are passed to
-  `GRBackendRenderTarget` - never hardcoded.
+- **The pixel format is chosen on a throwaway window, not on the real one.** A window's format can
+  be set once and never changed, so the probe spends a hidden 1 x 1 window per flavour.
+  `gdi32`'s `ChoosePixelFormat`/`SetPixelFormat` is tried first, because that is the app-facing
+  path a vendor ICD expects; if it cannot produce a Skia-usable context, `opengl32`'s
+  `wglChoosePixelFormat`/`wglSetPixelFormat` pair is tried on a fresh window - that is the Mesa
+  path. The probe also creates and validates a `GRGlInterface` on the throwaway, so a stack with
+  WGL but only GDI Generic OpenGL 1.1 (no interface Skia can use) never spends the real window's
+  one-shot format. Only a flavour that passed every step is used
+  on the real window. The framebuffer's sample count comes from `GL_SAMPLES` and its stencil depth
+  from the described pixel format, and both are passed to `GRBackendRenderTarget` - never
+  hardcoded.
 - **Vsync is one interval** when `wglSwapIntervalEXT` exists.
 - **A lost context is a fallback, not an exception.** A driver reset, an RDP change, or a resize
   that cannot rebuild the render target disposes the GL stack and returns the window to the DIB
@@ -4014,9 +4019,17 @@ The rules the implementation follows:
   is for - the invalidation still differs, the present does not.
 
 `Win32WindowBackend.GraphicsPath` reports `gl` or `cpu (...)` with the reason, and `GraphicsRenderer`
-reports the GL vendor and device. The demo prints both at startup and keeps them in its footer, so
-a screenshot says which path produced its numbers; the **Measured rendering** page is where the
-CPU/GL A/B is run.
+reports the GL vendor and device. The reason names the failing step rather than a generic
+"no context", for example:
+
+```
+gfx: cpu (no gl interface; gdi: no wgl context (error 2000))
+```
+
+Set `XPLATUI_GL_TRACE=1` to print every probe attempt, the chosen flavour and format number, the
+described colour/stencil/sample counts and the renderer to stderr. The demo prints the one-line
+path and renderer at startup and keeps them in its footer, so a screenshot says which path produced
+its numbers; the **Measured rendering** page is where the CPU/GL A/B is run.
 
 Measured cost on the `XPlatUI.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
 §8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
@@ -4024,12 +4037,14 @@ Measured cost on the `XPlatUI.Minimal` floor (Windows x64, NativeAOT, Skia loose
 | Measurement | Bytes |
 | --- | ---: |
 | `XPlatUI.Minimal` floor before this change | 3,283,456 |
-| After the Win32 GL seam and the `GfxHardwareAcceleration` option | 3,312,640 |
-| Delta | +29,184 (+0.89 %) |
+| After the Win32 GL seam, the flavour probe and the `GfxHardwareAcceleration` option | 3,329,024 |
+| Delta | +45,568 (+1.39 %) |
 
 The WGL/P-invoke half is a handful of functions and one internal type set; it is not a package and
 adds no native asset. `opengl32.dll` is an operating-system component and the shipped
-`libSkiaSharp.dll` already contains the GL backend, so nothing new is shipped.
+`libSkiaSharp.dll` already contains the GL backend, so nothing new is shipped. The opt-in trace
+writes its UTF-8 bytes straight to the standard error handle instead of `Console.Error`, because
+routing it through `Console.Error` alone cost about 75 KB in a trimmed native image.
 
 ## Writing a backend
 
@@ -4258,12 +4273,14 @@ stack panel, and both report what the last frame cost to draw them.
 ### Measuring the Win32 GPU path by hand
 
 The footer always names the live path - `gfx: gl - <vendor> / <renderer>` or
-`gfx: cpu (no gl context)` - and the same line is printed at startup. The last demo page,
+`gfx: cpu (<step>)` - and the same line is printed at startup. The last demo page,
 **Measured rendering** (index 54), turns that into numbers:
 
 1. Run the demo on the machine being measured. Check the footer says `gfx: gl` and that the
-   renderer is the GPU you expect. On a machine with no ICD it says `gfx: cpu (no gl context)`,
-   which is the fallback doing its job rather than a failure to record.
+   renderer is the GPU you expect. On a fallback it says `gfx: cpu (...)` with the step that
+   failed, for example `cpu (no gl interface; gdi: no wgl context (error 2000))`; rerun with
+   `XPLATUI_GL_TRACE=1` to capture every probe attempt for a bug report.
+   That is the fallback doing its job rather than a failure to record.
 2. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
    **Measure 600 frames**. The page is invalidated from one 15 ms timer (about 66 Hz, which is what
    makes the Win32 backend use its high-resolution timer instead of rounding to 31.25 ms); the first 30 frames are

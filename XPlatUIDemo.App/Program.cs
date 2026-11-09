@@ -214,7 +214,10 @@ internal static class Program
             if (window.Backend is Win32WindowBackend win32)
             {
                 demo.SetGraphicsInfo(win32.GraphicsPath, win32.GraphicsRenderer);
-                Console.WriteLine($"gfx: {win32.GraphicsPath}; renderer: {win32.GraphicsRenderer ?? "none"}");
+                Console.WriteLine(
+                    win32.GraphicsRenderer is { } renderer
+                        ? $"gfx: {win32.GraphicsPath}; renderer: {renderer}"
+                        : $"gfx: {win32.GraphicsPath}");
             }
         });
 #else
