@@ -3958,8 +3958,34 @@ public sealed class DemoUi
 
         card.Controls.Add(viewportFrame);
 
-        // The buttons scroll the panel the way the scrollbar does, so the page demonstrates the same
-        // thing on a host whose pointer wheel nobody is driving.
+        // The page runs its own cycle: the picture is scrolled away for 700 ms and brought back for
+        // 2.3 s, over and over, while the page is displayed. That is what makes the point visible on
+        // a machine nobody is clicking on - and the buttons do one leg of it by hand.
+        var awayTimer = new XPlatTimer(TimeSpan.FromMilliseconds(2300));
+        var backTimer = new XPlatTimer(TimeSpan.FromMilliseconds(700));
+
+        awayTimer.AddTickHandler(_ =>
+        {
+            awayTimer.Stop();
+            viewport.ScrollTo(0f, 140f);
+            backTimer.Start();
+        });
+
+        backTimer.AddTickHandler(_ =>
+        {
+            backTimer.Stop();
+            viewport.ScrollTo(0f, 0f);
+            awayTimer.Start();
+        });
+
+        void Away()
+        {
+            awayTimer.Stop();
+            backTimer.Stop();
+            viewport.ScrollTo(0f, 140f);
+            backTimer.Start();
+        }
+
         var buttons = new XPlatPanel
         {
             Dock = XDock.Top,
@@ -3989,10 +4015,18 @@ public sealed class DemoUi
 
         away.AddClickHandler(_ =>
         {
-            viewport.ScrollTo(0f, 140f);
             SetStatus("The picture is scrolled out of view; the timeline is not.");
+            Away();
         });
-        back.AddClickHandler(_ => viewport.ScrollTo(0f, 0f));
+        back.AddClickHandler(_ =>
+        {
+            awayTimer.Stop();
+            backTimer.Stop();
+            viewport.ScrollTo(0f, 0f);
+            awayTimer.Start();
+        });
+
+        bool travelled = false;
 
         buttons.Controls.Add(away);
         buttons.Controls.Add(back);
@@ -4009,10 +4043,20 @@ public sealed class DemoUi
             if (image.IsDisplayed)
             {
                 timer.Start();
+
+                // The cycle starts the first time the page is looked at, so the demonstration happens
+                // without anyone clicking anything.
+                if (!travelled)
+                {
+                    travelled = true;
+                    awayTimer.Start();
+                }
             }
             else
             {
                 timer.Stop();
+                awayTimer.Stop();
+                backTimer.Stop();
             }
         });
 
@@ -4023,7 +4067,8 @@ public sealed class DemoUi
             "Scroll the picture away, wait, then scroll it back: the frame you get is the one the clock "
             + "says, not the one it left on. Nothing in the player arranges that - the position is "
             + "computed from a clock rather than accumulated by a timer - so the readout keeps counting "
-            + "while the picture is out of the frame and the frame that comes back agrees with it."));
+            + "while the picture is out of the frame and the frame that comes back agrees with it. The "
+            + "page runs the cycle itself so it can be watched without touching anything."));
 
         return card;
     }
