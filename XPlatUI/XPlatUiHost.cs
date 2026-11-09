@@ -420,9 +420,9 @@ public sealed class XPlatUiHost
     /// <summary>
     /// Whether the backend keeps the pixels of the previous frame between paints, so a paint only
     /// has to cover the area that was invalidated. Off by default, because a backend that
-    /// rasterizes the whole surface every frame - GTK4 and the headless renderer both do - would
-    /// be left with blank patches where the retained content should be. Turn it on only when
-    /// <see cref="Paint"/> draws into a surface that outlives the frame.
+    /// rasterizes the whole surface every frame - GTK4's CPU path and the headless renderer both
+    /// do - would be left with blank patches where the retained content should be. Turn it on only
+    /// when <see cref="Paint"/> draws into a surface that outlives the frame.
     /// </summary>
     public bool PartialUpdates { get; set; }
 

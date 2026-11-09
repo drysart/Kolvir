@@ -460,8 +460,6 @@ public sealed class Gtk4SkiaView : IDisposable
 
             sender.MakeCurrent();
 
-            Gtk4GlTrace.Write($"render {width}x{height}@{scale} gl={(_gl is null ? "no" : "yes")}");
-
             // Before Skia creates or binds anything: creating a texture surface leaves one of
             // Skia's framebuffers bound, and the target has to name GTK's.
             _gl?.CaptureFrameState();
@@ -554,6 +552,12 @@ public sealed class Gtk4SkiaView : IDisposable
         if (gl.HasRetainedBuffer && gl.Surface is { } retained)
         {
             var damaged = Host.IsUpdatePending || gl.NeedsFullRepaint;
+
+            if (Gtk4GlTrace.IsEnabled)
+            {
+                Gtk4GlTrace.Write(
+                    $"frame {width}x{height}@{scale} retained damaged={damaged} full={gl.NeedsFullRepaint}");
+            }
 
             if (damaged)
             {
@@ -659,9 +663,6 @@ public sealed class Gtk4SkiaView : IDisposable
         }
 
         var glLive = _gl is not null;
-
-        Gtk4GlTrace.Write(
-            $"swap: glLive={glLive}, pictureVisible={_picture.GetVisible()}, glAreaVisible={_glArea?.GetVisible()}");
 
         _picture.SetVisible(!glLive);
         _glArea?.SetVisible(glLive || !_glUnavailable);

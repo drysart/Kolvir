@@ -75,8 +75,6 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
 
     private delegate void GetIntegerProc(uint pname, int* value);
 
-    private delegate void ReadPixelsProc(int x, int y, int width, int height, uint format, uint type, IntPtr pixels);
-
     /// <summary>
     /// Kept in a field so the native side always finds a rooted delegate. It must never throw: the
     /// exception would cross back into native Skia code.
@@ -104,7 +102,7 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
     private bool _needsFull = true;
     private bool _offscreenUnavailable;
     private bool _disposed;
-    private bool _dumped;
+
 
     private Gtk4GlSurface(
         Gtk.GLArea area,
@@ -323,14 +321,6 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
             return null;
         }
 
-        // Temporary experiment switch: force the direct tier to see whether the retained buffer is
-        // what the window is missing.
-        if (Environment.GetEnvironmentVariable("XPLATUI_GL_DIRECT") is "1")
-        {
-            surface.DropRetainedBuffer();
-            Gtk4GlTrace.Write("forced direct tier");
-        }
-
         reason = "gl";
         return surface;
     }
@@ -346,7 +336,7 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
             return false;
         }
 
-        if (_offscreen is not null && _width == width && _height == height)
+        if (_width == width && _height == height)
         {
             return true;
         }
@@ -363,6 +353,7 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
 
         if (_offscreenUnavailable)
         {
+            // The direct tier has no buffer to rebuild; the target is recreated on demand.
             return true;
         }
 
@@ -421,6 +412,11 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
         {
             _area.MakeCurrent();
 
+            // GTK, the window system and our own previous frame all touch GL state, and Skia caches
+            // what it set last time. Resetting the cache makes Skia re-issue every piece of state it
+            // needs, which is what stops a second frame from drawing with a stale binding.
+            _context.ResetContext(GRGlBackendState.All);
+
             var target = EnsureTarget();
 
             if (target is null)
@@ -450,8 +446,6 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
             target.Canvas.Flush();
             _context.Flush();
 
-            DumpFramebuffer();
-
             return Gtk4GlPresentResult.Presented;
         }
         catch (Exception exception)
@@ -480,6 +474,11 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
         try
         {
             _area.MakeCurrent();
+
+            // GTK, the window system and our own previous frame all touch GL state, and Skia caches
+            // what it set last time. Resetting the cache makes Skia re-issue every piece of state it
+            // needs, which is what stops a second frame from drawing with a stale binding.
+            _context.ResetContext(GRGlBackendState.All);
 
             var target = EnsureTarget();
 
@@ -591,6 +590,9 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
         _targetSamples = samples;
         _targetStencil = stencil;
         DropTarget();
+
+        Gtk4GlTrace.Write(
+            $"framebuffer: fbo {fbo}, {width}x{height}, {samples} samples, {stencil} stencil");
     }
 
     /// <summary>
@@ -658,48 +660,8 @@ internal sealed unsafe class Gtk4GlSurface : IDisposable
         return _targetSurface;
     }
 
-    /// <summary>
-    /// Temporary diagnostic: reads the area framebuffer back into a PNG when
-    /// <c>XPLATUI_GL_DUMP=1</c>, so a picture of what the seam put in the framebuffer can be compared
-    /// with what the window shows.
-    /// </summary>
-    private void DumpFramebuffer()
+    private void DropTarget()
     {
-        if (Environment.GetEnvironmentVariable("XPLATUI_GL_DUMP") is not "1" || _dumped)
-        {
-            return;
-        }
-
-        _dumped = true;
-
-        try
-        {
-            var readPixels = Bind<ReadPixelsProc>("glReadPixels");
-
-            if (readPixels is null || _targetWidth <= 0 || _targetHeight <= 0)
-            {
-                Gtk4GlTrace.Write("dump: no glReadPixels");
-                return;
-            }
-
-            var info = new SKImageInfo(_targetWidth, _targetHeight, SKColorType.Rgba8888, SKAlphaType.Premul);
-            using var bitmap = new SKBitmap(info);
-            readPixels(0, 0, _targetWidth, _targetHeight, 0x1908, 0x1401, bitmap.GetPixels());
-
-            using var image = SKImage.FromBitmap(bitmap);
-            using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-            using var stream = File.Create("/tmp/xplatui-gl-frame.png");
-            data.SaveTo(stream);
-
-            Gtk4GlTrace.Write($"dump: wrote /tmp/xplatui-gl-frame.png ({_targetWidth}x{_targetHeight})");
-        }
-        catch (Exception exception)
-        {
-            Gtk4GlTrace.Write($"dump threw {exception.GetType().Name}: {exception.Message}");
-        }
-    }
-
-    private void DropTarget()    {
         _targetSurface?.Dispose();
         _targetSurface = null;
         _target?.Dispose();

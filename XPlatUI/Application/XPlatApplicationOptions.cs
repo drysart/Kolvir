@@ -121,9 +121,11 @@ public sealed class XPlatApplicationOptions
     /// so explicitly, which is what makes it the showcase.
     /// </para>
     /// <para>
-    /// Linux defaults to true for consistency with Windows even though the GTK4 backend has no
-    /// accelerated path yet; a backend that cannot accelerate ignores the flag and stays on the
-    /// CPU, so the default costs nothing.
+    /// Linux defaults to true for consistency with Windows, and the GTK4 backend now has its own
+    /// accelerated path: a <c>Gtk.GLArea</c> whose EGL context Skia drives through its GLES
+    /// interface, with the host's damage painted into a retained GPU surface and blitted onto the
+    /// area's framebuffer. A machine whose GL cannot come up stays on the CPU texture path with the
+    /// failing step named, so the default costs nothing there either.
     /// </para>
     /// <para>
     /// The constructor computes the default once: on Windows and Linux true, on macOS false, and
