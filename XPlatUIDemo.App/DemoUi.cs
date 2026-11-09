@@ -3958,33 +3958,79 @@ public sealed class DemoUi
 
         card.Controls.Add(viewportFrame);
 
-        // The page runs its own cycle: the picture is scrolled away for 700 ms and brought back for
-        // 2.3 s, over and over, while the page is displayed. That is what makes the point visible on
-        // a machine nobody is clicking on - and the buttons do one leg of it by hand.
+        // The page runs its own cycle so the claim can be watched without touching anything, but a
+        // page that pulls the viewport out from under the pointer is worse than one that needs a
+        // button: every leg first checks that the offset is still the one the cycle itself wrote,
+        // and the first scroll somebody else does stops the cycle for good. What the page is showing
+        // - that time passes while the picture is out of view - is still automatic.
+        float home = viewport.VerticalOffset;
+        float owned = home;
+        bool tookOver = false;
+
         var awayTimer = new XPlatTimer(TimeSpan.FromMilliseconds(2300));
         var backTimer = new XPlatTimer(TimeSpan.FromMilliseconds(700));
+
+        void StopCycle()
+        {
+            awayTimer.Stop();
+            backTimer.Stop();
+        }
+
+        bool StillOurs()
+        {
+            if (tookOver)
+            {
+                return false;
+            }
+
+            if (MathF.Abs(viewport.VerticalOffset - owned) < 0.5f)
+            {
+                return true;
+            }
+
+            // Somebody scrolled: the page gives the viewport up rather than dragging it back to
+            // where the demonstration wanted it.
+            tookOver = true;
+            StopCycle();
+            SetStatus("You scrolled it, so the page has handed the scrolling back to you.");
+            return false;
+        }
+
+        void CycleAway()
+        {
+            if (!StillOurs())
+            {
+                return;
+            }
+
+            owned = 140f;
+            viewport.ScrollTo(0f, owned);
+            backTimer.Start();
+        }
+
+        void CycleBack()
+        {
+            if (!StillOurs())
+            {
+                return;
+            }
+
+            owned = home;
+            viewport.ScrollTo(0f, home);
+            awayTimer.Start();
+        }
 
         awayTimer.AddTickHandler(_ =>
         {
             awayTimer.Stop();
-            viewport.ScrollTo(0f, 140f);
-            backTimer.Start();
+            CycleAway();
         });
 
         backTimer.AddTickHandler(_ =>
         {
             backTimer.Stop();
-            viewport.ScrollTo(0f, 0f);
-            awayTimer.Start();
+            CycleBack();
         });
-
-        void Away()
-        {
-            awayTimer.Stop();
-            backTimer.Stop();
-            viewport.ScrollTo(0f, 140f);
-            backTimer.Start();
-        }
 
         var buttons = new XPlatPanel
         {
@@ -4016,14 +4062,20 @@ public sealed class DemoUi
         away.AddClickHandler(_ =>
         {
             SetStatus("The picture is scrolled out of view; the timeline is not.");
-            Away();
+
+            // A click is the user asking the page to move it, so the cycle is re-armed from wherever
+            // the panel is now.
+            tookOver = false;
+            owned = viewport.VerticalOffset;
+            CycleAway();
         });
         back.AddClickHandler(_ =>
         {
-            awayTimer.Stop();
-            backTimer.Stop();
-            viewport.ScrollTo(0f, 0f);
-            awayTimer.Start();
+            SetStatus("The picture is back; the frame is the one the clock reached.");
+
+            tookOver = false;
+            owned = viewport.VerticalOffset;
+            CycleBack();
         });
 
         bool travelled = false;
@@ -4055,8 +4107,7 @@ public sealed class DemoUi
             else
             {
                 timer.Stop();
-                awayTimer.Stop();
-                backTimer.Stop();
+                StopCycle();
             }
         });
 
@@ -4068,7 +4119,9 @@ public sealed class DemoUi
             + "says, not the one it left on. Nothing in the player arranges that - the position is "
             + "computed from a clock rather than accumulated by a timer - so the readout keeps counting "
             + "while the picture is out of the frame and the frame that comes back agrees with it. The "
-            + "page runs the cycle itself so it can be watched without touching anything."));
+            + "page runs the cycle itself so it can be watched without touching anything, and it stops "
+            + "the moment you scroll the panel yourself: a demonstration that fights the pointer is "
+            + "worse than one that needs a button."));
 
         return card;
     }

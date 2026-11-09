@@ -244,6 +244,145 @@ public sealed class ImageAnimationTests : HeadlessTestBase
         });
     }
 
+    [TestMethod]
+    public void SixtyTicksNeitherMeasureNorArrangeTheControl()
+    {
+        // A tick is a repaint and nothing more. A measure or an arrange per frame walks the tree on
+        // the animation's clock - and inside scrolled content an arrange recomputes the extent, which
+        // is how a panel ends up jumping away from the pointer that is scrolling it. Counting the
+        // passes is the assertion because the visible symptom is intermittent; the count is not.
+        var backend = new TestApplicationBackend();
+        using var source = new StepSource([100, 200, 300, 100]) { Loops = true };
+        using var data = new XPlatImageData(source);
+        var image = new CountingImage { Dock = DockStyle.Fill, Image = data };
+
+        using var scene = HeadlessScene.Create(backend, image, 40f, 40f);
+
+        scene.RunWhileShown(() =>
+        {
+            scene.Paint();
+            data.Play();
+
+            int measures = image.Measures;
+            int layouts = image.Layouts;
+            int paints = image.Paints;
+
+            for (int tick = 0; tick < 60; tick++)
+            {
+                _clock.Advance(100);
+
+                // A timer moves its tick to the UI thread, so firing the backend only queues it:
+                // draining is what a running message loop does before the next paint.
+                backend.Timer.Fire();
+                backend.Drain();
+                scene.Paint();
+            }
+
+            Assert.AreEqual(
+                measures,
+                image.Measures,
+                "sixty ticks measured the control zero times: a frame's size is the source's NaturalSize");
+            Assert.AreEqual(
+                layouts,
+                image.Layouts,
+                "and arranged it zero times: a tick repaints, it does not lay the tree out");
+            Assert.IsTrue(image.Paints > paints, "while still repainting, which is all a tick is for");
+        });
+    }
+
+    [TestMethod]
+    public void AnAnimationInScrolledContentKeepsTheScrollOffsetThroughAWholeLoop()
+    {
+        // The same claim seen from where a user notices it: the offset of the container being
+        // scrolled. The frames here differ in size and in bounds, which is what a GIF's composited
+        // frames look like, so a player that measured the current frame would move this offset.
+        var backend = new TestApplicationBackend();
+        using var source = new StepSource([100, 200, 300, 100]) { Loops = true };
+        using var data = new XPlatImageData(source);
+
+        var column = new XPlatStackPanel
+        {
+            Dock = DockStyle.Fill,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            Spacing = 2f,
+        };
+
+        var image = new XPlatImage
+        {
+            AutoSize = true,
+            MinimumSize = new SKSize(40f, 40f),
+            Image = data,
+        };
+
+        column.Controls.Add(image);
+
+        for (int row = 0; row < 12; row++)
+        {
+            column.Controls.Add(new XPlatLabel($"Filler row {row}")
+            {
+                AutoSize = false,
+                Height = 16f,
+            });
+        }
+
+        using var scene = HeadlessScene.Create(backend, column, 160f, 120f);
+
+        scene.RunWhileShown(() =>
+        {
+            scene.Paint();
+
+            column.ScrollTo(0f, 40f);
+            float offset = column.VerticalOffset;
+            Assert.IsTrue(offset > 0f, "the content is taller than the viewport, so the panel scrolled");
+
+            var bounds = image.Bounds;
+            data.Play();
+
+            // Seventy ticks of a hundred milliseconds each: more than a full 700 ms loop, so every
+            // frame boundary and the wrap are crossed while the panel holds an offset.
+            for (int tick = 0; tick < 70; tick++)
+            {
+                _clock.Advance(100);
+                backend.Timer.Fire();
+                backend.Drain();
+                scene.Paint();
+            }
+
+            Assert.AreEqual(offset, column.VerticalOffset, "the scroll offset survived a whole loop");
+            Assert.AreEqual(bounds, image.Bounds, "and the picture was never resized by a frame");
+        });
+    }
+
+    /// <summary>
+    /// An image control that counts the passes over it, so a test can say a tick made none.
+    /// </summary>
+    private sealed class CountingImage : XPlatImage
+    {
+        internal int Measures { get; private set; }
+
+        internal int Layouts { get; private set; }
+
+        internal int Paints { get; private set; }
+
+        protected override SKSize MeasureContent(SKSize availableSize)
+        {
+            Measures++;
+            return base.MeasureContent(availableSize);
+        }
+
+        protected override void OnLayout()
+        {
+            Layouts++;
+            base.OnLayout();
+        }
+
+        protected override void OnPaint(SKCanvas canvas, SKRect rect)
+        {
+            Paints++;
+            base.OnPaint(canvas, rect);
+        }
+    }
+
     private static SKPicture Picture(int width)
     {
         using var recorder = new SKPictureRecorder();
