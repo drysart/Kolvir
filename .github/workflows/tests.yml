@@ -24,6 +24,8 @@ on:
       - 'XPlatUI/**'
       - 'XPlatUI.Backend/**'
       - 'XPlatUI.Backend.Headless/**'
+      - 'XPlatUI.Backend.Win32/**'
+      - 'XPlatUI.Backend.Win32.Tests/**'
       - 'XPlatUI.Feature.*/**'
       - 'XPlatUIDemo.App/Fonts/**'
       - 'Directory.Build.props'
@@ -180,6 +182,24 @@ jobs:
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=webp.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The Win32 backend's own suite targets net10.0-windows and exists only on the Windows leg.
+      # It covers the internal GL fallback decision with a fake probe; the accelerated path itself
+      # needs a real driver, which no hosted runner has, so that half is verified by hand and
+      # documented in the README rather than asserted here.
+      - name: Restore the Win32 backend tests
+        if: runner.os == 'Windows'
+        run: dotnet restore XPlatUI.Backend.Win32.Tests/XPlatUI.Backend.Win32.Tests.csproj --nologo
+
+      - name: Test the Win32 backend
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Backend.Win32.Tests/XPlatUI.Backend.Win32.Tests.csproj --no-restore --nologo \
+            --logger "trx;LogFileName=win32.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

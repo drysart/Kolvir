@@ -15,4 +15,10 @@
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
   </ItemGroup>
 
+  <!-- The GL seam is internal on purpose. The Windows-only test assembly drives its fallback
+       decision with a fake probe; no public surface is widened for the test. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="XPlatUI.Backend.Win32.Tests" />
+  </ItemGroup>
+
 </Project>

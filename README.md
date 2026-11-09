@@ -202,7 +202,18 @@ dotnet test XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Test
   -p:TargetFramework=net10.0
 ```
 
-All six are what the `Tests` workflow dispatches, on all three platforms.
+All six portable suites are what the `Tests` workflow dispatches, on all three platforms.
+
+The Win32 backend has a Windows-only suite of its own, because its fallback decision is internal
+and its target framework is `net10.0-windows`:
+
+```
+dotnet test XPlatUI.Backend.Win32.Tests/XPlatUI.Backend.Win32.Tests.csproj
+```
+
+The `Tests` workflow runs it on the Windows leg only. It drives the GL fallback decision with a
+probe that always fails, which is what a machine with no OpenGL ICD looks like; the accelerated
+path needs a real driver and is verified by hand through the demo's measured-rendering page.
 
 `XPlatUI.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
 `Animations` categories, the same filter, plain `net10.0` on every platform, and the same
@@ -3946,6 +3957,80 @@ WebP copy of the **GIF out of view** page: that page makes a claim about the tim
 while the picture is hidden - and the timeline is not per-format. A second copy would exercise the
 same core code with a different byte stream and would not test anything WebP-specific.
 
+## Hardware acceleration (Windows)
+
+`XPlatApplicationOptions.GfxHardwareAcceleration` is a `bool`, true by default. When it is true the
+Win32 backend tries to build a WGL-backed Skia surface: a context on the window's own device
+context, `GRGlInterface.Create()` plus `Validate()`, `GRContext.CreateGl()`, a
+`GRBackendRenderTarget` for the default framebuffer, and an `SKSurface`. Only when every one of
+those succeeds does the window present with `wglSwapBuffers`; any failure silently falls back to
+the existing DIB + `BitBlt` path.
+
+```csharp
+var options = new XPlatApplicationOptions
+{
+    // Windows only. True by default; this is the shape to use when the launcher owns the
+    // command line and wants the switch honoured explicitly.
+    GfxHardwareAcceleration = !args.Contains("--no-hardware-acceleration"),
+};
+```
+
+`--no-hardware-acceleration` is the switch. It is read from `ResolveCommandLine()`, so an explicit
+`CommandLine` list is honoured, and the constructor overload
+`XPlatApplicationOptions(IReadOnlyList<string>)` is the form to use when the arguments are known at
+construction. `CommandLine` is a settable property, so a launcher that assigns it *after*
+construction must assign `GfxHardwareAcceleration` in the same place; the constructor's default
+cannot see an assignment that has not happened yet. An explicit assignment to
+`GfxHardwareAcceleration` always wins, whatever order the two properties are set in.
+
+The rules the implementation follows:
+
+- **WGL only when the option is true.** `Win32PopupWindow` and `Win32MenuWindow` stay on the DIB
+  path, and the GTK4, AppKit and headless backends do not have this seam. `--render` is headless
+  and cannot reach it.
+- **Every step is checked.** Context creation, the GL interface and its `Validate()`, the Skia
+  context, `GRBackendRenderTarget.IsValid` and `SKSurface.Create()` each can fail. A machine with
+  no OpenGL ICD - a Hyper-V VM, an RDP session with no vendor driver - renders exactly as it did
+  before.
+- **GL and GDI never present the same window.** When GL comes up the retained DIB is released and
+  `WM_PAINT` paints and swaps the whole surface; it does not `BitBlt`. `WM_PRINTCLIENT` paints one
+  CPU frame into a temporary DIB so screenshots and visual capture still work.
+- **The pixel format comes from `opengl32`, not `gdi32`.** `wglChoosePixelFormat`,
+  `wglSetPixelFormat` and `wglDescribePixelFormat` route through the ICD that
+  `wglCreateContext` will use; the `gdi32` equivalents can return a system format number that
+  `wglCreateContext` rejects. The framebuffer's sample count comes from `GL_SAMPLES` and its
+  stencil depth from the described pixel format, and both are passed to
+  `GRBackendRenderTarget` - never hardcoded.
+- **Vsync is one interval** when `wglSwapIntervalEXT` exists.
+- **A lost context is a fallback, not an exception.** A driver reset, an RDP change, or a resize
+  that cannot rebuild the render target disposes the GL stack and returns the window to the DIB
+  for the rest of its life.
+- **The context lives on the UI thread.** Creation, make-current, paint, flush and swap all happen
+  there; nothing runs on a timer or a worker.
+- **The whole surface is presented each frame.** The host's `SKRegion` machinery still decides
+  what the UI invalidated, but with GL it no longer decides what is copied: a swapped back buffer
+  has no guaranteed contents, so partial present would need a preserved buffer the window
+  framebuffer does not promise. That is what the demo's `Damage: full` / `Damage: partial` toggle
+  is for - the invalidation still differs, the present does not.
+
+`Win32WindowBackend.GraphicsPath` reports `gl` or `cpu (...)` with the reason, and `GraphicsRenderer`
+reports the GL vendor and device. The demo prints both at startup and keeps them in its footer, so
+a screenshot says which path produced its numbers; the **Measured rendering** page is where the
+CPU/GL A/B is run.
+
+Measured cost on the `XPlatUI.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
+§8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
+
+| Measurement | Bytes |
+| --- | ---: |
+| `XPlatUI.Minimal` floor before this change | 3,283,456 |
+| After the Win32 GL seam and the `GfxHardwareAcceleration` option | 3,312,640 |
+| Delta | +29,184 (+0.89 %) |
+
+The WGL/P-invoke half is a handful of functions and one internal type set; it is not a package and
+adds no native asset. `opengl32.dll` is an operating-system component and the shipped
+`libSkiaSharp.dll` already contains the GL backend, so nothing new is shipped.
+
 ## Writing a backend
 
 A backend is two interfaces plus one registration hook. `IXPlatApplicationBackend` owns the platform
@@ -4138,7 +4223,8 @@ dotnet run --project XPlatUIDemo.App
 `Program.cs` is the whole program: it picks the backend for the platform this build is for, describes
 one `XPlatWindow` around `new DemoUi().Root`, and runs the `XPlatApplication`. Everything else lives
 behind the backend - `Win32WindowBackend` creates the window with raw `user32` P/Invoke, owns a 32-bit
-DIB section that Skia draws into, blits it on `WM_PAINT`, and forwards mouse/keyboard messages to the
+DIB section that Skia draws into (or a WGL-backed Skia surface when hardware acceleration is on),
+blits it on `WM_PAINT` (or swaps the GL surface), and forwards mouse/keyboard messages to the
 `XPlatUiHost`.
 
 The sample is organised as a navigation list down the left and a stage on the right that shows one
@@ -4168,6 +4254,55 @@ drag down from its label, over the whole-control button and into the text box, t
 the selection. The two **Performance** pages are the ones to watch scroll: **Performance: list box**
 loads 1 to 100,000 rows into a list, **Performance: controls** stacks 1 to 100,000 buttons in a
 stack panel, and both report what the last frame cost to draw them.
+
+### Measuring the Win32 GPU path by hand
+
+The footer always names the live path - `gfx: gl - <vendor> / <renderer>` or
+`gfx: cpu (no gl context)` - and the same line is printed at startup. The last demo page,
+**Measured rendering** (index 54), turns that into numbers:
+
+1. Run the demo on the machine being measured. Check the footer says `gfx: gl` and that the
+   renderer is the GPU you expect. On a machine with no ICD it says `gfx: cpu (no gl context)`,
+   which is the fallback doing its job rather than a failure to record.
+2. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
+   **Measure 600 frames**. The page is invalidated from one 15 ms timer (about 66 Hz, which is what
+   makes the Win32 backend use its high-resolution timer instead of rounding to 31.25 ms); the first 30 frames are
+   discarded so the lazily uploaded glyph atlas and shaders do not poison the mean.
+3. Press again with the other damage mode if the partial/full comparison is what you want.
+4. Quit, rerun with `--no-hardware-acceleration`, and repeat. That is the CPU half of the A/B.
+
+`--page 54 --benchmark` starts the same measurement from the command line, so the console line
+can be captured without a pointer; with any other page it does nothing.
+
+Every run writes one machine-readable line to stderr:
+
+```
+BENCH mode="gl" renderer="Intel Corporation / Intel(R) Arc(TM) A770 Graphics" size=2560x1640 scale=2.00 damage=full frames=600 warmup=30 p50=0.512 p95=0.903 max=1.804 mean=0.589 fps=59.9 area=2560x1640
+```
+
+`mode` is `gl` or `cpu (...)`, `renderer` is the GL vendor and device (`none` on the CPU path),
+`size` is the client size, `scale` is the DPI scale, `area` is the last painted area in pixels,
+and the timings are milliseconds. The line is written with the invariant culture, so a desktop
+with a comma decimal separator does not change it. `fps` is the wall-clock cadence over the
+measured frames, so it includes the GPU and present cost; it can sit well below the timer rate on a
+software rasterizer even while the CPU paint time (`p50`/`mean`) stays small.
+
+The readout is driven by the same timer and is included in the frame it reports; it repaints its
+own label about four times a second, so a completely idle window has one small repaint roughly
+every 250 ms. In **partial** mode the measured area is the 180 x 180 swatch, which does not
+overlap the readout; the caveat is the timer itself, not the label's area. The frame time is the
+host's paint (`XPlatUiHost.LastFrameTime`), so a GL run's `SwapBuffers` happens after the number
+and is not included.
+
+The timer starts only when the page is displayed and stops when it is left, which is the same
+marquee rule the progress bar follows. An idle application with a different page open runs no
+timers from this page.
+
+A software rasterizer is useful for correctness and meaningless for timing. Mesa's
+`opengl32.dll` beside the executable (the Mesa build the development VM uses) makes the whole GL
+chain run on the Microsoft Basic Render Driver, which is enough to prove pixels and fallback but
+produces no statement about GPU performance. Real numbers need a machine with a vendor ICD; the
+demo is instrumented so those can be captured by hand and pasted back with no ambiguity.
 
 ### On Linux (GTK4)
 

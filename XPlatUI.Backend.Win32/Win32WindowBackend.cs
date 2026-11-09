@@ -61,6 +61,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private XPlatWindowState _state = XPlatWindowState.Normal;
     private XPlatMenuBar? _menuBar;
     private readonly bool _useXPlatMenus;
+    private readonly bool _useHardwareAcceleration;
 
     private XPlatIcon? _icon;
     private IntPtr _bigIcon;
@@ -76,6 +77,10 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private SKSurface? _skia;
     private int _bufferGeneration;
     private int _paintedGeneration;
+
+    private Win32GlSurface? _gl;
+    private bool _glUnavailable;
+    private string _gfxReason = "cpu (not started)";
 
     private bool _trackingLeave;
     private long _lastClickTime;
@@ -109,10 +114,33 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         // change while a window is open, and the presenters are installed from it.
         _useXPlatMenus = !(application.Application?.Options.MenuPresentation ?? XPlatMenuPresentation.Auto)
             .UsesNativeMenus();
+
+        // Read once, the way the menu choice is: the option is a window-creation decision, and the
+        // surface cannot switch between GL and the DIB after the window has allocated one.
+        _useHardwareAcceleration = application.Application?.Options.GfxHardwareAcceleration ?? false;
+
+        if (!_useHardwareAcceleration)
+        {
+            _glUnavailable = true;
+            _gfxReason = "cpu (disabled)";
+        }
     }
 
     /// <inheritdoc />
     public XPlatUiHost Host => _host;
+
+    /// <summary>
+    /// What this window is presenting with, for a one-line diagnostic: <c>gl</c> when the OpenGL
+    /// surface came up, or <c>cpu (...)</c> naming why it did not. It is decided when the native
+    /// window allocates its drawing surface, so it is meaningful from <c>Shown</c> onwards.
+    /// </summary>
+    public string GraphicsPath => _gl is not null ? "gl" : _gfxReason;
+
+    /// <summary>
+    /// The GL vendor and renderer strings when <see cref="GraphicsPath"/> is <c>gl</c>, or null on
+    /// the DIB path. Diagnostic only, and the same lifetime rule as the path.
+    /// </summary>
+    public string? GraphicsRenderer => _gl?.Renderer;
 
     /// <inheritdoc />
     public float ScaleFactor => _scale;
@@ -642,6 +670,10 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         // platform keeps calling into a registered object for as long as the window is alive.
         ReleaseNativeTeardowns();
 
+        // The context belongs to the window's device context, so it has to go before the window
+        // that owns that DC is destroyed.
+        ReleaseGl();
+
         if (_hwnd != IntPtr.Zero)
         {
             NativeMethods.DestroyWindow(_hwnd);
@@ -649,7 +681,6 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         }
 
         ReleaseIcons();
-
         ReleaseBuffer();
 
         if (_classRegistered)
@@ -756,6 +787,14 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         PlaceInitially();
         ApplyResizable();
         ApplyIcon();
+
+        // Allocate the drawing surface now rather than waiting for the first WM_SIZE/WM_PAINT. The
+        // presentation path is a property of the window, and a caller that wants to report it - the
+        // demo's gfx line, a diagnostic - should not have to wait for a message to arrive.
+        if (NativeMethods.GetClientRect(_hwnd, out var client) && client.Right > 0 && client.Bottom > 0)
+        {
+            EnsureBuffer(client.Right, client.Bottom);
+        }
 
         UpdateHostSize();
         return true;
@@ -1241,6 +1280,35 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         var hdc = NativeMethods.BeginPaint(hwnd, out var paint);
         try
         {
+            if (_gl is not null)
+            {
+                // With a GL surface the whole framebuffer is painted and swapped every frame. A
+                // swapped back buffer has no guaranteed contents, so there is no equivalent of the
+                // DIB's "copy the stale rectangle back out" shortcut: the SKRegion machinery in the
+                // host still decides what the UI invalidated, and the window still invalidates the
+                // same region, but the present covers everything. That is a deliberate trade for
+                // WGL, not an oversight - partial present would need either PFD_SWAP_EXCHANGE_ARB
+                // or a preserved buffer, neither of which is guaranteed on a window framebuffer.
+                var glArea = Render(full: true);
+
+                if (_gl is null)
+                {
+                    // The context was lost while rendering; the frame is now in the CPU buffer, so
+                    // copy it out instead of leaving this paint empty until the next one.
+                    Blit(hdc, glArea);
+                    return;
+                }
+
+                if (!_gl.Present())
+                {
+                    // A driver reset, an RDP session change or a lost device: drop the GL stack and
+                    // let the next paint use the DIB, rather than throwing from a paint handler.
+                    LoseGl(invalidate: true);
+                }
+
+                return;
+            }
+
             if (_skia is null || _memoryDc == IntPtr.Zero)
             {
                 return;
@@ -1281,6 +1349,15 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     private void OnPrintClient(IntPtr hdc)
     {
+        if (_gl is not null)
+        {
+            // WM_PRINTCLIENT hands over a foreign DC, and a GL back buffer cannot be BitBlt'd from.
+            // Paint one CPU frame into a temporary DIB instead, so a screenshot or a visual test
+            // still gets pixels without turning the window's own presentation back into GDI.
+            RenderCpuSnapshot(hdc);
+            return;
+        }
+
         if (_skia is null || _memoryDc == IntPtr.Zero)
         {
             return;
@@ -1319,7 +1396,16 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     /// <returns>The area that was painted, in logical pixels.</returns>
     private SKRectI Render(bool full = false)
     {
-        if (_skia is null)
+        if (_gl is not null && !_gl.MakeCurrent())
+        {
+            // The context cannot be made current - the window never paints GL on any other thread,
+            // so this is a lost context, not a threading mistake. Fall back for the rest of the
+            // window's life.
+            LoseGl(invalidate: false);
+        }
+
+        var surface = _gl?.Surface ?? _skia;
+        if (surface is null)
         {
             return SKRectI.Empty;
         }
@@ -1332,7 +1418,16 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             full = true;
         }
 
-        var canvas = _skia.Canvas;
+        var area = PaintHost(surface, full);
+
+        // GL submit and swap happen in OnPaint, after the host has finished the frame.
+        return area;
+    }
+
+    /// <summary>Paints the control tree into a surface at the current scale.</summary>
+    private SKRectI PaintHost(SKSurface surface, bool full)
+    {
+        var canvas = surface.Canvas;
         canvas.Save();
         canvas.Scale(_scale);
         var area = _host.Paint(canvas, full);
@@ -1340,6 +1435,66 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         canvas.Flush();
 
         return area;
+    }
+
+    /// <summary>
+    /// Paints one whole CPU frame straight into a caller-supplied DC. Only used for
+    /// <c>WM_PRINTCLIENT</c> while GL is presenting.
+    /// </summary>
+    private void RenderCpuSnapshot(IntPtr hdc)
+    {
+        if (_bufferWidth <= 0 || _bufferHeight <= 0)
+        {
+            return;
+        }
+
+        var info = new NativeMethods.BITMAPINFO();
+        info.bmiHeader.biSize = (uint)Marshal.SizeOf<NativeMethods.BITMAPINFOHEADER>();
+        info.bmiHeader.biWidth = _bufferWidth;
+        info.bmiHeader.biHeight = -_bufferHeight;
+        info.bmiHeader.biPlanes = 1;
+        info.bmiHeader.biBitCount = 32;
+        info.bmiHeader.biCompression = NativeMethods.BiRgb;
+
+        var dib = NativeMethods.CreateDIBSection(
+            IntPtr.Zero,
+            ref info,
+            NativeMethods.DibRgbColors,
+            out var bits,
+            IntPtr.Zero,
+            0);
+
+        if (dib == IntPtr.Zero)
+        {
+            return;
+        }
+
+        var dc = NativeMethods.CreateCompatibleDC(IntPtr.Zero);
+        var previous = NativeMethods.SelectObject(dc, dib);
+
+        try
+        {
+            var imageInfo = new SKImageInfo(_bufferWidth, _bufferHeight, SKColorType.Bgra8888, SKAlphaType.Premul);
+            using var surface = SKSurface.Create(imageInfo, bits, _bufferWidth * 4);
+
+            if (surface is null)
+            {
+                return;
+            }
+
+            PaintHost(surface, full: true);
+            NativeMethods.BitBlt(hdc, 0, 0, _bufferWidth, _bufferHeight, dc, 0, 0, NativeMethods.SrcCopy);
+        }
+        finally
+        {
+            if (previous != IntPtr.Zero)
+            {
+                NativeMethods.SelectObject(dc, previous);
+            }
+
+            NativeMethods.DeleteDC(dc);
+            NativeMethods.DeleteObject(dib);
+        }
     }
 
     private void OnSize(int width, int height, uint sizeType)
@@ -1719,6 +1874,50 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     private void EnsureBuffer(int width, int height)
     {
+        if (_gl is not null)
+        {
+            if (_gl.Resize(width, height))
+            {
+                _bufferWidth = width;
+                _bufferHeight = height;
+                _bufferGeneration++;
+                return;
+            }
+
+            // A resize that cannot rebuild the render target is as final as a lost context: keep the
+            // window alive on the DIB rather than throwing from WM_SIZE.
+            LoseGl(invalidate: false);
+        }
+        else if (_useHardwareAcceleration && !_glUnavailable)
+        {
+            var gl = Win32Gfx.TryCreate(
+                hardwareAcceleration: true,
+                _hwnd,
+                Win32GlProbe.Instance,
+                width,
+                height,
+                out var reason);
+
+            _gfxReason = reason;
+
+            if (gl is not null)
+            {
+                ReleaseBuffer();
+                _gl = gl;
+                _bufferWidth = width;
+                _bufferHeight = height;
+                _bufferGeneration++;
+                return;
+            }
+
+            _glUnavailable = true;
+        }
+
+        EnsureCpuBuffer(width, height);
+    }
+
+    private void EnsureCpuBuffer(int width, int height)
+    {
         if (_skia is not null && _bufferWidth == width && _bufferHeight == height)
         {
             return;
@@ -1783,6 +1982,37 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         _dibBits = IntPtr.Zero;
         _bufferWidth = 0;
         _bufferHeight = 0;
+    }
+
+    /// <summary>
+    /// Drops the GL stack and returns the window to its retained DIB. Used for a lost context, a
+    /// failed present or a render target that cannot be rebuilt; the fallback lasts for the rest of
+    /// this window's life rather than risking a context that keeps failing.
+    /// </summary>
+    /// <param name="invalidate">Ask for a repaint, which the next WM_PAINT will satisfy with GDI.</param>
+    private void LoseGl(bool invalidate)
+    {
+        int width = _bufferWidth;
+        int height = _bufferHeight;
+
+        ReleaseGl();
+        _glUnavailable = true;
+        _gfxReason = "cpu (gl context lost)";
+
+        // The CPU buffer may be gone (it was released when GL took over), so rebuild it at the
+        // current framebuffer size before anything paints again.
+        EnsureCpuBuffer(width, height);
+
+        if (invalidate)
+        {
+            Invalidate();
+        }
+    }
+
+    private void ReleaseGl()
+    {
+        _gl?.Dispose();
+        _gl = null;
     }
 
     /// <inheritdoc />
