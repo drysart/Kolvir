@@ -172,6 +172,8 @@ filters on:
 | `Platform.Win32`, `Platform.AppKit`, `Platform.Gtk4` | Can only pass on one platform. The portable CI job skips these; a platform job can select them. |
 | `Feature`, `DragDrop` | The drag and drop feature's own suite. Runs everywhere. |
 | `Feature`, `Animations` | The animations feature's own suite. Runs everywhere. |
+| `Feature`, `Svg` | The SVG feature's own suite. Runs everywhere. |
+| `AnimatedGif` | The animated GIF feature's own suite. Runs everywhere. |
 
 To run exactly what CI runs:
 
@@ -188,7 +190,15 @@ dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj
 
 dotnet test XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj \
   -p:TargetFramework=net10.0
+
+dotnet test XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj \
+  -p:TargetFramework=net10.0
+
+dotnet test XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj \
+  -p:TargetFramework=net10.0
 ```
+
+All five are what the `Tests` workflow dispatches, on all three platforms.
 
 `XPlatUI.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
 `Animations` categories, the same filter, plain `net10.0` on every platform, and the same
