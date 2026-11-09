@@ -121,9 +121,15 @@ public sealed class XPlatApplicationOptions
     /// so explicitly, which is what makes it the showcase.
     /// </para>
     /// <para>
-    /// Linux defaults to true for consistency with Windows even though the GTK4 backend has no
-    /// accelerated path yet; a backend that cannot accelerate ignores the flag and stays on the
-    /// CPU, so the default costs nothing.
+    /// Linux defaults to true, and that is a decision taken for the GTK4 backend rather than a copy
+    /// of the Windows value. The GTK4 backend composites through GL regardless, so this only decides
+    /// whether Skia paints into that context: the CPU texture path uploads a full-surface
+    /// <c>Gdk.MemoryTexture</c> every frame and the accelerated path blits a retained GPU surface
+    /// that stays in video memory. Measured end to end on software GL that is roughly a quarter more
+    /// frames on X11, level on Wayland, and 3.7-3.85x for an image-heavy page on both. It is
+    /// unmeasured on hardware: no Linux machine with a GPU was available, so the default rests on
+    /// that structural asymmetry plus the fact that every failure falls back to the CPU path with the
+    /// failing step named.
     /// </para>
     /// <para>
     /// The constructor computes the default once: on Windows and Linux true, on macOS false, and

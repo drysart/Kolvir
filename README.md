@@ -1608,14 +1608,14 @@ between the label and whatever else changed. A label, a panel, a table and an im
 hovered as not, so they are left out of it.
 
 A backend opts into partial presentation with `XPlatUiHost.PartialUpdates`. It is off by default
-because a backend that rasterizes the whole surface every frame - GTK4 and the headless renderer
-both do - would be left with blank patches where the retained content should be:
+because a backend that rasterizes the whole surface every frame - GTK4's CPU path and the headless
+renderer both do - would be left with blank patches where the retained content should be:
 
 | Backend | Presents |
 | --- | --- |
 | Win32 | The painted area from the DIB, or the whole retained GL buffer after a damage-only paint |
 | AppKit | The painted area, through the layer's `CGImage` |
-| GTK4 | The whole surface every frame |
+| GTK4 | The whole surface every frame on the CPU path; the projected damage inside a retained GL buffer on the accelerated one |
 | Headless | The whole surface, so `--render` is always complete |
 
 `Paint` returns the `SKRectI` it covered, `PendingUpdateBounds` reports what the next paint will
@@ -3960,8 +3960,10 @@ same core code with a different byte stream and would not test anything WebP-spe
 ## Hardware acceleration (Windows)
 
 `XPlatApplicationOptions.GfxHardwareAcceleration` is a `bool`: **true by default on Windows and
-Linux, false on macOS** (the macOS default is explained in
-[Hardware acceleration (macOS)](#hardware-acceleration-macos)). When it is true the Win32 backend
+Linux, false on macOS**. The macOS default is explained in
+[Hardware acceleration (macOS)](#hardware-acceleration-macos) and the Linux one, which is also
+`true`, in [Hardware acceleration (Linux)](#hardware-acceleration-linux); neither is a carried-over
+value. When it is true the Win32 backend
 tries to build a WGL-backed Skia surface: a context on the window's own device
 context, `GRGlInterface.Create()` plus `Validate()`, `GRContext.CreateGl()`, a
 `GRBackendRenderTarget` for the default framebuffer, and an `SKSurface`. Only when every one of
@@ -3988,9 +3990,10 @@ wins over whatever the constructor resolved.
 The rules the implementation follows:
 
 - **WGL only when the option is true.** `Win32PopupWindow` and `Win32MenuWindow` stay on the DIB
-  path, and the GTK4 and headless backends do not have this seam. AppKit has its own Metal seam,
-  described in [Hardware acceleration (macOS)](#hardware-acceleration-macos). `--render` is
-  headless and cannot reach either one.
+  path, and the headless backend has no such seam. AppKit has its own Metal seam, described in
+  [Hardware acceleration (macOS)](#hardware-acceleration-macos), and GTK4 its own GL seam,
+  described in [Hardware acceleration (Linux)](#hardware-acceleration-linux). `--render` is
+  headless and cannot reach any of them.
 - **Every step is checked.** Context creation, the GL interface and its `Validate()`, the Skia
   context, `GRBackendRenderTarget.IsValid` and `SKSurface.Create()` each can fail. A machine with
   no OpenGL ICD - a Hyper-V VM, an RDP session with no vendor driver - renders exactly as it did
@@ -4091,8 +4094,9 @@ The rules the implementation follows:
 
 - **Metal only when the option is true.** The AppKit backend reads the same flag as Win32 and has
   no gate of its own; the platform default (on for Windows and Linux, off for macOS) is what makes
-  Metal opt-in on macOS. Popups and menus stay on the CPU path, and GTK4 and the headless
-  `--render` path have no such seam.
+  Metal opt-in on macOS. Popups and menus stay on the CPU path, and the headless `--render` path
+  has no such seam; GTK4 has its own GL seam, described in
+  [Hardware acceleration (Linux)](#hardware-acceleration-linux).
 - **Every step is checked.** The device, the command queue, the layer, the Skia context and the
   first offscreen surface each can fail. Each failure names the step and leaves the window on the
   CPU path with no Metal state behind, for example `cpu (no metal device)`,
@@ -4246,6 +4250,308 @@ The Metal half is a small managed type set over bindings the AppKit backend alre
 ships no native library. Both builds report **0 IL2xxx/IL3xxx warnings** with
 `-p:TrimmerSingleWarn=false`, so nothing here is kept by a trimmer workaround. A physical-Mac
 measurement of the same pair before the API simplification gave the same +320 bytes.
+
+## Hardware acceleration (Linux)
+
+`XPlatApplicationOptions.GfxHardwareAcceleration` is the same `bool`, with the same mechanics and
+the same `--no-hardware-acceleration` switch. It defaults to **true on Linux**, as it does on
+Windows, and the GTK4 backend honours it exactly as the other two do: an application that assigns
+it false, or launches with the switch, gets the CPU texture path and nothing else changes.
+
+That default is a decision taken for this platform, not a value left where it was. The reasoning,
+the measurement it rests on and what is still unmeasured are in
+[the default paragraph](#measured-on-llvmpipe-software-gl-x11) below; the short version is that GTK4
+already composites through GL, the CPU path pays a full-surface upload every frame that this one
+does not, the measured end-to-end result is ahead or level on both test pages and on both display
+servers, and every failure returns to the CPU path with a named reason.
+
+When it is enabled the GTK4 backend tries to build a Skia context on the `Gdk.GLContext` that a
+`Gtk.GLArea` hands it, and presents the control tree through that area instead of through the
+`Gdk.MemoryTexture` the CPU path uses. Every step is checked and any failure is silent: the window
+keeps the CPU frame it was already showing and never fails because acceleration was asked for.
+
+The compatibility question this platform has, and the other two do not, is what GDK gives you.
+GTK4's backends ask **EGL** for a **GLES** context, on X11 and on Wayland alike, and SkiaSharp's
+Linux `libSkiaSharp.so` assembles its native interface over **GLX**. So `GRGlInterface.Create()`
+returns null here - the native library contains no `eglGetProcAddress` at all - and the seam
+assembles Skia's **GLES** interface instead, handing it `eglGetProcAddress` as the resolver. That is
+the whole bridge: no new native library, no second context, and no dependency on how SkiaSharp was
+packaged. It has been run on both display servers, which is where the Wayland rows below come from.
+
+The rules the implementation follows:
+
+- **GL only when the option is true.** `Gtk4PopupWindow` keeps the CPU constructor, so popups and
+  menus stay on the CPU path, and `--render` is headless and never reaches this code. The choice is
+  made once per window: a window that falls back stays on the CPU for its lifetime.
+- **The seam comes up underneath the frame the user is already looking at.** The GL area is the
+  bottom child of the view's grid, the CPU picture sits above it and the input drawing area above
+  that. GTK still snapshots - and so still renders - an area an opaque sibling covers, so the seam
+  proves itself while the CPU frame is what is on screen; only once it has painted does the picture
+  hide.
+- **Every step is checked.** The area's context, the interface and its `Validate()`, the Skia
+  context, the framebuffer the area has bound and the retained surface each can fail. The reason
+  names the failing step: `cpu (disabled)`, `cpu (no gl context)`, `cpu (gl area: <gtk message>)`,
+  `cpu (no gl interface)`, `cpu (interface invalid)`, `cpu (no gr context)`,
+  `cpu (no gl surface: 2560 x 1520)`, `cpu (no gl framebuffer)` or `cpu (gl context lost)`.
+- **The framebuffer is read before Skia touches anything.** GTK does not render into the default
+  framebuffer: in a GTK4 window the area's framebuffer is an offscreen one, and its id has to come
+  from `glGetIntegerv(GL_FRAMEBUFFER_BINDING)`. Reading it after creating a Skia texture surface
+  answers with *Skia's* framebuffer instead, and a blit into that leaves the window empty - which is
+  exactly what happened the first time this seam was run.
+- **Foreign GL state is reset every frame.** GTK, the window system and the previous frame all touch
+  the context, and Skia caches the state it set last time. Without `ResetContext` the second frame
+  draws with stale bindings and text comes out as solid boxes; with it, every tier paints correctly
+  from any frame onwards.
+- **The frame lives in a retained offscreen buffer.** The host's `SKRegion` decides what the UI
+  invalidated, and that is exactly what is repainted into a persistent RGBA8 GPU surface; present is
+  one Skia `Snapshot()` + `DrawImage` onto the area's framebuffer. The retained surface has undefined
+  contents when it is created, so the first frame after creation, resize or scale change is painted
+  in full.
+- **The direct tier is full-frame only.** GTK does not promise the area's framebuffer still holds
+  the previous frame, so the tier that paints straight into it paints every frame in full. It is
+  chosen for the rest of the window's life if the retained buffer could not be created or a
+  snapshot/blit failed, with one full repaint to recover the frame.
+- **All GL work is on the GTK thread, in the render signal.** Creation, make-current, paint, blit
+  and flush all happen there; nothing is scheduled on a worker and no second context exists.
+- **Resize and scale changes recreate the retained buffer, then repaint in full.** The buffer is
+  sized in device pixels (`width x scale`), so a 2.00 window is 2560 x 1520 for a 1280 x 760 client,
+  and `EnsureSize` sees the new pixel size and forces the full paint.
+- **A frame is asked for, not assumed.** A `Gtk.GLArea` renders only when something queues a render
+  on it, and queueing from inside the render signal is folded into the pass already running, so an
+  invalidation that arrives during a paint is deferred to an idle and retried there.
+
+`Gtk4WindowBackend.GraphicsPath` reports `gl` or `cpu (...)` with the reason, and
+`GraphicsRenderer` reports the GL vendor and renderer. The footer and the `BENCH` line name both, so
+a screenshot says which path produced its numbers:
+
+```
+gfx: gl; renderer: Mesa / llvmpipe (LLVM 20.1.2, 256 bits)
+```
+
+Unlike Win32 and AppKit, the GTK4 decision cannot be made while the window is being shown - a GL
+context only exists once the area has been allocated and drawn - so `AddGraphicsPathChangedHandler`
+runs once it is made, and reads immediately for a window that never asked for acceleration. Set
+`XPLATUI_GL_TRACE=1` to print the framebuffer, the retained target, per-frame damage and every
+failure to stderr.
+
+### Measuring the GTK4 GPU path by hand
+
+The measured-rendering page (index 54) works exactly as it does on Windows and macOS, and
+`--page N --benchmark` starts the same measurement on any page:
+
+1. Make sure no other instance is running first: the demo is `SingleInstance = true`, so a launch
+   can be handed to a window that is already up instead of starting a new one - the status line then
+   reads "A second launch was handed to this window" and the `BENCH` line you get back describes the
+   *other* window's geometry, or none arrives at all. `pgrep -af XPlatUIDemoApp` before each run.
+2. **Keep the window in sight.** Leave it unobscured on the current workspace, not minimised, and the
+   session unlocked. The measurement counts frames the host actually painted, and GTK stops painting
+   a toplevel that reports itself non-visible - so a covered window starves the count and the run
+   stalls with no error at all, on both display servers and both tiers. Full damage stalls exactly
+   like partial, and the CPU path exactly like the GPU one: covering the window with an opaque
+   fullscreen window from 6 s to 56 s delayed a run that normally finishes at 15 s to 65-68 s, at
+   9.1-9.6 fps instead of about 49, and every run completed within seconds of the cover going away.
+   A window that gets no frames at all (minimised, another workspace, a locked session) never
+   finishes. A `BENCH stalled: ...` line on stderr names that case; see below.
+3. Run the demo. The footer says `gfx: gl` and the renderer string, or `gfx: cpu (...)` with the
+   step that failed; rerun with `XPLATUI_GL_TRACE=1` to capture every step.
+4. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
+   **Measure 600 frames**. The first 30 frames are discarded.
+5. Press again with the other damage mode.
+6. Quit, rerun with `--no-hardware-acceleration`, and repeat. That is the CPU half of the A/B.
+
+The `BENCH` line has the same shape as the other two platforms. On software GL, **`fps` is the
+number to trust and `p50` is not**: `LastFrameTime` stops before the window system composites the
+frame, and on llvmpipe the rasterisation a GPU would do on the way to the screen happens largely
+during presentation, outside the measurement. Compare the two paths by achieved frame rate, and read
+the paint column as what it is labelled - paint time, present excluded.
+
+A run that stops being painted prints `BENCH stalled: 137/630 frames after 15s (no frames for 10s)`
+to stderr instead of hanging silently. It is a watchdog, not an error: it fires while no frame has
+completed for ten seconds and repeats at most every thirty, and it never fires on a run that is
+making progress. If you see it, bring the window forward and the run continues where it stopped.
+
+On Mesa 26 the log also carries `libEGL warning: failed to get driver name for fd -1`,
+`MESA: error: ZINK: failed to choose pdev` and `libEGL warning: egl: failed to create dri2 screen`
+before `gfx: gl`. That is Mesa trying Vulkan first and falling back to llvmpipe; it happens before
+the seam runs and changes nothing.
+
+#### Measured on llvmpipe (software GL), X11
+
+Ubuntu 24.04.5 under a hypervisor, kernel 7.0, a Microsoft Hyper-V virtual VGA adapter with no GPU,
+Mesa 25.2.8 on **llvmpipe (LLVM 20.1.2, 256 bits)**, X11, 1280 x 760 logical client at 2.00 scale
+(2560 x 1520 device pixels), 600 frames after 30 warm-up, measured 2026-11-09. CPU rows are
+`--no-hardware-acceleration`. **There is no GPU in this machine, so these numbers show the shape of
+the change and nothing about hardware performance.** Every number comes from a software rasteriser
+that both paths are paying for.
+
+| Mode | Damage | p50 | p95 | max | mean | fps | Painted area |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| GL (page 54, light) | full | 0.889 | 1.399 | 5.200 | 0.954 | 25.5 | 1280 x 760 |
+| GL (page 54, light) | partial | 0.066 | 0.114 | 0.284 | 0.074 | 28.6 | 180 x 180 |
+| CPU (page 54, light) | full | 4.142 | 5.066 | 8.259 | 4.165 | 21.1 | 1280 x 760 |
+| CPU (page 54, light) | partial | 4.112 | 4.886 | 7.421 | 4.126 | 21.5 | 1280 x 760 |
+| GL (page 11, heavy) | full | 0.387 | 0.712 | 1.032 | 0.423 | 24.5 | 1280 x 760 |
+| CPU (page 11, heavy) | full | 88.933 | 92.146 | 105.381 | 89.295 | 7.5 | 1280 x 760 |
+
+**On X11, page 54 gets about a quarter more frames on llvmpipe: 25.5 fps on the seam against
+21.1 fps on the CPU path** (a second run of the same rows on the same host gave 21.8 against 17.5,
+so the ratio holds at roughly 1.2-1.25x while the absolute cadence moves by 15 % between runs). Both
+paths are capped by software compositing of a 2560 x 1520 area, which is why the frame rate is the
+honest measure and the paint column is not.
+
+That quarter is an **X11 number, not a Linux-wide one**. On Wayland the same comparison is a wash -
+1.01-1.04x - because the CPU path's full-surface upload is cheaper on that stack and the compositing
+cap is higher, so page 54's frame rate stops being about the paint at all. See
+[the Wayland rows below](#measured-on-llvmpipe-software-gl-wayland): the light page does not
+regress on Wayland, it just stops being the case that acceleration buys frames there, while the
+heavy page keeps its 3.7-3.85x on both.
+
+The paint column is paint time only. Page 54's p50 ratio is 4.7x (0.889 against 4.142 ms), and that
+figure says precisely one thing: Skia's work on this page is 4.7x cheaper when it runs in the GL
+context than when it rasterises into a bitmap. It does not say the window is 4.7x faster, because
+the ~40 ms of compositing that follows `LastFrameTime` is common to both paths, and on llvmpipe a
+good part of the GL path's rasterisation is inside that common term. Quoting the ratio as a
+performance win would be wrong, and this is the only place it appears.
+
+What that quarter does buy comes from a copy the CPU path pays and this one does not: the CPU path
+rasterises into a reused BGRA bitmap and then uploads the whole 2560 x 1520 surface to a fresh
+`Gdk.MemoryTexture` every frame (see the GTK4 platform section - that copy is deliberate and worth
+about 1.3 ms of that path's frame), while the GL path blits a retained surface that never leaves
+video memory. So the fraction of the frame budget that is convertible is real but partial, and it
+grows as the paint cost grows - it is the whole of page 11's 3.7-3.85x and only a quarter of page 54
+on X11, where the upload is a small share of a frame that compositing dominates.
+
+Page 11 is the one page where the paint column does translate, because there the CPU cost is
+rasterisation that cannot be deferred: 88.9 ms of it, giving 7.5 fps against 24.5 fps on the seam -
+and that holds on Wayland too, at 10.3 fps against 39.7. Page 54's partial row is the other extreme:
+0.066 ms of paint under 28.6 fps, which is to say paint has stopped mattering and the frame rate is
+set entirely by presentation. The CPU partial row on page 54 reports the whole frame because the
+GTK4 CPU path has always rasterized every frame into a reused buffer and cannot present part of it -
+that is the pre-existing behaviour, not something this change altered.
+
+#### Measured on llvmpipe (software GL), Wayland
+
+A second VM, Ubuntu 26.04.1, kernel 7.0, Mesa 26.0.8 on **llvmpipe (LLVM 21.1.8, 256 bits)**, a
+GNOME Wayland session, 1280 x 723 logical client at 2.00 scale (2560 x 1446 device pixels), 600
+frames after 30 warm-up. Its GL path is GDK's **EGL GLES** context exactly as on X11, so the same
+`CreateGles` seam drives it: `gfx: gl; renderer: Mesa / llvmpipe (LLVM 21.1.8, 256 bits)`. Same
+caveat as above - software rasteriser, no GPU, shape only.
+
+| Row | p50 | fps |
+| --- | ---: | ---: |
+| GL (page 54, light) | 0.919 | 41.0 |
+| CPU (page 54, light) | 3.912 | 39.3 |
+| GL (page 54, light, partial) | 0.068 | 49.2 (area 180 x 180) |
+| GL (page 11, heavy) | 0.367 | 39.7 |
+| CPU (page 11, heavy) | 75.639 | 10.3 |
+
+Page 54 is **1.04x** end to end here and page 11 is **3.85x**; a second paired run of the same rows
+gave 40.4 against 39.9 fps and 38.9 against 10.5, which is 1.01x and 3.7x. The partial row on the
+CPU path paints the whole frame at about 3.9 ms and 39 fps, as it does on X11, for the reason above.
+
+Read the two tables separately: the client is 1280 x 760 on X11 and 1280 x 723 on Wayland because
+that is the size the Wayland toplevel negotiates, so the rows are shapes for the same pages and not
+pixel-for-pixel comparisons. What the pair establishes is where the acceleration actually pays.
+Page 11 is the same on both stacks - a 3.7-3.85x frame rate against a paint cost that cannot be
+deferred anywhere - and page 54 is content-dependent on the compositing stack: a quarter more frames
+on X11, a wash on Wayland, never a regression. Neither table says anything about a real GPU.
+
+**The Linux default stays at `true`, and that is a decision made here rather than a value inherited
+from `master`.** Nothing measured above proves it on hardware - neither machine has a GPU.
+What the evidence does establish, and what the decision rests on:
+
+- GTK4 already composites these windows through GL. The option does not add a GL stack that would
+  otherwise be absent; it only decides whether Skia paints into the one GTK is using anyway.
+- Both measured comparisons come out ahead or level, never behind: 1.0-1.07x the frame rate on the
+  light page (a wash on Wayland rather than a loss) and 3.7-3.85x on the heavy page, on X11 and
+  Wayland alike.
+- The CPU path pays a full-surface `Gdk.MemoryTexture` upload every frame that this path does not
+  pay at all. That asymmetry is structural rather than a property of llvmpipe, and it is what the
+  heavy page converts into frames and the light page cannot.
+- Every failure is contained and named. Any step of the seam failing drops to the exact CPU path
+  that shipped before this change, with a `gfx: cpu (...)` reason, and `--no-hardware-acceleration`
+  forces it. A wrong call here costs performance, not correctness - which is verified byte-identical
+  below.
+
+Still unmeasured, and worth a real GPU before anyone calls the default proven:
+
+- **Any hardware Linux GPU.** All numbers here are llvmpipe. On a real driver the compositing term
+  that caps both paths gets much smaller, so the absolute headroom shrinks; whether the *ratio*
+  moves with it is unknown and could go either way.
+- **A multisampled framebuffer.** The VM reports 0 samples, so the seam builds a 0-sample
+  `GRBackendRenderTarget`. It does read `GL_SAMPLES` and clamp it to `GetMaxSurfaceSampleCount`, so a
+  driver that reports 4 takes a path that is written and traced but has never run.
+- **Whether a hardware driver returns the GLES interface here.** Both VMs hand out an **EGL**
+  `GLES` context, not GLX, on X11 and on Wayland alike, which is why the interface is assembled with
+  `CreateGles` over `eglGetProcAddress` instead of `GRGlInterface.Create()`. That is the shape of
+  this stack, not a compatibility shim, but it has only been seen on Mesa in VMs.
+- **Any Wayland compositor other than GNOME's**, **another X11 window manager**, and a display at a
+  scale other than 2.00. Runtime scale change could not be exercised on either machine; see
+  [Lifecycle](#lifecycle).
+- **The correctness capture on Wayland.** The GL-versus-CPU screenshot comparison below was made on
+  X11, where a window can be captured with `ffmpeg -f x11grab`; GNOME's Wayland session offers no
+  equivalent from ssh, so the Wayland claim here rests on the seam taking the same code path, on the
+  `gfx:` line naming the renderer, and on the frame rates being those of a real composited window.
+
+#### Correctness: GL vs CPU, the demo pages
+
+The demo window was captured on the same X11 display twice at 1280 x 760 @ 2.00, once with
+`--no-hardware-acceleration` and once on the GL path, and the two screenshots were compared channel
+by channel over the client area:
+
+| Page | Max channel difference | Pixels changed |
+| --- | ---: | ---: |
+| 1 (stack panel) | 10/255 | 0.83 % |
+| 11 (images and layout) | 10/255 | 28.1 % |
+| 54 (measured rendering) | 23/255 | 0.98 % |
+
+Page 1's differences are antialiased text edges. Page 11's 28 % is a photograph's resampling: the GPU
+and CPU rasterisers filter a scaled bitmap slightly differently, and every pixel of that image moves
+by at most 10/255 - the amplified diff is a uniform field of that image, with no structural
+difference anywhere else. Page 54 is compared below its live readout, which prints numbers that
+change every frame and cannot be compared between two runs. All three are inside the 11-30/255
+antialiasing band the Windows and macOS comparisons recorded. The CPU path itself is unchanged:
+the same window captured with `--no-hardware-acceleration` on `master` and on this branch is
+**byte-identical** over the whole client area (0 pixels differ, page 1, 1280 x 760 @ 2.00), which is
+what proves the tier really is the code that was already there.
+
+Measured cost on the `XPlatUI.Minimal` fixture (`linux-x64`, NativeAOT, the loose Skia row of §8 in
+[FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
+
+```
+dotnet publish XPlatUI.Minimal/XPlatUI.Minimal.csproj -c Release -r linux-x64 \
+  -p:EmbedSkiaSharpNative=false -p:TrimmerSingleWarn=false
+```
+
+| Measurement | Bytes |
+| --- | ---: |
+| `XPlatUI.Minimal` floor before this change | 4,276,144 |
+| After the GL seam, its tier fallback and the `GraphicsPath` diagnostics | 4,338,944 |
+| Delta | +62,800 (+1.47 %) |
+
+The GL half is managed code plus two P/Invoke declarations (`eglGetProcAddress` and `dlsym`); it
+ships no native library, and `libSkiaSharp.so` already contains the GL backend. The delta is larger
+than the other two backends' because the managed SkiaSharp GPU surface API is new to this assembly.
+Both builds report **0 IL2xxx/IL3xxx warnings** with `-p:TrimmerSingleWarn=false`.
+
+#### Lifecycle
+
+Exercised on the X11 VM, each with a screenshot to confirm the frame survived: window resize,
+minimise and restore, occluded-then-uncovered, and close-then-reopen. The CPU path was captured on
+`master` and on this branch for the last of those and compares byte-identical, so a reopened window
+starts on the same code it always did.
+
+Exercised on the Wayland VM: open, resize, minimise and restore, occluded-then-uncovered, and a full
+measurement on every row. The one difference worth knowing is that a Wayland (and, it turns out, an
+X11) toplevel that is not visible is not painted at all, so a run whose window is covered stalls
+rather than slowing down - which is why the harness now says `BENCH stalled: ...` instead of going
+quiet. Resize and scale both arrive at the same place: the retained buffer is sized in device pixels
+and `EnsureSize` forces a full repaint when that size changes.
+
+Not exercised: a **runtime scale-factor change** (both VMs report 2.00 and offer no way to change it
+over ssh), **suspend/resume of the GL context**, and a **non-GNOME compositor**. What covers them in
+the code: `EnsureSize` for the scale case, and a lost context drops to the CPU picture with
+`cpu (gl context lost)` rather than painting into nothing.
 
 ## Writing a backend
 
@@ -4592,11 +4898,14 @@ installed for it. Then:
 dotnet run --project XPlatUIDemo.App
 ```
 
-The window is a plain `Gtk.ApplicationWindow` whose child is a `Gtk.Overlay`: a `Gtk.Picture` is the
-main child and a transparent `Gtk.DrawingArea` sits on top of it. Skia paints into a premultiplied
-BGRA bitmap (`SKColorType.Bgra8888` with `SKAlphaType.Premul`), which is wrapped in a
-`Gdk.MemoryTexture` and handed to the picture; the drawing area is what reports the widget's size and
-scale factor and what receives input. The frame is not blitted with Cairo because GTK4 gives a
+The window is a plain `Gtk.ApplicationWindow` whose child is a `Gtk.Box` holding the view: a
+`Gtk.Grid` whose single cell carries the surface (`Gtk.Picture` on the CPU path, `Gtk.GLArea` on the
+accelerated one), a transparent `Gtk.DrawingArea` on top of it, and, once the seam has painted, no
+picture at all. Skia paints into a premultiplied BGRA bitmap (`SKColorType.Bgra8888` with
+`SKAlphaType.Premul`), which is wrapped in a `Gdk.MemoryTexture` and handed to the picture; the
+drawing area is what reports the widget's size and scale factor and what receives input. The
+accelerated path is described in [Hardware acceleration (Linux)](#hardware-acceleration-linux): the
+same host paints into a retained GPU surface and blits it onto the area's framebuffer. The frame is not blitted with Cairo because GTK4 gives a
 drawing area a Cairo *recording* surface - there are no pixels to write into - so a bitmap can only
 reach the screen as a Cairo source, and Cairo answers a mutable source with a full size snapshot.
 GTK keeps the render nodes those snapshots end up in, so every repaint leaked one frame buffer.

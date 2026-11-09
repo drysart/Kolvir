@@ -23,6 +23,7 @@ namespace XPlatUI.Backend.Gtk4;
 public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 {
     private Action<object>? _shown;
+    private Action<object>? _graphicsPathChanged;
     private Action<object>? _closeRequested;
     private Action<object>? _closed;
     private Action<object>? _activated;
@@ -80,6 +81,56 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
     /// <inheritdoc />
     public float ScaleFactor => _scale;
+
+    /// <summary>
+    /// What this window is presenting with, for a one-line diagnostic: <c>gl</c> when the GL seam
+    /// came up, or <c>cpu (...)</c> naming why it did not. It is decided on the first render pass,
+    /// so it is meaningful from <c>Shown</c> onwards.
+    /// </summary>
+    public string GraphicsPath => _view?.GraphicsPath ?? "cpu (no window)";
+
+    /// <summary>
+    /// The GL vendor and renderer when <see cref="GraphicsPath"/> is <c>gl</c>, or null on the CPU
+    /// path. Diagnostic only, and the same lifetime rule as the path.
+    /// </summary>
+    public string? GraphicsRenderer => _view?.GraphicsRenderer;
+
+    /// <summary>
+    /// Adds a handler that runs once <see cref="GraphicsPath"/> has stopped saying
+    /// <c>cpu (not created)</c>.
+    /// </summary>
+    /// <remarks>
+    /// The Win32 and AppKit backends allocate their drawing surface while showing the window, so
+    /// their path is already final when <c>Shown</c> runs. GTK4 cannot: a GL context only exists
+    /// once the area has been allocated and drawn, which happens after <c>Shown</c>. A caller that
+    /// wants the footer or the <c>BENCH</c> line to name the path therefore reads it here as well -
+    /// and a window that never asked for acceleration reports immediately.
+    /// </remarks>
+    /// <param name="handler">The handler, called with this backend.</param>
+    /// <returns>A token that removes the handler.</returns>
+    public IDisposable AddGraphicsPathChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        if (_view is { } view)
+        {
+            return view.AddGraphicsPathChangedHandler(handler);
+        }
+
+        _graphicsPathChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveGraphicsPathChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddGraphicsPathChangedHandler"/> added.</summary>
+    public void RemoveGraphicsPathChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        _graphicsPathChanged -= handler;
+        _view?.RemoveGraphicsPathChangedHandler(handler);
+    }
+
+    private void OnViewGraphicsPathChanged(object sender) => _graphicsPathChanged?.Invoke(this);
 
     /// <inheritdoc />
     public XPlatScreen? Screen => _window is null
@@ -430,6 +481,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         if (view is not null)
         {
             view.RemoveMetricsChangedHandler(OnViewMetricsChanged);
+            view.RemoveGraphicsPathChangedHandler(OnViewGraphicsPathChanged);
             view.Dispose();
         }
 
@@ -701,7 +753,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         window.Resizable = _resizable;
         window.SetDefaultSize(ToPixels(_clientSize.Width), ToPixels(_clientSize.Height));
 
-        var view = new Gtk4SkiaView(_host);
+        // Read once, the way the menu choice is: the option is a window-creation decision, and the
+        // view cannot switch back to GL after it has presented through the CPU texture.
+        var useHardwareAcceleration = _application.Application?.Options.GfxHardwareAcceleration ?? false;
+
+        var view = new Gtk4SkiaView(_host, useHardwareAcceleration);
 
         // The drawing area lives in a vertical box so a per-window menu bar can be packed above it.
         var container = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
@@ -718,6 +774,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         window.OnNotify += OnWindowNotify;
 
         view.AddMetricsChangedHandler(OnViewMetricsChanged);
+        view.AddGraphicsPathChangedHandler(OnViewGraphicsPathChanged);
 
         _window = window;
         _container = container;

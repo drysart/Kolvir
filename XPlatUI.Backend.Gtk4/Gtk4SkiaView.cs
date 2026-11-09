@@ -3,14 +3,21 @@ using SkiaSharp;
 namespace XPlatUI.Backend.Gtk4;
 
 /// <summary>
-/// The GTK4 host widget for the XPlat UI library. It owns an <see cref="XPlatUiHost"/>, rasterizes
-/// the control tree with SkiaSharp into a premultiplied BGRA bitmap and shows it through a
-/// <see cref="Gtk.Picture"/>, and forwards mouse and keyboard input from GTK's event controllers.
-/// This is the counterpart of the Win32 host and of the AppKit view: same duties, different native
-/// API.
+/// The GTK4 host widget for the XPlat UI library. It owns an <see cref="XPlatUiHost"/>, presents
+/// the control tree with SkiaSharp either through a <see cref="Gtk.GLArea"/> or through a
+/// premultiplied BGRA bitmap shown by a <see cref="Gtk.Picture"/>, and forwards mouse and keyboard
+/// input from GTK's event controllers. This is the counterpart of the Win32 host and of the AppKit
+/// view: same duties, different native API.
 /// </summary>
 /// <remarks>
 /// <para>
+/// The accelerated path is the one described in README.md, "Hardware acceleration (Linux)": a
+/// <see cref="Gtk.GLArea"/> whose context GTK already has current when it emits the render signal,
+/// Skia's GLES interface assembled over <c>eglGetProcAddress</c>, a retained offscreen surface that
+/// the control tree paints its damage into, and one Skia blit onto the area's own framebuffer. The
+/// CPU texture below is what a window falls back to, and what a window that did not ask for
+/// acceleration uses from the start.
+/// </para>
 /// The frame is handed to GTK as a <see cref="Gdk.MemoryTexture"/> rather than painted into the
 /// Cairo context of a <see cref="Gtk.DrawingArea"/>. GTK4 gives a drawing area a Cairo recording
 /// surface, so compositing a bitmap into it means using the bitmap as a Cairo source, and Cairo
@@ -56,9 +63,25 @@ public sealed class Gtk4SkiaView : IDisposable
     private readonly Gtk.Grid _root;
     private readonly Gtk.DrawingArea _area;
     private readonly Gtk.Picture _picture;
+    private readonly Gtk.GLArea? _glArea;
     private readonly GLib.SourceFunc _redrawIdle;
     private readonly GLib.SourceFunc _pictureIdle;
     private readonly GLib.SourceFunc _notifyMetrics;
+    private readonly GLib.SourceFunc _presentationSwap;
+
+    /// <summary>
+    /// Whether this view was created for a window that asked for acceleration. The option is a
+    /// window-creation decision, so it is read once: a window never switches back on after is has
+    /// fallen back, exactly as on Windows and macOS.
+    /// </summary>
+    private readonly bool _useHardwareAcceleration;
+
+    private Gtk4GlSurface? _gl;
+    private bool _glUnavailable;
+    private bool _presentationSwapPending;
+    private bool _gfxDecided;
+    private Action<object>? _graphicsPathChanged;
+    private string _gfxReason;
 
     private SKSurface? _frame;
     private IntPtr _framePixels;
@@ -92,13 +115,36 @@ public sealed class Gtk4SkiaView : IDisposable
     private long _reportedFrames;
 
     public Gtk4SkiaView(XPlatUiHost host)
+        : this(host, false)
+    {
+    }
+
+    /// <summary>
+    /// Creates the host widget, choosing at creation whether the window may present through a
+    /// <see cref="Gtk.GLArea"/> instead of the CPU texture.
+    /// </summary>
+    /// <param name="host">The control tree to paint.</param>
+    /// <param name="hardwareAcceleration">
+    /// True to try the GL seam. The attempt is made on the first render pass and any failure leaves
+    /// the view on the CPU path, so this only decides whether it is tried at all.
+    /// </param>
+    internal Gtk4SkiaView(XPlatUiHost host, bool hardwareAcceleration)
     {
         Host = host;
+        _useHardwareAcceleration = hardwareAcceleration;
+        _gfxReason = hardwareAcceleration ? "cpu (not created)" : "cpu (disabled)";
+
+        if (!hardwareAcceleration)
+        {
+            _glUnavailable = true;
+            _gfxDecided = true;
+        }
 
         // The delegates must stay rooted for as long as GLib may call them.
         _redrawIdle = OnRedrawIdle;
         _pictureIdle = OnPictureIdle;
         _notifyMetrics = OnNotifyMetrics;
+        _presentationSwap = OnPresentationSwap;
 
         _area = Gtk.DrawingArea.New();
         _area.SetHexpand(true);
@@ -121,8 +167,24 @@ public sealed class Gtk4SkiaView : IDisposable
         _root.SetHexpand(true);
         _root.SetVexpand(true);
 
-        // Both children share the grid's only cell. The picture goes in first so that the drawing
-        // area, which is what receives input, stays on top of it.
+        // The GL area goes in first, so every other child is drawn over it: the picture keeps
+        // showing the CPU frame while the GL seam proves itself, and the drawing area stays on top
+        // for input exactly as it did before. GTK still snapshots - and so still renders - an area
+        // that an opaque sibling covers, which is what lets the seam come up underneath the frame
+        // the user is already looking at instead of showing an empty window while it tries.
+        if (!_glUnavailable)
+        {
+            _glArea = Gtk.GLArea.New();
+            _glArea.SetHexpand(true);
+            _glArea.SetVexpand(true);
+            _glArea.SetHasDepthBuffer(false);
+            _glArea.SetHasStencilBuffer(true);
+            _glArea.OnRender += OnGlRender;
+            _root.Attach(_glArea, 0, 0, 1, 1);
+        }
+
+        // The picture goes in before the drawing area so that the area, which receives input, stays
+        // on top of it.
         _root.Attach(_picture, 0, 0, 1, 1);
         _root.Attach(_area, 0, 0, 1, 1);
 
@@ -131,6 +193,55 @@ public sealed class Gtk4SkiaView : IDisposable
         XPlatTheme.AddChangedHandler(OnThemeChanged);
 
         AttachInput();
+    }
+
+    /// <summary>
+    /// What this view is presenting with, for a one-line diagnostic: <c>gl</c> when the GL seam is
+    /// live, or <c>cpu (...)</c> naming the step that put it there.
+    /// </summary>
+    internal string GraphicsPath => _gl is not null ? "gl" : _gfxReason;
+
+    /// <summary>The GL vendor and renderer when <see cref="GraphicsPath"/> is <c>gl</c>, else null.</summary>
+    internal string? GraphicsRenderer => _gl?.Renderer;
+
+    /// <summary>
+    /// Adds a handler that runs when <see cref="GraphicsPath"/> stops saying "not decided". The GL
+    /// seam is chosen on the first render pass rather than when the window is created, so this is
+    /// how a caller learns the outcome; a view that already knows it - because acceleration was
+    /// never asked for - runs the handler immediately.
+    /// </summary>
+    internal IDisposable AddGraphicsPathChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        if (_gfxDecided)
+        {
+            handler(this);
+        }
+        else
+        {
+            _graphicsPathChanged += handler;
+        }
+
+        return new XPlatHandlerToken<Action<object>>(RemoveGraphicsPathChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddGraphicsPathChangedHandler"/> added.</summary>
+    internal void RemoveGraphicsPathChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _graphicsPathChanged -= handler;
+    }
+
+    private void MarkGraphicsPathDecided()
+    {
+        if (_gfxDecided)
+        {
+            return;
+        }
+
+        _gfxDecided = true;
+        _graphicsPathChanged?.Invoke(this);
     }
 
     /// <summary>Adds a handler that runs after a paint when the widget's size or scale factor changed.</summary>
@@ -267,6 +378,10 @@ public sealed class Gtk4SkiaView : IDisposable
         _frame?.Dispose();
         _frame = null;
         _framePixels = IntPtr.Zero;
+
+        _gl?.Dispose();
+        _gl = null;
+        _glUnavailable = true;
     }
 
     private void OnDraw(Gtk.DrawingArea area, Cairo.Context cr, int width, int height)
@@ -288,9 +403,19 @@ public sealed class Gtk4SkiaView : IDisposable
             _height = height;
             _scale = scale;
 
-            Trace($"{DebugTag} draw {width}x{height} at {scale}x");
+            // A GL area that never renders never reports its own failure through the render signal,
+            // so this is where a machine whose compositor refused a context is noticed: the
+            // drawing area is snapshotted in the same pass either way.
+            if (_gl is null && !_glUnavailable && _glArea is { } candidate && candidate.GetError() is { } error)
+            {
+                DropToCpu($"cpu (gl area: {error.Message ?? "unknown"})");
+            }
 
-            PaintFrame(width, height, scale);
+            if (_gl is null)
+            {
+                Trace($"{DebugTag} draw {width}x{height} at {scale}x");
+                PaintFrame(width, height, scale);
+            }
 
             ReportMetrics(width, height, scale);
         }
@@ -299,6 +424,259 @@ public sealed class Gtk4SkiaView : IDisposable
             _inDraw = false;
             _deferredRepaints = 0;
         }
+    }
+
+    /// <summary>
+    /// The GL seam's frame: GTK calls this with the area's own framebuffer bound, so this is where
+    /// every GL operation for a window happens - creation, paint, blit and flush.
+    /// </summary>
+    /// <returns>True, so GTK treats the framebuffer as fully painted by the handler.</returns>
+    private bool OnGlRender(Gtk.GLArea sender, Gtk.GLArea.RenderSignalArgs args)
+    {
+        if (_disposed)
+        {
+            return true;
+        }
+
+        // GTK does not re-enter a render, and doing so would paint the same frame twice.
+        if (_inDraw)
+        {
+            return true;
+        }
+
+        _inDraw = true;
+
+        try
+        {
+            var width = _area.GetWidth();
+            var height = _area.GetHeight();
+
+            if (width <= 0 || height <= 0)
+            {
+                return true;
+            }
+
+            var scale = Math.Max(_area.ScaleFactor, 1);
+
+            sender.MakeCurrent();
+
+            // Before Skia creates or binds anything: creating a texture surface leaves one of
+            // Skia's framebuffers bound, and the target has to name GTK's.
+            _gl?.CaptureFrameState();
+
+            if (_gl is null)
+            {
+                if (_glUnavailable)
+                {
+                    return true;
+                }
+
+                TryCreateGl(sender, width, height, scale);
+
+                if (_gl is null)
+                {
+                    return true;
+                }
+            }
+
+            Host.SetClientSize(width, height);
+
+            _width = width;
+            _height = height;
+            _scale = scale;
+
+            DrawGl(width, height, scale);
+            ReportMetrics(width, height, scale);
+        }
+        catch (Exception exception)
+        {
+            // A paint that throws must not escape the signal; the next frame is the CPU path.
+            DropToCpu($"cpu (gl draw threw {exception.GetType().Name})");
+        }
+        finally
+        {
+            _inDraw = false;
+            _deferredRepaints = 0;
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Builds the GL stack on the first render pass, when the area finally has a context. A failure
+    /// is remembered for the life of the window, exactly as the Win32 probe is, so a window that
+    /// fell back does not retry a losing attempt on every frame.
+    /// </summary>
+    private void TryCreateGl(Gtk.GLArea area, int width, int height, int scale)
+    {
+        var gl = Gtk4GlSurface.TryCreate(area, width * scale, height * scale, out var reason);
+
+        _gfxReason = reason;
+
+        if (gl is null)
+        {
+            DropToCpu(reason);
+            return;
+        }
+
+        _gl = gl;
+        _glUnavailable = false;
+        Gtk4GlTrace.Write($"gfx: {reason} ({gl.Renderer})");
+
+        // The picture is still the child on top, so the swap that reveals the GL area is the next
+        // thing that has to happen - after this pass, because the grid is being snapshotted now.
+        SchedulePresentationSwap();
+        MarkGraphicsPathDecided();
+    }
+
+    /// <summary>
+    /// Presents one frame through GL. The retained tier paints only the host's damage into the
+    /// persistent offscreen surface and blits the whole buffer; the direct tier paints the area's
+    /// framebuffer in full, because GTK does not promise it still holds the previous frame.
+    /// </summary>
+    private void DrawGl(int width, int height, int scale)
+    {
+        var gl = _gl!;
+
+        if (!gl.EnsureSize(width * scale, height * scale))
+        {
+            DropToCpu("cpu (gl surface invalid)");
+            return;
+        }
+
+        // The retained buffer keeps the pixels between frames, so the host may paint the damaged
+        // region alone. The CPU path rasterizes every frame into a reused buffer and clears what it
+        // writes, so it must keep asking for complete frames.
+        Host.PartialUpdates = gl.HasRetainedBuffer;
+
+        if (gl.HasRetainedBuffer && gl.Surface is { } retained)
+        {
+            var damaged = Host.IsUpdatePending || gl.NeedsFullRepaint;
+
+            if (Gtk4GlTrace.IsEnabled)
+            {
+                Gtk4GlTrace.Write(
+                    $"frame {width}x{height}@{scale} retained damaged={damaged} full={gl.NeedsFullRepaint}");
+            }
+
+            if (damaged)
+            {
+                // The offscreen contents are undefined when it is created, and a resize or scale
+                // change makes them so again; TakeNeedsFull is what forces that first frame full.
+                Paint(retained, gl.TakeNeedsFull(), width, height, scale);
+            }
+
+            var result = gl.PresentRetained();
+
+            if (result == Gtk4GlPresentResult.RetryDirect)
+            {
+                // The retained buffer failed mid-frame. Repaint this one frame against the area's
+                // framebuffer and present it; the next frame stays on the direct tier.
+                var retry = gl.PresentDirect(surface => Paint(surface, full: true, width, height, scale));
+
+                if (retry == Gtk4GlPresentResult.Lost)
+                {
+                    DropToCpu("cpu (gl context lost)");
+                }
+
+                return;
+            }
+
+            if (result == Gtk4GlPresentResult.Lost)
+            {
+                DropToCpu("cpu (gl context lost)");
+            }
+
+            return;
+        }
+
+        // The direct tier has no retained contents, so every frame it serves is a full frame.
+        var direct = gl.PresentDirect(surface => Paint(surface, full: true, width, height, scale));
+
+        if (direct == Gtk4GlPresentResult.Lost)
+        {
+            DropToCpu("cpu (gl context lost)");
+        }
+    }
+
+    /// <summary>Paints the control tree into a GL-backed surface at the widget's device resolution.</summary>
+    private void Paint(SKSurface surface, bool full, int width, int height, int scale)
+    {
+        var canvas = surface.Canvas;
+        canvas.Save();
+        canvas.Scale(scale);
+        canvas.ClipRect(SKRect.Create(0, 0, width, height));
+        Host.Paint(canvas, full);
+        canvas.Restore();
+        canvas.Flush();
+    }
+
+    /// <summary>
+    /// Abandons the GL seam and returns the view to the CPU texture for the rest of its life. The
+    /// CPU buffer may never have been allocated, so the next frame builds it and paints in full.
+    /// </summary>
+    private void DropToCpu(string reason)
+    {
+        _gfxReason = reason;
+        _glUnavailable = true;
+
+        var gl = _gl;
+        _gl = null;
+        gl?.Dispose();
+
+        Host.PartialUpdates = false;
+
+        SchedulePresentationSwap();
+
+        Trace($"gfx: {reason}");
+        MarkGraphicsPathDecided();
+    }
+
+    /// <summary>
+    /// Swaps which child is on top. The picture always exists, so the two tiers are a visibility
+    /// flip: CPU while the GL seam is unproven or has failed, GL once it has painted.
+    /// </summary>
+    /// <remarks>
+    /// It has to happen outside the pass that is running, because GTK is walking the grid's
+    /// children while the decision is made, and changing a child's visibility under it is not
+    /// safe. The swap also asks for the frame that shows its result, which is what makes the
+    /// picture's first CPU frame reach the screen after a fallback.
+    /// </remarks>
+    private void SchedulePresentationSwap()
+    {
+        if (_presentationSwapPending || _disposed)
+        {
+            return;
+        }
+
+        _presentationSwapPending = true;
+        GLib.Functions.IdleAdd(0, _presentationSwap);
+    }
+
+    private bool OnPresentationSwap()
+    {
+        _presentationSwapPending = false;
+
+        if (_disposed)
+        {
+            return false;
+        }
+
+        var glLive = _gl is not null;
+
+        _picture.SetVisible(!glLive);
+        _glArea?.SetVisible(glLive || !_glUnavailable);
+
+        if (glLive)
+        {
+            _glArea?.QueueRender();
+        }
+        else
+        {
+            _area.QueueDraw();
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -611,7 +989,7 @@ public sealed class Gtk4SkiaView : IDisposable
             return;
         }
 
-        _area.QueueDraw();
+        QueueRepaint();
     }
 
     private bool OnRedrawIdle()
@@ -620,10 +998,26 @@ public sealed class Gtk4SkiaView : IDisposable
 
         if (!_disposed)
         {
-            _area.QueueDraw();
+            QueueRepaint();
         }
 
         return false;
+    }
+
+    /// <summary>
+    /// Asks for the frame the tier needs. A GL area renders only when something queues a render on
+    /// it, and queueing one from inside the render signal is folded into the pass that is already
+    /// running - which is why the deferred path runs on an idle.
+    /// </summary>
+    private void QueueRepaint()
+    {
+        if (_gl is not null && _glArea is { } glArea)
+        {
+            glArea.QueueRender();
+            return;
+        }
+
+        _area.QueueDraw();
     }
 
     private void OnHostCursorChanged(object sender) =>
