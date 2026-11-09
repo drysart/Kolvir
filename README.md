@@ -4016,7 +4016,9 @@ The rules the implementation follows:
   what the UI invalidated, but with GL it no longer decides what is copied: a swapped back buffer
   has no guaranteed contents, so partial present would need a preserved buffer the window
   framebuffer does not promise. That is what the demo's `Damage: full` / `Damage: partial` toggle
-  is for - the invalidation still differs, the present does not.
+  is for - the invalidation still differs, the present does not. The real-hardware table below
+  shows the consequence: a GL partial run reports the full area and costs the same as a full frame,
+  while a small CPU partial frame is cheaper than either.
 
 `Win32WindowBackend.GraphicsPath` reports `gl` or `cpu (...)` with the reason, and `GraphicsRenderer`
 reports the GL vendor and device. The reason names the failing step rather than a generic
@@ -4320,6 +4322,29 @@ A software rasterizer is useful for correctness and meaningless for timing. Mesa
 chain run on the Microsoft Basic Render Driver, which is enough to prove pixels and fallback but
 produces no statement about GPU performance. Real numbers need a machine with a vendor ICD; the
 demo is instrumented so those can be captured by hand and pasted back with no ambiguity.
+
+#### Measured on real hardware
+
+NVIDIA GeForce RTX 5090 with the vendor ICD, Windows, 1280 x 820 logical client at 2.00 scale,
+600 frames after 30 warm-up frames, measured 2026-11-09. The CPU rows are
+`--no-hardware-acceleration`. Times in milliseconds.
+
+| Mode | Damage | p50 | p95 | max | mean | Painted area |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| GL | full | 0.417 | 0.498 | 3.968 | 0.431 | 1280 x 820 |
+| GL | partial | 0.416 | 0.526 | 1.405 | 0.430 | 1280 x 820 |
+| CPU | full | 2.681 | 3.051 | 5.719 | 2.634 | 1280 x 820 |
+| CPU | partial | 0.178 | 0.199 | 0.399 | 0.177 | 180 x 180 |
+
+A full frame costs **6.4x less time under GL** (0.417 vs 2.681 ms p50). The `partial` GL row is not a
+broken toggle: GL presents the whole surface every frame, so the damage setting changes what is
+repainted but not what is submitted and swapped, and the row reports the full 1280 x 820 area at
+about the same cost as `full`. On the CPU path the same partial run repaints only the 180 x 180
+swatch and costs 0.178 ms, so for that small region **the CPU path is 2.3x cheaper than GL**.
+
+The break-even follows from that: a frame whose damaged area is a small fraction of the window costs
+less on the CPU path, while a full or large-area frame costs several times less under GL. A GL frame
+carries a fixed submit-and-present cost that does not shrink with the damage.
 
 ### On Linux (GTK4)
 
