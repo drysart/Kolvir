@@ -174,6 +174,7 @@ filters on:
 | `Feature`, `Animations` | The animations feature's own suite. Runs everywhere. |
 | `Feature`, `Svg` | The SVG feature's own suite. Runs everywhere. |
 | `AnimatedGif` | The animated GIF feature's own suite. Runs everywhere. |
+| `AnimatedWebp` | The animated WebP feature's own suite. Runs everywhere. |
 
 To run exactly what CI runs:
 
@@ -196,9 +197,12 @@ dotnet test XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj \
 
 dotnet test XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj \
   -p:TargetFramework=net10.0
+
+dotnet test XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Tests.csproj \
+  -p:TargetFramework=net10.0
 ```
 
-All five are what the `Tests` workflow dispatches, on all three platforms.
+All six are what the `Tests` workflow dispatches, on all three platforms.
 
 `XPlatUI.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
 `Animations` categories, the same filter, plain `net10.0` on every platform, and the same
@@ -3336,7 +3340,7 @@ process - or two tests in one process - cannot see each other's formats.
 | Two providers claim the same bytes | The higher `Priority` wins; at equal priority the later registration wins. A load never tries a second provider for the same bytes. |
 | A provider throws while sniffing | It has not claimed the bytes - the exception is swallowed and the next provider is asked - because identifying a stream must not be able to fail a load. |
 | The claiming provider throws | The load throws an `XPlatImageFormatException` naming the provider, with what it threw inside it, and does **not** fall through to the next claim. |
-| No provider claims the bytes | The built-in decoder gets them. It is fallback behaviour, not a provider with a priority, which is exactly why registering a GIF provider takes GIF away from it. |
+| No provider claims the bytes | The built-in decoder gets them. It is fallback behaviour, not a provider with a priority, which is exactly why registering a GIF or WebP provider takes that format away from it. |
 | The stream cannot seek | It is buffered, bounded by `BufferLimit` (64 MiB by default), rather than refused - a network stream or a pipe is the case a real application hits. A larger one can be copied to a file first. |
 | The data outlives the factory | Fine, and expected: the data owns fully decoded pixels, not the stream or the factory. |
 | Options for a format nobody registered | The load throws, rather than silently ignoring what the caller configured. |
@@ -3386,8 +3390,9 @@ indistinguishable from a broken one.
 
 The **Animated GIF** page plays the 48x48 sample with play, pause, a seek bar and a position readout;
 **GIF frames** steps it a frame at a time and prints where each frame starts on the timeline; **GIF
-out of view** is the hidden-time case made visible. The SVG pages below are the same control and the
-same factory call with a different provider registered.
+out of view** is the hidden-time case made visible. **Animated WebP** and **WebP frames** are the
+same two pages for a WebP container, whose frames are sub-rectangles rather than full canvases. The
+SVG pages below are the same control and the same factory call with a different provider registered.
 
 ### SVG images
 
@@ -3786,6 +3791,160 @@ The rest is the `XPlatImageData` every image has: `Loop` can be reassigned after
 The demo's **Animated GIF** page plays the sample with play, pause, a seek bar and a position readout;
 **GIF frames** steps it frame by frame; **GIF out of view** scrolls the picture out of a frame and
 back with a button, so the frame it returns on can be compared with the readout.
+
+### Animated WebP
+
+Animated WebP is a package of its own, `XPlatUI.Feature.AnimatedWebp`, and it follows the animated GIF
+package rung for rung: SkiaSharp already decodes WebP, so what the package adds is the RIFF container
+walk, the compositor and the timeline glue, with no native library of its own. Reference it and opt
+in:
+
+```csharp
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddAnimatedWebpImages(),
+};
+```
+
+**A WebP without it is still an image.** The built-in raster decoder reads WebP, so an application
+that has not enabled the feature still shows the file - frame one, as a still. Enabling the feature
+registers a provider that claims every `RIFF....WEBP` stream. A stream that turns out not to be
+animated is decoded through the feature's still path, which records the picture the same way the
+built-in decoder does; a test loads one file through both paths and compares every pixel. Enabling
+the feature therefore cannot make a static WebP worse, which is what the GIF package promises for a
+single-frame GIF as well.
+
+```csharp
+using XPlatUI;   // XPlatWebpOptions
+
+image.Image = factory.LoadFromPath("art/spinner.webp");
+
+// or, from a stream, with the feature's own settings
+image.Image = factory.LoadFromStream(stream, new XPlatWebpOptions
+{
+    DecodedSizeLimit = 32L * 1024 * 1024,
+});
+```
+
+#### The container, and what the animation gets
+
+A WebP file is `RIFF`, a 32-bit little-endian size, `WEBP`, then chunks of a four-character code, a
+size and a payload padded to an even length. The package walks that chain once, and what it reads is:
+
+| Chunk | What the package uses |
+| --- | --- |
+| `VP8X` | The animation bit and the canvas width and height (`NaturalSize`) |
+| `ANIM` | That a loop is declared: `Loop` starts true for any `ANIM` chunk. The 16-bit count is not read or preserved; the background colour is read but not used for disposal |
+| `ANMF` | One per frame: the offset in two-pixel units, the frame rectangle, the duration in milliseconds, the blend bit and the disposal bit |
+| `ALPH`, `VP8 `, `VP8L` | The frame's own image data, moved into a stand-alone container so Skia decodes that frame alone rather than the canvas with earlier frames composed onto it |
+
+The offsets are stored in two-pixel units, so an odd offset cannot occur in a valid file; the composer
+draws the frame at `(x, y)` on a full canvas and hands out a picture of the canvas. A frame is decoded
+exactly once: the parser moves the frame's image chunks, and the decoder reads that result.
+
+| In the file | What the animation gets |
+| --- | --- |
+| Per-frame durations | Per-frame durations: a WebP with mixed durations plays mixed durations |
+| A duration of zero | `XPlatWebpOptions.ZeroDelayMinimum`, 100 ms by default - the same number `XPlatGifOptions` uses |
+| An `ANIM` chunk with any count, `0` or `N` | `Loop` starts `true` |
+| No `ANIM` chunk | `Loop` starts `false` |
+| A single `ANMF` | A still picture: duration zero, no loop - the GIF feature's answer for a single-frame GIF |
+| The `VP8X` canvas | `NaturalSize`, fixed for the whole animation |
+
+**The loop rule never re-derives a second answer.** WebP's `ANIM` count has the same shape as GIF's
+Netscape extension: `0` is "forever" and `N` is "N times", while the playback model has a boolean
+whose pass is a position inside one pass, not a total elapsed time. Any declared count therefore
+means `Loop` starts true, no declaration means false, and the finite count is not preserved. A caller
+who wants exactly three passes counts them - see the GIF section above for the longer version.
+
+**Zero durations match the GIF feature on purpose.** A zero duration taken literally asks the
+timeline for the next frame immediately, which is a visible busy loop; 100 ms is the minimum browsers
+already apply and the number the GIF package chose. A declared 10 ms is still played at 10 ms. The
+two packages are separate, so the number is duplicated rather than shared; the tests in each suite
+assert it, which is what keeps them from drifting apart.
+
+#### Compositing, and the one place WebP differs most
+
+WebP frames are deltas: an `ANMF` names a rectangle and usually carries only the pixels inside it, so
+frame *n* is the canvas after frames 0 to *n* have been composited. The blend and disposal bits are
+per frame:
+
+| Frame's blend bit | What happens inside its rectangle |
+| --- | --- |
+| Clear (0) | The frame is drawn over the canvas, so a transparent pixel lets the previous picture through |
+| Set (1) - "do not blend" | The frame replaces the rectangle, transparent pixels included |
+
+| Frame's disposal bit | What happens to its rectangle before the next frame draws |
+| --- | --- |
+| 0 - keep | Nothing: the next frame draws over it |
+| 1 - dispose to background | Cleared to transparent |
+
+**WebP has two disposal methods, not GIF's three.** There is no "restore previous" in the format, so
+there is no snapshot and no third branch in the compositor; a `SKCodecAnimationDisposalMethod` with
+value 3 cannot come out of a valid WebP. Disposal 1 is cleared to transparent rather than to the
+`ANIM` background colour, because that is what browsers and libwebp do, the colour is absent or
+meaningless in most files, and a control that fills its background cannot tell the difference - the
+same decision, and the same reasoning, as the GIF package.
+
+The blend bit is easy to invert, and inverting it produces frames that look nearly right - right
+size, right timing, a different picture under every transparent pixel - so the suite asserts the
+pixel content of specific frames: a blending frame over red, a do-not-blend frame with a transparent
+pixel, and a frame after a background disposal. Both the blend branch and the disposal branch were
+broken on purpose during development and the tests failed, which is what makes them evidence rather
+than decoration.
+
+#### Memory, and the limit
+
+Every frame is decoded and composited up front, because the timeline lets a viewer seek anywhere -
+backwards included - and a lazy window cannot go back. The cost is predictable, frames x canvas
+width x canvas height x 4 bytes, and it is bounded by `XPlatWebpOptions.DecodedSizeLimit`: 256 MiB by
+default, which a 2000x2000 WebP of 60 frames exceeds at 960 MB of pixels. A file over the limit is
+refused rather than partially decoded, so a load either produces a complete animation or throws with
+the numbers in the message.
+
+#### What it costs
+
+Measured the way FEATURE-COST-POLICY.md §8 says to, on win-x64, linux-x64 and osx-arm64:
+`XPlatUI.Minimal` built with `PublishAot` and `-p:EmbedSkiaSharpNative=false`, then built again with
+an `XPlatImage` showing a PNG through the built-in decoder, then built a third time with the WebP
+package referenced, `AddAnimatedWebpImages()` called and the demo's animated WebP loaded and drawn.
+The three numbers separate the image control and the timeline from the feature:
+
+| Measurement | win-x64 | linux-x64 | osx-arm64 |
+| --- | --- | --- | --- |
+| Executable, one label (the floor at this commit) | 3,283,968 | 4,276,144 | 4,080,304† |
+| Executable, one `XPlatImage` showing a PNG (image control and timeline paid for) | 3,526,656 | 4,590,160 | 4,080,304† |
+| Executable, the same control showing an animated WebP with the feature registered | 3,582,464 | 4,636,032 | 4,080,304† |
+| Feature only, against the PNG fixture | +55,808 (54.5 KB) | +45,872 (44.8 KB) | 0 |
+| Whole use path, against the label fixture | +298,496 (291.5 KB, +9.1%) | +359,888 (351.5 KB, +8.4%) | 0 |
+| `libSkiaSharp` beside it | 12,903,776 | 12,262,408 | 15,804,304 |
+
+† macOS was measured with `dotnet build -c Release -r osx-arm64 -p:PublishAot=true` rather than
+`dotnet publish`, because `dsymutil` fails during publish on that host; that failure is pre-existing
+on master. The app bundle's binary is the one quoted, and the pre-strip `nativelibraries` binary was
+4,103,584 for all three builds as well. The arm64 image is linked in 16 KB pages and the feature fits
+in slack the linker had already paid for: the file lengths are byte-for-byte identical while the
+hashes differ and the feature's assembly is present in the WebP build and absent from the floor.
+That is the same zero-cost shape FEATURE-COST-POLICY.md records for other arm64 features.
+
+No new native library: Skia already carries the WebP decoder, so the package is the RIFF walk, the
+compositor and the glue. What the fixture proves is that the whole path an application uses - the
+service-collection extension, the provider, Skia's WebP decoder, the compositor and the timeline - is
+reachable and cheap on all three platforms. What it does not prove is that a large file is free:
+frame memory is `frames x width x height x 4` and that is bounded at run time by
+`DecodedSizeLimit`, not by the size of the executable. It also does not isolate Skia's decoder from
+the package, because the PNG fixture already links the built-in raster path and the WebP decoder
+lives in the same Skia library; the +55,808 and +45,872 byte figures are the package's own code and
+the metadata that keeps it reachable, while osx-arm64 absorbs the same code into existing page slack.
+
+The rest is the `XPlatImageData` every image has: `Loop` can be reassigned after the load, `Play`,
+`Pause` and `Seek` are the same timeline a PNG has, and the control never disposes it.
+
+The demo's **Animated WebP** page plays the sample with play, pause, a seek bar and a position
+readout; **WebP frames** steps it through the timeline's own boundaries. There is deliberately no
+WebP copy of the **GIF out of view** page: that page makes a claim about the timeline - time passes
+while the picture is hidden - and the timeline is not per-format. A second copy would exercise the
+same core code with a different byte stream and would not test anything WebP-specific.
 
 ## Writing a backend
 

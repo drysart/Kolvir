@@ -27,11 +27,15 @@ public sealed class DemoUi
     /// The application's <c>ConfigureServices</c> does the same thing through the container - see
     /// <c>Program.cs</c> - and this factory exists because the sample is also rendered headlessly,
     /// where no container is set up. One list, composed once, and every image on every page comes
-    /// from it: <c>Images.LoadFromStream(...)</c> reads a PNG, an SVG or an animated GIF without the
-    /// call site knowing which.
+    /// from it: <c>Images.LoadFromStream(...)</c> reads a PNG, an SVG, an animated GIF or an animated
+    /// WebP without the call site knowing which.
     /// </remarks>
     private static readonly XPlatImageDataFactory Images =
-        new([XPlatSvgImageFormatProvider.Shared, XPlatGifImageFormatProvider.Shared]);
+        new([
+            XPlatSvgImageFormatProvider.Shared,
+            XPlatGifImageFormatProvider.Shared,
+            XPlatWebpImageFormatProvider.Shared,
+        ]);
 
     private XPlatLabel _statusLabel = null!;
     private XPlatLabel _counterLabel = null!;
@@ -456,6 +460,8 @@ public sealed class DemoUi
         ("Animated GIF", demo => Page(demo.BuildAnimatedGifDemo())),
         ("GIF frames", demo => Page(demo.BuildGifFrameDemo())),
         ("GIF out of view", demo => Page(demo.BuildGifScrollDemo())),
+        ("Animated WebP", demo => Page(demo.BuildAnimatedWebpDemo())),
+        ("WebP frames", demo => Page(demo.BuildWebpFrameDemo())),
     };
 
     /// <summary>
@@ -4148,6 +4154,252 @@ public sealed class DemoUi
             starts.Add(boundary);
             position = boundary;
         }
+    }
+
+    /// <summary>
+    /// The animated WebP page: the picture itself, play and pause, a seek bar, and a readout that says
+    /// where in the pass it is.
+    /// </summary>
+    /// <remarks>
+    /// The readout is a timer of the demo's own, not the player's, exactly as the GIF page does it:
+    /// the player runs one only to repaint when a frame boundary arrives - about twelve times a
+    /// second for this file - and this text wants a number every fifty milliseconds. The demo timer
+    /// follows the same rule the player follows: it exists only while the page is displayed, and the
+    /// position it prints comes from the clock rather than from the ticks.
+    /// </remarks>
+    private XPlatPanel BuildAnimatedWebpDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Animated WebP"));
+
+        var data = Images.LoadFromBytes(Convert.FromBase64String(DemoWebp.Spinner));
+
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 206f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var image = new XPlatImage
+        {
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.Zoom,
+            ImageAlign = XPlatContentAlignment.MiddleCenter,
+            CornerRadius = 6f,
+            Bounds = new SKRect(0f, 4f, 192f, 196f),
+            Image = data,
+        };
+        row.Controls.Add(image);
+
+        var playPause = new XPlatButton("Pause")
+        {
+            AutoSize = false,
+            Width = 110f,
+            Bounds = new SKRect(208f, 12f, 318f, 42f),
+        };
+        row.Controls.Add(playPause);
+
+        var seek = new XPlatTrackBar
+        {
+            Minimum = 0f,
+            Maximum = 1000f,
+            Value = 0f,
+            SmallChange = 10f,
+            LargeChange = 100f,
+            TickFrequency = 100f,
+            Bounds = new SKRect(208f, 50f, 468f, 78f),
+        };
+        row.Controls.Add(seek);
+
+        var readout = new XPlatLabel("0.00 s of 0.96 s - playing")
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 84f, 468f, 104f),
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        };
+        row.Controls.Add(readout);
+
+        row.Controls.Add(new XPlatLabel(
+            "48x48, twelve frames, 80 ms each, and the RIFF ANIM chunk declares an infinite loop. The "
+            + "first frame is the whole canvas and the eleven after it are 8x8 ANMF sub-rectangles, so "
+            + "the compositor draws each one at its own offset rather than replacing the canvas.")
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 110f, 468f, 196f),
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        });
+
+        card.Controls.Add(row);
+
+        bool seeking = false;
+
+        void Update()
+        {
+            var position = data.Position;
+            var duration = data.Duration.TotalMilliseconds;
+
+            readout.Text = duration <= 0
+                ? "still image"
+                : $"{position.TotalSeconds:0.00} s of {data.Duration.TotalSeconds:0.00} s - "
+                  + (data.IsPlaying ? "playing" : data.Loop ? "paused" : "stopped");
+
+            seeking = true;
+            seek.Value = duration <= 0 ? 0f : (float)(position.TotalMilliseconds / duration * 1000.0);
+            seeking = false;
+        }
+
+        playPause.AddClickHandler(_ =>
+        {
+            if (data.IsPlaying)
+            {
+                data.Pause();
+            }
+            else
+            {
+                data.Play();
+            }
+
+            playPause.Text = data.IsPlaying ? "Pause" : "Play";
+            Update();
+        });
+
+        seek.AddValueChangedHandler(_ =>
+        {
+            if (seeking || data.Duration <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            data.Seek(TimeSpan.FromMilliseconds(data.Duration.TotalMilliseconds * seek.Value / 1000.0));
+            Update();
+        });
+
+        var timer = new XPlatTimer(TimeSpan.FromMilliseconds(50));
+        timer.AddTickHandler(_ => Update());
+        image.AddDisplayedChangedHandler(_ =>
+        {
+            if (image.IsDisplayed)
+            {
+                Update();
+                timer.Start();
+            }
+            else
+            {
+                timer.Stop();
+            }
+        });
+
+        data.Play();
+        Update();
+
+        card.Controls.Add(ScrollCaption(
+            "Play and Pause are the timeline's; the seek bar re-anchors it, so a seek during playback "
+            + "does not jump when the clock catches up. The timeline is the GIF feature's, unchanged."));
+
+        return card;
+    }
+
+    /// <summary>
+    /// The WebP frame-stepping page: one frame at a time, backwards or forwards, on a paused
+    /// animation whose boundaries come from the timeline rather than from a table.
+    /// </summary>
+    /// <remarks>
+    /// Stepping is a seek to a frame's start, and the starts are walked from
+    /// <see cref="XPlatImageData.TimeUntilNextFrame"/>, which is the same number the control
+    /// schedules its repaints by. Because every frame was decoded up front, stepping backwards costs
+    /// what stepping forwards does, and the sub-rectangle frames make the offset visible when the
+    /// readout names the frame.
+    /// </remarks>
+    private XPlatPanel BuildWebpFrameDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("WebP frames"));
+
+        var data = Images.LoadFromBytes(Convert.FromBase64String(DemoWebp.Spinner));
+        var starts = FrameStarts(data);
+        int index = 0;
+
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 206f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var image = new XPlatImage
+        {
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.Zoom,
+            ImageAlign = XPlatContentAlignment.MiddleCenter,
+            CornerRadius = 6f,
+            Bounds = new SKRect(0f, 4f, 192f, 196f),
+            Image = data,
+        };
+        row.Controls.Add(image);
+
+        var previous = new XPlatButton("Previous")
+        {
+            AutoSize = false,
+            Width = 100f,
+            Bounds = new SKRect(208f, 12f, 308f, 42f),
+        };
+        row.Controls.Add(previous);
+
+        var next = new XPlatButton("Next")
+        {
+            AutoSize = false,
+            Width = 100f,
+            Bounds = new SKRect(318f, 12f, 418f, 42f),
+        };
+        row.Controls.Add(next);
+
+        var readout = new XPlatLabel(string.Empty)
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 54f, 468f, 76f),
+        };
+        row.Controls.Add(readout);
+
+        row.Controls.Add(new XPlatLabel(
+            "The animation is paused and the buttons seek to a frame boundary. The readout's second "
+            + "number is the frame's start on the timeline, which is what the player schedules its "
+            + "repaints by.")
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 84f, 468f, 196f),
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        });
+
+        card.Controls.Add(row);
+
+        void Show(int wanted)
+        {
+            index = Math.Clamp(wanted, 0, starts.Count - 1);
+            data.Seek(starts[index]);
+            readout.Text = $"Frame {index + 1} of {starts.Count} - starts at {starts[index].TotalMilliseconds:0} ms";
+        }
+
+        previous.AddClickHandler(_ => Show(index - 1));
+        next.AddClickHandler(_ => Show(index + 1));
+        Show(0);
+
+        return card;
     }
 
     /// <summary>

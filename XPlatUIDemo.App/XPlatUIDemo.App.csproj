@@ -57,6 +57,7 @@
          HarfBuzz native comes along per-platform from the package's own dependency groups. -->
     <ProjectReference Include="..\XPlatUI.Feature.Animations\XPlatUI.Feature.Animations.csproj" />
     <ProjectReference Include="..\XPlatUI.Feature.AnimatedGif\XPlatUI.Feature.AnimatedGif.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.AnimatedWebp\XPlatUI.Feature.AnimatedWebp.csproj" />
     <ProjectReference Include="..\XPlatUI.Feature.Svg\XPlatUI.Feature.Svg.csproj" />
   </ItemGroup>
 

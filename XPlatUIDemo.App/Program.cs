@@ -110,10 +110,16 @@ internal static class Program
             // three platforms.
             SingleInstance = true,
 
-            // The sample takes drops on its root panel and on a text box, so it opts into the drag
-            // and drop feature. It shows SVG icons, so it opts into the SVG feature the same way;
-            // leaving either out is what keeps it out of an application that does not want it.
-            ConfigureServices = services => services.AddDragDrop().AddAnimations().AddSvgImages().AddAnimatedGifImages(),
+            // The sample opts into five features, each for a page that uses it: drag and drop for
+            // its drops, animations for the easing pages, SVG for the icon pages, and the animated
+            // GIF and WebP providers for their picture pages. Each Add call is the whole opt-in;
+            // leaving one out keeps that feature's code out of an application that does not want it.
+            ConfigureServices = services => services
+                .AddDragDrop()
+                .AddAnimations()
+                .AddSvgImages()
+                .AddAnimatedGifImages()
+                .AddAnimatedWebpImages(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,

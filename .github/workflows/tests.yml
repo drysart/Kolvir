@@ -1,6 +1,6 @@
 name: Tests
 
-# All five suites are portable net10.0 assemblies, so they need no window server, no display and
+# All six suites are portable net10.0 assemblies, so they need no window server, no display and
 # no platform workload: every test drives XPlatUI through the headless backend, the animation suite
 # drives its own clock and frame source rather than a real timer, and the image suites drive their
 # timelines with a hand-advanced TimeProvider. That is why no leg of this
@@ -85,6 +85,7 @@ jobs:
           dotnet restore XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -165,6 +166,20 @@ jobs:
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=gif.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The animated WebP feature's suite. Same wiring, same narrowing. It builds RIFF containers
+      # and decodes their frames in memory, ignores the run-time clock entirely and reads pixels back,
+      # so no display and no timer are involved.
+      - name: Test the animated WebP feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Tests.csproj --no-restore --nologo \
+            -p:TargetFramework=net10.0 \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=webp.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 
