@@ -20,6 +20,19 @@ namespace XPlatUI.Demo;
 /// </summary>
 public sealed class DemoUi
 {
+    /// <summary>
+    /// The formats the sample enables for its images.
+    /// </summary>
+    /// <remarks>
+    /// The application's <c>ConfigureServices</c> does the same thing through the container - see
+    /// <c>Program.cs</c> - and this factory exists because the sample is also rendered headlessly,
+    /// where no container is set up. One list, composed once, and every image on every page comes
+    /// from it: <c>Images.LoadFromStream(...)</c> reads a PNG, an SVG or an animated GIF without the
+    /// call site knowing which.
+    /// </remarks>
+    private static readonly XPlatImageDataFactory Images =
+        new([XPlatSvgImageFormatProvider.Shared, XPlatGifImageFormatProvider.Shared]);
+
     private XPlatLabel _statusLabel = null!;
     private XPlatLabel _counterLabel = null!;
     private XPlatButton _primaryButton = null!;
@@ -59,11 +72,6 @@ public sealed class DemoUi
 
     public DemoUi()
     {
-        // The sample is also rendered headlessly, where no ConfigureServices runs, so the SVG
-        // provider is registered here as well as in Program.cs. The call is idempotent, which is
-        // what makes that safe rather than doubled.
-        XPlatSvg.AddSvgImages();
-
         Root = BuildUi();
 
         // A page that has no menu of its own still has to answer a right-click: the host asks for a
@@ -445,6 +453,9 @@ public sealed class DemoUi
         ("SVG icons", demo => Page(BuildSvgIconGallery())),
         ("SVG recolour", demo => Page(BuildSvgRecolourDemo())),
         ("SVG and a raster twin", demo => Page(BuildSvgRasterTwinDemo())),
+        ("Animated GIF", demo => Page(demo.BuildAnimatedGifDemo())),
+        ("GIF frames", demo => Page(demo.BuildGifFrameDemo())),
+        ("GIF out of view", demo => Page(demo.BuildGifScrollDemo())),
     };
 
     /// <summary>
@@ -3241,12 +3252,8 @@ public sealed class DemoUi
             SizeMode = XPlatSizeMode.Zoom,
             ImageAlign = XPlatContentAlignment.MiddleCenter,
             CornerRadius = 8f,
-            DisposePictureWithControl = true,
         };
-        using (var gradient = CreateGradientPng(320, 200))
-        {
-            image.Load(gradient);
-        }
+        image.Image = Images.LoadFromStream(CreateGradientPng(320, 200));
         faded.Controls.Add(image);
         card.Controls.Add(faded);
 
@@ -3273,9 +3280,9 @@ public sealed class DemoUi
     /// A gallery: five documents, each drawn at five sizes.
     /// </summary>
     /// <remarks>
-    /// Every one of them is loaded through <see cref="XPlatImage.Load(Stream)"/> rather than through
-    /// the recolour helper, so what the page shows is the path an application gets for free once
-    /// <c>AddSvgImages()</c> has run: the same <c>Load</c> call it already makes for a PNG.
+    /// Every one of them is loaded through the same factory call a PNG goes through, so what the
+    /// page shows is the path an application gets for free once the image format provider is
+    /// registered.
     /// </remarks>
     private static XPlatPanel BuildSvgIconGallery()
     {
@@ -3516,7 +3523,7 @@ public sealed class DemoUi
 
         using (var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(source)))
         {
-            image.Load(stream);
+            image.Image = Images.LoadFromStream(stream);
         }
 
         cell.Controls.Add(image);
@@ -3600,11 +3607,11 @@ public sealed class DemoUi
         if (vector)
         {
             using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(DemoIcons.Disc));
-            image.Load(stream);
+            image.Image = Images.LoadFromStream(stream);
         }
         else
         {
-            image.Load(new MemoryStream(RasteriseSvg(DemoIcons.Disc, 16)));
+            image.Image = Images.LoadFromBytes(RasteriseSvg(DemoIcons.Disc, 16));
         }
 
         cell.Controls.Add(image);
@@ -3614,10 +3621,9 @@ public sealed class DemoUi
     /// <summary>Renders a document once to a PNG of the requested size, the way a build step would.</summary>
     private static byte[] RasteriseSvg(string source, int size)
     {
-        var provider = new XPlatSvgImageFormatProvider();
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(source));
-        using var picture = provider.Decode(stream, "svg")
-                            ?? throw new InvalidOperationException("The demo icon did not render.");
+        using var data = Images.LoadFromStream(stream);
+        var picture = data.CurrentFrame!;
 
         using var surface = SKSurface.Create(new SKImageInfo(size, size));
         surface.Canvas.Clear(SKColors.Transparent);
@@ -3627,14 +3633,521 @@ public sealed class DemoUi
         surface.Canvas.DrawPicture(picture);
 
         using var image = surface.Snapshot();
-        using var data = image.Encode(SKEncodedImageFormat.Png, 100);
-        return data.ToArray();
+        using var png = image.Encode(SKEncodedImageFormat.Png, 100);
+        return png.ToArray();
     }
 
     private static void Reload(XPlatImage image, string source, SKColor colour)
     {
         using var stream = new MemoryStream(System.Text.Encoding.UTF8.GetBytes(source));
-        image.LoadSvg(stream, colour);
+
+        // The control does not own what it shows, so replacing an image here releases the one it
+        // was showing by hand rather than relying on the control to do it.
+        image.Image?.Dispose();
+        image.Image = Images.LoadFromStream(stream, new XPlatSvgOptions { CurrentColor = colour });
+    }
+
+    /// <summary>
+    /// The animated GIF page: the picture itself, play and pause, a seek bar, and a readout that says
+    /// where in the pass it is.
+    /// </summary>
+    /// <remarks>
+    /// The readout is a timer of the demo's own, not the player's. The player runs one only to
+    /// repaint when a frame boundary arrives - about twelve times a second for this file - and this
+    /// text wants a number every fifty milliseconds. The demo timer follows the same rule the player
+    /// follows: it exists only while the page is displayed, and the position it prints comes from the
+    /// clock rather than from the ticks.
+    /// </remarks>
+    private XPlatPanel BuildAnimatedGifDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Animated GIF"));
+
+        var data = Images.LoadFromBytes(Convert.FromBase64String(DemoGif.Spinner));
+
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 206f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var image = new XPlatImage
+        {
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.Zoom,
+            ImageAlign = XPlatContentAlignment.MiddleCenter,
+            CornerRadius = 6f,
+            Bounds = new SKRect(0f, 4f, 192f, 196f),
+            Image = data,
+        };
+        row.Controls.Add(image);
+
+        var playPause = new XPlatButton("Pause")
+        {
+            AutoSize = false,
+            Width = 110f,
+            Bounds = new SKRect(208f, 12f, 318f, 42f),
+        };
+        row.Controls.Add(playPause);
+
+        var seek = new XPlatTrackBar
+        {
+            Minimum = 0f,
+            Maximum = 1000f,
+            Value = 0f,
+            SmallChange = 10f,
+            LargeChange = 100f,
+            TickFrequency = 100f,
+            Bounds = new SKRect(208f, 50f, 468f, 78f),
+        };
+        row.Controls.Add(seek);
+
+        var readout = new XPlatLabel("0.00 s of 0.96 s - playing")
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 84f, 468f, 104f),
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        };
+        row.Controls.Add(readout);
+
+        row.Controls.Add(new XPlatLabel(
+            "48x48, twelve frames, 80 ms each, and the file declares an infinite loop. The frames are "
+            + "deltas, so the decoder composites them: the second frame onwards carries only the "
+            + "eleven-pixel-wide strip the square moved through.")
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 110f, 468f, 196f),
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        });
+
+        card.Controls.Add(row);
+
+        bool seeking = false;
+
+        void Update()
+        {
+            var position = data.Position;
+            var duration = data.Duration.TotalMilliseconds;
+
+            readout.Text = duration <= 0
+                ? "still image"
+                : $"{position.TotalSeconds:0.00} s of {data.Duration.TotalSeconds:0.00} s - "
+                  + (data.IsPlaying ? "playing" : data.Loop ? "paused" : "stopped");
+
+            seeking = true;
+            seek.Value = duration <= 0 ? 0f : (float)(position.TotalMilliseconds / duration * 1000.0);
+            seeking = false;
+        }
+
+        playPause.AddClickHandler(_ =>
+        {
+            if (data.IsPlaying)
+            {
+                data.Pause();
+            }
+            else
+            {
+                data.Play();
+            }
+
+            playPause.Text = data.IsPlaying ? "Pause" : "Play";
+            Update();
+        });
+
+        seek.AddValueChangedHandler(_ =>
+        {
+            if (seeking || data.Duration <= TimeSpan.Zero)
+            {
+                return;
+            }
+
+            data.Seek(TimeSpan.FromMilliseconds(data.Duration.TotalMilliseconds * seek.Value / 1000.0));
+            Update();
+        });
+
+        var timer = new XPlatTimer(TimeSpan.FromMilliseconds(50));
+        timer.AddTickHandler(_ => Update());
+        image.AddDisplayedChangedHandler(_ =>
+        {
+            if (image.IsDisplayed)
+            {
+                Update();
+                timer.Start();
+            }
+            else
+            {
+                timer.Stop();
+            }
+        });
+
+        data.Play();
+        Update();
+
+        card.Controls.Add(ScrollCaption(
+            "Play and Pause are the timeline's; the seek bar re-anchors it, so a seek during playback "
+            + "does not jump when the clock catches up."));
+
+        return card;
+    }
+
+    /// <summary>
+    /// The frame-stepping page: one frame at a time, backwards or forwards, on a paused animation.
+    /// </summary>
+    /// <remarks>
+    /// Stepping is a seek to a frame's start, and the frame starts are read back from the timeline
+    /// itself rather than from a table: <see cref="XPlatImageData.TimeUntilNextFrame"/> walked from
+    /// zero is the list of boundaries, which is the same number the control schedules its repaints
+    /// by. Because every frame was decoded up front, stepping backwards costs what stepping forwards
+    /// does.
+    /// </remarks>
+    private XPlatPanel BuildGifFrameDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("GIF frames"));
+
+        var data = Images.LoadFromBytes(Convert.FromBase64String(DemoGif.Spinner));
+        var starts = FrameStarts(data);
+        int index = 0;
+
+        var row = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 206f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+        };
+
+        var image = new XPlatImage
+        {
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.Zoom,
+            ImageAlign = XPlatContentAlignment.MiddleCenter,
+            CornerRadius = 6f,
+            Bounds = new SKRect(0f, 4f, 192f, 196f),
+            Image = data,
+        };
+        row.Controls.Add(image);
+
+        var previous = new XPlatButton("Previous")
+        {
+            AutoSize = false,
+            Width = 100f,
+            Bounds = new SKRect(208f, 12f, 308f, 42f),
+        };
+        row.Controls.Add(previous);
+
+        var next = new XPlatButton("Next")
+        {
+            AutoSize = false,
+            Width = 100f,
+            Bounds = new SKRect(318f, 12f, 418f, 42f),
+        };
+        row.Controls.Add(next);
+
+        var readout = new XPlatLabel(string.Empty)
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 54f, 468f, 76f),
+        };
+        row.Controls.Add(readout);
+
+        row.Controls.Add(new XPlatLabel(
+            "The animation is paused and the buttons seek to a frame boundary. The readout's second "
+            + "number is the frame's start on the timeline, which is what the player schedules its "
+            + "repaints by.")
+        {
+            AutoSize = false,
+            Bounds = new SKRect(208f, 84f, 468f, 196f),
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        });
+
+        card.Controls.Add(row);
+
+        void Show(int wanted)
+        {
+            index = Math.Clamp(wanted, 0, starts.Count - 1);
+            data.Seek(starts[index]);
+            readout.Text = $"Frame {index + 1} of {starts.Count} - starts at {starts[index].TotalMilliseconds:0} ms";
+        }
+
+        previous.AddClickHandler(_ => Show(index - 1));
+        next.AddClickHandler(_ => Show(index + 1));
+        Show(0);
+
+        return card;
+    }
+
+    /// <summary>
+    /// The page that shows time passing while nobody is looking: scroll the picture out of the
+    /// scroll panel, wait, scroll back, and the frame is the one the clock says rather than the one
+    /// it left on.
+    /// </summary>
+    /// <remarks>
+    /// Nothing special makes this happen - the position is computed from a clock rather than
+    /// accumulated by a timer - so the page exists to make the claim visible: the readout keeps
+    /// counting while the picture is scrolled away, and the frame that comes back is the one the
+    /// readout describes.
+    /// </remarks>
+    private XPlatPanel BuildGifScrollDemo()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("GIF out of view"));
+
+        var data = Images.LoadFromBytes(Convert.FromBase64String(DemoGif.Spinner));
+
+        // A stack inside a fixed frame, which is the scrolling container the Scrolling page uses: the
+        // run of children is what makes the picture scrollable out of the frame.
+        var viewportFrame = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 150f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        var viewport = new XPlatStackPanel
+        {
+            Dock = XDock.Fill,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            Padding = new XPlatThickness(4f),
+            Spacing = 4f,
+        };
+        viewportFrame.Controls.Add(viewport);
+
+        var image = new XPlatImage
+        {
+            AutoSize = true,
+            MinimumSize = new SKSize(120f, 120f),
+            HorizontalAlignment = XPlatAlignment.Near,
+            SizeMode = XPlatSizeMode.Zoom,
+            CornerRadius = 6f,
+            Image = data,
+        };
+        viewport.Controls.Add(image);
+
+        for (int row = 0; row < 8; row++)
+        {
+            viewport.Controls.Add(new XPlatLabel($"Filler row {row + 1} - scroll past the picture")
+            {
+                AutoSize = false,
+                Height = 22f,
+                Font = XPlatTheme.CaptionFont,
+                ForeColorRole = XPlatThemeColor.MutedForeground,
+            });
+        }
+
+        card.Controls.Add(viewportFrame);
+
+        // The page runs its own cycle so the claim can be watched without touching anything, but a
+        // page that pulls the viewport out from under the pointer is worse than one that needs a
+        // button: every leg first checks that the offset is still the one the cycle itself wrote,
+        // and the first scroll somebody else does stops the cycle for good. What the page is showing
+        // - that time passes while the picture is out of view - is still automatic.
+        float home = viewport.VerticalOffset;
+        float owned = home;
+        bool tookOver = false;
+
+        var awayTimer = new XPlatTimer(TimeSpan.FromMilliseconds(2300));
+        var backTimer = new XPlatTimer(TimeSpan.FromMilliseconds(700));
+
+        void StopCycle()
+        {
+            awayTimer.Stop();
+            backTimer.Stop();
+        }
+
+        bool StillOurs()
+        {
+            if (tookOver)
+            {
+                return false;
+            }
+
+            if (MathF.Abs(viewport.VerticalOffset - owned) < 0.5f)
+            {
+                return true;
+            }
+
+            // Somebody scrolled: the page gives the viewport up rather than dragging it back to
+            // where the demonstration wanted it.
+            tookOver = true;
+            StopCycle();
+            SetStatus("You scrolled it, so the page has handed the scrolling back to you.");
+            return false;
+        }
+
+        void CycleAway()
+        {
+            if (!StillOurs())
+            {
+                return;
+            }
+
+            owned = 140f;
+            viewport.ScrollTo(0f, owned);
+            backTimer.Start();
+        }
+
+        void CycleBack()
+        {
+            if (!StillOurs())
+            {
+                return;
+            }
+
+            owned = home;
+            viewport.ScrollTo(0f, home);
+            awayTimer.Start();
+        }
+
+        awayTimer.AddTickHandler(_ =>
+        {
+            awayTimer.Stop();
+            CycleAway();
+        });
+
+        backTimer.AddTickHandler(_ =>
+        {
+            backTimer.Stop();
+            CycleBack();
+        });
+
+        var buttons = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 34f,
+            ShowFrame = false,
+            IsCard = false,
+            BackColor = null,
+            BorderWidth = 0f,
+            CornerRadius = 0f,
+            Padding = new XPlatThickness(0f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        };
+
+        var away = new XPlatButton("Scroll the picture away")
+        {
+            AutoSize = false,
+            Width = 200f,
+            Bounds = new SKRect(0f, 2f, 200f, 32f),
+        };
+
+        var back = new XPlatButton("Scroll it back")
+        {
+            AutoSize = false,
+            Width = 150f,
+            Bounds = new SKRect(210f, 2f, 360f, 32f),
+        };
+
+        away.AddClickHandler(_ =>
+        {
+            SetStatus("The picture is scrolled out of view; the timeline is not.");
+
+            // A click is the user asking the page to move it, so the cycle is re-armed from wherever
+            // the panel is now.
+            tookOver = false;
+            owned = viewport.VerticalOffset;
+            CycleAway();
+        });
+        back.AddClickHandler(_ =>
+        {
+            SetStatus("The picture is back; the frame is the one the clock reached.");
+
+            tookOver = false;
+            owned = viewport.VerticalOffset;
+            CycleBack();
+        });
+
+        bool travelled = false;
+
+        buttons.Controls.Add(away);
+        buttons.Controls.Add(back);
+        card.Controls.Add(buttons);
+
+        var readout = ScrollCaption("Position 0.00 s of 0.96 s");
+
+        var timer = new XPlatTimer(TimeSpan.FromMilliseconds(50));
+        timer.AddTickHandler(_ =>
+            readout.Text = $"Position {data.Position.TotalSeconds:0.00} s of {data.Duration.TotalSeconds:0.00} s");
+
+        image.AddDisplayedChangedHandler(_ =>
+        {
+            if (image.IsDisplayed)
+            {
+                timer.Start();
+
+                // The cycle starts the first time the page is looked at, so the demonstration happens
+                // without anyone clicking anything.
+                if (!travelled)
+                {
+                    travelled = true;
+                    awayTimer.Start();
+                }
+            }
+            else
+            {
+                timer.Stop();
+                StopCycle();
+            }
+        });
+
+        data.Play();
+        card.Controls.Add(readout);
+
+        card.Controls.Add(Note(
+            "Scroll the picture away, wait, then scroll it back: the frame you get is the one the clock "
+            + "says, not the one it left on. Nothing in the player arranges that - the position is "
+            + "computed from a clock rather than accumulated by a timer - so the readout keeps counting "
+            + "while the picture is out of the frame and the frame that comes back agrees with it. The "
+            + "page runs the cycle itself so it can be watched without touching anything, and it stops "
+            + "the moment you scroll the panel yourself: a demonstration that fights the pointer is "
+            + "worse than one that needs a button."));
+
+        return card;
+    }
+
+    /// <summary>Where each frame of an animation starts, read back from the timeline itself.</summary>
+    private static List<TimeSpan> FrameStarts(XPlatImageData data)
+    {
+        var starts = new List<TimeSpan> { TimeSpan.Zero };
+        var position = TimeSpan.Zero;
+
+        while (true)
+        {
+            if (data.TimeUntilNextFrame(position) is not { } wait)
+            {
+                return starts;
+            }
+
+            var boundary = position + wait;
+            if (boundary <= position || boundary >= data.Duration)
+            {
+                return starts;
+            }
+
+            starts.Add(boundary);
+            position = boundary;
+        }
     }
 
     /// <summary>

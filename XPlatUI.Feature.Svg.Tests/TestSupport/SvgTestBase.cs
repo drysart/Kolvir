@@ -1,40 +1,51 @@
+using SkiaSharp;
 using XPlatUI.Undo;
 
 namespace XPlatUI.Svg.Tests;
 
 /// <summary>
-/// The base every test class derives from, so process-wide state a test changed is put back
-/// afterwards even when the test fails.
+/// The base every test class derives from: a factory with the SVG provider in it, and the
+/// process-wide state a test may have changed put back afterwards.
 /// </summary>
 /// <remarks>
-/// Image format providers are process-wide by design, and every test that registers one has to
-/// leave the process as it found it or the next test inherits SVG support it did not ask for. The
-/// registrations a test opens through this type are disposed after it, and the parse cache is
-/// emptied, because a test that counts parses must not be able to see another test's parses.
+/// <para>
+/// There is no registry to register into and nothing to unregister: a factory is composed from an
+/// explicit list, so a test states which formats it is testing and two tests cannot see each other's.
+/// That is why the old "register for one test and put the process back" machinery is gone.
+/// </para>
+/// <para>
+/// The parse cache is still process-wide - it is a property of the package rather than of a load -
+/// so it is emptied after every test: a test that counts parses must not be able to see another
+/// test's parses.
+/// </para>
 /// </remarks>
 public abstract class SvgTestBase
 {
-    private readonly Stack<IDisposable> _registrations = new();
+    /// <summary>The factory under test: SVG plus the built-in raster decoder.</summary>
+    protected XPlatImageDataFactory Factory { get; }
 
-    /// <summary>Registers a provider for the length of one test.</summary>
-    protected IDisposable Register(IXPlatImageFormatProvider provider)
+    protected SvgTestBase()
     {
-        var handle = XPlatImageFormats.Add(provider);
-        _registrations.Push(handle);
-        return handle;
+        Factory = new XPlatImageDataFactory([XPlatSvgImageFormatProvider.Shared]);
     }
 
-    /// <summary>Registers the SVG provider for the length of one test.</summary>
-    protected IDisposable RegisterSvg() => Register(XPlatSvgImageFormatProvider.Shared);
+    /// <summary>A factory over exactly the providers a test names.</summary>
+    protected static XPlatImageDataFactory FactoryWith(params IXPlatImageFormatProvider[] providers) =>
+        new(providers);
+
+    /// <summary>Loads a document, with <c>currentColor</c> resolved to <paramref name="colour"/>.</summary>
+    protected XPlatImageData LoadColoured(Stream stream, SKColor? colour) =>
+        Factory.LoadFromStream(stream, new XPlatSvgOptions { CurrentColor = colour });
+
+    /// <summary>Assigns what the factory made of the document to a control.</summary>
+    protected void Load(XPlatImage image, Stream stream) => image.Image = Factory.LoadFromStream(stream);
+
+    /// <summary>A control showing what the factory made of the document.</summary>
+    protected XPlatImage Show(Stream stream) => new() { Image = Factory.LoadFromStream(stream) };
 
     [TestCleanup]
     public void RestoreProcessState()
     {
-        while (_registrations.Count > 0)
-        {
-            _registrations.Pop().Dispose();
-        }
-
         XPlatSvg.ClearCache();
         XPlatTheme.FontFamily = null;
         XPlatTheme.Palette = XPlatPalette.Light;

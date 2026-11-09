@@ -103,6 +103,12 @@ public sealed partial class XPlatApplication : IDisposable
         backend.RegisterServices(services);
         options.ConfigureServices?.Invoke(services);
 
+        // Composed after the application has declared its features, so the factory sees every format
+        // they registered. One factory per application, built once from a fixed list: a control
+        // resolves this one, and nothing can add a format to it at run time.
+        services.AddSingleton<IXPlatImageDataFactory>(provider =>
+            new XPlatImageDataFactory(provider.GetServices<IXPlatImageFormatProvider>()));
+
         _provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = ValidateScopes });
         Services = _provider;
 

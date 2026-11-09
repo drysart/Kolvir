@@ -3,13 +3,14 @@ using SkiaSharp;
 namespace XPlatUI.Svg;
 
 /// <summary>
-/// The <see cref="IXPlatImageFormatProvider"/> that teaches <see cref="XPlatImage"/> to read SVG.
+/// The <see cref="IXPlatImageFormatProvider"/> that teaches <see cref="XPlatImageDataFactory"/> to
+/// read SVG.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Register it once and every subsequent <see cref="XPlatImage.Load(string)"/> and
-/// <see cref="XPlatImage.Load(Stream)"/> reads SVG with no change to the call site: the bytes
-/// decide, and the picture is handed to the control exactly as a decoded bitmap is. The provider is
+/// Register it once - <c>services.AddSvgImages()</c> - and every subsequent load through the
+/// application's <see cref="IXPlatImageDataFactory"/> reads SVG with no change to the call site: the
+/// bytes decide, and the data reaches the control exactly as a decoded bitmap does. The provider is
 /// opt-in because it is a package: an application that does not reference this assembly has none of
 /// it, and one that references it but never registers it has the assembly and none of its work.
 /// </para>
@@ -18,11 +19,16 @@ namespace XPlatUI.Svg;
 /// SVG, so the two never contend over the same bytes in practice. A bitmap is never routed here and
 /// an SVG is never handed to the raster decoder.
 /// </para>
+/// <para>
+/// The document is a still image: the data it produces has a duration of zero, which is what an SVG
+/// is to a timeline. An animated SVG would be a source of its own, added here without the control
+/// knowing about it.
+/// </para>
 /// </remarks>
 public sealed class XPlatSvgImageFormatProvider : IXPlatImageFormatProvider
 {
     /// <summary>The single instance, so registering twice is registering once.</summary>
-    internal static XPlatSvgImageFormatProvider Shared { get; } = new();
+    public static XPlatSvgImageFormatProvider Shared { get; } = new();
 
     /// <inheritdoc/>
     public string Name => "svg";
@@ -34,21 +40,31 @@ public sealed class XPlatSvgImageFormatProvider : IXPlatImageFormatProvider
     public bool CanDecode(ReadOnlySpan<byte> header) => XPlatSvgDocument.LooksLikeSvg(header);
 
     /// <summary>
-    /// Parses the document, or serves it from the cache, and returns a recording the control owns.
+    /// Parses the document, or serves it from the cache, and returns data that owns its recording.
     /// </summary>
     /// <remarks>
-    /// <c>currentColor</c> is left at SVG's own default - black - because a provider has no way to
-    /// be told a colour. An application that wants an icon to follow its palette loads it through
-    /// <see cref="XPlatImageSvgExtensions.LoadSvg(XPlatImage, string, SKColor?)"/> instead, which
-    /// keys the same cache on the colour.
+    /// <c>currentColor</c> comes from <see cref="XPlatSvgOptions"/> when the caller passed one and is
+    /// SVG's own default - black - otherwise, because a provider has no other way to be told a
+    /// colour. <see cref="XPlatSvgImageDataFactoryExtensions"/> is the discoverable spelling of that
+    /// call.
     /// </remarks>
-    public SKPicture? Decode(Stream stream, string? extensionHint)
+    public XPlatImageData Create(Stream stream, string? extensionHint, IXPlatImageFormatOptions? options)
     {
         ArgumentNullException.ThrowIfNull(stream);
+
+        var svg = options switch
+        {
+            null => null,
+            XPlatSvgOptions typed => typed,
+            _ => throw new ArgumentException(
+                $"The SVG provider does not understand {options.GetType().Name}.",
+                nameof(options)),
+        };
 
         using var buffer = new MemoryStream();
         stream.CopyTo(buffer);
 
-        return XPlatSvgCache.Get(buffer.GetBuffer().AsSpan(0, (int)buffer.Length), currentColor: null).Record();
+        var picture = XPlatSvgCache.Get(buffer.GetBuffer().AsSpan(0, (int)buffer.Length), svg?.CurrentColor).Record();
+        return XPlatImageData.FromPicture(picture, disposePictureWithData: true);
     }
 }

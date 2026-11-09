@@ -1,8 +1,9 @@
 name: Tests
 
-# All four suites are portable net10.0 assemblies, so they need no window server, no display and
-# no platform workload: every test drives XPlatUI through the headless backend, and the animation
-# suite drives its own clock and frame source rather than a real timer. That is why no leg of this
+# All five suites are portable net10.0 assemblies, so they need no window server, no display and
+# no platform workload: every test drives XPlatUI through the headless backend, the animation suite
+# drives its own clock and frame source rather than a real timer, and the image suites drive their
+# timelines with a hand-advanced TimeProvider. That is why no leg of this
 # workflow installs a workload - the macOS build and feature pack workflows are the only jobs
 # that do, because they compile or pack the net10.0-macos target. The matrix is the point rather than
 # a formality - the same tests run on all three platforms, which is what keeps the portable claims
@@ -83,6 +84,7 @@ jobs:
           dotnet restore XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -149,6 +151,20 @@ jobs:
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=svg.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The animated GIF feature's suite. Same wiring, same narrowing. It decodes and composites
+      # frames in memory and reads pixels back, and every position it asserts comes from a clock the
+      # test advances by hand, so it needs no display and no timer of its own.
+      - name: Test the animated GIF feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj --no-restore --nologo \
+            -p:TargetFramework=net10.0 \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=gif.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

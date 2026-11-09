@@ -1,27 +1,25 @@
-using SkiaSharp;
-
 namespace XPlatUI.Svg.Tests;
 
 /// <summary>
-/// The raster formats the control has always read, checked with the SVG feature present in the
-/// process but nothing registered.
+/// The raster formats the built-in decoder has always read, checked from the assembly that also
+/// carries the SVG feature, with no provider in the factory.
 /// </summary>
 /// <remarks>
 /// This is the "core stays able to decode with nothing installed" claim, and the only way to test it
-/// honestly from this assembly is to register nothing: the feature is referenced, the code is in the
-/// output, and the provider is not on the list, so every one of these loads goes through the same
-/// built-in raster decoder an application without the feature uses.
+/// honestly from this assembly is to pass no providers: the feature is referenced, the code is in the
+/// output, and the factory still reads every raster format - which is the built-in decoder doing
+/// fallback work rather than a provider.
 /// </remarks>
 [TestClass]
 [TestCategory("Feature")]
 [TestCategory("Svg")]
 public sealed class RasterFormatTests : SvgTestBase
 {
-    public TestContext? TestContext { get; set; }
-
     [TestMethod]
     public void EveryRasterFormatTheControlAlwaysReadStillReads()
     {
+        var factory = new XPlatImageDataFactory();
+
         var fixtures = new (string Name, byte[] Bytes, int Width, int Height)[]
         {
             ("PNG", SvgFixtures.Png(SvgFixtures.Blue), 4, 2),
@@ -33,15 +31,11 @@ public sealed class RasterFormatTests : SvgTestBase
 
         foreach (var (name, bytes, width, height) in fixtures)
         {
-            using var image = new XPlatImage();
-            int failures = 0;
-            image.AddLoadFailedHandler((_, _) => failures++);
+            using var data = factory.LoadFromBytes(bytes);
 
-            Assert.IsTrue(image.Load(new MemoryStream(bytes)), $"{name} should decode with no provider registered");
-            Assert.IsNotNull(image.Picture, $"{name} should produce a picture");
-            Assert.AreEqual(width, image.Picture!.CullRect.Width, 0.5f, $"{name}'s width is the file's");
-            Assert.AreEqual(height, image.Picture.CullRect.Height, 0.5f, $"{name}'s height is the file's");
-            Assert.AreEqual(0, failures, $"{name} should not report a failure");
+            Assert.AreEqual(width, data.NaturalSize.Width, 0.5f, $"{name}'s width is the file's");
+            Assert.AreEqual(height, data.NaturalSize.Height, 0.5f, $"{name}'s height is the file's");
+            Assert.AreEqual(TimeSpan.Zero, data.Duration, $"{name} is a still image");
         }
     }
 
@@ -58,25 +52,21 @@ public sealed class RasterFormatTests : SvgTestBase
     }
 
     [TestMethod]
-    public void AnUnknownStreamIsAFalseReturnWithNoFailureReported()
+    public void AnUnknownStreamIsAFailureWithNoProviderNamed()
     {
-        // Unchanged from before the seam existed: a stream that is not a recognised image is not an
-        // error to report, it is simply not an image.
-        using var image = new XPlatImage();
-        int failures = 0;
-        image.AddLoadFailedHandler((_, _) => failures++);
+        var failure = Assert.ThrowsExactly<XPlatImageFormatException>(
+            () => new XPlatImageDataFactory().LoadFromBytes([1, 2, 3, 4]));
 
-        Assert.IsFalse(image.Load(new MemoryStream([1, 2, 3, 4])), "four bytes of nothing are not an image");
-        Assert.AreEqual(0, failures, "and nothing is raised for them");
+        Assert.AreEqual(string.Empty, failure.ProviderName, "nothing claimed the bytes");
     }
 
     [TestMethod]
     public void ANonSeekableStreamIsBufferedAndStillDecodes()
     {
-        using var image = new XPlatImage();
+        using var data = new XPlatImageDataFactory().LoadFromStream(
+            new ForwardOnlyStream(SvgFixtures.Png(SvgFixtures.Blue)));
 
-        Assert.IsTrue(image.Load(new ForwardOnlyStream(SvgFixtures.Png(SvgFixtures.Blue))), "a pipe-like stream should decode");
-        Assert.AreEqual(4f, image.Picture!.CullRect.Width, "by the same bounds as a seekable one");
+        Assert.AreEqual(4f, data.NaturalSize.Width, "by the same bounds as a seekable one");
     }
 
     /// <summary>A stream that can only be read forwards, like a socket or a pipe.</summary>

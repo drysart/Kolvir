@@ -8,17 +8,20 @@ namespace XPlatUI.Svg;
 /// </summary>
 /// <remarks>
 /// <para>
-/// This exists so that turning SVG on happens in the same place as turning every other feature on,
-/// not because there is a service to resolve. An image format is process state - which provider
-/// claims a stream's bytes is not a question a window can answer differently from another window -
-/// so the call registers the provider immediately and returns the collection for chaining.
+/// This is the registration. The provider goes into the container, and the
+/// <see cref="IXPlatImageDataFactory"/> the application resolves is composed from the providers the
+/// container holds - so every control that is handed the factory's output reads SVG, and the call
+/// site does not change.
 /// </para>
 /// <para>
-/// One consequence is worth stating rather than discovering: the registration belongs to the
-/// process, so it is not undone when the container is disposed. An application that builds and
-/// disposes a second container in the same process keeps SVG support, which is what an image format
-/// wants; a test that needs the previous state back calls <see cref="XPlatSvg.AddSvgImages"/> and
-/// disposes the handle it returns.
+/// There is nothing to undo: registration happens once, while services are declared, and the
+/// container owns the provider's lifetime. An application that builds a second container gets its own
+/// answer about which formats it has, which is the point of doing it this way rather than through a
+/// process-wide registry.
+/// </para>
+/// <para>
+/// A test that wants only some formats composes its factory directly instead:
+/// <c>new XPlatImageDataFactory([XPlatSvgImageFormatProvider.Shared])</c>.
 /// </para>
 /// </remarks>
 /// <example>
@@ -39,7 +42,7 @@ public static class XPlatSvgServiceCollectionExtensions
     {
         ArgumentNullException.ThrowIfNull(services);
 
-        XPlatSvg.AddSvgImages();
+        services.AddSingleton<IXPlatImageFormatProvider>(XPlatSvgImageFormatProvider.Shared);
         return services;
     }
 }

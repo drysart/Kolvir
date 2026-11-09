@@ -3,14 +3,20 @@ using SkiaSharp;
 namespace XPlatUI.Svg.Tests;
 
 /// <summary>
-/// <c>currentColor</c> is the one part of an SVG a palette can change, so it is the one the feature
-/// exposes: an icon drawn with it follows the colour a load resolves it to, and an icon that names
-/// its own colours does not.
+/// <c>currentColor</c> is the one part of an SVG a palette can change, so it is the one thing the
+/// feature configures: an icon drawn with it follows the colour a load resolves it to, and an icon
+/// that names its own colours does not.
 /// </summary>
 /// <remarks>
-/// The colour is resolved while the document is parsed, which is why the parser is the thing that
-/// takes it and why the cache is keyed on it. The tests below are as much about that key as about
-/// the colour: a recolour that re-parsed on every paint would still pass a pixel assertion.
+/// <para>
+/// The colour is resolved while the document is parsed, which is why it is an option passed to the
+/// factory and why the cache is keyed on it. The tests below are as much about that key as about the
+/// colour: a recolour that re-parsed on every paint would still pass a pixel assertion.
+/// </para>
+/// <para>
+/// The typed spelling is <see cref="XPlatSvgImageDataFactoryExtensions"/>, which forwards to the same
+/// factory overload these tests use - one pipeline, two spellings.
+/// </para>
 /// </remarks>
 [TestClass]
 [TestCategory("Feature")]
@@ -20,8 +26,9 @@ public sealed class SvgRecolourTests : SvgTestBase
     [TestMethod]
     public void CurrentColorDefaultsToBlack()
     {
-        using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon)), "the icon should load");
+        var image = Show(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon));
+        image.Dock = DockStyle.Fill;
+        image.SizeMode = XPlatSizeMode.StretchImage;
 
         using var scene = SvgScene.Create(image, 40f, 40f);
         var pixel = scene.PixelAt(20, 30);
@@ -35,8 +42,13 @@ public sealed class SvgRecolourTests : SvgTestBase
     public void AResolvedCurrentColorIsWhatTheIconDraws()
     {
         var green = new SKColor(0x33, 0x99, 0x33);
-        using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green), "the icon should load tinted");
+
+        var image = new XPlatImage
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = XPlatSizeMode.StretchImage,
+            Image = LoadColoured(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green),
+        };
 
         using var scene = SvgScene.Create(image, 40f, 40f);
         var pixel = scene.PixelAt(20, 30);
@@ -55,30 +67,26 @@ public sealed class SvgRecolourTests : SvgTestBase
         XPlatSvg.ClearCache();
         int parsed = XPlatSvgCache.ParseCount;
 
-        using (var image = new XPlatImage())
+        using (LoadColoured(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green))
         {
-            Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green), "green loads");
         }
 
         Assert.AreEqual(parsed + 1, XPlatSvgCache.ParseCount, "a colour is parsed once");
 
-        using (var image = new XPlatImage())
+        using (LoadColoured(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green))
         {
-            Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green), "green loads again");
         }
 
         Assert.AreEqual(parsed + 1, XPlatSvgCache.ParseCount, "and a second load at the same colour is a cache hit");
 
-        using (var image = new XPlatImage())
+        using (LoadColoured(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), purple))
         {
-            Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), purple), "purple loads");
         }
 
         Assert.AreEqual(parsed + 2, XPlatSvgCache.ParseCount, "a second colour is a second parse, not a thrash per load");
 
-        using (var image = new XPlatImage())
+        using (LoadColoured(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green))
         {
-            Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon), green), "green again");
         }
 
         Assert.AreEqual(parsed + 2, XPlatSvgCache.ParseCount, "and going back to the first colour parses nothing");
@@ -87,8 +95,12 @@ public sealed class SvgRecolourTests : SvgTestBase
     [TestMethod]
     public void AFixedColourIsNotRecoloured()
     {
-        using var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.FixedColourIcon), SKColors.Lime), "the icon loads");
+        var image = new XPlatImage
+        {
+            Dock = DockStyle.Fill,
+            SizeMode = XPlatSizeMode.StretchImage,
+            Image = LoadColoured(SvgFixtures.Stream(SvgFixtures.FixedColourIcon), SKColors.Lime),
+        };
 
         using var scene = SvgScene.Create(image, 40f, 40f);
         var pixel = scene.PixelAt(20, 20);
@@ -98,12 +110,18 @@ public sealed class SvgRecolourTests : SvgTestBase
     }
 
     [TestMethod]
-    public void LoadSvgTakesOwnershipOfWhatItLoads()
+    public void TheTypedExtensionsHandTheOptionsToTheFactory()
     {
-        // The picture is built for this load, so the control has to dispose it; a caller that sets
-        // Picture itself afterwards is responsible for turning the rule back off.
-        using var image = new XPlatImage();
-        Assert.IsTrue(image.LoadSvg(SvgFixtures.Stream(SvgFixtures.CurrentColorIcon)), "loads");
-        Assert.IsTrue(image.DisposePictureWithControl, "the control owns the picture it was given");
+        // The discoverable spelling: an XPlatSvgOptions value reaches the provider, which is what
+        // makes the recolour happen. This calls the extension explicitly, because C# binds the
+        // factory's own overload for the same call syntax.
+        var green = new SKColor(0x33, 0x99, 0x33);
+
+        using var data = XPlatSvgImageDataFactoryExtensions.LoadFromStream(
+            Factory,
+            SvgFixtures.Stream(SvgFixtures.CurrentColorIcon),
+            new XPlatSvgOptions { CurrentColor = green });
+
+        Assert.AreEqual(24f, data.NaturalSize.Width, 0.01f, "the document loaded at its viewBox's size");
     }
 }

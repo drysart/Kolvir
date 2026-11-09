@@ -125,7 +125,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     public void StretchImageFillsTheBoxAndNormalDoesNot()
     {
         var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.StretchImage };
-        Assert.IsTrue(image.Load(RedPng(4, 2)), "the fixture image should decode");
+        image.Image = new XPlatImageDataFactory().LoadFromStream(RedPng(4, 2));
 
         using var scene = HeadlessScene.Create(image, 100f, 100f);
 
@@ -142,7 +142,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     public void ZoomKeepsTheAspectRatioAndLeavesBands()
     {
         var image = new XPlatImage { Dock = DockStyle.Fill, SizeMode = XPlatSizeMode.Zoom };
-        Assert.IsTrue(image.Load(RedPng(4, 2)), "the fixture image should decode");
+        image.Image = new XPlatImageDataFactory().LoadFromStream(RedPng(4, 2));
 
         using var scene = HeadlessScene.Create(image, 100f, 100f);
 
@@ -156,7 +156,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     {
         var image = new XPlatImage { Dock = DockStyle.Fill, CornerRadius = 0f };
         using var scene = HeadlessScene.Create(image, 100f, 100f);
-        Assert.IsTrue(image.Load(RedPng(4, 2)), "the fixture image should decode");
+        image.Image = new XPlatImageDataFactory().LoadFromStream(RedPng(4, 2));
 
         foreach (var mode in Enum.GetValues<XPlatSizeMode>())
         {
@@ -241,7 +241,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         using var background = RenderBackground();
 
         var image = new XPlatImage { Dock = DockStyle.Fill, CornerRadius = 0f };
-        Assert.IsTrue(image.Load(new MemoryStream(png)), "the fixture image should decode");
+        image.Image = new XPlatImageDataFactory().LoadFromBytes(png);
         using var scene = HeadlessScene.Create(image, 101f, 67f);
 
         using var decoded = SKBitmap.Decode(png);

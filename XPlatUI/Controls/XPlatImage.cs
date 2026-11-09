@@ -3,68 +3,84 @@ using SkiaSharp;
 namespace XPlatUI;
 
 /// <summary>
-/// Draws an <see cref="SKPicture"/>. The control holds a picture rather than an image, so what it
-/// shows is always something a canvas can replay.
+/// Shows an image - a still picture or an animation, which are the same thing here: what it holds is
+/// an <see cref="XPlatImageData"/>, and a picture is an animation with a duration of zero.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="Load(Stream)"/> asks the registered <see cref="IXPlatImageFormatProvider"/>s what the
-/// bytes are and takes the picture the winner produces. By default that is the built-in raster
-/// decoder, which records one draw of the decoded bitmap into a picture at identity, so the control
-/// reads PNG, JPEG, WebP, GIF, BMP and ICO with nothing installed. A feature package registers a
-/// provider for anything else - SVG, say - and the same <c>Load</c> call then reads that too; see
-/// <see cref="XPlatImageFormats"/> for the rules a load follows when several providers claim the
-/// same bytes.
+/// <b>The control never decodes anything.</b> There is no <c>Load</c> and no format handling here: an
+/// application resolves <see cref="IXPlatImageDataFactory"/> from its services and assigns the
+/// result, so a failure is an ordinary exception where the developer called the factory rather than
+/// an event raised from a control:
+/// </para>
+/// <code>
+/// var factory = services.GetRequiredService&lt;IXPlatImageDataFactory&gt;();
+/// image.Image = factory.LoadFromStream(stream);
+/// </code>
+/// <para>
+/// <b>The control never advances the animation either.</b> <see cref="XPlatImageData.Position"/> is
+/// computed from a clock, so what is drawn is right whether or not a timer ever runs. The control's
+/// timer only repaints, and only when there is something to repaint for: it is scheduled to the next
+/// frame boundary rather than to a display rate, and it does not exist while the animation is
+/// paused, while the image is still, or while the control is not
+/// <see cref="XPlatControl.IsDisplayed"/>. That last rule is the one the marquee progress bar set: a
+/// control nobody can look at holds no clock. Time still passes for the animation while it is
+/// hidden, so showing it again shows the frame the clock says rather than the one it left on.
 /// </para>
 /// <para>
-/// A picture that was not decoded from a stream is set directly through <see cref="Picture"/>, which
-/// is also what a caller does when it wants a picture built its own way.
-/// </para>
-/// <para>
-/// The control owns the picture when it was loaded through one of the <c>Load</c> helpers or when
-/// <see cref="DisposePictureWithControl"/> is set.
+/// <b>Ownership.</b> The control draws the data and never disposes it - the same convention WinForms
+/// has for <c>PictureBox.Image</c>, and for the same reason: the same picture is often shown in more
+/// than one place, and an image that vanished because one control was closed would be a surprise no
+/// amount of documentation fixes. <see cref="XPlatImageData"/> is <see cref="IDisposable"/> and it
+/// belongs to whoever created it: assign it, show it, dispose it when the application is done with
+/// it. Disposing the control does not dispose the image, and assigning a different image does not
+/// dispose the one that was there.
 /// </para>
 /// </remarks>
 public class XPlatImage : XPlatControl
 {
-    private Action<object, Exception>? _loadFailed;
-    private SKPicture? _picture;
-    private bool _ownsPicture;
+    // A source may ask for the next frame in zero time - a GIF frame with no delay, or a position
+    // that lands exactly on a boundary - and a timer with no interval is a busy loop.
+    private static readonly TimeSpan MinimumFrameDelay = TimeSpan.FromMilliseconds(1);
+
+    private XPlatImageData? _image;
     private XPlatSizeMode _sizeMode = XPlatSizeMode.Zoom;
+    private XPlatTimer? _frameTimer;
+    private TimeSpan? _scheduledFor;
 
     public XPlatImage()
     {
         AutoSize = true;
     }
 
-    /// <summary>Adds a handler that runs when the image fails to load (for example a missing file).</summary>
-    public IDisposable AddLoadFailedHandler(Action<object, Exception> handler)
+    /// <summary>
+    /// What the control shows. The control does not take ownership: it draws this and does not
+    /// dispose it.
+    /// </summary>
+    /// <remarks>
+    /// Setting it replaces whatever was there without disposing the old data, and the timer follows
+    /// the new data: an animation already playing starts ticking, and a still picture stops the timer
+    /// at once. The caller disposes what the caller created - see the ownership note on this class.
+    /// </remarks>
+    public XPlatImageData? Image
     {
-        ArgumentNullException.ThrowIfNull(handler);
-        _loadFailed += handler;
-        return new XPlatHandlerToken<Action<object, Exception>>(RemoveLoadFailedHandler, handler);
-    }
-
-    /// <summary>Removes a handler that <see cref="AddLoadFailedHandler"/> added.</summary>
-    public void RemoveLoadFailedHandler(Action<object, Exception> handler)
-    {
-        ArgumentNullException.ThrowIfNull(handler);
-        _loadFailed -= handler;
-    }
-
-    /// <summary>The picture to display. Not disposed unless ownership was transferred.</summary>
-    public SKPicture? Picture
-    {
-        get => _picture;
+        get => _image;
         set
         {
-            if (ReferenceEquals(_picture, value))
+            if (ReferenceEquals(_image, value))
             {
                 return;
             }
 
-            ReleasePicture();
-            _picture = value;
+            ReleaseImage();
+            _image = value;
+
+            if (_image is not null)
+            {
+                _image.Changed += OnImageChanged;
+            }
+
+            UpdateFrames();
             PerformLayout();
             Invalidate();
         }
@@ -87,122 +103,21 @@ public class XPlatImage : XPlatControl
 
     public XPlatContentAlignment ImageAlign { get; set; } = XPlatContentAlignment.MiddleCenter;
 
-    /// <summary>When true, the picture is disposed together with the control.</summary>
-    public bool DisposePictureWithControl { get; set; }
-
-    /// <summary>Loads an image from disk, replacing the current one. Returns false when loading fails.</summary>
-    /// <remarks>
-    /// The file extension is passed to the providers as a hint, so a format whose content is hard to
-    /// identify from its first bytes can still be recognised; it is never the deciding factor, since
-    /// a stream has no name and the same provider has to work there too.
-    /// </remarks>
-    public bool Load(string path)
-    {
-        try
-        {
-            using var stream = File.OpenRead(path);
-            return Load(stream, Path.GetExtension(path));
-        }
-        catch (Exception ex) when (ex is IOException or UnauthorizedAccessException or ArgumentException)
-        {
-            _loadFailed?.Invoke(this, ex);
-            return false;
-        }
-    }
-
-    /// <summary>Loads an image from a stream, replacing the current one.</summary>
-    /// <remarks>
-    /// A stream is identified by its bytes, because it has no name. A stream that no provider
-    /// recognises returns false and raises nothing; a stream that a provider recognised and then
-    /// could not decode returns false and raises <see cref="AddLoadFailedHandler"/> with an
-    /// <see cref="XPlatImageFormatException"/>. A provider that throws is that second case rather
-    /// than an exception out of this method, so a hostile document cannot take the paint thread down
-    /// with it.
-    /// </remarks>
-    public bool Load(Stream stream)
-    {
-        ArgumentNullException.ThrowIfNull(stream);
-        return Load(stream, extensionHint: null);
-    }
-
-    private bool Load(Stream stream, string? extensionHint)
-    {
-        // A provider is promised a seekable stream, because it has to look at the start twice: once
-        // to be recognised and once to be decoded. A pipe or a network stream is buffered here so
-        // that promise holds for every provider rather than for the careful ones.
-        Stream source = stream;
-        MemoryStream? buffered = null;
-        SKPicture? picture = null;
-
-        try
-        {
-            if (!stream.CanSeek)
-            {
-                buffered = new MemoryStream();
-                stream.CopyTo(buffered);
-                buffered.Position = 0;
-                source = buffered;
-            }
-
-            string? extension = string.IsNullOrEmpty(extensionHint)
-                ? null
-                : extensionHint.TrimStart('.').ToLowerInvariant();
-
-            var provider = XPlatImageFormats.Find(ReadHeader(source));
-            if (provider is null)
-            {
-                return false;
-            }
-
-            try
-            {
-                source.Position = 0;
-                picture = provider.Decode(source, extension);
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                _loadFailed?.Invoke(this, new XPlatImageFormatException(provider.Name, ex));
-                return false;
-            }
-
-            if (picture is null)
-            {
-                _loadFailed?.Invoke(this, new XPlatImageFormatException(provider.Name));
-                return false;
-            }
-        }
-        finally
-        {
-            buffered?.Dispose();
-        }
-
-        ReleasePicture();
-        _picture = picture;
-        _ownsPicture = true;
-        PerformLayout();
-        Invalidate();
-        return true;
-    }
-
-    /// <summary>Draws a solid color placeholder instead of a picture.</summary>
+    /// <summary>Draws a solid color placeholder instead of an image.</summary>
     public SKColor? PlaceholderColor { get; set; }
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        if (_picture is null)
-        {
-            return SKSize.Empty;
-        }
-
-        var bounds = _picture.CullRect;
-        return new SKSize(bounds.Width, bounds.Height);
+        // The source's own size, never the current frame's: an animation whose frames differ by a
+        // pixel would otherwise re-lay-out the window on every frame.
+        return _image is null ? SKSize.Empty : _image.NaturalSize;
     }
 
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         base.OnPaintBackground(canvas, rect);
 
-        if (PlaceholderColor is { } placeholder && _picture is null)
+        if (PlaceholderColor is { } placeholder && _image is null)
         {
             XPlatPainter.Fill(canvas, rect, placeholder, CornerRadius);
         }
@@ -210,7 +125,11 @@ public class XPlatImage : XPlatControl
 
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
-        if (_picture is null)
+        // A host may paint a tree it never showed, which is a frame rather than the user seeing it:
+        // the check here is what keeps the timer honest in that case too.
+        UpdateFrames();
+
+        if (_image?.CurrentFrame is not { } frame)
         {
             return;
         }
@@ -221,25 +140,32 @@ public class XPlatImage : XPlatControl
             return;
         }
 
-        // The recorded bounds are the picture's natural size. They come from the picture rather
-        // than from the bitmap that was decoded, so a picture recorded by something else measures
-        // and scales by what it actually drew.
-        var bounds = _picture.CullRect;
-        var destination = ComputeDestination(content, bounds.Width, bounds.Height, _sizeMode, ImageAlign);
+        var natural = _image.NaturalSize;
+        var destination = ComputeDestination(content, natural.Width, natural.Height, _sizeMode, ImageAlign);
         if (destination.Width <= 0f || destination.Height <= 0f)
         {
             return;
         }
 
-        // Replay the picture at the destination's scale. The draw was recorded at identity with
-        // the same sampling a direct image draw uses, so this paints exactly what the control
-        // painted before, without a second copy of the pixels.
+        // Replay the frame at the destination's scale. The bounds are the picture's own, so a frame
+        // recorded with an origin still lands where it drew.
+        var bounds = frame.CullRect;
         canvas.Save();
         canvas.Translate(destination.Left, destination.Top);
-        canvas.Scale(destination.Width / bounds.Width, destination.Height / bounds.Height);
+        canvas.Scale(destination.Width / natural.Width, destination.Height / natural.Height);
         canvas.Translate(-bounds.Left, -bounds.Top);
-        canvas.DrawPicture(_picture);
+        canvas.DrawPicture(frame);
         canvas.Restore();
+    }
+
+    protected override void OnDisplayedChanged()
+    {
+        base.OnDisplayedChanged();
+
+        // Showing the control again does not resume from where it left: the position is computed
+        // from the clock, so the paint after this one shows the frame time has reached.
+        UpdateFrames();
+        Invalidate();
     }
 
     private static SKRect ComputeDestination(SKRect content, float pictureWidth, float pictureHeight, XPlatSizeMode sizeMode, XPlatContentAlignment alignment)
@@ -271,50 +197,100 @@ public class XPlatImage : XPlatControl
         return new SKSize(source.Width * scale, source.Height * scale);
     }
 
-    /// <summary>Reads the bytes a provider is shown, leaving the stream where it was.</summary>
-    private static ReadOnlySpan<byte> ReadHeader(Stream stream)
+    /// <summary>
+    /// Runs a repaint timer, or stops it, according to whether there is a frame to wait for.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="XPlatControl.IsDisplayed"/> and an <see cref="XPlatApplication"/> are what make the
+    /// decision, the same rule the marquee progress bar follows: a control that is hidden, sits under
+    /// a hidden container, has been taken off its host or lives in a window that was never shown or
+    /// has closed has nothing to repaint for, and a tick with no application to deliver it would run
+    /// on a pool thread. Paused and still animations have no next frame at all.
+    /// </remarks>
+    private void UpdateFrames()
     {
-        long origin = stream.Position;
-        var header = new byte[XPlatImageFormats.HeaderLength];
-        int read = 0;
-
-        try
+        if (_image is not { IsPlaying: true } data
+            || data.Duration <= TimeSpan.Zero
+            || !IsDisplayed
+            || XPlatApplication.Current is null)
         {
-            while (read < header.Length)
-            {
-                int count = stream.Read(header, read, header.Length - read);
-                if (count == 0)
-                {
-                    break;
-                }
-
-                read += count;
-            }
-        }
-        finally
-        {
-            stream.Position = origin;
+            StopFrames();
+            return;
         }
 
-        return read == header.Length ? header : header.AsSpan(0, read);
+        var position = data.Position;
+        if (data.TimeUntilNextFrame(position) is not { } wait)
+        {
+            StopFrames();
+            return;
+        }
+
+        // A repaint that changes nothing must not restart the countdown, so the timer is left alone
+        // while it is already aiming at the boundary this position asks for.
+        var target = position + wait;
+        if (_frameTimer is { Enabled: true } && _scheduledFor == target)
+        {
+            return;
+        }
+
+        var interval = wait > MinimumFrameDelay ? wait : MinimumFrameDelay;
+
+        if (_frameTimer is null)
+        {
+            _frameTimer = CreateTimer(interval, OnFrameTick);
+        }
+        else
+        {
+            _frameTimer.Interval = interval;
+        }
+
+        _scheduledFor = target;
+        _frameTimer.Start();
     }
 
-    private void ReleasePicture()
+    private void StopFrames()
     {
-        if (_ownsPicture || DisposePictureWithControl)
+        _frameTimer?.Stop();
+        _scheduledFor = null;
+    }
+
+    private void OnFrameTick(object sender)
+    {
+        // The control tree belongs to the caller, so this timer can outlive the application. Once
+        // that happens XPlatTimer ticks inline on a pool thread, which must not touch the UI.
+        if (XPlatApplication.Current is null || !IsDisplayed)
         {
-            _picture?.Dispose();
+            StopFrames();
+            return;
         }
 
-        _picture = null;
-        _ownsPicture = false;
+        // The tick is only a repaint: the frame it shows comes from the clock, and the next wait
+        // comes from the source.
+        UpdateFrames();
+        Invalidate();
+    }
+
+    private void OnImageChanged(XPlatImageData data)
+    {
+        UpdateFrames();
+        Invalidate();
+    }
+
+    private void ReleaseImage()
+    {
+        // The data belongs to whoever assigned it, so this only stops listening to it.
+        _image?.Changed -= OnImageChanged;
+        _image = null;
+        StopFrames();
     }
 
     protected override void Dispose(bool disposing)
     {
         if (disposing)
         {
-            ReleasePicture();
+            ReleaseImage();
+            _frameTimer?.Dispose();
+            _frameTimer = null;
         }
 
         base.Dispose(disposing);

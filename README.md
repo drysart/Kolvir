@@ -117,7 +117,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatMenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
 | `XPlatMenuPresenter` | `ToolStripDropDown` plumbing | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, on every backend, one popup per level of the chain |
 | `XPlatMenuPresentation` | - | Chooses the library's menus or the platform's, per application |
-| `XPlatImage` | `PictureBox` | Holds and draws an `SKPicture`: `Picture`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `Load` helpers that ask the registered image format providers for a picture (the built-in one reads PNG, JPEG, WebP, GIF, BMP and ICO; `XPlatUI.Feature.Svg` adds SVG) |
+| `XPlatImage` | `PictureBox` | Draws an `XPlatImageData` - a still picture or an animation, which are the same thing with different durations: `Image`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `ImageAlign`, `PlaceholderColor`. It decodes nothing and owns nothing: `IXPlatImageDataFactory` loads, the caller disposes |
 | `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `XPlatFont` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
 | `XPlatTheme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
@@ -172,6 +172,8 @@ filters on:
 | `Platform.Win32`, `Platform.AppKit`, `Platform.Gtk4` | Can only pass on one platform. The portable CI job skips these; a platform job can select them. |
 | `Feature`, `DragDrop` | The drag and drop feature's own suite. Runs everywhere. |
 | `Feature`, `Animations` | The animations feature's own suite. Runs everywhere. |
+| `Feature`, `Svg` | The SVG feature's own suite. Runs everywhere. |
+| `AnimatedGif` | The animated GIF feature's own suite. Runs everywhere. |
 
 To run exactly what CI runs:
 
@@ -188,7 +190,15 @@ dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj
 
 dotnet test XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj \
   -p:TargetFramework=net10.0
+
+dotnet test XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj \
+  -p:TargetFramework=net10.0
+
+dotnet test XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj \
+  -p:TargetFramework=net10.0
 ```
+
+All five are what the `Tests` workflow dispatches, on all three platforms.
 
 `XPlatUI.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
 `Animations` categories, the same filter, plain `net10.0` on every platform, and the same
@@ -3182,6 +3192,203 @@ instant one, which is the shortest way to see what the duration buys; **Toast an
 switch on the same page that takes both durations away, and **Overlay fade** shows a layer dimming in
 over the panel it holds still.
 
+### Images and animations
+
+A picture is an animation whose duration is zero, so there is one type, one timeline and one code
+path - not a still path and an animation path that have to be kept in step. `XPlatImage` draws an
+`XPlatImageData` and does nothing else with it:
+
+```csharp
+var image = new XPlatImage { SizeMode = XPlatSizeMode.Zoom };
+image.Image = factory.LoadFromStream(stream);    // a PNG is a zero-duration animation
+```
+
+The control's image surface is `Image`, `SizeMode`, `ImageAlign` and `PlaceholderColor`. It has no
+loader - `IXPlatImageDataFactory` is where bytes become an image - and it has no ownership of what it
+shows. That is `PictureBox`'s convention and the one to arrive with: you create the image, you assign
+it, you dispose it. Disposing the control does not dispose the image, and assigning a second image
+does not dispose the first, so a long-running page that replaces its image has to dispose the old one
+itself. A disposed image draws nothing rather than throwing, because a paint runs on the paint thread
+where there is nobody to catch anything.
+
+#### The data: one timeline
+
+```csharp
+public interface IXPlatImageDataSource : IDisposable
+{
+    TimeSpan Duration { get; }                        // Zero for a still picture
+    SKSize NaturalSize { get; }                       // fixed for the source, never per-frame
+    bool Loops { get; }                               // what the file declares
+    SKPicture FrameAt(TimeSpan position);             // position already wrapped and clamped
+    TimeSpan? TimeUntilNextFrame(TimeSpan position);  // null when there is nothing to wait for
+}
+
+public sealed class XPlatImageData : IDisposable
+{
+    public XPlatImageData(IXPlatImageDataSource source);
+    public static XPlatImageData FromPicture(SKPicture picture, bool disposePictureWithData = false);
+
+    public TimeSpan Duration { get; }
+    public SKSize NaturalSize { get; }
+    public bool Loop { get; set; }                    // starts from the source, then it is yours
+    public bool IsPlaying { get; }
+    public TimeSpan Position { get; }
+    public SKPicture? CurrentFrame { get; }
+
+    public void Play();
+    public void Pause();
+    public void Seek(TimeSpan position);
+    public TimeSpan? TimeUntilNextFrame(TimeSpan position);
+}
+```
+
+`FromPicture` is the low-level way in, and it keeps "show this picture" a one-liner; the format
+provider seam hands its sources through it. `disposePictureWithData` is the ownership switch that
+matters: true gives the data the picture, and the source that produces it has to outlive every
+picture it hands out.
+
+`NaturalSize` is fixed for the source rather than measured from the current frame, and it is what
+`AutoSize` measures and every `XPlatSizeMode` scales from. An animation whose frames differ by a pixel
+therefore cannot make the layout twitch once a second.
+
+**`Position` is computed, never accumulated.** `Play` records an anchor - a position and a
+`TimeProvider` timestamp - and every read is `anchor.Position + (now - anchor.Timestamp)`, wrapped
+when the animation loops and clamped otherwise. There is no timer in that arithmetic, which is why an
+animation that spent three seconds behind another page is three seconds further on when it comes
+back: time spent hidden counts, and the frame it shows is the one the clock says rather than the one
+it left on. `TimeProvider` is the same seam `XPlatUndoClock` uses, and it is `TimeProvider.System`
+unless an application supplies another, so a test drives the whole timeline with the `TestClock` that
+already exists.
+
+The rest of the timeline follows from that one rule:
+
+| Situation | What happens |
+| --- | --- |
+| Ticks | They repaint, and only repaint. A tick never advances anything, so a dropped or late tick costs a repaint rather than a frame of timeline. |
+| `Seek(position)` | Re-anchors and clamps to `[0, Duration]`, so seeking during playback does not jump when the clock catches up. |
+| Paused | Frozen: `Position` moves only while `IsPlaying`. |
+| Playing to the end, `Loop` true | Wraps and keeps playing. `Position` is always inside `[0, Duration)`; it is not a total elapsed time, and there is no second value for one. |
+| Playing to the end, `Loop` false | Stops on the last frame. |
+| `Play` at the end of a one-shot | Restarts from the beginning. |
+| `Duration == Zero` | Never plays and never ticks. `Play`, `Pause` and `Seek` are no-ops rather than exceptions: a still picture is the degenerate case, not an error. |
+
+`Loop` starts as whatever the file declared and is settable afterwards; once assigned, the
+assignment wins.
+
+Playback rate is fixed at 1.0x in this cut. The arithmetic lives in one method, so a rate multiplies
+`(now - anchor.Timestamp)` in one place rather than being threaded through the frame scheduling.
+
+#### What wakes the control up
+
+The repaint timer is gated the way the marquee is (PR #39): it exists only while the animation is
+playing, has a non-zero duration, and `IsDisplayed` is true. Paused, hidden or still, there is no
+timer at all.
+
+It is also scheduled to the next frame boundary rather than to a fixed display rate: asked
+`TimeUntilNextFrame`, the control sets the timer for that long, so a four-frames-a-second GIF wakes
+four times a second rather than sixty. A boundary nearer than a millisecond is treated as a
+millisecond, so a file full of zero-length frames cannot spin the clock. Becoming displayed starts
+the timer again and repaints immediately from the current position, which is the frame the clock says.
+
+The **Animated GIF**, **GIF frames** and **GIF out of view** demo pages show all three: the first
+with play, pause, a seek bar and a position readout, the second stepping frames on a paused
+animation, and the third scrolling the picture out of a scroll panel and back - the readout keeps
+counting while it is gone, and the frame it comes back on is the one the readout describes.
+
+#### Loading: the factory
+
+```csharp
+public interface IXPlatImageDataFactory
+{
+    XPlatImageData LoadFromPath(string path, IXPlatImageFormatOptions? options = null);
+    XPlatImageData LoadFromStream(Stream stream, IXPlatImageFormatOptions? options = null);
+    XPlatImageData LoadFromBytes(ReadOnlySpan<byte> bytes, IXPlatImageFormatOptions? options = null);
+}
+```
+
+One call loads anything the application can read, and the answer to "how do I load this image" does
+not depend on which formats happen to be enabled. An application resolves the factory from its
+services - `XPlatApplication` registers one, composed from every provider the features declared, and
+`XPlatApplication.Services` is the provider it lives in - and assigns what comes back:
+
+```csharp
+var factory = services.GetRequiredService<IXPlatImageDataFactory>();
+
+image.Image = factory.LoadFromPath("art/logo.png");
+```
+
+A factory with nothing registered reads every raster format Skia does - PNG, JPEG, WebP, GIF (its
+first frame), BMP and ICO - because the built-in decoder is part of the factory rather than of a
+package. Without a container, compose by hand:
+
+```csharp
+var factory = new XPlatImageDataFactory();                              // raster formats only
+var withSvg = new XPlatImageDataFactory([XPlatSvgImageFormatProvider.Shared]);
+```
+
+The list is copied and sorted once, and it is the factory's for its lifetime: registration is a
+startup concern, so there is no add, no remove, no handle and no lock, and two factories in one
+process - or two tests in one process - cannot see each other's formats.
+
+| Situation | What happens |
+| --- | --- |
+| A load fails to recognise the bytes, or the decoder fails | It throws `XPlatImageFormatException`. There is no bool-and-handler convention left: the caller is the one who asked for the image, so a failure is an ordinary exception where it can be handled. |
+| Two providers claim the same bytes | The higher `Priority` wins; at equal priority the later registration wins. A load never tries a second provider for the same bytes. |
+| A provider throws while sniffing | It has not claimed the bytes - the exception is swallowed and the next provider is asked - because identifying a stream must not be able to fail a load. |
+| The claiming provider throws | The load throws an `XPlatImageFormatException` naming the provider, with what it threw inside it, and does **not** fall through to the next claim. |
+| No provider claims the bytes | The built-in decoder gets them. It is fallback behaviour, not a provider with a priority, which is exactly why registering a GIF provider takes GIF away from it. |
+| The stream cannot seek | It is buffered, bounded by `BufferLimit` (64 MiB by default), rather than refused - a network stream or a pipe is the case a real application hits. A larger one can be copied to a file first. |
+| The data outlives the factory | Fine, and expected: the data owns fully decoded pixels, not the stream or the factory. |
+| Options for a format nobody registered | The load throws, rather than silently ignoring what the caller configured. |
+
+`LoadFromPath` passes the file extension to the provider as a hint; the other two have only bytes, so
+a provider identifies itself from the content.
+
+#### The provider seam
+
+A format arrives as an `IXPlatImageFormatProvider`:
+
+```csharp
+public interface IXPlatImageFormatProvider
+{
+    string Name { get; }
+    int Priority { get; }
+    bool CanDecode(ReadOnlySpan<byte> header);
+    XPlatImageData Create(Stream stream, string? extensionHint, IXPlatImageFormatOptions? options);
+}
+```
+
+A provider is asked about *the first 512 bytes* and, if it claims them, is handed the whole seekable
+stream and returns the `XPlatImageData` the control will play. There is no reflection, no assembly
+scanning and no registration by attribute: a provider is added to the service container, and the
+`Add...()` call a feature package ships is that call with the package's provider in it.
+
+Options travel through the same seam. `IXPlatImageFormatOptions` is an empty marker, so core can
+carry a format's settings without knowing what any of them mean; a package declares the concrete
+type and overloads the factory methods with it, and the provider that claims the bytes is the one
+that receives them:
+
+```csharp
+using XPlatUI.Svg;
+
+image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
+{
+    CurrentColor = XPlatTheme.Foreground,
+});
+```
+
+Only the claiming provider sees the options, so handing GIF options to a load of a PNG is not an
+error - nothing reads them. A provider that *does* claim bytes and is then handed options of another
+format fails the load instead of ignoring them, because a silently ignored setting is
+indistinguishable from a broken one.
+
+#### What the demo shows
+
+The **Animated GIF** page plays the 48x48 sample with play, pause, a seek bar and a position readout;
+**GIF frames** steps it a frame at a time and prints where each frame starts on the timeline; **GIF
+out of view** is the hidden-time case made visible. The SVG pages below are the same control and the
+same factory call with a different provider registered.
+
 ### SVG images
 
 SVG is a package of its own, `XPlatUI.Feature.Svg`, built on [Svg.Skia]. A vector renderer is not
@@ -3198,52 +3405,40 @@ var options = new XPlatApplicationOptions
 };
 ```
 
-or, without a service container, `using var svg = XPlatSvg.AddSvgImages();`. Both register a
-**format provider** with the control, which is the seam the next section describes, and after that
-nothing about the call site changes:
+or, without a service container, `new XPlatImageDataFactory([XPlatSvgImageFormatProvider.Shared])`.
+Either way the package's contribution is one registered **format provider** - the seam the images
+section above describes - and after that nothing about the call site changes:
 
 ```csharp
 var icon = new XPlatImage { SizeMode = XPlatSizeMode.Zoom };
-icon.Load("icons/star.svg");          // the same call that reads a PNG
+icon.Image = factory.LoadFromPath("icons/star.svg");   // the same call that reads a PNG
 ```
 
-#### How a format gets in: the provider seam
+Referencing the package is not the opt-in; the `AddSvgImages()` call is. An application that
+references it and never calls it gets no SVG at all: nothing claims the bytes, the built-in decoder
+does not read XML, and the load throws an `XPlatImageFormatException` naming no provider - the same
+failure a stream that is not an image has always had.
 
-`XPlatImage` reads PNG, JPEG, WebP, GIF, BMP and ICO with nothing installed, and that does not
-change: the built-in decoder is itself a provider, at priority 0, so an application that never
-references this package behaves exactly as it did before the seam existed. Anything else arrives
-through `IXPlatImageFormatProvider`:
+#### What the package adds to the seam
+
+The provider (at priority 100, above anything else registered) is the whole of its loading story:
+there is no `XPlatSvg` loader, no second way to get an `XPlatImageData`, and nothing an application
+can call that skips the factory. What the package adds around it is the document work - the secure
+parse, the cache, `currentColor` resolution - and one options type, which reaches the provider as a
+**typed overload** of the same three factory calls:
 
 ```csharp
-public interface IXPlatImageFormatProvider
+using XPlatUI.Svg;
+
+image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
 {
-    string Name { get; }
-    int Priority { get; }
-    bool CanDecode(ReadOnlySpan<byte> header);
-    SKPicture? Decode(Stream stream, string? extensionHint);
-}
+    CurrentColor = XPlatTheme.Foreground,
+});
 ```
 
-A provider is *asked about the first 512 bytes* and, if it claims them, is handed the whole seekable
-stream and returns the `SKPicture` the control draws. There is no reflection, no assembly scanning
-and no registration by attribute: a provider is an instance a call registers,
-`XPlatImageFormats.Add(provider)`, which returns a handle that unregisters it. A feature package's
-`Add…()` call is that call with the package's provider in it.
-
-The rules, which are the part worth reading before writing one:
-
-| Situation | What happens |
-| --- | --- |
-| Two providers claim the same bytes | The higher `Priority` wins; at equal priority the later registration wins. A load never tries a second provider for the same bytes. |
-| A provider throws while sniffing | It has not claimed the bytes - the exception is swallowed and the next provider is asked - because identifying a stream must not be able to fail a load. |
-| The claiming provider throws | The load returns false and raises `AddLoadFailedHandler` with an `XPlatImageFormatException` naming the provider, with what it threw as the inner exception. It does **not** fall through to the next claim: the bytes were identified, and handing a document one parser refused to another is how a refused file gets read anyway. |
-| The claiming provider returns null | The same, without an inner exception. |
-| No provider claims the bytes | False, and nothing raised - the contract a stream that is not an image has always had. That is also what an SVG is before `AddSvgImages()` runs. |
-| The provider is unregistered while a picture is alive | Supported. A picture is self-contained, so removing a provider changes what future loads do and nothing else; the picture is not disposed and keeps drawing. |
-
-`Load(path)` passes the file extension to the provider as a hint, because a path has one; `Load(Stream)`
-has only bytes, so a provider has to identify itself from the content. A non-seekable stream is
-buffered so that every provider is promised a stream it can rewind.
+Those overloads parse and validate nothing themselves: they hand the options to the factory, which
+hands them to whichever provider claims the bytes. Validate in the provider, where the format lives;
+an extension method that has real work to do is a sign that the work belongs in core.
 
 #### Sizing, and what `viewBox` means to `AutoSize`
 
@@ -3267,7 +3462,10 @@ An icon that draws with `currentColor` can follow the palette, and nothing else 
 without rewriting the document:
 
 ```csharp
-image.LoadSvg("icons/badge.svg", XPlatTheme.Foreground);
+image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
+{
+    CurrentColor = XPlatTheme.Foreground,
+});
 ```
 
 The colour is resolved **while the document is parsed**, because that is when the renderer resolves
@@ -3277,13 +3475,20 @@ Switching a small palette back and forth therefore settles and stops parsing, wh
 safe to reload icons on a theme change:
 
 ```csharp
-XPlatTheme.AddChangedHandler(_ => image.LoadSvg("icons/badge.svg", XPlatTheme.Foreground));
+XPlatTheme.AddChangedHandler(_ =>
+{
+    image.Image?.Dispose();
+    image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
+    {
+        CurrentColor = XPlatTheme.Foreground,
+    });
+});
 ```
 
-`LoadSvg` is the one part of the feature that does not need `AddSvgImages()`: it goes straight to the
-renderer, and it takes ownership of what it loads (`DisposePictureWithControl` is left set). A
-document that fails to parse returns false from it rather than raising, because it is not `Load`; use
-`Load` when a failure has to reach an `AddLoadFailedHandler` subscription.
+Reloading recolours also shows the ownership rule in use: the control does not dispose what it was
+showing, so the handler disposes the previous `XPlatImageData` itself before assigning the next one.
+A document that fails to parse throws out of the load, which is where the code that asked for it can
+catch it.
 
 #### Caching
 
@@ -3317,9 +3522,9 @@ it today" is not the same claim as "this feature refuses it":
   removing it makes the entity-bomb test fail, because the renderer happily expands the document.
 - **The document cap is one megabyte.** The whole document is in memory by the time it is parsed, so
   the limit is one the library chose rather than one it inherited.
-- **Malformed input surfaces through `AddLoadFailedHandler`** as an `XPlatImageFormatException` with
-  the parser's exception inside it. It never throws out of `Load`, and the picture from a previous
-  load stays on screen.
+- **Malformed input surfaces as an `XPlatImageFormatException`** with the parser's exception inside
+  it, thrown by the load that asked for the document. It is never thrown at the paint thread, and an
+  image a control is already showing stays on screen.
 
 #### What actually renders
 
@@ -3359,7 +3564,7 @@ against an unfiltered twin, and the transform and clip path at the pixels they d
 Measured the way FEATURE-COST-POLICY.md §8 says to: one fixture, published twice, with the project
 reference to `XPlatUI.Feature.Svg` and the `AddSvgImages()` call switched off and on by a property,
 so the two numbers differ by the feature and nothing else. The feature build calls `AddSvgImages()`,
-loads a document through `Load`, draws the picture and writes it out. `PublishAot`,
+loads a document through the factory, draws the image and writes it out. `PublishAot`,
 `-p:EmbedSkiaSharpNative=false`, three RIDs. The fixture is `XPlatUI.Minimal` with one `XPlatImage`
 on its page - 88 KB above the policy's 3,203,072 floor on win-x64, which is what an image control
 costs before any format is added:
@@ -3424,8 +3629,8 @@ number, and it is why "trim the SVG packages" does not get far.
     `HarfBuzzSharp.NativeAssets.*` packages excluded, `<text>` renders pixel-identically, because
     the Windows `libSkiaSharp.dll` shapes text itself.
   - linux-x64: it cannot. `Svg.Skia` reaches HarfBuzz for `<text>` and the load fails with
-    `DllNotFoundException`, surfaced correctly as an `XPlatImageFormatException` through
-    `AddLoadFailedHandler` rather than thrown at the paint thread.
+    `DllNotFoundException`, surfaced correctly as an `XPlatImageFormatException` at the factory call
+    rather than thrown at the paint thread.
   - osx-arm64: it cannot, and not even later - the AOT image links
     `@executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib` at load time, so removing
     the file stops the process from starting at all.
@@ -3461,11 +3666,126 @@ one trims.
 
 The seam every application does pay is small. `XPlatUI.Minimal` publishes at 3,203,072 before and
 after this change - the same bytes, because it names no image - and a fixture that is the floor plus
-one `XPlatImage` loading a PNG publishes at 3,325,440 against 3,318,784 at `1b63ea1`, so the
-provider list, the interface and the header sniff cost 6,656 bytes to an application that shows an
-image and never adds a format.
+one `XPlatImage` loading a PNG publishes at 3,325,440 against 3,318,784 at `1b63ea1`, so the factory,
+the provider interface and the header sniff cost 6,656 bytes to an application that shows an image
+and never adds a format.
 
 [Svg.Skia]: https://github.com/wieslawsoltes/Svg.Skia
+
+### Animated GIF
+
+Animated GIF is a package of its own, `XPlatUI.Feature.AnimatedGif`, and it is a small one: SkiaSharp
+already decodes GIF frames, so what the package adds is the compositor, the loop-declaration walk and
+the timeline glue, with no native library of its own. Reference it and opt in:
+
+```csharp
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddAnimatedGifImages(),
+};
+```
+
+**A GIF without it is still an image.** The built-in raster decoder reads the first frame, the
+control shows a picture, and that is the documented fallback rather than an error - what an
+application that has not enabled the feature should expect. Enabling it registers a provider that
+claims `GIF87a` and `GIF89a`, and claiming is all it takes: the built-in decoder only sees bytes
+somebody else declined, so a GIF stops being a still picture and becomes an animation without a
+single change at the call site.
+
+```csharp
+using XPlatUI;   // XPlatGifOptions
+
+image.Image = factory.LoadFromPath("art/spinner.gif");
+
+// or, from a stream, with the feature's own settings
+image.Image = factory.LoadFromStream(stream, new XPlatGifOptions
+{
+    DecodedSizeLimit = 32L * 1024 * 1024,
+});
+```
+
+#### What the file says, and what the animation gets
+
+| In the file | What the animation gets |
+| --- | --- |
+| Per-frame delays | Per-frame delays: a GIF with mixed delays plays mixed delays |
+| A delay of zero | `XPlatGifOptions.ZeroDelayMinimum`, 100 ms by default |
+| A Netscape loop extension with any count, `0` or `N` | `Loop` starts `true` |
+| No loop extension | `Loop` starts `false` |
+| Frames | All of them, decoded up front |
+| The canvas size | `NaturalSize`, fixed for the whole animation |
+
+**`Loop` is a bool on purpose.** The extension defines `0` as "loop forever" and `N` as "play N
+times", so any count at all means the file asked to repeat, and a file with no count asked to play
+once. The count itself is not kept: a finite count is a total number of passes, and the timeline
+tracks a position inside one pass rather than a total elapsed time, so honouring it would mean a
+second value that nothing else uses. A caller who wants exactly three passes counts them.
+
+**Zero delays.** A zero delay means "as fast as possible", which taken literally asks the timeline for
+the next frame immediately and leaves a visible animation waking at the millisecond floor forever -
+a busy loop doing nothing useful. 100 ms is the minimum browsers settled on for a zero-delay GIF, so
+an animation authored for the web already looks the way this plays it. Only an exact zero is
+replaced: a declared 10 ms is a delay the author chose, and it is played at 10 ms.
+
+#### Memory, and the limit
+
+Every frame is decoded and composited up front, because the timeline lets a viewer seek anywhere -
+backwards included - and a lazy window cannot go back. That makes the cost predictable, frames x width
+x height x 4 bytes, and it is bounded by `XPlatGifOptions.DecodedSizeLimit`: 256 MiB by default, which
+a 2000x2000 GIF of 60 frames exceeds at 960 MB of pixels. A file over the limit is refused rather than
+partially decoded, so a load either produces a complete animation or throws with the numbers in the
+message.
+
+#### Compositing, which is the part that goes wrong quietly
+
+GIF frames are mostly deltas: a frame names a rectangle and usually carries only the pixels inside it,
+so the picture at frame *n* is the canvas after frames 0 to *n* have been composited. Skia will
+reconstruct a frame from the previous one, but the disposal rule is per frame and the blend flag is
+per frame, so the compositing is this package's job rather than a flag passed to the decoder.
+
+| Frame's disposal | What happens to its rectangle before the next frame draws |
+| --- | --- |
+| Keep (0, 1) | Nothing: the next frame draws over it |
+| Restore background (2) | Cleared to transparent |
+| Restore previous (3) | Put back to what it was before this frame drew, from a snapshot |
+
+The blend flag decides whether a frame replaces the pixels in its rectangle or is drawn over them;
+GIF's default is to blend, which is what makes the transparent index mean anything. Restore
+background is cleared to transparent rather than to the logical-screen background colour, because
+that is what browsers do, the background index is absent or meaningless in most animated files, and a
+control that fills its background cannot tell the difference.
+
+Wrong compositing produces frames that look nearly right - right size, right timing, subtly corrupt -
+which is why the tests assert the pixel content of specific frames rather than trusting the demo:
+each disposal method has a fixture whose earlier frames leave something behind, and the assertions are
+on colours in regions rather than on a hash.
+
+#### What it costs
+
+Measured the way FEATURE-COST-POLICY.md §8 says to, on win-x64: `XPlatUI.Minimal` published with
+`PublishAot` and `-p:EmbedSkiaSharpNative=false`, then published again with the project reference and
+an `AddAnimatedGifImages()` call added and one GIF loaded and drawn. The two numbers differ by the
+feature and nothing else.
+
+| Measurement | Bytes |
+| --- | --- |
+| Executable, feature not referenced (the floor at this commit) | 3,283,968 |
+| Executable, feature used | 3,575,808 |
+| Delta | +291,840 (285 KB, +8.9%) |
+| `libSkiaSharp.dll` beside it | 12,903,776, unchanged |
+
+No new native library: Skia already carries the GIF decoder, so the package is the compositor, the
+loop walk and the glue. What the fixture proves is that the whole path an application uses - the
+provider, `SKCodec`, the compositing, the timeline - is reachable and cheap. What it does not prove
+is that a large file is free: frame memory is `frames x width x height x 4` and that is bounded at
+run time by `DecodedSizeLimit`, not by the size of the executable.
+
+The rest is the `XPlatImageData` every image has: `Loop` can be reassigned after the load, `Play`,
+`Pause` and `Seek` are the same timeline a PNG has, and the control never disposes it.
+
+The demo's **Animated GIF** page plays the sample with play, pause, a seek bar and a position readout;
+**GIF frames** steps it frame by frame; **GIF out of view** scrolls the picture out of a frame and
+back with a button, so the frame it returns on can be compared with the readout.
 
 ## Writing a backend
 
