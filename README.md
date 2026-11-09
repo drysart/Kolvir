@@ -3834,7 +3834,7 @@ size and a payload padded to an even length. The package walks that chain once, 
 | Chunk | What the package uses |
 | --- | --- |
 | `VP8X` | The animation bit and the canvas width and height (`NaturalSize`) |
-| `ANIM` | The 16-bit loop count, and the background colour (read, but not used for disposal) |
+| `ANIM` | That a loop is declared: `Loop` starts true for any `ANIM` chunk. The 16-bit count is not read or preserved; the background colour is read but not used for disposal |
 | `ANMF` | One per frame: the offset in two-pixel units, the frame rectangle, the duration in milliseconds, the blend bit and the disposal bit |
 | `ALPH`, `VP8 `, `VP8L` | The frame's own image data, moved into a stand-alone container so Skia decodes that frame alone rather than the canvas with earlier frames composed onto it |
 
@@ -3904,29 +3904,38 @@ the numbers in the message.
 
 #### What it costs
 
-Measured the way FEATURE-COST-POLICY.md §8 says to, on win-x64: `XPlatUI.Minimal` published with
-`PublishAot` and `-p:EmbedSkiaSharpNative=false`, then published again with an `XPlatImage` showing a
-PNG through the built-in decoder, then published a third time with the WebP package referenced,
-`AddAnimatedWebpImages()` called and the demo's animated WebP loaded and drawn. The three numbers
-separate the image control and the timeline from the feature:
+Measured the way FEATURE-COST-POLICY.md §8 says to, on win-x64, linux-x64 and osx-arm64:
+`XPlatUI.Minimal` built with `PublishAot` and `-p:EmbedSkiaSharpNative=false`, then built again with
+an `XPlatImage` showing a PNG through the built-in decoder, then built a third time with the WebP
+package referenced, `AddAnimatedWebpImages()` called and the demo's animated WebP loaded and drawn.
+The three numbers separate the image control and the timeline from the feature:
 
-| Measurement | Bytes |
-| --- | --- |
-| Executable, one label (the floor at this commit) | 3,283,968 |
-| Executable, one `XPlatImage` showing a PNG (image control and timeline paid for) | 3,526,656 |
-| Executable, the same control showing an animated WebP with the feature registered | 3,582,464 |
-| Feature only, against the PNG fixture | +55,808 (54.5 KB) |
-| Whole use path, against the label fixture | +298,496 (291.5 KB, +9.1%) |
-| `libSkiaSharp.dll` beside it | 12,903,776, unchanged |
+| Measurement | win-x64 | linux-x64 | osx-arm64 |
+| --- | --- | --- | --- |
+| Executable, one label (the floor at this commit) | 3,283,968 | 4,276,144 | 4,080,304† |
+| Executable, one `XPlatImage` showing a PNG (image control and timeline paid for) | 3,526,656 | 4,590,160 | 4,080,304† |
+| Executable, the same control showing an animated WebP with the feature registered | 3,582,464 | 4,636,032 | 4,080,304† |
+| Feature only, against the PNG fixture | +55,808 (54.5 KB) | +45,872 (44.8 KB) | 0 |
+| Whole use path, against the label fixture | +298,496 (291.5 KB, +9.1%) | +359,888 (351.5 KB, +8.4%) | 0 |
+| `libSkiaSharp` beside it | 12,903,776 | 12,262,408 | 15,804,304 |
+
+† macOS was measured with `dotnet build -c Release -r osx-arm64 -p:PublishAot=true` rather than
+`dotnet publish`, because `dsymutil` fails during publish on that host; that failure is pre-existing
+on master. The app bundle's binary is the one quoted, and the pre-strip `nativelibraries` binary was
+4,103,584 for all three builds as well. The arm64 image is linked in 16 KB pages and the feature fits
+in slack the linker had already paid for: the file lengths are byte-for-byte identical while the
+hashes differ and the feature's assembly is present in the WebP build and absent from the floor.
+That is the same zero-cost shape FEATURE-COST-POLICY.md records for other arm64 features.
 
 No new native library: Skia already carries the WebP decoder, so the package is the RIFF walk, the
 compositor and the glue. What the fixture proves is that the whole path an application uses - the
 service-collection extension, the provider, Skia's WebP decoder, the compositor and the timeline - is
-reachable and cheap. What it does not prove is that a large file is free: frame memory is
-`frames x width x height x 4` and that is bounded at run time by `DecodedSizeLimit`, not by the size
-of the executable. It also does not isolate Skia's decoder from the package, because the PNG fixture
-already links the built-in raster path and the WebP decoder lives in the same Skia library; the
-55,808-byte figure is the package's own code and the metadata that keeps it reachable.
+reachable and cheap on all three platforms. What it does not prove is that a large file is free:
+frame memory is `frames x width x height x 4` and that is bounded at run time by
+`DecodedSizeLimit`, not by the size of the executable. It also does not isolate Skia's decoder from
+the package, because the PNG fixture already links the built-in raster path and the WebP decoder
+lives in the same Skia library; the +55,808 and +45,872 byte figures are the package's own code and
+the metadata that keeps it reachable, while osx-arm64 absorbs the same code into existing page slack.
 
 The rest is the `XPlatImageData` every image has: `Loop` can be reassigned after the load, `Play`,
 `Pause` and `Seek` are the same timeline a PNG has, and the control never disposes it.
