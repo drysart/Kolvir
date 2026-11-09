@@ -4389,9 +4389,10 @@ and CPU rasterisers filter a scaled bitmap slightly differently, and every pixel
 by at most 10/255 - the amplified diff is a uniform field of that image, with no structural
 difference anywhere else. Page 54 is compared below its live readout, which prints numbers that
 change every frame and cannot be compared between two runs. All three are inside the 11-30/255
-antialiasing band the Windows and macOS comparisons recorded. The CPU path itself is unchanged: the
-demo's own full-frame repaint for that tier is the code that was already there, and `--render` still
-produces the same images it does on `master`.
+antialiasing band the Windows and macOS comparisons recorded. The CPU path itself is unchanged:
+the same window captured with `--no-hardware-acceleration` on `master` and on this branch is
+**byte-identical** over the whole client area (0 pixels differ, page 1, 1280 x 760 @ 2.00), which is
+what proves the tier really is the code that was already there.
 
 Measured cost on the `XPlatUI.Minimal` fixture (`linux-x64`, NativeAOT, the loose Skia row of §8 in
 [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
