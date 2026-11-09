@@ -1613,7 +1613,7 @@ both do - would be left with blank patches where the retained content should be:
 
 | Backend | Presents |
 | --- | --- |
-| Win32 | The painted area, blitted out of the retained DIB |
+| Win32 | The painted area from the DIB, or the whole retained GL buffer after a damage-only paint |
 | AppKit | The painted area, through the layer's `CGImage` |
 | GTK4 | The whole surface every frame |
 | Headless | The whole surface, so `--render` is always complete |
@@ -3992,9 +3992,9 @@ The rules the implementation follows:
   context, `GRBackendRenderTarget.IsValid` and `SKSurface.Create()` each can fail. A machine with
   no OpenGL ICD - a Hyper-V VM, an RDP session with no vendor driver - renders exactly as it did
   before.
-- **GL and GDI never present the same window.** When GL comes up the retained DIB is released and
-  `WM_PAINT` paints and swaps the whole surface; it does not `BitBlt`. `WM_PRINTCLIENT` paints one
-  CPU frame into a temporary DIB so screenshots and visual capture still work.
+- **GL and GDI never share a window.** When GL comes up the retained DIB is released and
+  `WM_PAINT` presents with a blit and `wglSwapBuffers`; it does not `BitBlt`. `WM_PRINTCLIENT`
+  paints one CPU frame into a temporary DIB so screenshots and visual capture still work.
 - **The pixel format is chosen on a throwaway window, not on the real one.** A window's format can
   be set once and never changed, so the probe spends a hidden 1 x 1 window per flavour.
   `gdi32`'s `ChoosePixelFormat`/`SetPixelFormat` is tried first, because that is the app-facing
@@ -4012,13 +4012,18 @@ The rules the implementation follows:
   for the rest of its life.
 - **The context lives on the UI thread.** Creation, make-current, paint, flush and swap all happen
   there; nothing runs on a timer or a worker.
-- **The whole surface is presented each frame.** The host's `SKRegion` machinery still decides
-  what the UI invalidated, but with GL it no longer decides what is copied: a swapped back buffer
-  has no guaranteed contents, so partial present would need a preserved buffer the window
-  framebuffer does not promise. That is what the demo's `Damage: full` / `Damage: partial` toggle
-  is for - the invalidation still differs, the present does not. The real-hardware table below
-  shows the consequence: a GL partial run reports the full area and costs the same as a full frame,
-  while a small CPU partial frame is cheaper than either.
+- **The frame lives in a retained offscreen buffer.** The host's `SKRegion` decides what the UI
+  invalidated, and that is now exactly what is repainted: a partial invalidation paints the damaged
+  region into a persistent RGBA8 offscreen surface, then one Skia blit stamps the whole buffer onto
+  the window's default framebuffer and `wglSwapBuffers` presents it. No raw shader, no GLSL; the
+  blit is Skia's own. If nothing was damaged and Windows is not asking for pixels, no frame is
+  submitted at all. An uncovered or restored window blits the retained buffer without repainting
+  the tree. The offscreen buffer has undefined contents when it is created, so the first frame
+  after creation and after any resize or DPI change is painted in full.
+- **Three tiers with a reason.** Offscreen-FBO GL is the normal Tier 1. If the offscreen surface
+  cannot be created, or a snapshot/blit fails, the window drops to direct-to-FBO-0 GL for the rest
+  of its life (with one full repaint to recover the frame); if the context or the swap fails, it
+  drops to the CPU DIB. Each step is named, so a screenshot says which tier is live.
 
 `Win32WindowBackend.GraphicsPath` reports `gl` or `cpu (...)` with the reason, and `GraphicsRenderer`
 reports the GL vendor and device. The reason names the failing step rather than a generic
@@ -4039,14 +4044,16 @@ Measured cost on the `XPlatUI.Minimal` floor (Windows x64, NativeAOT, Skia loose
 | Measurement | Bytes |
 | --- | ---: |
 | `XPlatUI.Minimal` floor before this change | 3,283,456 |
-| After the Win32 GL seam, the flavour probe and the `GfxHardwareAcceleration` option | 3,329,024 |
-| Delta | +45,568 (+1.39 %) |
+| After the Win32 GL seam, the flavour probe, damage-aware present and the `GfxHardwareAcceleration` option | 3,332,096 |
+| Delta | +48,640 (+1.48 %) |
 
 The WGL/P-invoke half is a handful of functions and one internal type set; it is not a package and
 adds no native asset. `opengl32.dll` is an operating-system component and the shipped
-`libSkiaSharp.dll` already contains the GL backend, so nothing new is shipped. The opt-in trace
-writes its UTF-8 bytes straight to the standard error handle instead of `Console.Error`, because
-routing it through `Console.Error` alone cost about 75 KB in a trimmed native image.
+`libSkiaSharp.dll` already contains the GL backend, so nothing new is shipped. The retained
+offscreen surface and its snapshot/`DrawImage` present add about 3 KB, because those Skia APIs were
+already retained by the drawing set. The opt-in trace writes its UTF-8 bytes straight to the
+standard error handle instead of `Console.Error`, because routing it through `Console.Error` alone
+cost about 75 KB in a trimmed native image.
 
 ## Writing a backend
 
@@ -4325,9 +4332,10 @@ demo is instrumented so those can be captured by hand and pasted back with no am
 
 #### Measured on real hardware
 
-NVIDIA GeForce RTX 5090 with the vendor ICD, Windows, 1280 x 820 logical client at 2.00 scale,
-600 frames after 30 warm-up frames, measured 2026-11-09. The CPU rows are
-`--no-hardware-acceleration`. Times in milliseconds.
+These are the numbers from the first revision, which painted the whole surface into FBO 0 on every
+frame; the damage-aware path below changes the partial row. NVIDIA GeForce RTX 5090 with the vendor
+ICD, Windows, 1280 x 820 logical client at 2.00 scale, 600 frames after 30 warm-up frames, measured
+2026-11-09. The CPU rows are `--no-hardware-acceleration`. Times in milliseconds.
 
 | Mode | Damage | p50 | p95 | max | mean | Painted area |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
@@ -4345,6 +4353,28 @@ swatch and costs 0.178 ms, so for that small region **the CPU path is 2.3x cheap
 The break-even follows from that: a frame whose damaged area is a small fraction of the window costs
 less on the CPU path, while a full or large-area frame costs several times less under GL. A GL frame
 carries a fixed submit-and-present cost that does not shrink with the damage.
+
+#### Damage-aware present on the development VM
+
+The retained-buffer path is measured here with Mesa on the Microsoft Basic Render Driver, 1280 x
+820 at 2.00 scale, 600 frames after 30 warm-up. **These are software-rasterizer numbers: they show
+the shape of the change, not hardware speed.** `p50`/`p95`/`max`/`mean` are the host's paint, as
+everywhere else, so the GL rows exclude the present blit. The blit was timed separately by
+snapshotting and blitting an unchanged 2560 x 1640 buffer: about **0.05 ms per frame** at steady
+state on this VM, which is the floor the GL partial row adds.
+
+| Mode | Damage | p50 | p95 | max | mean | Painted area |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| GL | full | 0.598 | 1.110 | 9.743 | 0.760 | 1280 x 820 |
+| GL | partial | 0.068 | 0.112 | 0.193 | 0.074 | 180 x 180 |
+| CPU | full | 3.157 | 4.382 | 8.105 | 3.253 | 1280 x 820 |
+| CPU | partial | 0.198 | 0.240 | 0.704 | 0.205 | 180 x 180 |
+
+A partial GL frame now paints the 180 x 180 swatch instead of the whole window, and the full-buffer
+blit adds about 0.05 ms, so on this software device the partial GL total is roughly 0.12 ms against
+the CPU path's 0.198 ms. A full GL frame is about 0.65 ms against 3.157 ms. The hardware split has
+to be re-measured on the RTX 5090: `SwapBuffers` is still outside `LastFrameTime`, and the blit's
+cost on a vendor driver is the number that decides whether the partial win survives there.
 
 ### On Linux (GTK4)
 

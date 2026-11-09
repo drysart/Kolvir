@@ -619,10 +619,24 @@ internal sealed class Win32GlContext : IDisposable
     }
 }
 
+/// <summary>Outcome of a present attempt, so the window can fall back without guessing.</summary>
+internal enum Win32GlPresentResult
+{
+    /// <summary>The frame reached the window and the buffers were swapped.</summary>
+    Presented,
+
+    /// <summary>The retained buffer failed; repaint once against the default framebuffer.</summary>
+    RetryDirect,
+
+    /// <summary>The context or the swap was lost; the window must fall back to the DIB.</summary>
+    Lost,
+}
+
 /// <summary>
 /// Skia's side of the seam: a <c>GRContext</c>, a render target for the window's default
-/// framebuffer, and the surface the control tree paints into. Created by <see cref="Win32Gfx"/>,
-/// owned by the window, and presented with <see cref="Present"/>.
+/// framebuffer, a retained offscreen surface the control tree paints its damage into, and the blit
+/// that presents it. Created by <see cref="Win32Gfx"/>, owned by the window, and presented with
+/// <see cref="Present"/>.
 /// </summary>
 internal sealed class Win32GlSurface : IDisposable
 {
@@ -631,12 +645,29 @@ internal sealed class Win32GlSurface : IDisposable
     private GRContext? _contextState;
     private GRBackendRenderTarget? _target;
     private SKSurface? _surface;
+    private SKSurface? _offscreen;
     private int _width;
     private int _height;
+    private bool _needsFull = true;
+    private bool _offscreenUnavailable;
 
     private Win32GlSurface(Win32GlContext context) => _context = context;
 
-    internal SKSurface? Surface => _surface;
+    internal SKSurface? Surface => _offscreen ?? _surface;
+
+    /// <summary>True while the retained offscreen buffer is the paint target.</summary>
+    internal bool HasRetainedBuffer => _offscreen is not null;
+
+    /// <summary>True when the retained buffer's contents are undefined and a full paint is owed.</summary>
+    internal bool NeedsFullRepaint => _needsFull;
+
+    /// <summary>Consumes the full-repaint flag; the frame that asks is the one that clears it.</summary>
+    internal bool TakeNeedsFull()
+    {
+        bool needed = _needsFull;
+        _needsFull = false;
+        return needed;
+    }
 
     /// <summary>The vendor and renderer string, for the demo's one-line diagnostic.</summary>
     internal string Renderer => _context.Renderer;
@@ -854,6 +885,8 @@ internal sealed class Win32GlSurface : IDisposable
         _surface = null;
         _target?.Dispose();
         _target = null;
+        _offscreen?.Dispose();
+        _offscreen = null;
 
         // The default framebuffer is 0, and its real sample and stencil counts come from the context.
         // Passing 0/8 instead would render wrongly or trip a Skia assert on a multisampled format.
@@ -895,21 +928,101 @@ internal sealed class Win32GlSurface : IDisposable
 
         _target = target;
         _surface = surface;
+
+        var info = new SKImageInfo(width, height, SKColorType.Rgba8888, SKAlphaType.Premul);
+
+        if (_offscreenUnavailable)
+        {
+            _offscreen = null;
+        }
+        else
+        {
+            try
+            {
+                _offscreen = SKSurface.Create(
+                    _contextState,
+                    false,
+                    info,
+                    samples,
+                    GRSurfaceOrigin.BottomLeft);
+            }
+            catch (Exception exception)
+            {
+                _offscreen = null;
+                Win32GlTrace.Write($"offscreen surface threw {exception.GetType().Name}, presenting directly");
+            }
+
+            if (_offscreen is null)
+            {
+                // Do not keep trying on every resize: the tier is chosen for the life of the window.
+                _offscreenUnavailable = true;
+                Win32GlTrace.Write("offscreen surface unavailable, presenting directly");
+            }
+        }
+
         _width = width;
         _height = height;
+        _needsFull = true;
+
         return null;
     }
 
-    /// <summary>Submits the frame and swaps the back buffer onto the window.</summary>
-    internal bool Present()
+    /// <summary>Presents the frame and swaps the back buffer onto the window.</summary>
+    internal Win32GlPresentResult Present()
     {
         if (_contextState is null || _surface is null || !_context.MakeCurrent())
         {
-            return false;
+            return Win32GlPresentResult.Lost;
         }
 
-        _contextState.Flush();
-        return _context.Present();
+        if (_offscreen is not null)
+        {
+            try
+            {
+                // The offscreen buffer is the retained frame. Wrapping the window's own default
+                // framebuffer in a surface keeps this a Skia blit: no GLSL to maintain per driver,
+                // and no partial-present extension to require.
+                using var image = _offscreen.Snapshot();
+
+                if (image is null)
+                {
+                    DropRetainedBuffer();
+                    return Win32GlPresentResult.RetryDirect;
+                }
+
+                _surface.Canvas.DrawImage(
+                    image,
+                    0f,
+                    0f,
+                    new SKSamplingOptions(SKFilterMode.Nearest),
+                    null);
+
+                _contextState.Flush();
+            }
+            catch (Exception exception)
+            {
+                Win32GlTrace.Write(
+                    $"offscreen present threw {exception.GetType().Name}, dropping to direct");
+                DropRetainedBuffer();
+                return Win32GlPresentResult.RetryDirect;
+            }
+        }
+        else
+        {
+            _contextState.Flush();
+        }
+
+        return _context.Present()
+            ? Win32GlPresentResult.Presented
+            : Win32GlPresentResult.Lost;
+    }
+
+    private void DropRetainedBuffer()
+    {
+        _offscreen?.Dispose();
+        _offscreen = null;
+        _offscreenUnavailable = true;
+        _needsFull = true;
     }
 
     public void Dispose()
@@ -931,6 +1044,8 @@ internal sealed class Win32GlSurface : IDisposable
         _surface = null;
         _target?.Dispose();
         _target = null;
+        _offscreen?.Dispose();
+        _offscreen = null;
         _contextState?.Dispose();
         _contextState = null;
         _interface?.Dispose();

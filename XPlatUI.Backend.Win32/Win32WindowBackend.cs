@@ -1282,24 +1282,70 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         {
             if (_gl is not null)
             {
-                // With a GL surface the whole framebuffer is painted and swapped every frame. A
-                // swapped back buffer has no guaranteed contents, so there is no equivalent of the
-                // DIB's "copy the stale rectangle back out" shortcut: the SKRegion machinery in the
-                // host still decides what the UI invalidated, and the window still invalidates the
-                // same region, but the present covers everything. That is a deliberate trade for
-                // WGL, not an oversight - partial present would need either PFD_SWAP_EXCHANGE_ARB
-                // or a preserved buffer, neither of which is guaranteed on a window framebuffer.
-                var glArea = Render(full: true);
+                // The retained offscreen buffer is the frame. A damaged paint updates only the
+                // region the host accumulated; presenting stamps that whole buffer onto the window
+                // with one Skia blit, so a small caret update no longer forces a full raster. If
+                // Windows only wants pixels back (uncover, minimise/restore), the retained buffer is
+                // blitted without repainting the tree at all.
+                bool stalePixels = paint.rcPaint.Right > paint.rcPaint.Left
+                    && paint.rcPaint.Bottom > paint.rcPaint.Top;
 
-                if (_gl is null)
+                bool damaged = _host.IsUpdatePending
+                    || _gl.NeedsFullRepaint
+                    || _paintedGeneration != _bufferGeneration;
+
+                if (!damaged && !stalePixels)
                 {
-                    // The context was lost while rendering; the frame is now in the CPU buffer, so
-                    // copy it out instead of leaving this paint empty until the next one.
-                    Blit(hdc, glArea);
+                    // Nothing was invalidated and Windows is not asking for pixels: do not submit a
+                    // frame at all.
                     return;
                 }
 
-                if (!_gl.Present())
+                SKRectI glArea = SKRectI.Empty;
+
+                if (damaged)
+                {
+                    glArea = Render();
+
+                    if (_gl is null)
+                    {
+                        // The context was lost while rendering; the frame is now in the CPU buffer,
+                        // so copy it out instead of leaving this paint empty until the next one.
+                        Blit(hdc, glArea);
+                        return;
+                    }
+                }
+                else if (!_gl.HasRetainedBuffer)
+                {
+                    // Direct-to-FBO-0 has no retained contents of its own, so a stale paint still
+                    // has to rebuild the frame before swapping.
+                    glArea = Render(full: true);
+
+                    if (_gl is null)
+                    {
+                        Blit(hdc, glArea);
+                        return;
+                    }
+                }
+
+                var result = _gl.Present();
+
+                if (result == Win32GlPresentResult.RetryDirect)
+                {
+                    // The retained buffer failed; repaint this one frame against the default
+                    // framebuffer and present again. The next paint stays on the direct tier.
+                    glArea = Render(full: true);
+
+                    if (_gl is null)
+                    {
+                        Blit(hdc, glArea);
+                        return;
+                    }
+
+                    result = _gl.Present();
+                }
+
+                if (result != Win32GlPresentResult.Presented)
                 {
                     // A driver reset, an RDP session change or a lost device: drop the GL stack and
                     // let the next paint use the DIB, rather than throwing from a paint handler.
@@ -1415,6 +1461,11 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         if (_paintedGeneration != _bufferGeneration)
         {
             _paintedGeneration = _bufferGeneration;
+            full = true;
+        }
+
+        if (_gl?.TakeNeedsFull() == true)
+        {
             full = true;
         }
 

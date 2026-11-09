@@ -2951,10 +2951,10 @@ public sealed class DemoUi
 
         var caveat = new XPlatLabel(
             "One 15 ms timer (about 66 Hz) drives both the rolling readout and the benchmark; it runs only while this page is " +
-            "displayed. The damage toggle changes what is repainted only on the CPU path: under GL every frame paints and " +
-            "presents the whole surface, so both damage modes report the full area at about the same cost - that is expected, " +
-            "not a failed measurement. On the CPU path, partial damage repaints only the swatch. The readout's own label " +
-            "repaints about four times a second and is part of the frame it reports.")
+            "displayed. The damage toggle changes what is repainted: partial damage repaints only the swatch. Under GL the " +
+            "damaged region goes into a retained buffer and is presented with one full-buffer blit, so a GL partial frame " +
+            "reports the swatch area while the blit is outside the frame number (the BENCH line is paint only). The readout's " +
+            "own label repaints about four times a second and is part of the frame it reports.")
         {
             Dock = XDock.Top,
             AutoSize = false,
