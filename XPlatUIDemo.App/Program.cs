@@ -113,7 +113,12 @@ internal static class Program
             // The sample takes drops on its root panel and on a text box, so it opts into the drag
             // and drop feature. It shows SVG icons, so it opts into the SVG feature the same way;
             // leaving either out is what keeps it out of an application that does not want it.
-            ConfigureServices = services => services.AddDragDrop().AddAnimations().AddSvgImages().AddAnimatedGifImages(),
+            ConfigureServices = services => services
+                .AddDragDrop()
+                .AddAnimations()
+                .AddSvgImages()
+                .AddAnimatedGifImages()
+                .AddAnimatedWebpImages(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,

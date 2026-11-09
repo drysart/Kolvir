@@ -1,0 +1,54 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The animated WebP feature's own suite, in an assembly of its own because the feature is a
+       package of its own: a rung-3 feature is not part of the core library, so its tests are not part
+       of the core suite either.
+
+       The feature splits by platform - `common/` plus one of windows, macos or linux compiled per
+       target framework - but these tests only touch `common/`, so the project takes one portable
+       target framework and the reference resolves the `net10.0` inner build of the feature on every
+       machine.
+
+       Restoring from this project needs -p:TargetFramework=net10.0, exactly as the other feature
+       suites do: the feature lists all three frameworks unconditionally for `dotnet pack`, and a
+       plain restore follows every framework in the reference graph, including the macOS one whose
+       workload no runner has. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>XPlatUI.AnimatedWebp.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- Decoding a WebP needs SkiaSharp's native library, which the main package does not carry on
+       Linux or macOS. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.AnimatedWebp\XPlatUI.Feature.AnimatedWebp.csproj" />
+  </ItemGroup>
+
+</Project>
