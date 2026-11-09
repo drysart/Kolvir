@@ -3750,12 +3750,32 @@ which is why the tests assert the pixel content of specific frames rather than t
 each disposal method has a fixture whose earlier frames leave something behind, and the assertions are
 on colours in regions rather than on a hash.
 
+#### What it costs
+
+Measured the way FEATURE-COST-POLICY.md §8 says to, on win-x64: `XPlatUI.Minimal` published with
+`PublishAot` and `-p:EmbedSkiaSharpNative=false`, then published again with the project reference and
+an `AddAnimatedGifImages()` call added and one GIF loaded and drawn. The two numbers differ by the
+feature and nothing else.
+
+| Measurement | Bytes |
+| --- | --- |
+| Executable, feature not referenced (the floor at this commit) | 3,283,968 |
+| Executable, feature used | 3,575,808 |
+| Delta | +291,840 (285 KB, +8.9%) |
+| `libSkiaSharp.dll` beside it | 12,903,776, unchanged |
+
+No new native library: Skia already carries the GIF decoder, so the package is the compositor, the
+loop walk and the glue. What the fixture proves is that the whole path an application uses - the
+provider, `SKCodec`, the compositing, the timeline - is reachable and cheap. What it does not prove
+is that a large file is free: frame memory is `frames x width x height x 4` and that is bounded at
+run time by `DecodedSizeLimit`, not by the size of the executable.
+
 The rest is the `XPlatImageData` every image has: `Loop` can be reassigned after the load, `Play`,
 `Pause` and `Seek` are the same timeline a PNG has, and the control never disposes it.
 
 The demo's **Animated GIF** page plays the sample with play, pause, a seek bar and a position readout;
-**GIF frames** steps it frame by frame; **GIF out of view** scrolls it out of a panel and back to show
-that the frame it returns on is the one the clock says.
+**GIF frames** steps it frame by frame; **GIF out of view** scrolls the picture out of a frame and
+back with a button, so the frame it returns on can be compared with the readout.
 
 ## Writing a backend
 
