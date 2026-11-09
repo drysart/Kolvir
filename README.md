@@ -4332,35 +4332,43 @@ demo is instrumented so those can be captured by hand and pasted back with no am
 
 #### Measured on real hardware
 
-These are the numbers from the first revision, which painted the whole surface into FBO 0 on every
-frame; the damage-aware path below changes the partial row. NVIDIA GeForce RTX 5090 with the vendor
-ICD, Windows, 1280 x 820 logical client at 2.00 scale, 600 frames after 30 warm-up frames, measured
-2026-11-09. The CPU rows are `--no-hardware-acceleration`. Times in milliseconds.
+NVIDIA GeForce RTX 5090 with the vendor ICD, Windows, 1280 x 820 logical client at 2.00 scale,
+600 frames after 30 warm-up frames, measured 2026-11-09. The CPU rows are
+`--no-hardware-acceleration`. Times in milliseconds; this is the damage-aware build.
 
 | Mode | Damage | p50 | p95 | max | mean | Painted area |
 | --- | --- | ---: | ---: | ---: | ---: | --- |
-| GL | full | 0.417 | 0.498 | 3.968 | 0.431 | 1280 x 820 |
-| GL | partial | 0.416 | 0.526 | 1.405 | 0.430 | 1280 x 820 |
-| CPU | full | 2.681 | 3.051 | 5.719 | 2.634 | 1280 x 820 |
-| CPU | partial | 0.178 | 0.199 | 0.399 | 0.177 | 180 x 180 |
+| GL | full | 0.487 | 0.582 | 3.446 | 0.502 | 1280 x 820 |
+| GL | partial | 0.047 | 0.056 | 0.159 | 0.046 | 180 x 180 |
+| CPU | full | 2.917 | 3.432 | 6.416 | 2.919 | 1280 x 820 |
+| CPU | partial | 0.177 | 0.222 | 0.548 | 0.183 | 180 x 180 |
 
-A full frame costs **6.4x less time under GL** (0.417 vs 2.681 ms p50). The `partial` GL row is not a
-broken toggle: GL presents the whole surface every frame, so the damage setting changes what is
-repainted but not what is submitted and swapped, and the row reports the full 1280 x 820 area at
-about the same cost as `full`. On the CPU path the same partial run repaints only the 180 x 180
-swatch and costs 0.178 ms, so for that small region **the CPU path is 2.3x cheaper than GL**.
+A full frame is **6.0x cheaper under GL** (0.487 vs 2.917 ms p50). A partial frame is **3.8x
+cheaper under GL** (0.047 vs 0.177). That reverses the first revision, where whole-surface present
+made the GL partial row 2.3x *more* expensive than the CPU one (0.416 vs 0.178). The retained buffer
+costs **+0.070 ms on a full frame** (0.417 -> 0.487) and takes **8.9x off a partial frame** (0.416
+-> 0.047).
 
-The break-even follows from that: a frame whose damaged area is a small fraction of the window costs
-less on the CPU path, while a full or large-area frame costs several times less under GL. A GL frame
-carries a fixed submit-and-present cost that does not shrink with the damage.
+Both hardware runs are timer-capped at 64.9-65.0 fps, so at this workload the win is headroom, not
+frame rate. The frame-rate difference appears when the workload approaches the frame budget: a full
+frame now leaves 6x more of it.
 
-#### Damage-aware present on the development VM
+#### What the frame number excludes
 
-The retained-buffer path is measured here with Mesa on the Microsoft Basic Render Driver, 1280 x
-820 at 2.00 scale, 600 frames after 30 warm-up. **These are software-rasterizer numbers: they show
-the shape of the change, not hardware speed.** `p50`/`p95`/`max`/`mean` are the host's paint, as
+`p50`/`p95`/`max`/`mean` are the host's paint (`XPlatUiHost.LastFrameTime`). A GL frame's
+offscreen-to-window blit and `wglSwapBuffers` happen after that paint and are **not** in the number.
+The blit was timed separately at **0.054 ms** on the software VM, but it has **not** been timed on
+this hardware, so the true hardware partial frame is 0.047 ms plus an unmeasured blit - still
+comfortably under the CPU path's 0.177, but 0.047 is not the whole frame. A full GL frame likewise
+carries that blit on top of 0.487.
+
+#### Development VM (software rasterizer)
+
+The retained-buffer path is also measured here with Mesa on the Microsoft Basic Render Driver,
+1280 x 820 at 2.00 scale, 600 frames after 30 warm-up. **These are software-rasterizer numbers: they
+show the shape of the change, not hardware speed.** `p50`/`p95`/`max`/`mean` are the host's paint, as
 everywhere else, so the GL rows exclude the present blit. The blit was timed separately by
-snapshotting and blitting an unchanged 2560 x 1640 buffer: about **0.05 ms per frame** at steady
+snapshotting and blitting an unchanged 2560 x 1640 buffer: about **0.054 ms per frame** at steady
 state on this VM, which is the floor the GL partial row adds.
 
 | Mode | Damage | p50 | p95 | max | mean | Painted area |
@@ -4372,9 +4380,8 @@ state on this VM, which is the floor the GL partial row adds.
 
 A partial GL frame now paints the 180 x 180 swatch instead of the whole window, and the full-buffer
 blit adds about 0.05 ms, so on this software device the partial GL total is roughly 0.12 ms against
-the CPU path's 0.198 ms. A full GL frame is about 0.65 ms against 3.157 ms. The hardware split has
-to be re-measured on the RTX 5090: `SwapBuffers` is still outside `LastFrameTime`, and the blit's
-cost on a vendor driver is the number that decides whether the partial win survives there.
+the CPU path's 0.198 ms. A full GL frame is about 0.65 ms against 3.157 ms. Use these for the shape;
+the hardware table above is the one to quote.
 
 ### On Linux (GTK4)
 
