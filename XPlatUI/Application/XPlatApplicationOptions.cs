@@ -125,10 +125,11 @@ public sealed class XPlatApplicationOptions
     /// of the Windows value. The GTK4 backend composites through GL regardless, so this only decides
     /// whether Skia paints into that context: the CPU texture path uploads a full-surface
     /// <c>Gdk.MemoryTexture</c> every frame and the accelerated path blits a retained GPU surface
-    /// that stays in video memory, which measured end to end as roughly a quarter more frames on a
-    /// software GL stack, and several times more for image-heavy pages. It is unmeasured on hardware:
-    /// no Linux machine with a GPU was available, so the default rests on that structural asymmetry
-    /// plus the fact that every failure falls back to the CPU path with the failing step named.
+    /// that stays in video memory. Measured end to end on software GL that is roughly a quarter more
+    /// frames on X11, level on Wayland, and 3.7-3.85x for an image-heavy page on both. It is
+    /// unmeasured on hardware: no Linux machine with a GPU was available, so the default rests on
+    /// that structural asymmetry plus the fact that every failure falls back to the CPU path with the
+    /// failing step named.
     /// </para>
     /// <para>
     /// The constructor computes the default once: on Windows and Linux true, on macOS false, and

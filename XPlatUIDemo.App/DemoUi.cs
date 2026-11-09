@@ -55,6 +55,18 @@ public sealed class DemoUi
     private const int BenchmarkWarmupFrames = 30;
     private const int BenchmarkMeasuredFrames = 600;
     private const int RollingFrameWindow = 120;
+
+    // A run that stops being painted used to look like a hang: the only output is the BENCH line at
+    // the end, so a window that is covered, minimised or on another workspace stalls the count and
+    // says nothing, on every backend and for both damage modes. The watchdog says so instead.
+    private const int BenchmarkStallCheckSeconds = 5;
+    private const int BenchmarkStallSeconds = 10;
+    private const int BenchmarkStallReportSeconds = 30;
+    private XPlatTimer? _benchmarkWatchdog;
+    private int _watchdogFrames;
+    private long _watchdogStartedAt;
+    private long _watchdogAdvancedAt;
+    private long _watchdogReportedAt;
     private XPlatTimer? _metricsTimer;
     private XPlatTimer? _pageBenchmarkTimer;
     private bool _pageBenchmarkHandlerAdded;
@@ -3048,6 +3060,65 @@ public sealed class DemoUi
         }
 
         SetStatus("Benchmark running - the page is invalidated on every tick; nothing else changes.");
+
+        StartBenchmarkWatchdog();
+    }
+
+    /// <summary>
+    /// Starts the stall watchdog: while a measurement is in progress it checks every five seconds
+    /// whether the completed-frame count has advanced, and reports to stderr when it has not for ten.
+    /// A normal run never prints anything from here, and a run that finishes stops it.
+    /// </summary>
+    private void StartBenchmarkWatchdog()
+    {
+        long now = Environment.TickCount64;
+        _watchdogStartedAt = now;
+        _watchdogAdvancedAt = now;
+        _watchdogReportedAt = long.MinValue / 2;
+        _watchdogFrames = _measureFrame;
+
+        if (_benchmarkWatchdog is null)
+        {
+            _benchmarkWatchdog = new XPlatTimer(TimeSpan.FromSeconds(BenchmarkStallCheckSeconds));
+            _benchmarkWatchdog.AddTickHandler(_ => OnBenchmarkWatchdogTick());
+        }
+
+        _benchmarkWatchdog.Start();
+    }
+
+    private void StopBenchmarkWatchdog() => _benchmarkWatchdog?.Stop();
+
+    private void OnBenchmarkWatchdogTick()
+    {
+        if (!_measuring)
+        {
+            StopBenchmarkWatchdog();
+            return;
+        }
+
+        long now = Environment.TickCount64;
+        if (_measureFrame != _watchdogFrames)
+        {
+            _watchdogFrames = _measureFrame;
+            _watchdogAdvancedAt = now;
+            return;
+        }
+
+        long stalled = now - _watchdogAdvancedAt;
+
+        // Repeat at most every 30 s, so a window that stays covered for minutes does not spew.
+        if (stalled < BenchmarkStallSeconds * 1000L ||
+            now - _watchdogReportedAt < BenchmarkStallReportSeconds * 1000L)
+        {
+            return;
+        }
+
+        _watchdogReportedAt = now;
+        int total = BenchmarkWarmupFrames + BenchmarkMeasuredFrames;
+        Console.Error.WriteLine(string.Create(
+            CultureInfo.InvariantCulture,
+            $"BENCH stalled: {_measureFrame}/{total} frames after {(now - _watchdogStartedAt) / 1000}s " +
+            $"(no frames for {stalled / 1000}s)"));
     }
 
     private void ToggleDamage()
@@ -3154,6 +3225,7 @@ public sealed class DemoUi
     {
         _measuring = false;
         _pageBenchmarkTimer?.Stop();
+        StopBenchmarkWatchdog();
 
         var values = _measureSamples.OrderBy(value => value).ToArray();
         double mean = values.Average();
@@ -5899,6 +5971,8 @@ public sealed class DemoUi
         }
 
         SetStatus("Benchmark running - the page is invalidated in full on every tick.");
+
+        StartBenchmarkWatchdog();
     }
 
     private void OnPageBenchmarkTick()
