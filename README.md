@@ -4058,13 +4058,20 @@ cost about 75 KB in a trimmed native image.
 
 ## Hardware acceleration (macOS)
 
-`XPlatApplicationOptions.GfxHardwareAcceleration` is the same `bool`, true by default, and
-`--no-hardware-acceleration` is the same switch. When it is true the AppKit backend tries to build a
-Metal-backed Skia context on the window's own `NSView`: `MTLDevice.SystemDefault`, one
-`MTLCommandQueue`, a `CAMetalLayer` sublayer with `PixelFormat = Bgra8Unorm`,
-`FramebufferOnly = false` and a `DrawableSize` of bounds x backing scale, then
-`GRContext.CreateMetal(GRMtlBackendContext)`. Only when every one of those succeeds does the window
-present from the layer's drawable; any failure silently falls back to the existing
+`XPlatApplicationOptions.GfxHardwareAcceleration` is the same `bool` as Windows, but on macOS
+**Metal is strictly opt-in**: the AppKit backend uses it only when the application assigned the
+property, so the constructor's `true` default selects the CPU path. The demo assigns it explicitly
+and `--no-hardware-acceleration` is the same off switch. The reason is the measured crossover in
+[Physical Apple silicon](#measured-on-physical-apple-silicon): Metal is 15-18x faster on the
+image-heavy page and 1.6x slower on the light measured-rendering page, so the non-regressing
+default is the CPU path and acceleration is a decision the application makes with its own content
+in view.
+
+When it is enabled the AppKit backend tries to build a Metal-backed Skia context on the window's own
+`NSView`: `MTLDevice.SystemDefault`, one `MTLCommandQueue`, a `CAMetalLayer` sublayer with
+`PixelFormat = Bgra8Unorm`, `FramebufferOnly = false` and a `DrawableSize` of bounds x backing
+scale, then `GRContext.CreateMetal(GRMtlBackendContext)`. Only when every one of those succeeds does
+the window present from the layer's drawable; any failure silently falls back to the existing
 `CGImage`-through-the-layer path.
 
 No new native library ships. The macOS `libSkiaSharp.dylib` already contains the Metal backend and
@@ -4074,8 +4081,10 @@ surface.
 
 The rules the implementation follows:
 
-- **Metal only when the option is true.** Popups and menus stay on the CPU path, and GTK4 and the
-  headless `--render` path have no such seam.
+- **Metal only when the option is true, and on macOS only when it was assigned explicitly.** The
+  Win32 backend keeps its opt-out default; the AppKit backend adopts Metal only for an application
+  that asked for it. Popups and menus stay on the CPU path, and GTK4 and the headless `--render`
+  path have no such seam.
 - **Every step is checked.** The device, the command queue, the layer, the Skia context and the
   first offscreen surface each can fail. Each failure names the step and leaves the window on the
   CPU path with no Metal state behind, for example `cpu (no metal device)`,
@@ -4108,8 +4117,10 @@ queue, context, drawable sizes, per-frame damage state and every failure to stde
 
 ### Measuring the AppKit GPU path by hand
 
-The footer always names the live path. The last demo page, **Measured rendering** (index 54), works
-exactly as it does on Windows:
+The footer always names the live path. The demo assigns `GfxHardwareAcceleration` explicitly, so it
+opts into Metal; an application that wants the accelerated path must do the same, because leaving
+the constructor's default selects the CPU path on macOS. The measured-rendering page (index 54)
+works exactly as it does on Windows:
 
 1. Run the demo on the machine being measured. Check the footer says `gfx: metal` and the device is
    the one you expect. On a fallback it says `gfx: cpu (...)` with the step that failed; rerun with
@@ -4119,18 +4130,56 @@ exactly as it does on Windows:
 3. Press again with the other damage mode.
 4. Quit, rerun with `--no-hardware-acceleration`, and repeat. That is the CPU half of the A/B.
 
-`--page 54 --benchmark` starts the same measurement from the command line; `--partial-damage`
-selects the partial row, so all four rows can be captured without a pointer. The `BENCH` line has
-exactly the Windows shape:
+`--page N --benchmark` starts the same measurement on any page, not only 54. Page 54 is
+deliberately light, so it is the wrong page for a full-frame comparison on Apple silicon; **page 11
+(Images and layout)** is the heavy one. `--partial-damage` selects the partial row on page 54, so
+all four of its rows can be captured without a pointer. The `BENCH` line has exactly the Windows
+shape:
 
 ```
-BENCH mode="metal" renderer="Apple Paravirtual device" size=1280x800 scale=2.00 damage=full frames=600 warmup=30 p50=0.642 p95=0.861 max=5.317 mean=0.672 fps=59.8 area=1280x800
+BENCH mode="metal" renderer="Apple M4" size=1280x820 scale=2.00 damage=full frames=600 warmup=30 p50=0.883 p95=1.207 max=7.823 mean=0.872 fps=60.1 area=1280x820
 ```
 
 `p50`/`p95`/`max`/`mean` are `XPlatUiHost.LastFrameTime`, the host's paint. The offscreen snapshot,
 the drawable blit, `PresentDrawable` and `Commit` happen after that and are **not** in the number, so
 the Metal partial row is the paint of the 180 x 180 swatch plus an unmeasured full-buffer blit and a
 vsync'd present, not the whole frame. `fps` is the wall-clock cadence and does include the present.
+
+#### Measured on physical Apple silicon
+
+Mac mini (Apple M4), macOS 27.0, `AGXMetalG16G_B0`, 1280 x 820 at 2.00, 600 frames after 30
+warm-up, measured 2026-11-09. The demo assigns `GfxHardwareAcceleration` explicitly; the CPU rows
+are `--no-hardware-acceleration`. Debug and AOT agree, so this is not a build artefact.
+
+| Mode | Damage | Debug p50 | AOT p50 | Debug mean | Painted area |
+| --- | --- | ---: | ---: | ---: | --- |
+| Metal | full | 2.949 | 2.848 | 2.684 | 1280 x 820 |
+| Metal | partial | 0.118 | 0.088 | 0.119 | 180 x 180 |
+| CPU | full | 1.852 | 1.823 | 1.898 | 1280 x 820 |
+| CPU | partial | 0.116 | 0.112 | 0.120 | 180 x 180 |
+
+On this page **Metal is 1.6x slower for a full frame** (2.95 vs 1.85 ms Debug; 2.86 vs 1.83 AOT),
+the opposite of the Windows result. Partial damage is a wash (0.118 vs 0.116), and partial Metal
+includes the full-buffer blit, so the blit is not the problem. Forcing **Tier 2** (direct to the
+drawable, no offscreen, no `Snapshot`) measured **2.948 ms p50** against Tier 1's 2.949: the
+retained buffer and the snapshot are free on this hardware, and the 2.77 ms is the GPU rasterising
+this text-heavy page. Reworking the present design would not recover it.
+
+Page 54 is not the page that decides the design. On the heavy page, **page 11 (Images and layout)**,
+the same builds give:
+
+| Mode | Debug p50 | AOT p50 | Debug p95 | Debug fps | AOT fps | Painted area |
+| --- | ---: | ---: | ---: | ---: | ---: | --- |
+| Metal | 0.883 | 0.748 | 1.207 | 60.1 | 60.0 | 1280 x 820 |
+| CPU | 13.257 | 13.186 | 13.569 | 42.2 | 42.5 | 1280 x 820 |
+
+**Metal is 15-18x faster** (0.75-0.88 vs 13.2-13.3 ms p50) and holds 60 fps where the CPU path
+drops to 42. The crossover is content: Apple's tile-based GPU pays a per-frame cost on many small
+antialiased glyphs and wins on large image fills. That is why the macOS default is the CPU path and
+Metal is strictly opt-in: an application
+with image-heavy content assigns `GfxHardwareAcceleration = true` and gains an order of magnitude;
+an application with only light text stays on the path that was already under budget. The Windows
+default is unchanged because the Win32 measurements win on both.
 
 #### Measured on macvm (paravirtual GPU)
 
@@ -4149,10 +4198,11 @@ below.
 | CPU | full | 2.257 | 3.090 | 6.750 | 2.407 | 1280 x 800 |
 | CPU | partial | 0.177 | 0.287 | 0.437 | 0.192 | 180 x 180 |
 
-A full frame is **3.5x cheaper under Metal** (0.642 vs 2.257 ms p50). A partial frame is **4.7x
-cheaper** (0.038 vs 0.177), and the partial row really does paint only the 180 x 180 swatch. Both
-paths are timer-capped at about 60 fps on this workload, so the win is headroom, not frame rate.
-Use these for the shape; re-run on physical Apple silicon before quoting a hardware number.
+A full frame is **3.5x cheaper under Metal on this paravirtual device** (0.642 vs 2.257 ms p50),
+and the partial row really does paint only the 180 x 180 swatch. That is the VM's shape only: the
+physical section above shows page 54 reversing (Metal 1.6x slower) while page 11 keeps a large
+Metal win. Use the physical numbers for any decision; this table is here because a VM with a
+paravirtual GPU is what `macvm` provides for CI.
 
 #### Correctness: Metal vs CPU, all 54 pages
 
@@ -4171,17 +4221,25 @@ on 53 pages, and the one difference is page 49's animated GIF phase - the same t
 Windows comparison recorded.
 
 Measured cost on the `XPlatUI.Minimal` fixture (osx-arm64, NativeAOT, the app-bundle binary because
-the full publish can fail in `dsymutil` on this VM, a pre-existing failure on `master`):
+the full publish can fail in `dsymutil` on some macOS hosts, a pre-existing failure on `master`).
+`master` and this branch were built back to back on the same machine with the same toolchain
+(Mac mini M4, SDK 10.0.401) and the same command:
+
+```
+dotnet build XPlatUI.Minimal/XPlatUI.Minimal.csproj -c Release -r osx-arm64 \
+  -p:PublishAot=true -p:TrimmerSingleWarn=false
+```
 
 | Measurement | Bytes |
 | --- | ---: |
-| `XPlatUI.Minimal` floor before this change | 4,080,304 |
-| After the Metal seam, the tier fallback and the `GraphicsPath` diagnostics | 4,080,656 |
-| Delta | +352 (+0.009 %) |
+| `XPlatUI.Minimal` floor before this change | 4,080,400 |
+| After the Metal seam, the tier fallback, the opt-in gate and the `GraphicsPath` diagnostics | 4,080,720 |
+| Delta | +320 (+0.008 %) |
 
 The Metal half is a small managed type set over bindings the AppKit backend already references; it
-ships no native library. The build with `-p:TrimmerSingleWarn=false` reports **0 IL2xxx/IL3xxx
-warnings**, so nothing here is kept by a trimmer workaround.
+ships no native library. Both builds report **0 IL2xxx/IL3xxx warnings** with
+`-p:TrimmerSingleWarn=false` (the 20 warnings each are NU1903 advisories on the ILCompiler package,
+identical before and after), so nothing here is kept by a trimmer workaround.
 
 ## Writing a backend
 

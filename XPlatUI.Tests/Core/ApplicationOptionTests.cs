@@ -21,6 +21,38 @@ public sealed class ApplicationOptionTests
     }
 
     [TestMethod]
+    public void TheAccelerationOptionIsUnassignedByDefault()
+    {
+        // The AppKit backend uses this to keep Metal strictly opt-in on macOS: the default true
+        // must not look like a request for the accelerated path.
+        var options = new XPlatApplicationOptions([]);
+
+        Assert.IsFalse(options.GfxHardwareAccelerationAssigned);
+        Assert.IsTrue(options.GfxHardwareAcceleration);
+    }
+
+    [TestMethod]
+    public void TheAccelerationOptionIsAssignedEvenWhenSetToFalse()
+    {
+        var options = new XPlatApplicationOptions
+        {
+            GfxHardwareAcceleration = false,
+        };
+
+        Assert.IsTrue(options.GfxHardwareAccelerationAssigned);
+        Assert.IsFalse(options.GfxHardwareAcceleration);
+    }
+
+    [TestMethod]
+    public void TheCommandLineSwitchDoesNotCountAsAnAssignment()
+    {
+        var options = new XPlatApplicationOptions(["--no-hardware-acceleration"]);
+
+        Assert.IsFalse(options.GfxHardwareAccelerationAssigned);
+        Assert.IsFalse(options.GfxHardwareAcceleration);
+    }
+
+    [TestMethod]
     public void TheConstructorReadsTheSuppliedCommandLine()
     {
         var options = new XPlatApplicationOptions(["--no-hardware-acceleration"]);

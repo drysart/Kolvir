@@ -56,6 +56,9 @@ public sealed class DemoUi
     private const int BenchmarkMeasuredFrames = 600;
     private const int RollingFrameWindow = 120;
     private XPlatTimer? _metricsTimer;
+    private XPlatTimer? _pageBenchmarkTimer;
+    private bool _pageBenchmarkHandlerAdded;
+    private XPlatUiHost? _pageBenchmarkHost;
     private XPlatControl? _metricsPage;
     private XPlatUiHost? _metricsHost;
     private XPlatLabel? _metricsReadout;
@@ -71,6 +74,7 @@ public sealed class DemoUi
     private readonly List<double> _measureSamples = [];
     private readonly Queue<(double Milliseconds, long Timestamp)> _rollingFrames = new();
     private long _rollingUpdatedAt;
+    private long _lastRecordedFrame = -1;
     private XPlatLabel? _gfxLabel;
     private string? _graphicsPath;
     private string? _graphicsRenderer;
@@ -3062,6 +3066,15 @@ public sealed class DemoUi
 
     private void OnMetricsFramePainted(XPlatUiHost host)
     {
+        // A page benchmark can add its own handler while the measured-rendering page's handler is
+        // still registered; both fire for the same frame, so count each frame once.
+        if (host.FrameCount == _lastRecordedFrame)
+        {
+            return;
+        }
+
+        _lastRecordedFrame = host.FrameCount;
+
         double milliseconds = host.LastFrameTime.TotalMilliseconds;
         long timestamp = Stopwatch.GetTimestamp();
 
@@ -3140,6 +3153,7 @@ public sealed class DemoUi
     private void FinishMeasurement(XPlatUiHost host)
     {
         _measuring = false;
+        _pageBenchmarkTimer?.Stop();
 
         var values = _measureSamples.OrderBy(value => value).ToArray();
         double mean = values.Average();
@@ -5821,12 +5835,81 @@ public sealed class DemoUi
     /// </param>
     public void StartBenchmark(bool partialDamage = false)
     {
-        if (partialDamage && _metricsFullDamage)
+        if (_metricsPage is { IsDisplayed: true })
         {
-            ToggleDamage();
+            if (partialDamage && _metricsFullDamage)
+            {
+                ToggleDamage();
+            }
+
+            StartMeasurement();
+            return;
         }
 
-        StartMeasurement();
+        StartPageBenchmark();
+    }
+
+    /// <summary>
+    /// The same 630-frame measurement on whatever page is showing, for pages whose content is
+    /// heavier than the measured-rendering page's own swatch. The page is invalidated in full on
+    /// every tick, and the frame time is still <see cref="XPlatUiHost.LastFrameTime"/>.
+    /// </summary>
+    private void StartPageBenchmark()
+    {
+        if (_measuring)
+        {
+            return;
+        }
+
+        var host = Root.Host ?? _metricsHost;
+        if (host is null)
+        {
+            // Not attached yet; the Shown handler that calls this runs before the first layout on
+            // some backends, so say so rather than silently measuring nothing.
+            Console.Error.WriteLine("BENCH skipped: the window is not attached to a host yet");
+            return;
+        }
+
+        _measuring = true;
+        _metricsFullDamage = true;
+        _measureFrame = 0;
+        _measureFirst = 0;
+        _measureLast = 0;
+        _measureLastArea = SKRectI.Empty;
+        _measureSamples.Clear();
+        _pageBenchmarkHost = host;
+
+        if (!_pageBenchmarkHandlerAdded)
+        {
+            host.AddFramePaintedHandler(_ => OnMetricsFramePainted(host));
+            _pageBenchmarkHandlerAdded = true;
+        }
+
+        if (_pageBenchmarkTimer is null)
+        {
+            _pageBenchmarkTimer = new XPlatTimer(TimeSpan.FromMilliseconds(15.0));
+            _pageBenchmarkTimer.AddTickHandler(_ => OnPageBenchmarkTick());
+        }
+
+        _pageBenchmarkTimer.Start();
+
+        if (_metricsReadout is not null)
+        {
+            _metricsReadout.Text = $"measuring {BenchmarkMeasuredFrames} frames after {BenchmarkWarmupFrames} warm-up...";
+        }
+
+        SetStatus("Benchmark running - the page is invalidated in full on every tick.");
+    }
+
+    private void OnPageBenchmarkTick()
+    {
+        if (!_measuring)
+        {
+            _pageBenchmarkTimer?.Stop();
+            return;
+        }
+
+        (_pageBenchmarkHost ?? Root.Host)?.Invalidate();
     }
 
     public void SetStatus(string message) => _statusLabel.Text = message;

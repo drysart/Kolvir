@@ -100,6 +100,11 @@ internal static class Program
             ForcedDarkMode = ForcedDarkMode(args),
             MenuPresentation = MenuPresentationArgument(args),
 
+            // The demo opts into accelerated presentation explicitly, which is what makes it the
+            // showcase on macOS (where the AppKit backend otherwise stays on the CPU path) and
+            // keeps the Windows default. --no-hardware-acceleration is the off switch.
+            GfxHardwareAcceleration = Array.IndexOf(args, "--no-hardware-acceleration") < 0,
+
             // The application-wide icon: the Dock tile on macOS, the taskbar and Alt-Tab on Windows,
             // and the default icon name for every GTK window. Windows also shows it in the title bar
             // because XPlatWindow inherits this when it is created.

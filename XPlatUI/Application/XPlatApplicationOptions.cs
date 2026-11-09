@@ -115,11 +115,19 @@ public sealed class XPlatApplicationOptions
         CommandLine ?? Environment.GetCommandLineArgs()[1..];
 
     /// <summary>
-    /// Windows only: true to let the Win32 backend draw with an OpenGL (WGL) surface when the
-    /// machine has a working OpenGL implementation. True by default, and false when
-    /// <see cref="ResolveCommandLine"/> carries <c>--no-hardware-acceleration</c>.
+    /// True to let a backend draw with an accelerated surface when the machine has a working GPU
+    /// implementation. True by default, and false when <see cref="ResolveCommandLine"/> carries
+    /// <c>--no-hardware-acceleration</c>.
     /// </summary>
     /// <remarks>
+    /// <para>
+    /// On Windows this is a plain opt-out: true (the default) lets the Win32 backend try WGL, and a
+    /// failure falls back to the DIB. On macOS the AppKit backend requires an explicit assignment
+    /// (see <see cref="GfxHardwareAccelerationAssigned"/>): the physical-Mac measurements are
+    /// content-dependent - Metal is much faster on image-heavy pages and slower on light
+    /// text-heavy ones - so the default is the CPU path and an application opts into Metal by
+    /// assigning this property. The demo does so explicitly.
+    /// </para>
     /// <para>
     /// The constructor reads the command line once, from <see cref="CommandLine"/> when that is
     /// assigned or from the process's own arguments otherwise. Because
@@ -133,9 +141,9 @@ public sealed class XPlatApplicationOptions
     /// <para>
     /// An explicit assignment always wins, so setting this to true after a
     /// <c>--no-hardware-acceleration</c> launch keeps acceleration on. The setting is a decision the
-    /// window makes when it allocates its drawing surface: the fallback to the DIB path is silent
-    /// and the window never fails because acceleration was requested but unavailable. Every other
-    /// backend, and every popup, menu and headless surface, ignores it.
+    /// window makes when it allocates its drawing surface: the fallback to the CPU path is silent
+    /// and the window never fails because acceleration was requested but unavailable. Popups,
+    /// menus and headless surfaces ignore it.
     /// </para>
     /// </remarks>
     public bool GfxHardwareAcceleration
@@ -147,6 +155,13 @@ public sealed class XPlatApplicationOptions
             _gfxHardwareAccelerationAssigned = true;
         }
     }
+
+    /// <summary>
+    /// True when the application assigned <see cref="GfxHardwareAcceleration"/> rather than leaving
+    /// the constructor's default. The AppKit backend requires this on macOS, because Metal is
+    /// strictly opt-in there; the Win32 backend does not need it.
+    /// </summary>
+    public bool GfxHardwareAccelerationAssigned => _gfxHardwareAccelerationAssigned;
 
     private static bool HasNoHardwareAccelerationSwitch(IReadOnlyList<string> arguments)
     {
