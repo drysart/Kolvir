@@ -1294,6 +1294,12 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
                     || _gl.NeedsFullRepaint
                     || _paintedGeneration != _bufferGeneration;
 
+                if (Win32GlTrace.IsEnabled)
+                {
+                    Win32GlTrace.Write(
+                        $"paint damaged={damaged} stale={stalePixels} retained={_gl.HasRetainedBuffer}");
+                }
+
                 if (!damaged && !stalePixels)
                 {
                     // Nothing was invalidated and Windows is not asking for pixels: do not submit a
@@ -1303,26 +1309,16 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
                 SKRectI glArea = SKRectI.Empty;
 
-                if (damaged)
+                if (damaged || !_gl.HasRetainedBuffer)
                 {
-                    glArea = Render();
+                    // The direct tier has no retained contents of its own, so every paint it serves
+                    // is a full frame. The retained tier paints only the damage.
+                    glArea = Render(full: !_gl.HasRetainedBuffer);
 
                     if (_gl is null)
                     {
                         // The context was lost while rendering; the frame is now in the CPU buffer,
                         // so copy it out instead of leaving this paint empty until the next one.
-                        Blit(hdc, glArea);
-                        return;
-                    }
-                }
-                else if (!_gl.HasRetainedBuffer)
-                {
-                    // Direct-to-FBO-0 has no retained contents of its own, so a stale paint still
-                    // has to rebuild the frame before swapping.
-                    glArea = Render(full: true);
-
-                    if (_gl is null)
-                    {
                         Blit(hdc, glArea);
                         return;
                     }
@@ -1470,6 +1466,11 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         }
 
         var area = PaintHost(surface, full);
+
+        if (Win32GlTrace.IsEnabled)
+        {
+            Win32GlTrace.Write($"render full={full} area={area.Width}x{area.Height} scale={_scale}");
+        }
 
         // GL submit and swap happen in OnPaint, after the host has finished the frame.
         return area;

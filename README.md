@@ -4044,13 +4044,13 @@ Measured cost on the `XPlatUI.Minimal` floor (Windows x64, NativeAOT, Skia loose
 | Measurement | Bytes |
 | --- | ---: |
 | `XPlatUI.Minimal` floor before this change | 3,283,456 |
-| After the Win32 GL seam, the flavour probe, damage-aware present and the `GfxHardwareAcceleration` option | 3,332,096 |
-| Delta | +48,640 (+1.48 %) |
+| After the Win32 GL seam, the flavour probe, damage-aware present and the `GfxHardwareAcceleration` option | 3,334,656 |
+| Delta | +51,200 (+1.56 %) |
 
 The WGL/P-invoke half is a handful of functions and one internal type set; it is not a package and
 adds no native asset. `opengl32.dll` is an operating-system component and the shipped
 `libSkiaSharp.dll` already contains the GL backend, so nothing new is shipped. The retained
-offscreen surface and its snapshot/`DrawImage` present add about 3 KB, because those Skia APIs were
+offscreen surface and its snapshot/`DrawImage` present add about 5 KB, because those Skia APIs were
 already retained by the drawing set. The opt-in trace writes its UTF-8 bytes straight to the
 standard error handle instead of `Console.Error`, because routing it through `Console.Error` alone
 cost about 75 KB in a trimmed native image.

@@ -28,6 +28,9 @@ internal static class Win32GlTrace
 
     private static readonly bool Enabled = ResolveEnabled();
 
+    /// <summary>Lets a hot path skip formatting a message nobody will read.</summary>
+    internal static bool IsEnabled => Enabled;
+
     internal static unsafe void Write(string message)
     {
         if (!Enabled)
