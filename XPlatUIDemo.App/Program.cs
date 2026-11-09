@@ -245,9 +245,27 @@ internal static class Program
             }
         });
 #else
-        // GTK4 has no accelerated present path in this change; the footer still names the path so a
-        // screenshot from any platform says what produced its numbers.
-        demo.SetGraphicsInfo("cpu (platform backend)", null);
+        // The GTK4 backend makes the same decision the other two do: GL when the option is on and
+        // every step of the seam came up, otherwise the CPU texture with the reason. Unlike Win32
+        // and AppKit it cannot make that decision while showing the window - a GL context only
+        // exists once the area has been allocated and drawn - so the line is printed when the
+        // decision is made, which is the first render pass.
+        window.AddShownHandler(_ =>
+        {
+            if (window.Backend is Gtk4WindowBackend gtk4)
+            {
+                void Report()
+                {
+                    demo.SetGraphicsInfo(gtk4.GraphicsPath, gtk4.GraphicsRenderer);
+                    Console.WriteLine(
+                        gtk4.GraphicsRenderer is { } renderer
+                            ? $"gfx: {gtk4.GraphicsPath}; renderer: {renderer}"
+                            : $"gfx: {gtk4.GraphicsPath}");
+                }
+
+                gtk4.AddGraphicsPathChangedHandler(_ => Report());
+            }
+        });
 #endif
 
         window.Show();
