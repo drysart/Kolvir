@@ -3960,8 +3960,10 @@ same core code with a different byte stream and would not test anything WebP-spe
 ## Hardware acceleration (Windows)
 
 `XPlatApplicationOptions.GfxHardwareAcceleration` is a `bool`: **true by default on Windows and
-Linux, false on macOS** (the macOS default is explained in
-[Hardware acceleration (macOS)](#hardware-acceleration-macos)). When it is true the Win32 backend
+Linux, false on macOS**. The macOS default is explained in
+[Hardware acceleration (macOS)](#hardware-acceleration-macos) and the Linux one, which is also
+`true`, in [Hardware acceleration (Linux)](#hardware-acceleration-linux); neither is a carried-over
+value. When it is true the Win32 backend
 tries to build a WGL-backed Skia surface: a context on the window's own device
 context, `GRGlInterface.Create()` plus `Validate()`, `GRContext.CreateGl()`, a
 `GRBackendRenderTarget` for the default framebuffer, and an `SKSurface`. Only when every one of
@@ -4256,6 +4258,13 @@ the same `--no-hardware-acceleration` switch. It defaults to **true on Linux**, 
 Windows, and the GTK4 backend honours it exactly as the other two do: an application that assigns
 it false, or launches with the switch, gets the CPU texture path and nothing else changes.
 
+That default is a decision taken for this platform, not a value left where it was. The reasoning,
+the measurement it rests on and what is still unmeasured are in
+[the default paragraph](#measured-on-llvmpipe-software-gl) below; the short version is that GTK4
+already composites through GL, the CPU path pays a full-surface upload every frame that this one
+does not, the measured end-to-end result is ahead on both test pages, and every failure returns to
+the CPU path with a named reason.
+
 When it is enabled the GTK4 backend tries to build a Skia context on the `Gdk.GLContext` that a
 `Gtk.GLArea` hands it, and presents the control tree through that area instead of through the
 `Gdk.MemoryTexture` the CPU path uses. Every step is checked and any failure is silent: the window
@@ -4329,14 +4338,22 @@ failure to stderr.
 The measured-rendering page (index 54) works exactly as it does on Windows and macOS, and
 `--page N --benchmark` starts the same measurement on any page:
 
-1. Run the demo. The footer says `gfx: gl` and the renderer string, or `gfx: cpu (...)` with the
+1. Make sure no other instance is running first: the demo is `SingleInstance = true`, so a launch
+   can be handed to a window that is already up instead of starting a new one - the status line then
+   reads "A second launch was handed to this window" and the `BENCH` line you get back describes the
+   *other* window's geometry, or none arrives at all. `pgrep -af XPlatUIDemoApp` before each run.
+2. Run the demo. The footer says `gfx: gl` and the renderer string, or `gfx: cpu (...)` with the
    step that failed; rerun with `XPLATUI_GL_TRACE=1` to capture every step.
-2. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
+3. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
    **Measure 600 frames**. The first 30 frames are discarded.
-3. Press again with the other damage mode.
-4. Quit, rerun with `--no-hardware-acceleration`, and repeat. That is the CPU half of the A/B.
+4. Press again with the other damage mode.
+5. Quit, rerun with `--no-hardware-acceleration`, and repeat. That is the CPU half of the A/B.
 
-The `BENCH` line has the same shape as the other two platforms.
+The `BENCH` line has the same shape as the other two platforms. On software GL, **`fps` is the
+number to trust and `p50` is not**: `LastFrameTime` stops before the window system composites the
+frame, and on llvmpipe the rasterisation a GPU would do on the way to the screen happens largely
+during presentation, outside the measurement. Compare the two paths by achieved frame rate, and read
+the paint column as what it is labelled - paint time, present excluded.
 
 #### Measured on llvmpipe (software GL)
 
@@ -4347,30 +4364,74 @@ Mesa 25.2.8 on **llvmpipe (LLVM 20.1.2, 256 bits)**, X11, 1280 x 760 logical cli
 the change and nothing about hardware performance.** Every number comes from a software rasteriser
 that both paths are paying for.
 
-| Mode | Damage | p50 | p95 | max | mean | Painted area |
-| --- | --- | ---: | ---: | ---: | ---: | --- |
-| GL (page 54, light) | full | 0.953 | 1.673 | 6.259 | 1.117 | 1280 x 760 |
-| GL (page 54, light) | partial | 0.084 | 0.133 | 0.218 | 0.090 | 180 x 180 |
-| CPU (page 54, light) | full | 4.549 | 5.888 | 7.191 | 4.674 | 1280 x 760 |
-| CPU (page 54, light) | partial | 4.609 | 6.159 | 7.425 | 4.757 | 1280 x 760 |
-| GL (page 11, heavy) | full | 0.437 | 0.819 | 1.130 | 0.504 | 1280 x 760 |
-| CPU (page 11, heavy) | full | 97.258 | 102.824 | 107.628 | 97.321 | 1280 x 760 |
+| Mode | Damage | p50 | p95 | max | mean | fps | Painted area |
+| --- | --- | ---: | ---: | ---: | ---: | ---: | --- |
+| GL (page 54, light) | full | 0.889 | 1.399 | 5.200 | 0.954 | 25.5 | 1280 x 760 |
+| GL (page 54, light) | partial | 0.066 | 0.114 | 0.284 | 0.074 | 28.6 | 180 x 180 |
+| CPU (page 54, light) | full | 4.142 | 5.066 | 8.259 | 4.165 | 21.1 | 1280 x 760 |
+| CPU (page 54, light) | partial | 4.112 | 4.886 | 7.421 | 4.126 | 21.5 | 1280 x 760 |
+| GL (page 11, heavy) | full | 0.387 | 0.712 | 1.032 | 0.423 | 24.5 | 1280 x 760 |
+| CPU (page 11, heavy) | full | 88.933 | 92.146 | 105.381 | 89.295 | 7.5 | 1280 x 760 |
 
-Page 54's full frame is **4.8x cheaper** through the seam (0.953 vs 4.549 ms p50) and the partial
-row really does paint only the 180 x 180 swatch. Page 11 is the extreme of a software stack: the CPU
-rasteriser cannot scale that page's images at 2560 x 1520 in a frame budget at all (97 ms), while
-the GL path keeps it at 0.437 ms. The CPU partial row on page 54 reports the whole frame because the
-GTK4 CPU path has always rasterized every frame into a reused buffer and cannot present part of it -
-that is the pre-existing behaviour, not something this change altered.
+**End to end, page 54 gets about a quarter more frames on llvmpipe: 25.5 fps on the seam against
+21.1 fps on the CPU path** (a second run of the same rows on the same host gave 21.8 against 17.5,
+so the ratio holds at roughly 1.2-1.25x while the absolute cadence moves by 15 % between runs). Both
+paths are capped by software compositing of a 2560 x 1520 area, which is why the frame rate is the
+honest measure and the paint column is not.
 
-`fps` is dominated by GTK's compositing and presentation of a 2560 x 1520 area on llvmpipe (about
-20-25 fps for both paths), which is why it does not follow the paint times.
+The paint column is paint time only. Page 54's p50 ratio is 4.7x (0.889 against 4.142 ms), and that
+figure says precisely one thing: Skia's work on this page is 4.7x cheaper when it runs in the GL
+context than when it rasterises into a bitmap. It does not say the window is 4.7x faster, because
+the ~40 ms of compositing that follows `LastFrameTime` is common to both paths, and on llvmpipe a
+good part of the GL path's rasterisation is inside that common term. Quoting the ratio as a
+performance win would be wrong, and this is the only place it appears.
 
-None of this settles the default. On hardware the seam should be at least as fast as the CPU path -
-GTK4 already composites through GL, so the CPU path pays a full-surface upload every frame while
-this path pays a blit - but that has not been measured, and the only evidence here is a software
-stack that flatters the GPU path and punishes the CPU one. **The Linux default therefore stays at
-`true`, as it was on `master`**, with the reasoning above stated rather than assumed.
+What the 1.2-1.25x does buy comes from a copy the CPU path pays and this one does not: the CPU path
+rasterises into a reused BGRA bitmap and then uploads the whole 2560 x 1520 surface to a fresh
+`Gdk.MemoryTexture` every frame (see the GTK4 platform section - that copy is deliberate and worth
+about 1.3 ms of that path's frame), while the GL path blits a retained surface that never leaves
+video memory. So the fraction of the frame budget that is convertible is real but partial, and it
+grows as the paint cost grows.
+
+Page 11 is the one page where the paint column does translate, because there the CPU cost is
+rasterisation that cannot be deferred: 88.9 ms of it, giving 7.5 fps against 24.5 fps on the seam.
+Page 54's partial row is the other extreme: 0.066 ms of paint under 28.6 fps, which is to say paint
+has stopped mattering and the frame rate is set entirely by presentation. The CPU partial row on
+page 54 reports the whole frame because the GTK4 CPU path has always rasterized every frame into a
+reused buffer and cannot present part of it - that is the pre-existing behaviour, not something this
+change altered.
+
+**The Linux default stays at `true`, and that is a decision made here rather than a value inherited
+from `master`.** Nothing measured above proves it on hardware - there is no GPU in the machine.
+What the evidence does establish, and what the decision rests on:
+
+- GTK4 already composites these windows through GL. The option does not add a GL stack that would
+  otherwise be absent; it only decides whether Skia paints into the one GTK is using anyway.
+- Both measured comparisons come out ahead, never behind: about 1.2-1.25x the frame rate on the page
+  where the CPU path is cheap, and 3.3x on the page where it is not.
+- The CPU path pays a full-surface `Gdk.MemoryTexture` upload every frame that this path does not
+  pay at all. That asymmetry is structural rather than a property of llvmpipe.
+- Every failure is contained and named. Any step of the seam failing drops to the exact CPU path
+  that shipped before this change, with a `gfx: cpu (...)` reason, and `--no-hardware-acceleration`
+  forces it. A wrong call here costs performance, not correctness - which is verified byte-identical
+  below.
+
+Still unmeasured, and worth a real GPU before anyone calls the default proven:
+
+- **Any hardware Linux GPU.** All numbers here are llvmpipe. On a real driver the compositing term
+  that caps both paths gets much smaller, so the absolute headroom shrinks; whether the *ratio*
+  moves with it is unknown and could go either way.
+- **A multisampled framebuffer.** The VM reports 0 samples, so the seam builds a 0-sample
+  `GRBackendRenderTarget`. It does read `GL_SAMPLES` and clamp it to `GetMaxSurfaceSampleCount`, so a
+  driver that reports 4 takes a path that is written and traced but has never run.
+- **Whether a hardware driver returns the GLES interface here.** The spike found GDK handing out an
+  **EGL** `GLES` context, not GLX, which is why the interface is assembled with `CreateGles` over
+  `eglGetProcAddress` instead of `GRGlInterface.Create()`. That is the shape of this stack, not a
+  compatibility shim, but it has only been seen on Mesa in a VM.
+- **Wayland.** The VM is X11 `:10`. The seam queries the framebuffer and viewport from the current
+  context and makes no X11 assumption, but it has not been run on a Wayland session.
+- **A different window manager or compositor**, and a display at a scale other than 2.00. Runtime
+  scale change could not be exercised here; see [Lifecycle](#lifecycle).
 
 #### Correctness: GL vs CPU, the demo pages
 
@@ -4412,6 +4473,19 @@ The GL half is managed code plus two P/Invoke declarations (`eglGetProcAddress` 
 ships no native library, and `libSkiaSharp.so` already contains the GL backend. The delta is larger
 than the other two backends' because the managed SkiaSharp GPU surface API is new to this assembly.
 Both builds report **0 IL2xxx/IL3xxx warnings** with `-p:TrimmerSingleWarn=false`.
+
+#### Lifecycle
+
+Exercised in the VM, each with a screenshot to confirm the frame survived: window resize, minimise
+and restore, occluded-then-uncovered, and close-then-reopen. The CPU path was captured on `master`
+and on this branch for the last of those and compares byte-identical, so a reopened window starts on
+the same code it always did.
+
+Not exercised: a **runtime scale-factor change** (the VM's GTK reports 2.00 and offers no way to
+change it under X11), a **Wayland session**, and **suspend/resume of the GL context**. What covers
+them in the code: the retained buffer is sized in device pixels and `EnsureSize` forces a full
+repaint when that size changes, whichever of resize or scale produced it, and a lost context drops
+to the CPU picture with `cpu (gl context lost)` rather than painting into nothing.
 
 ## Writing a backend
 
