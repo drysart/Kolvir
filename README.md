@@ -3969,7 +3969,7 @@ the existing DIB + `BitBlt` path.
 ```csharp
 var options = new XPlatApplicationOptions
 {
-    // Windows only. True by default; this is the shape to use when the launcher owns the
+    // Windows and macOS. True by default; this is the shape to use when the launcher owns the
     // command line and wants the switch honoured explicitly.
     GfxHardwareAcceleration = !args.Contains("--no-hardware-acceleration"),
 };
@@ -3986,8 +3986,9 @@ cannot see an assignment that has not happened yet. An explicit assignment to
 The rules the implementation follows:
 
 - **WGL only when the option is true.** `Win32PopupWindow` and `Win32MenuWindow` stay on the DIB
-  path, and the GTK4, AppKit and headless backends do not have this seam. `--render` is headless
-  and cannot reach it.
+  path, and the GTK4 and headless backends do not have this seam. AppKit has its own Metal seam,
+  described in [Hardware acceleration (macOS)](#hardware-acceleration-macos). `--render` is
+  headless and cannot reach either one.
 - **Every step is checked.** Context creation, the GL interface and its `Validate()`, the Skia
   context, `GRBackendRenderTarget.IsValid` and `SKSurface.Create()` each can fail. A machine with
   no OpenGL ICD - a Hyper-V VM, an RDP session with no vendor driver - renders exactly as it did
@@ -4054,6 +4055,133 @@ offscreen surface and its snapshot/`DrawImage` present add about 5 KB, because t
 already retained by the drawing set. The opt-in trace writes its UTF-8 bytes straight to the
 standard error handle instead of `Console.Error`, because routing it through `Console.Error` alone
 cost about 75 KB in a trimmed native image.
+
+## Hardware acceleration (macOS)
+
+`XPlatApplicationOptions.GfxHardwareAcceleration` is the same `bool`, true by default, and
+`--no-hardware-acceleration` is the same switch. When it is true the AppKit backend tries to build a
+Metal-backed Skia context on the window's own `NSView`: `MTLDevice.SystemDefault`, one
+`MTLCommandQueue`, a `CAMetalLayer` sublayer with `PixelFormat = Bgra8Unorm`,
+`FramebufferOnly = false` and a `DrawableSize` of bounds x backing scale, then
+`GRContext.CreateMetal(GRMtlBackendContext)`. Only when every one of those succeeds does the window
+present from the layer's drawable; any failure silently falls back to the existing
+`CGImage`-through-the-layer path.
+
+No new native library ships. The macOS `libSkiaSharp.dylib` already contains the Metal backend and
+the AppKit half is managed code over the Metal and CoreAnimation bindings, so this seam adds no
+package reference and no native asset - unlike the Windows work, there is not even a P/Invoke
+surface.
+
+The rules the implementation follows:
+
+- **Metal only when the option is true.** Popups and menus stay on the CPU path, and GTK4 and the
+  headless `--render` path have no such seam.
+- **Every step is checked.** The device, the command queue, the layer, the Skia context and the
+  first offscreen surface each can fail. Each failure names the step and leaves the window on the
+  CPU path with no Metal state behind, for example `cpu (no metal device)`,
+  `cpu (no command queue)`, `cpu (no gr context)` or `cpu (no metal surface: 2560 x 1600)`.
+- **The frame lives in a retained offscreen buffer.** The host's `SKRegion` decides what changed and
+  only that region is painted into a persistent Metal-backed surface at device-pixel size. Present
+  is one Skia `Snapshot()` + `DrawImage` onto the drawable's surface, then `PresentDrawable` +
+  `Commit`. No shader and no second texture of our own.
+- **The direct tier is full-frame only.** A drawable's contents are undefined after present, so the
+  tier that paints straight into a fresh drawable always paints the whole frame. It is chosen for
+  the rest of the window's life if the retained buffer could not be created or a snapshot/blit
+  failed.
+- **A missing drawable skips the frame.** `NextDrawable()` returns null when the compositor has no
+  surface ready; the frame is dropped without spinning or throwing, and the retained buffer keeps
+  the damage for the next one.
+- **Resize and scale changes recreate the drawable and the offscreen, then repaint in full.** The
+  drawable size is bounds x `BackingScaleFactor`, so a Retina window is 2x and the same
+  logical-vs-device trap the Windows work had applies here. `DidChangeBackingProperties` asks for a
+  frame; `EnsureSize` sees the new pixel size and the next paint is full.
+- **All Metal work is on the UI thread.** `UpdateLayer` creates the drawable, paints, flushes and
+  commits; nothing runs on a timer or a worker.
+- **Colour matches the CPU path.** The layer uses a device-RGB `CGColorSpace`, the same language the
+  CPU path's `CGColorSpace.CreateDeviceRGB` speaks; the page comparison below is what proves there
+  is no shift rather than an assumption.
+
+`AppKitWindowBackend.GraphicsPath` reports `metal` or `cpu (...)` with the reason, and
+`GraphicsRenderer` reports the Metal device name. Set `XPLATUI_METAL_TRACE=1` to print the device,
+queue, context, drawable sizes, per-frame damage state and every failure to stderr. The demo prints
+`gfx: metal; renderer: <device>` at startup and keeps the line in its footer.
+
+### Measuring the AppKit GPU path by hand
+
+The footer always names the live path. The last demo page, **Measured rendering** (index 54), works
+exactly as it does on Windows:
+
+1. Run the demo on the machine being measured. Check the footer says `gfx: metal` and the device is
+   the one you expect. On a fallback it says `gfx: cpu (...)` with the step that failed; rerun with
+   `XPLATUI_METAL_TRACE=1` to capture every step.
+2. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
+   **Measure 600 frames**. The first 30 frames are discarded.
+3. Press again with the other damage mode.
+4. Quit, rerun with `--no-hardware-acceleration`, and repeat. That is the CPU half of the A/B.
+
+`--page 54 --benchmark` starts the same measurement from the command line; `--partial-damage`
+selects the partial row, so all four rows can be captured without a pointer. The `BENCH` line has
+exactly the Windows shape:
+
+```
+BENCH mode="metal" renderer="Apple Paravirtual device" size=1280x800 scale=2.00 damage=full frames=600 warmup=30 p50=0.642 p95=0.861 max=5.317 mean=0.672 fps=59.8 area=1280x800
+```
+
+`p50`/`p95`/`max`/`mean` are `XPlatUiHost.LastFrameTime`, the host's paint. The offscreen snapshot,
+the drawable blit, `PresentDrawable` and `Commit` happen after that and are **not** in the number, so
+the Metal partial row is the paint of the 180 x 180 swatch plus an unmeasured full-buffer blit and a
+vsync'd present, not the whole frame. `fps` is the wall-clock cadence and does include the present.
+
+#### Measured on macvm (paravirtual GPU)
+
+Apple M4 (Virtual), macOS 27.2, `AppleParavirtGPUMetalIOGPUFamily`, 1280 x 800 logical client at
+2.00 scale (the VM's work area is 800 high), Debug build, 600 frames after 30 warm-up, measured
+2026-11-09. CPU rows are `--no-hardware-acceleration`. **These are paravirtual-GPU numbers: they
+show the shape of the change, not what physical Apple hardware does.** They were taken from a Debug
+build because a Release non-AOT app bundle is rejected by macOS code-signing validation on this VM
+(the same failure reproduces on unmodified `master`); the AOT executable is measured separately
+below.
+
+| Mode | Damage | p50 | p95 | max | mean | Painted area |
+| --- | --- | ---: | ---: | ---: | ---: | --- |
+| Metal | full | 0.642 | 0.861 | 5.317 | 0.672 | 1280 x 800 |
+| Metal | partial | 0.038 | 0.072 | 0.131 | 0.043 | 180 x 180 |
+| CPU | full | 2.257 | 3.090 | 6.750 | 2.407 | 1280 x 800 |
+| CPU | partial | 0.177 | 0.287 | 0.437 | 0.192 | 180 x 180 |
+
+A full frame is **3.5x cheaper under Metal** (0.642 vs 2.257 ms p50). A partial frame is **4.7x
+cheaper** (0.038 vs 0.177), and the partial row really does paint only the 180 x 180 swatch. Both
+paths are timer-capped at about 60 fps on this workload, so the win is headroom, not frame rate.
+Use these for the shape; re-run on physical Apple silicon before quoting a hardware number.
+
+#### Correctness: Metal vs CPU, all 54 pages
+
+The same `DemoUi` page tree was painted twice at 2560 x 1640 device pixels, once into a raster
+`SKSurface` and once into a Skia surface on `GRContext.CreateMetal` over the same device and queue,
+then read back and compared channel by channel. 34 of the 54 pages differ by at most 30/255 with
+**zero pixels above 32/255**. The worst non-animation page is the SVG icon gallery at **74/255**,
+where 398 of 4,198,400 pixels (0.0095 %) differ by more than 32 - all of them antialiasing edges on
+the vector icons. The two live-animation pages (49 and 52) differ at up to 201/255 in 131 pixels
+because two freshly built instances are at different animation frames; that is timing, not the
+rasteriser. Nothing is structurally different, and flat fills and text stay within the same 10-11/255
+rounding the Windows work measured.
+
+The CPU path itself is unchanged: headless `--render` of all 54 pages is byte-identical to `master`
+on 53 pages, and the one difference is page 49's animated GIF phase - the same timing difference the
+Windows comparison recorded.
+
+Measured cost on the `XPlatUI.Minimal` fixture (osx-arm64, NativeAOT, the app-bundle binary because
+the full publish can fail in `dsymutil` on this VM, a pre-existing failure on `master`):
+
+| Measurement | Bytes |
+| --- | ---: |
+| `XPlatUI.Minimal` floor before this change | 4,080,304 |
+| After the Metal seam, the tier fallback and the `GraphicsPath` diagnostics | 4,080,656 |
+| Delta | +352 (+0.009 %) |
+
+The Metal half is a small managed type set over bindings the AppKit backend already references; it
+ships no native library. The build with `-p:TrimmerSingleWarn=false` reports **0 IL2xxx/IL3xxx
+warnings**, so nothing here is kept by a trimmer workaround.
 
 ## Writing a backend
 

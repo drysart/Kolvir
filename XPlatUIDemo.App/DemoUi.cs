@@ -5815,7 +5815,19 @@ public sealed class DemoUi
     /// <c>--benchmark</c> calls, so a script can capture the BENCH line without a pointer; the
     /// button on the page is the same entry point.
     /// </summary>
-    public void StartBenchmark() => StartMeasurement();
+    /// <param name="partialDamage">
+    /// True to measure the partial-damage row. The <c>--partial-damage</c> switch passes this so a
+    /// script can capture all four rows without a pointer, exactly as the on-page toggle does.
+    /// </param>
+    public void StartBenchmark(bool partialDamage = false)
+    {
+        if (partialDamage && _metricsFullDamage)
+        {
+            ToggleDamage();
+        }
+
+        StartMeasurement();
+    }
 
     public void SetStatus(string message) => _statusLabel.Text = message;
 
