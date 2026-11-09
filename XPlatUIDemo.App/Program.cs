@@ -169,6 +169,13 @@ internal static class Program
 
         demo.SelectPage(PageArgument(args));
 
+        if (Array.IndexOf(args, "--benchmark") >= 0)
+        {
+            // The same entry point as the Measure button, so a script can capture the BENCH line
+            // without a pointer. It no-ops unless the measured-rendering page is the one showing.
+            window.AddShownHandler(_ => demo.StartBenchmark());
+        }
+
         // Opens the menus page's context menu as if the box had been right-clicked, which is what a
         // screenshot or a script needs in order to see a menu without hunting for the box. A popup
         // needs a host, and a page has none until the window is up, so this waits for that moment -
@@ -191,6 +198,33 @@ internal static class Program
         {
             window.AddShownHandler(_ => demo.FocusUndoDemo());
         }
+
+        // The measured-rendering page reports the live scale alongside the client size; the window
+        // is the only place that knows it.
+        demo.SetScaleProvider(() => window.ScaleFactor);
+
+#if WINDOWS
+        // One line that says which presentation path the window took. The backend creates its
+        // surface when the window is really shown - Show() before Run() only queues it - so this
+        // hangs off Shown rather than following the call. On a machine with no OpenGL ICD it also
+        // says why the fallback happened, which is the only way to tell "acceleration worked" from
+        // "acceleration quietly did not" when watching a real desktop.
+        window.AddShownHandler(_ =>
+        {
+            if (window.Backend is Win32WindowBackend win32)
+            {
+                demo.SetGraphicsInfo(win32.GraphicsPath, win32.GraphicsRenderer);
+                Console.WriteLine(
+                    win32.GraphicsRenderer is { } renderer
+                        ? $"gfx: {win32.GraphicsPath}; renderer: {renderer}"
+                        : $"gfx: {win32.GraphicsPath}");
+            }
+        });
+#else
+        // GTK4 and AppKit have no accelerated present path in this change; the footer still names
+        // the path so a screenshot from any platform says what produced its numbers.
+        demo.SetGraphicsInfo("cpu (platform backend)", null);
+#endif
 
         window.Show();
 
@@ -347,6 +381,10 @@ internal static class Program
         Console.WriteLine(
             $"Font: {XPlatTheme.FontFamily ?? XPlatTheme.DefaultFont.FamilyName}; " +
             $"appearance: {(XPlatTheme.IsDarkMode ? "dark" : "light")}");
+
+        // The render path never touches a window or a GL context; saying so makes that a claim a
+        // script can check rather than one the reader has to infer.
+        Console.WriteLine("gfx: cpu (headless render)");
         return 0;
     }
 

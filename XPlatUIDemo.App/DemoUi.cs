@@ -1,4 +1,5 @@
 using System.Diagnostics;
+using System.Globalization;
 using SkiaSharp;
 using XPlatUI;
 using XPlatUI.Animations;
@@ -47,6 +48,33 @@ public sealed class DemoUi
     private XPlatControl? _menuDemoTarget;
     private XPlatTextBox? _undoFocusTarget;
     private int _clicks;
+
+    // The measured-rendering page. The timer exists only while the page is displayed, and the
+    // benchmark drives the same timer and the same invalidation as the rolling readout, so CPU and
+    // GL runs are comparable rather than merely similar.
+    private const int BenchmarkWarmupFrames = 30;
+    private const int BenchmarkMeasuredFrames = 600;
+    private const int RollingFrameWindow = 120;
+    private XPlatTimer? _metricsTimer;
+    private XPlatControl? _metricsPage;
+    private XPlatUiHost? _metricsHost;
+    private XPlatLabel? _metricsReadout;
+    private XPlatPanel? _metricsSwatch;
+    private XPlatButton? _measureButton;
+    private XPlatButton? _damageButton;
+    private bool _metricsFullDamage = true;
+    private bool _measuring;
+    private int _measureFrame;
+    private long _measureFirst;
+    private long _measureLast;
+    private SKRectI _measureLastArea;
+    private readonly List<double> _measureSamples = [];
+    private readonly Queue<(double Milliseconds, long Timestamp)> _rollingFrames = new();
+    private long _rollingUpdatedAt;
+    private XPlatLabel? _gfxLabel;
+    private string? _graphicsPath;
+    private string? _graphicsRenderer;
+    private Func<float>? _scaleProvider;
 
     // The inherited-appearance page. The fonts are the page's for the life of the window: controls
     // never dispose a font they were handed, and the theme keeps the face it is given.
@@ -396,7 +424,25 @@ public sealed class DemoUi
             SetStatus(_primaryButton.Enabled ? "Primary action enabled." : "Primary action disabled.");
         });
 
+        // Always visible, not a transient status: a screenshot of this window has to say which
+        // presentation path produced whatever number the page is showing. The renderer string is
+        // filled in from Shown, when the backend has actually created its surface.
+        _gfxLabel = new XPlatLabel("gfx: -")
+        {
+            Dock = XDock.Right,
+            AutoSize = true,
+            // Hidden until a backend reports its path. The headless render harness never calls
+            // SetGraphicsInfo, so a --render image stays byte-identical to the one before this
+            // label existed - an invisible docked child takes no space.
+            Visible = false,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.MiddleRight,
+            Margin = new XPlatThickness(8f, 0f, 0f, 0f),
+        };
+
         footer.Controls.Add(_statusLabel);
+        footer.Controls.Add(_gfxLabel);
         footer.Controls.Add(resetButton);
         footer.Controls.Add(toggleButton);
         return footer;
@@ -462,6 +508,7 @@ public sealed class DemoUi
         ("GIF out of view", demo => Page(demo.BuildGifScrollDemo())),
         ("Animated WebP", demo => Page(demo.BuildAnimatedWebpDemo())),
         ("WebP frames", demo => Page(demo.BuildWebpFrameDemo())),
+        ("Measured rendering", demo => Page(demo.BuildMetricsPage())),
     };
 
     /// <summary>
@@ -2838,6 +2885,318 @@ public sealed class DemoUi
         }
 
         return count;
+    }
+
+    /// <summary>
+    /// The measured-rendering page: the live presentation path, a rolling frame-time readout and a
+    /// fixed benchmark, all driven by one 15 ms timer that runs only while the page is displayed.
+    /// </summary>
+    /// <remarks>
+    /// The benchmark invalidates the window (or a small swatch, in partial mode) for the same
+    /// number of frames under either backend, so a CPU run and a GL run are comparable. The frame
+    /// time is <see cref="XPlatUiHost.LastFrameTime"/>, which is the host's paint only; a GL run's
+    /// <c>SwapBuffers</c> happens after that and is not in the number, which the README states.
+    /// </remarks>
+    private XPlatPanel BuildMetricsPage()
+    {
+        var card = Card();
+        _metricsPage = card;
+
+        _metricsReadout = new XPlatLabel("frame: waiting for the first paint")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 22f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.MiddleLeft,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+
+        _measureButton = new XPlatButton($"Measure {BenchmarkMeasuredFrames} frames")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        _measureButton.AddClickHandler(_ => StartMeasurement());
+
+        _damageButton = new XPlatButton("Damage: full")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        _damageButton.AddClickHandler(_ => ToggleDamage());
+
+        var buttons = Row(32f);
+        buttons.Controls.Add(_measureButton);
+        buttons.Controls.Add(_damageButton);
+
+        // The partial-damage target is deliberately separate from the readout: repainting this
+        // swatch every frame costs about nothing, and it is the area the partial numbers describe.
+        _metricsSwatch = new XPlatPanel
+        {
+            Dock = XDock.Left,
+            Width = 180f,
+            Height = 180f,
+            BackColor = new SKColor(0x2F, 0x6F, 0x8F),
+            CornerRadius = 8f,
+        };
+
+        var swatchRow = Row(180f);
+        swatchRow.Controls.Add(_metricsSwatch);
+
+        var caveat = new XPlatLabel(
+            "One 15 ms timer (about 66 Hz) drives both the rolling readout and the benchmark; it runs only while this page is " +
+            "displayed. The damage toggle changes what is repainted: partial damage repaints only the swatch. Under GL the " +
+            "damaged region goes into a retained buffer and is presented with one full-buffer blit, so a GL partial frame " +
+            "reports the swatch area while the blit is outside the frame number (the BENCH line is paint only). The readout's " +
+            "own label repaints about four times a second and is part of the frame it reports.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            WrapText = true,
+            Height = 84f,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            TextAlign = XPlatContentAlignment.TopLeft,
+            Margin = new XPlatThickness(0f, 12f, 0f, 0f),
+        };
+
+        card.Controls.Add(_metricsReadout);
+        card.Controls.Add(buttons);
+        card.Controls.Add(swatchRow);
+        card.Controls.Add(caveat);
+
+        // 15 ms is below the Windows 15.625 ms system-timer period, so the backend really uses its
+        // high-resolution timer: the loop runs at about 66 Hz and 630 frames take about ten
+        // seconds. A 16.67 ms interval would be rounded up to 31.25 ms on this backend.
+        _metricsTimer = new XPlatTimer(TimeSpan.FromMilliseconds(15.0));
+        _metricsTimer.AddTickHandler(_ => OnMetricsTick());
+
+        // The marquee rule: the timer exists only while this page is on screen. Leaving the page
+        // stops it, and returning starts it and paints once immediately.
+        card.AddDisplayedChangedHandler(_ =>
+        {
+            if (card.IsDisplayed)
+            {
+                _metricsTimer.Start();
+                OnMetricsTick();
+            }
+            else
+            {
+                _metricsTimer.Stop();
+            }
+        });
+
+        OnHostAvailable(card, host =>
+        {
+            _metricsHost = host;
+            host.AddFramePaintedHandler(_ => OnMetricsFramePainted(host));
+        });
+
+        return card;
+    }
+
+    private void OnMetricsTick()
+    {
+        if (_metricsHost is null || _metricsPage is not { IsDisplayed: true })
+        {
+            return;
+        }
+
+        if (_metricsFullDamage)
+        {
+            _metricsHost.Invalidate();
+        }
+        else
+        {
+            _metricsSwatch?.Invalidate();
+        }
+    }
+
+    private void StartMeasurement()
+    {
+        if (_measuring || _metricsPage is not { IsDisplayed: true })
+        {
+            return;
+        }
+
+        _measuring = true;
+        _measureFrame = 0;
+        _measureFirst = 0;
+        _measureLast = 0;
+        _measureLastArea = SKRectI.Empty;
+        _measureSamples.Clear();
+
+        if (_measureButton is not null)
+        {
+            _measureButton.Enabled = false;
+            _measureButton.Text = "Measuring...";
+        }
+
+        if (_metricsReadout is not null)
+        {
+            _metricsReadout.Text = $"measuring {BenchmarkMeasuredFrames} frames after {BenchmarkWarmupFrames} warm-up...";
+        }
+
+        SetStatus("Benchmark running - the page is invalidated on every tick; nothing else changes.");
+    }
+
+    private void ToggleDamage()
+    {
+        _metricsFullDamage = !_metricsFullDamage;
+
+        if (_damageButton is not null)
+        {
+            _damageButton.Text = _metricsFullDamage ? "Damage: full" : "Damage: partial";
+        }
+
+        SetStatus(_metricsFullDamage
+            ? "Full damage: every tick invalidates the whole window."
+            : "Partial damage: every tick invalidates only the 180 x 180 swatch.");
+    }
+
+    private void OnMetricsFramePainted(XPlatUiHost host)
+    {
+        double milliseconds = host.LastFrameTime.TotalMilliseconds;
+        long timestamp = Stopwatch.GetTimestamp();
+
+        _rollingFrames.Enqueue((milliseconds, timestamp));
+        while (_rollingFrames.Count > RollingFrameWindow)
+        {
+            _rollingFrames.Dequeue();
+        }
+
+        if (_measuring)
+        {
+            _measureFrame++;
+
+            // The glyph atlas and shader programs are uploaded lazily on the first frames, so the
+            // warm-up is discarded rather than averaged into a number it would poison.
+            if (_measureFrame > BenchmarkWarmupFrames)
+            {
+                if (_measureSamples.Count == 0)
+                {
+                    _measureFirst = timestamp;
+                }
+
+                _measureSamples.Add(milliseconds);
+                _measureLast = timestamp;
+                _measureLastArea = host.LastFrameArea;
+
+                if (_measureSamples.Count >= BenchmarkMeasuredFrames)
+                {
+                    FinishMeasurement(host);
+                }
+            }
+
+            return;
+        }
+
+        long now = Environment.TickCount64;
+        if (now - _rollingUpdatedAt < 250)
+        {
+            return;
+        }
+
+        _rollingUpdatedAt = now;
+        UpdateMetricsReadout(host);
+    }
+
+    private void UpdateMetricsReadout(XPlatUiHost host)
+    {
+        if (_metricsReadout is null || _rollingFrames.Count == 0)
+        {
+            return;
+        }
+
+        var frames = _rollingFrames.ToArray();
+        var values = frames.Select(frame => frame.Milliseconds).OrderBy(value => value).ToArray();
+        double mean = values.Average();
+        double p95 = Percentile(values, 0.95);
+        double worst = values[^1];
+        double last = frames[^1].Milliseconds;
+
+        double seconds = frames.Length > 1
+            ? Stopwatch.GetElapsedTime(frames[0].Timestamp, frames[^1].Timestamp).TotalSeconds
+            : 0;
+        double framesPerSecond = seconds > 0 ? (frames.Length - 1) / seconds : 0;
+
+        double scale = _scaleProvider?.Invoke() ?? 1f;
+        var client = host.ClientSize;
+        var area = host.LastFrameArea;
+
+        _metricsReadout.Text =
+            $"last {last:0.0} | mean {mean:0.0} | p95 {p95:0.0} | worst {worst:0.0} ms | " +
+            $"{framesPerSecond:0} fps | area {area.Width} x {area.Height} px | " +
+            $"client {client.Width:0} x {client.Height:0} @ {scale:0.00}x | " +
+            $"damage {(_metricsFullDamage ? "full" : "partial")}";
+    }
+
+    private void FinishMeasurement(XPlatUiHost host)
+    {
+        _measuring = false;
+
+        var values = _measureSamples.OrderBy(value => value).ToArray();
+        double mean = values.Average();
+        double p50 = Percentile(values, 0.50);
+        double p95 = Percentile(values, 0.95);
+        double max = values[^1];
+
+        double seconds = _measureLast > _measureFirst
+            ? Stopwatch.GetElapsedTime(_measureFirst, _measureLast).TotalSeconds
+            : 0;
+        double framesPerSecond = seconds > 0 ? values.Length / seconds : 0;
+
+        double scale = _scaleProvider?.Invoke() ?? 1f;
+        var client = host.ClientSize;
+        string mode = _graphicsPath ?? "cpu (unknown)";
+        string renderer = _graphicsRenderer ?? "none";
+        string damage = _metricsFullDamage ? "full" : "partial";
+
+        // One machine-readable line per run. Numbers use the invariant culture so a comma decimal
+        // separator on the desktop that produced them cannot change what a script reads.
+        string line = string.Create(
+            CultureInfo.InvariantCulture,
+            $"BENCH mode=\"{mode}\" renderer=\"{renderer}\" size={client.Width:0}x{client.Height:0} " +
+            $"scale={scale:0.00} damage={damage} frames={values.Length} warmup={BenchmarkWarmupFrames} " +
+            $"p50={p50:0.000} p95={p95:0.000} max={max:0.000} mean={mean:0.000} fps={framesPerSecond:0.0} " +
+            $"area={_measureLastArea.Width}x{_measureLastArea.Height}");
+
+        Console.Error.WriteLine(line);
+
+        if (_metricsReadout is not null)
+        {
+            _metricsReadout.Text =
+                $"benchmark {damage}: p50 {p50:0.0} | p95 {p95:0.0} | max {max:0.0} | mean {mean:0.0} ms | " +
+                $"{framesPerSecond:0.0} fps | area {_measureLastArea.Width} x {_measureLastArea.Height} px | " +
+                $"client {client.Width:0} x {client.Height:0} @ {scale:0.00}x";
+        }
+
+        if (_measureButton is not null)
+        {
+            _measureButton.Enabled = true;
+            _measureButton.Text = $"Measure {BenchmarkMeasuredFrames} frames";
+        }
+
+        SetStatus(
+            $"Benchmark {damage}: p50 {p50:0.0} ms, p95 {p95:0.0} ms, max {max:0.0} ms, " +
+            $"{framesPerSecond:0.0} fps. The BENCH line is on stderr.");
+    }
+
+    private static double Percentile(double[] sorted, double percentile)
+    {
+        if (sorted.Length == 0)
+        {
+            return 0;
+        }
+
+        int rank = (int)Math.Ceiling(percentile * sorted.Length) - 1;
+        return sorted[Math.Clamp(rank, 0, sorted.Length - 1)];
     }
 
     /// <summary>
@@ -5418,6 +5777,46 @@ public sealed class DemoUi
     /// Public so a host can report something the sample UI did not cause itself, such as a second
     /// launch being handed to the running window.
     /// </remarks>
+    /// <summary>
+    /// Publishes the live presentation path for the footer and the measured-rendering page. The
+    /// backend only knows it once the window really exists, so the harness calls this from
+    /// <see cref="XPlatWindow.AddShownHandler"/> rather than before <c>Show</c>.
+    /// </summary>
+    /// <param name="path"><c>gl</c> or <c>cpu (...)</c>, from the Win32 backend.</param>
+    /// <param name="renderer">The vendor and renderer string, or null on the CPU path.</param>
+    public void SetGraphicsInfo(string path, string? renderer)
+    {
+        _graphicsPath = path;
+        _graphicsRenderer = renderer;
+
+        if (_gfxLabel is not null)
+        {
+            _gfxLabel.Text = string.IsNullOrWhiteSpace(renderer)
+                ? $"gfx: {path}"
+                : $"gfx: {path} - {renderer}";
+            _gfxLabel.Visible = true;
+
+            // Toggling visibility does not re-run layout - the control explains why in
+            // XPlatControl.OnChildVisibleChanged - so the footer has to be laid out explicitly or
+            // the newly visible label keeps the zero-width slot it had while hidden.
+            _gfxLabel.Parent?.PerformLayout();
+        }
+    }
+
+    /// <summary>The live scale factor, for the page's readout; the harness supplies it from the window.</summary>
+    public void SetScaleProvider(Func<float> scale)
+    {
+        ArgumentNullException.ThrowIfNull(scale);
+        _scaleProvider = scale;
+    }
+
+    /// <summary>
+    /// Starts the measured-rendering page's benchmark once that page is displayed. This is what
+    /// <c>--benchmark</c> calls, so a script can capture the BENCH line without a pointer; the
+    /// button on the page is the same entry point.
+    /// </summary>
+    public void StartBenchmark() => StartMeasurement();
+
     public void SetStatus(string message) => _statusLabel.Text = message;
 
     /// <summary>

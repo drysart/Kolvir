@@ -8,6 +8,31 @@ namespace XPlatUI;
 /// </summary>
 public sealed class XPlatApplicationOptions
 {
+    private bool _gfxHardwareAcceleration = true;
+    private bool _gfxHardwareAccelerationAssigned;
+    private IReadOnlyList<string>? _commandLine;
+
+    /// <summary>Creates options with defaults taken from this process's own command line.</summary>
+    public XPlatApplicationOptions()
+        : this(null)
+    {
+    }
+
+    /// <summary>
+    /// Creates options with defaults taken from <paramref name="commandLine"/> - the form to use
+    /// when a launcher supplies the arguments itself rather than letting the process's own command
+    /// line decide.
+    /// </summary>
+    /// <param name="commandLine">
+    /// The arguments the application was started with, without the executable path, or null to read
+    /// <see cref="Environment.GetCommandLineArgs"/>.
+    /// </param>
+    public XPlatApplicationOptions(IReadOnlyList<string>? commandLine)
+    {
+        CommandLine = commandLine;
+        _gfxHardwareAcceleration = !HasNoHardwareAccelerationSwitch(ResolveCommandLine());
+    }
+
     /// <summary>
     /// The application's name: the macOS menu bar's first entry, the taskbar entry, the about box.
     /// Null leaves it to the backend, which usually takes it from the executable.
@@ -54,11 +79,32 @@ public sealed class XPlatApplicationOptions
     /// second launch's are delivered in <see cref="XPlatSecondInstanceEventArgs.Arguments"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Null reads <see cref="Environment.GetCommandLineArgs"/>. A launcher that adds switches of its
     /// own, such as <c>--render</c> in the test harness, should pass only the arguments the
     /// application understands.
+    /// </para>
+    /// <para>
+    /// Assigning this property after construction re-evaluates the command-line default of
+    /// <see cref="GfxHardwareAcceleration"/> until that property has been assigned explicitly. A
+    /// launcher that assigns this property after the options exist is still advised to assign
+    /// <see cref="GfxHardwareAcceleration"/> in the same place: the application may already have
+    /// read the options, and an explicit assignment always wins over the switch.
+    /// </para>
     /// </remarks>
-    public IReadOnlyList<string>? CommandLine { get; set; }
+    public IReadOnlyList<string>? CommandLine
+    {
+        get => _commandLine;
+        set
+        {
+            _commandLine = value;
+
+            if (!_gfxHardwareAccelerationAssigned)
+            {
+                _gfxHardwareAcceleration = !HasNoHardwareAccelerationSwitch(ResolveCommandLine());
+            }
+        }
+    }
 
     /// <summary>
     /// The arguments a forwarded launch carries: <see cref="CommandLine"/>, or this process's own
@@ -67,6 +113,53 @@ public sealed class XPlatApplicationOptions
     /// <returns>The arguments, never null.</returns>
     public IReadOnlyList<string> ResolveCommandLine() =>
         CommandLine ?? Environment.GetCommandLineArgs()[1..];
+
+    /// <summary>
+    /// Windows only: true to let the Win32 backend draw with an OpenGL (WGL) surface when the
+    /// machine has a working OpenGL implementation. True by default, and false when
+    /// <see cref="ResolveCommandLine"/> carries <c>--no-hardware-acceleration</c>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The constructor reads the command line once, from <see cref="CommandLine"/> when that is
+    /// assigned or from the process's own arguments otherwise. Because
+    /// <see cref="CommandLine"/> is settable after construction, a launcher that assigns it later
+    /// cannot retroactively change a value the application has already read; assigning it
+    /// re-evaluates the default only until this property itself is assigned. Assign both properties
+    /// together when the launcher owns the command line - <c>{ CommandLine = args,
+    /// GfxHardwareAcceleration = !args.Contains("--no-hardware-acceleration") }</c> - rather than
+    /// relying on the order.
+    /// </para>
+    /// <para>
+    /// An explicit assignment always wins, so setting this to true after a
+    /// <c>--no-hardware-acceleration</c> launch keeps acceleration on. The setting is a decision the
+    /// window makes when it allocates its drawing surface: the fallback to the DIB path is silent
+    /// and the window never fails because acceleration was requested but unavailable. Every other
+    /// backend, and every popup, menu and headless surface, ignores it.
+    /// </para>
+    /// </remarks>
+    public bool GfxHardwareAcceleration
+    {
+        get => _gfxHardwareAcceleration;
+        set
+        {
+            _gfxHardwareAcceleration = value;
+            _gfxHardwareAccelerationAssigned = true;
+        }
+    }
+
+    private static bool HasNoHardwareAccelerationSwitch(IReadOnlyList<string> arguments)
+    {
+        for (int i = 0; i < arguments.Count; i++)
+        {
+            if (string.Equals(arguments[i], "--no-hardware-acceleration", StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>
     /// True to follow the desktop's light/dark preference for the lifetime of the application.

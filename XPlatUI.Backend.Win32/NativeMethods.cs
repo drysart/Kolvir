@@ -126,6 +126,16 @@ internal static class NativeMethods
     internal const uint DibRgbColors = 0;
     internal const uint BiRgb = 0;
 
+    // OpenGL (WGL). The pixel-format flags are the minimum a double-buffered window context needs;
+    // the sample and stencil counts are queried back rather than assumed.
+    internal const uint PfdDoubleBuffer = 0x00000001;
+    internal const uint PfdDrawToWindow = 0x00000004;
+    internal const uint PfdSupportOpenGl = 0x00000020;
+    internal const byte PfdTypeRgba = 0;
+    internal const uint GlSamples = 0x80A9;
+    internal const uint GlVendor = 0x1F00;
+    internal const uint GlRenderer = 0x1F01;
+
     // Mouse.
     internal const uint TmeLeave = 0x00000002;
     internal const int SmCxDoubleClk = 36;
@@ -222,6 +232,10 @@ internal static class NativeMethods
 
     [UnmanagedFunctionPointer(CallingConvention.Winapi)]
     internal delegate bool MonitorEnumProc(IntPtr hMonitor, IntPtr hdc, ref RECT lprcMonitor, IntPtr dwData);
+
+    /// <summary><c>wglSwapIntervalEXT</c>, resolved through <c>wglGetProcAddress</c>.</summary>
+    [UnmanagedFunctionPointer(CallingConvention.Winapi)]
+    internal delegate int WglSwapIntervalProc(int interval);
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct POINT
@@ -432,6 +446,41 @@ internal static class NativeMethods
         public byte BlendFlags;
         public byte SourceConstantAlpha;
         public byte AlphaFormat;
+    }
+
+    /// <summary>
+    /// <c>PIXELFORMATDESCRIPTOR</c>. The layout is fixed by Windows, so the byte fields stay
+    /// separate rather than being folded into a larger integer.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct PIXELFORMATDESCRIPTOR
+    {
+        public ushort nSize;
+        public ushort nVersion;
+        public uint dwFlags;
+        public byte iPixelType;
+        public byte cColorBits;
+        public byte cRedBits;
+        public byte cRedShift;
+        public byte cGreenBits;
+        public byte cGreenShift;
+        public byte cBlueBits;
+        public byte cBlueShift;
+        public byte cAlphaBits;
+        public byte cAlphaShift;
+        public byte cAccumBits;
+        public byte cAccumRedBits;
+        public byte cAccumGreenBits;
+        public byte cAccumBlueBits;
+        public byte cAccumAlphaBits;
+        public byte cDepthBits;
+        public byte cStencilBits;
+        public byte cAuxBuffers;
+        public byte iLayerType;
+        public byte bReserved;
+        public uint dwLayerMask;
+        public uint dwVisibleMask;
+        public uint dwDamageMask;
     }
 
     // user32 - window management.
@@ -685,6 +734,51 @@ internal static class NativeMethods
     [DllImport("gdi32.dll")]
     internal static extern bool BitBlt(IntPtr hdc, int x, int y, int cx, int cy, IntPtr hdcSrc, int x1, int y1, uint rop);
 
+    // gdi32 - the app-facing pixel-format calls. These route through the display driver to the
+    // registered ICD, which is what a vendor driver expects. They are tried first on a throwaway
+    // window; the opengl32 wgl* pair below is the fallback for a stack that stands in for the whole
+    // implementation (Mesa).
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern int ChoosePixelFormat(IntPtr hdc, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern bool SetPixelFormat(IntPtr hdc, int format, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    [DllImport("gdi32.dll", SetLastError = true)]
+    internal static extern int DescribePixelFormat(IntPtr hdc, int format, uint nBytes, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    // opengl32 - the ICD-facing pixel-format calls, the context and the core GL queries needed to
+    // describe the framebuffer. Never assumed to be the only face: the flavour probe decides.
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern int wglChoosePixelFormat(IntPtr hdc, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern bool wglSetPixelFormat(IntPtr hdc, int format, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern int wglDescribePixelFormat(IntPtr hdc, int format, uint nBytes, ref PIXELFORMATDESCRIPTOR ppfd);
+
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern bool wglSwapBuffers(IntPtr hdc);
+
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern IntPtr wglCreateContext(IntPtr hdc);
+
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern bool wglDeleteContext(IntPtr hglrc);
+
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern bool wglMakeCurrent(IntPtr hdc, IntPtr hglrc);
+
+    [DllImport("opengl32.dll", SetLastError = true)]
+    internal static extern IntPtr wglGetProcAddress(string lpszProc);
+
+    [DllImport("opengl32.dll")]
+    internal static extern void glGetIntegerv(uint pname, out int data);
+
+    [DllImport("opengl32.dll")]
+    internal static extern IntPtr glGetString(uint name);
+
     // The BLENDFUNCTION used to describe a premultiplied surface to the compositor.
     internal const byte AcSrcOver = 0;
     internal const byte AcSrcAlpha = 1;
@@ -709,8 +803,25 @@ internal static class NativeMethods
         uint dwFlags);
 
     // kernel32.
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetLastError();
+
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
     internal static extern IntPtr GetModuleHandleW(string? lpModuleName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, ExactSpelling = true)]
+    internal static extern unsafe uint GetEnvironmentVariableW(string lpName, char* lpBuffer, uint nSize);
+
+    [DllImport("kernel32.dll")]
+    internal static extern IntPtr GetStdHandle(int nStdHandle);
+
+    [DllImport("kernel32.dll", SetLastError = true)]
+    internal static extern unsafe bool WriteFile(
+        IntPtr hFile,
+        byte* lpBuffer,
+        uint nNumberOfBytesToWrite,
+        out uint lpNumberOfBytesWritten,
+        IntPtr lpOverlapped);
 
     [DllImport("kernel32.dll")]
     internal static extern bool AttachConsole(uint dwProcessId);
