@@ -4,52 +4,52 @@ namespace XPlatUI.Tests;
 
 /// <summary>
 /// The application options' defaults and the command-line contract. The hardware-acceleration
-/// option is read by the Win32 backend at window creation, so what it resolves to - and the order
-/// in which <see cref="XPlatApplicationOptions.CommandLine"/> and the option itself are assigned -
-/// decides whether a window ever asks for a GL surface.
+/// option is read by the Win32 and AppKit backends at window creation, so what the constructor
+/// resolves it to - the platform default or the switch - decides whether a window ever asks for a
+/// GL or Metal surface.
 /// </summary>
 [TestClass]
 [TestCategory("Core")]
 public sealed class ApplicationOptionTests
 {
     [TestMethod]
-    public void HardwareAccelerationDefaultsToTrue()
+    public void HardwareAccelerationDefaultsPerPlatform()
     {
+        // Windows and Linux default to acceleration; macOS defaults to the CPU path because the
+        // measured Metal path is slower on light text-heavy content. Written with the same
+        // predicate the constructor uses, so the assertion is meaningful on all three CI legs.
         var options = new XPlatApplicationOptions([]);
 
-        Assert.IsTrue(options.GfxHardwareAcceleration);
+        Assert.AreEqual(!OperatingSystem.IsMacOS(), options.GfxHardwareAcceleration);
     }
 
     [TestMethod]
-    public void TheAccelerationOptionIsUnassignedByDefault()
+    public void MacOsDefaultsHardwareAccelerationOff()
     {
-        // The AppKit backend uses this to keep Metal strictly opt-in on macOS: the default true
-        // must not look like a request for the accelerated path.
-        var options = new XPlatApplicationOptions([]);
-
-        Assert.IsFalse(options.GfxHardwareAccelerationAssigned);
-        Assert.IsTrue(options.GfxHardwareAcceleration);
-    }
-
-    [TestMethod]
-    public void TheAccelerationOptionIsAssignedEvenWhenSetToFalse()
-    {
-        var options = new XPlatApplicationOptions
+        if (!OperatingSystem.IsMacOS())
         {
-            GfxHardwareAcceleration = false,
-        };
+            Assert.Inconclusive("The macOS default is asserted by the macOS CI leg and the Mac test host.");
+        }
 
-        Assert.IsTrue(options.GfxHardwareAccelerationAssigned);
+        // This is the whole reason the platform default exists: Metal is 1.6x slower than the CPU
+        // path on light content, so an unopted-in macOS application must not get it.
+        var options = new XPlatApplicationOptions([]);
+
         Assert.IsFalse(options.GfxHardwareAcceleration);
     }
 
     [TestMethod]
-    public void TheCommandLineSwitchDoesNotCountAsAnAssignment()
+    public void TheSwitchTurnsAccelerationOffOnEveryPlatform()
     {
         var options = new XPlatApplicationOptions(["--no-hardware-acceleration"]);
 
-        Assert.IsFalse(options.GfxHardwareAccelerationAssigned);
         Assert.IsFalse(options.GfxHardwareAcceleration);
+
+        // Even where the default is already off, the switch must not turn it back on.
+        if (OperatingSystem.IsMacOS())
+        {
+            Assert.IsFalse(new XPlatApplicationOptions([]).GfxHardwareAcceleration);
+        }
     }
 
     [TestMethod]
@@ -61,14 +61,17 @@ public sealed class ApplicationOptionTests
     }
 
     [TestMethod]
-    public void CommandLineAssignedAfterConstructionAppliesTheSwitch()
+    public void CommandLineAssignedAfterConstructionDoesNotChangeTheDefault()
     {
+        // The constructor is where the platform default and the switch are decided. Setting
+        // CommandLine later must not reach back into GfxHardwareAcceleration: a launcher that owns
+        // its arguments uses the constructor overload or assigns the option itself.
         var options = new XPlatApplicationOptions
         {
             CommandLine = ["--no-hardware-acceleration"],
         };
 
-        Assert.IsFalse(options.GfxHardwareAcceleration);
+        Assert.AreEqual(!OperatingSystem.IsMacOS(), options.GfxHardwareAcceleration);
     }
 
     [TestMethod]
@@ -83,7 +86,7 @@ public sealed class ApplicationOptionTests
     }
 
     [TestMethod]
-    public void AnExplicitAssignmentAlsoWinsWhenItComesBeforeTheCommandLine()
+    public void AnExplicitAssignmentIsNotUndoneByALaterCommandLine()
     {
         var options = new XPlatApplicationOptions
         {
@@ -92,6 +95,16 @@ public sealed class ApplicationOptionTests
         };
 
         Assert.IsTrue(options.GfxHardwareAcceleration);
+
+        // And the other direction: an explicit false stays false even for a command line with no
+        // switch.
+        var disabled = new XPlatApplicationOptions
+        {
+            GfxHardwareAcceleration = false,
+            CommandLine = [],
+        };
+
+        Assert.IsFalse(disabled.GfxHardwareAcceleration);
     }
 
     [TestMethod]
@@ -104,7 +117,7 @@ public sealed class ApplicationOptionTests
         options.GfxHardwareAcceleration = true;
         options.CommandLine = ["--page", "3"];
 
-        Assert.IsTrue(options.GfxHardwareAcceleration, "an unrelated command line leaves the default alone");
+        Assert.IsTrue(options.GfxHardwareAcceleration, "an explicit assignment is not undone by a later CommandLine");
     }
 
     [TestMethod]

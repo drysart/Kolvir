@@ -100,9 +100,10 @@ internal static class Program
             ForcedDarkMode = ForcedDarkMode(args),
             MenuPresentation = MenuPresentationArgument(args),
 
-            // The demo opts into accelerated presentation explicitly, which is what makes it the
-            // showcase on macOS (where the AppKit backend otherwise stays on the CPU path) and
-            // keeps the Windows default. --no-hardware-acceleration is the off switch.
+            // Assign the switch explicitly so the demo is the showcase on every platform. Windows
+            // and Linux already default it on, but macOS defaults it off (Metal is slower on light
+            // content), so this is what turns the accelerated path on there.
+            // --no-hardware-acceleration is the off switch everywhere.
             GfxHardwareAcceleration = Array.IndexOf(args, "--no-hardware-acceleration") < 0,
 
             // The application-wide icon: the Dock tile on macOS, the taskbar and Alt-Tab on Windows,

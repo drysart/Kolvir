@@ -619,17 +619,12 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         window.ReleaseWhenClosed(false);
         window.Delegate = _delegate;
 
-        // The same application option the Win32 backend honours, but with a different default
-        // policy: on Apple silicon Metal wins big on image-heavy pages and loses on light
-        // text-heavy ones, so the AppKit backend uses it only when the application assigned the
-        // option. Leaving the constructor's true default selects the CPU path, which is the
-        // non-regressing choice. Resolved once, when the window is created.
-        var options = _application.Application?.Options;
-        var useHardwareAcceleration = options is
-        {
-            GfxHardwareAcceleration: true,
-            GfxHardwareAccelerationAssigned: true,
-        };
+        // The same application option the Win32 backend honours. Its platform default is off on
+        // macOS (Metal is slower on light text-heavy pages and much faster on image-heavy ones, so
+        // the application decides), and an explicit assignment or --no-hardware-acceleration is
+        // already applied there. Resolved once, when the window is created, because the
+        // presentation choice does not change while a window is open.
+        var useHardwareAcceleration = _application.Application?.Options.GfxHardwareAcceleration ?? false;
 
         var view = new AppKitSkiaView(_host, useHardwareAcceleration)
         {
