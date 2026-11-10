@@ -365,9 +365,16 @@ public class XPlatScrollBar : XPlatControl, IXPlatSelectionBarrier
 
     /// <summary>
     /// A wheel turn moves the bar as far as a few arrow presses would, so a bar can be scrolled
-    /// without focusing it first. The bar only claims the turn when the value actually moved,
-    /// which leaves a bar at either end free to pass it to the container around it.
+    /// without focusing it first.
     /// </summary>
+    /// <remarks>
+    /// A bar owns its own axis while the pointer is over it, so it claims the turn whether or not it
+    /// can move. A horizontal bar already at its end must not leave the turn for the panel that owns
+    /// it: the panel would answer a turn it cannot use on one axis by scrolling the other, so the
+    /// user's wheel would suddenly move the content vertically. Declining the turn only at an end
+    /// is therefore the bug, not the courtesy it reads as - the turn goes to the owner, not to some
+    /// enclosing panel.
+    /// </remarks>
     protected override void OnMouseWheel(XPlatMouseEventArgs e)
     {
         base.OnMouseWheel(e);
@@ -377,12 +384,10 @@ public class XPlatScrollBar : XPlatControl, IXPlatSelectionBarrier
             return;
         }
 
-        var before = _value;
-
         // A positive delta scrolls toward the start of the content, which is a smaller value.
         var steps = e.Delta / XPlatUiHost.WheelPixelsPerDetent * WheelLinesPerDetent;
         ScrollBy(-steps * _smallChange);
-        e.Handled = MathF.Abs(_value - before) > 0.001f;
+        e.Handled = true;
     }
 
     protected override void OnLostFocus()
