@@ -402,10 +402,12 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
     public void TheScrollBarOfAZoomedPanelIsNotZoomed()
     {
         var panel = ScrollingPanel(2f);
-        using var scene = HeadlessScene.Create(panel, 100f, 100f);
+        var root = OffOrigin(panel);
+        using var scene = HeadlessScene.Create(root, 200f, 200f);
 
-        var point = new SKPoint(BarX(panel), 95f);
-        var bar = panel.HitTest(point);
+        var panelPoint = new SKPoint(BarX(panel), 95f);
+        var point = BarPoint(panel, panelPoint.X, panelPoint.Y);
+        var bar = root.HitTest(point);
 
         Assert.IsInstanceOfType<XPlatScrollBar>(bar, "the point is on the vertical bar");
         Assert.AreEqual(
@@ -414,7 +416,7 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
             0.0001f,
             "the bar is panel-space chrome, so no multiplier applies to it");
         Assert.AreEqual(
-            new SKPoint(point.X - bar.Left, point.Y - bar.Top),
+            new SKPoint(panelPoint.X - bar.Left, panelPoint.Y - bar.Top),
             bar.HostToClient(point),
             "a host point reaches the bar as the panel-space point the bar laid itself out in");
         Assert.AreEqual(
@@ -492,9 +494,9 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
     private static float ScrollDeltaFromClick(float scaleFactor, SKPoint panelPoint)
     {
         var panel = ScrollingPanel(scaleFactor);
-        using var scene = HeadlessScene.Create(panel, 100f, 100f);
+        using var scene = HeadlessScene.Create(OffOrigin(panel), 200f, 200f);
 
-        var point = new SKPoint(BarX(panel) + panelPoint.X, panelPoint.Y);
+        var point = BarPoint(panel, BarX(panel) + panelPoint.X, panelPoint.Y);
         scene.Host.ProcessMouseMove(point);
         scene.Host.ProcessMouseDown(point, XPlatMouseButtons.Left, XPlatModifiers.None);
         scene.Host.ProcessMouseUp(point, XPlatMouseButtons.Left, XPlatModifiers.None);
@@ -509,11 +511,10 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
     private static float ScrollDeltaFromDrag(float scaleFactor)
     {
         var panel = ScrollingPanel(scaleFactor);
-        using var scene = HeadlessScene.Create(panel, 100f, 100f);
+        using var scene = HeadlessScene.Create(OffOrigin(panel), 200f, 200f);
 
-        var x = BarX(panel);
-        var start = new SKPoint(x, 28f);
-        var end = new SKPoint(x, 68f);
+        var start = BarPoint(panel, BarX(panel), 28f);
+        var end = BarPoint(panel, BarX(panel), 68f);
 
         scene.Host.ProcessMouseMove(start);
         scene.Host.ProcessMouseDown(start, XPlatMouseButtons.Left, XPlatModifiers.None);
@@ -522,6 +523,26 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
 
         return panel.VerticalOffset;
     }
+
+    /// <summary>
+    /// Wraps <paramref name="panel"/> in a container at a non-zero position. The bars are hit tested
+    /// in panel space, so a panel that sits at the window's origin would hide a mapping error that
+    /// divides the whole host coordinate before subtracting the ancestors - which is exactly the
+    /// bug the bar tests exist for. Every scene here gets the offset, so none of them can regress
+    /// into insensitivity.
+    /// </summary>
+    private static XPlatControl OffOrigin(XPlatPanel panel)
+    {
+        panel.Bounds = new SKRect(37f, 23f, 137f, 123f);
+
+        var root = Group();
+        root.Controls.Add(panel);
+        return root;
+    }
+
+    /// <summary>A point on a bar, given in the panel's own coordinates, in host coordinates.</summary>
+    private static SKPoint BarPoint(XPlatPanel panel, float x, float y) =>
+        panel.ClientToHost(new SKPoint(x, y));
 
     /// <summary>
     /// A panel with a vertical bar whose content is twice its viewport in <em>panel</em> space at

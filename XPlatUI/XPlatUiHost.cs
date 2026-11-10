@@ -1487,34 +1487,25 @@ public sealed class XPlatUiHost
         }
     }
 
-    private static SKPoint ToLocal(XPlatControl control, SKPoint point)
-    {
-        var local = point;
-        for (var current = control; current is not null; current = current.Parent)
-        {
-            if (current.Parent is { } parent)
-            {
-                // The inverse of ToHost: undo the zoom first, then the child's own position and
-                // the content offset that was added before it.
-                var multiplier = parent.GetChildScaleFactor(current);
-                if (multiplier != 1f)
-                {
-                    local = new SKPoint(local.X / multiplier, local.Y / multiplier);
-                }
-
-                var offset = parent.GetChildOffset(current);
-                local = new SKPoint(
-                    local.X - current.Left - offset.X,
-                    local.Y - current.Top - offset.Y);
-            }
-            else
-            {
-                local = new SKPoint(local.X - current.Left, local.Y - current.Top);
-            }
-        }
-
-        return local;
-    }
+    /// <summary>Maps a host point into a control's client coordinates.</summary>
+    /// <remarks>
+    /// <para>
+    /// This is the control's own public inverse, deliberately, rather than a second walk of the
+    /// parent chain here: the mapping has to undo a parent's zoom before the level above it, because
+    /// a parent's multiplier applies to its child's position and content offset as much as to the
+    /// child's own coordinates. A control-first loop that divides and then subtracts applies the
+    /// innermost inverse to the host point, so it divides every ancestor's position by the
+    /// multiplier as well - a click inside a zoomed panel that sits away from the origin then lands
+    /// tens of pixels away from the pointer.
+    /// </para>
+    /// <para>
+    /// With every multiplier at one the order is invisible (subtractions commute and the division is
+    /// a no-op), which is why the coordinate path only had to state the rule once zoom arrived.
+    /// Sharing <see cref="XPlatControl.HostToClient"/> means the input path and the public
+    /// control-to-host conversions cannot drift apart again.
+    /// </para>
+    /// </remarks>
+    private static SKPoint ToLocal(XPlatControl control, SKPoint point) => control.HostToClient(point);
 
     /// <summary>
     /// The subscription <see cref="AddInputSink"/> hands back. It is not an
