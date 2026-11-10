@@ -68,6 +68,10 @@ public sealed class DemoUi
     private XPlatTextBox? _dragLifetimeLog;
     private readonly List<int> _dragLifetimeSamples = [];
     private readonly List<(string Time, string Text)> _dragLifetimeEvents = [];
+#if WINDOWS
+    // The sampler that writes these is Win32-only while the page that reads them is shared, so the
+    // fields are conditional: without this guard a --no-incremental build on Linux and macOS sees
+    // reads with no writes and reports CS0649 for each of them, which looks like seven dead fields.
     private int _dragLifetimeMinimum;
     private bool _dragLifetimeFell;
     private int _dragLifetimeFallFrom;
@@ -75,6 +79,7 @@ public sealed class DemoUi
     private string? _dragLifetimeFallEvent;
     private IntPtr _dragLifetimePointer;
     private string? _dragLifetimeLastEvent;
+#endif
     private int _dragLifetimeDrops;
     private string? _dragLifetimeFirstPayload;
     private string? _dragLifetimeSecondPayload;
@@ -3478,10 +3483,17 @@ public sealed class DemoUi
     /// <summary>Appends the payload the drop zone just read to the sample line it belongs to.</summary>
     private void AppendDragLifetimePayload(string payload)
     {
-        if (_dragLifetimeEvents.Count == 0 || _dragLifetimeLastEvent is not ("DragEnter" or "Drop"))
+        if (_dragLifetimeEvents.Count == 0)
         {
             return;
         }
+
+#if WINDOWS
+        if (_dragLifetimeLastEvent is not ("DragEnter" or "Drop"))
+        {
+            return;
+        }
+#endif
 
         var last = _dragLifetimeEvents[^1];
         _dragLifetimeEvents[^1] = (last.Time, $"{last.Text}  {payload}");
@@ -3573,9 +3585,7 @@ public sealed class DemoUi
         sequenceLabel.Text = _dragLifetimeSamples.Count == 0
             ? "This drag: -"
             : $"This drag: {sequence}";
-        countsLabel.Text =
-            $"Minimum this drag: {(_dragLifetimeSamples.Count == 0 ? "-" : _dragLifetimeMinimum.ToString(CultureInfo.InvariantCulture))}" +
-            $"   Drops this session: {_dragLifetimeDrops}";
+        countsLabel.Text = DragLifetimeCountsText();
 
         if (_dragLifetimeSamples.Count == 0)
         {
@@ -3583,19 +3593,9 @@ public sealed class DemoUi
             verdict.ClearForeground();
             verdict.ForeColorRole = XPlatThemeColor.MutedForeground;
         }
-        else if (_dragLifetimeFell)
-        {
-            verdict.Text =
-                $"FAIL - the reference count fell from {_dragLifetimeFallFrom} to {_dragLifetimeFallTo} " +
-                $"at {_dragLifetimeFallEvent ?? "a drag event"}: {sequence}. The count must never fall " +
-                $"while the shell is still using the object, and it did.";
-            verdict.Foreground = new SKColor(0xFFD32F2F);
-        }
         else
         {
-            verdict.Text =
-                $"PASS - the count held at {_dragLifetimeSamples[0]} for the whole drag: {sequence}.";
-            verdict.Foreground = new SKColor(0xFF2E7D32);
+            ApplyDragLifetimeVerdict(verdict, sequence);
         }
 
         payloadLabel.Text =
@@ -3616,6 +3616,45 @@ public sealed class DemoUi
         log.Text = _dragLifetimeEvents.Count == 0
             ? "Drag something over the window: the last 12 samples appear here."
             : string.Join(Environment.NewLine, _dragLifetimeEvents.Select(entry => entry.Text));
+    }
+
+    /// <summary>Builds the counts line, whose minimum is the one number Win32 has to measure.</summary>
+    private string DragLifetimeCountsText()
+    {
+#if WINDOWS
+        return
+            $"Minimum this drag: {(_dragLifetimeSamples.Count == 0 ? "-" : _dragLifetimeMinimum.ToString(CultureInfo.InvariantCulture))}" +
+            $"   Drops this session: {_dragLifetimeDrops}";
+#else
+        return $"Minimum this drag: -   Drops this session: {_dragLifetimeDrops}";
+#endif
+    }
+
+    /// <summary>States the criterion against the samples the drag produced.</summary>
+    private void ApplyDragLifetimeVerdict(XPlatLabel verdict, string sequence)
+    {
+#if WINDOWS
+        if (_dragLifetimeFell)
+        {
+            verdict.Text =
+                $"FAIL - the reference count fell from {_dragLifetimeFallFrom} to {_dragLifetimeFallTo} " +
+                $"at {_dragLifetimeFallEvent ?? "a drag event"}: {sequence}. The count must never fall " +
+                $"while the shell is still using the object, and it did.";
+            verdict.Foreground = new SKColor(0xFFD32F2F);
+        }
+        else
+        {
+            verdict.Text =
+                $"PASS - the count held at {_dragLifetimeSamples[0]} for the whole drag: {sequence}.";
+            verdict.Foreground = new SKColor(0xFF2E7D32);
+        }
+#else
+        // No sample can arrive where the sampler does not exist, so the page never reaches a verdict
+        // here; this repeats the resting line rather than inventing a second one to read.
+        verdict.Text = "Waiting: the reference count must never fall during a drag.";
+        verdict.ClearForeground();
+        verdict.ForeColorRole = XPlatThemeColor.MutedForeground;
+#endif
     }
 
     private static string Timestamp() =>
