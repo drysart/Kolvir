@@ -54,7 +54,7 @@ list that Windows has to evaluate; and a portable `net10.0` build *on a Mac* def
 One TFM per OS is what keeps `Program.cs`'s `#if` blocks honest.
 See [On macOS (AppKit)](#on-macos-appkit).
 
-Building `WinFormsApp3.slnx` needs the macOS workload, because the solution lists
+Building `XPlatUI.slnx` needs the macOS workload, because the solution lists
 `XPlatUI.Backend.AppKit` and `XPlatUI.Feature.DragDrop`, which both target `net10.0-macos`.
 `dotnet workload install macos` satisfies it where it is not already present; a build without it
 stops with `NETSDK1147`. Nothing else in the solution needs a workload, and an application that
@@ -5010,7 +5010,7 @@ clipboard are all the real thing; only the contents of the window are drawn by t
 
 That target framework is why the macOS build has to happen on a Mac: it needs the macOS workload and
 the Xcode tools that bundle and sign the `.app`. `Program.cs` selects it with
-`$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `WinFormsApp3.slnx` on every platform
+`$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `XPlatUI.slnx` on every platform
 and simply resolves to a different target framework on each. Build it on a Mac, or let the
 `macOS build` GitHub Actions workflow do it - that workflow runs on pull requests against `master`
 and on demand (`workflow_dispatch`), not on every push, so a branch that is still being worked on

@@ -3,7 +3,7 @@
   <PropertyGroup>
     <!-- Unlike the AppKit backend, the GTK4 binding (GirCore) is plain NuGet with no workload, so
          this project builds anywhere - Windows, macOS and CI included - which is why it is part of
-         WinFormsApp3.slnx. See README.md, "On Linux (GTK4)". -->
+         XPlatUI.slnx. See README.md, "On Linux (GTK4)". -->
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
