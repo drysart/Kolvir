@@ -1393,9 +1393,9 @@ Three things follow from that, and each was load-bearing rather than cosmetic:
   both undefined there, so `Program.cs` would fall through to the GTK code and link
   `XPlatUI.Backend.Gtk4`. One framework per OS keeps the `#if` blocks honest instead of relying on
   the developer to remember a `-f` switch.
-- **The solution can therefore list the app unconditionally.** `WinFormsApp3.slnx` has nine projects
-  and `XPlatUIDemo.App` resolves to a different TFM on each machine, which is what makes "three CI
-  jobs build one project" true rather than aspirational.
+- **The solution can therefore list the app unconditionally.** `XPlatUI.slnx` lists every project,
+  including the macOS-only backend, and `XPlatUIDemo.App` resolves to a different TFM on each
+  machine, which is what makes "three CI jobs build one project" true rather than aspirational.
 
 `AssemblyName` is `XPlatUIDemoApp`, not `XPlatUIDemo`: the macOS SDK names the `.app` bundle after the
 assembly, and the name was chosen when the sample control tree was a separate `XPlatUIDemo` library

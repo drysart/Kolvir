@@ -2,7 +2,7 @@
 
   <PropertyGroup>
     <!-- The AppKit backend binds the macOS SDK, so it targets net10.0-macos and needs the macOS
-         workload to build on any host. It is part of WinFormsApp3.slnx, so building the solution
+         workload to build on any host. It is part of XPlatUI.slnx, so building the solution
          needs that workload: a machine without it fails here with NETSDK1147. See README.md,
          "On macOS (AppKit)". -->
     <TargetFramework>net10.0-macos</TargetFramework>
