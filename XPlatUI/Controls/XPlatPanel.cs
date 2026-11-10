@@ -28,6 +28,7 @@ public class XPlatPanel : XPlatControl
     private readonly XPlatScrollBars _scroll;
     private readonly List<DockedChild> _docked = [];
     private bool _layingOut;
+    private float _scaleFactor = 1f;
 
     /// <summary>A docked child, and where it sits in the declaration order.</summary>
     /// <remarks>
@@ -65,6 +66,55 @@ public class XPlatPanel : XPlatControl
     /// <summary>When true the panel paints itself like a card: filled surface plus a 1px border.</summary>
     public bool IsCard { get; set; } = true;
 
+    /// <summary>
+    /// The multiplier applied to the effective scale factor of the subtree under this panel.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is a <b>multiplier on the effective scale of the subtree</b>, not an absolute device
+    /// scale: it is not the logical-to-physical pixel ratio that <see cref="XPlatWindow.ScaleFactor"/>
+    /// and <see cref="IXPlatWindowBackend.ScaleFactor"/> report. Multipliers compose down the tree,
+    /// so a panel at 2.0 inside a panel at 0.5 behaves exactly as an unzoomed one.
+    /// </para>
+    /// <para>
+    /// The default, 1.0, leaves the panel exactly as it was. At 2.0 the logical space the children
+    /// are measured and arranged in is halved, and they are painted at twice the size; a docked
+    /// <see cref="DockStyle.Fill"/> child still fills the panel, while the fixed metrics inside it
+    /// - fonts, paddings, a 20 px button - double on screen. At 0.5 the space doubles and the
+    /// children are painted at half size.
+    /// </para>
+    /// <para>
+    /// The panel's own chrome does not zoom: its border, padding, corner radius and scrollbars keep
+    /// their size, and only the subtree is affected. The value must be finite and greater than zero.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// The value is not finite, or is zero or negative.
+    /// </exception>
+    public float ScaleFactor
+    {
+        get => _scaleFactor;
+        set
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(value),
+                    value,
+                    "The scale factor must be a finite, positive number.");
+            }
+
+            if (_scaleFactor == value)
+            {
+                return;
+            }
+
+            _scaleFactor = value;
+            PerformLayout();
+            Invalidate();
+        }
+    }
+
     /// <summary>How the horizontal axis scrolls. Defaults to <see cref="XPlatScrollStyle.None"/>.</summary>
     public XPlatScrollStyle HorizontalScroll
     {
@@ -92,17 +142,32 @@ public class XPlatPanel : XPlatControl
     /// <summary>The vertical scrollbar, or null until the panel first needs one.</summary>
     public XPlatScrollBar? VerticalScrollBar => _scroll.VerticalBar;
 
-    /// <summary>The current horizontal scroll offset, in pixels. Zero when not scrolled.</summary>
-    public float HorizontalOffset => _scroll.HorizontalOffset;
-
-    /// <summary>The current vertical scroll offset, in pixels. Zero when not scrolled.</summary>
-    public float VerticalOffset => _scroll.VerticalOffset;
+    /// <summary>
+    /// The current horizontal scroll offset, in the content space the children are laid out in
+    /// (the panel's scrolled space divided by <see cref="ScaleFactor"/>). Zero when not scrolled.
+    /// </summary>
+    public float HorizontalOffset => ToContentSpace(_scroll.HorizontalOffset);
 
     /// <summary>
-    /// The total size of the scrollable content, measured from the top-left of
-    /// <see cref="ContentArea"/>. Never smaller than the content area.
+    /// The current vertical scroll offset, in the content space the children are laid out in
+    /// (the panel's scrolled space divided by <see cref="ScaleFactor"/>). Zero when not scrolled.
     /// </summary>
-    public SKSize ScrollExtent => _scroll.Extent;
+    public float VerticalOffset => ToContentSpace(_scroll.VerticalOffset);
+
+    /// <summary>
+    /// The total size of the scrollable content, in the same content space the children are laid
+    /// out in. Never smaller than the content area.
+    /// </summary>
+    public SKSize ScrollExtent
+    {
+        get
+        {
+            var extent = _scroll.Extent;
+            return _scaleFactor == 1f
+                ? extent
+                : new SKSize(extent.Width / _scaleFactor, extent.Height / _scaleFactor);
+        }
+    }
 
     /// <summary>The client area left over once the visible scrollbars are accounted for.</summary>
     public SKRect ViewportRect => _scroll.Viewport;
@@ -115,12 +180,25 @@ public class XPlatPanel : XPlatControl
 
     private SKRect ContentArea => _scroll.ContentArea;
 
-    private float MaxHorizontalOffset => _scroll.MaxHorizontalOffset;
+    private float MaxHorizontalOffset => ToContentSpace(_scroll.MaxHorizontalOffset);
 
-    private float MaxVerticalOffset => _scroll.MaxVerticalOffset;
+    private float MaxVerticalOffset => ToContentSpace(_scroll.MaxVerticalOffset);
+
+    /// <summary>The zoom this panel applies to its children. Not the device pixel ratio.</summary>
+    protected internal override float ChildScaleMultiplier => _scaleFactor;
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {
+        var scale = _scaleFactor;
+
+        // The children are measured in their own, zoomed space, so the room they are offered is
+        // the panel's content space divided by the multiplier, and what they ask for is turned
+        // back into panel space on the way out. Without both halves an autosized zoomed panel
+        // collapses to a fraction of its content.
+        var childSpace = scale == 1f
+            ? availableSize
+            : new SKSize(availableSize.Width / scale, availableSize.Height / scale);
+
         float width = 0f;
         float height = 0f;
 
@@ -131,11 +209,18 @@ public class XPlatPanel : XPlatControl
                 continue;
             }
 
-            var childSize = child.Measure(availableSize);
+            var childSize = child.Measure(childSpace);
             width = MathF.Max(width, childSize.Width + child.Margin.Horizontal);
             height += childSize.Height + child.Margin.Vertical;
         }
 
+        if (scale != 1f)
+        {
+            width *= scale;
+            height *= scale;
+        }
+
+        // The bars belong to the panel, not the subtree, so their thickness is never zoomed.
         if (VerticalScroll == XPlatScrollStyle.Always)
         {
             width += ScrollBarThickness;
@@ -181,23 +266,47 @@ public class XPlatPanel : XPlatControl
             return;
         }
 
-        _scroll.ScrollRectIntoView(XPlatGeometry.Inflate(control.Bounds, control.Margin));
+        // Child bounds and margins are in the content space; the scroll helper works in the panel
+        // space the bars live in, so the rectangle is zoomed on the way in.
+        _scroll.ScrollRectIntoView(ToPanelSpace(XPlatGeometry.Inflate(control.Bounds, control.Margin)));
     }
 
-    /// <summary>Scrolls to the given offsets, clamped to the scrollable range.</summary>
+    /// <summary>Scrolls to the given offsets, given in the content space the children use.</summary>
     public void ScrollTo(float horizontalOffset, float verticalOffset) =>
-        _scroll.ScrollTo(horizontalOffset, verticalOffset);
+        _scroll.ScrollTo(ToPanelSpace(horizontalOffset), ToPanelSpace(verticalOffset));
 
-    /// <summary>Scrolls by a relative amount, clamped to the scrollable range.</summary>
+    /// <summary>Scrolls by a relative amount, given in the content space the children use.</summary>
     public void ScrollBy(float horizontalDelta, float verticalDelta) =>
-        _scroll.ScrollBy(horizontalDelta, verticalDelta);
+        _scroll.ScrollBy(ToPanelSpace(horizontalDelta), ToPanelSpace(verticalDelta));
 
-    /// <summary>The scrollbars sit above the content and are never part of the scrolled area.</summary>
+    /// <summary>
+    /// The scroll translation applied to a child, in the child's own (content) space. The
+    /// scrollbars sit above the content and are never part of the scrolled area, so they get none.
+    /// </summary>
     protected internal override SKPoint GetChildOffset(XPlatControl child) =>
-        _scroll.IsBar(child) ? SKPoint.Empty : _scroll.ChildOffset;
+        _scroll.IsBar(child) ? SKPoint.Empty : ContentOffset;
 
     /// <summary>The area scrolled content is clipped to, in this panel's client coordinates.</summary>
     protected SKRect ContentViewport => _scroll.EffectiveViewport(ContentBounds);
+
+    /// <summary>
+    /// The same viewport, expressed in the content space the children are laid out in. A zoomed
+    /// panel's viewport covers less content than it does panel space.
+    /// </summary>
+    protected SKRect ContentViewportInContentSpace
+    {
+        get
+        {
+            var viewport = ContentViewport;
+            return _scaleFactor == 1f
+                ? viewport
+                : new SKRect(
+                    viewport.Left / _scaleFactor,
+                    viewport.Top / _scaleFactor,
+                    viewport.Right / _scaleFactor,
+                    viewport.Bottom / _scaleFactor);
+        }
+    }
 
     /// <summary>
     /// The part of the client area the content is laid out, clipped and hit-tested inside.
@@ -209,22 +318,81 @@ public class XPlatPanel : XPlatControl
     /// </remarks>
     protected virtual SKRect ContentBounds => ClientRect;
 
-    /// <summary>The translation scrolled content is painted at, which is the negated offset.</summary>
-    protected SKPoint ContentOffset => _scroll.ChildOffset;
+    /// <summary>The translation scrolled content is painted at, in the children's own space.</summary>
+    protected SKPoint ContentOffset
+    {
+        get
+        {
+            var offset = _scroll.ChildOffset;
+            return _scaleFactor == 1f
+                ? offset
+                : new SKPoint(offset.X / _scaleFactor, offset.Y / _scaleFactor);
+        }
+    }
 
     /// <summary>The docked children the last layout pass placed, in declaration order.</summary>
     protected IReadOnlyList<DockedChild> DockedChildren => _docked;
 
     /// <summary>Clips a child's invalidation to the viewport the child is painted into.</summary>
     /// <remarks>
+    /// <para>
     /// Scrolled content is clipped to the viewport while painting, so an area outside it cannot
     /// have changed anything on screen. The scrollbars are the exception: they live in the gutter
     /// the viewport excludes and are painted over the content, so their areas are left alone.
+    /// </para>
+    /// <para>
+    /// The region arrives in the panel's own space but was built from the child's coordinates and
+    /// the content offset, which are both content-space values, so a zoomed panel multiplies it by
+    /// <see cref="ScaleFactor"/> and rounds each rectangle outwards. A fractional zoom would
+    /// otherwise leave a stale edge one pixel wide.
+    /// </para>
     /// </remarks>
     protected internal override void ChildInvalidate(XPlatControl child, SKRegion region)
     {
-        _scroll.ClipInvalidate(child, region, ContentBounds);
-        base.ChildInvalidate(child, region);
+        if (_scaleFactor == 1f || _scroll.IsBar(child))
+        {
+            _scroll.ClipInvalidate(child, region, ContentBounds);
+            base.ChildInvalidate(child, region);
+            return;
+        }
+
+        using var scaled = ScaleRegion(region, _scaleFactor);
+        _scroll.ClipInvalidate(child, scaled, ContentBounds);
+        base.ChildInvalidate(child, scaled);
+    }
+
+    /// <summary>Maps a rectangle from the content space into the panel's own space.</summary>
+    private SKRect ToPanelSpace(SKRect rect) =>
+        _scaleFactor == 1f
+            ? rect
+            : new SKRect(
+                rect.Left * _scaleFactor,
+                rect.Top * _scaleFactor,
+                rect.Right * _scaleFactor,
+                rect.Bottom * _scaleFactor);
+
+    private float ToContentSpace(float value) => _scaleFactor == 1f ? value : value / _scaleFactor;
+
+    private float ToPanelSpace(float value) => _scaleFactor == 1f ? value : value * _scaleFactor;
+
+    /// <summary>Scales a region, rounding every rectangle outwards so no edge is left behind.</summary>
+    private static SKRegion ScaleRegion(SKRegion region, float scale)
+    {
+        var scaled = new SKRegion();
+        using var rects = region.CreateRectIterator();
+
+        while (rects.Next(out var rect))
+        {
+            scaled.Op(
+                new SKRectI(
+                    (int)MathF.Floor(rect.Left * scale),
+                    (int)MathF.Floor(rect.Top * scale),
+                    (int)MathF.Ceiling(rect.Right * scale),
+                    (int)MathF.Ceiling(rect.Bottom * scale)),
+                SKRegionOperation.Union);
+        }
+
+        return scaled;
     }
 
     public override XPlatControl? HitTest(SKPoint pointInParent)
@@ -257,7 +425,13 @@ public class XPlatPanel : XPlatControl
             return Enabled ? this : null;
         }
 
-        return HitTestChildren(local) ?? (Enabled ? this : null);
+        // Everything above is panel space, including both bars. The children live in the zoomed
+        // content space, so the point crosses that boundary last, after the viewport test.
+        var contentPoint = _scaleFactor == 1f
+            ? local
+            : new SKPoint(local.X / _scaleFactor, local.Y / _scaleFactor);
+
+        return HitTestChildren(contentPoint) ?? (Enabled ? this : null);
     }
 
     /// <summary>
@@ -282,7 +456,7 @@ public class XPlatPanel : XPlatControl
         if (canScrollVertically && !(shift && canScrollHorizontally))
         {
             var before = VerticalOffset;
-            ScrollBy(0f, -e.Delta);
+            ScrollBy(0f, ToContentSpace(-e.Delta));
             e.Handled = MathF.Abs(VerticalOffset - before) > ScrollEpsilon;
             return;
         }
@@ -290,18 +464,32 @@ public class XPlatPanel : XPlatControl
         if (canScrollHorizontally)
         {
             var before = HorizontalOffset;
-            ScrollBy(-e.Delta, 0f);
+            ScrollBy(ToContentSpace(-e.Delta), 0f);
             e.Handled = MathF.Abs(HorizontalOffset - before) > ScrollEpsilon;
         }
     }
 
-    /// <summary>Clips the scrolled children to the viewport, then paints the scrollbars on top.</summary>
+    /// <summary>
+    /// Clips the scrolled children to the viewport, zooms into the children's content space, then
+    /// paints the scrollbars on top in panel space.
+    /// </summary>
+    /// <remarks>
+    /// The clip comes first and in panel space, so the viewport and the bars are never zoomed. The
+    /// scale is applied before the content translation, which is what makes the translation carry
+    /// the children's own units: a child at content point p is drawn at
+    /// <c>ScaleFactor * (p + offset)</c>.
+    /// </remarks>
     protected override void RenderChildren(SKCanvas canvas)
     {
         canvas.Save();
         canvas.ClipRect(ContentViewport);
 
-        var offset = _scroll.ChildOffset;
+        if (_scaleFactor != 1f)
+        {
+            canvas.Scale(_scaleFactor);
+        }
+
+        var offset = ContentOffset;
         if (offset.X != 0f || offset.Y != 0f)
         {
             canvas.Translate(offset.X, offset.Y);
@@ -331,13 +519,44 @@ public class XPlatPanel : XPlatControl
         base.Dispose(disposing);
     }
 
-    private void LayoutCore() => _scroll.Layout(ContentBounds, Padding, ArrangeChildren);
+    private void LayoutCore() => _scroll.Layout(ContentBounds, Padding, ArrangeInPanelSpace);
+
+    /// <summary>
+    /// Converts the panel-space area the scrollbars hand over into the content space the children
+    /// are arranged in, and the extent back into panel space.
+    /// </summary>
+    /// <remarks>
+    /// Keeping the scroll helper entirely in panel space and converting only here is deliberate:
+    /// the same helper also serves an unscaled list, and its visibility pass compares the extent
+    /// against a panel-space content area. Mixing the two spaces inside it is exactly where an
+    /// off-by-scale bug would hide.
+    /// </remarks>
+    private SKSize ArrangeInPanelSpace(SKRect area)
+    {
+        if (_scaleFactor == 1f)
+        {
+            return ArrangeChildren(area);
+        }
+
+        var content = new SKRect(
+            area.Left / _scaleFactor,
+            area.Top / _scaleFactor,
+            area.Right / _scaleFactor,
+            area.Bottom / _scaleFactor);
+
+        var extent = ArrangeChildren(content);
+        return new SKSize(extent.Width * _scaleFactor, extent.Height * _scaleFactor);
+    }
 
     /// <summary>
     /// Positions the children and returns the size of the content the panel scrolls. The scrollbars
     /// call this once per visibility pass, so it has to be idempotent.
     /// </summary>
-    /// <param name="area">The content area, with the padding and any visible scrollbar removed.</param>
+    /// <param name="area">
+    /// The content area, with the padding and any visible scrollbar removed, in the content space
+    /// the children are laid out in. A zoomed panel divides the panel space by
+    /// <see cref="ScaleFactor"/> before calling this, so the value is already the children's space.
+    /// </param>
     protected virtual SKSize ArrangeChildren(SKRect area)
     {
         LayoutDockedChildren(area);

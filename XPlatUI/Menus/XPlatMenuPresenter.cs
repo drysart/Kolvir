@@ -37,7 +37,11 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
             return;
         }
 
-        ShowMenu(request.Host, new XPlatMenuView(request.Menu), request.Location);
+        ShowMenu(
+            request.Host,
+            new XPlatMenuView(request.Menu),
+            request.Location,
+            scale: request.Control?.EffectiveScaleMultiplier ?? 1f);
     }
 
     /// <summary>
@@ -52,16 +56,23 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
     /// Run once the menu has closed, whether something was picked, the user dismissed it or the
     /// platform took it away. What a menu bar uses to un-press the button that opened it.
     /// </param>
+    /// <param name="scale">
+    /// The zoom the menu is drawn at, normally the owner's
+    /// <see cref="XPlatControl.EffectiveScaleMultiplier"/>. The view is laid out in its own units
+    /// and the whole placement calculation runs in them; only the location handed to the popup and
+    /// the size it occupies on screen are in host space.
+    /// </param>
     public static XPlatPopup ShowMenu(
         XPlatUiHost host,
         XPlatMenuView view,
         SKPoint location,
-        Action? closed = null)
+        Action? closed = null,
+        float scale = 1f)
     {
         ArgumentNullException.ThrowIfNull(host);
         ArgumentNullException.ThrowIfNull(view);
 
-        return new Chain(host, closed).Open(view, location);
+        return new Chain(host, closed, scale).Open(view, location);
     }
 
     /// <summary>
@@ -79,16 +90,18 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
     {
         private readonly XPlatUiHost _host;
         private readonly Dictionary<XPlatMenuView, Level> _levels = new();
+        private readonly float _scale;
 
         private Action? _closed;
         private XPlatMenuView? _root;
         private bool _closing;
         private bool _notified;
 
-        internal Chain(XPlatUiHost host, Action? closed)
+        internal Chain(XPlatUiHost host, Action? closed, float scale)
         {
             _host = host;
             _closed = closed;
+            _scale = scale;
         }
 
         internal XPlatPopup Open(XPlatMenuView view, SKPoint location)
@@ -99,17 +112,18 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
 
             view.Attach(_host);
 
-            var client = ClientOf(_host);
-            var area = PlacementArea(_host);
+            var client = ToContentSpace(ClientOf(_host));
+            var area = ToContentSpace(PlacementArea(_host));
+            var contentLocation = ToContentSpace(location);
 
             var popup = level.Popup;
-            popup.Show(PlaceRoot(view, location, area));
+            popup.Show(ToHostSpace(PlaceRoot(view, contentLocation, area)));
 
             if (popup.ActualPresentation == XPlatPopupPresentation.Overlay && !area.Equals(client))
             {
                 // Painted inside the window, so the window is as far as the menu can go after all.
                 popup.MaximumSize = client.Size;
-                popup.MoveTo(PlaceRoot(view, location, client));
+                popup.MoveTo(ToHostSpace(PlaceRoot(view, contentLocation, client)));
             }
 
             return popup;
@@ -131,7 +145,8 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
                 // A submenu is still a menu the user clicks in, so it takes the pointer even though
                 // it is not what dismisses the chain.
                 TakesPresses = true,
-                MaximumSize = ClientOf(_host).Size,
+                MaximumSize = ToContentSpace(ClientOf(_host)).Size,
+                ScaleFactor = _scale,
             };
 
             var level = new Level(view, popup);
@@ -166,15 +181,15 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
 
             var popup = Watch(child, isRoot: false).Popup;
 
-            var client = ClientOf(_host);
-            var area = PlacementArea(_host);
+            var client = ToContentSpace(ClientOf(_host));
+            var area = ToContentSpace(PlacementArea(_host));
 
-            popup.Show(PlaceSubMenu(parent, level, child, index, area));
+            popup.Show(ToHostSpace(PlaceSubMenu(parent, level, child, index, area, _scale)));
 
             if (popup.ActualPresentation == XPlatPopupPresentation.Overlay && !area.Equals(client))
             {
                 popup.MaximumSize = client.Size;
-                popup.MoveTo(PlaceSubMenu(parent, level, child, index, client));
+                popup.MoveTo(ToHostSpace(PlaceSubMenu(parent, level, child, index, client, _scale)));
             }
         }
 
@@ -307,12 +322,16 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
             Level parentLevel,
             XPlatMenuView child,
             int index,
-            SKRect area)
+            SKRect area,
+            float scale)
         {
             var metrics = child.Metrics ?? XPlatMenuMetrics.Default;
             var inset = child.SurfaceInset;
             var surface = parent.Layout?.SurfaceBounds ?? SKRect.Empty;
-            var origin = parentLevel.Popup.Location;
+
+            // The parent's popup location is in host space; everything else here is in the menus'
+            // own units, so the reference is brought into them on the way in.
+            var origin = new SKPoint(parentLevel.Popup.Location.X / scale, parentLevel.Popup.Location.Y / scale);
 
             // The row the submenu opens from, in the parent popup's coordinates. The scroll offset is
             // taken off because rows are laid out in content space, which a scrolled menu shows a
@@ -364,8 +383,32 @@ public sealed class XPlatMenuPresenter : IXPlatContextMenuPresenter
 
             child.OpenedToLeft = left;
 
-            return new SKPoint(x - inset, top - inset);
+            return ToHostSpace(new SKPoint(x - inset, top - inset), scale);
         }
+
+        /// <summary>Maps a host-space rectangle into the menus' own units.</summary>
+        private SKRect ToContentSpace(SKRect rect) =>
+            _scale == 1f
+                ? rect
+                : new SKRect(
+                    rect.Left / _scale,
+                    rect.Top / _scale,
+                    rect.Right / _scale,
+                    rect.Bottom / _scale);
+
+        /// <summary>Maps a host-space point into the menus' own units.</summary>
+        private SKPoint ToContentSpace(SKPoint point) =>
+            _scale == 1f
+                ? point
+                : new SKPoint(point.X / _scale, point.Y / _scale);
+
+        /// <summary>Maps a point in the menus' units back to host space.</summary>
+        private SKPoint ToHostSpace(SKPoint point) => ToHostSpace(point, _scale);
+
+        private static SKPoint ToHostSpace(SKPoint point, float scale) =>
+            scale == 1f
+                ? point
+                : new SKPoint(point.X * scale, point.Y * scale);
 
         /// <summary>The area a popup may use: the display, or the window when it is painted inside it.</summary>
         private static SKRect PlacementArea(XPlatUiHost host)

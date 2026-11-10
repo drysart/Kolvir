@@ -47,6 +47,7 @@ public sealed class DemoUi
     private XPlatControl? _shownPage;
     private XPlatControl? _menuDemoTarget;
     private XPlatTextBox? _undoFocusTarget;
+    private XPlatTrackBar? _zoomSlider;
     private int _clicks;
 
     // The measured-rendering page. The timer exists only while the page is displayed, and the
@@ -525,6 +526,7 @@ public sealed class DemoUi
         ("Animated WebP", demo => Page(demo.BuildAnimatedWebpDemo())),
         ("WebP frames", demo => Page(demo.BuildWebpFrameDemo())),
         ("Measured rendering", demo => Page(demo.BuildMetricsPage())),
+        ("Zoom", demo => Page(demo.BuildZoomPage())),
     };
 
     /// <summary>
@@ -3012,6 +3014,146 @@ public sealed class DemoUi
         {
             _metricsHost = host;
             host.AddFramePaintedHandler(_ => OnMetricsFramePainted(host));
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// Drives the Zoom page's slider, so a headless render can show a fixed multiplier without a
+    /// click. The value is clamped by the track bar to its own range.
+    /// </summary>
+    public void SetPanelZoom(float multiplier) => _zoomSlider?.Value = multiplier;
+
+    /// <summary>
+    /// Page 55: a panel whose <see cref="XPlatPanel.ScaleFactor"/> zooms its children while its own
+    /// chrome stays put, with a nested panel at the reciprocal multiplier proving that they compose.
+    /// </summary>
+    private XPlatPanel BuildZoomPage()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Panel zoom"));
+
+        var readout = ScrollCaption("Panel 1.00x - nested 1.00x - effective 1.00x");
+        readout.Height = 18f;
+        card.Controls.Add(readout);
+
+        var zoomed = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = true,
+            IsCard = true,
+            Padding = new XPlatThickness(0f),
+            HorizontalScroll = XPlatScrollStyle.Automatic,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            Margin = new XPlatThickness(0f, 8f, 0f, 0f),
+        };
+
+        // The nested panel carries the reciprocal multiplier, so its children see the same logical
+        // space at every position of the slider: the two multipliers cancel.
+        var nested = new XPlatPanel
+        {
+            Bounds = new SKRect(8f, 8f, 348f, 108f),
+        };
+        nested.Controls.Add(new XPlatLabel("Nested panel at the reciprocal multiplier.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 22f,
+            WrapText = true,
+        });
+        nested.Controls.Add(new XPlatButton("Nested button")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Margin = new XPlatThickness(0f, 8f, 0f, 0f),
+        });
+
+        var caption = new XPlatLabel(
+            "A 14 px label, a 20 px button and a 30 px text box all follow the subtree multiplier. " +
+            "The panel's border, padding, corner radius and scrollbar do not zoom; the nested panel " +
+            "shows that multipliers compose, because its own multiplier is the reciprocal.")
+        {
+            Bounds = new SKRect(8f, 118f, 348f, 198f),
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        };
+
+        var buttonRow = Row(34f);
+        buttonRow.Dock = XDock.None;
+        buttonRow.Margin = new XPlatThickness(0f);
+        buttonRow.Bounds = new SKRect(8f, 206f, 348f, 240f);
+        buttonRow.Controls.Add(new XPlatButton("A button")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        });
+        buttonRow.Controls.Add(new XPlatButton("Another")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        });
+
+        var edit = new XPlatTextBox
+        {
+            Bounds = new SKRect(8f, 248f, 308f, 278f),
+            PlaceholderText = "Type at any zoom",
+        };
+
+        var imageRow = Row(64f);
+        imageRow.Dock = XDock.None;
+        imageRow.Margin = new XPlatThickness(0f);
+        imageRow.Bounds = new SKRect(8f, 286f, 104f, 350f);
+        imageRow.Controls.Add(new XPlatImage
+        {
+            Dock = XDock.Left,
+            Width = 96f,
+            Height = 64f,
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.StretchImage,
+            Image = Images.LoadFromStream(CreateGradientPng(96, 64)),
+        });
+
+        zoomed.Controls.Add(nested);
+        zoomed.Controls.Add(caption);
+        zoomed.Controls.Add(buttonRow);
+        zoomed.Controls.Add(edit);
+        zoomed.Controls.Add(imageRow);
+
+        var sliderRow = Row(42f);
+        var slider = new XPlatTrackBar
+        {
+            Dock = XDock.Fill,
+            Minimum = 0.5f,
+            Maximum = 3f,
+            Value = 1f,
+            SmallChange = 0.05f,
+            LargeChange = 0.25f,
+            TickFrequency = 0.5f,
+        };
+        sliderRow.Controls.Add(slider);
+        _zoomSlider = slider;
+
+        card.Controls.Add(sliderRow);
+        card.Controls.Add(zoomed);
+
+        slider.AddValueChangedHandler(_ =>
+        {
+            float multiplier = slider.Value;
+            float reciprocal = 1f / multiplier;
+
+            zoomed.ScaleFactor = multiplier;
+            nested.ScaleFactor = reciprocal;
+
+            readout.Text =
+                $"Panel {multiplier:0.00}x - nested {reciprocal:0.00}x - effective {multiplier * reciprocal:0.00}x";
+
+            SetStatus(
+                "The panel's children zoom with the slider; its chrome and scrollbar do not. " +
+                "The nested panel cancels the multiplier, so its own content is unchanged.");
         });
 
         return card;

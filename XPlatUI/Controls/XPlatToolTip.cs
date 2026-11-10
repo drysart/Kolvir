@@ -321,13 +321,15 @@ public sealed class XPlatToolTip : IDisposable
 
         var view = new XPlatToolTipView(text, _maximumWidth);
         var size = view.Measure(new SKSize(MaximumWidth, float.PositiveInfinity));
+        var scale = control.EffectiveScaleMultiplier;
 
-        var (x, y) = PlaceFor(control, host, size);
+        var (x, y) = PlaceFor(control, host, size, scale);
 
         var popup = new XPlatPopup(control)
         {
             Content = view,
             Size = size,
+            ScaleFactor = scale,
 
             // A tooltip is not a menu: the press that dismisses it has to reach whatever is under
             // the pointer, so it never installs a click blocker.
@@ -366,9 +368,10 @@ public sealed class XPlatToolTip : IDisposable
     /// looking at. The pointer's own position is used while the pointer is inside the host, which is
     /// the only time a tip is ever shown, and the control is only the fallback.
     /// </summary>
-    private static (float X, float Y) PlaceFor(XPlatControl control, XPlatUiHost host, SKSize size)
+    private static (float X, float Y) PlaceFor(XPlatControl control, XPlatUiHost host, SKSize size, float scale)
     {
         var client = host.ClientSize;
+        var onScreen = new SKSize(size.Width * scale, size.Height * scale);
         float x;
         float y;
 
@@ -381,33 +384,35 @@ public sealed class XPlatToolTip : IDisposable
 
             // Flipping rather than only clamping keeps the tip away from the pointer at the far
             // edges, where clamping alone would drag it back over the pointer.
-            if (x + size.Width > client.Width)
+            if (x + onScreen.Width > client.Width)
             {
-                x = pointer.X - size.Width - PointerOffsetX;
+                x = pointer.X - onScreen.Width - PointerOffsetX;
             }
 
-            if (y + size.Height > client.Height)
+            if (y + onScreen.Height > client.Height)
             {
-                y = pointer.Y - size.Height - PointerOffsetY;
+                y = pointer.Y - onScreen.Height - PointerOffsetY;
             }
         }
         else
         {
             var origin = control.GetPositionInHost();
             x = origin.X;
-            y = origin.Y + control.Height + Gap;
+
+            // The control's own height is a zoomed metric; the gap is popup chrome and stays put.
+            y = origin.Y + (control.Height * scale) + Gap;
 
             // Below the control is the usual place; above it is where a control near the bottom edge
             // of the window has room.
-            if (y + size.Height > client.Height && origin.Y - size.Height - Gap >= 0f)
+            if (y + onScreen.Height > client.Height && origin.Y - onScreen.Height - Gap >= 0f)
             {
-                y = origin.Y - size.Height - Gap;
+                y = origin.Y - onScreen.Height - Gap;
             }
         }
 
         return (
-            Math.Clamp(x, 0f, MathF.Max(0f, client.Width - size.Width)),
-            Math.Clamp(y, 0f, MathF.Max(0f, client.Height - size.Height)));
+            Math.Clamp(x, 0f, MathF.Max(0f, client.Width - onScreen.Width)),
+            Math.Clamp(y, 0f, MathF.Max(0f, client.Height - onScreen.Height)));
     }
 
     private void OnPopupClosed(object sender)

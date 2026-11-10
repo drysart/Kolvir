@@ -146,18 +146,22 @@ public class XPlatComboBox : XPlatControl
         _list.Font = Font;
 
         var size = MeasureDropDown();
+        var scale = EffectiveScaleMultiplier;
+        var onScreen = new SKSize(size.Width * scale, size.Height * scale);
         var origin = GetPositionInHost();
-        var location = new SKPoint(origin.X, origin.Y + Height);
+        var location = new SKPoint(origin.X, origin.Y + (Height * scale));
 
         // Flipping above the field is what a combo box near the bottom of the window does; the
         // platform layer places the popup inside the screen as well, but it has no idea which
-        // control the popup belongs to.
-        if (location.Y + size.Height > host.ClientSize.Height && origin.Y - size.Height >= 0f)
+        // control the popup belongs to. The flip decision uses the size the popup will occupy on
+        // screen, not the content size it was measured at.
+        if (location.Y + onScreen.Height > host.ClientSize.Height && origin.Y - onScreen.Height >= 0f)
         {
-            location = new SKPoint(origin.X, origin.Y - size.Height);
+            location = new SKPoint(origin.X, origin.Y - onScreen.Height);
         }
 
         _dropDownOpen = true;
+        _popup.ScaleFactor = scale;
         _popup.Size = size;
         _popup.Show(location);
 

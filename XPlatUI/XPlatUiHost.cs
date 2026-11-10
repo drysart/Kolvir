@@ -1326,6 +1326,10 @@ public sealed class XPlatUiHost
     }
 
     /// <summary>Maps a point from a control's coordinate space to the host's.</summary>
+    /// <remarks>
+    /// A zoomed container scales both the child's own position and the content offset it applies
+    /// while painting, so the multiplication happens after both have been added.
+    /// </remarks>
     private static SKPoint ToHost(XPlatControl control, SKPoint point)
     {
         for (var current = control; current is not null; current = current.Parent)
@@ -1335,7 +1339,10 @@ public sealed class XPlatUiHost
             if (current.Parent is { } parent)
             {
                 var offset = parent.GetChildOffset(current);
-                point = new SKPoint(point.X + offset.X, point.Y + offset.Y);
+                var multiplier = parent.ChildScaleMultiplier;
+                point = new SKPoint(
+                    (point.X + offset.X) * multiplier,
+                    (point.Y + offset.Y) * multiplier);
             }
         }
 
@@ -1346,11 +1353,13 @@ public sealed class XPlatUiHost
     internal static SKRect ToHost(XPlatControl control, SKRect rect)
     {
         var origin = ToHost(control, SKPoint.Empty);
+        var scale = control.EffectiveScaleMultiplier;
+
         return new SKRect(
-            rect.Left + origin.X,
-            rect.Top + origin.Y,
-            rect.Right + origin.X,
-            rect.Bottom + origin.Y);
+            origin.X + (rect.Left * scale),
+            origin.Y + (rect.Top * scale),
+            origin.X + (rect.Right * scale),
+            origin.Y + (rect.Bottom * scale));
     }
 
     /// <summary>
@@ -1483,12 +1492,24 @@ public sealed class XPlatUiHost
         var local = point;
         for (var current = control; current is not null; current = current.Parent)
         {
-            local = new SKPoint(local.X - current.Left, local.Y - current.Top);
-
             if (current.Parent is { } parent)
             {
+                // The inverse of ToHost: undo the zoom first, then the child's own position and
+                // the content offset that was added before it.
+                var multiplier = parent.ChildScaleMultiplier;
+                if (multiplier != 1f)
+                {
+                    local = new SKPoint(local.X / multiplier, local.Y / multiplier);
+                }
+
                 var offset = parent.GetChildOffset(current);
-                local = new SKPoint(local.X - offset.X, local.Y - offset.Y);
+                local = new SKPoint(
+                    local.X - current.Left - offset.X,
+                    local.Y - current.Top - offset.Y);
+            }
+            else
+            {
+                local = new SKPoint(local.X - current.Left, local.Y - current.Top);
             }
         }
 

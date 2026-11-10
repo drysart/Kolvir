@@ -454,13 +454,28 @@ internal static class Program
 
     /// <summary>
     /// What a headless render should do after the window is up and before the frame is written:
-    /// open the menus page's context menu, right-click a span on the spans page, or nothing. Both
-    /// exist so a screenshot can show something that normally needs a click.
+    /// open the menus page's context menu, right-click a span on the spans page, drive the Zoom
+    /// page's slider, or nothing. They exist so a screenshot can show something that normally needs
+    /// a click.
     /// </summary>
     private static Action<XPlatWindow, DemoUi>? AfterShownArgument(string[] args)
     {
         bool menu = Array.IndexOf(args, "--menu") >= 0;
         bool spanMenu = Array.IndexOf(args, "--span-menu") >= 0;
+
+        // The zoom page's slider is what a user would drag, so a screenshot of 2.0 against 1.0 is
+        // otherwise not reproducible from a headless render.
+        int zoomIndex = Array.IndexOf(args, "--zoom");
+        if (zoomIndex >= 0 &&
+            zoomIndex + 1 < args.Length &&
+            float.TryParse(
+                args[zoomIndex + 1],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var zoom))
+        {
+            return (_, demo) => demo.SetPanelZoom(zoom);
+        }
 
         if (menu)
         {

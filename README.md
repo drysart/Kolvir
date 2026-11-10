@@ -78,7 +78,7 @@ has to read `--classic-menus` before it can build a backend.
 | `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
 | `XPlatBackground` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
 | `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
-| `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis |
+| `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree |
 | `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
 | `XPlatSplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
 | `XPlatWrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
@@ -606,6 +606,61 @@ A scrolling container and a scrolling list want the same plumbing, so it lives i
 placement, the offset clamping, `ScrollRectIntoView`, the wheel and the invalidation clip. A third
 scrolling control only has to say how big its content is - `XPlatPanel` measures its children, the
 list box multiplies its row count by the row height - and the helper does the rest.
+
+### Panel zoom
+
+`XPlatPanel.ScaleFactor` is a **multiplier applied to the effective scale factor of the subtree**
+under that panel. It is not the absolute device scale factor: `XPlatWindow.ScaleFactor` and
+`IXPlatWindowBackend.ScaleFactor` report the logical-to-physical pixel ratio of the display, while
+this says how far the subtree is zoomed inside the window. The two multiply together only when a
+point finally reaches the platform.
+
+The default, `1.0`, leaves measurement, arrangement, painting, hit testing and damage exactly as
+they were. At `2.0` the logical space the children are measured and arranged in is halved and they
+are painted at twice the size; a docked `DockStyle.Fill` child still fills the panel, while the
+fixed metrics inside it - fonts, paddings, a 20 px button - double on screen. At `0.5` the space
+doubles and the children are painted at half size.
+
+| Root device scale | Panel `ScaleFactor` | Space its children see | A 20 px button on screen |
+| --- | --- | --- | --- |
+| 2.0 | 1.0 | 100 x 100 | 40 x 40 device px |
+| 2.0 | 2.0 | 50 x 50 | 80 x 80 device px |
+| 2.0 | 0.5 | 200 x 200 | 20 x 20 device px |
+
+Multipliers compose down the tree, and no effective value is stored or propagated: each panel acts
+only on its own child space, so a panel at `2.0` containing a panel at `0.5` behaves exactly as an
+unzoomed one. `XPlatControl.EffectiveScaleMultiplier` is the product of the multipliers above a
+control, and every conversion between control and host coordinates (`GetPositionInHost`,
+`ClientToHost`, `HostToClient`, and the host's own input mapping) multiplies by it.
+
+The panel's own chrome does not zoom. Its border, `Padding`, corner radius and scrollbars keep their
+size; only the subtree is affected. An application that wants more room around zoomed content
+changes `Padding` itself. Scroll offsets and `ScrollExtent` are reported in the same content space
+the children are laid out in, while the bars stay in panel space and never zoom, and the damage
+rectangle a child asks for is multiplied back into panel space and rounded outwards.
+
+Containers that derive from `XPlatPanel` inherit the property for free: `XPlatGroupBox`,
+`XPlatOverlay`, `XPlatExpander`, `XPlatStackPanel`, `XPlatTableLayoutPanel`, `XPlatTabPage` and
+`XPlatWrapPanel`. `XPlatSplitContainer`, `XPlatTabControl`, `XPlatVirtualList` and `XPlatToolStrip`
+derive from `XPlatControl` and do not zoom.
+
+Popup surfaces opened from a control inside a zoomed panel - combo drop-downs, date pickers,
+autocomplete lists, split-button menus, context menus and tooltips - are sized, painted, hit tested
+and placed at the owner's effective multiplier, so a drop-down is never half the size of the field
+that opened it. A popup hosts its content in a zoom wrapper for painting and input, and scales the
+outer window or overlay size and position. Menus that belong to the window rather than to a control
+- the `XPlatMenuBar` drop-downs - stay unzoomed, because the bar itself is outside the panel.
+Images are recorded into their pictures with linear sampling, so a raster image shrunk by a zoom is
+filtered rather than point sampled; animated GIF and WebP frames keep their own nearest sampling by
+design, which is what keeps pixel art crisp.
+
+```csharp
+var zoom = new XPlatPanel { Dock = DockStyle.Fill, ScaleFactor = 1.75f };
+zoom.Controls.Add(new XPlatLabel("A 14 px label, at 24.5 px on screen") { Dock = DockStyle.Top });
+```
+
+The demo's **Zoom** page - `--page 55` - drives a panel from 0.5x to 3.0x and puts a reciprocal panel
+inside it, so the readout shows the effective multiplier cancelling back to 1.00.
 
 ### Adding many children at once
 

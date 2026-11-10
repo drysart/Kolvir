@@ -210,18 +210,26 @@ public class XPlatDateTimePicker : XPlatTextBox
         _calendar.Show(_value, DateTime.Today);
 
         var area = PlacementArea(host);
-        var size = _calendar.Measure(new SKSize(area.Width, area.Height));
+        var scale = EffectiveScaleMultiplier;
+
+        // The calendar is measured in the content space it will be drawn in, so the room it may
+        // use is the host's placement area divided by the zoom, and the size it occupies on screen
+        // is the measured size multiplied back.
+        var room = new SKSize(area.Width / scale, area.Height / scale);
+        var size = _calendar.Measure(room);
+        var onScreen = new SKSize(size.Width * scale, size.Height * scale);
         var origin = GetPositionInHost();
 
-        float x = Math.Clamp(origin.X, area.Left, MathF.Max(area.Left, area.Right - size.Width));
-        float below = origin.Y + Height;
-        float above = origin.Y - size.Height;
+        float x = Math.Clamp(origin.X, area.Left, MathF.Max(area.Left, area.Right - onScreen.Width));
+        float below = origin.Y + (Height * scale);
+        float above = origin.Y - onScreen.Height;
 
         // Like a drop-down list, the calendar opens downwards and flips above the field when there
         // is no room below it. The platform layer still clamps a window popup to the display.
-        float y = below + size.Height <= area.Bottom || above < area.Top ? below : above;
-        y = Math.Clamp(y, area.Top, MathF.Max(area.Top, area.Bottom - size.Height));
+        float y = below + onScreen.Height <= area.Bottom || above < area.Top ? below : above;
+        y = Math.Clamp(y, area.Top, MathF.Max(area.Top, area.Bottom - onScreen.Height));
 
+        _popup.ScaleFactor = scale;
         _popup.Size = size;
         _popup.Show(new SKPoint(x, y));
         _dropDownOpen = true;
