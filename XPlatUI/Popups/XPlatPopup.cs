@@ -37,7 +37,9 @@ public sealed class XPlatPopup : IDisposable
     private IXPlatPopupWindow? _window;
     private XPlatPopupDismissCatcher? _catcher;
     private XPlatControl? _shownContent;
+    private XPlatScaledPopupHost? _wrapper;
     private SKPoint _location;
+    private float _scaleFactor = 1f;
     private bool _open;
     private bool _disposed;
 
@@ -80,13 +82,51 @@ public sealed class XPlatPopup : IDisposable
     public XPlatPopupPresentation ActualPresentation { get; private set; } = XPlatPopupPresentation.Overlay;
 
     /// <summary>
-    /// The popup's size in logical pixels. While null the content is measured for each show, which
-    /// is what a tooltip wants; a drop-down list assigns it so it matches its owner's width.
+    /// The popup's size in logical pixels, in the content's own coordinate space. While null the
+    /// content is measured for each show, which is what a tooltip wants; a drop-down list assigns
+    /// it so it matches its owner's width. The window or overlay the popup occupies is this size
+    /// multiplied by <see cref="ScaleFactor"/>.
     /// </summary>
     public SKSize? Size { get; set; }
 
     /// <summary>Largest size the popup may take when it measures its content.</summary>
+    /// <remarks>
+    /// It is a content-space limit: a popup zoomed by 2.0 occupies twice this on screen. A caller
+    /// that wants the popup to stay inside a host-space rectangle divides that rectangle by
+    /// <see cref="ScaleFactor"/> before assigning it.
+    /// </remarks>
     public SKSize MaximumSize { get; set; } = new(float.PositiveInfinity, float.PositiveInfinity);
+
+    /// <summary>
+    /// The multiplier the popup's content is painted, hit tested and measured at. Defaults to 1.
+    /// </summary>
+    /// <remarks>
+    /// A control anchored inside a zoomed panel sets this to its
+    /// <see cref="XPlatControl.EffectiveScaleMultiplier"/>, so the drop-down or menu reads as part
+    /// of the zoomed subtree rather than as half-size chrome beside it. The content is hosted in
+    /// a zoom wrapper, which means painting and hit testing come from the same container-local
+    /// mechanism the panel uses; only the popup's outer size and placement are multiplied here.
+    /// The value must be finite and greater than zero, and is read when the popup is shown.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// The value is not finite, or is zero or negative.
+    /// </exception>
+    public float ScaleFactor
+    {
+        get => _scaleFactor;
+        set
+        {
+            if (float.IsNaN(value) || float.IsInfinity(value) || value <= 0f)
+            {
+                throw new ArgumentOutOfRangeException(
+                    nameof(value),
+                    value,
+                    "The scale factor must be a finite, positive number.");
+            }
+
+            _scaleFactor = value;
+        }
+    }
 
     /// <summary>
     /// Whether a press outside the popup closes it. True is what a menu or a drop-down list wants,
@@ -159,12 +199,31 @@ public sealed class XPlatPopup : IDisposable
 
         _location = location;
 
-        if (Presentation != XPlatPopupPresentation.Overlay && TryShowInWindow(host, content, location))
+        // The content is hosted in a zoom wrapper rather than the wrapper being taught to the
+        // backend: painting and hit testing inside the popup then come from the same container
+        // mechanism a zoomed panel uses, and the platform still sees one ordinary control tree.
+        var shown = content;
+        if (_scaleFactor != 1f)
         {
-            return;
+            shown = _wrapper = new XPlatScaledPopupHost(content, _scaleFactor);
         }
 
-        ShowInOverlay(host, content, location);
+        try
+        {
+            if (Presentation != XPlatPopupPresentation.Overlay && TryShowInWindow(host, shown, location))
+            {
+                return;
+            }
+
+            ShowInOverlay(host, shown, location);
+        }
+        catch
+        {
+            // A show that failed must not leave the caller's content parented to a wrapper nobody
+            // owns, or every later attempt would see it as already in a tree.
+            DetachWrapper();
+            throw;
+        }
     }
 
     /// <summary>
@@ -229,7 +288,27 @@ public sealed class XPlatPopup : IDisposable
             content.Host?.RemoveOverlay(content);
         }
 
+        DetachWrapper();
+
         _closed?.Invoke(this);
+    }
+
+    /// <summary>Takes the caller's content back out of the zoom wrapper, if one was made.</summary>
+    private void DetachWrapper()
+    {
+        if (_wrapper is not { } wrapper)
+        {
+            return;
+        }
+
+        _wrapper = null;
+
+        if (Content is { } original && ReferenceEquals(original.Parent, wrapper))
+        {
+            wrapper.Controls.Remove(original);
+        }
+
+        wrapper.Dispose();
     }
 
     public void Dispose()
@@ -333,23 +412,70 @@ public sealed class XPlatPopup : IDisposable
 
     private SKSize MeasureContent()
     {
-        if (Size is { } size)
-        {
-            return size;
-        }
+        SKSize size;
 
-        if (Content is not { } content)
+        if (Size is { } requested)
+        {
+            size = requested;
+        }
+        else if (Content is { } content)
+        {
+            var measured = content.Measure(MaximumSize);
+            size = new SKSize(
+                MathF.Min(measured.Width, MaximumSize.Width),
+                MathF.Min(measured.Height, MaximumSize.Height));
+        }
+        else
         {
             return SKSize.Empty;
         }
 
-        var measured = content.Measure(MaximumSize);
-        return new SKSize(
-            MathF.Min(measured.Width, MaximumSize.Width),
-            MathF.Min(measured.Height, MaximumSize.Height));
+        // Size and MaximumSize are content-space values; the window or overlay the popup occupies
+        // is that size scaled, which is also the size the screen-fitting decision must use.
+        return _scaleFactor == 1f
+            ? size
+            : new SKSize(size.Width * _scaleFactor, size.Height * _scaleFactor);
     }
 
     private void OnWindowDismissed(object sender) => Close();
+}
+
+/// <summary>
+/// The wrapper an <see cref="XPlatPopup"/> puts its content in when the popup belongs to a zoomed
+/// subtree: a panel whose children are drawn, hit tested and measured at the popup's multiplier.
+/// </summary>
+/// <remarks>
+/// It is deliberately a container and not a backend transform. Input enters the popup at its root
+/// and is divided by the wrapper's <see cref="XPlatPanel.ScaleFactor"/> on the way down, painting
+/// is scaled on the way out, and the single child is arranged to fill the content space. That is
+/// the same mechanism a zoomed panel uses inside a window, so a popup and its owner cannot drift
+/// apart in how they treat the pointer.
+/// </remarks>
+internal sealed class XPlatScaledPopupHost : XPlatPanel
+{
+    private readonly XPlatControl _content;
+
+    public XPlatScaledPopupHost(XPlatControl content, float scale)
+    {
+        _content = content;
+
+        ShowFrame = false;
+        IsCard = false;
+        BackColor = null;
+        BorderWidth = 0f;
+        CornerRadius = 0f;
+        Padding = new XPlatThickness(0f);
+
+        Controls.Add(content);
+        ScaleFactor = scale;
+    }
+
+    /// <summary>Gives the content the whole content space and claims no more than it occupies.</summary>
+    protected override SKSize ArrangeChildren(SKRect area)
+    {
+        _content.Bounds = area;
+        return new SKSize(MathF.Max(0f, area.Width), MathF.Max(0f, area.Height));
+    }
 }
 
 /// <summary>

@@ -401,6 +401,95 @@ public class XPlatControl : IDisposable
     /// <param name="child">The child about to be painted or hit tested.</param>
     protected internal virtual SKPoint GetChildOffset(XPlatControl child) => SKPoint.Empty;
 
+    /// <summary>
+    /// The zoom multiplier this control applies to its children's coordinate space when it paints,
+    /// hit tests and maps them. One for every control except a zoomed <see cref="XPlatPanel"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is a container-local multiplier, not the device pixel ratio: it says how much bigger
+    /// the subtree is drawn inside this control, not how many physical pixels a logical pixel is.
+    /// </remarks>
+    protected internal virtual float ChildScaleMultiplier => 1f;
+
+    /// <summary>
+    /// The zoom multiplier between this control and one of its children, which is
+    /// <see cref="ChildScaleMultiplier"/> unless the container lays some children out in its own
+    /// space instead of the zoomed space of its subtree.
+    /// </summary>
+    /// <remarks>
+    /// An <see cref="XPlatPanel"/> overrides this to report 1 for its scrollbars: the bars are
+    /// panel-space chrome, like the border and the padding, so they are neither painted nor hit
+    /// tested under the zoom. A control that is a <see cref="Parent"/> without being in
+    /// <see cref="Controls"/> - which is how the bars are attached - gets its coordinates mapped by
+    /// this rather than by <see cref="ChildScaleMultiplier"/>, so the paint translation and the
+    /// input translation cannot disagree.
+    /// </remarks>
+    /// <param name="child">The child whose coordinate space is being mapped.</param>
+    protected internal virtual float GetChildScaleFactor(XPlatControl child) => ChildScaleMultiplier;
+
+    /// <summary>
+    /// The product of <see cref="XPlatPanel.ScaleFactor"/> for every zoomed container above this
+    /// control: the multiplier between this control's own coordinate space and the host's.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A control inside a panel at 2.0 reports 2.0, and one inside that panel at 0.5 reports 1.0.
+    /// Every conversion from control coordinates to host or screen coordinates multiplies by it:
+    /// <see cref="GetPositionInHost"/> and <see cref="ClientToHost"/> do, and a popup anchored to a
+    /// control inside a zoomed panel has to as well.
+    /// </para>
+    /// <para>
+    /// It is deliberately not the absolute device scale factor. <see cref="XPlatWindow.ScaleFactor"/>
+    /// and <see cref="IXPlatWindowBackend.ScaleFactor"/> answer how many physical pixels the display
+    /// packs into a logical pixel; this answers how far the subtree has been zoomed inside the
+    /// window. The two multiply together only when a point finally reaches the platform.
+    /// </para>
+    /// </remarks>
+    public float EffectiveScaleMultiplier
+    {
+        get
+        {
+            float multiplier = 1f;
+
+            for (var current = this; current.Parent is { } parent; current = parent)
+            {
+                multiplier *= parent.GetChildScaleFactor(current);
+            }
+
+            return multiplier;
+        }
+    }
+
+    /// <summary>
+    /// Maps a point from this control's client coordinates to the host's, including the zoom of
+    /// every container above it. The inverse of <see cref="XPlatUiHost"/>'s own conversion.
+    /// </summary>
+    /// <param name="point">A point in this control's client space.</param>
+    public SKPoint ClientToHost(SKPoint point)
+    {
+        var origin = GetPositionInHost();
+        var scale = EffectiveScaleMultiplier;
+
+        return scale == 1f
+            ? new SKPoint(origin.X + point.X, origin.Y + point.Y)
+            : new SKPoint(origin.X + (point.X * scale), origin.Y + (point.Y * scale));
+    }
+
+    /// <summary>
+    /// Maps a point from the host's coordinates into this control's client coordinates, undoing
+    /// the zoom of every container above it. The inverse of <see cref="ClientToHost"/>.
+    /// </summary>
+    /// <param name="point">A point in host coordinates.</param>
+    public SKPoint HostToClient(SKPoint point)
+    {
+        var origin = GetPositionInHost();
+        var scale = EffectiveScaleMultiplier;
+
+        return scale == 1f
+            ? new SKPoint(point.X - origin.X, point.Y - origin.Y)
+            : new SKPoint((point.X - origin.X) / scale, (point.Y - origin.Y) / scale);
+    }
+
     public XPlatControl? Parent
     {
         get => _parent;
@@ -467,8 +556,12 @@ public class XPlatControl : IDisposable
             if (current.Parent is { } parent)
             {
                 var offset = parent.GetChildOffset(current);
-                x += offset.X;
-                y += offset.Y;
+                var multiplier = parent.GetChildScaleFactor(current);
+
+                // The parent's zoom applies to the child's position as well as its size: a child
+                // laid out at x = 30 inside a panel at 2.0 sits 60 px into that panel.
+                x = (x + offset.X) * multiplier;
+                y = (y + offset.Y) * multiplier;
             }
         }
 

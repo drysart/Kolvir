@@ -1326,6 +1326,10 @@ public sealed class XPlatUiHost
     }
 
     /// <summary>Maps a point from a control's coordinate space to the host's.</summary>
+    /// <remarks>
+    /// A zoomed container scales both the child's own position and the content offset it applies
+    /// while painting, so the multiplication happens after both have been added.
+    /// </remarks>
     private static SKPoint ToHost(XPlatControl control, SKPoint point)
     {
         for (var current = control; current is not null; current = current.Parent)
@@ -1335,7 +1339,10 @@ public sealed class XPlatUiHost
             if (current.Parent is { } parent)
             {
                 var offset = parent.GetChildOffset(current);
-                point = new SKPoint(point.X + offset.X, point.Y + offset.Y);
+                var multiplier = parent.GetChildScaleFactor(current);
+                point = new SKPoint(
+                    (point.X + offset.X) * multiplier,
+                    (point.Y + offset.Y) * multiplier);
             }
         }
 
@@ -1346,11 +1353,13 @@ public sealed class XPlatUiHost
     internal static SKRect ToHost(XPlatControl control, SKRect rect)
     {
         var origin = ToHost(control, SKPoint.Empty);
+        var scale = control.EffectiveScaleMultiplier;
+
         return new SKRect(
-            rect.Left + origin.X,
-            rect.Top + origin.Y,
-            rect.Right + origin.X,
-            rect.Bottom + origin.Y);
+            origin.X + (rect.Left * scale),
+            origin.Y + (rect.Top * scale),
+            origin.X + (rect.Right * scale),
+            origin.Y + (rect.Bottom * scale));
     }
 
     /// <summary>
@@ -1478,22 +1487,25 @@ public sealed class XPlatUiHost
         }
     }
 
-    private static SKPoint ToLocal(XPlatControl control, SKPoint point)
-    {
-        var local = point;
-        for (var current = control; current is not null; current = current.Parent)
-        {
-            local = new SKPoint(local.X - current.Left, local.Y - current.Top);
-
-            if (current.Parent is { } parent)
-            {
-                var offset = parent.GetChildOffset(current);
-                local = new SKPoint(local.X - offset.X, local.Y - offset.Y);
-            }
-        }
-
-        return local;
-    }
+    /// <summary>Maps a host point into a control's client coordinates.</summary>
+    /// <remarks>
+    /// <para>
+    /// This is the control's own public inverse, deliberately, rather than a second walk of the
+    /// parent chain here: the mapping has to undo a parent's zoom before the level above it, because
+    /// a parent's multiplier applies to its child's position and content offset as much as to the
+    /// child's own coordinates. A control-first loop that divides and then subtracts applies the
+    /// innermost inverse to the host point, so it divides every ancestor's position by the
+    /// multiplier as well - a click inside a zoomed panel that sits away from the origin then lands
+    /// tens of pixels away from the pointer.
+    /// </para>
+    /// <para>
+    /// With every multiplier at one the order is invisible (subtractions commute and the division is
+    /// a no-op), which is why the coordinate path only had to state the rule once zoom arrived.
+    /// Sharing <see cref="XPlatControl.HostToClient"/> means the input path and the public
+    /// control-to-host conversions cannot drift apart again.
+    /// </para>
+    /// </remarks>
+    private static SKPoint ToLocal(XPlatControl control, SKPoint point) => control.HostToClient(point);
 
     /// <summary>
     /// The subscription <see cref="AddInputSink"/> hands back. It is not an

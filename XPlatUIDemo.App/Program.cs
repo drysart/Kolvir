@@ -70,6 +70,11 @@ internal static class Program
         // headless backend rather than the window one, so it needs no window, no message loop and no
         // display, and it works over ssh:
         //   XPlatUIDemoApp --render output.png [width height] [--dark|--light]
+        //   XPlatUIDemoApp --render output.png 1200 800 --page 55 [--zoom 2.0 | --zoom-popup dropdown]
+        //
+        // --page picks a page by index, --zoom drives the Zoom page's slider and --zoom-popup opens
+        // one of that page's popup surfaces (dropdown, menu or tooltip), so a screenshot of
+        // something that normally needs a click can be reproduced from any machine.
         //
         // This has to come before anything touches a toolkit. GDK's initialisation prints
         // "Failed to open display" and terminates the process with exit code 1 when there is no
@@ -454,13 +459,52 @@ internal static class Program
 
     /// <summary>
     /// What a headless render should do after the window is up and before the frame is written:
-    /// open the menus page's context menu, right-click a span on the spans page, or nothing. Both
-    /// exist so a screenshot can show something that normally needs a click.
+    /// open the menus page's context menu, right-click a span on the spans page, drive the Zoom
+    /// page's slider, or nothing. They exist so a screenshot can show something that normally needs
+    /// a click.
     /// </summary>
     private static Action<XPlatWindow, DemoUi>? AfterShownArgument(string[] args)
     {
         bool menu = Array.IndexOf(args, "--menu") >= 0;
         bool spanMenu = Array.IndexOf(args, "--span-menu") >= 0;
+
+        // The zoom page's slider is what a user would drag, so a screenshot of 2.0 against 1.0 is
+        // otherwise not reproducible from a headless render. --zoom-popup opens one of the popup
+        // surfaces anchored inside that panel, which is the only way to see the scaled wrapper.
+        float? zoom = null;
+        int zoomIndex = Array.IndexOf(args, "--zoom");
+        if (zoomIndex >= 0 &&
+            zoomIndex + 1 < args.Length &&
+            float.TryParse(
+                args[zoomIndex + 1],
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture,
+                out var parsedZoom))
+        {
+            zoom = parsedZoom;
+        }
+
+        string? zoomPopup = null;
+        int popupIndex = Array.IndexOf(args, "--zoom-popup");
+        if (popupIndex >= 0 && popupIndex + 1 < args.Length)
+        {
+            zoomPopup = args[popupIndex + 1];
+        }
+
+        if (zoom is not null || zoomPopup is not null)
+        {
+            return (window, demo) =>
+            {
+                if (zoomPopup is not null)
+                {
+                    demo.ShowZoomPopup(window, zoomPopup, zoom ?? 2f);
+                }
+                else
+                {
+                    demo.SetPanelZoom(zoom!.Value);
+                }
+            };
+        }
 
         if (menu)
         {

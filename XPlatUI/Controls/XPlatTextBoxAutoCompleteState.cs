@@ -446,7 +446,8 @@ internal sealed class XPlatTextBoxAutoCompleteState
             _suppressCompletion = false;
         }
 
-        _popup!.Size = MeasureList(host);
+        _popup!.ScaleFactor = _textBox.EffectiveScaleMultiplier;
+        _popup.Size = MeasureList(host);
         _open = true;
 
         if (wasOpen)
@@ -664,17 +665,22 @@ internal sealed class XPlatTextBoxAutoCompleteState
     private SKSize MeasureList(XPlatUiHost host)
     {
         var area = PlacementArea(host);
-        var measured = _list!.Measure(new SKSize(area.Width, float.PositiveInfinity));
+        var scale = _textBox.EffectiveScaleMultiplier;
+
+        // The list is measured in the content space it will be drawn in, so the room is the
+        // host-space placement area divided by the zoom.
+        var room = new SKSize(area.Width / scale, area.Height / scale);
+        var measured = _list!.Measure(new SKSize(room.Width, float.PositiveInfinity));
 
         // The list draws its own border and padding inside its bounds, so both are part of the
         // height the popup has to make room for, as they are for a combo box.
         float chrome = (_list.BorderWidth * 2f) + _list.Padding.Vertical;
         float rows = MathF.Max(1, _list.ItemCount) * _list.ItemHeight;
-        float height = MathF.Min(rows + chrome, MathF.Min(MaxListHeight, area.Height));
+        float height = MathF.Min(rows + chrome, MathF.Min(MaxListHeight, room.Height));
 
         // As wide as its own rows, unlike a combo box's list: it hangs from the caret rather than
         // filling the field, so a short suggestion does not put a wide blank panel on screen.
-        float width = MathF.Min(measured.Width, area.Width);
+        float width = MathF.Min(measured.Width, room.Width);
 
         return new SKSize(MathF.Max(1f, width), MathF.Max(1f, height));
     }
@@ -682,25 +688,29 @@ internal sealed class XPlatTextBoxAutoCompleteState
     private SKPoint Placement(XPlatUiHost host)
     {
         var area = PlacementArea(host);
+        var scale = _textBox.EffectiveScaleMultiplier;
         var origin = _textBox.GetPositionInHost();
         var caret = _textBox.CaretBounds;
-        var size = _popup!.Size ?? SKSize.Empty;
+        _popup!.ScaleFactor = scale;
+        var size = _popup.Size ?? SKSize.Empty;
+        var onScreen = new SKSize(size.Width * scale, size.Height * scale);
 
         // Under the caret: the list starts where the insertion point is, so it reads as a
         // continuation of what the user is typing rather than as a drop-down of the whole field.
-        float x = origin.X + caret.Left;
-        x = Math.Clamp(x, area.Left, MathF.Max(area.Left, area.Right - size.Width));
+        // The caret and the field's height are the box's own metrics, so they are zoomed too.
+        float x = origin.X + (caret.Left * scale);
+        x = Math.Clamp(x, area.Left, MathF.Max(area.Left, area.Right - onScreen.Width));
 
         // Like a drop-down list, it opens downwards and flips above the field when there is no room
         // below it. In a field that spans lines it hangs from the caret's own line instead, which is
         // the line being edited and may be many lines away from the top or bottom of a tall box. The
         // platform layer still clamps a window popup to the display.
-        float top = origin.Y + (_textBox.IsMultiline ? caret.Top : 0f);
-        float bottom = origin.Y + (_textBox.IsMultiline ? caret.Bottom : _textBox.Height);
+        float top = origin.Y + (_textBox.IsMultiline ? caret.Top * scale : 0f);
+        float bottom = origin.Y + (_textBox.IsMultiline ? caret.Bottom * scale : _textBox.Height * scale);
         float below = bottom;
-        float above = top - size.Height;
-        float y = below + size.Height <= area.Bottom || above < area.Top ? below : above;
-        y = Math.Clamp(y, area.Top, MathF.Max(area.Top, area.Bottom - size.Height));
+        float above = top - onScreen.Height;
+        float y = below + onScreen.Height <= area.Bottom || above < area.Top ? below : above;
+        y = Math.Clamp(y, area.Top, MathF.Max(area.Top, area.Bottom - onScreen.Height));
 
         return new SKPoint(x, y);
     }

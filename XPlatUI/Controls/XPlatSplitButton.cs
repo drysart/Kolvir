@@ -112,20 +112,22 @@ public class XPlatSplitButton : XPlatButton
 
         // The view is built per open, because the presenter owns and disposes it with the popup.
         var view = new XPlatMenuView(Menu);
+        var scale = EffectiveScaleMultiplier;
         var origin = GetPositionInHost();
-        var measured = view.Measure(new SKSize(host.ClientSize.Width, host.ClientSize.Height));
-        var location = new SKPoint(origin.X, origin.Y + Height);
+        var measured = view.Measure(new SKSize(host.ClientSize.Width / scale, host.ClientSize.Height / scale));
+        var onScreen = new SKSize(measured.Width * scale, measured.Height * scale);
+        var location = new SKPoint(origin.X, origin.Y + (Height * scale));
 
         // Flipping above is what a split button at the bottom of a window does. The presenter places
         // the menu inside the display's work area as well, but it does not know which control the
         // menu belongs to.
-        if (location.Y + measured.Height > host.ClientSize.Height && origin.Y - measured.Height >= 0f)
+        if (location.Y + onScreen.Height > host.ClientSize.Height && origin.Y - onScreen.Height >= 0f)
         {
-            location = new SKPoint(origin.X, origin.Y - measured.Height);
+            location = new SKPoint(origin.X, origin.Y - onScreen.Height);
         }
 
         _dropDownOpen = true;
-        _dropDown = XPlatMenuPresenter.ShowMenu(host, view, location, OnDropDownClosed);
+        _dropDown = XPlatMenuPresenter.ShowMenu(host, view, location, OnDropDownClosed, scale);
         Invalidate();
     }
 

@@ -47,6 +47,13 @@ public sealed class DemoUi
     private XPlatControl? _shownPage;
     private XPlatControl? _menuDemoTarget;
     private XPlatTextBox? _undoFocusTarget;
+    private XPlatTrackBar? _zoomSlider;
+    private XPlatPanel? _zoomPanel;
+    private XPlatComboBox? _zoomCombo;
+    private XPlatControl? _zoomMenuTarget;
+    private XPlatControl? _zoomButtonRow;
+    private XPlatButton? _zoomTipTarget;
+    private XPlatToolTip? _zoomToolTip;
     private int _clicks;
 
     // The measured-rendering page. The timer exists only while the page is displayed, and the
@@ -525,6 +532,7 @@ public sealed class DemoUi
         ("Animated WebP", demo => Page(demo.BuildAnimatedWebpDemo())),
         ("WebP frames", demo => Page(demo.BuildWebpFrameDemo())),
         ("Measured rendering", demo => Page(demo.BuildMetricsPage())),
+        ("Zoom", demo => Page(demo.BuildZoomPage())),
     };
 
     /// <summary>
@@ -3012,6 +3020,217 @@ public sealed class DemoUi
         {
             _metricsHost = host;
             host.AddFramePaintedHandler(_ => OnMetricsFramePainted(host));
+        });
+
+        return card;
+    }
+
+    /// <summary>
+    /// Opens one of the popup surfaces anchored inside the zoomed panel, at <paramref name="multiplier"/>,
+    /// so a headless render can show that it is scaled with its owner.
+    /// </summary>
+    /// <param name="window">The window the page is shown in; the context menu and pointer use its host.</param>
+    /// <param name="kind">"dropdown", "menu" or "tooltip".</param>
+    /// <param name="multiplier">The panel's multiplier when the surface is opened.</param>
+    public void ShowZoomPopup(XPlatWindow window, string kind, float multiplier = 2f)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+        ArgumentNullException.ThrowIfNull(kind);
+
+        SetPanelZoom(multiplier);
+
+        switch (kind)
+        {
+            case "dropdown":
+                _zoomPanel?.ScrollTo(0f, 0f);
+                _zoomCombo?.OpenDropDown();
+                break;
+
+            case "menu":
+                if (_zoomMenuTarget is not null)
+                {
+                    _zoomPanel?.ScrollControlIntoView(_zoomMenuTarget);
+                    window.Host.ProcessContextMenu(_zoomMenuTarget.ClientToHost(new SKPoint(24f, 15f)));
+                }
+
+                break;
+
+            case "tooltip":
+                if (_zoomTipTarget is not null && _zoomToolTip is not null)
+                {
+                    _zoomPanel?.ScrollControlIntoView(_zoomButtonRow ?? _zoomTipTarget);
+                    var tipPoint = _zoomTipTarget.ClientToHost(new SKPoint(20f, 12f));
+                    window.Host.ProcessMouseMove(tipPoint);
+                }
+
+                break;
+
+            default:
+                throw new ArgumentOutOfRangeException(nameof(kind), kind, "Expected dropdown, menu or tooltip.");
+        }
+    }
+
+    /// <summary>
+    /// Drives the Zoom page's slider, so a headless render can show a fixed multiplier without a
+    /// click. The value is clamped by the track bar to its own range.
+    /// </summary>
+    public void SetPanelZoom(float multiplier) => _zoomSlider?.Value = multiplier;
+
+    /// <summary>
+    /// Page 55: a panel whose <see cref="XPlatPanel.ScaleFactor"/> zooms its children while its own
+    /// chrome stays put, with a nested panel at the reciprocal multiplier proving that they compose.
+    /// </summary>
+    private XPlatPanel BuildZoomPage()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Panel zoom"));
+
+        var readout = ScrollCaption("Panel 1.00x - nested 1.00x - effective 1.00x");
+        readout.Height = 18f;
+        card.Controls.Add(readout);
+
+        var zoomed = new XPlatPanel
+        {
+            Dock = XDock.Fill,
+            ShowFrame = true,
+            IsCard = true,
+            Padding = new XPlatThickness(0f),
+            HorizontalScroll = XPlatScrollStyle.Automatic,
+            VerticalScroll = XPlatScrollStyle.Automatic,
+            Margin = new XPlatThickness(0f, 8f, 0f, 0f),
+        };
+        _zoomPanel = zoomed;
+
+        // The nested panel carries the reciprocal multiplier, so its children see the same logical
+        // space at every position of the slider: the two multipliers cancel.
+        var nested = new XPlatPanel
+        {
+            Bounds = new SKRect(8f, 8f, 348f, 96f),
+        };
+
+        // The nested panel's box is in its parent's content units, so it draws bigger as the
+        // slider goes up; its one child is a fixed-height row, so the button inside it is exactly
+        // the same size at every multiplier. That is what "nested 0.50x" cancelling "panel 2.00x"
+        // means, and it is why the row is here instead of the button being docked straight in: a
+        // docked button would stretch along the axis the panel hands it more space on.
+        var nestedRow = Row(34f);
+        nestedRow.Margin = new XPlatThickness(0f);
+        var nestedButton = new XPlatButton("Nested button")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+        };
+        nestedRow.Controls.Add(nestedButton);
+        nested.Controls.Add(nestedRow);
+
+        var combo = new XPlatComboBox
+        {
+            Bounds = new SKRect(8f, 104f, 208f, 134f),
+        };
+        combo.Items.Add("First row");
+        combo.Items.Add("Second row");
+        combo.Items.Add("A longer third row");
+        combo.Items.Add("Fourth row");
+        combo.SelectedIndex = 0;
+        _zoomCombo = combo;
+
+        var caption = new XPlatLabel(
+            "A 14 px label, a 20 px button and a 30 px text box all follow the subtree multiplier. " +
+            "The panel's border, padding, corner radius and scrollbar do not zoom. The boxed panel " +
+            "above carries the reciprocal multiplier, so its button never changes size.")
+        {
+            Bounds = new SKRect(8f, 142f, 348f, 208f),
+            AutoSize = false,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        };
+
+        var buttonRow = Row(34f);
+        buttonRow.Dock = XDock.None;
+        buttonRow.Margin = new XPlatThickness(0f);
+        buttonRow.Bounds = new SKRect(8f, 214f, 348f, 248f);
+        _zoomButtonRow = buttonRow;
+        var buttonA = new XPlatButton("A button")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        buttonRow.Controls.Add(buttonA);
+        buttonRow.Controls.Add(new XPlatButton("Another")
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+        });
+
+        var edit = new XPlatTextBox
+        {
+            Bounds = new SKRect(8f, 256f, 308f, 286f),
+            PlaceholderText = "Type at any zoom",
+        };
+
+        var image = new XPlatImage
+        {
+            Bounds = new SKRect(320f, 256f, 480f, 356f),
+            Dock = XDock.None,
+            AutoSize = false,
+            SizeMode = XPlatSizeMode.StretchImage,
+            // The source has the same 8:5 shape as the box and a caption drawn well inside its
+            // edges, so the picture is whole and legible at every multiplier.
+            Image = Images.LoadFromStream(CreateGradientPng(320, 200)),
+        };
+
+        // Controls that leave the panel's canvas for a top-level window of their own. The combo
+        // carries a context menu and the first button a tooltip, so both surfaces can be opened
+        // from inside the zoomed panel and shown to inherit its multiplier.
+        combo.ContextMenu = new XPlatContextMenu().Add("Zoomed row").Add("Another row");
+        _zoomMenuTarget = combo;
+
+        zoomed.Controls.Add(nested);
+        zoomed.Controls.Add(combo);
+        zoomed.Controls.Add(caption);
+        zoomed.Controls.Add(buttonRow);
+        zoomed.Controls.Add(edit);
+        zoomed.Controls.Add(image);
+
+        var toolTip = new XPlatToolTip { InitialDelay = 0, AutoPopDelay = 0 };
+        toolTip.SetToolTip(buttonA, "This tip is painted at the panel's multiplier.");
+        _zoomToolTip = toolTip;
+        _zoomTipTarget = buttonA;
+
+        var sliderRow = Row(42f);
+        var slider = new XPlatTrackBar
+        {
+            Dock = XDock.Fill,
+            Minimum = 0.5f,
+            Maximum = 3f,
+            Value = 1f,
+            SmallChange = 0.05f,
+            LargeChange = 0.25f,
+            TickFrequency = 0.5f,
+        };
+        sliderRow.Controls.Add(slider);
+        _zoomSlider = slider;
+
+        card.Controls.Add(sliderRow);
+        card.Controls.Add(zoomed);
+
+        slider.AddValueChangedHandler(_ =>
+        {
+            float multiplier = slider.Value;
+            float reciprocal = 1f / multiplier;
+
+            zoomed.ScaleFactor = multiplier;
+            nested.ScaleFactor = reciprocal;
+
+            readout.Text =
+                $"Panel {multiplier:0.00}x - nested {reciprocal:0.00}x - effective {multiplier * reciprocal:0.00}x";
+
+            SetStatus(
+                "The panel's children zoom with the slider; its chrome and scrollbar do not. " +
+                "The nested panel cancels the multiplier, so its own content is unchanged.");
         });
 
         return card;

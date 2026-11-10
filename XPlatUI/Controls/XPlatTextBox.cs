@@ -483,8 +483,9 @@ public class XPlatTextBox : XPlatControl
         {
             if (ReferenceEquals(args.Control, this))
             {
-                var origin = GetPositionInHost();
-                args.Hit = spans.HitTest(this, new SKPoint(args.Location.X - origin.X, args.Location.Y - origin.Y));
+                // The event carries a host-space point; the spans live in this control's own
+                // space, which a zoomed ancestor has scaled.
+                args.Hit = spans.HitTest(this, HostToClient(args.Location));
             }
             else
             {

@@ -230,16 +230,7 @@ internal sealed class XPlatDragDropRouter
 
     private XPlatControl? HitTest(SKPoint location) => _host.Root?.HitTest(location);
 
-    private static SKPoint ToLocal(XPlatControl control, SKPoint point)
-    {
-        var local = point;
-        for (var current = control; current is not null; current = current.Parent)
-        {
-            local = new SKPoint(local.X - current.Left, local.Y - current.Top);
-        }
-
-        return local;
-    }
+    private static SKPoint ToLocal(XPlatControl control, SKPoint point) => control.HostToClient(point);
 
     /// <summary>
     /// Runs an entry point a backend calls from a platform callback, so a failure reaches

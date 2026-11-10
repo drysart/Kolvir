@@ -372,7 +372,10 @@ public class XPlatStackPanel : XPlatPanel
 
         bool vertical = Orientation == XPlatStackOrientation.Vertical;
         var offset = ContentOffset;
-        var viewport = ContentViewport;
+
+        // The run's slot positions and the offset are content space, so the viewport is taken in
+        // that space too: a zoomed panel's viewport covers less content than panel space.
+        var viewport = ContentViewportInContentSpace;
 
         // Content is painted at the offset, so a child is on screen when its own band, shifted by
         // the offset, overlaps the viewport.
