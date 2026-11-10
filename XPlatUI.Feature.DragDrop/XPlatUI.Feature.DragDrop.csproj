@@ -36,6 +36,13 @@
        core library are untouched. -->
   <ItemGroup>
     <InternalsVisibleTo Include="XPlatUI.Feature.DragDrop.Tests" />
+    <!-- The demo's "Drag/drop lifetime" page reads the reference-count diagnostic that
+         windows/Win32DropReferenceTrace.cs publishes. That type is internal on purpose: the count of
+         a borrowed data object is a diagnostic, not something an application should build on, so the
+         grant is to the one assembly that has to display it rather than a public surface. The name
+         has to be the demo's assembly identity, which its csproj overrides to XPlatUIDemoApp; the
+         namespace XPlatUI.Demo.App would grant nothing. -->
+    <InternalsVisibleTo Include="XPlatUIDemoApp" />
   </ItemGroup>
 
   <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,

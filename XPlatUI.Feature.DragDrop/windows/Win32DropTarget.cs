@@ -43,6 +43,11 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     private nint* _object;
     private XPlatDataObject? _data;
 
+    // The borrowed pointer DragEnter was handed, kept only so DragOver - which receives no data
+    // object at all - can sample the same object's reference count. Nothing is ever released
+    // through it: the shell owns the reference for the whole drag.
+    private IntPtr _dataObject;
+
     /// <summary>Creates the drop target of a window.</summary>
     /// <param name="window">The window the target belongs to.</param>
     /// <param name="router">The router that turns what the shell reports into control events.</param>
@@ -126,7 +131,14 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         try
         {
+            _dataObject = dataObject;
             _data = Read(dataObject);
+
+            // Sampled after the read, so the count is what the feature leaves behind for this event
+            // rather than what it is holding while it works: in a correct implementation reading the
+            // object is arithmetic-neutral and the drag's samples never move.
+            Win32DropReferenceTrace.Record(Win32DropReferenceTrace.EnterEvent, dataObject);
+
             effect = _data is null
                 ? Win32DropNativeMethods.DropEffectNone
                 : (uint)_router.DragEnter(_window.ScreenToLogical(point.X, point.Y), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
@@ -146,6 +158,8 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         try
         {
+            Win32DropReferenceTrace.Record(Win32DropReferenceTrace.OverEvent, _dataObject);
+
             if (_data is null)
             {
                 effect = Win32DropNativeMethods.DropEffectNone;
@@ -177,6 +191,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
 
         _data = null;
+        _dataObject = IntPtr.Zero;
         return Win32DropNativeMethods.SOk;
     }
 
@@ -188,6 +203,12 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             // The data object handed to Drop is the authority: read it again rather than trusting
             // whatever was cached at DragEnter, which a source is allowed to have replaced.
             var data = Read(dataObject) ?? _data;
+
+            // The second conversion of this pointer, sampled so the page can tell it apart from the
+            // one at DragEnter. It is where the defect used to show first: the cached marshaller
+            // released the borrowed reference on this path instead of at finalization.
+            Win32DropReferenceTrace.Record(Win32DropReferenceTrace.DropEvent, dataObject);
+
             effect = data is null
                 ? Win32DropNativeMethods.DropEffectNone
                 : (uint)_router.DragDrop(_window.ScreenToLogical(point.X, point.Y), data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
@@ -199,6 +220,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
 
         _data = null;
+        _dataObject = IntPtr.Zero;
         return Win32DropNativeMethods.SOk;
     }
 
@@ -396,6 +418,10 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     }
 
     /// <summary>Reads everything the library understands out of a dragged data object.</summary>
+    /// <remarks>
+    /// The pointer OLE passes is borrowed: the shell owns that reference and keeps using the object
+    /// for the rest of the drag, so this method must leave the count exactly as it found it.
+    /// </remarks>
     private static unsafe XPlatDataObject? Read(IntPtr dataObject)
     {
         if (dataObject == IntPtr.Zero)
@@ -403,9 +429,39 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             return null;
         }
 
-        var com = ComInterfaceMarshaller<IComDataObject>.ConvertToManaged((void*)dataObject);
+        // A wrapper takes ownership of whatever reference it is handed and releases it when it is
+        // finished, so the feature hands it one of its own rather than OLE's. Without this the
+        // wrapper believes it owns the shell's reference and decrements a count it never
+        // incremented when it is released - freeing an object the shell is still calling.
+        if (Marshal.AddRef(dataObject) <= 0)
+        {
+            return null;
+        }
+
+        // A unique wrapper is not cached and does not share a reference with any other conversion of
+        // the same pointer, which is what makes the release below deterministic. The cached wrapper
+        // ComInterfaceMarshaller returns cannot be released early at all: ComObject.FinalRelease()
+        // does nothing unless the object was created with CreateObjectFlags.UniqueInstance.
+        //
+        // Converting throws rather than returning null when the object does not answer the
+        // QueryInterface for IComDataObject, and the reference taken above is ours to give back on
+        // that path as well - otherwise a source offering an object the library cannot read leaks
+        // it. No test can reach this without a deliberately broken data object, which is why the
+        // guard lives here and the suite has no fake for it.
+        IComDataObject? com;
+        try
+        {
+            com = UniqueComInterfaceMarshaller<IComDataObject>.ConvertToManaged((void*)dataObject);
+        }
+        catch
+        {
+            Marshal.Release(dataObject);
+            throw;
+        }
+
         if (com is null)
         {
+            Marshal.Release(dataObject);
             return null;
         }
 
@@ -426,20 +482,13 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
         finally
         {
-            // The pointer this wrapper came from is borrowed: IDropTarget is handed it by OLE, which
-            // owns that reference and keeps using the object after this callback returns. The
-            // generated wrapper is a ComObject, which is not IDisposable, so this call is a no-op -
-            // and it has to stay one. Releasing here (with FinalRelease, say) would drop OLE's
-            // reference synchronously, in the middle of a drag that still has DragOver calls and a
-            // Drop to come, which over-releases a live object.
-            //
-            // That is the real defect: ConvertToManaged takes ownership of whatever reference it is
-            // given and does not AddRef, so the wrapper believes it owns OLE's reference and
-            // eventually releases one it never took, at finalization. The fix is to give the
-            // wrapper a reference of its own first - an AddRef on the borrowed pointer before
-            // ConvertToManaged, once that is done - and it needs a real OLE drop to verify, so it is
-            // not this change. Do not simply swap this line for FinalRelease.
-            (com as IDisposable)?.Dispose();
+            // Drops exactly the reference taken above, inside this call: OLE keeps its own, and the
+            // count the drop target samples is the same before and after every read. The runtime
+            // object behind the interface is the generated wrapper, which is always a ComObject.
+            if ((object)com is ComObject wrapper)
+            {
+                wrapper.FinalRelease();
+            }
         }
 
         // An empty object is still a drag: the source may be offering a format the library has no

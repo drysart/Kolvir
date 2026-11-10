@@ -3066,6 +3066,15 @@ control cannot claim a move the source never offered. All of that routing lives 
 The demo turns the whole window into a drop target: dropping files prints their names on the status
 line, and dropping text prints the first sixty characters.
 
+The `IDataObject*` a Win32 drop target is handed is borrowed: the shell owns that reference and keeps
+using the object for the rest of the drag, so the feature takes one of its own before wrapping it and
+releases exactly that before returning. Page 56, **Drag/drop lifetime**, measures that contract: it
+samples the object's live reference count at `DragEnter`, every `DragOver` and `Drop` with a net-zero
+`AddRef`/`Release` pair, shows the sequence and the verdict - the count must never fall during a drag -
+and says FAIL with the numbers when it does. `XPLATUI_DRAG_TRACE=1` writes the same samples to
+standard error. Its "Collect during drag" toggle forces a collection on every drag-over, which is what
+pulls a wrapper's finalizer into the middle of a drag instead of leaving the damage to chance.
+
 #### Migrating from the old surface
 
 Setting `AllowDrop` and subscribing to the four drag handlers used to be members of `XPlatControl`.
