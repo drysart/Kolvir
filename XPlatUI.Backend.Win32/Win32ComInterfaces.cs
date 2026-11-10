@@ -166,8 +166,12 @@ internal partial interface IFileDialog : IModalWindow
     void SetFileNameLabel([MarshalAs(UnmanagedType.LPWStr)] string label);
 
     /// <summary>Gets what the user chose. Only valid after <see cref="IModalWindow.Show"/> succeeded.</summary>
-    /// <param name="item">Receives the chosen item.</param>
-    void GetResult(out IShellItem item);
+    /// <param name="item">
+    /// Receives a reference the caller owns. It is a raw pointer rather than an
+    /// <see cref="IShellItem"/> so that the caller decides how the reference is wrapped: the wrapper
+    /// it builds must be a unique instance for <c>ComObject.FinalRelease</c> to release it.
+    /// </param>
+    void GetResult(out IntPtr item);
 
     /// <summary>Not used; declared to keep the vtable aligned.</summary>
     /// <param name="item">Unused.</param>
