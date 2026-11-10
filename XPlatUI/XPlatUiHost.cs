@@ -1339,7 +1339,7 @@ public sealed class XPlatUiHost
             if (current.Parent is { } parent)
             {
                 var offset = parent.GetChildOffset(current);
-                var multiplier = parent.ChildScaleMultiplier;
+                var multiplier = parent.GetChildScaleFactor(current);
                 point = new SKPoint(
                     (point.X + offset.X) * multiplier,
                     (point.Y + offset.Y) * multiplier);
@@ -1496,7 +1496,7 @@ public sealed class XPlatUiHost
             {
                 // The inverse of ToHost: undo the zoom first, then the child's own position and
                 // the content offset that was added before it.
-                var multiplier = parent.ChildScaleMultiplier;
+                var multiplier = parent.GetChildScaleFactor(current);
                 if (multiplier != 1f)
                 {
                     local = new SKPoint(local.X / multiplier, local.Y / multiplier);

@@ -398,6 +398,152 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
         Assert.IsTrue(wrapper.Width > 40f, "and the popup is wider than the unzoomed menu would be");
     }
 
+    [TestMethod]
+    public void TheScrollBarOfAZoomedPanelIsNotZoomed()
+    {
+        var panel = ScrollingPanel(2f);
+        using var scene = HeadlessScene.Create(panel, 100f, 100f);
+
+        var point = new SKPoint(BarX(panel), 95f);
+        var bar = panel.HitTest(point);
+
+        Assert.IsInstanceOfType<XPlatScrollBar>(bar, "the point is on the vertical bar");
+        Assert.AreEqual(
+            1f,
+            bar!.EffectiveScaleMultiplier,
+            0.0001f,
+            "the bar is panel-space chrome, so no multiplier applies to it");
+        Assert.AreEqual(
+            new SKPoint(point.X - bar.Left, point.Y - bar.Top),
+            bar.HostToClient(point),
+            "a host point reaches the bar as the panel-space point the bar laid itself out in");
+        Assert.AreEqual(
+            2f,
+            panel.Controls[0].EffectiveScaleMultiplier,
+            0.0001f,
+            "while the content beside it is still zoomed");
+    }
+
+    [TestMethod]
+    public void ClickingAZoomedPanelsScrollBarArrowStepsInsteadOfPaging()
+    {
+        // The increment arrow is the last 16 panel px of the bar at every multiplier, because the
+        // bars are panel space. A press there must step by the small change, not page.
+        var reference = ScrollDeltaFromClick(1f, new SKPoint(0f, 95f));
+        Assert.IsTrue(reference > 0f, "the arrow scrolls the panel");
+
+        Assert.AreEqual(
+            reference,
+            ScrollDeltaFromClick(2f, new SKPoint(0f, 95f)) * 2f,
+            0.01f,
+            "at 2.0 the same arrow is still under the pointer, and one step in panel space is half that in child space");
+
+        Assert.AreEqual(
+            reference,
+            ScrollDeltaFromClick(0.5f, new SKPoint(0f, 95f)) * 0.5f,
+            0.01f,
+            "and at 0.5, where halving the point instead of leaving it alone would miss the bar entirely");
+    }
+
+    [TestMethod]
+    public void ClickingAZoomedPanelsScrollBarTroughPagesByOneViewport()
+    {
+        var reference = ScrollDeltaFromClick(1f, new SKPoint(0f, 60f));
+        Assert.IsTrue(reference > 0f, "the trough below the thumb pages the panel");
+
+        Assert.AreEqual(
+            reference,
+            ScrollDeltaFromClick(2f, new SKPoint(0f, 60f)) * 2f,
+            0.01f,
+            "the trough is at the same panel-space point at 2.0");
+
+        Assert.AreEqual(
+            reference,
+            ScrollDeltaFromClick(0.5f, new SKPoint(0f, 60f)) * 0.5f,
+            0.01f,
+            "and at 0.5, where doubling the point would fall outside the bar");
+    }
+
+    [TestMethod]
+    public void DraggingAZoomedPanelsScrollBarThumbFollowsThePointer()
+    {
+        var reference = ScrollDeltaFromDrag(1f);
+        Assert.IsTrue(reference > 0f, "the thumb drag scrolls the panel");
+
+        // A drag of 40 panel px moves the thumb 40 panel px, so the content moves by the same
+        // amount whatever the multiplier is - the same distance the pointer travelled.
+        Assert.AreEqual(
+            reference,
+            ScrollDeltaFromDrag(2f) * 2f,
+            0.5f,
+            "a 40 px drag is 40 px of thumb travel at 2.0, which is half as many child px");
+
+        Assert.AreEqual(
+            reference,
+            ScrollDeltaFromDrag(0.5f) * 0.5f,
+            0.5f,
+            "and at 0.5 the thumb still follows the pointer rather than racing ahead of it");
+    }
+
+    /// <summary>
+    /// Presses and releases the pointer on a bar at <paramref name="panelPoint"/>, given in the
+    /// panel's own coordinates, and returns how far the panel scrolled in its child space.
+    /// </summary>
+    private static float ScrollDeltaFromClick(float scaleFactor, SKPoint panelPoint)
+    {
+        var panel = ScrollingPanel(scaleFactor);
+        using var scene = HeadlessScene.Create(panel, 100f, 100f);
+
+        var point = new SKPoint(BarX(panel) + panelPoint.X, panelPoint.Y);
+        scene.Host.ProcessMouseMove(point);
+        scene.Host.ProcessMouseDown(point, XPlatMouseButtons.Left, XPlatModifiers.None);
+        scene.Host.ProcessMouseUp(point, XPlatMouseButtons.Left, XPlatModifiers.None);
+
+        return panel.VerticalOffset;
+    }
+
+    /// <summary>
+    /// Presses the thumb 12 panel px into it and drags 40 panel px down, then returns how far the
+    /// panel scrolled in its child space.
+    /// </summary>
+    private static float ScrollDeltaFromDrag(float scaleFactor)
+    {
+        var panel = ScrollingPanel(scaleFactor);
+        using var scene = HeadlessScene.Create(panel, 100f, 100f);
+
+        var x = BarX(panel);
+        var start = new SKPoint(x, 28f);
+        var end = new SKPoint(x, 68f);
+
+        scene.Host.ProcessMouseMove(start);
+        scene.Host.ProcessMouseDown(start, XPlatMouseButtons.Left, XPlatModifiers.None);
+        scene.Host.ProcessMouseMove(end);
+        scene.Host.ProcessMouseUp(end, XPlatMouseButtons.Left, XPlatModifiers.None);
+
+        return panel.VerticalOffset;
+    }
+
+    /// <summary>
+    /// A panel with a vertical bar whose content is twice its viewport in <em>panel</em> space at
+    /// every multiplier, so the bar's own geometry - track, thumb, arrows, page step - is identical
+    /// whatever the zoom, and only the coordinate mapping can differ between them.
+    /// </summary>
+    private static XPlatPanel ScrollingPanel(float scaleFactor)
+    {
+        var content = Solid(Red);
+        content.Bounds = new SKRect(0f, 0f, 40f, 400f / scaleFactor);
+
+        var panel = Group();
+        panel.HorizontalScroll = XPlatScrollStyle.None;
+        panel.VerticalScroll = XPlatScrollStyle.Always;
+        panel.ScaleFactor = scaleFactor;
+        panel.Controls.Add(content);
+        return panel;
+    }
+
+    /// <summary>The middle of the vertical bar, which sits in the right-hand gutter in panel space.</summary>
+    private static float BarX(XPlatPanel panel) => 100f - (panel.ScrollBarThickness / 2f);
+
     private static XPlatPanel Group() => new()
     {
         ShowFrame = false,

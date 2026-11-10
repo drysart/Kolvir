@@ -412,6 +412,22 @@ public class XPlatControl : IDisposable
     protected internal virtual float ChildScaleMultiplier => 1f;
 
     /// <summary>
+    /// The zoom multiplier between this control and one of its children, which is
+    /// <see cref="ChildScaleMultiplier"/> unless the container lays some children out in its own
+    /// space instead of the zoomed space of its subtree.
+    /// </summary>
+    /// <remarks>
+    /// An <see cref="XPlatPanel"/> overrides this to report 1 for its scrollbars: the bars are
+    /// panel-space chrome, like the border and the padding, so they are neither painted nor hit
+    /// tested under the zoom. A control that is a <see cref="Parent"/> without being in
+    /// <see cref="Controls"/> - which is how the bars are attached - gets its coordinates mapped by
+    /// this rather than by <see cref="ChildScaleMultiplier"/>, so the paint translation and the
+    /// input translation cannot disagree.
+    /// </remarks>
+    /// <param name="child">The child whose coordinate space is being mapped.</param>
+    protected internal virtual float GetChildScaleFactor(XPlatControl child) => ChildScaleMultiplier;
+
+    /// <summary>
     /// The product of <see cref="XPlatPanel.ScaleFactor"/> for every zoomed container above this
     /// control: the multiplier between this control's own coordinate space and the host's.
     /// </summary>
@@ -435,9 +451,9 @@ public class XPlatControl : IDisposable
         {
             float multiplier = 1f;
 
-            for (var parent = Parent; parent is not null; parent = parent.Parent)
+            for (var current = this; current.Parent is { } parent; current = parent)
             {
-                multiplier *= parent.ChildScaleMultiplier;
+                multiplier *= parent.GetChildScaleFactor(current);
             }
 
             return multiplier;
@@ -540,7 +556,7 @@ public class XPlatControl : IDisposable
             if (current.Parent is { } parent)
             {
                 var offset = parent.GetChildOffset(current);
-                var multiplier = parent.ChildScaleMultiplier;
+                var multiplier = parent.GetChildScaleFactor(current);
 
                 // The parent's zoom applies to the child's position as well as its size: a child
                 // laid out at x = 30 inside a panel at 2.0 sits 60 px into that panel.

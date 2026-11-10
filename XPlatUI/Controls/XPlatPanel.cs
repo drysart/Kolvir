@@ -286,6 +286,15 @@ public class XPlatPanel : XPlatControl
     protected internal override SKPoint GetChildOffset(XPlatControl child) =>
         _scroll.IsBar(child) ? SKPoint.Empty : ContentOffset;
 
+    /// <summary>
+    /// The zoom applied to a child's coordinates. The scrollbars are panel-space chrome, exactly
+    /// like the border and the padding: they are positioned, painted and hit tested without the
+    /// multiplier, so a click that lands on a bar must arrive as the panel-space point the bar laid
+    /// itself out in. Every other child is in the zoomed content space.
+    /// </summary>
+    protected internal override float GetChildScaleFactor(XPlatControl child) =>
+        _scroll.IsBar(child) ? 1f : _scaleFactor;
+
     /// <summary>The area scrolled content is clipped to, in this panel's client coordinates.</summary>
     protected SKRect ContentViewport => _scroll.EffectiveViewport(ContentBounds);
 
