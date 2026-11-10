@@ -43,6 +43,11 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     private nint* _object;
     private XPlatDataObject? _data;
 
+    // The borrowed pointer DragEnter was handed, kept only so DragOver - which receives no data
+    // object at all - can sample the same object's reference count. Nothing is ever released
+    // through it: the shell owns the reference for the whole drag.
+    private IntPtr _dataObject;
+
     /// <summary>Creates the drop target of a window.</summary>
     /// <param name="window">The window the target belongs to.</param>
     /// <param name="router">The router that turns what the shell reports into control events.</param>
@@ -126,7 +131,14 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         try
         {
+            _dataObject = dataObject;
             _data = Read(dataObject);
+
+            // Sampled after the read, so the count is what the feature leaves behind for this event
+            // rather than what it is holding while it works: in a correct implementation reading the
+            // object is arithmetic-neutral and the drag's samples never move.
+            Win32DropReferenceTrace.Record(Win32DropReferenceTrace.EnterEvent, dataObject);
+
             effect = _data is null
                 ? Win32DropNativeMethods.DropEffectNone
                 : (uint)_router.DragEnter(_window.ScreenToLogical(point.X, point.Y), _data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
@@ -146,6 +158,8 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     {
         try
         {
+            Win32DropReferenceTrace.Record(Win32DropReferenceTrace.OverEvent, _dataObject);
+
             if (_data is null)
             {
                 effect = Win32DropNativeMethods.DropEffectNone;
@@ -177,6 +191,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
 
         _data = null;
+        _dataObject = IntPtr.Zero;
         return Win32DropNativeMethods.SOk;
     }
 
@@ -188,6 +203,11 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
             // The data object handed to Drop is the authority: read it again rather than trusting
             // whatever was cached at DragEnter, which a source is allowed to have replaced.
             var data = Read(dataObject) ?? _data;
+
+            // The second read of this pointer, and the sample that shows what it cost: the wrapper
+            // cache releases the incoming reference here rather than at finalization.
+            Win32DropReferenceTrace.Record(Win32DropReferenceTrace.DropEvent, dataObject);
+
             effect = data is null
                 ? Win32DropNativeMethods.DropEffectNone
                 : (uint)_router.DragDrop(_window.ScreenToLogical(point.X, point.Y), data, (XPlatDragDropEffects)effect, ModifiersOf(keyState));
@@ -199,6 +219,7 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
 
         _data = null;
+        _dataObject = IntPtr.Zero;
         return Win32DropNativeMethods.SOk;
     }
 
@@ -396,6 +417,10 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
     }
 
     /// <summary>Reads everything the library understands out of a dragged data object.</summary>
+    /// <remarks>
+    /// The pointer OLE passes is borrowed: the shell owns that reference and keeps using the object
+    /// for the rest of the drag, so this method must leave the count exactly as it found it.
+    /// </remarks>
     private static unsafe XPlatDataObject? Read(IntPtr dataObject)
     {
         if (dataObject == IntPtr.Zero)

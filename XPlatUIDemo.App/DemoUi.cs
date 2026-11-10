@@ -54,6 +54,30 @@ public sealed class DemoUi
     private XPlatControl? _zoomButtonRow;
     private XPlatButton? _zoomTipTarget;
     private XPlatToolTip? _zoomToolTip;
+
+    // The drag/drop lifetime page. The counts come from the feature's own diagnostic
+    // (Win32DropReferenceTrace, reached through InternalsVisibleTo) and the collection is forced
+    // here, in the demo, because that is the only way to pull a wrapper's finalizer into the middle
+    // of a drag: the library must not garbage collect on an application's behalf.
+    private XPlatCheckBox? _dragLifetimeCollect;
+    private XPlatLabel? _dragLifetimeCurrent;
+    private XPlatLabel? _dragLifetimeSequence;
+    private XPlatLabel? _dragLifetimeCounts;
+    private XPlatLabel? _dragLifetimeVerdict;
+    private XPlatLabel? _dragLifetimePayload;
+    private XPlatTextBox? _dragLifetimeLog;
+    private readonly List<int> _dragLifetimeSamples = [];
+    private readonly List<(string Time, string Text)> _dragLifetimeEvents = [];
+    private int _dragLifetimeMinimum;
+    private bool _dragLifetimeFell;
+    private int _dragLifetimeFallFrom;
+    private int _dragLifetimeFallTo;
+    private string? _dragLifetimeFallEvent;
+    private IntPtr _dragLifetimePointer;
+    private string? _dragLifetimeLastEvent;
+    private int _dragLifetimeDrops;
+    private string? _dragLifetimeFirstPayload;
+    private string? _dragLifetimeSecondPayload;
     private int _clicks;
 
     // The measured-rendering page. The timer exists only while the page is displayed, and the
@@ -533,6 +557,7 @@ public sealed class DemoUi
         ("WebP frames", demo => Page(demo.BuildWebpFrameDemo())),
         ("Measured rendering", demo => Page(demo.BuildMetricsPage())),
         ("Zoom", demo => Page(demo.BuildZoomPage())),
+        ("Drag/drop lifetime", demo => Page(demo.BuildDragLifetimePage())),
     };
 
     /// <summary>
@@ -3234,6 +3259,376 @@ public sealed class DemoUi
         });
 
         return card;
+    }
+
+    /// <summary>
+    /// Page 56: the Win32 drag/drop reference-count defect, measured rather than described.
+    /// </summary>
+    /// <remarks>
+    /// The shell owns the dragged data object and lends the drop target an <c>IDataObject*</c> for
+    /// the duration of a drag. A wrapper created over that borrowed pointer believes it owns the
+    /// reference and releases it later, so the live count falls - during a drag if a collection
+    /// pulls the finalizer forward, or on the second conversion of the same pointer, which is what
+    /// the <c>Drop</c> sample shows. This page samples the count at every OLE entry point and states
+    /// the criterion: it must never fall.
+    /// </remarks>
+    private XPlatPanel BuildDragLifetimePage()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Drag/drop lifetime"));
+
+        // Says, on every platform, whether the numbers below mean anything here.
+#if WINDOWS
+        const string platformNote =
+            "Win32 only. macOS and GTK4 hand a drag to the feature by a different mechanism, so this " +
+            "page cannot measure them and shows no samples there.";
+#else
+        const string platformNote =
+            "Informational on this platform. The defect is Win32 specific - the drag/drop feature uses " +
+            "a different mechanism here - so no reference count is sampled and no verdict is reached.";
+#endif
+
+        card.Controls.Add(new XPlatLabel(platformNote)
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 32f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            Margin = new XPlatThickness(0f, 0f, 0f, 6f),
+        });
+
+        card.Controls.Add(new XPlatLabel(
+            "Drag files from Explorer into the box below, then drag a text selection (select some text " +
+            "in a browser or Notepad and drag it): the two sources hand over data objects with " +
+            "different reference counts. Drop something different the second time - the second drop is " +
+            "what shows the over-release's other symptom, a payload that is stale or gone.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 48f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+
+        _dragLifetimeCollect = new XPlatCheckBox("Collect during drag")
+        {
+            Dock = XDock.Top,
+            Checked = true,
+            AutoSize = true,
+            Margin = new XPlatThickness(0f, 0f, 0f, 4f),
+        };
+        card.Controls.Add(_dragLifetimeCollect);
+
+        card.Controls.Add(new XPlatLabel(
+            "With this on, every drag-over forces a blocking gen-2 collection, which is what pulls the " +
+            "wrapper's finalizer into the middle of the drag instead of leaving it to chance. Turn it " +
+            "off to measure the other failure: the second conversion of the same pointer, at Drop. A " +
+            "drop that never arrives at all is the same defect further along - the object was already gone. " +
+            "With collection off the count can still look flat, because the shell takes its own reference " +
+            "for the drop at the moment the wrapper cache gives the borrowed one back: the two cancel, and " +
+            "the dip hides in the arithmetic instead of disappearing.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 64f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        });
+
+        var zone = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 76f,
+            ShowFrame = true,
+            IsCard = true,
+            CornerRadius = 8f,
+            Padding = new XPlatThickness(8f),
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        };
+        zone.Controls.Add(new XPlatLabel("Drop files or text here")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            TextAlign = XPlatContentAlignment.MiddleCenter,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        });
+
+        // The zone is the measured area; the window itself already takes drops, so a drag that
+        // lands on the navigation list is sampled too, but only this control forces a collection.
+        zone.AllowDrop = true;
+        zone.AddDragEnterHandler((_, e) => OnDragLifetimeEnter(e));
+        zone.AddDragOverHandler((_, e) => OnDragLifetimeOver(e));
+        zone.AddDragDropHandler((_, e) => OnDragLifetimeDrop(e));
+        card.Controls.Add(zone);
+
+        _dragLifetimeCurrent = Readout("Current sample: none yet");
+        _dragLifetimeSequence = Readout("This drag: -");
+        _dragLifetimeCounts = Readout("Minimum this drag: -   Drops this session: 0");
+        _dragLifetimeVerdict = new XPlatLabel(
+            "Waiting: the reference count must never fall during a drag.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 34f,
+            WrapText = true,
+            Font = XPlatTheme.EmphasizedFont,
+            Margin = new XPlatThickness(0f, 4f, 0f, 4f),
+        };
+        _dragLifetimePayload = new XPlatLabel("Drop 1: -   Drop 2: -")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 34f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            Margin = new XPlatThickness(0f, 0f, 0f, 4f),
+        };
+        card.Controls.Add(_dragLifetimeCurrent);
+        card.Controls.Add(_dragLifetimeSequence);
+        card.Controls.Add(_dragLifetimeCounts);
+        card.Controls.Add(_dragLifetimeVerdict);
+        card.Controls.Add(_dragLifetimePayload);
+
+        _dragLifetimeLog = new XPlatTextBox
+        {
+            Dock = XDock.Fill,
+            Multiline = true,
+            ReadOnly = true,
+            WordWrap = false,
+            Font = XPlatTheme.CaptionFont,
+            Text = "Drag something over the window: the last 12 samples appear here.",
+        };
+        card.Controls.Add(_dragLifetimeLog);
+
+#if WINDOWS
+        // One subscription for the life of the window: the trace belongs to the feature, not to the
+        // page, and the samples keep arriving while another page is shown.
+        Win32DropReferenceTrace.Sampled += OnDragReferenceSampled;
+#endif
+
+        return card;
+    }
+
+    /// <summary>Builds one line of the lifetime page's readouts.</summary>
+    private static XPlatLabel Readout(string text) => new(text)
+    {
+        Dock = XDock.Top,
+        AutoSize = false,
+        Height = 18f,
+        Font = XPlatTheme.CaptionFont,
+        TextAlign = XPlatContentAlignment.BottomLeft,
+    };
+
+    /// <summary>Records a sample the feature took, and rebuilds what the page shows.</summary>
+#if WINDOWS
+    private void OnDragReferenceSampled(Win32DropReferenceSample sample)
+    {
+        // A new drag starts with the count the shell handed over, so the baseline is per drag: two
+        // different data objects need not have the same count, and comparing across drags would
+        // report a fall that never happened.
+        if (sample.Event == Win32DropReferenceTrace.EnterEvent || _dragLifetimeSamples.Count == 0)
+        {
+            _dragLifetimeSamples.Clear();
+            _dragLifetimeMinimum = sample.Count;
+            _dragLifetimeFell = false;
+            _dragLifetimeFallFrom = 0;
+            _dragLifetimeFallTo = 0;
+            _dragLifetimeFallEvent = null;
+            _dragLifetimePointer = sample.DataObject;
+        }
+        else if (sample.Count < _dragLifetimeSamples[^1] && !_dragLifetimeFell)
+        {
+            // The criterion is "never falls", so the comparison is against the sample before it
+            // rather than against the first one: the count may legitimately be acquired by the
+            // shell mid-drag, but it must never be given up.
+            _dragLifetimeFell = true;
+            _dragLifetimeFallFrom = _dragLifetimeSamples[^1];
+            _dragLifetimeFallTo = sample.Count;
+            _dragLifetimeFallEvent = sample.Event;
+        }
+
+        _dragLifetimeSamples.Add(sample.Count);
+        _dragLifetimeMinimum = Math.Min(_dragLifetimeMinimum, sample.Count);
+        _dragLifetimeLastEvent = sample.Event;
+
+        // The Drop sample is a second conversion of the pointer DragEnter already converted, and it
+        // is where the wrapper cache releases the incoming reference synchronously. Marking it keeps
+        // that decrement attributable without a screenshot of the debugger.
+        var secondConversion =
+            sample.Event == Win32DropReferenceTrace.DropEvent &&
+            sample.DataObject == _dragLifetimePointer;
+
+        var line =
+            $"{Timestamp()}  {sample.Event,-9} ref {sample.Count,-2}  0x{sample.DataObject.ToInt64():X}" +
+            (secondConversion ? "  second conversion of this pointer" : string.Empty);
+
+        _dragLifetimeEvents.Add((Timestamp(), line));
+        TrimDragLifetimeLog();
+        RefreshDragLifetimePage();
+    }
+#endif
+
+    /// <summary>Appends the payload the drop zone just read to the sample line it belongs to.</summary>
+    private void AppendDragLifetimePayload(string payload)
+    {
+        if (_dragLifetimeEvents.Count == 0 || _dragLifetimeLastEvent is not ("DragEnter" or "Drop"))
+        {
+            return;
+        }
+
+        var last = _dragLifetimeEvents[^1];
+        _dragLifetimeEvents[^1] = (last.Time, $"{last.Text}  {payload}");
+        TrimDragLifetimeLog();
+        RefreshDragLifetimePage();
+    }
+
+    private void TrimDragLifetimeLog()
+    {
+        while (_dragLifetimeEvents.Count > 12)
+        {
+            _dragLifetimeEvents.RemoveAt(0);
+        }
+    }
+
+    /// <summary>Runs on every drag-over the zone receives, so the collection lands mid-drag.</summary>
+    private void OnDragLifetimeOver(XPlatDragEventArgs e)
+    {
+        e.Effect = XPlatDragDropEffects.Copy;
+
+        if (_dragLifetimeCollect?.Checked == true)
+        {
+            GC.Collect(2, GCCollectionMode.Forced, blocking: true);
+            GC.WaitForPendingFinalizers();
+        }
+
+        RefreshDragLifetimePage();
+    }
+
+    private void OnDragLifetimeEnter(XPlatDragEventArgs e)
+    {
+        e.Effect = XPlatDragDropEffects.Copy;
+        AppendDragLifetimePayload(DescribeDragPayload(e.Data));
+    }
+
+    private void OnDragLifetimeDrop(XPlatDragEventArgs e)
+    {
+        e.Effect = XPlatDragDropEffects.Copy;
+
+        var payload = DescribeDragPayload(e.Data);
+        _dragLifetimeDrops++;
+
+        if (_dragLifetimeDrops == 1)
+        {
+            _dragLifetimeFirstPayload = payload;
+        }
+        else
+        {
+            _dragLifetimeSecondPayload = payload;
+        }
+
+        SetStatus($"Dropped {payload} on the lifetime page.");
+        AppendDragLifetimePayload(payload);
+    }
+
+    /// <summary>Says what a dropped payload holds, in one line, for the log and the readouts.</summary>
+    private static string DescribeDragPayload(XPlatDataObject data)
+    {
+        var files = data.GetFiles();
+        if (files.Length > 0)
+        {
+            return $"files: {string.Join(", ", files.Select(Path.GetFileName))}";
+        }
+
+        var text = data.GetText();
+        return string.IsNullOrEmpty(text) ? "nothing this sample can read" : $"text: \"{Preview(text)}\"";
+    }
+
+    /// <summary>
+    /// Rebuilds the readout, the verdict and the log. The verdict states the criterion in words
+    /// because the numbers alone are easy to read as "fine".
+    /// </summary>
+    private void RefreshDragLifetimePage()
+    {
+        if (_dragLifetimeCurrent is not { } current ||
+            _dragLifetimeSequence is not { } sequenceLabel ||
+            _dragLifetimeCounts is not { } countsLabel ||
+            _dragLifetimeVerdict is not { } verdict ||
+            _dragLifetimePayload is not { } payloadLabel ||
+            _dragLifetimeLog is not { } log)
+        {
+            return;
+        }
+
+        var sequence = string.Join(' ', _dragLifetimeSamples);
+        current.Text = _dragLifetimeSamples.Count == 0
+            ? "Current sample: none yet"
+            : CurrentSampleText();
+        sequenceLabel.Text = _dragLifetimeSamples.Count == 0
+            ? "This drag: -"
+            : $"This drag: {sequence}";
+        countsLabel.Text =
+            $"Minimum this drag: {(_dragLifetimeSamples.Count == 0 ? "-" : _dragLifetimeMinimum.ToString(CultureInfo.InvariantCulture))}" +
+            $"   Drops this session: {_dragLifetimeDrops}";
+
+        if (_dragLifetimeSamples.Count == 0)
+        {
+            verdict.Text = "Waiting: the reference count must never fall during a drag.";
+            verdict.ClearForeground();
+            verdict.ForeColorRole = XPlatThemeColor.MutedForeground;
+        }
+        else if (_dragLifetimeFell)
+        {
+            verdict.Text =
+                $"FAIL - the reference count fell from {_dragLifetimeFallFrom} to {_dragLifetimeFallTo} " +
+                $"at {_dragLifetimeFallEvent ?? "a drag event"}: {sequence}. The count must never fall " +
+                $"while the shell is still using the object, and it did.";
+            verdict.Foreground = new SKColor(0xFFD32F2F);
+        }
+        else
+        {
+            verdict.Text =
+                $"PASS - the count held at {_dragLifetimeSamples[0]} for the whole drag: {sequence}.";
+            verdict.Foreground = new SKColor(0xFF2E7D32);
+        }
+
+        payloadLabel.Text =
+            $"Drop 1: {_dragLifetimeFirstPayload ?? "-"}   " +
+            $"Drop 2: {_dragLifetimeSecondPayload ?? "-"}";
+
+        if (_dragLifetimeSecondPayload is not null)
+        {
+            var secondDrop = _dragLifetimeSecondPayload == "nothing this sample can read"
+                ? "FAIL - the second drop carried nothing; the object was gone by then."
+                : _dragLifetimeSecondPayload == _dragLifetimeFirstPayload
+                    ? "Second drop: same payload as the first - fine if you dragged the same thing, FAIL if you did not."
+                    : "Second drop: PASS - it carried its own payload.";
+
+            payloadLabel.Text += $"   {secondDrop}";
+        }
+
+        log.Text = _dragLifetimeEvents.Count == 0
+            ? "Drag something over the window: the last 12 samples appear here."
+            : string.Join(Environment.NewLine, _dragLifetimeEvents.Select(entry => entry.Text));
+    }
+
+    private static string Timestamp() =>
+        DateTime.Now.ToString("HH:mm:ss.fff", CultureInfo.InvariantCulture);
+
+    /// <summary>The last sample in words, which is the only line a reader has to trust.</summary>
+    private string CurrentSampleText()
+    {
+#if WINDOWS
+        return $"Current sample: {_dragLifetimeSamples[^1]} at {Win32DropReferenceTrace.Last?.Event}";
+#else
+        return "Current sample: not sampled on this platform";
+#endif
     }
 
     private void OnMetricsTick()
