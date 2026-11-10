@@ -442,7 +442,23 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         // the same pointer, which is what makes the release below deterministic. The cached wrapper
         // ComInterfaceMarshaller returns cannot be released early at all: ComObject.FinalRelease()
         // does nothing unless the object was created with CreateObjectFlags.UniqueInstance.
-        var com = UniqueComInterfaceMarshaller<IComDataObject>.ConvertToManaged((void*)dataObject);
+        //
+        // Converting throws rather than returning null when the object does not answer the
+        // QueryInterface for IComDataObject, and the reference taken above is ours to give back on
+        // that path as well - otherwise a source offering an object the library cannot read leaks
+        // it. No test can reach this without a deliberately broken data object, which is why the
+        // guard lives here and the suite has no fake for it.
+        IComDataObject? com;
+        try
+        {
+            com = UniqueComInterfaceMarshaller<IComDataObject>.ConvertToManaged((void*)dataObject);
+        }
+        catch
+        {
+            Marshal.Release(dataObject);
+            throw;
+        }
+
         if (com is null)
         {
             Marshal.Release(dataObject);
