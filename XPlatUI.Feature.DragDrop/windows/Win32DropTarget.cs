@@ -426,8 +426,19 @@ internal sealed unsafe class Win32DropTarget : IDropTarget
         }
         finally
         {
-            // The wrapper is the only owner of the reference taken by ConvertToManaged. The
-            // generated wrappers do not support FinalReleaseComObject, so it is disposed instead.
+            // The pointer this wrapper came from is borrowed: IDropTarget is handed it by OLE, which
+            // owns that reference and keeps using the object after this callback returns. The
+            // generated wrapper is a ComObject, which is not IDisposable, so this call is a no-op -
+            // and it has to stay one. Releasing here (with FinalRelease, say) would drop OLE's
+            // reference synchronously, in the middle of a drag that still has DragOver calls and a
+            // Drop to come, which over-releases a live object.
+            //
+            // That is the real defect: ConvertToManaged takes ownership of whatever reference it is
+            // given and does not AddRef, so the wrapper believes it owns OLE's reference and
+            // eventually releases one it never took, at finalization. The fix is to give the
+            // wrapper a reference of its own first - an AddRef on the borrowed pointer before
+            // ConvertToManaged, once that is done - and it needs a real OLE drop to verify, so it is
+            // not this change. Do not simply swap this line for FinalRelease.
             (com as IDisposable)?.Dispose();
         }
 

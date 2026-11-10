@@ -1192,9 +1192,21 @@ monitors, which needs a second monitor.
 - **Control code needs its window to parent a dialog.** `XPlatUiHost` gained `Window` (assigned by
   `XPlatWindow`) and `XPlatControl` gained `Window`, so `control.Window?.Application.Dialogs` reaches
   the service from anywhere in a control tree without threading a parameter through the layout code.
-- **`FinalReleaseComObject` is not for source-generated wrappers.** It throws
-  `PlatformNotSupportedException`/`ArgumentException` for them; `Release` swallows both, because the
-  wrapper's own finalizer handles the count.
+- **`FinalReleaseComObject` is not for source-generated wrappers, and catching it is not enough.**
+  What `ComInterfaceMarshaller` hands back is a `System.Runtime.InteropServices.Marshalling.ComObject`:
+  no RCW bookkeeping, and no `IDisposable` either. `Marshal.FinalReleaseComObject` throws
+  `ArgumentException` for it on CoreCLR and **`NotSupportedException` under NativeAOT**, and
+  `PlatformNotSupportedException` derives from the latter, so a `when` filter naming the CoreCLR
+  exceptions lets the AOT one escape the `finally` and end the process - which is exactly what
+  cancelling a file dialog did in an AOT build.
+- **`FinalRelease` only releases a *unique* wrapper.** It is documented to do nothing unless the
+  `ComObject` was created with `CreateObjectFlags.UniqueInstance`, and
+  `ComInterfaceMarshaller<T>.ConvertToManaged` passes only `Unwrap` - so the wrapper it returns is
+  cached and shared, `FinalRelease` on it is a no-op, and the reference goes at finalization instead.
+  The dialogs wrap through `UniqueComInterfaceMarshaller<T>`, one wrapper per reference they own, and
+  `Release` then really releases - on CoreCLR and under NativeAOT alike. That is also why
+  `IFileDialog::GetResult` is declared with an `IntPtr` out parameter rather than `IShellItem`: the
+  caller has to pick the marshaller for the reference it was handed.
 
 Verified end to end on Windows: message box (`YesNoCancel`, default `Yes` → `Yes`), open
 (`C:\Windows\win.ini`, honouring `InitialDirectory`), save (`%TEMP%\probe-save.txt`), folder

@@ -258,7 +258,7 @@ internal sealed class Win32DialogService : IXPlatDialogService
         var hr = NativeMethods.CoCreateInstance(classId, IntPtr.Zero, NativeMethods.ClsCtxInprocServer, interfaceId, out var unknown);
         Marshal.ThrowExceptionForHR(hr);
 
-        var dialog = ComInterfaceMarshaller<IFileDialog>.ConvertToManaged((void*)unknown)!;
+        var dialog = Wrap<IFileDialog>(unknown);
         try
         {
             dialog.GetOptions(out var current);
@@ -289,7 +289,8 @@ internal sealed class Win32DialogService : IXPlatDialogService
 
             Marshal.ThrowExceptionForHR(show);
 
-            dialog.GetResult(out var item);
+            dialog.GetResult(out var itemPointer);
+            var item = Wrap<IShellItem>(itemPointer);
             try
             {
                 item.GetDisplayName(ShellItemDisplayName.FileSysPath, out var name);
@@ -364,7 +365,7 @@ internal sealed class Win32DialogService : IXPlatDialogService
             return;
         }
 
-        var folder = ComInterfaceMarshaller<IShellItem>.ConvertToManaged((void*)unknown)!;
+        var folder = Wrap<IShellItem>(unknown);
         try
         {
             dialog.SetFolder(folder);
@@ -376,21 +377,46 @@ internal sealed class Win32DialogService : IXPlatDialogService
     }
 
     /// <summary>
-    /// Drops this class's reference to a generated-COM wrapper. The wrapper is a
-    /// <c>ComWrappers</c>-based object rather than a classic RCW, so <c>ReleaseComObject</c> is not
-    /// the right tool; releasing the underlying pointer is.
+    /// Wraps a COM reference this class owns. <c>ComInterfaceMarshaller&lt;T&gt;.ConvertToManaged</c>
+    /// would hand back a cached wrapper, and <see cref="ComObject.FinalRelease"/> deliberately does
+    /// nothing for a cached wrapper; <see cref="UniqueComInterfaceMarshaller{T}"/> makes one wrapper
+    /// per reference, which is what lets <see cref="Release"/> actually release it.
     /// </summary>
-    private static void Release(object wrapper)
+    /// <param name="unknown">The owned interface pointer. The wrapper takes the reference over.</param>
+    /// <returns>The wrapper, which implements <typeparamref name="T"/>.</returns>
+    internal static unsafe T Wrap<T>(IntPtr unknown)
+        where T : class =>
+        UniqueComInterfaceMarshaller<T>.ConvertToManaged((void*)unknown)!;
+
+    /// <summary>
+    /// Releases this class's reference to a wrapper made by <see cref="Wrap{T}"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The wrapper is a <c>ComWrappers</c> <see cref="ComObject"/> rather than a classic RCW, and
+    /// because <see cref="UniqueComInterfaceMarshaller{T}"/> creates a unique instance,
+    /// <see cref="ComObject.FinalRelease"/> really does release the reference here - on CoreCLR and
+    /// under NativeAOT alike. That pairing is the contract: a wrapper from the cached
+    /// <c>ComInterfaceMarshaller&lt;T&gt;</c> would make this a silent no-op.
+    /// </para>
+    /// <para>
+    /// <c>Marshal.FinalReleaseComObject</c> must not be used for these at all. It throws
+    /// <c>ArgumentException</c> on CoreCLR and <c>NotSupportedException</c> under NativeAOT, and
+    /// <c>PlatformNotSupportedException</c> derives from the second rather than the first, so a
+    /// filter naming the CoreCLR exceptions lets the AOT one escape the <c>finally</c> that calls
+    /// this and takes the process with it.
+    /// </para>
+    /// </remarks>
+    internal static void Release(object wrapper)
     {
-        try
+        if (wrapper is ComObject comObject)
         {
-            Marshal.FinalReleaseComObject(wrapper);
+            comObject.FinalRelease();
+            return;
         }
-        catch (Exception exception) when (exception is PlatformNotSupportedException or ArgumentException)
-        {
-            // Source-generated COM wrappers do not participate in classic RCW bookkeeping, so
-            // there is no deterministic release for them; their own finalizer drops the reference.
-        }
+
+        // Nothing on this path is another shape today; a wrapper that is one releases if it can.
+        (wrapper as IDisposable)?.Dispose();
     }
 
     private static IntPtr HandleOf(XPlatWindow? owner) =>
