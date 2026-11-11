@@ -30,8 +30,11 @@ internal static class Win32CaptionButtons
     /// </summary>
     internal const float Width = 46f;
 
-    /// <summary>Half the side of a glyph, at 100% scale.</summary>
-    private const float GlyphRadius = 5f;
+    /// <summary>Half the side of a glyph's path, which sits half a pixel inside its ten pixel box.</summary>
+    private const float GlyphHalf = 4.5f;
+
+    /// <summary>How much the platform rounds the corners of the square glyphs.</summary>
+    private const float GlyphCorner = 1f;
 
     /// <summary>
     /// The height of the strip, in logical pixels: the caption height the system would use, so the
@@ -143,8 +146,11 @@ internal static class Win32CaptionButtons
         var r = button.Bounds;
         var cx = r.MidX;
         var cy = r.MidY;
-        var size = MathF.Min(GlyphRadius, MathF.Min(r.Width, r.Height) / 3f);
-        var half = MathF.Round(MathF.Min(GlyphRadius, size));
+
+        // The glyphs are ten logical pixels across including their stroke, which is what the platform
+        // draws at every DPI, and the stroke is centred on the path - so the path is half a pixel in
+        // from each edge of that box.
+        var half = MathF.Min(GlyphHalf, (MathF.Min(r.Width, r.Height) / 2f) - 0.5f);
 
         using var pen = new SKPaint
         {
@@ -157,35 +163,63 @@ internal static class Win32CaptionButtons
         switch (button.Kind)
         {
             case XPlatCaptionButtonKind.Minimize:
-                canvas.DrawLine(cx - half, MathF.Round(cy), cx + half, MathF.Round(cy), pen);
+                // The stroke's caps sit on the box the square glyphs use, so the line is as wide as
+                // the platform's: ten logical pixels.
+                var y = MathF.Round(cy);
+                canvas.DrawLine(cx - half - 0.5f, y, cx + half + 0.5f, y, pen);
                 break;
 
             case XPlatCaptionButtonKind.Maximize:
-                canvas.DrawRect(new SKRect(cx - half, cy - half, cx + half, cy + half), pen);
+                canvas.DrawRoundRect(Square(cx, cy, half), GlyphCorner, GlyphCorner, pen);
                 break;
 
             case XPlatCaptionButtonKind.Restore:
-                // Two squares offset the way the platform offsets them, and the back one is
-                // *occluded* by the front one rather than drawn through it. The platform fills the
-                // front square with the caption colour; here the application's own paint shows
-                // through, so the back square is clipped away instead of covered, which leaves the
-                // 1 px gap between them that the platform's glyph has.
-                var back = new SKRect(cx - half + 2f, cy - half - 2f, cx + half, cy + half);
-                var front = new SKRect(cx - half, cy - half + 2f, cx + half - 2f, cy + half);
-                var cut = new SKRect(front.Left - 1f, front.Top - 1f, front.Right + 1f, front.Bottom + 1f);
+            {
+                // Two squares a little smaller than the maximise one, offset by two pixels, which is
+                // the platform's shape: the front square is whole and the back one shows only its top
+                // and right edges. Those are the edges the platform keeps visible - its front square
+                // is opaque, so the back one's left and bottom edges are behind it. Here the
+                // application's own paint shows through, so they are simply not drawn.
+                var front = Square(cx - 1f, cy + 1f, half - 1f);
+                canvas.DrawRoundRect(front, GlyphCorner, GlyphCorner, pen);
 
-                canvas.Save();
-                canvas.ClipRect(cut, SKClipOperation.Difference, antialias: false);
-                canvas.DrawRect(back, pen);
-                canvas.Restore();
+                var backLeft = front.Left + 2f;
+                var backTop = front.Top - 2f;
+                var backRight = front.Right + 2f;
+                var backBottom = front.Bottom - 2f;
 
-                canvas.DrawRect(front, pen);
+                using var builder = new SKPathBuilder();
+                builder.MoveTo(backLeft, backTop);
+                builder.LineTo(backRight - GlyphCorner, backTop);
+                builder.ArcTo(
+                    new SKRect(
+                        backRight - (GlyphCorner * 2f),
+                        backTop,
+                        backRight,
+                        backTop + (GlyphCorner * 2f)),
+                    270f,
+                    90f,
+                    forceMoveTo: false);
+                builder.LineTo(backRight, backBottom);
+
+                using var path = builder.Snapshot();
+                canvas.DrawPath(path, pen);
                 break;
+            }
 
             case XPlatCaptionButtonKind.Close:
-                canvas.DrawLine(cx - half, cy - half, cx + half, cy + half, pen);
-                canvas.DrawLine(cx - half, cy + half, cx + half, cy - half, pen);
+                // The platform's X fills the same ten pixel box as the square glyphs, which its
+                // diagonals only reach if they run a little past the path those squares use - and it
+                // has to start on a half pixel to land on whole device pixels at every scale.
+                var d = half + 0.25f;
+                var yc = MathF.Round(cy - 0.5f) + 0.5f;
+                canvas.DrawLine(cx - d, yc - d, cx + d, yc + d, pen);
+                canvas.DrawLine(cx - d, yc + d, cx + d, yc - d, pen);
                 break;
         }
     }
+
+    /// <summary>A square glyph's path, which is half a pixel inside the box it paints.</summary>
+    private static SKRect Square(float cx, float cy, float half) =>
+        new(cx - half, cy - half, cx + half, cy + half);
 }
