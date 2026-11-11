@@ -256,15 +256,4 @@ public sealed class XPlatBadgeTests
         Assert.AreEqual(Linux, badge.Capabilities);
     }
 
-    /// <summary>A platform half that keeps everything it was told.</summary>
-    private sealed class RecordingPresenter(XPlatBadgeCapabilities capabilities) : IXPlatAppBadgePresenter
-    {
-        public List<XPlatBadgeState> Applied { get; } = [];
-
-        public XPlatBadgeCapabilities Capabilities { get; } = capabilities;
-
-        public XPlatBadgeState Last => Applied[^1];
-
-        public void Apply(XPlatBadgeState state) => Applied.Add(state);
-    }
 }

@@ -35,6 +35,9 @@
   <ItemGroup>
     <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
     <ProjectReference Include="..\XPlatUI.Feature.Badges\XPlatUI.Feature.Badges.csproj" />
+    <!-- An attention request ends when the user comes back, which is an event only a real application
+         and window produce: the activation tests build both on the headless backend. -->
+    <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
   </ItemGroup>
 
 </Project>

@@ -234,6 +234,12 @@ public sealed class DemoUi
         window.AddShownHandler(_ => RefreshChromeReadout());
 
         RefreshChromeReadout();
+
+        // The badge can change without the page: an urgent request is a moment rather than a state, and
+        // the platform half ends it when the user comes back, so the readout follows the badge rather
+        // than only the clicks that set it.
+        window.Application?.Badge.AddChangedHandler(_ => RefreshBadgeReadout());
+
         RefreshBadgeReadout();
     }
     /// <summary>Shows the page that holds the first text field and puts the caret in it, which then blinks.</summary>

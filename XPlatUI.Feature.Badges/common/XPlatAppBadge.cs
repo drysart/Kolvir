@@ -28,13 +28,23 @@ namespace XPlatUI.Badges;
 /// platform requires, so a worker completing a request can set a count directly.
 /// </para>
 /// <para>
-/// A badge that is set is kept until it is changed: closing the window a notification was about does
-/// not clear it, and neither does activating the application. Clearing is the application's decision.
+/// A count, a label or a dot is kept until it is changed: closing the window a notification was about
+/// does not clear it, and clearing it is the application's decision.
+/// </para>
+/// <para>
+/// <b><see cref="Urgent"/> is the exception, because it asks for a moment rather than a state.</b>
+/// All three platforms draw attention for a while and then stop: Windows flashes a taskbar button
+/// until its window comes to the front, macOS bounces a Dock icon until the application is activated,
+/// and a Linux dock highlights the icon until its window has the focus. Once the user is back, the
+/// flag no longer describes anything, so it is set back to false - and that is also what lets an
+/// application ask again, since a flag that stayed true would not be a second request.
 /// </para>
 /// </remarks>
 public sealed class XPlatAppBadge
 {
     private readonly IXPlatAppBadgePresenter? _presenter;
+
+    private Action<XPlatAppBadge>? _changed;
 
     private int? _count;
     private string? _text;
@@ -42,10 +52,43 @@ public sealed class XPlatAppBadge
     private bool _urgent;
 
     /// <summary>
+    /// Creates a badge that watches no windows, which is what a unit test drives: the members are set
+    /// directly and there is no application whose activation could end an attention request.
+    /// </summary>
+    /// <param name="presenter">The platform half, or null when the feature was not opted into.</param>
+    internal XPlatAppBadge(IXPlatAppBadgePresenter? presenter)
+        : this(presenter, application: null)
+    {
+    }
+
+    /// <summary>
     /// Creates a badge over <paramref name="presenter"/>, or over nothing when the feature was not
     /// opted into, in which case every setter is inert and the capabilities are empty.
     /// </summary>
-    internal XPlatAppBadge(IXPlatAppBadgePresenter? presenter) => _presenter = presenter;
+    /// <param name="presenter">The platform half, or null when the feature was not opted into.</param>
+    /// <param name="application">
+    /// The application whose windows are watched for the activation that ends an attention request, or
+    /// null when there is no application to watch.
+    /// </param>
+    internal XPlatAppBadge(IXPlatAppBadgePresenter? presenter, XPlatApplication? application)
+    {
+        _presenter = presenter;
+
+        if (application is null)
+        {
+            return;
+        }
+
+        // Watching the windows from here rather than in each platform folder, because coming back to
+        // the application is the same event on all three: a window becomes active, which is what each
+        // backend already reports and what each platform's attention request ends on.
+        foreach (var window in application.Windows)
+        {
+            WatchForActivation(window);
+        }
+
+        application.AddWindowOpenedHandler((_, args) => WatchForActivation(args.Window));
+    }
 
     /// <summary>
     /// How many unread items there are, or null for no count. Zero and negative values are the same
@@ -130,8 +173,14 @@ public sealed class XPlatAppBadge
     /// <para>
     /// Windows and macOS treat it as a nudge: setting it true while it is already true does not flash
     /// or bounce a second time, and clearing it does not take the nudge back. The Linux desktop keeps
-    /// the highlight until it is cleared, which is its own behaviour rather than an invention of this
-    /// library.
+    /// the highlight until it is cleared, so there clearing the flag is what ends it.
+    /// </para>
+    /// <para>
+    /// In every case the request ends when the user comes back to the application, and the flag is set
+    /// back to false then: the platform stops flashing, bouncing or highlighting, so reporting
+    /// <c>true</c> afterwards would describe nothing, and asking again would not be a second request.
+    /// A handler that wants to know when the user has seen the nudge can therefore simply read this
+    /// property, or listen for it changing.
     /// </para>
     /// </remarks>
     public bool Urgent
@@ -154,6 +203,30 @@ public sealed class XPlatAppBadge
     /// never called the feature's <c>AddAppBadges</c>.
     /// </summary>
     public XPlatBadgeCapabilities Capabilities => _presenter?.Capabilities ?? XPlatBadgeCapabilities.None;
+
+    /// <summary>Adds a handler that runs after the badge changed, on the thread that changed it.</summary>
+    /// <param name="handler">The handler, which is given the badge.</param>
+    /// <returns>A token that removes the handler.</returns>
+    /// <remarks>
+    /// Runs for every change, including the ones the badge makes itself: an attention request that the
+    /// user answered is cleared here, not by the application, so a handler is how an application keeps
+    /// a readout or a tray icon in step. It runs after the platform half has been told, and on the
+    /// thread that made the change - the UI thread when the platform half is what changed it.
+    /// </remarks>
+    public IDisposable AddChangedHandler(Action<XPlatAppBadge> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed += handler;
+        return new XPlatHandlerToken<Action<XPlatAppBadge>>(RemoveChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChangedHandler"/> added.</summary>
+    /// <param name="handler">The handler to remove.</param>
+    public void RemoveChangedHandler(Action<XPlatAppBadge> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _changed -= handler;
+    }
 
     /// <summary>
     /// Clears the count, the label, the dot and the urgent flag in one change, so a platform is told
@@ -221,5 +294,38 @@ public sealed class XPlatAppBadge
         new(XPlatBadgeKind.None, 0, null, capabilities.Urgent);
 
     /// <summary>Hands the resolved presentation to the platform half, if the feature was opted into.</summary>
-    private void Push() => _presenter?.Apply(Resolve(Capabilities));
+    private void Push()
+    {
+        _presenter?.Apply(Resolve(Capabilities));
+
+        // After the platform half, so a handler that reads the badge sees the new state and a handler
+        // that reads what the platform was told sees the same thing. The badge can change on its own -
+        // coming back to the application ends an urgent request - so this is also how an application
+        // hears about a change it did not make.
+        _changed?.Invoke(this);
+    }
+
+    /// <summary>
+    /// Clears <see cref="Urgent"/> when <paramref name="window"/> becomes the active window.
+    /// </summary>
+    private void WatchForActivation(XPlatWindow window)
+    {
+        window.AddActivatedHandler(OnWindowActivated);
+        window.AddClosedHandler(OnWindowClosed);
+    }
+
+    /// <summary>The user came back to the application, so the attention request is over.</summary>
+    private void OnWindowActivated(object sender) => Urgent = false;
+
+    /// <summary>Stops watching a window that closed: a closed window cannot be activated again.</summary>
+    private void OnWindowClosed(object sender)
+    {
+        if (sender is not XPlatWindow window)
+        {
+            return;
+        }
+
+        window.RemoveActivatedHandler(OnWindowActivated);
+        window.RemoveClosedHandler(OnWindowClosed);
+    }
 }

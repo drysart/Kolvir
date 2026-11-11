@@ -20,6 +20,12 @@ namespace XPlatUI.Badges;
 /// application is alive costs one object.
 /// </para>
 /// <para>
+/// A badge that has an application to watch also subscribes to its windows' activation, because that
+/// is where an attention request ends: the user coming back is what stops a flash or a bounce, so it
+/// is also what sets <see cref="XPlatAppBadge.Urgent"/> back to false. Those subscriptions keep the
+/// badge reachable for the application's lifetime, which the weak table already assumed.
+/// </para>
+/// <para>
 /// The platform half is resolved once, here, from the services the application configured. When the
 /// application never called <c>AddAppBadges</c> nothing is registered and the badge is created over
 /// nothing: its setters are accepted and dropped, and <see cref="XPlatAppBadge.Capabilities"/> is
@@ -55,6 +61,6 @@ public static class XPlatApplicationBadgeExtensions
     {
         ArgumentNullException.ThrowIfNull(application);
 
-        return new XPlatAppBadge(application.Services.GetService<IXPlatAppBadgePresenter>());
+        return new XPlatAppBadge(application.Services.GetService<IXPlatAppBadgePresenter>(), application);
     }
 }
