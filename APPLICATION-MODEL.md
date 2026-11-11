@@ -1070,7 +1070,7 @@ Tier 1 **is** the v1 scope (D12, D13).
 | Clipboard image/file formats | `XPlatClipboard` handles text today. |
 | Native file-drop on window | Done: `IDropTarget` on Windows, `NSDraggingDestination` on macOS, `Gtk.DropTarget` on GTK4, all routed by the feature's own `XPlatDragDropRouter`; the core library names none of it (`README.md`, "Drag and drop"). |
 | IME / dead keys / composed input | Text boxes are unusable for CJK and accented input without it. |
-| Notification / tray / dock badge | Deferred; the API shape is obvious and the payoff is small. |
+| Notification / tray / dock badge | Badging is done, as a rung-3 package: `XPlatUI.Feature.Badges` puts a count, a label or a dot on the taskbar button or dock icon, with an urgent nudge, and names nothing in the backends but their public seams (`README.md`, "App badging"). On Linux it is a dock convention rather than a platform API, so a bare GNOME desktop shows nothing. Notifications and the tray are still deferred. |
 | Accessibility (UIA / NSAccessibility / AT-SPI) | Large, and worth designing separately. |
 | Custom window chrome | Only if the default chrome proves insufficient. |
 

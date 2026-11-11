@@ -1012,6 +1012,20 @@ IL3xxx warning from the new code.
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
 
+`XPlatUI.Feature.Badges` is the first rung 3 worked example, and the one that shows why the rung is a
+packaging decision rather than a trimming trick. A badge belongs to the application, so no call site
+can decide whether the code ships: `XPlatApplication` is retained by every application, and a rung 1
+member on it would be retained whether or not anyone set a badge. Rung 2 would have put the
+implementations in the backends, where every application of that platform carries them. Instead the
+package holds all three - a Skia-drawn overlay icon and `ITaskbarList3` on Windows, `NSDockTile` on
+macOS, a D-Bus convention on Linux - and the backends gained one member between them:
+`Win32WindowBackend.AddMessageFilter`, which describes a platform facility (a window's messages) and
+names no feature, and which exists because the shell throws an overlay icon away when it re-creates a
+taskbar button. Everything else the feature reaches was already public: `IXPlatWin32WindowHook`,
+`Handle`, `NSApplication.SharedApplication`, `Gio.Application` and `Gio.DBusConnection`. The surface
+is an extension block on `XPlatApplication`, per section 5, because a separate assembly cannot add a
+member to a type in `XPlatUI`. See [APP-BADGING.md](APP-BADGING.md).
+
 ## 9. Checklist for a new feature
 
 - [ ] Does any always-retained type (a control, a backend view, `XPlatUiHost`, `XPlatApplication`)

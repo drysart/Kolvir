@@ -3094,6 +3094,89 @@ capability report and metrics snapshot it read back. The sample's own header str
 subtitle and the space around them - is a drag handle too, so the window can be moved by its title
 area in either chrome; the two buttons in that header keep their own clicks.
 
+### App badging
+
+An unread count or a dot on the application's own icon - the taskbar button on Windows, the Dock tile
+on macOS, the dock icon on Linux - is a package of its own, `XPlatUI.Feature.Badges`, because an
+application that never shows one should not carry three platform implementations of it. Reference the
+package and opt in with one line:
+
+```csharp
+var options = new XPlatApplicationOptions
+{
+    ConfigureServices = services => services.AddAppBadges(),
+};
+
+using var application = new XPlatApplication(XPlatUIBackend.CreateDefault(), options);
+```
+
+`AddAppBadges()` is the whole opt-in and has the same name on every platform, so nothing in the
+application names a backend. The badge itself is a member of the application rather than of a window,
+because two of the three platforms only have an application icon and Windows groups a process's
+windows under one taskbar button:
+
+```csharp
+application.Badge.Count = 3;      // unread items; null, zero or less hides the badge
+application.Badge.Text = "99+";   // any short label, where the platform takes one
+application.Badge.IsDot = true;   // a dot, with no number
+application.Badge.Urgent = true;  // a flash, a bounce or a highlight, as the platform does it
+application.Badge.Clear();        // all four in one change
+```
+
+The presentations overlap on purpose, so setting them from different parts of an application does not
+need coordination: **`IsDot` beats `Text`, which beats `Count`**. A dot is "something happened and I
+have no number for it", which is the more urgent thing to say.
+
+#### What each platform shows
+
+| | Windows | macOS | GTK4 (X11 and Wayland) |
+|---|---|---|---|
+| `Count` | drawn into the overlay icon, capped at `99+` | the Dock's own red bubble | Unity LauncherEntry `count` |
+| `Text` | drawn | passed through; long labels are clipped | - |
+| `IsDot` | drawn | a bullet inside the bubble | - |
+| `Urgent` | the taskbar button flashes | the Dock icon bounces | the dock holds a highlight |
+| `Capabilities` | all four | all four | `Count` and `Urgent` |
+
+`Badge.Capabilities` reports that table, and an application should read it rather than assume: asking
+for a presentation the platform cannot draw is **not** silently dropped - it becomes `Urgent`, so the
+user still learns that something happened. `Capabilities` is empty (all false) when the application
+never called `AddAppBadges()`, which is how an application can tell it forgot.
+
+#### Linux needs a desktop entry
+
+Linux has no badge API at all: GTK 4 has neither a badge nor an urgency call, and the only urgency
+symbol in the library is GDK's X11-only escape hatch, which does nothing on Wayland. What exists is a
+convention - the application broadcasts `com.canonical.Unity.LauncherEntry.Update` on the session bus
+and a dock that implements the protocol (Ubuntu's `ubuntu-dock`, dash-to-dock, Plank) draws the badge
+on the icon whose **desktop entry** matches the id in the signal. Two consequences:
+
+- The application must have an installed `.desktop` file whose name is its application id, which on
+  GTK 4 is derived from `InstanceKey`. Run out of a build directory with no entry installed and
+  nothing appears - silently, which is the one failure worth documenting.
+- Stock GNOME Shell implements none of it, so a bare GNOME desktop shows nothing however the
+  capabilities read.
+
+The demo ships `XPlatUIDemo.App/com.xplatui.ixplatui.desktop` and
+`XPlatUIDemo.App/install-badge-desktop-entry.sh`, which writes it to
+`~/.local/share/applications` with the build's absolute path. Run the script once and the **App
+badge** page's count appears on the dock.
+
+#### What the platforms cannot do
+
+- **Windows draws the badge itself**, so its look is this library's: a red disc with a white ring and
+  a white numeral, at the small-icon size for the window's DPI, redrawn when the window moves to a
+  display with a different scale. The shell throws an overlay away when it re-creates a taskbar
+  button - an Explorer restart - and the feature listens for that and re-applies.
+- **macOS chooses the colour.** The bubble is always the system's red, and the dot is a bullet inside
+  a bubble that is the size of a number badge rather than a small dot. A Dock bounce only happens
+  while the application is *not* the active one, because macOS skips it for the frontmost app, which
+  is also the right answer for "the user is already looking at us".
+- **Urgent is a nudge, not a state, on Windows and macOS**: it fires on the transition and clearing it
+  does not take a flash or a bounce back. On Linux the dock keeps the highlight until it is cleared.
+
+The demo has an **App badge** page that sets a count, a dot, a label and an urgent nudge, clears them
+again, and reports what the backend says it can draw.
+
 ### Drag and drop
 
 Drag and drop is a package of its own, `XPlatUI.Feature.DragDrop`, because most applications never

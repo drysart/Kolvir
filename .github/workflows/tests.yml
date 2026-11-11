@@ -88,6 +88,7 @@ jobs:
           dotnet restore XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore XPlatUI.Feature.Badges.Tests/XPlatUI.Feature.Badges.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -185,6 +186,20 @@ jobs:
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 
+      # The app badge feature's portable half. Same wiring and same narrowing. It exercises the
+      # resolution of Count, Text, IsDot and Urgent into one presentation, and the degradation an
+      # unsupported presentation gets, so it needs neither a window nor a desktop.
+      - name: Test the app badge feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Feature.Badges.Tests/XPlatUI.Feature.Badges.Tests.csproj --no-restore --nologo \
+            -p:TargetFramework=net10.0 \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=badges.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
       # The Win32 backend's own suite targets net10.0-windows and exists only on the Windows leg.
       # It covers the internal GL fallback decision with a fake probe; the accelerated path itself
       # needs a real driver, which no hosted runner has, so that half is verified by hand and
@@ -200,6 +215,23 @@ jobs:
           set -o pipefail
           dotnet test XPlatUI.Backend.Win32.Tests/XPlatUI.Backend.Win32.Tests.csproj --no-restore --nologo \
             --logger "trx;LogFileName=win32.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The badge feature's Windows half: the overlay icon is drawn with Skia and handed to the
+      # shell as a GDI icon, so its geometry is asserted pixel by pixel and cannot be checked from
+      # the portable suite. Windows only, like the backend suite above.
+      - name: Restore the Windows badge tests
+        if: runner.os == 'Windows'
+        run: dotnet restore XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj --nologo
+
+      - name: Test the Windows badge icon
+        if: runner.os == 'Windows'
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj --no-restore --nologo \
+            --logger "trx;LogFileName=badges-win32.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 
