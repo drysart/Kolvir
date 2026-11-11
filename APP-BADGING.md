@@ -45,6 +45,10 @@ Measured, not assumed:
   rather than a typo. The correct value is in `shobjidl_core.h`.
 - **macOS is one property**, plus `dockTile.display()` to redraw now, and `null`/empty to clear. The
   badge is a red rounded bubble drawn by the system; long text is clipped, so counts are clamped.
+  Two behaviours worth knowing: the dot is a *bubble containing a bullet*, so it is the size of a
+  number badge rather than a small dot, and a Dock bounce only happens while the application is not
+  the active one — macOS ignores `requestUserAttention` for the frontmost app, which is also the
+  right answer for "the user is already looking at us".
 - **GTK4 has no urgency API at all.** Neither Ubuntu box exports `gtk_window_set_urgency_hint`; the
   only symbol is GDK's `gdk_x11_surface_set_urgency_hint`, which is X11-only and useless on Wayland.
 - **Linux is a D-Bus convention, not a platform API.** Dash-to-dock (`ubuntu-dock`) *owns*
@@ -171,7 +175,7 @@ without a live window — the same split the backend uses for its other decision
 | 1 | Done. `SetOverlayIcon` answers `S_OK` and the `DrawIconEx` round trip returns the pixels drawn (16/20/24/32 px). Two findings: the shell renders the overlay in the small-icon slot, so the icon must be built at `SM_CXSMICON` for the window's DPI; and the IID typo above, which made `ITaskbarList3` look unsupported. |
 | 2 | Done. `AddMessageFilter`/`RemoveMessageFilter` on `Win32WindowBackend`, dispatch in `Win32MessageFilters`, seven tests. |
 | 3 | Done. `common/` is the whole model: `XPlatAppBadge` (Count, Text, IsDot, Urgent, Clear), `XPlatBadgeCapabilities`, the resolved `XPlatBadgeState`, the presenter seam and `app.Badge`. Precedence is `IsDot` → `Text` → `Count`; a count of zero or less is no badge; setting the same value twice publishes once; `Clear()` publishes once however many members were set. An unsupported presentation degrades to `Urgent`, and a platform without urgency drops it. Without the opt-in nothing is published and `Capabilities` is empty. 19 tests. |
-| 4 | |
+| 4 | Done. `AddAppBadges()` and `AppKitAppBadgePresenter`: the label is the count's digits, the text as given, or a bullet for the dot, with `dockTile.display()` after every change and `RequestUserAttention` on an urgent transition. Workers are queued on `NSOperationQueue.MainQueue` rather than touching AppKit off-thread. Seen on the Dock of a harness application: `3`, a bullet, `99+`, and cleared. 19 platform-neutral tests still pass; the macOS half has no unit tests because it is a property set on a global AppKit object. |
 | 5 | |
 | 6 | |
 | 7 | |
