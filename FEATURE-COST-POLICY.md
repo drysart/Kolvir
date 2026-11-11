@@ -1022,7 +1022,9 @@ macOS, a D-Bus convention on Linux - and the backends gained one member between 
 `Win32WindowBackend.AddMessageFilter`, which describes a platform facility (a window's messages) and
 names no feature, and which exists because the shell throws an overlay icon away when it re-creates a
 taskbar button. Everything else the feature reaches was already public: `IXPlatWin32WindowHook`,
-`Handle`, `NSApplication.SharedApplication`, `Gio.Application` and `Gio.DBusConnection`. The surface
+`Handle`, `NSApplication.SharedApplication`, `Gio.Application`, `Gio.DBusConnection`, and the window
+lifecycle the badge watches so that an attention request ends when the user comes back
+(`XPlatApplication.AddWindowOpenedHandler`, `XPlatWindow.AddActivatedHandler`). The surface
 is an extension block on `XPlatApplication`, per section 5, because a separate assembly cannot add a
 member to a type in `XPlatUI`. See [APP-BADGING.md](APP-BADGING.md).
 

@@ -3142,6 +3142,24 @@ for a presentation the platform cannot draw is **not** silently dropped - it bec
 user still learns that something happened. `Capabilities` is empty (all false) when the application
 never called `AddAppBadges()`, which is how an application can tell it forgot.
 
+#### Urgent is a request, not a state
+
+A flash, a bounce and a dock highlight all stop when the user comes back to the application, so
+`Urgent` asks for something rather than describing it: the badge sets the flag back to `false` once a
+window of the application has been activated, which is the same event on all three platforms. That
+makes it read truthfully, and it is also what lets an application ask again - a flag that stayed
+`true` would not be a second request on Windows or macOS.
+
+Because the badge can therefore change without the application, it reports every change:
+
+```csharp
+application.Badge.AddChangedHandler(badge => UpdateTrayIcon(badge.Count, badge.Urgent));
+```
+
+The handler runs after the platform half has been told, so a readout built from it agrees with what
+the platform is showing. The `Count`, `Text` and `IsDot` members are still kept until changed: only
+the request is a moment.
+
 #### Linux needs a desktop entry
 
 Linux has no badge API at all: GTK 4 has neither a badge nor an urgency call, and the only urgency
@@ -3171,8 +3189,10 @@ badge** page's count appears on the dock.
   a bubble that is the size of a number badge rather than a small dot. A Dock bounce only happens
   while the application is *not* the active one, because macOS skips it for the frontmost app, which
   is also the right answer for "the user is already looking at us".
-- **Urgent is a nudge, not a state, on Windows and macOS**: it fires on the transition and clearing it
-  does not take a flash or a bounce back. On Linux the dock keeps the highlight until it is cleared.
+- **Urgent is a nudge, not a state, on Windows and macOS**: it fires on the transition, and clearing it
+  by hand does not take a flash or a bounce back. What happens instead is that the platform ends it:
+  the flag reads `false` again once the user has come back, which on Linux is also what releases the
+  dock's highlight.
 
 The demo has an **App badge** page that sets a count, a dot, a label and an urgent nudge, clears them
 again, and reports what the backend says it can draw. Its **Urgent in 3 s** button waits three seconds
