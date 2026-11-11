@@ -49,6 +49,21 @@ public sealed class Win32CaptionGlyphTests
         return pixel.Red > 128 && pixel.Green > 128 && pixel.Blue > 128;
     }
 
+    /// <summary>Paints one button's glyph at 200% and returns the pixels that were lit.</summary>
+    private static SKBitmap PaintAt200(XPlatCaptionButtonKind kind)
+    {
+        var bitmap = new SKBitmap((int)(ButtonWidth * 2f), (int)MathF.Ceiling(StripHeight * 2f));
+        using var canvas = new SKCanvas(bitmap);
+        canvas.Clear(SKColors.Black);
+        canvas.Scale(2f);
+
+        var button = new XPlatCaptionButton(kind, new SKRect(0f, 0f, ButtonWidth, StripHeight));
+        Win32CaptionButtons.Draw(canvas, [button], hot: -1, pressed: -1, dark: true);
+        canvas.Flush();
+
+        return bitmap;
+    }
+
     private static SKRectI LitBounds(SKBitmap bitmap)
     {
         var left = bitmap.Width;
@@ -146,6 +161,23 @@ public sealed class Win32CaptionGlyphTests
         // The two squares do not touch: the row under the back square's top edge is clear between
         // the back square's left end and its right edge.
         Assert.IsFalse(IsLit(bitmap, CenterX, CenterY - Half + 1), "there is a gap under the back square's top edge");
+    }
+
+    [TestMethod]
+    public void TheRestoreGlyphsBackSquareHasRoundedCorners()
+    {
+        using var bitmap = PaintAt200(XPlatCaptionButtonKind.Restore);
+
+        // Both squares are squares with their outside corners rounded, and the back one is only
+        // visible above and right of the front one. At 200% its top edge reaches device pixel 40 on
+        // its lower row but starts at 41 on the row above - that is the top-left corner curving -
+        // and one row further down only the corner's own stub is left, because below that the
+        // platform's opaque front square would be covering it. A square-ended edge, which is what
+        // this glyph had first, runs down instead and fills that third row too.
+        Assert.IsTrue(IsLit(bitmap, 40, 14), "the top edge reaches the back square's left edge");
+        Assert.IsFalse(IsLit(bitmap, 40, 13), "the row above is inset, so the corner curves");
+        Assert.IsTrue(IsLit(bitmap, 40, 15), "the corner continues one row further down");
+        Assert.IsFalse(IsLit(bitmap, 40, 16), "and stops there, where the front square would be");
     }
 
     [TestMethod]

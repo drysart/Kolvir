@@ -175,11 +175,13 @@ internal static class Win32CaptionButtons
 
             case XPlatCaptionButtonKind.Restore:
             {
-                // Two squares a little smaller than the maximise one, offset by two pixels, which is
-                // the platform's shape: the front square is whole and the back one shows only its top
-                // and right edges. Those are the edges the platform keeps visible - its front square
-                // is opaque, so the back one's left and bottom edges are behind it. Here the
-                // application's own paint shows through, so they are simply not drawn.
+                // Two squares, each with its outside corners rounded, a little smaller than the
+                // maximise one and offset by two pixels. The front square is whole; the back one
+                // shows only its top edge and its right edge, because the platform's front square is
+                // opaque and hides the rest of it. This backend paints over the application's own
+                // content and cannot fill anything, so the back square's left and bottom edges are
+                // simply not drawn - but both of the corners it does show still curve, so the shape
+                // reads as the square it is.
                 var front = Square(cx - 1f, cy + 1f, half - 1f);
                 canvas.DrawRoundRect(front, GlyphCorner, GlyphCorner, pen);
 
@@ -187,16 +189,18 @@ internal static class Win32CaptionButtons
                 var backTop = front.Top - 2f;
                 var backRight = front.Right + 2f;
                 var backBottom = front.Bottom - 2f;
+                var diameter = GlyphCorner * 2f;
 
                 using var builder = new SKPathBuilder();
-                builder.MoveTo(backLeft, backTop);
+                builder.MoveTo(backLeft, backTop + GlyphCorner);
+                builder.ArcTo(
+                    new SKRect(backLeft, backTop, backLeft + diameter, backTop + diameter),
+                    180f,
+                    90f,
+                    forceMoveTo: false);
                 builder.LineTo(backRight - GlyphCorner, backTop);
                 builder.ArcTo(
-                    new SKRect(
-                        backRight - (GlyphCorner * 2f),
-                        backTop,
-                        backRight,
-                        backTop + (GlyphCorner * 2f)),
+                    new SKRect(backRight - diameter, backTop, backRight, backTop + diameter),
                     270f,
                     90f,
                     forceMoveTo: false);
