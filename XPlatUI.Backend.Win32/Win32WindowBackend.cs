@@ -68,6 +68,22 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private IntPtr _smallIcon;
 
     private float _scale = 1f;
+
+    private XPlatWindowChrome _chrome = XPlatWindowChrome.System;
+
+    /// <summary>Frame insets measured from the client rect <c>DefWindowProc</c> computed, in device
+    /// pixels. Left and right are the same number; the bottom is <see cref="_frameHeight"/>.</summary>
+    private int _frameWidth;
+    private int _frameHeight;
+
+    /// <summary>The resize band reported by the hit test, zeroed while maximized because the screen
+    /// edges are not resizable.</summary>
+    private int _hitBandWidth;
+    private int _hitBandHeight;
+    private Action<object>? _chromeMetricsChanged;
+
+    /// <summary>The snapshot for a decorated window: the platform owns nothing the seam reports.</summary>
+    private static readonly XPlatWindowChromeMetrics SystemMetrics = new();
     private IntPtr _memoryDc;
     private IntPtr _dib;
     private IntPtr _dibBits;
@@ -343,6 +359,47 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     /// <summary>The native window handle, or <see cref="IntPtr.Zero"/> before the window is shown.</summary>
     public IntPtr Handle => _hwnd;
+
+    /// <summary>
+    /// How much of the window the platform draws. Switching it live re-runs the frame calculation,
+    /// which is what grows the client over the caption or hands it back.
+    /// </summary>
+    public XPlatWindowChrome Chrome
+    {
+        get => _chrome;
+        set
+        {
+            if (_chrome == value)
+            {
+                return;
+            }
+
+            _chrome = value;
+
+            if (_hwnd != IntPtr.Zero && !_disposed)
+            {
+                ApplyChrome();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Borderless chrome is implemented here; caption buttons and window colours arrive with their own
+    /// steps and are reported as unsupported until then.
+    /// </summary>
+    public XPlatChromeCapabilities ChromeCapabilities => new() { Borderless = true };
+
+    /// <summary>
+    /// What the platform still owns in this window. Windows keeps its frame on three edges and hands
+    /// the client the top edge, so the painted inset and the claimed band are different numbers.
+    /// </summary>
+    public XPlatWindowChromeMetrics ChromeMetrics =>
+        ChromeMetricsFor(
+            _chrome == XPlatWindowChrome.Borderless,
+            _frameWidth,
+            _frameHeight,
+            _scale,
+            _state == XPlatWindowState.Maximized);
 
     /// <summary>
     /// Registers a native object that has to be released while the native window still exists.
@@ -652,6 +709,21 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     {
         ArgumentNullException.ThrowIfNull(handler);
         _stateChanged -= handler;
+    }
+
+    /// <summary>Adds a handler that runs when <see cref="ChromeMetrics"/> changes.</summary>
+    public IDisposable AddChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChromeMetricsChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChromeMetricsChangedHandler"/> added.</summary>
+    public void RemoveChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged -= handler;
     }
 
     /// <inheritdoc />
@@ -1161,6 +1233,12 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
                 OnDpiChanged(hwnd, wParam, lParam);
                 return IntPtr.Zero;
 
+            case NativeMethods.WmNcCalcSize:
+                return OnNcCalcSize(hwnd, wParam, lParam);
+
+            case NativeMethods.WmNcHitTest:
+                return OnNcHitTest(hwnd, lParam);
+
             case NativeMethods.WmGetMinMaxInfo:
                 OnGetMinMaxInfo(lParam);
                 return IntPtr.Zero;
@@ -1578,6 +1656,9 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         _state = state;
         _stateChanged?.Invoke(this);
+
+        // Maximizing removes the resize band and restoring puts it back.
+        RaiseChromeMetricsChanged();
     }
 
     private void OnDpiChanged(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
@@ -1606,6 +1687,9 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         UpdateHostSize();
         ApplyIcon();
         _scaleChanged?.Invoke(this);
+
+        // The frame is measured in device pixels, so every logical inset changes with the display.
+        RaiseChromeMetricsChanged();
     }
 
     private void OnGetMinMaxInfo(IntPtr lParam)
@@ -1627,6 +1711,220 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         }
 
         Marshal.StructureToPtr(info, lParam, false);
+    }
+
+    /// <summary>
+    /// Runs whenever the non-client area is recalculated. In borderless mode it lets
+    /// <c>DefWindowProc</c> compute the ordinary framed client rect, measures the frame that was
+    /// used, and then grows the client up over the caption - which is what lets the application own
+    /// the top edge without giving up the frame on the other three.
+    /// </summary>
+    /// <remarks>
+    /// RULE: derive the inset from <c>rgrc[0]</c>, the PROPOSED rect. <c>rgrc[1]</c> is the current
+    /// rect and is stale after a move or a maximize; the Win32 spike read it once and produced a
+    /// 1086 px client in a 700 px window.
+    /// </remarks>
+    private IntPtr OnNcCalcSize(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
+    {
+        if (_chrome != XPlatWindowChrome.Borderless || wParam == IntPtr.Zero)
+        {
+            // System chrome, or the create-time form that carries a RECT* rather than
+            // NCCALCSIZE_PARAMS and cannot be overridden.
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmNcCalcSize, wParam, lParam);
+        }
+
+        var proposed = Marshal.PtrToStructure<NativeMethods.NCCALCSIZE_PARAMS>(lParam).rgrc0;
+        var result = NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmNcCalcSize, wParam, lParam);
+        var parameters = Marshal.PtrToStructure<NativeMethods.NCCALCSIZE_PARAMS>(lParam);
+        var client = parameters.rgrc0;
+
+        // Measure the frame rather than computing it: SM_CXSIZEFRAME plus SM_CXPADDEDBORDER is a
+        // close guess at this inset, not the number the window actually got.
+        var frameWidth = client.Left - proposed.Left;
+        var frameHeight = proposed.Bottom - client.Bottom;
+        if (frameWidth >= 0 && frameHeight >= 0)
+        {
+            // The pre-size call reports zeros, so keeping the last good values is what lets a
+            // maximize still offset by the right height.
+            _frameWidth = frameWidth;
+            _frameHeight = frameHeight;
+        }
+
+        var maximizing = IsMaximizing(hwnd, proposed);
+
+        // Maximized the top starts lower by the bottom inset, which is what lands the client exactly
+        // on the work area rather than one frame above it.
+        client.Top = maximizing ? proposed.Top + _frameHeight : proposed.Top;
+        parameters.rgrc0 = client;
+        Marshal.StructureToPtr(parameters, lParam, false);
+
+        // Maximized, the window's edges are the screen's, so nothing may claim a resize band there.
+        _hitBandWidth = maximizing ? 0 : _frameWidth;
+        _hitBandHeight = maximizing ? 0 : _frameHeight;
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reports the resize band for a borderless window instead of letting <c>DefWindowProc</c> decide.
+    /// The client covers the caption, so the system would classify the top edge as client area and
+    /// leave nothing to drag but a sliver of the frame.
+    /// </summary>
+    private IntPtr OnNcHitTest(IntPtr hwnd, IntPtr lParam)
+    {
+        if (_chrome != XPlatWindowChrome.Borderless)
+        {
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmNcHitTest, IntPtr.Zero, lParam);
+        }
+
+        if (_hitBandWidth <= 0 || _hitBandHeight <= 0 || !NativeMethods.GetWindowRect(hwnd, out var window))
+        {
+            return new IntPtr(NativeMethods.HtClient);
+        }
+
+        // lParam carries signed screen coordinates; LowWord and HighWord sign extend them.
+        var x = NativeMethods.LowWord(lParam) - window.Left;
+        var y = NativeMethods.HighWord(lParam) - window.Top;
+        var width = window.Right - window.Left;
+        var height = window.Bottom - window.Top;
+
+        var left = x < _hitBandWidth;
+        var right = x >= width - _hitBandWidth;
+        var top = y < _hitBandHeight;
+        var bottom = y >= height - _hitBandHeight;
+
+        if (top && left)
+        {
+            return new IntPtr(NativeMethods.HtTopLeft);
+        }
+
+        if (top && right)
+        {
+            return new IntPtr(NativeMethods.HtTopRight);
+        }
+
+        if (bottom && left)
+        {
+            return new IntPtr(NativeMethods.HtBottomLeft);
+        }
+
+        if (bottom && right)
+        {
+            return new IntPtr(NativeMethods.HtBottomRight);
+        }
+
+        if (left)
+        {
+            return new IntPtr(NativeMethods.HtLeft);
+        }
+
+        if (right)
+        {
+            return new IntPtr(NativeMethods.HtRight);
+        }
+
+        if (top)
+        {
+            return new IntPtr(NativeMethods.HtTop);
+        }
+
+        return bottom ? new IntPtr(NativeMethods.HtBottom) : new IntPtr(NativeMethods.HtClient);
+    }
+
+    /// <summary>
+    /// Whether the rect being calculated is a maximize. <c>IsZoomed</c> alone is not enough: during
+    /// the transition the window is not maximized yet, so the proposed rect is compared with the
+    /// monitor's work area as well.
+    /// </summary>
+    private static bool IsMaximizing(IntPtr hwnd, NativeMethods.RECT proposed)
+    {
+        if (NativeMethods.IsZoomed(hwnd))
+        {
+            return true;
+        }
+
+        var monitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MonitorDefaultToNearest);
+        if (monitor == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var info = new NativeMethods.MONITORINFO
+        {
+            cbSize = (uint)Marshal.SizeOf<NativeMethods.MONITORINFO>(),
+        };
+
+        if (!NativeMethods.GetMonitorInfoW(monitor, ref info))
+        {
+            return false;
+        }
+
+        return proposed.Left == info.rcWork.Left
+            && proposed.Top == info.rcWork.Top
+            && proposed.Right == info.rcWork.Right
+            && proposed.Bottom == info.rcWork.Bottom;
+    }
+
+    /// <summary>Re-runs the frame calculation after a chrome change and tells the application.</summary>
+    private void ApplyChrome()
+    {
+        NativeMethods.SetWindowPos(
+            _hwnd,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder |
+            NativeMethods.SwpNoActivate | NativeMethods.SwpFrameChanged);
+
+        Invalidate();
+        RaiseChromeMetricsChanged();
+    }
+
+    private void RaiseChromeMetricsChanged() => _chromeMetricsChanged?.Invoke(this);
+
+    /// <summary>
+    /// Builds the snapshot from the measured frame, converting device pixels to logical ones.
+    /// </summary>
+    /// <param name="borderless">Whether the window is in borderless mode at all.</param>
+    /// <param name="frameWidth">Measured left and right frame inset, in device pixels.</param>
+    /// <param name="frameHeight">Measured bottom frame inset, in device pixels.</param>
+    /// <param name="scale">Logical-to-device ratio of the window's display.</param>
+    /// <param name="maximized">Whether the window is maximized, which removes the resize band.</param>
+    /// <returns>The snapshot the seam reports.</returns>
+    internal static XPlatWindowChromeMetrics ChromeMetricsFor(
+        bool borderless, int frameWidth, int frameHeight, float scale, bool maximized)
+    {
+        if (!borderless)
+        {
+            return SystemMetrics;
+        }
+
+        var safeScale = scale > 0f ? scale : 1f;
+        var edge = frameWidth / safeScale;
+        var band = frameHeight / safeScale;
+
+        return new XPlatWindowChromeMetrics
+        {
+            // The system paints the frame on three edges and the client owns the top one, so there is
+            // no top inset. The DWM border line that still crosses the top edge is cosmetic and
+            // belongs to BorderColor rather than to this number.
+            SurfaceInset = new XPlatThickness(edge, 0f, edge, band),
+
+            // What the band takes from the application's own pixels: the top edge only. On the other
+            // three edges it lives in the frame the application never sees.
+            ResizeInset = maximized ? XPlatThickness.Empty : new XPlatThickness(0f, band, 0f, 0f),
+
+            CornerResizeExtent = maximized ? 0f : band,
+
+            // Windows rounds its own corners on 11 and later but exposes no radius query, and a
+            // square window has none, so nothing here may clip the application's drawing.
+            CornerRadius = 0f,
+
+            CaptionButtons = XPlatCaptionButtons.None,
+            CaptionButtonSide = XPlatCaptionButtonSide.Right,
+        };
     }
 
     private void OnMouseMove(IntPtr hwnd, IntPtr lParam)
@@ -1921,6 +2219,15 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         var dpi = (uint)MathF.Round(_scale * 96f);
         NativeMethods.AdjustWindowRectExForDpi(ref rect, StyleFor(), false, 0, dpi == 0 ? 96u : dpi);
+
+        if (_chrome == XPlatWindowChrome.Borderless)
+        {
+            // The client is grown over the caption, so the top inset the frame would add is not part
+            // of the window any more. rect.Top is that inset negated, so dropping it leaves rect.Bottom
+            // as the whole height.
+            return (rect.Right - rect.Left, rect.Bottom);
+        }
+
         return (rect.Right - rect.Left, rect.Bottom - rect.Top);
     }
 

@@ -65,6 +65,16 @@ internal static class NativeMethods
 
     internal const int HtClient = 1;
     internal const int HtTransparent = -1;
+
+    /// <summary>Resize bands a borderless window reports from its own hit test.</summary>
+    internal const int HtLeft = 10;
+    internal const int HtRight = 11;
+    internal const int HtTop = 12;
+    internal const int HtTopLeft = 13;
+    internal const int HtTopRight = 14;
+    internal const int HtBottom = 15;
+    internal const int HtBottomLeft = 16;
+    internal const int HtBottomRight = 17;
     internal const int SwShow = 5;
     internal const int SwShowNoActivate = 4;
     internal const int SwHide = 0;
@@ -100,6 +110,7 @@ internal static class NativeMethods
     internal const uint WmActivateApp = 0x001C;
     internal const uint WmCaptureChanged = 0x0215;
     internal const uint WmNcHitTest = 0x0084;
+    internal const uint WmNcCalcSize = 0x0083;
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmMove = 0x0003;
     internal const int WaInactive = 0;
@@ -251,6 +262,23 @@ internal static class NativeMethods
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    /// <summary>
+    /// The <c>lParam</c> of <c>WM_NCCALCSIZE</c> when <c>wParam</c> is TRUE.
+    /// </summary>
+    /// <remarks>
+    /// <c>rgrc0</c> arrives as the proposed window rect and leaves as the client rect the handler
+    /// computed. <c>rgrc1</c> is the current window rect and is stale after a move or a maximize -
+    /// never derive an inset from it.
+    /// </remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NCCALCSIZE_PARAMS
+    {
+        public RECT rgrc0;
+        public RECT rgrc1;
+        public RECT rgrc2;
+        public IntPtr lppos;
     }
 
     [StructLayout(LayoutKind.Sequential)]
