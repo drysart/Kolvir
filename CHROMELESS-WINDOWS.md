@@ -148,4 +148,5 @@ Appearance regressions are caught with the demo's `--render` output, as with eve
 
 | Step | State | Notes |
 | --- | --- | --- |
-| - | Pending review | Design settled by the three spikes; this document is the review artifact. |
+| - | Approved | Design reviewed and accepted. Implementation runs on this branch, starting at step 1. |
+| 1 | Done | Seven types in `XPlatUI/Application`: `XPlatWindowChrome`, `XPlatCaptionButtons`, `XPlatCaptionButtonKind`, `XPlatCaptionButtonSide`, `XPlatResizeEdge` (flags, so two adjacent edges name a corner), `XPlatCaptionButton` (readonly record struct of kind and rect) and `XPlatWindowChromeMetrics` (sealed record). No backend and no window member changed, so behaviour is untouched: the solution builds with 0 warnings and 0 errors, and the portable suite is 481 passed, 1 skipped (the pre-existing macOS-only skip). Verified with 5 headless checks (`ChromeMetricsTests`): a default snapshot reports that the platform owns nothing and still returns an empty rather than null button list; every field round-trips with drawing order preserved; `XPlatCaptionButton` is a value; resize edges combine into corners in either order; and the two insets are proven independent across the three measured platforms - GTK empty/empty, macOS empty/3 pt, Win32 13 pt painted against 13 pt claimed at the top edge. |
