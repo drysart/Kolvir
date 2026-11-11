@@ -50,6 +50,9 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private bool _disposed;
     private List<NativeTeardownRegistration>? _nativeTeardowns;
 
+    /// <summary>Everything that asked to see this window's messages, empty unless a feature attached one.</summary>
+    private readonly Win32MessageFilters _messageFilters = new();
+
     private string _title = string.Empty;
     private SKSize _clientSize = new(800f, 600f);
     private SKSize _minimumClientSize;
@@ -562,6 +565,31 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         (_nativeTeardowns ??= []).Add(registration);
         return registration;
     }
+
+    /// <summary>
+    /// Adds a filter that sees every message this window receives, before the window acts on it.
+    /// </summary>
+    /// <param name="filter">The filter to run.</param>
+    /// <returns>A lease that removes the filter again when it is disposed.</returns>
+    /// <remarks>
+    /// <para>
+    /// The seam exists for a feature package that needs a notification this backend does not model -
+    /// the taskbar announcing that a window's button was re-created, say - rather than for an
+    /// application that wants to take the window procedure over, so a filter that returns
+    /// <c>true</c> stops the message reaching the window's own handling and has to mean it.
+    /// </para>
+    /// <para>
+    /// Filters run in the order they were added, on the UI thread, and a message with no filter
+    /// attached costs one length check. The type is part of the platform facility rather than of any
+    /// one feature, which is what lets a feature package name it without the backend naming the
+    /// feature.
+    /// </para>
+    /// </remarks>
+    public IDisposable AddMessageFilter(Win32MessageFilter filter) => _messageFilters.Add(filter);
+
+    /// <summary>Removes a filter added by <see cref="AddMessageFilter"/>.</summary>
+    /// <param name="filter">The filter to remove. Removing one that is not attached does nothing.</param>
+    public void RemoveMessageFilter(Win32MessageFilter filter) => _messageFilters.Remove(filter);
 
     /// <summary>Releases everything registered with <see cref="RegisterNativeTeardown"/>.</summary>
     private void ReleaseNativeTeardowns()
@@ -1397,6 +1425,14 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         if (_hwnd == IntPtr.Zero)
         {
             _hwnd = hwnd;
+        }
+
+        // Anything that asked to see the window's messages sees them first, and can stop the message
+        // here. The check is against the snapshot, which is empty for a window no feature attached
+        // to, so an application that opts into nothing pays one comparison per message.
+        if (!_messageFilters.IsEmpty && _messageFilters.Invoke(hwnd, message, wParam, lParam))
+        {
+            return IntPtr.Zero;
         }
 
         // A press on the window that dismisses a popup belongs to that popup: it closes it and
