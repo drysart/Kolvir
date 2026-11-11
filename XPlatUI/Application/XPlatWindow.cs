@@ -275,6 +275,17 @@ public sealed partial class XPlatWindow : IDisposable
     }
 
     /// <summary>
+    /// Which parts of application-owned chrome this window's backend implements. Read it before
+    /// reaching for any of the members below: they refuse what they cannot honour.
+    /// </summary>
+    /// <remarks>
+    /// The answer is a property of the backend, so it is the same for every window and does not
+    /// change over the life of one. An application that finds <see cref="XPlatChromeCapabilities.None"/>
+    /// should fall back to the decorated window it would have built anyway, not catch an exception.
+    /// </remarks>
+    public XPlatChromeCapabilities ChromeCapabilities => Backend.ChromeCapabilities;
+
+    /// <summary>
     /// How much of the window the platform draws. The default is
     /// <see cref="XPlatWindowChrome.System"/>, the ordinary decorated window.
     /// </summary>
@@ -282,7 +293,8 @@ public sealed partial class XPlatWindow : IDisposable
     /// <see cref="XPlatWindowChrome.Borderless"/> makes the application responsible for every visible
     /// pixel while the platform keeps the resize band and its window behaviours. Setting it may be
     /// done before or after <see cref="Show"/>; before is cheaper, because the window is created with
-    /// the mode rather than changed into it.
+    /// the mode rather than changed into it. Check <see cref="ChromeCapabilities"/> first - a backend
+    /// that has not adopted the feature throws rather than silently staying decorated.
     /// </remarks>
     public XPlatWindowChrome Chrome
     {

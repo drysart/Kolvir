@@ -88,6 +88,17 @@ public interface IXPlatWindowBackend : IDisposable
     XPlatMenuBar? MenuBar { get; set; }
 
     /// <summary>
+    /// Which parts of application-owned chrome this backend implements. Ask here before asking for
+    /// one: the members below refuse what they cannot honour.
+    /// </summary>
+    /// <remarks>
+    /// The answer is fixed for the life of the backend, so it is safe to read once. A backend that
+    /// reports <see cref="XPlatChromeCapabilities.None"/> still throws from the chrome setters -
+    /// capabilities make the refusal discoverable, they do not turn it into a silent no-op.
+    /// </remarks>
+    XPlatChromeCapabilities ChromeCapabilities => XPlatChromeCapabilities.None;
+
+    /// <summary>
     /// How much of the window the platform draws: the ordinary decorated window, or one the
     /// application paints edge to edge.
     /// </summary>
@@ -99,9 +110,10 @@ public interface IXPlatWindowBackend : IDisposable
     /// there is no caption region on the seam.
     /// </para>
     /// <para>
-    /// <b>The default implementation throws.</b> A backend that has not adopted borderless chrome
-    /// refuses the request at the call site rather than silently staying decorated, so an application
-    /// finds out where it asked instead of by looking at the window.
+    /// <b>The default implementation throws.</b> Check <see cref="XPlatChromeCapabilities.Borderless"/>
+    /// first and fall back to a decorated window when it is false. A backend that has not adopted
+    /// borderless chrome refuses the request rather than silently staying decorated, so an application
+    /// that asks anyway finds out where it asked instead of by looking at the window.
     /// </para>
     /// </remarks>
     XPlatWindowChrome Chrome
@@ -116,9 +128,10 @@ public interface IXPlatWindowBackend : IDisposable
     /// </summary>
     /// <remarks>
     /// This is the request; <see cref="ChromeMetrics"/> is the answer, so an application reads back
-    /// what it got. <see cref="XPlatCaptionButtons.Platform"/> is honoured by every backend - Windows
-    /// draws and hit-tests the buttons itself rather than leaving the application to do it. The
-    /// default implementation throws, like <see cref="Chrome"/>.
+    /// what it got. <see cref="XPlatCaptionButtons.Platform"/> is honoured by every backend that
+    /// reports <see cref="XPlatChromeCapabilities.CaptionButtons"/> - Windows draws and hit-tests the
+    /// buttons itself rather than leaving the application to do it. The default implementation throws,
+    /// like <see cref="Chrome"/>.
     /// </remarks>
     XPlatCaptionButtons CaptionButtons
     {
@@ -145,7 +158,8 @@ public interface IXPlatWindowBackend : IDisposable
     /// <remarks>
     /// Only a borderless window needs this. On Windows the non-client strip is composited with a
     /// restored frame before any handler runs, so matching it to the title bar colour is the only way
-    /// to keep a restore from flashing. The default implementation throws.
+    /// to keep a restore from flashing. Check <see cref="XPlatChromeCapabilities.WindowColors"/> first;
+    /// the default implementation throws.
     /// </remarks>
     SKColor? CaptionColor
     {
@@ -159,7 +173,8 @@ public interface IXPlatWindowBackend : IDisposable
     /// </summary>
     /// <remarks>
     /// This is the border the platform draws, not one the application draws: on Windows the DWM
-    /// border colour, on GTK the window's own CSS border. The default implementation throws.
+    /// border colour, on GTK the window's own CSS border. Check
+    /// <see cref="XPlatChromeCapabilities.WindowColors"/> first; the default implementation throws.
     /// </remarks>
     SKColor? BorderColor
     {

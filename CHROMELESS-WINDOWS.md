@@ -14,6 +14,7 @@ the tree in a working state.
 | Topic | Decision | Rationale |
 | --- | --- | --- |
 | Chrome vocabulary | Two values, `XPlatWindowChrome.System` and `Borderless` | There is no third thing to describe. Being chromeless already means the app owns the window edge to edge, so a "custom chrome" value would only be a rename of `Borderless`. |
+| Capability discovery | `XPlatChromeCapabilities`, a non-throwing report, kept separate from the requests | The requests have to refuse what they cannot honour, and a feature that can only be discovered by triggering an exception forces every application either into `try`/`catch` or into asking for something it should not. Capabilities answer the question; the throw stays as the guard for code that ignored the answer. |
 | Caption buttons | Orthogonal knob, `XPlatCaptionButtons.None` or `Platform` | Whether the platform draws buttons has nothing to do with whether it draws a title bar. |
 | Windows parity | The Win32 backend **emulates** `Platform` buttons | Otherwise the same application would have to ship two title-bar implementations. The backend draws and hit-tests them so the public API is uniform; the fact that the pixels come from the backend rather than from DWM is invisible to the app. |
 | Two insets, never one | `SurfaceInset` (do not paint) and `ResizeInset` (do not put controls) are separate | Measured: GTK's 12 px band is entirely *outside* the app's pixels, macOS's 3 pt band is *on top of* them, and Win32's 13 px band is inside the client on the top edge only. A single thickness would be wrong for all three. |
@@ -45,6 +46,14 @@ window with real injected input, not from a calculation.
 ## API surface
 
 ```csharp
+public sealed record XPlatChromeCapabilities
+{
+    public static XPlatChromeCapabilities None { get; }   // nothing adopted; also the default
+    public bool Borderless { get; init; }
+    public bool CaptionButtons { get; init; }
+    public bool WindowColors { get; init; }
+}
+
 public enum XPlatWindowChrome { System, Borderless }
 public enum XPlatCaptionButtons { None, Platform }
 public enum XPlatCaptionButtonKind { Close, Minimize, Maximize, Restore }
@@ -69,6 +78,7 @@ public sealed record XPlatWindowChromeMetrics
 `IXPlatWindowBackend` gains, and `XPlatWindow` mirrors 1:1 as it does for every other member:
 
 ```csharp
+XPlatChromeCapabilities ChromeCapabilities { get; }
 XPlatWindowChrome Chrome { get; set; }
 XPlatCaptionButtons CaptionButtons { get; set; }
 XPlatWindowChromeMetrics ChromeMetrics { get; }
@@ -85,8 +95,8 @@ geometry themselves: it differs by platform, by GTK version and by DPI.
 
 ## Normative rules
 
-1. **Report, do not assume.** `CaptionButtons = Platform` is honoured by every backend, but
-   `ChromeMetrics.CaptionButtons` reports what was actually drawn.
+1. **Report, do not assume.** Ask `ChromeCapabilities` before setting anything - the setters throw
+   when the answer is no - and read `ChromeMetrics.CaptionButtons` for what was actually drawn.
 2. **Two insets.** `SurfaceInset` means do not paint; `ResizeInset` means do not hit-test controls.
 3. **`TryBeginDrag()` is called synchronously from pointer-down**, returns whether a drag started, and
    on `true` the application must suppress the click it would otherwise deliver.
@@ -114,7 +124,7 @@ The backend draws and handles the buttons so that `Platform` behaves as it does 
 | # | Step | Scope | Done when |
 | --- | --- | --- | --- |
 | 1 | Types and metrics model | `XPlatWindowChrome`, `XPlatCaptionButtons`, `XPlatCaptionButtonKind`, `XPlatCaptionButtonSide`, `XPlatResizeEdge`, `XPlatCaptionButton`, `XPlatWindowChromeMetrics` | Types compile; a headless test builds a snapshot and reads every field back; no backend is touched yet |
-| 2 | Seam members and delegation | The seven members on `IXPlatWindowBackend`, `XPlatWindow` passthroughs, and a default `ChromeMetrics` for backends that have not implemented it (`System` mode: empty insets, no buttons) | Solution builds and every existing test passes with no behaviour change; default metrics report `System` and `None` |
+| 2 | Seam members and delegation | `XPlatChromeCapabilities` plus the nine members on `IXPlatWindowBackend`, `XPlatWindow` passthroughs, and defaults that refuse rather than no-op: system chrome, empty insets, no buttons | Solution builds and every existing test passes with no behaviour change; a backend that has adopted nothing reports `None`, refuses every chrome request at the call site, and answers `false` from drag and resize |
 | 3 | Win32 borderless core | Style, `WM_NCCALCSIZE` from `rgrc[0]`, measured frame, custom `WM_NCHITTEST`, work-area clamp, metrics reporting | Insets match L13/T0/R13/B13 at 192 DPI, all four edges resize 13 px, maximise lands on the work area exactly, restore animation plays |
 | 4 | Win32 drag and resize start | Press caching (device, button, position, timestamp); `TryBeginDrag`, `TryBeginResize` | A press on an app-drawn title bar drags the window with native snap and tiling; calling either one outside a press returns false |
 | 5 | Win32 caption-button emulation | Overlay draw, hit priority, state/theme/DPI redraw, `CaptionButtonStrip` and bounds reporting | Buttons draw at 92x43 and take clicks; the app receives nothing inside the strip; glyphs follow `State` and `SetTitleBarAppearance` |
@@ -150,4 +160,4 @@ Appearance regressions are caught with the demo's `--render` output, as with eve
 | --- | --- | --- |
 | - | Approved | Design reviewed and accepted. Implementation runs on this branch, starting at step 1. |
 | 1 | Done | Seven types in `XPlatUI/Application`: `XPlatWindowChrome`, `XPlatCaptionButtons`, `XPlatCaptionButtonKind`, `XPlatCaptionButtonSide`, `XPlatResizeEdge` (flags, so two adjacent edges name a corner), `XPlatCaptionButton` (readonly record struct of kind and rect) and `XPlatWindowChromeMetrics` (sealed record). No backend and no window member changed, so behaviour is untouched: the solution builds with 0 warnings and 0 errors, and the portable suite is 481 passed, 1 skipped (the pre-existing macOS-only skip). Verified with 5 headless checks (`ChromeMetricsTests`): a default snapshot reports that the platform owns nothing and still returns an empty rather than null button list; every field round-trips with drawing order preserved; `XPlatCaptionButton` is a value; resize edges combine into corners in either order; and the two insets are proven independent across the three measured platforms - GTK empty/empty, macOS empty/3 pt, Win32 13 pt painted against 13 pt claimed at the top edge. |
-| 2 | Done | The seam gained nine members - `Chrome`, `CaptionButtons`, `ChromeMetrics`, `CaptionColor`, `BorderColor`, `TryBeginDrag`, `TryBeginResize`, `AddChromeMetricsChangedHandler`, `RemoveChromeMetricsChangedHandler` - and `XPlatWindow` mirrors all nine. They are **default interface members**, which is the one new thing this step introduces: the four backends compile and behave exactly as before, and a third-party implementation of the seam is not broken by the feature existing. The defaults split by what a caller can do with the answer. Requests that would otherwise no-op silently **throw** `NotSupportedException` at the call site - `Chrome`, `CaptionButtons`, `CaptionColor`, `BorderColor` - because a window that silently stays decorated is the failure mode worth a crash. Queries that "no" is a usable answer for **degrade**: `TryBeginDrag` and `TryBeginResize` return false, `ChromeMetrics` returns one shared empty snapshot, and the handler subscription is well behaved but never fires. Verified with 3 headless checks (`ChromeSeamTests`, driving the headless backend through `XPlatWindow`): a backend with no chrome support reports `System`, `None`, empty insets and empty geometry; every request throws and leaves the window unchanged; and the change subscription disposes cleanly, fires never, and rejects a null handler. Solution builds 0 warnings / 0 errors; portable suite 484 passed, 1 skipped. |
+| 2 | Done | The seam gained ten members - `ChromeCapabilities`, `Chrome`, `CaptionButtons`, `ChromeMetrics`, `CaptionColor`, `BorderColor`, `TryBeginDrag`, `TryBeginResize`, `AddChromeMetricsChangedHandler`, `RemoveChromeMetricsChangedHandler` - and `XPlatWindow` mirrors all ten. They are **default interface members**, which is the one new thing this step introduces: the four backends compile and behave exactly as before, and a third-party implementation of the seam is not broken by the feature existing. `XPlatChromeCapabilities` is the non-throwing half: the requests have to refuse what they cannot honour, so a feature discoverable only by throwing would push every application into `try`/`catch` or into asking for something it should not. It reports `Borderless`, `CaptionButtons` and `WindowColors`; drag and resize need no flag because `TryBeginDrag`/`TryBeginResize` already answer with a bool at the moment it matters. The defaults above it split by what a caller can do with the answer. Requests that would otherwise no-op silently **throw** `NotSupportedException` at the call site - `Chrome`, `CaptionButtons`, `CaptionColor`, `BorderColor` - because a window that silently stays decorated is the expensive failure mode. Queries that "no" is a usable answer for **degrade**: `TryBeginDrag` and `TryBeginResize` return false, `ChromeMetrics` returns one shared empty snapshot, and the handler subscription is well behaved but never fires. Verified with 4 headless checks (`ChromeSeamTests`, driving the headless backend through `XPlatWindow`): a backend with no chrome support reports `System`, `None`, empty insets and empty geometry; `ChromeCapabilities` answers `None` without throwing and agrees with the refusal; every request throws and leaves the window unchanged; and the change subscription disposes cleanly, fires never, and rejects a null handler. Solution builds 0 warnings / 0 errors; portable suite 485 passed, 1 skipped. |

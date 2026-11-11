@@ -86,6 +86,24 @@ public sealed class ChromeSeamTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void CapabilitiesAnswerWithoutThrowingAndMatchWhatTheBackendDoes()
+    {
+        WithWindow(window =>
+        {
+            var capabilities = window.ChromeCapabilities;
+
+            Assert.AreEqual(XPlatChromeCapabilities.None, capabilities, "a backend that has adopted nothing says so");
+            Assert.IsFalse(capabilities.Borderless);
+            Assert.IsFalse(capabilities.CaptionButtons);
+            Assert.IsFalse(capabilities.WindowColors);
+
+            // The whole point of the report is that the answer matches the behaviour: an application
+            // reads the capability, decides to stay decorated, and never reaches the throw.
+            Assert.ThrowsExactly<NotSupportedException>(() => window.Chrome = XPlatWindowChrome.Borderless);
+        });
+    }
+
+    [TestMethod]
     public void TheMetricsHandlerCanBeSubscribedToAndDisposed()
     {
         WithWindow(window =>
