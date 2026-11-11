@@ -165,10 +165,21 @@ internal static class Win32CaptionButtons
                 break;
 
             case XPlatCaptionButtonKind.Restore:
-                // The back square first, then the front one offset down and left, which is what the
-                // platform's restore glyph is.
-                canvas.DrawRect(new SKRect(cx - half + 2f, cy - half - 2f, cx + half, cy + half), pen);
-                canvas.DrawRect(new SKRect(cx - half, cy - half + 2f, cx + half - 2f, cy + half), pen);
+                // Two squares offset the way the platform offsets them, and the back one is
+                // *occluded* by the front one rather than drawn through it. The platform fills the
+                // front square with the caption colour; here the application's own paint shows
+                // through, so the back square is clipped away instead of covered, which leaves the
+                // 1 px gap between them that the platform's glyph has.
+                var back = new SKRect(cx - half + 2f, cy - half - 2f, cx + half, cy + half);
+                var front = new SKRect(cx - half, cy - half + 2f, cx + half - 2f, cy + half);
+                var cut = new SKRect(front.Left - 1f, front.Top - 1f, front.Right + 1f, front.Bottom + 1f);
+
+                canvas.Save();
+                canvas.ClipRect(cut, SKClipOperation.Difference, antialias: false);
+                canvas.DrawRect(back, pen);
+                canvas.Restore();
+
+                canvas.DrawRect(front, pen);
                 break;
 
             case XPlatCaptionButtonKind.Close:
