@@ -71,6 +71,10 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     private XPlatWindowChrome _chrome = XPlatWindowChrome.System;
 
+    /// <summary>The colour asked for the caption strip and the frame line, null meaning DWM's own.</summary>
+    private SKColor? _captionColor;
+    private SKColor? _borderColor;
+
     /// <summary>Frame insets measured from the client rect <c>DefWindowProc</c> computed, in device
     /// pixels. Left and right are the same number; the bottom is <see cref="_frameHeight"/>.</summary>
     private int _frameWidth;
@@ -398,10 +402,64 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>
-    /// Borderless chrome is implemented here; caption buttons are emulated. Window colours arrive with
-    /// their own step and are reported as unsupported until then.
+    /// Borderless chrome, emulated caption buttons and the two DWM window colours are all implemented
+    /// here; the colours need Windows 11, so they are reported honestly rather than assumed.
     /// </summary>
-    public XPlatChromeCapabilities ChromeCapabilities => new() { Borderless = true, CaptionButtons = true };
+    public XPlatChromeCapabilities ChromeCapabilities => new()
+    {
+        Borderless = true,
+        CaptionButtons = true,
+        WindowColors = NativeMethods.SupportsWindowColors(Environment.OSVersion.Version.Build),
+    };
+
+    /// <summary>
+    /// The colour DWM paints the caption strip in. A borderless window's client covers that strip, so
+    /// this is the only way to stop the restored frame from flashing it during a restore animation.
+    /// </summary>
+    /// <remarks>
+    /// Null hands the strip back to DWM, which is what a decorated window wants. The colour has no
+    /// alpha: <c>COLORREF</c> carries three channels and DWM composes the strip itself.
+    /// </remarks>
+    public SKColor? CaptionColor
+    {
+        get => _captionColor;
+        set
+        {
+            EnsureWindowColorsSupported();
+            if (_captionColor == value)
+            {
+                return;
+            }
+
+            _captionColor = value;
+            ApplyWindowColors();
+        }
+    }
+
+    /// <summary>
+    /// The colour of the one-pixel line DWM draws around the window, on every edge including the top
+    /// one the client covers.
+    /// </summary>
+    /// <remarks>
+    /// Null hands the line back to DWM. <c>DWMWA_COLOR_NONE</c> exists as well and is not exposed:
+    /// removing the line changes what the window looks like on screen, which is the application's
+    /// decision to draw rather than an attribute to set by accident.
+    /// </remarks>
+    public SKColor? BorderColor
+    {
+        get => _borderColor;
+        set
+        {
+            EnsureWindowColorsSupported();
+            if (_borderColor == value)
+            {
+                return;
+            }
+
+            _borderColor = value;
+            ApplyWindowColors();
+        }
+    }
 
     /// <summary>
     /// Whether the window shows caption buttons. Windows has none to offer in a borderless window, so
@@ -1039,6 +1097,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private void Present()
     {
         NativeMethods.SetDarkTitleBar(_hwnd, XPlatTheme.IsDarkMode);
+        ApplyWindowColors();
 
         // The presenters need a live HWND, so they can only be installed once the window exists.
         XPlatContextMenuPresenter.Current = _useXPlatMenus
@@ -2049,6 +2108,41 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             && proposed.Top == info.rcWork.Top
             && proposed.Right == info.rcWork.Right
             && proposed.Bottom == info.rcWork.Bottom;
+    }
+
+    /// <summary>
+    /// Turns a colour into the <c>COLORREF</c> DWM's colour attributes take.
+    /// </summary>
+    /// <param name="color">The colour.</param>
+    /// <returns><c>0x00BBGGRR</c>, the byte order every Win32 colour is in.</returns>
+    /// <remarks>
+    /// The channel order is reversed against SkiaSharp's, which is the whole of this method: a colour
+    /// passed through unchanged is blue where it should be red. Alpha is dropped because
+    /// <c>COLORREF</c> has no room for it.
+    /// </remarks>
+    internal static uint ToColorRef(SKColor color) =>
+        (uint)(color.Red | (color.Green << 8) | (color.Blue << 16));
+
+    /// <summary>Refuses a window colour where the running Windows build cannot honour it.</summary>
+    private void EnsureWindowColorsSupported()
+    {
+        if (!ChromeCapabilities.WindowColors)
+        {
+            throw new NotSupportedException(
+                "This version of Windows does not implement DWM window colours. Check XPlatChromeCapabilities.WindowColors first.");
+        }
+    }
+
+    /// <summary>Applies both window colours, or hands each one DWM did not get back to DWM.</summary>
+    private void ApplyWindowColors()
+    {
+        if (_hwnd == IntPtr.Zero || _disposed)
+        {
+            return;
+        }
+
+        NativeMethods.SetCaptionColor(_hwnd, _captionColor is { } caption ? ToColorRef(caption) : null);
+        NativeMethods.SetBorderColor(_hwnd, _borderColor is { } border ? ToColorRef(border) : null);
     }
 
     /// <summary>Re-runs the frame calculation after a chrome change and tells the application.</summary>

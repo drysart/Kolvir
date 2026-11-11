@@ -983,6 +983,12 @@ internal static class NativeMethods
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
 
+    // Windows 11 only. Both take a COLORREF, and both also take DWMWA_COLOR_DEFAULT instead of one,
+    // which is how an attribute is handed back to DWM rather than set to a colour.
+    private const int DwmwaBorderColor = 34;
+    private const int DwmwaCaptionColor = 35;
+    internal const uint DwmColorDefault = 0xFFFFFFFF;
+
     /// <summary>Reads a REG_DWORD from HKEY_CURRENT_USER, or null when the value is absent.</summary>
     internal static uint? ReadUserDword(string subKey, string valueName)
     {
@@ -1025,6 +1031,71 @@ internal static class NativeMethods
         }
     }
 
+        /// <summary>
+        /// Whether this Windows build implements <c>DWMWA_CAPTION_COLOR</c> and <c>DWMWA_BORDER_COLOR</c>.
+        /// </summary>
+        /// <param name="buildNumber">The OS build, from <see cref="Environment.OSVersion"/>.</param>
+        /// <returns>True from Windows 11 (build 22000) on.</returns>
+        /// <remarks>
+        /// Older builds reject the attributes with <c>E_INVALIDARG</c> rather than ignoring them, which is
+        /// exactly what makes the capability reportable instead of guessable.
+        /// </remarks>
+        internal static bool SupportsWindowColors(int buildNumber) => buildNumber >= 22000;
+
+        /// <summary>Sets the colour DWM paints the caption strip in, or hands it back to DWM.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">A <c>COLORREF</c>, or null for DWM's own colour.</param>
+        /// <returns>True when DWM accepted the attribute.</returns>
+        internal static bool SetCaptionColor(IntPtr hwnd, uint? colorRef) =>
+            SetDwmColor(hwnd, DwmwaCaptionColor, colorRef);
+
+        /// <summary>Sets the colour of the line DWM draws around the window, or hands it back to DWM.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">A <c>COLORREF</c>, or null for DWM's own colour.</param>
+        /// <returns>True when DWM accepted the attribute.</returns>
+        internal static bool SetBorderColor(IntPtr hwnd, uint? colorRef) =>
+            SetDwmColor(hwnd, DwmwaBorderColor, colorRef);
+
+        /// <summary>Reads back the caption colour DWM is using.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">The <c>COLORREF</c> DWM reports, or <c>DWMWA_COLOR_DEFAULT</c>.</param>
+        /// <returns>True when DWM answered.</returns>
+        internal static bool TryGetCaptionColor(IntPtr hwnd, out uint colorRef) =>
+            TryGetDwmColor(hwnd, DwmwaCaptionColor, out colorRef);
+
+        /// <summary>Reads back the border colour DWM is using.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">The <c>COLORREF</c> DWM reports, or a sentinel.</param>
+        /// <returns>True when DWM answered.</returns>
+        internal static bool TryGetBorderColor(IntPtr hwnd, out uint colorRef) =>
+            TryGetDwmColor(hwnd, DwmwaBorderColor, out colorRef);
+
+        private static bool SetDwmColor(IntPtr hwnd, int attribute, uint? colorRef)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // DWMWA_COLOR_DEFAULT is what hands an attribute back to DWM, so a null colour is a value
+            // rather than a separate call.
+            var value = (int)(colorRef ?? DwmColorDefault);
+            return DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int)) == 0;
+        }
+
+        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)
+        {
+            colorRef = 0;
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var ok = DwmGetWindowAttribute(hwnd, attribute, out var value, sizeof(int)) == 0;
+            colorRef = (uint)value;
+            return ok;
+        }
+
     /// <summary>
     /// Windows 11 (build 22000) is the first release whose menus use the modern rounded, softly
     /// shadowed style, so that is the cut-off for drawing one instead of calling
@@ -1047,6 +1118,9 @@ internal static class NativeMethods
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
 
     // Message box: the flags, the ids it returns, and the one call.
     internal const uint MbOk = 0x00000000;
