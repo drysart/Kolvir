@@ -220,10 +220,15 @@ jobs:
 
       # The badge feature's Windows half: the overlay icon is drawn with Skia and handed to the
       # shell as a GDI icon, so its geometry is asserted pixel by pixel and cannot be checked from
-      # the portable suite. Windows only, like the backend suite above.
+      # the portable suite. Windows only, like the backend suite above, and narrowed to the one
+      # framework it uses for the reason the feature csproj gives: an unnarrowed restore evaluates
+      # all three of the feature's frameworks and stops for the macOS workload this job never
+      # installs. -p:XPlatUIBadgeFrameworks= rather than -p:TargetFramework=, because the latter
+      # would also override XPlatUI's own net10.0 and leave it restored for one framework and built
+      # for another.
       - name: Restore the Windows badge tests
         if: runner.os == 'Windows'
-        run: dotnet restore XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj --nologo
+        run: dotnet restore XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj --nologo -p:XPlatUIBadgeFrameworks=net10.0-windows
 
       - name: Test the Windows badge icon
         if: runner.os == 'Windows'
@@ -231,6 +236,7 @@ jobs:
         run: |
           set -o pipefail
           dotnet test XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj --no-restore --nologo \
+            -p:XPlatUIBadgeFrameworks=net10.0-windows \
             --logger "trx;LogFileName=badges-win32.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"

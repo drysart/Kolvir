@@ -13,6 +13,14 @@
          builds. An application that references this project still builds only the inner build its own
          framework can use. -->
     <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <!-- A test project that wants one platform - the Windows half of this feature's tests - narrows
+         the list here instead: `-p:XPlatUIBadgeFrameworks=net10.0-windows`. That is what keeps its
+         restore from evaluating the macOS inner build on a machine without the macOS workload, which
+         fails as NETSDK1147 from XPlatUI.Backend.AppKit before anything is compiled. The two
+         -p:TargetFramework= spellings above cannot do it here: a global TargetFramework also
+         overrides the single-framework projects underneath, and XPlatUI is net10.0, so the answer is
+         an assets file restored for one framework and built for another. -->
+    <TargetFrameworks Condition="'$(XPlatUIBadgeFrameworks)' != ''">$(XPlatUIBadgeFrameworks)</TargetFrameworks>
     <RootNamespace>XPlatUI.Badges</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

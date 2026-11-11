@@ -5,7 +5,15 @@
        interop that the portable suite cannot reach.
 
        Separate from XPlatUI.Feature.Badges.Tests because that project is deliberately portable: it
-       resolves the net10.0 (linux) inner build of the feature, which has no Win32 code in it. -->
+       resolves the net10.0 (linux) inner build of the feature, which has no Win32 code in it.
+
+       Like every project that references the feature, this one wants -p:TargetFramework=net10.0-windows
+       on restore and on the test invocation. The feature lists all three frameworks so that `dotnet
+       pack` can build them in one pass, and a restore that is not narrowed evaluates every one of
+       them - which on a machine without the macOS workload fails as NETSDK1147 from
+       XPlatUI.Backend.AppKit before a line here is compiled. The test workflow does that; the
+       XPlatUI.Feature.Badges.csproj comment explains why the plural -p:TargetFrameworks= is not the
+       switch to reach for. -->
 
   <PropertyGroup>
     <TargetFramework>net10.0-windows</TargetFramework>
