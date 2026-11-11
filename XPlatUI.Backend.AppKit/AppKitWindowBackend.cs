@@ -511,7 +511,9 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     /// <returns>True when a drag was started.</returns>
     public bool TryBeginDrag()
     {
-        if (_window is null || _disposed || _chrome != XPlatWindowChrome.Borderless)
+        // Deliberately not limited to borderless: an application's own title bar is a drag handle in
+        // either chrome, and Win32 and GTK both start the move whatever the window is wearing.
+        if (_window is null || _disposed)
         {
             return false;
         }

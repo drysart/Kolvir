@@ -3090,7 +3090,9 @@ working. A UI Automation provider for the emulated strip is deferred rather than
 
 The demo has a **Chromeless window** page that switches its own window between the two in the UI,
 requests the platform buttons both ways, starts a drag from a strip it draws itself, and shows the
-capability report and metrics snapshot it read back.
+capability report and metrics snapshot it read back. The sample's own header strip - the title, the
+subtitle and the space around them - is a drag handle too, so the window can be moved by its title
+area in either chrome; the two buttons in that header keep their own clicks.
 
 ### Drag and drop
 

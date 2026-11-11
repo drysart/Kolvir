@@ -395,7 +395,7 @@ public sealed class DemoUi
         header.Controls.Add(BuildAppearanceButton());
         header.Controls.Add(BuildOwnedWindowButton());
 
-        header.Controls.Add(new XPlatLabel("XPlat UI")
+        var title = new XPlatLabel("XPlat UI")
         {
             Dock = XDock.Top,
             AutoSize = false,
@@ -403,9 +403,9 @@ public sealed class DemoUi
             Font = XPlatTheme.TitleFont,
             TextAlign = XPlatContentAlignment.BottomLeft,
             Margin = new XPlatThickness(28f, 16f, 28f, 0f),
-        });
+        };
 
-        header.Controls.Add(new XPlatLabel("A lightweight, AOT-friendly, cross-platform control layer rendered with SkiaSharp.")
+        var subtitle = new XPlatLabel("A lightweight, AOT-friendly, cross-platform control layer rendered with SkiaSharp.")
         {
             Dock = XDock.Top,
             AutoSize = false,
@@ -414,10 +414,31 @@ public sealed class DemoUi
             ForeColorRole = XPlatThemeColor.MutedForeground,
             TextAlign = XPlatContentAlignment.TopLeft,
             Margin = new XPlatThickness(28f, 4f, 28f, 0f),
-        });
+        };
+
+        header.Controls.Add(title);
+        header.Controls.Add(subtitle);
+
+        // The header is this sample's title bar, so a press on it that a button does not claim is
+        // what a borderless window has to turn into a window drag. The labels are not selection
+        // targets, so the title text drags with the strip rather than highlighting.
+        AttachWindowDrag(header);
+        AttachWindowDrag(title);
+        AttachWindowDrag(subtitle);
 
         return header;
     }
+
+    /// <summary>
+    /// Makes a strip act as the window's title bar: a press the platform hands to the strip is the
+    /// application's chance to ask for a window drag.
+    /// </summary>
+    /// <remarks>
+    /// Only presses the strip itself receives count - a button inside it takes its own click first,
+    /// which is why the header's two buttons are not wired to this and still work.
+    /// </remarks>
+    private void AttachWindowDrag(XPlatControl strip) =>
+        strip.AddMouseDownHandler((_, _) => DragWindowFromThisPress());
 
     /// <summary>
     /// Swaps the palette. The library repaints on its own (the host listens to
@@ -3181,7 +3202,7 @@ public sealed class DemoUi
             Font = XPlatTheme.CaptionFont,
             ForeColorRole = XPlatThemeColor.MutedForeground,
         });
-        handle.AddMouseDownHandler((_, _) => DragWindowFromThisPress());
+        AttachWindowDrag(handle);
         _chromeDragHandle = handle;
         card.Controls.Add(handle);
 
