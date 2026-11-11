@@ -154,12 +154,18 @@ public sealed class DemoUi
     private XPlatPanel? _colorDialogSwatch;
     private XPlatLabel? _colorDialogReadout;
 
+    // The chromeless page. The window is attached after it is created, because a page is built
+    // before there is a window to ask; the readout then reports what the backend said rather than
+    // what the page asked for, which is the whole point of the page.
+    private XPlatWindow? _chromeWindow;
+    private XPlatLabel? _chromeReadout;
+    private XPlatControl? _chromeDragHandle;
+
     public DemoUi()
     {
         Root = BuildUi();
 
-        // A page that has no menu of its own still has to answer a right-click: the host asks for a
-        // menu only after the control under the pointer has declined, and the native menu paths show
+        // A page that has no menu of its own still has to answer a right-click: the host asks for a        // menu only after the control under the pointer has declined, and the native menu paths show
         // nothing at all when nobody answers. This one is genuinely application-wide - it belongs to
         // the window, not to any one control - so it is the host's handler, and it runs last. The
         // selection's Copy menu comes after it, so a page menu is only offered while there is
@@ -176,6 +182,40 @@ public sealed class DemoUi
 
     /// <summary>The root of the sample control tree.</summary>
     public XPlatControl Root { get; }
+
+    /// <summary>
+    /// Gives the sample the window it is showing in, which the chromeless page drives.
+    /// </summary>
+    /// <remarks>
+    /// A page is built before the window exists, so the page cannot ask for one - and a headless
+    /// render never has a real window to give it, which is why the page reports "no window" rather
+    /// than failing when this is never called.
+    /// </remarks>
+    /// <param name="window">The window the sample is displayed in.</param>
+    public void AttachWindow(XPlatWindow window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        if (ReferenceEquals(_chromeWindow, window))
+        {
+            return;
+        }
+
+        _chromeWindow = window;
+
+        // The snapshot moves when the window changes: after a resize, a maximise, a change of
+        // explicit chrome or of the buttons requested. The page re-reads it rather than assuming.
+        //
+        // Showing counts as a change even though no backend reports it as one: a borderless window's
+        // measured frame, and therefore its insets and button rects, is only known once the native
+        // window exists, and the page is attached before that.
+        window.AddChromeMetricsChangedHandler(_ => RefreshChromeReadout());
+        window.AddStateChangedHandler(_ => RefreshChromeReadout());
+        window.AddClientSizeChangedHandler(_ => RefreshChromeReadout());
+        window.AddShownHandler(_ => RefreshChromeReadout());
+
+        RefreshChromeReadout();
+    }
     /// <summary>Shows the page that holds the first text field and puts the caret in it, which then blinks.</summary>
     public void FocusFirstTextBox()    {
         for (int index = 0; index < _pages.Length; index++)
@@ -298,6 +338,11 @@ public sealed class DemoUi
         {
             window.MenuBar = menuBar(window, demo);
         }
+
+        // The chromeless page drives the window it is shown in, and a headless render has a window
+        // even though it has no platform behind it - so the page reports that backend's "no" rather
+        // than nothing at all.
+        demo.AttachWindow(window);
 
         window.AddShownHandler(_ =>
         {
@@ -563,6 +608,7 @@ public sealed class DemoUi
         ("Measured rendering", demo => Page(demo.BuildMetricsPage())),
         ("Zoom", demo => Page(demo.BuildZoomPage())),
         ("Drag/drop lifetime", demo => Page(demo.BuildDragLifetimePage())),
+        ("Chromeless window", demo => Page(demo.BuildChromelessPage())),
     };
 
     /// <summary>
@@ -3099,6 +3145,217 @@ public sealed class DemoUi
                 throw new ArgumentOutOfRangeException(nameof(kind), kind, "Expected dropdown, menu or tooltip.");
         }
     }
+
+    /// <summary>
+    /// Page 58: the window's own chrome. The buttons switch this window between the platform's
+    /// decoration and a borderless one and ask for the platform's caption buttons, the strip starts a
+    /// drag from the application's own press, and the readout reports what the backend answered
+    /// rather than what was asked for.
+    /// </summary>
+    private XPlatPanel BuildChromelessPage()
+    {
+        var card = Card();
+        card.Controls.Add(Heading("Chromeless window"));
+
+        var buttons = Row(34f);
+        buttons.Controls.Add(ChromeButton("Borderless", MakeBorderless));
+        buttons.Controls.Add(ChromeButton("System chrome", MakeDecorated));
+        buttons.Controls.Add(ChromeButton("Platform buttons", AskForPlatformButtons));
+        buttons.Controls.Add(ChromeButton("Our own buttons", AskForNoButtons));
+        card.Controls.Add(buttons);
+
+        // The application's own title bar: a press here asks the platform to move the window, which is
+        // the one thing a borderless window cannot do for itself once the platform's caption is gone.
+        var handle = new XPlatPanel
+        {
+            Dock = XDock.Top,
+            Height = 36f,
+            BorderWidth = 1f,
+            CornerRadius = 6f,
+            Margin = new XPlatThickness(0f, 0f, 0f, 10f),
+        };
+        handle.Controls.Add(new XPlatLabel("Press and drag here to move the window")
+        {
+            Dock = XDock.Fill,
+            TextAlign = XPlatContentAlignment.MiddleCenter,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        });
+        handle.AddMouseDownHandler((_, _) => DragWindowFromThisPress());
+        _chromeDragHandle = handle;
+        card.Controls.Add(handle);
+
+        var readout = new XPlatLabel("No window attached, so there is nothing to report.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 150f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+            Margin = new XPlatThickness(0f, 0f, 0f, 8f),
+        };
+        _chromeReadout = readout;
+        card.Controls.Add(readout);
+
+        card.Controls.Add(new XPlatLabel(
+            "A borderless window is still a window: the platform keeps its shadow, its rounded " +
+            "corners, its resize band and its behaviours. Ask ChromeCapabilities first - the setters " +
+            "throw when the answer is no - and read ChromeMetrics back for what was actually " +
+            "delivered. On Windows the caption buttons are the backend's own emulation and are " +
+            "invisible to assistive technology, so an application that needs them reachable should " +
+            "draw its own and keep Alt+F4 and Alt+Space working.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 62f,
+            WrapText = true,
+            Font = XPlatTheme.CaptionFont,
+            ForeColorRole = XPlatThemeColor.MutedForeground,
+        });
+
+        return card;
+    }
+
+    /// <summary>A button that sits beside the one before it rather than under it.</summary>
+    private static XPlatButton ChromeButton(string text, Action onClick)
+    {
+        var button = new XPlatButton(text)
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        button.AddClickHandler(_ => onClick());
+        return button;
+    }
+
+    /// <summary>Switches the sample's window to the application-owned chrome, if the backend has it.</summary>
+    private void MakeBorderless() => ChangeChrome(window =>
+    {
+        if (!window.ChromeCapabilities.Borderless)
+        {
+            return "This backend cannot make a window borderless.";
+        }
+
+        window.Chrome = XPlatWindowChrome.Borderless;
+        return "Borderless: the application owns every visible pixel.";
+    });
+
+    /// <summary>Hands the window back to the platform's own decoration.</summary>
+    private void MakeDecorated() => ChangeChrome(window =>
+    {
+        window.Chrome = XPlatWindowChrome.System;
+        return "System chrome: the platform draws and drives the window again.";
+    });
+
+    /// <summary>Asks for the platform's own caption buttons where the platform has any.</summary>
+    private void AskForPlatformButtons() => ChangeChrome(window =>
+    {
+        if (!window.ChromeCapabilities.CaptionButtons)
+        {
+            return "This backend cannot draw caption buttons of its own.";
+        }
+
+        window.CaptionButtons = XPlatCaptionButtons.Platform;
+        return window.ChromeMetrics.CaptionButtons == XPlatCaptionButtons.Platform
+            ? "Platform buttons: the platform draws them and claims their clicks."
+            : "Platform buttons were requested, but none are on screen.";
+    });
+
+    /// <summary>Goes back to a window with no buttons of the platform's, so the application can draw its own.</summary>
+    private void AskForNoButtons() => ChangeChrome(window =>
+    {
+        window.CaptionButtons = XPlatCaptionButtons.None;
+        return "No platform buttons: the application draws and handles its own.";
+    });
+
+    /// <summary>
+    /// Runs a chrome change against the attached window and reports what came of it, including the
+    /// refusal a backend without the feature answers with.
+    /// </summary>
+    private void ChangeChrome(Func<XPlatWindow, string> change)
+    {
+        if (_chromeWindow is not { } window)
+        {
+            SetStatus("No window attached to change.");
+            return;
+        }
+
+        try
+        {
+            SetStatus(change(window));
+        }
+        catch (NotSupportedException ex)
+        {
+            // The seam throws where an application would have to guess, and the capabilities are how
+            // it is meant to find out first; showing the message is the honest version of that.
+            SetStatus(ex.Message);
+        }
+
+        RefreshChromeReadout();
+    }
+
+    /// <summary>
+    /// Asks the platform to move the window from the press being handled, which is only effective
+    /// while the press is still in flight - which is why this runs from the mouse-down itself.
+    /// </summary>
+    private void DragWindowFromThisPress()
+    {
+        if (_chromeWindow is not { } window)
+        {
+            return;
+        }
+
+        bool started = window.TryBeginDrag();
+        SetStatus(started
+            ? "The platform took the press and is moving the window."
+            : "No window drag started: the backend refused, or there is no press to drag with.");
+    }
+
+    /// <summary>Re-reads the window's chrome state into the page's readout.</summary>
+    private void RefreshChromeReadout()
+    {
+        if (_chromeReadout is not { } readout)
+        {
+            return;
+        }
+
+        if (_chromeWindow is not { } window)
+        {
+            readout.Text = "No window attached, so there is nothing to report.";
+            return;
+        }
+
+        var caps = window.ChromeCapabilities;
+        var metrics = window.ChromeMetrics;
+
+        var buttons = metrics.CaptionButtonBounds.Count == 0
+            ? "none"
+            : string.Join(", ", metrics.CaptionButtonBounds.Select(b => $"{b.Kind} {Describe(b.Bounds)}"));
+
+        readout.Text =
+            $"Window: {window.Title}, client {window.ClientSize.Width:0}x{window.ClientSize.Height:0}, " +
+            $"state {window.State}\n" +
+            $"Chrome: {window.Chrome}; buttons requested: {window.CaptionButtons}\n" +
+            $"Supported: borderless {Yes(caps.Borderless)}, caption buttons {Yes(caps.CaptionButtons)}, " +
+            $"window colours {Yes(caps.WindowColors)}\n" +
+            $"Surface inset {Describe(metrics.SurfaceInset)}, resize inset {Describe(metrics.ResizeInset)}\n" +
+            $"Corner radius {metrics.CornerRadius:0.#}, corner resize {metrics.CornerResizeExtent:0.#}\n" +
+            $"Buttons: {metrics.CaptionButtons} on the {metrics.CaptionButtonSide} - {buttons}\n" +
+            $"Strip: {Describe(metrics.CaptionButtonStrip)}";
+    }
+
+    private static string Yes(bool value) => value ? "yes" : "no";
+
+    private static string Describe(XPlatThickness thickness) =>
+        $"{thickness.Left:0.#},{thickness.Top:0.#},{thickness.Right:0.#},{thickness.Bottom:0.#}";
+
+    private static string Describe(SKRect rect) =>
+        rect.Width <= 0f || rect.Height <= 0f
+            ? "none"
+            : $"{rect.Left:0.#},{rect.Top:0.#} {rect.Width:0.#}x{rect.Height:0.#}";
 
     /// <summary>
     /// Drives the Zoom page's slider, so a headless render can show a fixed multiplier without a
