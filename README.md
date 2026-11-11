@@ -3175,7 +3175,11 @@ badge** page's count appears on the dock.
   does not take a flash or a bounce back. On Linux the dock keeps the highlight until it is cleared.
 
 The demo has an **App badge** page that sets a count, a dot, a label and an urgent nudge, clears them
-again, and reports what the backend says it can draw.
+again, and reports what the backend says it can draw. Its **Urgent in 3 s** button waits three seconds
+before nudging, because Windows and macOS skip a flash or a bounce while the application is active -
+three seconds is enough time to switch to another window and watch the taskbar or the Dock. It clears
+the flag first, since the nudge is the transition rather than the state, which is what makes the
+button usable more than once.
 
 ### Drag and drop
 

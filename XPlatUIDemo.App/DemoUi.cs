@@ -99,6 +99,10 @@ public sealed class DemoUi
     private const int BenchmarkStallCheckSeconds = 5;
     private const int BenchmarkStallSeconds = 10;
     private const int BenchmarkStallReportSeconds = 30;
+
+    // The badge page's delayed nudge: long enough to switch to another window, short enough that the
+    // click is still the last thing the tester did.
+    private const int BadgeUrgentCountdownSeconds = 3;
     private XPlatTimer? _benchmarkWatchdog;
     private int _watchdogFrames;
     private long _watchdogStartedAt;
@@ -163,6 +167,17 @@ public sealed class DemoUi
 
     /// <summary>The app badge page's readout: what the backend can draw and what is showing.</summary>
     private XPlatLabel? _badgeReadout;
+
+    /// <summary>
+    /// The countdown behind the badge page's "Urgent in 3 s" button, so the nudge can be watched from
+    /// outside the window: there is time to switch away, which is the only way to see a flash or a
+    /// bounce on the two platforms that skip it while the application is frontmost.
+    /// </summary>
+    private XPlatTimer? _badgeUrgentTimer;
+
+    /// <summary>Seconds left on that countdown, or zero when nothing is pending.</summary>
+    private int _badgeUrgentSeconds;
+
     private XPlatControl? _chromeDragHandle;
 
     public DemoUi()
@@ -3268,6 +3283,10 @@ public sealed class DemoUi
             badge.Text = "99+";
         }));
         buttons.Controls.Add(BadgeButton("Urgent", badge => badge.Urgent = true));
+
+        // Delayed on purpose: Windows and macOS skip a flash or a bounce while the window is active,
+        // so the nudge is only observable from outside, and three seconds is enough time to get there.
+        buttons.Controls.Add(BadgeButton("Urgent in 3 s", StartUrgentCountdown));
         buttons.Controls.Add(BadgeButton("Clear", badge => badge.Clear()));
         card.Controls.Add(buttons);
 
@@ -3275,7 +3294,8 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             AutoSize = false,
-            Height = 56f,
+            // Room for the countdown line as well as the two that are always there.
+            Height = 74f,
             WrapText = true,
             Font = XPlatTheme.CaptionFont,
             ForeColorRole = XPlatThemeColor.MutedForeground,
@@ -3317,6 +3337,77 @@ public sealed class DemoUi
         return button;
     }
 
+    /// <summary>A button that does something other than one change to the badge.</summary>
+    private XPlatButton BadgeButton(string text, Action action)
+    {
+        var button = new XPlatButton(text)
+        {
+            Dock = XDock.Left,
+            AutoSize = true,
+            Style = XPlatButtonStyle.Secondary,
+            Margin = new XPlatThickness(0f, 0f, 8f, 0f),
+        };
+        button.AddClickHandler(_ => action());
+        return button;
+    }
+
+    /// <summary>
+    /// Starts the page's three-second countdown, after which the urgent nudge is applied.
+    /// </summary>
+    /// <remarks>
+    /// The urgent flag is cleared first, because it is a transition on Windows and macOS rather than a
+    /// state: setting it again while it is already set neither flashes nor bounces, so a second click
+    /// would otherwise look like nothing happened. Clearing it is also what makes the countdown
+    /// repeatable, which is the whole point of a button used to try the thing by hand.
+    /// </remarks>
+    private void StartUrgentCountdown()
+    {
+        if (OwnerWindow?.Application is not { } application)
+        {
+            return;
+        }
+
+        application.Badge.Urgent = false;
+
+        _badgeUrgentTimer ??= CreateBadgeUrgentTimer();
+        _badgeUrgentSeconds = BadgeUrgentCountdownSeconds;
+        _badgeUrgentTimer.Stop();
+        _badgeUrgentTimer.Start();
+        RefreshBadgeReadout();
+    }
+
+    /// <summary>Cancels a countdown that has not fired yet, so an explicit change wins over a pending nudge.</summary>
+    private void CancelUrgentCountdown()
+    {
+        if (_badgeUrgentSeconds == 0)
+        {
+            return;
+        }
+
+        _badgeUrgentSeconds = 0;
+        _badgeUrgentTimer?.Stop();
+    }
+
+    /// <summary>Builds the timer the countdown runs on: one second a tick, stopping at zero.</summary>
+    private XPlatTimer CreateBadgeUrgentTimer()
+    {
+        var timer = new XPlatTimer(TimeSpan.FromSeconds(1.0));
+        timer.AddTickHandler(_ =>
+        {
+            if (--_badgeUrgentSeconds > 0)
+            {
+                RefreshBadgeReadout();
+                return;
+            }
+
+            // Stop before applying: a tick that arrives after the last one has nothing left to do and
+            // would push the count below zero.
+            timer.Stop();
+            ApplyBadge(badge => badge.Urgent = true);
+        });
+        return timer;
+    }
+
     /// <summary>Applies <paramref name="change"/> to the attached application's badge.</summary>
     private void ApplyBadge(Action<XPlatAppBadge> change)
     {
@@ -3324,6 +3415,9 @@ public sealed class DemoUi
         {
             return;
         }
+
+        // An explicit change is an answer to the page, so it takes the pending prompt with it.
+        CancelUrgentCountdown();
 
         change(application.Badge);
         RefreshBadgeReadout();
@@ -3354,8 +3448,14 @@ public sealed class DemoUi
                     ? $"a count of {badge.Count.Value.ToString(CultureInfo.CurrentCulture)}"
                     : "nothing";
 
+        var pending = _badgeUrgentSeconds > 0
+            ? $"The urgent nudge arrives in {_badgeUrgentSeconds.ToString(CultureInfo.CurrentCulture)} s - " +
+              "switch to another window to watch for it.\n"
+            : string.Empty;
+
         _badgeReadout.Text =
             $"Showing {shown}. Urgent: {(badge.Urgent ? "yes" : "no")}.\n" +
+            pending +
             "This backend can draw: " +
             $"count {(capabilities.Count ? "yes" : "no")}, " +
             $"text {(capabilities.Text ? "yes" : "no")}, " +
