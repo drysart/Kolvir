@@ -15,6 +15,7 @@
   <Project Path="XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj" />
   <Project Path="XPlatUI.Feature.Badges/XPlatUI.Feature.Badges.csproj" />
   <Project Path="XPlatUI.Feature.Badges.Tests/XPlatUI.Feature.Badges.Tests.csproj" />
+  <Project Path="XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj" />
   <Project Path="XPlatUI.Feature.DragDrop/XPlatUI.Feature.DragDrop.csproj" />
   <Project Path="XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj" />
   <Project Path="XPlatUI.Feature.Svg/XPlatUI.Feature.Svg.csproj" />

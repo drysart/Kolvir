@@ -33,6 +33,7 @@
        silently if nothing watches it. -->
   <ItemGroup>
     <InternalsVisibleTo Include="XPlatUI.Feature.Badges.Tests" />
+    <InternalsVisibleTo Include="XPlatUI.Feature.Badges.Tests.Windows" />
   </ItemGroup>
 
   <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
