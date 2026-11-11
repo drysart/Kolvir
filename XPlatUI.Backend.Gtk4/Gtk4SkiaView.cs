@@ -520,20 +520,20 @@ public sealed class Gtk4SkiaView : IDisposable
     private void OnGlAreaUnrealize(Gtk.Widget sender, EventArgs args) => DropGl("gl area unrealized");
 
     /// <summary>
-    /// Drops the GL stack because the window is about to lose the surface it presents into, which is
-    /// what a chrome change does: GTK can only rebuild its client-side decoration around a window that
-    /// is not on screen, so the window is taken off screen and put back.
+    /// Drops the GL stack because the window's chrome is changing and its surface may change with it.
     /// </summary>
     /// <remarks>
-    /// The area reports an unrealize of its own on some platforms and not others, so this is asked for
-    /// rather than waited for. The retained offscreen buffer belongs to the context, and the
-    /// framebuffer it presents into is GTK's and goes with the surface: a frame that presents either
-    /// afterwards is defined by nobody, which shows as a window that has vanished and then only
-    /// repaints the pieces that happen to be damaged. Both are dropped here and the next frame builds
-    /// them again - in full, because a buffer that has never held a frame has nothing to keep. The CPU
-    /// picture takes over in the meantime, so the window keeps showing what it was showing.
+    /// GTK rebuilds its client-side decoration around the title bar the window now has, and on some
+    /// platforms that re-creates the surface the application draws into; the area reports an unrealize
+    /// of its own on some of them and not on others, so this is asked for rather than waited for. The
+    /// retained offscreen buffer belongs to the context, and the framebuffer it presents into is GTK's
+    /// and goes with the surface: a frame that presents either afterwards is defined by nobody, which
+    /// shows as a window that has vanished and then only repaints the pieces that happen to be damaged.
+    /// Both are dropped here and the next frame builds them again - in full, because a buffer that has
+    /// never held a frame has nothing to keep. The CPU picture takes over in the meantime, so the
+    /// window keeps showing what it was showing.
     /// </remarks>
-    internal void DropGlForSurfaceChange() => DropGl("window surface re-created");
+    internal void DropGlForChromeChange() => DropGl("chrome change");
 
     private void DropGl(string reason)
     {
@@ -551,15 +551,18 @@ public sealed class Gtk4SkiaView : IDisposable
 
         Trace($"gfx: {reason}");
 
-        // Releasing Skia's GPU resources wants the context current, which it is not while the surface
-        // is going away, so the release waits for an idle that runs after it.
+        // Releasing Skia's GPU resources wants the context current, which it is not while the area is
+        // unrealized or its surface is changing, so the release waits for an idle that runs after it.
         GLib.Functions.IdleAdd(0, () =>
         {
             gl.Dispose();
             return false;
         });
 
-        SchedulePresentationSwap();
+        // The area stays the child on top: its next frame builds the context again and paints in full,
+        // and until then GTK keeps showing the last frame it presented. Swapping to the CPU picture
+        // here would show one that was never painted, which reads as a window that went blank.
+        _glArea?.QueueRender();
     }
 
     /// <summary>

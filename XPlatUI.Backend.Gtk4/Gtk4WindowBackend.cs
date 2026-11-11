@@ -1241,19 +1241,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             return;
         }
 
-        // GTK builds the client-side decoration around whatever title bar the window has, and it
-        // cannot rebuild that around a window that is already on screen: it warns that
-        // set_titlebar() was "called on a realized window", and what it commits afterwards is not the
-        // decoration the window now needs - on Wayland the surface comes back empty apart from the
-        // pieces that happen to be painted again. Taking the window off screen first means the
-        // decoration is built from nothing, which is the only way to change it after creation.
-        var relight = _window.GetRealized() && _window.GetVisible();
-
-        if (relight)
-        {
-            _view?.DropGlForSurfaceChange();
-            _window.SetVisible(false);
-        }
+        // The decoration change can re-create the window's surface underneath the application, and
+        // GTK says so by unrealizing the area on some platforms and not on others. Dropping the
+        // accelerated view's frame first means the first thing painted into whatever surface comes
+        // out of the change is a whole frame.
+        _view?.DropGlForChromeChange();
 
         if (_chrome == XPlatWindowChrome.Borderless)
         {
@@ -1275,10 +1267,12 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         ApplySizeLimits();
         ApplyCaptionButtons();
 
-        if (relight)
-        {
-            _window.SetVisible(true);
-        }
+        // Replacing the title bar gives GTK a different window to build - on X11 the platform window is
+        // re-created, which is why its id changes - and the replacement is not guaranteed to be on top
+        // or even mapped where the old one was. Presenting it puts it back on screen, which is the
+        // difference between a window that changes shape and one that vanishes until the window manager
+        // is asked to map it again.
+        _window.Present();
     }
 
     /// <summary>
