@@ -394,10 +394,14 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>
-    /// Borderless chrome and the two window colours are implemented here; caption buttons arrive with
-    /// their own step and are reported as unsupported until then.
+    /// Borderless chrome, the two window colours and GTK's own caption buttons are implemented here.
     /// </summary>
-    public XPlatChromeCapabilities ChromeCapabilities => new() { Borderless = true, WindowColors = true };
+    public XPlatChromeCapabilities ChromeCapabilities => new()
+    {
+        Borderless = true,
+        CaptionButtons = true,
+        WindowColors = true,
+    };
 
     /// <summary>
     /// How much of the window GTK draws. Borderless keeps the client-side decorations - so the
