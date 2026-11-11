@@ -176,7 +176,7 @@ without a live window — the same split the backend uses for its other decision
 | 2 | Done. `AddMessageFilter`/`RemoveMessageFilter` on `Win32WindowBackend`, dispatch in `Win32MessageFilters`, seven tests. |
 | 3 | Done. `common/` is the whole model: `XPlatAppBadge` (Count, Text, IsDot, Urgent, Clear), `XPlatBadgeCapabilities`, the resolved `XPlatBadgeState`, the presenter seam and `app.Badge`. Precedence is `IsDot` → `Text` → `Count`; a count of zero or less is no badge; setting the same value twice publishes once; `Clear()` publishes once however many members were set. An unsupported presentation degrades to `Urgent`, and a platform without urgency drops it. Without the opt-in nothing is published and `Capabilities` is empty. 19 tests. |
 | 4 | Done. `AddAppBadges()` and `AppKitAppBadgePresenter`: the label is the count's digits, the text as given, or a bullet for the dot, with `dockTile.display()` after every change and `RequestUserAttention` on an urgent transition. Workers are queued on `NSOperationQueue.MainQueue` rather than touching AppKit off-thread. Seen on the Dock of a harness application: `3`, a bullet, `99+`, and cleared. 19 platform-neutral tests still pass; the macOS half has no unit tests because it is a property set on a global AppKit object. |
-| 5 | |
+| 5 | Done. `AddAppBadges()` and `Gtk4AppBadgePresenter`: `com.canonical.Unity.LauncherEntry.Update` every change with `count`, `count-visible` and `urgent`, all three each time because the dock keeps the last value. The desktop id comes from `Gtk4ApplicationBackend.NativeApplication.ApplicationId` — the backend registers itself in the container, so the presenter takes it as a constructor dependency instead of guessing at the id. Verified on X11 (`linux`) and Wayland (`linux2`): capabilities are count+urgent, text and dot degrade to urgent, three signals per run carry `application://com.xplatui.ibadgeharness.desktop`, and the window's `_GTK_APPLICATION_ID` matches the installed entry. Two findings: a presenter's constructor has to be **public** for the service provider to find it (an internal one fails at resolve time), and the dock cannot be photographed from these sessions at all — the shell composites it, so `xwd` misses it, `gnome-screenshot` falls back to X11 and the shell's screenshot method answers `AccessDenied`. |
 | 6 | |
 | 7 | |
 | 8 | |
@@ -188,4 +188,9 @@ without a live window — the same split the backend uses for its other decision
   Linux half has to be honest in `Capabilities`.
 - **A running application with no desktop entry** cannot be matched by the dock, so the demo needs
   one installed, or the Linux badge silently does nothing.
+- **The dock cannot be seen from a test session.** GNOME composits its own UI, so `xwd`/`x11grab`
+  capture the application windows but not the panel or the dock, `gnome-screenshot` falls back to X11
+  and finds no display, and the shell's screenshot method answers `AccessDenied`. Linux is therefore
+  verified by watching what the application broadcasts and what the window claims to be, and the
+  pixels wait for a real desktop.
 - **macOS cannot colour the badge**, so a theme-aware badge is not portable and is not offered.
