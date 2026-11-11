@@ -66,6 +66,9 @@ internal static class NativeMethods
     internal const int HtClient = 1;
     internal const int HtTransparent = -1;
 
+    /// <summary>Dragging the window body with the left button held: the system's own move loop.</summary>
+    internal const int HtCaption = 2;
+
     /// <summary>Resize bands a borderless window reports from its own hit test.</summary>
     internal const int HtLeft = 10;
     internal const int HtRight = 11;
@@ -111,6 +114,12 @@ internal static class NativeMethods
     internal const uint WmCaptureChanged = 0x0215;
     internal const uint WmNcHitTest = 0x0084;
     internal const uint WmNcCalcSize = 0x0083;
+
+    /// <summary>
+    /// Starts the system's own non-client move or resize loop; the hit test code in <c>wParam</c>
+    /// says which. Dispatching this is how an application-drawn title bar gets native dragging.
+    /// </summary>
+    internal const uint WmNcLButtonDown = 0x00A1;
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmMove = 0x0003;
     internal const int WaInactive = 0;

@@ -84,6 +84,13 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     /// <summary>The snapshot for a decorated window: the platform owns nothing the seam reports.</summary>
     private static readonly XPlatWindowChromeMetrics SystemMetrics = new();
+
+    /// <summary>Whether a pointer press is still being dispatched to the application, and where it
+    /// landed in client coordinates - the move loop wants the same point in screen coordinates, which
+    /// is converted when the drag starts.</summary>
+    private bool _pressActive;
+    private int _pressClientX;
+    private int _pressClientY;
     private IntPtr _memoryDc;
     private IntPtr _dib;
     private IntPtr _dibBits;
@@ -724,6 +731,92 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     {
         ArgumentNullException.ThrowIfNull(handler);
         _chromeMetricsChanged -= handler;
+    }
+
+    /// <summary>
+    /// Starts a window drag from the press being dispatched, and reports whether it did.
+    /// </summary>
+    /// <returns>True when the system's move loop was entered; false when no press was in flight.</returns>
+    public bool TryBeginDrag()
+    {
+        if (!_pressActive || _hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        BeginSystemDrag(NativeMethods.HtCaption);
+        return true;
+    }
+
+    /// <summary>
+    /// Starts a resize of <paramref name="edge"/> from the press being dispatched, and reports whether
+    /// it did.
+    /// </summary>
+    /// <param name="edge">The edge or corner to resize by.</param>
+    /// <returns>True when the system's resize loop was entered; false when no press was in flight or
+    /// <paramref name="edge"/> named no edge.</returns>
+    public bool TryBeginResize(XPlatResizeEdge edge)
+    {
+        if (!_pressActive || _hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var hit = HitCodeFor(edge);
+        if (hit == 0)
+        {
+            return false;
+        }
+
+        BeginSystemDrag(hit);
+        return true;
+    }
+
+    /// <summary>
+    /// Maps a seam edge onto Win32's hit-test code, or zero when nothing is named.
+    /// </summary>
+    /// <param name="edge">The edges to resize by; two adjacent ones name a corner.</param>
+    /// <returns>The <c>HT*</c> code for that edge, or zero.</returns>
+    internal static int HitCodeFor(XPlatResizeEdge edge) => edge switch
+    {
+        XPlatResizeEdge.Left => NativeMethods.HtLeft,
+        XPlatResizeEdge.Right => NativeMethods.HtRight,
+        XPlatResizeEdge.Top => NativeMethods.HtTop,
+        XPlatResizeEdge.Bottom => NativeMethods.HtBottom,
+        XPlatResizeEdge.Left | XPlatResizeEdge.Top => NativeMethods.HtTopLeft,
+        XPlatResizeEdge.Right | XPlatResizeEdge.Top => NativeMethods.HtTopRight,
+        XPlatResizeEdge.Left | XPlatResizeEdge.Bottom => NativeMethods.HtBottomLeft,
+        XPlatResizeEdge.Right | XPlatResizeEdge.Bottom => NativeMethods.HtBottomRight,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Hands the press to the system's own non-client move or resize loop - the one every title bar
+    /// and every frame edge uses - so snapping, tiling, the global move cursor and the shell's
+    /// animations come from the platform instead of being reimplemented here.
+    /// </summary>
+    /// <param name="hitCode">The <c>HT*</c> code that says whether this is a move or a resize.</param>
+    /// <remarks>
+    /// The application's capture has to be released first. The system loop takes the capture back as
+    /// soon as the message is dispatched, and a capture still held by the application is what makes a
+    /// drag report positions relative to the wrong window.
+    /// </remarks>
+    private void BeginSystemDrag(int hitCode)
+    {
+        _pressActive = false;
+
+        NativeMethods.ReleaseCapture();
+
+        // WM_LBUTTONDOWN reported the press in client coordinates; the non-client move loop takes a
+        // screen point, so convert before handing it over.
+        var point = new NativeMethods.POINT { X = _pressClientX, Y = _pressClientY };
+        NativeMethods.ClientToScreen(_hwnd, ref point);
+
+        NativeMethods.SendMessageW(
+            _hwnd,
+            NativeMethods.WmNcLButtonDown,
+            new IntPtr(hitCode),
+            new IntPtr((point.Y << 16) | (point.X & 0xFFFF)));
     }
 
     /// <inheritdoc />
@@ -1947,11 +2040,20 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private void OnMouseDown(IntPtr hwnd, IntPtr lParam, XPlatMouseButtons button)
     {
         NativeMethods.SetCapture(hwnd);
+
+        // The press is in flight while the application handles it, and a system drag loop can only be
+        // entered from inside one. WM_LBUTTONDOWN carries client coordinates; they are converted to
+        // screen coordinates when the drag starts, which is the frame the move loop expects.
+        _pressActive = true;
+        _pressClientX = NativeMethods.LowWord(lParam);
+        _pressClientY = NativeMethods.HighWord(lParam);
+
         _host.ProcessMouseDown(ToLogical(lParam), button, CurrentModifiers(), NextClickCount(lParam));
     }
 
     private void OnMouseUp(IntPtr lParam, XPlatMouseButtons button)
     {
+        _pressActive = false;
         _host.ProcessMouseUp(ToLogical(lParam), button, CurrentModifiers());
         NativeMethods.ReleaseCapture();
     }
