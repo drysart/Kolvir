@@ -170,7 +170,7 @@ without a live window — the same split the backend uses for its other decision
 |---|---|
 | 1 | Done. `SetOverlayIcon` answers `S_OK` and the `DrawIconEx` round trip returns the pixels drawn (16/20/24/32 px). Two findings: the shell renders the overlay in the small-icon slot, so the icon must be built at `SM_CXSMICON` for the window's DPI; and the IID typo above, which made `ITaskbarList3` look unsupported. |
 | 2 | Done. `AddMessageFilter`/`RemoveMessageFilter` on `Win32WindowBackend`, dispatch in `Win32MessageFilters`, seven tests. |
-| 3 | |
+| 3 | Done. `common/` is the whole model: `XPlatAppBadge` (Count, Text, IsDot, Urgent, Clear), `XPlatBadgeCapabilities`, the resolved `XPlatBadgeState`, the presenter seam and `app.Badge`. Precedence is `IsDot` → `Text` → `Count`; a count of zero or less is no badge; setting the same value twice publishes once; `Clear()` publishes once however many members were set. An unsupported presentation degrades to `Urgent`, and a platform without urgency drops it. Without the opt-in nothing is published and `Capabilities` is empty. 19 tests. |
 | 4 | |
 | 5 | |
 | 6 | |
