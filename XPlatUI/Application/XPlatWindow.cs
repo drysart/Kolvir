@@ -275,6 +275,87 @@ public sealed partial class XPlatWindow : IDisposable
     }
 
     /// <summary>
+    /// How much of the window the platform draws. The default is
+    /// <see cref="XPlatWindowChrome.System"/>, the ordinary decorated window.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="XPlatWindowChrome.Borderless"/> makes the application responsible for every visible
+    /// pixel while the platform keeps the resize band and its window behaviours. Setting it may be
+    /// done before or after <see cref="Show"/>; before is cheaper, because the window is created with
+    /// the mode rather than changed into it.
+    /// </remarks>
+    public XPlatWindowChrome Chrome
+    {
+        get => Backend.Chrome;
+        set => Backend.Chrome = value;
+    }
+
+    /// <summary>
+    /// Whether the platform draws the caption buttons, or the application draws its own. Read
+    /// <see cref="ChromeMetrics"/> for what was actually drawn.
+    /// </summary>
+    public XPlatCaptionButtons CaptionButtons
+    {
+        get => Backend.CaptionButtons;
+        set => Backend.CaptionButtons = value;
+    }
+
+    /// <summary>
+    /// What the platform still owns in this window - the pixels it paints, the ones it claims for
+    /// resizing, the corners it clips, and the caption buttons it draws. Re-read it after
+    /// <see cref="AddChromeMetricsChangedHandler"/> fires rather than caching it.
+    /// </summary>
+    public XPlatWindowChromeMetrics ChromeMetrics => Backend.ChromeMetrics;
+
+    /// <summary>
+    /// The colour the platform should use where it treats the window as a caption, or null for its
+    /// default. Only meaningful for a borderless window.
+    /// </summary>
+    public SKColor? CaptionColor
+    {
+        get => Backend.CaptionColor;
+        set => Backend.CaptionColor = value;
+    }
+
+    /// <summary>
+    /// The colour the platform should use for its own window border, or null to keep the default.
+    /// </summary>
+    public SKColor? BorderColor
+    {
+        get => Backend.BorderColor;
+        set => Backend.BorderColor = value;
+    }
+
+    /// <summary>
+    /// Starts a window drag from the pointer press being handled. Call it synchronously from the
+    /// press dispatch and do not deliver a click if it returns true.
+    /// </summary>
+    /// <returns>True when the platform started a drag; false when it did not.</returns>
+    public bool TryBeginDrag() => Backend.TryBeginDrag();
+
+    /// <summary>
+    /// Starts a resize of <paramref name="edge"/> from the pointer press being handled, for an
+    /// application that draws its own grip. Two adjacent edges name a corner.
+    /// </summary>
+    /// <param name="edge">The edge or corner to resize by.</param>
+    /// <returns>True when the platform started a resize; false when it did not.</returns>
+    public bool TryBeginResize(XPlatResizeEdge edge) => Backend.TryBeginResize(edge);
+
+    /// <summary>Adds a handler that runs when <see cref="ChromeMetrics"/> changes.</summary>
+    public IDisposable AddChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        return Backend.AddChromeMetricsChangedHandler(handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChromeMetricsChangedHandler"/> added.</summary>
+    public void RemoveChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        Backend.RemoveChromeMetricsChangedHandler(handler);
+    }
+
+    /// <summary>
     /// Runs a menu shortcut, inherited bar included, and reports whether an item claimed the key.
     /// The host calls this before handing a key to the focused control.
     /// </summary>
