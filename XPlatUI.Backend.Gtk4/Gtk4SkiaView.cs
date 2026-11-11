@@ -110,6 +110,17 @@ public sealed class Gtk4SkiaView : IDisposable
     /// </summary>
     private SKPoint _pointer;
 
+    /// <summary>
+    /// The press currently in flight, which is the only moment a window drag can be started.
+    /// </summary>
+    /// <remarks>
+    /// GDK4 exposes no event serial, so <c>begin_move</c> works from GDK's own implicit grab and does
+    /// nothing at all outside a real press. Caching the press lets the backend start a drag from the
+    /// application's own mouse-down, where the grab is live, without the application knowing anything
+    /// about devices or timestamps.
+    /// </remarks>
+    internal PressRecord? LastPress { get; private set; }
+
     private long _frames;
     private long _reportedAt;
     private long _reportedFrames;
@@ -874,6 +885,16 @@ public sealed class Gtk4SkiaView : IDisposable
         // Clicking anywhere inside the view takes keyboard focus, exactly like a Win32 window.
         _area.GrabFocus();
         _pointer = new SKPoint((float)args.X, (float)args.Y);
+
+        // The press is what a window drag is started from, so everything begin_move needs is
+        // captured here, while GDK's implicit grab is still the one in force.
+        LastPress = new PressRecord(
+            gesture.GetCurrentEventDevice(),
+            gesture.GetCurrentButton(),
+            args.X,
+            args.Y,
+            gesture.GetCurrentEventTime());
+
         Host.ProcessMouseDown(
             _pointer,
             button,
@@ -883,6 +904,10 @@ public sealed class Gtk4SkiaView : IDisposable
 
     private void OnReleased(Gtk.GestureClick gesture, Gtk.GestureClick.ReleasedSignalArgs args)
     {
+        // The grab this release ends is the one a drag would have used, so it stops being usable
+        // here rather than at the next unrelated event.
+        LastPress = null;
+
         var button = ToMouseButton(gesture.GetCurrentButton());
         if (button == XPlatMouseButtons.None)
         {

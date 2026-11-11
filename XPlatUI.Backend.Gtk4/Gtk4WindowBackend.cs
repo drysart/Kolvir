@@ -38,6 +38,17 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
     private Gtk.ApplicationWindow? _window;
     private Gtk.Box? _container;
+
+    /// <summary>The window's child, which holds the content and the caption buttons over it.</summary>
+    private Gtk.Overlay? _overlay;
+
+    /// <summary>GTK's own caption buttons, when the application asked for them.</summary>
+    private Gtk.WindowControls? _controls;
+
+    private XPlatCaptionButtons _captionButtons = XPlatCaptionButtons.None;
+
+    /// <summary>The settings object whose decoration layout this window follows, once subscribed.</summary>
+    private Gtk.Settings? _layoutSettings;
     private Gtk4SkiaView? _view;
     private IXPlatContextMenuPresenter? _presenter;
     private Gtk4MenuBar? _menuBarWidget;
@@ -478,6 +489,98 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>
+    /// Whether the window shows GTK's caption buttons. Asking for them puts a real
+    /// <see cref="Gtk.WindowControls"/> over the application's content, so they are the platform's own
+    /// buttons: they take their own clicks, follow the desktop's decoration layout, and are visible to
+    /// assistive technology.
+    /// </summary>
+    public XPlatCaptionButtons CaptionButtons
+    {
+        get => _captionButtons;
+        set
+        {
+            if (_captionButtons == value)
+            {
+                return;
+            }
+
+            _captionButtons = value;
+            ApplyCaptionButtons();
+            RaiseChromeMetricsChanged();
+        }
+    }
+
+    /// <summary>
+    /// Starts a window drag from the press being handled.
+    /// </summary>
+    /// <remarks>
+    /// The press has to be real and still in flight: GDK4 exposes no event serial, so
+    /// <c>begin_move</c> relies on the implicit grab that a press starts and silently does nothing
+    /// outside one. The backend keeps the press the view recorded, which is why the application can
+    /// call this from inside its own mouse-down without knowing any of that.
+    /// </remarks>
+    /// <returns>True when a drag was started.</returns>
+    public bool TryBeginDrag()
+    {
+        if (_window?.GetSurface() is not Gdk.Toplevel surface)
+        {
+            return false;
+        }
+
+        if (_view?.LastPress is not { Device: { } device } press)
+        {
+            return false;
+        }
+
+        surface.BeginMove(device, (int)press.Button, press.X, press.Y, press.Time);
+        return true;
+    }
+
+    /// <summary>
+    /// Starts a compositor resize from the press being handled, for an application that draws its own
+    /// grip.
+    /// </summary>
+    /// <remarks>
+    /// Same precondition as <see cref="TryBeginDrag"/>: a real press has to be in flight, because the
+    /// compositor resizes through the grab that press began. GTK's own band already resizes, so this
+    /// exists for applications that would rather draw the grip themselves.
+    /// </remarks>
+    /// <param name="edge">The edge or corner to resize by.</param>
+    /// <returns>True when a resize was started.</returns>
+    public bool TryBeginResize(XPlatResizeEdge edge)
+    {
+        var surfaceEdge = SurfaceEdgeFor(edge);
+        if (surfaceEdge is null || _window?.GetSurface() is not Gdk.Toplevel surface)
+        {
+            return false;
+        }
+
+        if (_view?.LastPress is not { Device: { } device } press)
+        {
+            return false;
+        }
+
+        surface.BeginResize(surfaceEdge.Value, device, (int)press.Button, press.X, press.Y, press.Time);
+        return true;
+    }
+
+    /// <summary>The GDK edge two adjacent seam edges name, or null when they do not name one.</summary>
+    /// <param name="edge">The seam edge flags.</param>
+    /// <returns>The GDK edge, or null for none or for opposite edges.</returns>
+    internal static Gdk.SurfaceEdge? SurfaceEdgeFor(XPlatResizeEdge edge) => edge switch
+    {
+        XPlatResizeEdge.Left => Gdk.SurfaceEdge.West,
+        XPlatResizeEdge.Right => Gdk.SurfaceEdge.East,
+        XPlatResizeEdge.Top => Gdk.SurfaceEdge.North,
+        XPlatResizeEdge.Bottom => Gdk.SurfaceEdge.South,
+        XPlatResizeEdge.Left | XPlatResizeEdge.Top => Gdk.SurfaceEdge.NorthWest,
+        XPlatResizeEdge.Top | XPlatResizeEdge.Right => Gdk.SurfaceEdge.NorthEast,
+        XPlatResizeEdge.Bottom | XPlatResizeEdge.Left => Gdk.SurfaceEdge.SouthWest,
+        XPlatResizeEdge.Right | XPlatResizeEdge.Bottom => Gdk.SurfaceEdge.SouthEast,
+        _ => null,
+    };
+
+    /// <summary>
     /// What GTK still owns in this window. On GTK that is nothing inside the surface: the resize band
     /// is 12 logical pixels deep and lies entirely outside the application's pixels, so every pixel
     /// the application paints is its own to hit test.
@@ -490,6 +593,8 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             {
                 return SystemChromeMetrics;
             }
+
+            var buttons = CaptionButtonLayout();
 
             return new XPlatWindowChromeMetrics
             {
@@ -510,10 +615,10 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
                 // about 12 on 4.22) and an application clipping its own chrome has to know which.
                 CornerRadius = BorderlessCornerRadius,
 
-                CaptionButtons = XPlatCaptionButtons.None,
-                CaptionButtonSide = XPlatCaptionButtonSide.Right,
-                CaptionButtonStrip = SKRect.Empty,
-                CaptionButtonBounds = [],
+                CaptionButtons = buttons is null ? XPlatCaptionButtons.None : XPlatCaptionButtons.Platform,
+                CaptionButtonSide = buttons?.Side ?? XPlatCaptionButtonSide.Right,
+                CaptionButtonStrip = buttons?.Strip ?? SKRect.Empty,
+                CaptionButtonBounds = buttons?.Buttons ?? [],
             };
         }
     }
@@ -627,10 +732,18 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         _window = null;
         _container = null;
+        _overlay = null;
         _view = null;
+        _controls = null;
         _presenter = null;
         _menuBarWidget = null;
         _modalLoop = null;
+
+        if (_layoutSettings is { } layoutSettings)
+        {
+            layoutSettings.OnNotify -= OnSettingsNotify;
+            _layoutSettings = null;
+        }
 
         // End the nested loop first: everything below would otherwise run while it is still the
         // active loop.
@@ -950,10 +1063,15 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         var view = new Gtk4SkiaView(_host, useHardwareAcceleration);
 
-        // The drawing area lives in a vertical box so a per-window menu bar can be packed above it.
+        // The drawing area lives in a vertical box so a per-window menu bar can be packed above it,
+        // and that box lives in an overlay so the platform's caption buttons can be stacked over the
+        // application's own pixels.
         var container = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
         container.Append(view.Widget);
-        window.SetChild(container);
+
+        var overlay = Gtk.Overlay.New();
+        overlay.SetChild(container);
+        window.SetChild(overlay);
 
         // Returning true keeps GTK from destroying the window behind the model's back.
         window.OnCloseRequest += (_, _) =>
@@ -969,6 +1087,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         _window = window;
         _container = container;
+        _overlay = overlay;
         _view = view;
         _presenter = _useXPlatMenus
             ? new XPlatMenuPresenter()
@@ -1056,6 +1175,9 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     /// </remarks>
     private const uint CssPriorityApplication = 601u;
 
+    /// <summary>Eight logical pixels between the buttons and the window's corner.</summary>
+    private const int CaptionButtonInset = 8;
+
     /// <summary>How much of the client the ring takes on each edge, in logical pixels.</summary>
     /// <remarks>
     /// Zero unless a borderless window was given a ring colour: GTK's ring is a CSS border on the
@@ -1133,6 +1255,203 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         // The ring is part of the window, so the size has to be asked for with it included.
         ApplyRequestedSize();
         ApplySizeLimits();
+        ApplyCaptionButtons();
+    }
+
+    /// <summary>
+    /// Puts GTK's caption buttons over the content, or takes them away.
+    /// </summary>
+    /// <remarks>
+    /// They are only worth showing on a borderless window: a decorated one has real buttons in its own
+    /// title bar, and adding a second set over the content would be a copy rather than the platform's
+    /// chrome. The buttons are a plain <see cref="Gtk.WindowControls"/>, so which buttons there are,
+    /// what they look like and what they do are all GTK's.
+    /// </remarks>
+    private void ApplyCaptionButtons()
+    {
+        if (_overlay is null || _disposed)
+        {
+            return;
+        }
+
+        if (!ShowsCaptionButtons)
+        {
+            if (_controls is not null)
+            {
+                _overlay.RemoveOverlay(_controls);
+                _controls = null;
+            }
+
+            return;
+        }
+
+        if (_controls is null)
+        {
+            _controls = Gtk.WindowControls.New(Gtk.PackType.End);
+            _overlay.AddOverlay(_controls);
+        }
+
+        ApplyDecorationLayout();
+    }
+
+    /// <summary>
+    /// Aligns the buttons with the desktop's decoration layout and re-reads it when it changes.
+    /// </summary>
+    /// <remarks>
+    /// The whole <c>start:end</c> string is handed to the widget, not just the half the buttons sit
+    /// in: given half of it the widget has no layout to render and measures 0x0, which looks exactly
+    /// like buttons that were never added.
+    /// </remarks>
+    private void ApplyDecorationLayout()
+    {
+        if (_controls is null)
+        {
+            return;
+        }
+
+        var layout = DecorationLayout();
+        _controls.SetDecorationLayout(layout);
+
+        // The desktop can move its buttons to the other end while the window is open, which is a
+        // metrics change and a re-layout of the widget.
+        if (_layoutSettings is null && Gtk.Settings.GetDefault() is { } settings)
+        {
+            _layoutSettings = settings;
+            settings.OnNotify += OnSettingsNotify;
+        }
+
+        _controls.SetSide(SideFor(layout) == XPlatCaptionButtonSide.Left ? Gtk.PackType.Start : Gtk.PackType.End);
+        _controls.SetValign(Gtk.Align.Start);
+        _controls.SetHalign(SideFor(layout) == XPlatCaptionButtonSide.Left ? Gtk.Align.Start : Gtk.Align.End);
+
+        // Eight pixels, which is where the platform puts them relative to the window's own corner.
+        _controls.SetMarginTop(CaptionButtonInset);
+        _controls.SetMarginStart(SideFor(layout) == XPlatCaptionButtonSide.Left ? CaptionButtonInset : 0);
+        _controls.SetMarginEnd(SideFor(layout) == XPlatCaptionButtonSide.Left ? 0 : CaptionButtonInset);
+    }
+
+    /// <summary>Whether GTK's own caption buttons are on screen for this window.</summary>
+    private bool ShowsCaptionButtons => _chrome == XPlatWindowChrome.Borderless
+        && _captionButtons == XPlatCaptionButtons.Platform;
+
+    /// <summary>Follows the desktop moving its buttons to the other end of the title bar.</summary>
+    private void OnSettingsNotify(GObject.Object sender, GObject.Object.NotifySignalArgs args)
+    {
+        if (args.Pspec?.GetName() != "gtk-decoration-layout" || _controls is null)
+        {
+            return;
+        }
+
+        ApplyDecorationLayout();
+        RaiseChromeMetricsChanged();
+    }
+
+    /// <summary>The desktop's decoration layout, as the <c>start:end</c> string GTK expects.</summary>
+    private static string DecorationLayout()
+    {
+        var layout = Gtk.Settings.GetDefault()?.GtkDecorationLayout;
+
+        // "minimize,maximize,close:" has no side separator and is not what the widget wants.
+        return string.IsNullOrWhiteSpace(layout) || !layout.Contains(':', StringComparison.Ordinal)
+            ? ":minimize,maximize,close"
+            : layout;
+    }
+
+    /// <summary>Which end of the title bar the decoration layout puts its buttons at.</summary>
+    private static XPlatCaptionButtonSide SideFor(string layout)
+    {
+        var separator = layout.IndexOf(':', StringComparison.Ordinal);
+        var end = separator >= 0 ? layout[(separator + 1)..] : layout;
+
+        // Buttons after the separator are the end side; when it is empty they are all on the start.
+        return end.Contains("close", StringComparison.OrdinalIgnoreCase)
+            || end.Contains("maximize", StringComparison.OrdinalIgnoreCase)
+            || end.Contains("minimize", StringComparison.OrdinalIgnoreCase)
+                ? XPlatCaptionButtonSide.Right
+                : XPlatCaptionButtonSide.Left;
+    }
+
+    /// <summary>Where the buttons are, read back from the widgets GTK laid out.</summary>
+    /// <returns>Null when no buttons are on screen.</returns>
+    private (SKRect Strip, IReadOnlyList<XPlatCaptionButton> Buttons, XPlatCaptionButtonSide Side)?
+        CaptionButtonLayout()
+    {
+        if (!ShowsCaptionButtons || _controls is null || _window is null)
+        {
+            return null;
+        }
+
+        if (!TryClientRect(_controls, out var strip))
+        {
+            return null;
+        }
+
+        var buttons = new List<XPlatCaptionButton>(3);
+        for (var child = _controls.GetFirstChild(); child is not null; child = child.GetNextSibling())
+        {
+            // The children are the buttons themselves, and their allocation is the clickable area -
+            // measured: a press in the gap between two of them reaches the application, so the rect
+            // reported here is exactly what the button claims.
+            if (!TryClientRect(child, out var bounds) || KindOf(child) is not { } kind)
+            {
+                continue;
+            }
+
+            buttons.Add(new XPlatCaptionButton(kind, bounds));
+        }
+
+        return (strip, buttons, SideFor(DecorationLayout()));
+    }
+
+    /// <summary>A widget's allocation in client coordinates, which is the window less the ring.</summary>
+    private bool TryClientRect(Gtk.Widget widget, out SKRect rect)
+    {
+        rect = SKRect.Empty;
+
+        if (_window is null || widget.GetWidth() <= 0 || widget.GetHeight() <= 0)
+        {
+            return false;
+        }
+
+        if (!widget.TranslateCoordinates(_window, 0, 0, out var x, out var y))
+        {
+            return false;
+        }
+
+        var ring = BorderWidth;
+        rect = new SKRect(
+            (float)(x - ring),
+            (float)(y - ring),
+            (float)(x - ring + widget.GetWidth()),
+            (float)(y - ring + widget.GetHeight()));
+
+        return true;
+    }
+
+    /// <summary>Which caption button a child of the controls is, from the icon it draws.</summary>
+    private static XPlatCaptionButtonKind? KindOf(Gtk.Widget child)
+    {
+        // GTK's buttons carry a symbolic icon whose name is the platform's own name for the action,
+        // so this reads what is there rather than assuming an order.
+        string? name = null;
+
+        if (child is Gtk.Image image)
+        {
+            name = image.GetIconName();
+        }
+        else if (child is Gtk.Button { } button && button.GetChild() is Gtk.Image buttonImage)
+        {
+            name = buttonImage.GetIconName();
+        }
+
+        return name switch
+        {
+            "window-minimize-symbolic" => XPlatCaptionButtonKind.Minimize,
+            "window-maximize-symbolic" => XPlatCaptionButtonKind.Maximize,
+            "window-restore-symbolic" => XPlatCaptionButtonKind.Restore,
+            "window-close-symbolic" => XPlatCaptionButtonKind.Close,
+            _ => null,
+        };
     }
 
     /// <summary>Installs, rewrites or removes this window's stylesheet.</summary>
