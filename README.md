@@ -147,6 +147,11 @@ Windows, macOS and Linux:
 dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj
 ```
 
+Nothing in the suite needs a desktop. When a check does - a real taskbar flash, a Dock bounce, a
+window that has to lose and regain focus - [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md) is the page to
+read first: it lists every test host with its versions, its use criteria, and the screenshot and
+input-injection routes that actually work on each one.
+
 Three things keep the run deterministic, and a test that breaks one of them is a bug to fix rather
 than a flake to retry:
 

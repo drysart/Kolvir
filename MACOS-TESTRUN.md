@@ -4,6 +4,10 @@ Status: the one page to read before trying to launch the sample on a Mac. Every 
 measured on the current Mac test host, not inferred from the SDK docs. If a launch stops working,
 work through this document before experimenting.
 
+For the hosts themselves - which machine to use, what is installed on it, and how to take a
+screenshot or drive the mouse and keyboard - see [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md). This page
+is only about getting a build to launch on macOS.
+
 **The canonical Mac host is `macvm`** (`ssh macvm` → `Timothys-Virtual-Machine.local`, osx-arm64,
 macOS 27.2, .NET 10.0.403, Xcode 27.2). It replaced the Mac mini `Timothys-Mac-mini.local`, which is
 reachable as `ssh mac` but **retired** — do not use it unless you are specifically told to. Everything
