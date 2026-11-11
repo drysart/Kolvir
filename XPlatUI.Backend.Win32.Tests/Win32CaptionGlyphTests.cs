@@ -164,20 +164,20 @@ public sealed class Win32CaptionGlyphTests
     }
 
     [TestMethod]
-    public void TheRestoreGlyphsBackSquareHasRoundedCorners()
+    public void TheRestoreGlyphsBackSquareIsARoundedRectBehindTheFrontOne()
     {
         using var bitmap = PaintAt200(XPlatCaptionButtonKind.Restore);
 
-        // Both squares are squares with their outside corners rounded, and the back one is only
-        // visible above and right of the front one. At 200% its top edge reaches device pixel 40 on
-        // its lower row but starts at 41 on the row above - that is the top-left corner curving -
-        // and one row further down only the corner's own stub is left, because below that the
-        // platform's opaque front square would be covering it. A square-ended edge, which is what
-        // this glyph had first, runs down instead and fills that third row too.
+        // Both squares are rounded rects, the back one drawn first and covered by the front one where
+        // they overlap - at 200% the back square's left edge is device pixel 40. It reaches that
+        // column on the top edge's lower row but not on the row above, which is its top-left corner
+        // curving; a square-ended edge, which this glyph had at first, fills that row too. It carries
+        // on down past the corner, because it is the side of a rect, and stops where the front square
+        // starts - inside it, at row 19, nothing of the back square is drawn.
         Assert.IsTrue(IsLit(bitmap, 40, 14), "the top edge reaches the back square's left edge");
         Assert.IsFalse(IsLit(bitmap, 40, 13), "the row above is inset, so the corner curves");
-        Assert.IsTrue(IsLit(bitmap, 40, 15), "the corner continues one row further down");
-        Assert.IsFalse(IsLit(bitmap, 40, 16), "and stops there, where the front square would be");
+        Assert.IsTrue(IsLit(bitmap, 40, 16), "the corner continues down the back square's side");
+        Assert.IsFalse(IsLit(bitmap, 40, 19), "which stops at the front square, that covers the rest");
     }
 
     [TestMethod]

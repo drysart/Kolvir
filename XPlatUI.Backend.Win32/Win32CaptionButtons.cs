@@ -175,39 +175,25 @@ internal static class Win32CaptionButtons
 
             case XPlatCaptionButtonKind.Restore:
             {
-                // Two squares, each with its outside corners rounded, a little smaller than the
-                // maximise one and offset by two pixels. The front square is whole; the back one
-                // shows only its top edge and its right edge, because the platform's front square is
-                // opaque and hides the rest of it. This backend paints over the application's own
-                // content and cannot fill anything, so the back square's left and bottom edges are
-                // simply not drawn - but both of the corners it does show still curve, so the shape
-                // reads as the square it is.
+                // Two rounded rects, a little smaller than the maximise square and offset by two
+                // pixels, with the back one drawn first and *occluded* by the front one - which is
+                // how the platform does it: its front square is filled, so the part of the back
+                // square inside that box never shows. This backend paints over the application's own
+                // content and cannot fill anything, so the same area is clipped out of the back
+                // square instead, which leaves the two of its corners that stick out curving.
                 var front = Square(cx - 1f, cy + 1f, half - 1f);
+                var back = Square(cx + 1f, cy - 1f, half - 1f);
+
+                // The front square's own outline, since a stroke of this width is centred on its path.
+                var cover = front;
+                cover.Inflate(0.5f, 0.5f);
+
+                canvas.Save();
+                canvas.ClipRect(cover, SKClipOperation.Difference, antialias: false);
+                canvas.DrawRoundRect(back, GlyphCorner, GlyphCorner, pen);
+                canvas.Restore();
+
                 canvas.DrawRoundRect(front, GlyphCorner, GlyphCorner, pen);
-
-                var backLeft = front.Left + 2f;
-                var backTop = front.Top - 2f;
-                var backRight = front.Right + 2f;
-                var backBottom = front.Bottom - 2f;
-                var diameter = GlyphCorner * 2f;
-
-                using var builder = new SKPathBuilder();
-                builder.MoveTo(backLeft, backTop + GlyphCorner);
-                builder.ArcTo(
-                    new SKRect(backLeft, backTop, backLeft + diameter, backTop + diameter),
-                    180f,
-                    90f,
-                    forceMoveTo: false);
-                builder.LineTo(backRight - GlyphCorner, backTop);
-                builder.ArcTo(
-                    new SKRect(backRight - diameter, backTop, backRight, backTop + diameter),
-                    270f,
-                    90f,
-                    forceMoveTo: false);
-                builder.LineTo(backRight, backBottom);
-
-                using var path = builder.Snapshot();
-                canvas.DrawPath(path, pen);
                 break;
             }
 
