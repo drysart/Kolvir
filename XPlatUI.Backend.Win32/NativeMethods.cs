@@ -120,6 +120,15 @@ internal static class NativeMethods
     /// says which. Dispatching this is how an application-drawn title bar gets native dragging.
     /// </summary>
     internal const uint WmNcLButtonDown = 0x00A1;
+
+    /// <summary>Carries a window-level command such as minimise, maximise or restore.</summary>
+    internal const uint WmSysCommand = 0x0112;
+    internal const int ScMinimize = 0xF020;
+    internal const int ScMaximize = 0xF030;
+    internal const int ScRestore = 0xF120;
+
+    /// <summary>The height of a caption bar at a given DPI: what an emulated one has to match.</summary>
+    internal const int SmCaption = 4;
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmMove = 0x0003;
     internal const int WaInactive = 0;

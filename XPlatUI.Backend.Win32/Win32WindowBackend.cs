@@ -91,6 +91,13 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private bool _pressActive;
     private int _pressClientX;
     private int _pressClientY;
+
+    private XPlatCaptionButtons _captionButtons = XPlatCaptionButtons.None;
+
+    /// <summary>Which emulated caption button the pointer is over, and which one is held down.</summary>
+    private int _hotCaption = -1;
+    private int _pressedCaption = -1;
+    private bool _overCaption;
     private IntPtr _memoryDc;
     private IntPtr _dib;
     private IntPtr _dibBits;
@@ -391,22 +398,86 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     }
 
     /// <summary>
-    /// Borderless chrome is implemented here; caption buttons and window colours arrive with their own
-    /// steps and are reported as unsupported until then.
+    /// Borderless chrome is implemented here; caption buttons are emulated. Window colours arrive with
+    /// their own step and are reported as unsupported until then.
     /// </summary>
-    public XPlatChromeCapabilities ChromeCapabilities => new() { Borderless = true };
+    public XPlatChromeCapabilities ChromeCapabilities => new() { Borderless = true, CaptionButtons = true };
+
+    /// <summary>
+    /// Whether the window shows caption buttons. Windows has none to offer in a borderless window, so
+    /// asking for them makes this backend draw and hit test its own.
+    /// </summary>
+    public XPlatCaptionButtons CaptionButtons
+    {
+        get => _captionButtons;
+        set
+        {
+            if (_captionButtons == value)
+            {
+                return;
+            }
+
+            _captionButtons = value;
+            _hotCaption = -1;
+            _pressedCaption = -1;
+
+            if (_hwnd != IntPtr.Zero && !_disposed)
+            {
+                Invalidate();
+                RaiseChromeMetricsChanged();
+            }
+        }
+    }
 
     /// <summary>
     /// What the platform still owns in this window. Windows keeps its frame on three edges and hands
     /// the client the top edge, so the painted inset and the claimed band are different numbers.
     /// </summary>
-    public XPlatWindowChromeMetrics ChromeMetrics =>
-        ChromeMetricsFor(
-            _chrome == XPlatWindowChrome.Borderless,
-            _frameWidth,
-            _frameHeight,
-            _scale,
+    public XPlatWindowChromeMetrics ChromeMetrics
+    {
+        get
+        {
+            var metrics = ChromeMetricsFor(
+                _chrome == XPlatWindowChrome.Borderless,
+                _frameWidth,
+                _frameHeight,
+                _scale,
+                _state == XPlatWindowState.Maximized);
+
+            if (!ShowsCaptionButtons)
+            {
+                return metrics;
+            }
+
+            var (strip, buttons) = CaptionLayout();
+            return metrics with
+            {
+                CaptionButtons = XPlatCaptionButtons.Platform,
+                CaptionButtonStrip = strip,
+                CaptionButtonBounds = buttons,
+            };
+        }
+    }
+
+    /// <summary>Whether this window draws caption buttons of its own, which needs both knobs set.</summary>
+    private bool ShowsCaptionButtons =>
+        _chrome == XPlatWindowChrome.Borderless && _captionButtons == XPlatCaptionButtons.Platform;
+
+    /// <summary>The strip and buttons for the current client size and state.</summary>
+    private (SKRect Strip, IReadOnlyList<XPlatCaptionButton> Buttons) CaptionLayout()
+    {
+        var width = 0f;
+        if (_hwnd != IntPtr.Zero && NativeMethods.GetClientRect(_hwnd, out var client))
+        {
+            width = client.Right / _scale;
+        }
+
+        var dpi = (uint)MathF.Round(_scale * 96f);
+        return Win32CaptionButtons.Layout(
+            width,
+            Win32CaptionButtons.Height(dpi, _scale),
             _state == XPlatWindowState.Maximized);
+    }
 
     /// <summary>
     /// Registers a native object that has to be released while the native window still exists.
@@ -1654,6 +1725,17 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         canvas.Save();
         canvas.Scale(_scale);
         var area = _host.Paint(canvas, full);
+
+        if (ShowsCaptionButtons)
+        {
+            // The buttons belong to the backend and are painted over the application's own content in
+            // the same frame, so they scale, clip and composite with it rather than living in a
+            // window of their own over the top.
+            var (strip, buttons) = CaptionLayout();
+            Win32CaptionButtons.Draw(canvas, buttons, _hotCaption, _pressedCaption, XPlatTheme.IsDarkMode);
+            area = SKRectI.Union(area, SKRectI.Ceiling(strip));
+        }
+
         canvas.Restore();
         canvas.Flush();
 
@@ -1881,6 +1963,17 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         var width = window.Right - window.Left;
         var height = window.Bottom - window.Top;
 
+        // Caption buttons win over the resize band, which wins over the application. They are
+        // reported as client area so the press comes back here, where it is consumed.
+        if (ShowsCaptionButtons)
+        {
+            var caption = new SKPoint((x - _frameWidth) / _scale, y / _scale);
+            if (Win32CaptionButtons.HitTest(CaptionLayout().Buttons, caption) >= 0)
+            {
+                return new IntPtr(NativeMethods.HtClient);
+            }
+        }
+
         var left = x < _hitBandWidth;
         var right = x >= width - _hitBandWidth;
         var top = y < _hitBandHeight;
@@ -2034,11 +2127,70 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             _trackingLeave = NativeMethods.TrackMouseEvent(ref track);
         }
 
+        if (UpdateCaptionHover(lParam))
+        {
+            return;
+        }
+
         _host.ProcessMouseMove(ToLogical(lParam));
+    }
+
+    /// <summary>
+    /// Tracks which emulated caption button the pointer is over, and reports whether the pointer is
+    /// inside the strip - in which case the application must not also be told about the move.
+    /// </summary>
+    /// <param name="lParam">The client point from the mouse message.</param>
+    /// <returns>True when the pointer belongs to the caption strip.</returns>
+    private bool UpdateCaptionHover(IntPtr lParam)
+    {
+        if (!ShowsCaptionButtons)
+        {
+            return false;
+        }
+
+        var (strip, buttons) = CaptionLayout();
+        var point = ToLogical(lParam);
+        var inside = strip.Contains(point);
+        var hot = inside ? Win32CaptionButtons.HitTest(buttons, point) : -1;
+
+        if (inside != _overCaption)
+        {
+            _overCaption = inside;
+
+            // The application is told it lost the pointer, so a control does not keep its own hover
+            // highlight lit behind a button that now owns the pointer.
+            if (inside)
+            {
+                _host.ProcessMouseLeave();
+                NativeMethods.SetCursor(NativeMethods.LoadCursorW(IntPtr.Zero, new IntPtr(NativeMethods.IdcArrow)));
+            }
+        }
+
+        if (hot != _hotCaption)
+        {
+            _hotCaption = hot;
+            Invalidate();
+        }
+
+        return inside;
     }
 
     private void OnMouseDown(IntPtr hwnd, IntPtr lParam, XPlatMouseButtons button)
     {
+        if (button == XPlatMouseButtons.Left && ShowsCaptionButtons)
+        {
+            var index = Win32CaptionButtons.HitTest(CaptionLayout().Buttons, ToLogical(lParam));
+            if (index >= 0)
+            {
+                // A press on a caption button is consumed here: caption buttons win over the resize
+                // band and over the application, and nothing downstream may see this one.
+                _pressedCaption = index;
+                NativeMethods.SetCapture(hwnd);
+                Invalidate();
+                return;
+            }
+        }
+
         NativeMethods.SetCapture(hwnd);
 
         // The press is in flight while the application handles it, and a system drag loop can only be
@@ -2053,9 +2205,53 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     private void OnMouseUp(IntPtr lParam, XPlatMouseButtons button)
     {
+        if (_pressedCaption >= 0)
+        {
+            var index = _pressedCaption;
+            _pressedCaption = -1;
+            NativeMethods.ReleaseCapture();
+
+            var buttons = CaptionLayout().Buttons;
+            if (button == XPlatMouseButtons.Left && Win32CaptionButtons.HitTest(buttons, ToLogical(lParam)) == index)
+            {
+                ActivateCaptionButton(buttons[index].Kind);
+            }
+
+            Invalidate();
+            return;
+        }
+
         _pressActive = false;
         _host.ProcessMouseUp(ToLogical(lParam), button, CurrentModifiers());
         NativeMethods.ReleaseCapture();
+    }
+
+    /// <summary>
+    /// Runs what a caption button does, through the same window commands a system-drawn button would
+    /// have used, so the window's own handling - the model's close request, the state change, the
+    /// maximise animation - happens exactly as it always does.
+    /// </summary>
+    /// <param name="kind">The button that was released.</param>
+    private void ActivateCaptionButton(XPlatCaptionButtonKind kind)
+    {
+        switch (kind)
+        {
+            case XPlatCaptionButtonKind.Close:
+                NativeMethods.PostMessageW(_hwnd, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
+                break;
+
+            case XPlatCaptionButtonKind.Minimize:
+                NativeMethods.SendMessageW(_hwnd, NativeMethods.WmSysCommand, new IntPtr(NativeMethods.ScMinimize), IntPtr.Zero);
+                break;
+
+            case XPlatCaptionButtonKind.Maximize:
+                NativeMethods.SendMessageW(_hwnd, NativeMethods.WmSysCommand, new IntPtr(NativeMethods.ScMaximize), IntPtr.Zero);
+                break;
+
+            case XPlatCaptionButtonKind.Restore:
+                NativeMethods.SendMessageW(_hwnd, NativeMethods.WmSysCommand, new IntPtr(NativeMethods.ScRestore), IntPtr.Zero);
+                break;
+        }
     }
 
     /// <summary>
