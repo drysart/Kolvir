@@ -191,6 +191,7 @@ public sealed class Gtk4SkiaView : IDisposable
             _glArea.SetHasDepthBuffer(false);
             _glArea.SetHasStencilBuffer(true);
             _glArea.OnRender += OnGlRender;
+            _glArea.OnUnrealize += OnGlAreaUnrealize;
             _root.Attach(_glArea, 0, 0, 1, 1);
         }
 
@@ -511,6 +512,54 @@ public sealed class Gtk4SkiaView : IDisposable
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// Drops the GL stack when the area is unrealized, because its context is destroyed with it.
+    /// </summary>
+    private void OnGlAreaUnrealize(Gtk.Widget sender, EventArgs args) => DropGl("gl area unrealized");
+
+    /// <summary>
+    /// Drops the GL stack because the window is about to lose the surface it presents into, which is
+    /// what a chrome change does: GTK can only rebuild its client-side decoration around a window that
+    /// is not on screen, so the window is taken off screen and put back.
+    /// </summary>
+    /// <remarks>
+    /// The area reports an unrealize of its own on some platforms and not others, so this is asked for
+    /// rather than waited for. The retained offscreen buffer belongs to the context, and the
+    /// framebuffer it presents into is GTK's and goes with the surface: a frame that presents either
+    /// afterwards is defined by nobody, which shows as a window that has vanished and then only
+    /// repaints the pieces that happen to be damaged. Both are dropped here and the next frame builds
+    /// them again - in full, because a buffer that has never held a frame has nothing to keep. The CPU
+    /// picture takes over in the meantime, so the window keeps showing what it was showing.
+    /// </remarks>
+    internal void DropGlForSurfaceChange() => DropGl("window surface re-created");
+
+    private void DropGl(string reason)
+    {
+        var gl = _gl;
+
+        if (gl is null)
+        {
+            return;
+        }
+
+        _gl = null;
+
+        // Nothing retained survives the context, so the host has to paint complete frames again.
+        Host.PartialUpdates = false;
+
+        Trace($"gfx: {reason}");
+
+        // Releasing Skia's GPU resources wants the context current, which it is not while the surface
+        // is going away, so the release waits for an idle that runs after it.
+        GLib.Functions.IdleAdd(0, () =>
+        {
+            gl.Dispose();
+            return false;
+        });
+
+        SchedulePresentationSwap();
     }
 
     /// <summary>

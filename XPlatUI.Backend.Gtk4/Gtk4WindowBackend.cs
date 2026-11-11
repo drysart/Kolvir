@@ -1241,6 +1241,20 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             return;
         }
 
+        // GTK builds the client-side decoration around whatever title bar the window has, and it
+        // cannot rebuild that around a window that is already on screen: it warns that
+        // set_titlebar() was "called on a realized window", and what it commits afterwards is not the
+        // decoration the window now needs - on Wayland the surface comes back empty apart from the
+        // pieces that happen to be painted again. Taking the window off screen first means the
+        // decoration is built from nothing, which is the only way to change it after creation.
+        var relight = _window.GetRealized() && _window.GetVisible();
+
+        if (relight)
+        {
+            _view?.DropGlForSurfaceChange();
+            _window.SetVisible(false);
+        }
+
         if (_chrome == XPlatWindowChrome.Borderless)
         {
             _window.SetDecorated(true);
@@ -1260,6 +1274,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         ApplyRequestedSize();
         ApplySizeLimits();
         ApplyCaptionButtons();
+
+        if (relight)
+        {
+            _window.SetVisible(true);
+        }
     }
 
     /// <summary>
