@@ -481,7 +481,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
             if (_hwnd != IntPtr.Zero && !_disposed)
             {
-                Invalidate();
+                InvalidateCaption();
                 RaiseChromeMetricsChanged();
             }
         }
@@ -1484,7 +1484,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
             case NativeMethods.WmMouseLeave:
                 _trackingLeave = false;
-                _host.ProcessMouseLeave();
+                OnMouseLeave(hwnd);
                 return IntPtr.Zero;
 
             case NativeMethods.WmLButtonDown:
@@ -2158,7 +2158,11 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder |
             NativeMethods.SwpNoActivate | NativeMethods.SwpFrameChanged);
 
-        Invalidate();
+        // The client area keeps its size but not its content: the caption strip appears or disappears
+        // with the chrome, and the insets the application lays out against change with it. Windows on
+        // its own would hand back the region and let the paint blit the retained buffer, so the host
+        // is told as well - that is what makes the next paint render rather than copy.
+        _host.Invalidate();
         RaiseChromeMetricsChanged();
     }
 
@@ -2205,6 +2209,24 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             CaptionButtons = XPlatCaptionButtons.None,
             CaptionButtonSide = XPlatCaptionButtonSide.Right,
         };
+    }
+
+    /// <summary>Clears the pointer state when it leaves the window, including the caption strip.</summary>
+    /// <remarks>
+    /// A pointer that leaves the window while over a caption button never produces another mouse
+    /// move, so without this the button stays lit - and on the way to another application, that is
+    /// the state a screenshot or a user would be left looking at.
+    /// </remarks>
+    private void OnMouseLeave(IntPtr hwnd)
+    {
+        if (_overCaption || _hotCaption >= 0)
+        {
+            _overCaption = false;
+            _hotCaption = -1;
+            InvalidateCaption();
+        }
+
+        _host.ProcessMouseLeave();
     }
 
     private void OnMouseMove(IntPtr hwnd, IntPtr lParam)
@@ -2263,10 +2285,31 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         if (hot != _hotCaption)
         {
             _hotCaption = hot;
-            Invalidate();
+            InvalidateCaption();
         }
 
         return inside;
+    }
+
+    /// <summary>Asks for the caption strip to be repainted after a change to it.</summary>
+    /// <remarks>
+    /// The strip is drawn by the backend over the application's content, so it is not part of the
+    /// host's damage - and a paint with no host damage does not render at all: it blits the retained
+    /// buffer back to the window, which holds the previous frame. Invalidating the window alone
+    /// therefore made a hover, a press or the buttons appearing wait for the application to happen to
+    /// repaint over them. Adding the strip to the host's damage is what makes the next paint render.
+    /// </remarks>
+    private void InvalidateCaption()
+    {
+        var strip = CaptionLayout().Strip;
+
+        if (strip.Width <= 0f || strip.Height <= 0f)
+        {
+            Invalidate();
+            return;
+        }
+
+        _host.Invalidate(strip);
     }
 
     private void OnMouseDown(IntPtr hwnd, IntPtr lParam, XPlatMouseButtons button)
@@ -2280,7 +2323,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
                 // band and over the application, and nothing downstream may see this one.
                 _pressedCaption = index;
                 NativeMethods.SetCapture(hwnd);
-                Invalidate();
+                InvalidateCaption();
                 return;
             }
         }
@@ -2311,7 +2354,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
                 ActivateCaptionButton(buttons[index].Kind);
             }
 
-            Invalidate();
+            InvalidateCaption();
             return;
         }
 
