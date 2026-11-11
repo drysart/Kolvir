@@ -60,6 +60,10 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
     private bool _disposed;
     private bool _modal;
 
+    private Action<object>? _chromeMetricsChanged;
+    private XPlatWindowChrome _chrome = XPlatWindowChrome.System;
+    private XPlatCaptionButtons _captionButtons = XPlatCaptionButtons.None;
+
     internal AppKitWindowBackend(AppKitApplicationBackend application, XPlatWindow window)
     {
         ArgumentNullException.ThrowIfNull(application);
@@ -210,6 +214,9 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
                 var style = _window.StyleMask;
                 _window.StyleMask = value ? style | NSWindowStyle.Resizable : style & ~NSWindowStyle.Resizable;
             }
+
+            // The resize band comes and goes with the style bit, so the metrics change with it.
+            RaiseChromeMetricsChanged();
         }
     }
 
@@ -394,6 +401,155 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         {
             _closeRequested?.Invoke(this);
         }
+    }
+
+    /// <summary>
+    /// Borderless chrome and AppKit's own caption buttons; window colours are not a macOS idea, so
+    /// they keep the seam's throwing defaults.
+    /// </summary>
+    public XPlatChromeCapabilities ChromeCapabilities => new() { Borderless = true, CaptionButtons = true };
+
+    /// <summary>
+    /// How much of the window AppKit draws. Borderless keeps the window titled - the traffic lights,
+    /// the shadow, the rounded corners and the resize band all come with the title bar - and lets the
+    /// content view run underneath it.
+    /// </summary>
+    public XPlatWindowChrome Chrome
+    {
+        get => _chrome;
+        set
+        {
+            if (_chrome == value)
+            {
+                return;
+            }
+
+            _chrome = value;
+            ApplyWindowChrome();
+            RaiseChromeMetricsChanged();
+        }
+    }
+
+    /// <summary>
+    /// What AppKit still owns in this window: nothing it paints, but three points on every edge that
+    /// it claims for resizing, and a corner radius it clips the content to.
+    /// </summary>
+    public XPlatWindowChromeMetrics ChromeMetrics
+    {
+        get
+        {
+            if (_chrome != XPlatWindowChrome.Borderless)
+            {
+                return SystemChromeMetrics;
+            }
+
+            var buttons = CaptionButtonLayout();
+
+            return new XPlatWindowChromeMetrics
+            {
+                // Nothing: a full-size content view covers the window, so there is not a pixel of it
+                // AppKit paints over.
+                SurfaceInset = default,
+
+                // Three points on every edge, measured against the platform: AppKit resizes from
+                // inside the application's own pixels, unlike GTK whose band sits outside them. A
+                // window that cannot be resized claims nothing, which is also what Win32 reports
+                // there - the style bit is what creates the band.
+                ResizeInset = _resizable
+                    ? new XPlatThickness(ResizeBandWidth, ResizeBandWidth, ResizeBandWidth, ResizeBandWidth)
+                    : default,
+
+                // Corners are claimed much more deeply than edges, so this cannot be derived from the
+                // band above.
+                CornerResizeExtent = _resizable ? CornerResizeExtentPoints : 0f,
+
+                // The window's own radius, which clips anything the application draws near a corner.
+                CornerRadius = CornerRadiusPoints,
+
+                CaptionButtons = buttons is null ? XPlatCaptionButtons.None : XPlatCaptionButtons.Platform,
+                CaptionButtonSide = XPlatCaptionButtonSide.Left,
+                CaptionButtonStrip = buttons?.Strip ?? SKRect.Empty,
+                CaptionButtonBounds = buttons?.Buttons ?? [],
+            };
+        }
+    }
+
+    /// <summary>
+    /// Whether AppKit's traffic lights stay, or the window goes bare for the application to draw its
+    /// own buttons.
+    /// </summary>
+    /// <remarks>
+    /// AppKit already draws these buttons over the application's own pixels and claims their clicks,
+    /// so <see cref="XPlatCaptionButtons.Platform"/> is the window it already has and
+    /// <see cref="XPlatCaptionButtons.None"/> hides all three. Nothing is drawn here either way.
+    /// </remarks>
+    public XPlatCaptionButtons CaptionButtons
+    {
+        get => _captionButtons;
+        set
+        {
+            if (_captionButtons == value)
+            {
+                return;
+            }
+
+            _captionButtons = value;
+            ApplyCaptionButtons();
+            RaiseChromeMetricsChanged();
+        }
+    }
+
+    /// <summary>
+    /// Starts a window drag from the press being handled.
+    /// </summary>
+    /// <remarks>
+    /// Unlike GTK and Win32, AppKit hands the event back: <c>performWindowDragWithEvent:</c> takes the
+    /// press AppKit is currently dispatching, which is the very one the application is inside when it
+    /// calls this, so nothing has to be cached. The call runs the drag loop and returns when the drag
+    /// ends, which is also why it cannot be started outside a press.
+    /// </remarks>
+    /// <returns>True when a drag was started.</returns>
+    public bool TryBeginDrag()
+    {
+        // Deliberately not limited to borderless: an application's own title bar is a drag handle in
+        // either chrome, and Win32 and GTK both start the move whatever the window is wearing.
+        if (_window is null || _disposed)
+        {
+            return false;
+        }
+
+        if (NSApplication.SharedApplication.CurrentEvent is not { } current
+            || current.Type != NSEventType.LeftMouseDown)
+        {
+            return false;
+        }
+
+        _window.PerformWindowDrag(current);
+        return true;
+    }
+
+    /// <summary>
+    /// Reports that nothing was started: AppKit has no public way to begin an edge drag of its own,
+    /// and its band - see <see cref="XPlatWindowChromeMetrics.ResizeInset"/> - is what resizes a
+    /// window.
+    /// </summary>
+    /// <param name="edge">Ignored.</param>
+    /// <returns>False, always.</returns>
+    public bool TryBeginResize(XPlatResizeEdge edge) => false;
+
+    /// <summary>Adds a handler that runs when <see cref="ChromeMetrics"/> changes.</summary>
+    public IDisposable AddChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChromeMetricsChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChromeMetricsChangedHandler"/> added.</summary>
+    public void RemoveChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged -= handler;
     }
 
     /// <inheritdoc />
@@ -605,6 +761,13 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
             style |= NSWindowStyle.Resizable;
         }
 
+        // A borderless window's content view runs under the title bar, so the style has to say so
+        // before the window is built: adding it afterwards makes AppKit re-lay the window out.
+        if (_chrome == XPlatWindowChrome.Borderless)
+        {
+            style |= NSWindowStyle.FullSizeContentView;
+        }
+
         var window = new NSWindow(
             new CGRect(0, 0, _clientSize.Width, _clientSize.Height),
             style,
@@ -635,6 +798,10 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
 
         _window = window;
         _view = view;
+
+        // The style mask carries the borderless bit already; the rest of the shape - transparent title
+        // bar, hidden title - is set here, before the window is on screen.
+        ApplyWindowChrome();
         _scale = (float)window.BackingScaleFactor;
         _reportedState = CurrentState();
 
@@ -725,6 +892,164 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
         _attachedOwner = null;
     }
 
+    /// <summary>The three points of application pixel AppKit claims on each edge for resizing.</summary>
+    /// <remarks>
+    /// Measured against the platform rather than derived: AppKit's resize band lies on top of the
+    /// application's own pixels, so an application drawing its own grip has to keep controls out of
+    /// this much of its edge.
+    /// </remarks>
+    private const float ResizeBandWidth = 3f;
+
+    /// <summary>The corner radius at which AppKit claims a diagonal resize, measured at about 13 points.</summary>
+    private const float CornerResizeExtentPoints = 13f;
+
+    /// <summary>The radius of the window's rounded corners, which clips the content drawn under it.</summary>
+    private const float CornerRadiusPoints = 11f;
+
+    /// <summary>What a window with AppKit's own chrome reports: it owns nothing of its own.</summary>
+    private static readonly XPlatWindowChromeMetrics SystemChromeMetrics = new();
+
+    /// <summary>
+    /// Puts the window into the shape its <see cref="Chrome"/> asks for.
+    /// </summary>
+    /// <remarks>
+    /// A borderless window stays <em>titled</em>: the traffic lights, the shadow, the rounded corners
+    /// and the resize band are all part of the titled style, so removing it would take away every one
+    /// of them. What goes is the space the title bar reserves - <c>FullSizeContentView</c> lets the
+    /// content view run under the title bar, a transparent title bar stops it painting a strip over
+    /// the content, and a hidden title stops it drawing text there.
+    /// </remarks>
+    private void ApplyWindowChrome()
+    {
+        if (_window is null || _disposed)
+        {
+            return;
+        }
+
+        var borderless = _chrome == XPlatWindowChrome.Borderless;
+        var style = _window.StyleMask;
+
+        _window.StyleMask = borderless
+            ? style | NSWindowStyle.FullSizeContentView
+            : style & ~NSWindowStyle.FullSizeContentView;
+
+        _window.TitlebarAppearsTransparent = borderless;
+        _window.TitleVisibility = borderless ? NSWindowTitleVisibility.Hidden : NSWindowTitleVisibility.Visible;
+
+        // Changing the style mask re-lays the frame out, and the content view has to end up covering
+        // whatever the window now is.
+        if (_view is { } view)
+        {
+            view.Frame = _window.ContentView?.Frame ?? view.Frame;
+        }
+
+        // The buttons come and go with the chrome: a borderless window may ask to own them.
+        ApplyCaptionButtons();
+    }
+
+    private void RaiseChromeMetricsChanged() => _chromeMetricsChanged?.Invoke(this);
+
+    /// <summary>The three traffic lights, in the order AppKit lays them out.</summary>
+    private static (XPlatCaptionButtonKind Kind, NSWindowButton Which)[] StandardButtons() =>
+    [
+        (XPlatCaptionButtonKind.Close, NSWindowButton.CloseButton),
+        (XPlatCaptionButtonKind.Minimize, NSWindowButton.MiniaturizeButton),
+        (XPlatCaptionButtonKind.Maximize, NSWindowButton.ZoomButton),
+    ];
+
+    /// <summary>Whether AppKit's own caption buttons are on screen for this window.</summary>
+    private bool ShowsCaptionButtons =>
+        _chrome == XPlatWindowChrome.Borderless && _captionButtons == XPlatCaptionButtons.Platform;
+
+    /// <summary>Shows or hides AppKit's own caption buttons for what the window currently asks for.</summary>
+    /// <remarks>
+    /// A decorated window always keeps them - they are part of the chrome AppKit owns - so only a
+    /// borderless window can ask for none.
+    /// </remarks>
+    private void ApplyCaptionButtons()
+    {
+        if (_window is null || _disposed)
+        {
+            return;
+        }
+
+        var show = _chrome != XPlatWindowChrome.Borderless || _captionButtons == XPlatCaptionButtons.Platform;
+
+        foreach (var (_, which) in StandardButtons())
+        {
+            if (_window.StandardWindowButton(which) is { } button)
+            {
+                button.Hidden = !show;
+            }
+        }
+    }
+
+    /// <summary>
+    /// The traffic lights and the band they sit in, read back from AppKit rather than computed.
+    /// </summary>
+    /// <returns>Null when the window has no platform buttons to report.</returns>
+    private (SKRect Strip, IReadOnlyList<XPlatCaptionButton> Buttons)? CaptionButtonLayout()
+    {
+        if (!ShowsCaptionButtons || _window is null)
+        {
+            return null;
+        }
+
+        var buttons = new List<XPlatCaptionButton>(3);
+        var union = SKRect.Empty;
+
+        foreach (var (kind, which) in StandardButtons())
+        {
+            if (_window.StandardWindowButton(which) is not { Hidden: false } button)
+            {
+                continue;
+            }
+
+            if (!TryClientRect(button, out var bounds))
+            {
+                continue;
+            }
+
+            buttons.Add(new XPlatCaptionButton(kind, bounds));
+            union = union == SKRect.Empty ? bounds : SKRect.Union(union, bounds);
+        }
+
+        if (buttons.Count == 0)
+        {
+            return null;
+        }
+
+        // Win32 and GTK both report a band that starts at the window's own edge, so the strip is the
+        // union of the buttons taken up to the top edge. AppKit paints nothing in it and claims none
+        // of it - the buttons themselves are what claim presses - but an application keeping a top
+        // row of its own clear of the lights wants the whole band.
+        return (new SKRect(union.Left, 0f, union.Right, union.Bottom), buttons);
+    }
+
+    /// <summary>A view's frame in client coordinates.</summary>
+    /// <remarks>
+    /// The content view is flipped, so its coordinate space already runs down from the window's top
+    /// edge and conversion is all that is needed.
+    /// </remarks>
+    private bool TryClientRect(NSView view, out SKRect rect)
+    {
+        rect = SKRect.Empty;
+
+        if (_view is null)
+        {
+            return false;
+        }
+
+        var frame = view.ConvertRectToView(view.Bounds, _view);
+        if (frame.Width <= 0 || frame.Height <= 0)
+        {
+            return false;
+        }
+
+        rect = new SKRect((float)frame.X, (float)frame.Y, (float)frame.Right, (float)frame.Bottom);
+        return true;
+    }
+
     /// <summary>Makes the title bar and other AppKit chrome match the palette the library draws with.</summary>
     private void ApplyChrome()
     {
@@ -804,6 +1129,10 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
 
         _reportedState = state;
         _stateChanged?.Invoke(this);
+
+        // Maximising changes what the window clips and how much of its edge it claims, so the metrics
+        // changed with the state.
+        RaiseChromeMetricsChanged();
     }
 
     /// <summary>
@@ -865,6 +1194,7 @@ public sealed class AppKitWindowBackend : IXPlatWindowBackend
 
             _backend._scale = scale;
             _backend._scaleChanged?.Invoke(_backend);
+            _backend.RaiseChromeMetricsChanged();
         }
 
         public override void DidMiniaturize(NSNotification notification) => _backend.RaiseStateChangedIfNeeded();

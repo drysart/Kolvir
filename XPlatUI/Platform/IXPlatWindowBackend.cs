@@ -88,6 +88,160 @@ public interface IXPlatWindowBackend : IDisposable
     XPlatMenuBar? MenuBar { get; set; }
 
     /// <summary>
+    /// Which parts of application-owned chrome this backend implements. Ask here before asking for
+    /// one: the members below refuse what they cannot honour.
+    /// </summary>
+    /// <remarks>
+    /// The answer is fixed for the life of the backend, so it is safe to read once. A backend that
+    /// reports <see cref="XPlatChromeCapabilities.None"/> still throws from the chrome setters -
+    /// capabilities make the refusal discoverable, they do not turn it into a silent no-op.
+    /// </remarks>
+    XPlatChromeCapabilities ChromeCapabilities => XPlatChromeCapabilities.None;
+
+    /// <summary>
+    /// How much of the window the platform draws: the ordinary decorated window, or one the
+    /// application paints edge to edge.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <see cref="XPlatWindowChrome.Borderless"/> does not make the window a popup. The platform keeps
+    /// its resize band, snapping, tiling, animations, shadow and minimise behaviour; what it still
+    /// owns is reported by <see cref="ChromeMetrics"/>. Title bar behaviour stays the application's:
+    /// there is no caption region on the seam.
+    /// </para>
+    /// <para>
+    /// <b>The default implementation throws.</b> Check <see cref="XPlatChromeCapabilities.Borderless"/>
+    /// first and fall back to a decorated window when it is false. A backend that has not adopted
+    /// borderless chrome refuses the request rather than silently staying decorated, so an application
+    /// that asks anyway finds out where it asked instead of by looking at the window.
+    /// </para>
+    /// </remarks>
+    XPlatWindowChrome Chrome
+    {
+        get => XPlatWindowChrome.System;
+        set => throw new NotSupportedException(
+            "This backend does not implement borderless window chrome.");
+    }
+
+    /// <summary>
+    /// Whether the platform draws the window's caption buttons, or the application draws its own.
+    /// </summary>
+    /// <remarks>
+    /// This is the request; <see cref="ChromeMetrics"/> is the answer, so an application reads back
+    /// what it got. <see cref="XPlatCaptionButtons.Platform"/> is honoured by every backend that
+    /// reports <see cref="XPlatChromeCapabilities.CaptionButtons"/> - Windows draws and hit-tests the
+    /// buttons itself rather than leaving the application to do it. The default implementation throws,
+    /// like <see cref="Chrome"/>.
+    /// </remarks>
+    XPlatCaptionButtons CaptionButtons
+    {
+        get => XPlatCaptionButtons.None;
+        set => throw new NotSupportedException(
+            "This backend does not implement platform caption buttons.");
+    }
+
+    /// <summary>
+    /// What the platform still owns in this window, as of the last change to it.
+    /// </summary>
+    /// <remarks>
+    /// Re-read it rather than caching it: the values move when the window changes display scale, is
+    /// maximised or restored, or the theme changes, and
+    /// <see cref="AddChromeMetricsChangedHandler"/> is when to re-read. A backend with nothing to
+    /// report returns the empty snapshot - system chrome, no insets, no rounded corners, no buttons.
+    /// </remarks>
+    XPlatWindowChromeMetrics ChromeMetrics => SystemMetrics;
+
+    /// <summary>
+    /// The colour the platform should use where it treats the window as a caption, or null for the
+    /// platform's own default.
+    /// </summary>
+    /// <remarks>
+    /// Only a borderless window needs this. On Windows the non-client strip is composited with a
+    /// restored frame before any handler runs, so matching it to the title bar colour is the only way
+    /// to keep a restore from flashing. Check <see cref="XPlatChromeCapabilities.WindowColors"/> first;
+    /// the default implementation throws.
+    /// </remarks>
+    SKColor? CaptionColor
+    {
+        get => null;
+        set => throw new NotSupportedException(
+            "This backend does not implement window caption colours.");
+    }
+
+    /// <summary>
+    /// The colour the platform should use for the window's own border, or null to keep its default.
+    /// </summary>
+    /// <remarks>
+    /// This is the border the platform draws, not one the application draws: on Windows the DWM
+    /// border colour, on GTK the window's own CSS border. Check
+    /// <see cref="XPlatChromeCapabilities.WindowColors"/> first; the default implementation throws.
+    /// </remarks>
+    SKColor? BorderColor
+    {
+        get => null;
+        set => throw new NotSupportedException(
+            "This backend does not implement window border colours.");
+    }
+
+    /// <summary>
+    /// Starts a window drag from the press that is being handled, and reports whether the platform
+    /// took it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Call it synchronously from the pointer-down dispatch, before returning to the platform. The
+    /// backend needs the press that is still in flight - GDK4 exposes no event serial, so a
+    /// <c>begin_move</c> outside one silently does nothing - which is why this takes no arguments:
+    /// the backend caches the press it dispatched.
+    /// </para>
+    /// <para>
+    /// A <c>true</c> result means the application must not deliver the click that the same press
+    /// would otherwise produce, or the control under the pointer activates when the drag ends.
+    /// </para>
+    /// <para>The default implementation reports that no drag was started.</para>
+    /// </remarks>
+    bool TryBeginDrag() => false;
+
+    /// <summary>
+    /// Starts a resize of <paramref name="edge"/> from the press that is being handled, and reports
+    /// whether the platform took it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The ordinary way a window resizes is the platform's own band, described by
+    /// <see cref="XPlatWindowChromeMetrics.ResizeInset"/> and
+    /// <see cref="XPlatWindowChromeMetrics.CornerResizeExtent"/>; this is for an application that
+    /// draws its own grip. Two adjacent edges name a corner. The same synchronous rule as
+    /// <see cref="TryBeginDrag"/> applies.
+    /// </para>
+    /// <para>The default implementation reports that no resize was started.</para>
+    /// </remarks>
+    bool TryBeginResize(XPlatResizeEdge edge) => false;
+
+    /// <summary>Adds a handler that runs when <see cref="ChromeMetrics"/> changes.</summary>
+    /// <remarks>
+    /// It changes when the window moves to a display with a different scale factor, when the window
+    /// is maximised or restored, and when the theme changes. A backend whose snapshot never moves
+    /// returns a subscription that never fires.
+    /// </remarks>
+    IDisposable AddChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        return new XPlatHandlerToken<Action<object>>(RemoveChromeMetricsChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChromeMetricsChangedHandler"/> added.</summary>
+    void RemoveChromeMetricsChangedHandler(Action<object> handler)
+    {
+    }
+
+    /// <summary>
+    /// The snapshot a backend reports when the platform owns nothing: system chrome, no insets, no
+    /// rounded corners and no caption buttons.
+    /// </summary>
+    private static readonly XPlatWindowChromeMetrics SystemMetrics = new();
+
+    /// <summary>
     /// Creates and shows the native window, owned by <see cref="Owner"/> when it is set, and
     /// returns without waiting for it to close. The model raises its own events from the ones
     /// below.

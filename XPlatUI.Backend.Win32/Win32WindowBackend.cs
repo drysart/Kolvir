@@ -68,6 +68,40 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private IntPtr _smallIcon;
 
     private float _scale = 1f;
+
+    private XPlatWindowChrome _chrome = XPlatWindowChrome.System;
+
+    /// <summary>The colour asked for the caption strip and the frame line, null meaning DWM's own.</summary>
+    private SKColor? _captionColor;
+    private SKColor? _borderColor;
+
+    /// <summary>Frame insets measured from the client rect <c>DefWindowProc</c> computed, in device
+    /// pixels. Left and right are the same number; the bottom is <see cref="_frameHeight"/>.</summary>
+    private int _frameWidth;
+    private int _frameHeight;
+
+    /// <summary>The resize band reported by the hit test, zeroed while maximized because the screen
+    /// edges are not resizable.</summary>
+    private int _hitBandWidth;
+    private int _hitBandHeight;
+    private Action<object>? _chromeMetricsChanged;
+
+    /// <summary>The snapshot for a decorated window: the platform owns nothing the seam reports.</summary>
+    private static readonly XPlatWindowChromeMetrics SystemMetrics = new();
+
+    /// <summary>Whether a pointer press is still being dispatched to the application, and where it
+    /// landed in client coordinates - the move loop wants the same point in screen coordinates, which
+    /// is converted when the drag starts.</summary>
+    private bool _pressActive;
+    private int _pressClientX;
+    private int _pressClientY;
+
+    private XPlatCaptionButtons _captionButtons = XPlatCaptionButtons.None;
+
+    /// <summary>Which emulated caption button the pointer is over, and which one is held down.</summary>
+    private int _hotCaption = -1;
+    private int _pressedCaption = -1;
+    private bool _overCaption;
     private IntPtr _memoryDc;
     private IntPtr _dib;
     private IntPtr _dibBits;
@@ -343,6 +377,165 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
     /// <summary>The native window handle, or <see cref="IntPtr.Zero"/> before the window is shown.</summary>
     public IntPtr Handle => _hwnd;
+
+    /// <summary>
+    /// How much of the window the platform draws. Switching it live re-runs the frame calculation,
+    /// which is what grows the client over the caption or hands it back.
+    /// </summary>
+    public XPlatWindowChrome Chrome
+    {
+        get => _chrome;
+        set
+        {
+            if (_chrome == value)
+            {
+                return;
+            }
+
+            _chrome = value;
+
+            if (_hwnd != IntPtr.Zero && !_disposed)
+            {
+                ApplyChrome();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Borderless chrome, emulated caption buttons and the two DWM window colours are all implemented
+    /// here; the colours need Windows 11, so they are reported honestly rather than assumed.
+    /// </summary>
+    public XPlatChromeCapabilities ChromeCapabilities => new()
+    {
+        Borderless = true,
+        CaptionButtons = true,
+        WindowColors = NativeMethods.SupportsWindowColors(Environment.OSVersion.Version.Build),
+    };
+
+    /// <summary>
+    /// The colour DWM paints the caption strip in. A borderless window's client covers that strip, so
+    /// this is the only way to stop the restored frame from flashing it during a restore animation.
+    /// </summary>
+    /// <remarks>
+    /// Null hands the strip back to DWM, which is what a decorated window wants. The colour has no
+    /// alpha: <c>COLORREF</c> carries three channels and DWM composes the strip itself.
+    /// </remarks>
+    public SKColor? CaptionColor
+    {
+        get => _captionColor;
+        set
+        {
+            EnsureWindowColorsSupported();
+            if (_captionColor == value)
+            {
+                return;
+            }
+
+            _captionColor = value;
+            ApplyWindowColors();
+        }
+    }
+
+    /// <summary>
+    /// The colour of the one-pixel line DWM draws around the window, on every edge including the top
+    /// one the client covers.
+    /// </summary>
+    /// <remarks>
+    /// Null hands the line back to DWM. <c>DWMWA_COLOR_NONE</c> exists as well and is not exposed:
+    /// removing the line changes what the window looks like on screen, which is the application's
+    /// decision to draw rather than an attribute to set by accident.
+    /// </remarks>
+    public SKColor? BorderColor
+    {
+        get => _borderColor;
+        set
+        {
+            EnsureWindowColorsSupported();
+            if (_borderColor == value)
+            {
+                return;
+            }
+
+            _borderColor = value;
+            ApplyWindowColors();
+        }
+    }
+
+    /// <summary>
+    /// Whether the window shows caption buttons. Windows has none to offer in a borderless window, so
+    /// asking for them makes this backend draw and hit test its own.
+    /// </summary>
+    public XPlatCaptionButtons CaptionButtons
+    {
+        get => _captionButtons;
+        set
+        {
+            if (_captionButtons == value)
+            {
+                return;
+            }
+
+            _captionButtons = value;
+            _hotCaption = -1;
+            _pressedCaption = -1;
+
+            if (_hwnd != IntPtr.Zero && !_disposed)
+            {
+                InvalidateCaption();
+                RaiseChromeMetricsChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// What the platform still owns in this window. Windows keeps its frame on three edges and hands
+    /// the client the top edge, so the painted inset and the claimed band are different numbers.
+    /// </summary>
+    public XPlatWindowChromeMetrics ChromeMetrics
+    {
+        get
+        {
+            var metrics = ChromeMetricsFor(
+                _chrome == XPlatWindowChrome.Borderless,
+                _frameWidth,
+                _frameHeight,
+                _scale,
+                _state == XPlatWindowState.Maximized);
+
+            if (!ShowsCaptionButtons)
+            {
+                return metrics;
+            }
+
+            var (strip, buttons) = CaptionLayout();
+            return metrics with
+            {
+                CaptionButtons = XPlatCaptionButtons.Platform,
+                CaptionButtonStrip = strip,
+                CaptionButtonBounds = buttons,
+            };
+        }
+    }
+
+    /// <summary>Whether this window draws caption buttons of its own, which needs both knobs set.</summary>
+    private bool ShowsCaptionButtons =>
+        _chrome == XPlatWindowChrome.Borderless && _captionButtons == XPlatCaptionButtons.Platform;
+
+    /// <summary>The strip and buttons for the current client size and state.</summary>
+    private (SKRect Strip, IReadOnlyList<XPlatCaptionButton> Buttons) CaptionLayout()
+    {
+        var width = 0f;
+        if (_hwnd != IntPtr.Zero && NativeMethods.GetClientRect(_hwnd, out var client))
+        {
+            width = client.Right / _scale;
+        }
+
+        var dpi = (uint)MathF.Round(_scale * 96f);
+        return Win32CaptionButtons.Layout(
+            width,
+            Win32CaptionButtons.Height(dpi, _scale),
+            _state == XPlatWindowState.Maximized);
+    }
 
     /// <summary>
     /// Registers a native object that has to be released while the native window still exists.
@@ -654,6 +847,107 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         _stateChanged -= handler;
     }
 
+    /// <summary>Adds a handler that runs when <see cref="ChromeMetrics"/> changes.</summary>
+    public IDisposable AddChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChromeMetricsChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChromeMetricsChangedHandler"/> added.</summary>
+    public void RemoveChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged -= handler;
+    }
+
+    /// <summary>
+    /// Starts a window drag from the press being dispatched, and reports whether it did.
+    /// </summary>
+    /// <returns>True when the system's move loop was entered; false when no press was in flight.</returns>
+    public bool TryBeginDrag()
+    {
+        if (!_pressActive || _hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        BeginSystemDrag(NativeMethods.HtCaption);
+        return true;
+    }
+
+    /// <summary>
+    /// Starts a resize of <paramref name="edge"/> from the press being dispatched, and reports whether
+    /// it did.
+    /// </summary>
+    /// <param name="edge">The edge or corner to resize by.</param>
+    /// <returns>True when the system's resize loop was entered; false when no press was in flight or
+    /// <paramref name="edge"/> named no edge.</returns>
+    public bool TryBeginResize(XPlatResizeEdge edge)
+    {
+        if (!_pressActive || _hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var hit = HitCodeFor(edge);
+        if (hit == 0)
+        {
+            return false;
+        }
+
+        BeginSystemDrag(hit);
+        return true;
+    }
+
+    /// <summary>
+    /// Maps a seam edge onto Win32's hit-test code, or zero when nothing is named.
+    /// </summary>
+    /// <param name="edge">The edges to resize by; two adjacent ones name a corner.</param>
+    /// <returns>The <c>HT*</c> code for that edge, or zero.</returns>
+    internal static int HitCodeFor(XPlatResizeEdge edge) => edge switch
+    {
+        XPlatResizeEdge.Left => NativeMethods.HtLeft,
+        XPlatResizeEdge.Right => NativeMethods.HtRight,
+        XPlatResizeEdge.Top => NativeMethods.HtTop,
+        XPlatResizeEdge.Bottom => NativeMethods.HtBottom,
+        XPlatResizeEdge.Left | XPlatResizeEdge.Top => NativeMethods.HtTopLeft,
+        XPlatResizeEdge.Right | XPlatResizeEdge.Top => NativeMethods.HtTopRight,
+        XPlatResizeEdge.Left | XPlatResizeEdge.Bottom => NativeMethods.HtBottomLeft,
+        XPlatResizeEdge.Right | XPlatResizeEdge.Bottom => NativeMethods.HtBottomRight,
+        _ => 0,
+    };
+
+    /// <summary>
+    /// Hands the press to the system's own non-client move or resize loop - the one every title bar
+    /// and every frame edge uses - so snapping, tiling, the global move cursor and the shell's
+    /// animations come from the platform instead of being reimplemented here.
+    /// </summary>
+    /// <param name="hitCode">The <c>HT*</c> code that says whether this is a move or a resize.</param>
+    /// <remarks>
+    /// The application's capture has to be released first. The system loop takes the capture back as
+    /// soon as the message is dispatched, and a capture still held by the application is what makes a
+    /// drag report positions relative to the wrong window.
+    /// </remarks>
+    private void BeginSystemDrag(int hitCode)
+    {
+        _pressActive = false;
+
+        NativeMethods.ReleaseCapture();
+
+        // WM_LBUTTONDOWN reported the press in client coordinates; the non-client move loop takes a
+        // screen point, so convert before handing it over.
+        var point = new NativeMethods.POINT { X = _pressClientX, Y = _pressClientY };
+        NativeMethods.ClientToScreen(_hwnd, ref point);
+
+        NativeMethods.SendMessageW(
+            _hwnd,
+            NativeMethods.WmNcLButtonDown,
+            new IntPtr(hitCode),
+            new IntPtr((point.Y << 16) | (point.X & 0xFFFF)));
+    }
+
     /// <inheritdoc />
     public void Dispose()
     {
@@ -803,6 +1097,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
     private void Present()
     {
         NativeMethods.SetDarkTitleBar(_hwnd, XPlatTheme.IsDarkMode);
+        ApplyWindowColors();
 
         // The presenters need a live HWND, so they can only be installed once the window exists.
         XPlatContextMenuPresenter.Current = _useXPlatMenus
@@ -1161,6 +1456,12 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
                 OnDpiChanged(hwnd, wParam, lParam);
                 return IntPtr.Zero;
 
+            case NativeMethods.WmNcCalcSize:
+                return OnNcCalcSize(hwnd, wParam, lParam);
+
+            case NativeMethods.WmNcHitTest:
+                return OnNcHitTest(hwnd, lParam);
+
             case NativeMethods.WmGetMinMaxInfo:
                 OnGetMinMaxInfo(lParam);
                 return IntPtr.Zero;
@@ -1183,7 +1484,7 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
             case NativeMethods.WmMouseLeave:
                 _trackingLeave = false;
-                _host.ProcessMouseLeave();
+                OnMouseLeave(hwnd);
                 return IntPtr.Zero;
 
             case NativeMethods.WmLButtonDown:
@@ -1483,6 +1784,17 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         canvas.Save();
         canvas.Scale(_scale);
         var area = _host.Paint(canvas, full);
+
+        if (ShowsCaptionButtons)
+        {
+            // The buttons belong to the backend and are painted over the application's own content in
+            // the same frame, so they scale, clip and composite with it rather than living in a
+            // window of their own over the top.
+            var (strip, buttons) = CaptionLayout();
+            Win32CaptionButtons.Draw(canvas, buttons, _hotCaption, _pressedCaption, XPlatTheme.IsDarkMode);
+            area = SKRectI.Union(area, SKRectI.Ceiling(strip));
+        }
+
         canvas.Restore();
         canvas.Flush();
 
@@ -1578,6 +1890,9 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         _state = state;
         _stateChanged?.Invoke(this);
+
+        // Maximizing removes the resize band and restoring puts it back.
+        RaiseChromeMetricsChanged();
     }
 
     private void OnDpiChanged(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
@@ -1606,6 +1921,9 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         UpdateHostSize();
         ApplyIcon();
         _scaleChanged?.Invoke(this);
+
+        // The frame is measured in device pixels, so every logical inset changes with the display.
+        RaiseChromeMetricsChanged();
     }
 
     private void OnGetMinMaxInfo(IntPtr lParam)
@@ -1629,6 +1947,288 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
         Marshal.StructureToPtr(info, lParam, false);
     }
 
+    /// <summary>
+    /// Runs whenever the non-client area is recalculated. In borderless mode it lets
+    /// <c>DefWindowProc</c> compute the ordinary framed client rect, measures the frame that was
+    /// used, and then grows the client up over the caption - which is what lets the application own
+    /// the top edge without giving up the frame on the other three.
+    /// </summary>
+    /// <remarks>
+    /// RULE: derive the inset from <c>rgrc[0]</c>, the PROPOSED rect. <c>rgrc[1]</c> is the current
+    /// rect and is stale after a move or a maximize; the Win32 spike read it once and produced a
+    /// 1086 px client in a 700 px window.
+    /// </remarks>
+    private IntPtr OnNcCalcSize(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
+    {
+        if (_chrome != XPlatWindowChrome.Borderless || wParam == IntPtr.Zero)
+        {
+            // System chrome, or the create-time form that carries a RECT* rather than
+            // NCCALCSIZE_PARAMS and cannot be overridden.
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmNcCalcSize, wParam, lParam);
+        }
+
+        var proposed = Marshal.PtrToStructure<NativeMethods.NCCALCSIZE_PARAMS>(lParam).rgrc0;
+        var result = NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmNcCalcSize, wParam, lParam);
+        var parameters = Marshal.PtrToStructure<NativeMethods.NCCALCSIZE_PARAMS>(lParam);
+        var client = parameters.rgrc0;
+
+        // Measure the frame rather than computing it: SM_CXSIZEFRAME plus SM_CXPADDEDBORDER is a
+        // close guess at this inset, not the number the window actually got.
+        var frameWidth = client.Left - proposed.Left;
+        var frameHeight = proposed.Bottom - client.Bottom;
+        if (frameWidth >= 0 && frameHeight >= 0)
+        {
+            // The pre-size call reports zeros, so keeping the last good values is what lets a
+            // maximize still offset by the right height.
+            _frameWidth = frameWidth;
+            _frameHeight = frameHeight;
+        }
+
+        var maximizing = IsMaximizing(hwnd, proposed);
+
+        // Maximized the top starts lower by the bottom inset, which is what lands the client exactly
+        // on the work area rather than one frame above it.
+        client.Top = maximizing ? proposed.Top + _frameHeight : proposed.Top;
+        parameters.rgrc0 = client;
+        Marshal.StructureToPtr(parameters, lParam, false);
+
+        // Maximized, the window's edges are the screen's, so nothing may claim a resize band there.
+        _hitBandWidth = maximizing ? 0 : _frameWidth;
+        _hitBandHeight = maximizing ? 0 : _frameHeight;
+
+        return result;
+    }
+
+    /// <summary>
+    /// Reports the resize band for a borderless window instead of letting <c>DefWindowProc</c> decide.
+    /// The client covers the caption, so the system would classify the top edge as client area and
+    /// leave nothing to drag but a sliver of the frame.
+    /// </summary>
+    private IntPtr OnNcHitTest(IntPtr hwnd, IntPtr lParam)
+    {
+        if (_chrome != XPlatWindowChrome.Borderless)
+        {
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmNcHitTest, IntPtr.Zero, lParam);
+        }
+
+        if (_hitBandWidth <= 0 || _hitBandHeight <= 0 || !NativeMethods.GetWindowRect(hwnd, out var window))
+        {
+            return new IntPtr(NativeMethods.HtClient);
+        }
+
+        // lParam carries signed screen coordinates; LowWord and HighWord sign extend them.
+        var x = NativeMethods.LowWord(lParam) - window.Left;
+        var y = NativeMethods.HighWord(lParam) - window.Top;
+        var width = window.Right - window.Left;
+        var height = window.Bottom - window.Top;
+
+        // Caption buttons win over the resize band, which wins over the application. They are
+        // reported as client area so the press comes back here, where it is consumed.
+        if (ShowsCaptionButtons)
+        {
+            var caption = new SKPoint((x - _frameWidth) / _scale, y / _scale);
+            if (Win32CaptionButtons.HitTest(CaptionLayout().Buttons, caption) >= 0)
+            {
+                return new IntPtr(NativeMethods.HtClient);
+            }
+        }
+
+        var left = x < _hitBandWidth;
+        var right = x >= width - _hitBandWidth;
+        var top = y < _hitBandHeight;
+        var bottom = y >= height - _hitBandHeight;
+
+        if (top && left)
+        {
+            return new IntPtr(NativeMethods.HtTopLeft);
+        }
+
+        if (top && right)
+        {
+            return new IntPtr(NativeMethods.HtTopRight);
+        }
+
+        if (bottom && left)
+        {
+            return new IntPtr(NativeMethods.HtBottomLeft);
+        }
+
+        if (bottom && right)
+        {
+            return new IntPtr(NativeMethods.HtBottomRight);
+        }
+
+        if (left)
+        {
+            return new IntPtr(NativeMethods.HtLeft);
+        }
+
+        if (right)
+        {
+            return new IntPtr(NativeMethods.HtRight);
+        }
+
+        if (top)
+        {
+            return new IntPtr(NativeMethods.HtTop);
+        }
+
+        return bottom ? new IntPtr(NativeMethods.HtBottom) : new IntPtr(NativeMethods.HtClient);
+    }
+
+    /// <summary>
+    /// Whether the rect being calculated is a maximize. <c>IsZoomed</c> alone is not enough: during
+    /// the transition the window is not maximized yet, so the proposed rect is compared with the
+    /// monitor's work area as well.
+    /// </summary>
+    private static bool IsMaximizing(IntPtr hwnd, NativeMethods.RECT proposed)
+    {
+        if (NativeMethods.IsZoomed(hwnd))
+        {
+            return true;
+        }
+
+        var monitor = NativeMethods.MonitorFromWindow(hwnd, NativeMethods.MonitorDefaultToNearest);
+        if (monitor == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var info = new NativeMethods.MONITORINFO
+        {
+            cbSize = (uint)Marshal.SizeOf<NativeMethods.MONITORINFO>(),
+        };
+
+        if (!NativeMethods.GetMonitorInfoW(monitor, ref info))
+        {
+            return false;
+        }
+
+        return proposed.Left == info.rcWork.Left
+            && proposed.Top == info.rcWork.Top
+            && proposed.Right == info.rcWork.Right
+            && proposed.Bottom == info.rcWork.Bottom;
+    }
+
+    /// <summary>
+    /// Turns a colour into the <c>COLORREF</c> DWM's colour attributes take.
+    /// </summary>
+    /// <param name="color">The colour.</param>
+    /// <returns><c>0x00BBGGRR</c>, the byte order every Win32 colour is in.</returns>
+    /// <remarks>
+    /// The channel order is reversed against SkiaSharp's, which is the whole of this method: a colour
+    /// passed through unchanged is blue where it should be red. Alpha is dropped because
+    /// <c>COLORREF</c> has no room for it.
+    /// </remarks>
+    internal static uint ToColorRef(SKColor color) =>
+        (uint)(color.Red | (color.Green << 8) | (color.Blue << 16));
+
+    /// <summary>Refuses a window colour where the running Windows build cannot honour it.</summary>
+    private void EnsureWindowColorsSupported()
+    {
+        if (!ChromeCapabilities.WindowColors)
+        {
+            throw new NotSupportedException(
+                "This version of Windows does not implement DWM window colours. Check XPlatChromeCapabilities.WindowColors first.");
+        }
+    }
+
+    /// <summary>Applies both window colours, or hands each one DWM did not get back to DWM.</summary>
+    private void ApplyWindowColors()
+    {
+        if (_hwnd == IntPtr.Zero || _disposed)
+        {
+            return;
+        }
+
+        NativeMethods.SetCaptionColor(_hwnd, _captionColor is { } caption ? ToColorRef(caption) : null);
+        NativeMethods.SetBorderColor(_hwnd, _borderColor is { } border ? ToColorRef(border) : null);
+    }
+
+    /// <summary>Re-runs the frame calculation after a chrome change and tells the application.</summary>
+    private void ApplyChrome()
+    {
+        NativeMethods.SetWindowPos(
+            _hwnd,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder |
+            NativeMethods.SwpNoActivate | NativeMethods.SwpFrameChanged);
+
+        // The client area keeps its size but not its content: the caption strip appears or disappears
+        // with the chrome, and the insets the application lays out against change with it. Windows on
+        // its own would hand back the region and let the paint blit the retained buffer, so the host
+        // is told as well - that is what makes the next paint render rather than copy.
+        _host.Invalidate();
+        RaiseChromeMetricsChanged();
+    }
+
+    private void RaiseChromeMetricsChanged() => _chromeMetricsChanged?.Invoke(this);
+
+    /// <summary>
+    /// Builds the snapshot from the measured frame, converting device pixels to logical ones.
+    /// </summary>
+    /// <param name="borderless">Whether the window is in borderless mode at all.</param>
+    /// <param name="frameWidth">Measured left and right frame inset, in device pixels.</param>
+    /// <param name="frameHeight">Measured bottom frame inset, in device pixels.</param>
+    /// <param name="scale">Logical-to-device ratio of the window's display.</param>
+    /// <param name="maximized">Whether the window is maximized, which removes the resize band.</param>
+    /// <returns>The snapshot the seam reports.</returns>
+    internal static XPlatWindowChromeMetrics ChromeMetricsFor(
+        bool borderless, int frameWidth, int frameHeight, float scale, bool maximized)
+    {
+        if (!borderless)
+        {
+            return SystemMetrics;
+        }
+
+        var safeScale = scale > 0f ? scale : 1f;
+        var edge = frameWidth / safeScale;
+        var band = frameHeight / safeScale;
+
+        return new XPlatWindowChromeMetrics
+        {
+            // The system paints the frame on three edges and the client owns the top one, so there is
+            // no top inset. The DWM border line that still crosses the top edge is cosmetic and
+            // belongs to BorderColor rather than to this number.
+            SurfaceInset = new XPlatThickness(edge, 0f, edge, band),
+
+            // What the band takes from the application's own pixels: the top edge only. On the other
+            // three edges it lives in the frame the application never sees.
+            ResizeInset = maximized ? XPlatThickness.Empty : new XPlatThickness(0f, band, 0f, 0f),
+
+            CornerResizeExtent = maximized ? 0f : band,
+
+            // Windows rounds its own corners on 11 and later but exposes no radius query, and a
+            // square window has none, so nothing here may clip the application's drawing.
+            CornerRadius = 0f,
+
+            CaptionButtons = XPlatCaptionButtons.None,
+            CaptionButtonSide = XPlatCaptionButtonSide.Right,
+        };
+    }
+
+    /// <summary>Clears the pointer state when it leaves the window, including the caption strip.</summary>
+    /// <remarks>
+    /// A pointer that leaves the window while over a caption button never produces another mouse
+    /// move, so without this the button stays lit - and on the way to another application, that is
+    /// the state a screenshot or a user would be left looking at.
+    /// </remarks>
+    private void OnMouseLeave(IntPtr hwnd)
+    {
+        if (_overCaption || _hotCaption >= 0)
+        {
+            _overCaption = false;
+            _hotCaption = -1;
+            InvalidateCaption();
+        }
+
+        _host.ProcessMouseLeave();
+    }
+
     private void OnMouseMove(IntPtr hwnd, IntPtr lParam)
     {
         if (!_trackingLeave)
@@ -1643,19 +2243,152 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
             _trackingLeave = NativeMethods.TrackMouseEvent(ref track);
         }
 
+        if (UpdateCaptionHover(lParam))
+        {
+            return;
+        }
+
         _host.ProcessMouseMove(ToLogical(lParam));
+    }
+
+    /// <summary>
+    /// Tracks which emulated caption button the pointer is over, and reports whether the pointer is
+    /// inside the strip - in which case the application must not also be told about the move.
+    /// </summary>
+    /// <param name="lParam">The client point from the mouse message.</param>
+    /// <returns>True when the pointer belongs to the caption strip.</returns>
+    private bool UpdateCaptionHover(IntPtr lParam)
+    {
+        if (!ShowsCaptionButtons)
+        {
+            return false;
+        }
+
+        var (strip, buttons) = CaptionLayout();
+        var point = ToLogical(lParam);
+        var inside = strip.Contains(point);
+        var hot = inside ? Win32CaptionButtons.HitTest(buttons, point) : -1;
+
+        if (inside != _overCaption)
+        {
+            _overCaption = inside;
+
+            // The application is told it lost the pointer, so a control does not keep its own hover
+            // highlight lit behind a button that now owns the pointer.
+            if (inside)
+            {
+                _host.ProcessMouseLeave();
+                NativeMethods.SetCursor(NativeMethods.LoadCursorW(IntPtr.Zero, new IntPtr(NativeMethods.IdcArrow)));
+            }
+        }
+
+        if (hot != _hotCaption)
+        {
+            _hotCaption = hot;
+            InvalidateCaption();
+        }
+
+        return inside;
+    }
+
+    /// <summary>Asks for the caption strip to be repainted after a change to it.</summary>
+    /// <remarks>
+    /// The strip is drawn by the backend over the application's content, so it is not part of the
+    /// host's damage - and a paint with no host damage does not render at all: it blits the retained
+    /// buffer back to the window, which holds the previous frame. Invalidating the window alone
+    /// therefore made a hover, a press or the buttons appearing wait for the application to happen to
+    /// repaint over them. Adding the strip to the host's damage is what makes the next paint render.
+    /// </remarks>
+    private void InvalidateCaption()
+    {
+        var strip = CaptionLayout().Strip;
+
+        if (strip.Width <= 0f || strip.Height <= 0f)
+        {
+            Invalidate();
+            return;
+        }
+
+        _host.Invalidate(strip);
     }
 
     private void OnMouseDown(IntPtr hwnd, IntPtr lParam, XPlatMouseButtons button)
     {
+        if (button == XPlatMouseButtons.Left && ShowsCaptionButtons)
+        {
+            var index = Win32CaptionButtons.HitTest(CaptionLayout().Buttons, ToLogical(lParam));
+            if (index >= 0)
+            {
+                // A press on a caption button is consumed here: caption buttons win over the resize
+                // band and over the application, and nothing downstream may see this one.
+                _pressedCaption = index;
+                NativeMethods.SetCapture(hwnd);
+                InvalidateCaption();
+                return;
+            }
+        }
+
         NativeMethods.SetCapture(hwnd);
+
+        // The press is in flight while the application handles it, and a system drag loop can only be
+        // entered from inside one. WM_LBUTTONDOWN carries client coordinates; they are converted to
+        // screen coordinates when the drag starts, which is the frame the move loop expects.
+        _pressActive = true;
+        _pressClientX = NativeMethods.LowWord(lParam);
+        _pressClientY = NativeMethods.HighWord(lParam);
+
         _host.ProcessMouseDown(ToLogical(lParam), button, CurrentModifiers(), NextClickCount(lParam));
     }
 
     private void OnMouseUp(IntPtr lParam, XPlatMouseButtons button)
     {
+        if (_pressedCaption >= 0)
+        {
+            var index = _pressedCaption;
+            _pressedCaption = -1;
+            NativeMethods.ReleaseCapture();
+
+            var buttons = CaptionLayout().Buttons;
+            if (button == XPlatMouseButtons.Left && Win32CaptionButtons.HitTest(buttons, ToLogical(lParam)) == index)
+            {
+                ActivateCaptionButton(buttons[index].Kind);
+            }
+
+            InvalidateCaption();
+            return;
+        }
+
+        _pressActive = false;
         _host.ProcessMouseUp(ToLogical(lParam), button, CurrentModifiers());
         NativeMethods.ReleaseCapture();
+    }
+
+    /// <summary>
+    /// Runs what a caption button does, through the same window commands a system-drawn button would
+    /// have used, so the window's own handling - the model's close request, the state change, the
+    /// maximise animation - happens exactly as it always does.
+    /// </summary>
+    /// <param name="kind">The button that was released.</param>
+    private void ActivateCaptionButton(XPlatCaptionButtonKind kind)
+    {
+        switch (kind)
+        {
+            case XPlatCaptionButtonKind.Close:
+                NativeMethods.PostMessageW(_hwnd, NativeMethods.WmClose, IntPtr.Zero, IntPtr.Zero);
+                break;
+
+            case XPlatCaptionButtonKind.Minimize:
+                NativeMethods.SendMessageW(_hwnd, NativeMethods.WmSysCommand, new IntPtr(NativeMethods.ScMinimize), IntPtr.Zero);
+                break;
+
+            case XPlatCaptionButtonKind.Maximize:
+                NativeMethods.SendMessageW(_hwnd, NativeMethods.WmSysCommand, new IntPtr(NativeMethods.ScMaximize), IntPtr.Zero);
+                break;
+
+            case XPlatCaptionButtonKind.Restore:
+                NativeMethods.SendMessageW(_hwnd, NativeMethods.WmSysCommand, new IntPtr(NativeMethods.ScRestore), IntPtr.Zero);
+                break;
+        }
     }
 
     /// <summary>
@@ -1921,6 +2654,15 @@ public sealed class Win32WindowBackend : IXPlatWindowBackend
 
         var dpi = (uint)MathF.Round(_scale * 96f);
         NativeMethods.AdjustWindowRectExForDpi(ref rect, StyleFor(), false, 0, dpi == 0 ? 96u : dpi);
+
+        if (_chrome == XPlatWindowChrome.Borderless)
+        {
+            // The client is grown over the caption, so the top inset the frame would add is not part
+            // of the window any more. rect.Top is that inset negated, so dropping it leaves rect.Bottom
+            // as the whole height.
+            return (rect.Right - rect.Left, rect.Bottom);
+        }
+
         return (rect.Right - rect.Left, rect.Bottom - rect.Top);
     }
 

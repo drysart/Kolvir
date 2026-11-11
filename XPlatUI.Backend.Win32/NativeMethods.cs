@@ -65,6 +65,19 @@ internal static class NativeMethods
 
     internal const int HtClient = 1;
     internal const int HtTransparent = -1;
+
+    /// <summary>Dragging the window body with the left button held: the system's own move loop.</summary>
+    internal const int HtCaption = 2;
+
+    /// <summary>Resize bands a borderless window reports from its own hit test.</summary>
+    internal const int HtLeft = 10;
+    internal const int HtRight = 11;
+    internal const int HtTop = 12;
+    internal const int HtTopLeft = 13;
+    internal const int HtTopRight = 14;
+    internal const int HtBottom = 15;
+    internal const int HtBottomLeft = 16;
+    internal const int HtBottomRight = 17;
     internal const int SwShow = 5;
     internal const int SwShowNoActivate = 4;
     internal const int SwHide = 0;
@@ -100,6 +113,22 @@ internal static class NativeMethods
     internal const uint WmActivateApp = 0x001C;
     internal const uint WmCaptureChanged = 0x0215;
     internal const uint WmNcHitTest = 0x0084;
+    internal const uint WmNcCalcSize = 0x0083;
+
+    /// <summary>
+    /// Starts the system's own non-client move or resize loop; the hit test code in <c>wParam</c>
+    /// says which. Dispatching this is how an application-drawn title bar gets native dragging.
+    /// </summary>
+    internal const uint WmNcLButtonDown = 0x00A1;
+
+    /// <summary>Carries a window-level command such as minimise, maximise or restore.</summary>
+    internal const uint WmSysCommand = 0x0112;
+    internal const int ScMinimize = 0xF020;
+    internal const int ScMaximize = 0xF030;
+    internal const int ScRestore = 0xF120;
+
+    /// <summary>The height of a caption bar at a given DPI: what an emulated one has to match.</summary>
+    internal const int SmCaption = 4;
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmMove = 0x0003;
     internal const int WaInactive = 0;
@@ -251,6 +280,23 @@ internal static class NativeMethods
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    /// <summary>
+    /// The <c>lParam</c> of <c>WM_NCCALCSIZE</c> when <c>wParam</c> is TRUE.
+    /// </summary>
+    /// <remarks>
+    /// <c>rgrc0</c> arrives as the proposed window rect and leaves as the client rect the handler
+    /// computed. <c>rgrc1</c> is the current window rect and is stale after a move or a maximize -
+    /// never derive an inset from it.
+    /// </remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct NCCALCSIZE_PARAMS
+    {
+        public RECT rgrc0;
+        public RECT rgrc1;
+        public RECT rgrc2;
+        public IntPtr lppos;
     }
 
     [StructLayout(LayoutKind.Sequential)]
@@ -937,6 +983,12 @@ internal static class NativeMethods
     private const int DwmwaUseImmersiveDarkMode = 20;
     private const int DwmwaUseImmersiveDarkModeBefore20H1 = 19;
 
+    // Windows 11 only. Both take a COLORREF, and both also take DWMWA_COLOR_DEFAULT instead of one,
+    // which is how an attribute is handed back to DWM rather than set to a colour.
+    private const int DwmwaBorderColor = 34;
+    private const int DwmwaCaptionColor = 35;
+    internal const uint DwmColorDefault = 0xFFFFFFFF;
+
     /// <summary>Reads a REG_DWORD from HKEY_CURRENT_USER, or null when the value is absent.</summary>
     internal static uint? ReadUserDword(string subKey, string valueName)
     {
@@ -979,6 +1031,71 @@ internal static class NativeMethods
         }
     }
 
+        /// <summary>
+        /// Whether this Windows build implements <c>DWMWA_CAPTION_COLOR</c> and <c>DWMWA_BORDER_COLOR</c>.
+        /// </summary>
+        /// <param name="buildNumber">The OS build, from <see cref="Environment.OSVersion"/>.</param>
+        /// <returns>True from Windows 11 (build 22000) on.</returns>
+        /// <remarks>
+        /// Older builds reject the attributes with <c>E_INVALIDARG</c> rather than ignoring them, which is
+        /// exactly what makes the capability reportable instead of guessable.
+        /// </remarks>
+        internal static bool SupportsWindowColors(int buildNumber) => buildNumber >= 22000;
+
+        /// <summary>Sets the colour DWM paints the caption strip in, or hands it back to DWM.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">A <c>COLORREF</c>, or null for DWM's own colour.</param>
+        /// <returns>True when DWM accepted the attribute.</returns>
+        internal static bool SetCaptionColor(IntPtr hwnd, uint? colorRef) =>
+            SetDwmColor(hwnd, DwmwaCaptionColor, colorRef);
+
+        /// <summary>Sets the colour of the line DWM draws around the window, or hands it back to DWM.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">A <c>COLORREF</c>, or null for DWM's own colour.</param>
+        /// <returns>True when DWM accepted the attribute.</returns>
+        internal static bool SetBorderColor(IntPtr hwnd, uint? colorRef) =>
+            SetDwmColor(hwnd, DwmwaBorderColor, colorRef);
+
+        /// <summary>Reads back the caption colour DWM is using.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">The <c>COLORREF</c> DWM reports, or <c>DWMWA_COLOR_DEFAULT</c>.</param>
+        /// <returns>True when DWM answered.</returns>
+        internal static bool TryGetCaptionColor(IntPtr hwnd, out uint colorRef) =>
+            TryGetDwmColor(hwnd, DwmwaCaptionColor, out colorRef);
+
+        /// <summary>Reads back the border colour DWM is using.</summary>
+        /// <param name="hwnd">The window.</param>
+        /// <param name="colorRef">The <c>COLORREF</c> DWM reports, or a sentinel.</param>
+        /// <returns>True when DWM answered.</returns>
+        internal static bool TryGetBorderColor(IntPtr hwnd, out uint colorRef) =>
+            TryGetDwmColor(hwnd, DwmwaBorderColor, out colorRef);
+
+        private static bool SetDwmColor(IntPtr hwnd, int attribute, uint? colorRef)
+        {
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            // DWMWA_COLOR_DEFAULT is what hands an attribute back to DWM, so a null colour is a value
+            // rather than a separate call.
+            var value = (int)(colorRef ?? DwmColorDefault);
+            return DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int)) == 0;
+        }
+
+        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)
+        {
+            colorRef = 0;
+            if (hwnd == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            var ok = DwmGetWindowAttribute(hwnd, attribute, out var value, sizeof(int)) == 0;
+            colorRef = (uint)value;
+            return ok;
+        }
+
     /// <summary>
     /// Windows 11 (build 22000) is the first release whose menus use the modern rounded, softly
     /// shadowed style, so that is the cut-off for drawing one instead of calling
@@ -1001,6 +1118,9 @@ internal static class NativeMethods
 
     [DllImport("dwmapi.dll")]
     private static extern int DwmSetWindowAttribute(IntPtr hwnd, int attribute, ref int value, int size);
+
+    [DllImport("dwmapi.dll")]
+    private static extern int DwmGetWindowAttribute(IntPtr hwnd, int attribute, out int value, int size);
 
     // Message box: the flags, the ids it returns, and the one call.
     internal const uint MbOk = 0x00000000;

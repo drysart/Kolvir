@@ -1,3 +1,5 @@
+using System.Globalization;
+using System.Text;
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
@@ -36,6 +38,17 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
     private Gtk.ApplicationWindow? _window;
     private Gtk.Box? _container;
+
+    /// <summary>The window's child, which holds the content and the caption buttons over it.</summary>
+    private Gtk.Overlay? _overlay;
+
+    /// <summary>GTK's own caption buttons, when the application asked for them.</summary>
+    private Gtk.WindowControls? _controls;
+
+    private XPlatCaptionButtons _captionButtons = XPlatCaptionButtons.None;
+
+    /// <summary>The settings object whose decoration layout this window follows, once subscribed.</summary>
+    private Gtk.Settings? _layoutSettings;
     private Gtk4SkiaView? _view;
     private IXPlatContextMenuPresenter? _presenter;
     private Gtk4MenuBar? _menuBarWidget;
@@ -62,6 +75,29 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
     private bool _menuBarAttached;
     private List<NativeTeardownRegistration>? _nativeTeardowns;
     private bool _active;
+
+    private Action<object>? _chromeMetricsChanged;
+    private XPlatWindowChrome _chrome = XPlatWindowChrome.System;
+    private SKColor? _captionColor;
+    private SKColor? _borderColor;
+
+    /// <summary>
+    /// The widget that takes the title bar's place when the window is borderless: an empty box, which
+    /// asks for no space at all.
+    /// </summary>
+    /// <remarks>
+    /// It has to be a widget rather than <c>set_titlebar(null)</c>, because null restores GTK's own
+    /// title bar instead of removing one. An empty <see cref="Gtk.Box"/> is enough: it has no minimum
+    /// size of its own, so the strip collapses as soon as the theme's <c>min-height</c> on the title
+    /// bar node is overridden - which is what <see cref="ChromeCss"/> does.
+    /// </remarks>
+    private Gtk.Widget? _zeroTitlebar;
+
+    /// <summary>This window's stylesheet, and the class that scopes it to this window.</summary>
+    private Gtk.CssProvider? _chromeProvider;
+    private string? _chromeClass;
+
+    private static int _chromeClassCounter;
 
     internal Gtk4WindowBackend(Gtk4ApplicationBackend application, XPlatWindow window)
     {
@@ -189,8 +225,11 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
             _clientSize = value;
 
             // GTK sizes windows in logical pixels, which is the same space the library uses, so no
-            // scale conversion is involved.
-            _window?.SetDefaultSize(ToPixels(value.Width), ToPixels(value.Height));
+            // scale conversion is involved beyond the ring, which is laid out and so has to be paid
+            // for on top of the client.
+            _window?.SetDefaultSize(
+                ToPixels(value.Width) + (2 * BorderWidth),
+                ToPixels(value.Height) + (2 * BorderWidth));
 
             // The drawing area reports its own size once GTK allocates it, but that happens a frame
             // after the window is presented - later than the Shown event, which the other two
@@ -354,6 +393,255 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
     }
 
+    /// <summary>
+    /// Borderless chrome, the two window colours and GTK's own caption buttons are implemented here.
+    /// </summary>
+    public XPlatChromeCapabilities ChromeCapabilities => new()
+    {
+        Borderless = true,
+        CaptionButtons = true,
+        WindowColors = true,
+    };
+
+    /// <summary>
+    /// How much of the window GTK draws. Borderless keeps the client-side decorations - so the
+    /// compositor keeps the resize band, the shadow and the window's behaviours - and collapses the
+    /// title bar to nothing.
+    /// </summary>
+    public XPlatWindowChrome Chrome
+    {
+        get => _chrome;
+        set
+        {
+            if (_chrome == value)
+            {
+                return;
+            }
+
+            _chrome = value;
+            ApplyWindowChrome();
+            RaiseChromeMetricsChanged();
+        }
+    }
+
+    /// <summary>
+    /// The colour GTK paints the window's own surface in.
+    /// </summary>
+    /// <remarks>
+    /// Null leaves the theme's colour, which is what a decorated window wants. GTK has no separate
+    /// caption surface to colour, so this is the window surface itself - which in a borderless window
+    /// is covered by the application's content and therefore only shows where the application leaves
+    /// the window unpainted. It is implemented for parity with the platforms that do have a caption
+    /// strip; on GTK the visible half of <see cref="XPlatChromeCapabilities.WindowColors"/> is
+    /// <see cref="BorderColor"/>.
+    /// </remarks>
+    public SKColor? CaptionColor
+    {
+        get => _captionColor;
+        set
+        {
+            if (_captionColor == value)
+            {
+                return;
+            }
+
+            _captionColor = value;
+            ApplyChromeCss();
+        }
+    }
+
+    /// <summary>
+    /// The colour of the one-pixel ring GTK draws round the window, which follows the rounded corners.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null draws no ring at all, and then the whole window is the application's. A colour costs one
+    /// logical pixel on every edge: GTK's ring is a <c>border</c> on the window, which is laid out, so
+    /// the window is asked for two pixels more than the client it holds and
+    /// <see cref="ChromeMetrics"/> reports the ring as <see cref="XPlatWindowChromeMetrics.SurfaceInset"/>.
+    /// </para>
+    /// <para>
+    /// A <c>border</c> rather than an <c>outline</c>: an outline takes no space, which is tempting, but
+    /// it is painted with the window's background and the child draws over half of it, so the ring came
+    /// and went depending on whether the application had repainted. A border is outside the child's
+    /// allocation, so nothing can draw over it.
+    /// </para>
+    /// </remarks>
+    public SKColor? BorderColor
+    {
+        get => _borderColor;
+        set
+        {
+            if (_borderColor == value)
+            {
+                return;
+            }
+
+            var hadRing = BorderWidth;
+            _borderColor = value;
+            ApplyChromeCss();
+
+            // The ring is laid out, so gaining or losing one changes the client a borderless window
+            // holds: the window is re-asked for the same client rather than being left two pixels
+            // different.
+            if (hadRing != BorderWidth)
+            {
+                ApplyRequestedSize();
+                RaiseChromeMetricsChanged();
+            }
+        }
+    }
+
+    /// <summary>
+    /// Whether the window shows GTK's caption buttons. Asking for them puts a real
+    /// <see cref="Gtk.WindowControls"/> over the application's content, so they are the platform's own
+    /// buttons: they take their own clicks, follow the desktop's decoration layout, and are visible to
+    /// assistive technology.
+    /// </summary>
+    public XPlatCaptionButtons CaptionButtons
+    {
+        get => _captionButtons;
+        set
+        {
+            if (_captionButtons == value)
+            {
+                return;
+            }
+
+            _captionButtons = value;
+            ApplyCaptionButtons();
+            RaiseChromeMetricsChanged();
+        }
+    }
+
+    /// <summary>
+    /// Starts a window drag from the press being handled.
+    /// </summary>
+    /// <remarks>
+    /// The press has to be real and still in flight: GDK4 exposes no event serial, so
+    /// <c>begin_move</c> relies on the implicit grab that a press starts and silently does nothing
+    /// outside one. The backend keeps the press the view recorded, which is why the application can
+    /// call this from inside its own mouse-down without knowing any of that.
+    /// </remarks>
+    /// <returns>True when a drag was started.</returns>
+    public bool TryBeginDrag()
+    {
+        if (_window?.GetSurface() is not Gdk.Toplevel surface)
+        {
+            return false;
+        }
+
+        if (_view?.LastPress is not { Device: { } device } press)
+        {
+            return false;
+        }
+
+        surface.BeginMove(device, (int)press.Button, press.X, press.Y, press.Time);
+        return true;
+    }
+
+    /// <summary>
+    /// Starts a compositor resize from the press being handled, for an application that draws its own
+    /// grip.
+    /// </summary>
+    /// <remarks>
+    /// Same precondition as <see cref="TryBeginDrag"/>: a real press has to be in flight, because the
+    /// compositor resizes through the grab that press began. GTK's own band already resizes, so this
+    /// exists for applications that would rather draw the grip themselves.
+    /// </remarks>
+    /// <param name="edge">The edge or corner to resize by.</param>
+    /// <returns>True when a resize was started.</returns>
+    public bool TryBeginResize(XPlatResizeEdge edge)
+    {
+        var surfaceEdge = SurfaceEdgeFor(edge);
+        if (surfaceEdge is null || _window?.GetSurface() is not Gdk.Toplevel surface)
+        {
+            return false;
+        }
+
+        if (_view?.LastPress is not { Device: { } device } press)
+        {
+            return false;
+        }
+
+        surface.BeginResize(surfaceEdge.Value, device, (int)press.Button, press.X, press.Y, press.Time);
+        return true;
+    }
+
+    /// <summary>The GDK edge two adjacent seam edges name, or null when they do not name one.</summary>
+    /// <param name="edge">The seam edge flags.</param>
+    /// <returns>The GDK edge, or null for none or for opposite edges.</returns>
+    internal static Gdk.SurfaceEdge? SurfaceEdgeFor(XPlatResizeEdge edge) => edge switch
+    {
+        XPlatResizeEdge.Left => Gdk.SurfaceEdge.West,
+        XPlatResizeEdge.Right => Gdk.SurfaceEdge.East,
+        XPlatResizeEdge.Top => Gdk.SurfaceEdge.North,
+        XPlatResizeEdge.Bottom => Gdk.SurfaceEdge.South,
+        XPlatResizeEdge.Left | XPlatResizeEdge.Top => Gdk.SurfaceEdge.NorthWest,
+        XPlatResizeEdge.Top | XPlatResizeEdge.Right => Gdk.SurfaceEdge.NorthEast,
+        XPlatResizeEdge.Bottom | XPlatResizeEdge.Left => Gdk.SurfaceEdge.SouthWest,
+        XPlatResizeEdge.Right | XPlatResizeEdge.Bottom => Gdk.SurfaceEdge.SouthEast,
+        _ => null,
+    };
+
+    /// <summary>
+    /// What GTK still owns in this window. On GTK that is nothing inside the surface: the resize band
+    /// is 12 logical pixels deep and lies entirely outside the application's pixels, so every pixel
+    /// the application paints is its own to hit test.
+    /// </summary>
+    public XPlatWindowChromeMetrics ChromeMetrics
+    {
+        get
+        {
+            if (_chrome != XPlatWindowChrome.Borderless)
+            {
+                return SystemChromeMetrics;
+            }
+
+            var buttons = CaptionButtonLayout();
+
+            return new XPlatWindowChromeMetrics
+            {
+                // One logical pixel on every edge when a ring was asked for, and nothing at all when
+                // it was not: GTK's ring is laid out, so the child is that much smaller.
+                SurfaceInset = BorderWidth == 0
+                    ? default
+                    : new XPlatThickness(BorderWidth, BorderWidth, BorderWidth, BorderWidth),
+
+                // Empty: the band is the ring outside the content, and the application never paints
+                // there. The number is worth knowing all the same, so it is named below.
+                ResizeInset = default,
+
+                CornerResizeExtent = 0f,
+
+                // Set explicitly by this backend rather than left to the theme, because the two GTK
+                // versions measured here default to different radii (about 10 logical pixels on 4.14,
+                // about 12 on 4.22) and an application clipping its own chrome has to know which.
+                CornerRadius = BorderlessCornerRadius,
+
+                CaptionButtons = buttons is null ? XPlatCaptionButtons.None : XPlatCaptionButtons.Platform,
+                CaptionButtonSide = buttons?.Side ?? XPlatCaptionButtonSide.Right,
+                CaptionButtonStrip = buttons?.Strip ?? SKRect.Empty,
+                CaptionButtonBounds = buttons?.Buttons ?? [],
+            };
+        }
+    }
+
+    /// <summary>Adds a handler that runs when <see cref="ChromeMetrics"/> changes.</summary>
+    public IDisposable AddChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged += handler;
+        return new XPlatHandlerToken<Action<object>>(RemoveChromeMetricsChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddChromeMetricsChangedHandler"/> added.</summary>
+    public void RemoveChromeMetricsChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _chromeMetricsChanged -= handler;
+    }
+
     /// <inheritdoc />
     public void Show()
     {
@@ -448,10 +736,18 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         _window = null;
         _container = null;
+        _overlay = null;
         _view = null;
+        _controls = null;
         _presenter = null;
         _menuBarWidget = null;
         _modalLoop = null;
+
+        if (_layoutSettings is { } layoutSettings)
+        {
+            layoutSettings.OnNotify -= OnSettingsNotify;
+            _layoutSettings = null;
+        }
 
         // End the nested loop first: everything below would otherwise run while it is still the
         // active loop.
@@ -486,6 +782,18 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
 
         menuBar?.Dispose();
+
+        // The stylesheet is installed on the display, which outlives this window, so it comes off
+        // before the window it was written for goes away.
+        if (_chromeProvider is { } provider)
+        {
+            if (Gdk.Display.GetDefault() is { } providerDisplay)
+            {
+                Gtk.StyleContext.RemoveProviderForDisplay(providerDisplay, provider);
+            }
+
+            _chromeProvider = null;
+        }
 
         if (window is not null)
         {
@@ -759,10 +1067,15 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         var view = new Gtk4SkiaView(_host, useHardwareAcceleration);
 
-        // The drawing area lives in a vertical box so a per-window menu bar can be packed above it.
+        // The drawing area lives in a vertical box so a per-window menu bar can be packed above it,
+        // and that box lives in an overlay so the platform's caption buttons can be stacked over the
+        // application's own pixels.
         var container = Gtk.Box.New(Gtk.Orientation.Vertical, 0);
         container.Append(view.Widget);
-        window.SetChild(container);
+
+        var overlay = Gtk.Overlay.New();
+        overlay.SetChild(container);
+        window.SetChild(overlay);
 
         // Returning true keeps GTK from destroying the window behind the model's back.
         window.OnCloseRequest += (_, _) =>
@@ -778,6 +1091,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         _window = window;
         _container = container;
+        _overlay = overlay;
         _view = view;
         _presenter = _useXPlatMenus
             ? new XPlatMenuPresenter()
@@ -788,6 +1102,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         ApplySizeLimits();
         ApplyMenuBar();
+        ApplyWindowChrome();
         ApplyChrome();
         ApplyIcon();
 
@@ -802,6 +1117,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
 
         ApplyChrome();
+        ApplyWindowChrome();
         SetTransient(_owner);
         _window.Present();
 
@@ -853,6 +1169,413 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         }
     }
 
+    /// <summary>
+    /// <c>GTK_STYLE_PROVIDER_PRIORITY_APPLICATION</c>, one above it.
+    /// </summary>
+    /// <remarks>
+    /// The binding does not expose GTK's priority constants, so the ABI value is used directly: 600 is
+    /// the application's own priority, and a window's chrome has to beat both the theme below it and
+    /// the library's palette beside it.
+    /// </remarks>
+    private const uint CssPriorityApplication = 601u;
+
+    /// <summary>Eight logical pixels between the buttons and the window's corner.</summary>
+    private const int CaptionButtonInset = 8;
+
+    /// <summary>How much of the client the ring takes on each edge, in logical pixels.</summary>
+    /// <remarks>
+    /// Zero unless a borderless window was given a ring colour: GTK's ring is a CSS border on the
+    /// window, and a border is laid out, so the child it holds is that much smaller.
+    /// </remarks>
+    private int BorderWidth =>
+        _chrome == XPlatWindowChrome.Borderless && _borderColor is not null ? 1 : 0;
+
+    /// <summary>
+    /// Asks the window for the client the application wanted, plus whatever the ring takes.
+    /// </summary>
+    /// <remarks>
+    /// A window's requested size is the whole window, decorations included, so a client of 900 with a
+    /// one-pixel ring has to ask for 902. Without this the application would silently get 898 - the
+    /// same two pixels per axis the spike measured when the ring was first drawn - and a client size
+    /// would stop meaning what it says.
+    /// </remarks>
+    private void ApplyRequestedSize()
+    {
+        if (_window is null)
+        {
+            return;
+        }
+
+        var border = BorderWidth;
+        _window.SetDefaultSize(
+            ToPixels(_clientSize.Width) + (2 * border),
+            ToPixels(_clientSize.Height) + (2 * border));
+    }
+
+    /// <summary>The radius a borderless window's content is clipped to, in logical pixels.</summary>
+    /// <remarks>
+    /// Stated in the stylesheet rather than inherited from the theme, because the two GTK versions
+    /// measured for this feature default to different radii - about 10 logical pixels on 4.14 and
+    /// about 12 on 4.22 - and an application that clips its own chrome has to be told which one it is
+    /// drawing inside.
+    /// </remarks>
+    private const float BorderlessCornerRadius = 12f;
+
+    /// <summary>What a window with GTK's own chrome reports: it owns nothing of its own.</summary>
+    private static readonly XPlatWindowChromeMetrics SystemChromeMetrics = new();
+
+    /// <summary>
+    /// Puts the window into the shape its <see cref="Chrome"/> asks for: GTK's own title bar, or
+    /// nothing where it would be.
+    /// </summary>
+    /// <remarks>
+    /// A borderless window stays <em>decorated</em>. GTK's client-side decoration is what gives it the
+    /// resize band, the shadow and the rounded corners, so removing it would take away all three; only
+    /// the title bar goes, and the ring the decoration draws stays under the application's control
+    /// through <see cref="BorderColor"/>.
+    /// </remarks>
+    private void ApplyWindowChrome()
+    {
+        if (_window is null || _disposed)
+        {
+            return;
+        }
+
+        // The decoration change can re-create the window's surface underneath the application, and
+        // GTK says so by unrealizing the area on some platforms and not on others. Dropping the
+        // accelerated view's frame first means the first thing painted into whatever surface comes
+        // out of the change is a whole frame.
+        _view?.DropGlForChromeChange();
+
+        if (_chrome == XPlatWindowChrome.Borderless)
+        {
+            _window.SetDecorated(true);
+            _zeroTitlebar ??= Gtk.Box.New(Gtk.Orientation.Horizontal, 0);
+            _window.SetTitlebar(_zeroTitlebar);
+        }
+        else
+        {
+            // Null is not "no title bar": GTK reads it as the default one, which is exactly what
+            // System chrome means. The widget has to stay alive for the borderless case to come back.
+            _window.SetTitlebar(null);
+        }
+
+        ApplyChromeCss();
+
+        // The ring is part of the window, so the size has to be asked for with it included.
+        ApplyRequestedSize();
+        ApplySizeLimits();
+        ApplyCaptionButtons();
+
+        // Replacing the title bar gives GTK a different window to build - on X11 the platform window is
+        // re-created, which is why its id changes - and the replacement is not guaranteed to be on top
+        // or even mapped where the old one was. Presenting it puts it back on screen, which is the
+        // difference between a window that changes shape and one that vanishes until the window manager
+        // is asked to map it again.
+        _window.Present();
+    }
+
+    /// <summary>
+    /// Puts GTK's caption buttons over the content, or takes them away.
+    /// </summary>
+    /// <remarks>
+    /// They are only worth showing on a borderless window: a decorated one has real buttons in its own
+    /// title bar, and adding a second set over the content would be a copy rather than the platform's
+    /// chrome. The buttons are a plain <see cref="Gtk.WindowControls"/>, so which buttons there are,
+    /// what they look like and what they do are all GTK's.
+    /// </remarks>
+    private void ApplyCaptionButtons()
+    {
+        if (_overlay is null || _disposed)
+        {
+            return;
+        }
+
+        if (!ShowsCaptionButtons)
+        {
+            if (_controls is not null)
+            {
+                _overlay.RemoveOverlay(_controls);
+                _controls = null;
+            }
+
+            return;
+        }
+
+        if (_controls is null)
+        {
+            _controls = Gtk.WindowControls.New(Gtk.PackType.End);
+            _overlay.AddOverlay(_controls);
+        }
+
+        ApplyDecorationLayout();
+    }
+
+    /// <summary>
+    /// Aligns the buttons with the desktop's decoration layout and re-reads it when it changes.
+    /// </summary>
+    /// <remarks>
+    /// The whole <c>start:end</c> string is handed to the widget, not just the half the buttons sit
+    /// in: given half of it the widget has no layout to render and measures 0x0, which looks exactly
+    /// like buttons that were never added.
+    /// </remarks>
+    private void ApplyDecorationLayout()
+    {
+        if (_controls is null)
+        {
+            return;
+        }
+
+        var layout = DecorationLayout();
+        _controls.SetDecorationLayout(layout);
+
+        // The desktop can move its buttons to the other end while the window is open, which is a
+        // metrics change and a re-layout of the widget.
+        if (_layoutSettings is null && Gtk.Settings.GetDefault() is { } settings)
+        {
+            _layoutSettings = settings;
+            settings.OnNotify += OnSettingsNotify;
+        }
+
+        _controls.SetSide(SideFor(layout) == XPlatCaptionButtonSide.Left ? Gtk.PackType.Start : Gtk.PackType.End);
+        _controls.SetValign(Gtk.Align.Start);
+        _controls.SetHalign(SideFor(layout) == XPlatCaptionButtonSide.Left ? Gtk.Align.Start : Gtk.Align.End);
+
+        // Eight pixels, which is where the platform puts them relative to the window's own corner.
+        _controls.SetMarginTop(CaptionButtonInset);
+        _controls.SetMarginStart(SideFor(layout) == XPlatCaptionButtonSide.Left ? CaptionButtonInset : 0);
+        _controls.SetMarginEnd(SideFor(layout) == XPlatCaptionButtonSide.Left ? 0 : CaptionButtonInset);
+    }
+
+    /// <summary>Whether GTK's own caption buttons are on screen for this window.</summary>
+    private bool ShowsCaptionButtons => _chrome == XPlatWindowChrome.Borderless
+        && _captionButtons == XPlatCaptionButtons.Platform;
+
+    /// <summary>Follows the desktop moving its buttons to the other end of the title bar.</summary>
+    private void OnSettingsNotify(GObject.Object sender, GObject.Object.NotifySignalArgs args)
+    {
+        if (args.Pspec?.GetName() != "gtk-decoration-layout" || _controls is null)
+        {
+            return;
+        }
+
+        ApplyDecorationLayout();
+        RaiseChromeMetricsChanged();
+    }
+
+    /// <summary>The desktop's decoration layout, as the <c>start:end</c> string GTK expects.</summary>
+    private static string DecorationLayout()
+    {
+        var layout = Gtk.Settings.GetDefault()?.GtkDecorationLayout;
+
+        // "minimize,maximize,close:" has no side separator and is not what the widget wants.
+        return string.IsNullOrWhiteSpace(layout) || !layout.Contains(':', StringComparison.Ordinal)
+            ? ":minimize,maximize,close"
+            : layout;
+    }
+
+    /// <summary>Which end of the title bar the decoration layout puts its buttons at.</summary>
+    private static XPlatCaptionButtonSide SideFor(string layout)
+    {
+        var separator = layout.IndexOf(':', StringComparison.Ordinal);
+        var end = separator >= 0 ? layout[(separator + 1)..] : layout;
+
+        // Buttons after the separator are the end side; when it is empty they are all on the start.
+        return end.Contains("close", StringComparison.OrdinalIgnoreCase)
+            || end.Contains("maximize", StringComparison.OrdinalIgnoreCase)
+            || end.Contains("minimize", StringComparison.OrdinalIgnoreCase)
+                ? XPlatCaptionButtonSide.Right
+                : XPlatCaptionButtonSide.Left;
+    }
+
+    /// <summary>Where the buttons are, read back from the widgets GTK laid out.</summary>
+    /// <returns>Null when no buttons are on screen.</returns>
+    private (SKRect Strip, IReadOnlyList<XPlatCaptionButton> Buttons, XPlatCaptionButtonSide Side)?
+        CaptionButtonLayout()
+    {
+        if (!ShowsCaptionButtons || _controls is null || _window is null)
+        {
+            return null;
+        }
+
+        if (!TryClientRect(_controls, out var strip))
+        {
+            return null;
+        }
+
+        var buttons = new List<XPlatCaptionButton>(3);
+        for (var child = _controls.GetFirstChild(); child is not null; child = child.GetNextSibling())
+        {
+            // The children are the buttons themselves, and their allocation is the clickable area -
+            // measured: a press in the gap between two of them reaches the application, so the rect
+            // reported here is exactly what the button claims.
+            if (!TryClientRect(child, out var bounds) || KindOf(child) is not { } kind)
+            {
+                continue;
+            }
+
+            buttons.Add(new XPlatCaptionButton(kind, bounds));
+        }
+
+        return (strip, buttons, SideFor(DecorationLayout()));
+    }
+
+    /// <summary>A widget's allocation in client coordinates, which is the window less the ring.</summary>
+    private bool TryClientRect(Gtk.Widget widget, out SKRect rect)
+    {
+        rect = SKRect.Empty;
+
+        if (_window is null || widget.GetWidth() <= 0 || widget.GetHeight() <= 0)
+        {
+            return false;
+        }
+
+        if (!widget.TranslateCoordinates(_window, 0, 0, out var x, out var y))
+        {
+            return false;
+        }
+
+        var ring = BorderWidth;
+        rect = new SKRect(
+            (float)(x - ring),
+            (float)(y - ring),
+            (float)(x - ring + widget.GetWidth()),
+            (float)(y - ring + widget.GetHeight()));
+
+        return true;
+    }
+
+    /// <summary>Which caption button a child of the controls is, from the icon it draws.</summary>
+    private static XPlatCaptionButtonKind? KindOf(Gtk.Widget child)
+    {
+        // GTK's buttons carry a symbolic icon whose name is the platform's own name for the action,
+        // so this reads what is there rather than assuming an order.
+        string? name = null;
+
+        if (child is Gtk.Image image)
+        {
+            name = image.GetIconName();
+        }
+        else if (child is Gtk.Button { } button && button.GetChild() is Gtk.Image buttonImage)
+        {
+            name = buttonImage.GetIconName();
+        }
+
+        return name switch
+        {
+            "window-minimize-symbolic" => XPlatCaptionButtonKind.Minimize,
+            "window-maximize-symbolic" => XPlatCaptionButtonKind.Maximize,
+            "window-restore-symbolic" => XPlatCaptionButtonKind.Restore,
+            "window-close-symbolic" => XPlatCaptionButtonKind.Close,
+            _ => null,
+        };
+    }
+
+    /// <summary>Installs, rewrites or removes this window's stylesheet.</summary>
+    private void ApplyChromeCss()
+    {
+        if (_window is null || _disposed)
+        {
+            return;
+        }
+
+        _chromeClass ??= "xplatui-window-"
+            + (++_chromeClassCounter).ToString(CultureInfo.InvariantCulture);
+
+        if (_chrome != XPlatWindowChrome.Borderless)
+        {
+            // A decorated window is the theme's business from top to bottom.
+            _window.RemoveCssClass(_chromeClass);
+
+            if (_chromeProvider is { } stale)
+            {
+                if (Gdk.Display.GetDefault() is { } staleDisplay)
+                {
+                    Gtk.StyleContext.RemoveProviderForDisplay(staleDisplay, stale);
+                }
+
+                _chromeProvider = null;
+            }
+
+            return;
+        }
+
+        if (Gdk.Display.GetDefault() is not { } display)
+        {
+            return;
+        }
+
+        _window.AddCssClass(_chromeClass);
+
+        if (_chromeProvider is null)
+        {
+            _chromeProvider = Gtk.CssProvider.New();
+            Gtk.StyleContext.AddProviderForDisplay(display, _chromeProvider, CssPriorityApplication);
+        }
+
+        _chromeProvider.LoadFromString(ChromeCss(_chromeClass));
+    }
+
+    /// <summary>
+    /// The stylesheet a borderless window needs: the title bar collapsed to nothing, the corners
+    /// clipped to a stated radius, and whichever colours the application asked for.
+    /// </summary>
+    /// <param name="cssClass">The class that scopes every rule to this window.</param>
+    /// <returns>The stylesheet.</returns>
+    private string ChromeCss(string cssClass)
+    {
+        var css = new StringBuilder();
+
+        // Which of these nodes GTK uses for the title bar is theme dependent, so all of them are
+        // collapsed. The widget alone is not enough - measured, a zero-measure widget without this
+        // still reserved 46 logical pixels, because the theme's min-height applies to the node it
+        // sits in - and this without the widget is not enough either, so both are needed.
+        css.AppendLine($"window.{cssClass} titlebar,");
+        css.AppendLine($"window.{cssClass} .titlebar,");
+        css.AppendLine($"window.{cssClass} headerbar,");
+        css.AppendLine($"window.{cssClass} .headerbar,");
+        css.AppendLine($"window.{cssClass} windowtitlebar,");
+        css.AppendLine($"window.{cssClass} windowtitlebar > * {{");
+        css.AppendLine("  min-height: 0;");
+        css.AppendLine("  min-width: 0;");
+        css.AppendLine("  padding: 0;");
+        css.AppendLine("  margin: 0;");
+        css.AppendLine("  border: 0;");
+        css.AppendLine("  background: none;");
+        css.AppendLine("  box-shadow: none;");
+        css.AppendLine("}");
+
+        css.AppendLine($"window.{cssClass}.csd {{ border-radius: {BorderlessCornerRadius:0.###}px; }}");
+
+        // Maximised and fullscreen windows are square: the compositor squares the corners it owns,
+        // and a radius here would clip the content to a shape the window no longer has.
+        css.AppendLine($"window.{cssClass}.csd.maximized,");
+        css.AppendLine($"window.{cssClass}.csd.fullscreen {{ border-radius: 0; }}");
+
+        if (_borderColor is { } border)
+        {
+            // Laid out, so it is outside the child and nothing can paint over it. The window is asked
+            // for two pixels more than the client to pay for it - see ApplyRequestedSize.
+            css.AppendLine($"window.{cssClass}.csd {{ border: {BorderWidth}px solid {CssColor(border)}; }}");
+        }
+
+        if (_captionColor is { } caption)
+        {
+            // The window's own surface, which is what shows through the corner arcs the content is
+            // clipped to.
+            css.AppendLine($"window.{cssClass}.csd {{ background-color: {CssColor(caption)}; }}");
+        }
+
+        return css.ToString();
+    }
+
+    /// <summary>One colour in GTK's syntax, alpha only when it is not opaque.</summary>
+    private static string CssColor(SKColor color) => color.Alpha == 255
+        ? $"#{color.Red:X2}{color.Green:X2}{color.Blue:X2}"
+        : FormattableString.Invariant($"rgba({color.Red}, {color.Green}, {color.Blue}, {color.Alpha / 255.0:0.###})");
+
+    private void RaiseChromeMetricsChanged() => _chromeMetricsChanged?.Invoke(this);
+
     /// <summary>Hands the icon's theme name to the window manager, which is all GTK4 accepts.</summary>
     private void ApplyIcon()
     {
@@ -864,8 +1587,12 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
     private void ApplySizeLimits()
     {
-        // GTK's size request is the minimum size a widget will accept.
-        _window?.SetSizeRequest(ToPixels(_minimumClientSize.Width), ToPixels(_minimumClientSize.Height));
+        // GTK's size request is the minimum size a widget will accept, and it applies to the window,
+        // so the ring has to be added the same way it is for the requested size.
+        var border = BorderWidth;
+        _window?.SetSizeRequest(
+            ToPixels(_minimumClientSize.Width) + (2 * border),
+            ToPixels(_minimumClientSize.Height) + (2 * border));
     }
 
     private void ApplyMenuBar()
@@ -956,6 +1683,7 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
         if (scaleChanged)
         {
             _scaleChanged?.Invoke(this);
+            RaiseChromeMetricsChanged();
         }
 
         RaiseStateChangedIfNeeded();
@@ -1005,6 +1733,10 @@ public sealed class Gtk4WindowBackend : IXPlatWindowBackend
 
         _reportedState = state;
         _stateChanged?.Invoke(this);
+
+        // The corner radius and the outline both depend on whether the window is maximised, so a
+        // state change is a chrome metrics change as well.
+        RaiseChromeMetricsChanged();
     }
 
     private static int ToPixels(float value) => (int)MathF.Round(MathF.Max(value, 0f));

@@ -160,6 +160,7 @@ internal static class Program
         // the window checks the bar before the focused control sees a key.
         window.MenuBar = CreateMenuBar(window, demo);
 
+
         application.MainWindow = window;
 
         // The window comes forward on its own; the status line says why it did.
@@ -177,6 +178,32 @@ internal static class Program
         // reachable as flags: --topmost starts above everything, --owned opens a window owned by
         // this one.
         window.TopMost = Array.IndexOf(args, "--topmost") >= 0;
+
+        // The chromeless page's two switches, for the same reason: a screenshot of a borderless
+        // window needs no pointer to take, and a window with no caption has nowhere to hang a menu.
+        if (Array.IndexOf(args, "--chromeless") >= 0)
+        {
+            if (window.ChromeCapabilities.Borderless)
+            {
+                window.Chrome = XPlatWindowChrome.Borderless;
+            }
+            else
+            {
+                demo.SetStatus("This backend cannot make a window borderless.");
+            }
+        }
+
+        if (ArgumentValue(args, "--caption-buttons") is { } captionButtons)
+        {
+            window.CaptionButtons = string.Equals(captionButtons, "platform", StringComparison.OrdinalIgnoreCase)
+                ? XPlatCaptionButtons.Platform
+                : XPlatCaptionButtons.None;
+        }
+
+        // The chromeless page drives the window the sample is shown in, so it needs one - and a page is
+        // built before there is a window to ask. Attached after the flags above so the readout starts
+        // out describing the window it is actually in rather than the one it would have been.
+        demo.AttachWindow(window);
 
         demo.SelectPage(PageArgument(args));
 
@@ -531,6 +558,19 @@ internal static class Program
     {
         int index = Array.IndexOf(args, "--page");
         return index >= 0 && index + 1 < args.Length && int.TryParse(args[index + 1], out var page) ? page : -1;
+    }
+
+    /// <summary>
+    /// The value of a <c>--name value</c> switch, or null when it was not given. A flag that takes a
+    /// value is read this way rather than by <see cref="Array.IndexOf(string[], string)"/> so a
+    /// missing value is "not given" instead of reading whatever follows.
+    /// </summary>
+    private static string? ArgumentValue(string[] args, string name)
+    {
+        int index = Array.IndexOf(args, name);
+        return index >= 0 && index + 1 < args.Length && !args[index + 1].StartsWith("--", StringComparison.Ordinal)
+            ? args[index + 1]
+            : null;
     }
 
     /// <summary>

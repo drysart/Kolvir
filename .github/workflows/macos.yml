@@ -29,8 +29,9 @@ jobs:
   build:
     name: Build the macOS app
     # The project turns the workload's Xcode version check off (see XPlatUIDemo.App.csproj), so any
-    # Xcode the SDK can find will do. The xcode-27 image carries the 27.x bindings the workload was
-    # generated against, which is what the app is actually developed and tested with.
+    # Xcode the SDK can find will do as far as .NET's own check is concerned - but the local SDK still
+    # has to be new enough for the headers the workload's bindings were generated against, which is
+    # why the step below selects the newest one rather than a named one.
     runs-on: xcode-27
     steps:
       - name: Check out
@@ -46,23 +47,32 @@ jobs:
       - name: Install the macOS workload
         run: dotnet workload install macos
 
-      # Pick the Xcode the workload was built against rather than whatever the image defaults to, so
-      # the build runs against the same bindings a developer would have locally.
-      - name: Select the Xcode the macOS workload expects
+      # Use the newest Xcode the image ships, rather than a version named here. The workload is
+      # installed from NuGet at whatever its current version is, and a Microsoft.macOS that needs a
+      # newer SDK than the selected Xcode provides does not fail up front: it fails deep in the
+      # linker, as MT0179 ("this version of Microsoft.macOS requires the macOS 27.2 SDK"). Naming a
+      # version here only means this job breaks the day the image moves ahead of the name.
+      - name: Select the newest Xcode
         run: |
           set -euo pipefail
-          chosen=""
-          for candidate in /Applications/Xcode_27.1.app /Applications/Xcode_27.1.0.app; do
-            if [ -d "$candidate" ]; then
-              chosen="$candidate"
-              break
+          echo "Installed Xcodes:"
+          ls -d /Applications/Xcode*.app 2>/dev/null || echo "  none under /Applications"
+          newest=""
+          newestVersion="0"
+          for app in /Applications/Xcode*.app; do
+            [ -d "$app" ] || continue
+            version="$(plutil -extract CFBundleShortVersionString raw -o - "$app/Contents/Info.plist" 2>/dev/null || echo 0)"
+            pick="$(printf '%s\n%s\n' "$newestVersion" "$version" | sort -t. -k1,1n -k2,2n | tail -n 1)"
+            if [ "$pick" = "$version" ] && [ "$version" != "$newestVersion" ]; then
+              newest="$app"
+              newestVersion="$version"
             fi
           done
-          if [ -n "$chosen" ]; then
-            echo "Selecting $chosen"
-            sudo xcode-select -s "$chosen/Contents/Developer"
+          if [ -n "$newest" ]; then
+            echo "::notice::Selecting $newest ($newestVersion)"
+            sudo xcode-select -s "$newest/Contents/Developer"
           else
-            echo "::warning::Xcode 27.1 is not installed on this image; using the default Xcode."
+            echo "::warning::No Xcode bundle with a version under /Applications; using the image's own."
           fi
           xcode-select -p
           xcodebuild -version
