@@ -363,8 +363,9 @@ In short: export `PATH="$HOME/.dotnet:$PATH"`, build with `-p:ValidateXcodeVersi
 **`.app` bundle** (`bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app`) with `open` - there is no
 loose executable beside it.
 
-The clone is `~/src/Kolvir`; throwaway harnesses live under `~/badge` (`~/badge/src` is a second clone,
-`~/badge/harness` the harness project that references it).
+The clone is `~/src/Kolvir`, on all three Unix hosts. A throwaway harness or second clone goes in a
+directory you name for the job (`~/verify<n>`, `~/work<n>`) and is removed when the job is done; nothing
+is kept there between jobs, so do not assume a previous harness still exists.
 
 ### Screenshots
 
