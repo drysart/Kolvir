@@ -1,0 +1,64 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application calls AddAnimations(). -->
+  <PropertyGroup>
+    <!-- Every platform the feature supports, unconditionally: `dotnet pack` is what makes the package
+         and it needs all three in one build, so a build of this project on its own needs the macOS
+         workload, and so does a build of the solution that lists it. Narrow one inner build for local
+         work with `-p:TargetFramework=net10.0`; the plural `-p:TargetFrameworks=...` does not work as
+         a switch, because it reaches the restore graph and not the referenced projects' builds. An
+         application that references this project still builds only the inner build its own framework
+         can use. -->
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <RootNamespace>Kolvir</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- The feature is AOT compatible for the same reason the library is: an application that opts
+         in publishes the same way whether it did or not. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Timeline animations for Kolvir: value animations, easing functions and one frame clock for the application.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- The scheduler and the animation set are public because they are the API an application names.
+       What is internal is the machinery between them - the attach and detach edges that start and
+       stop the clock - because that is the part most likely to be wrong and the part an application
+       should never reach. The tests drive those edges directly, which is why they need visibility
+       into this assembly; no new public API was added for testing. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kolvir.Feature.Animations.Tests" />
+  </ItemGroup>
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- The three platform folders are empty, and that is the finding rather than an oversight: an
+       animation is arithmetic, a clock and an invalidation, so nothing here is native and there is
+       nothing to select by platform. The folders stay because the layout is the package's shape -
+       the `lib/` folders and dependency groups come from these same inner builds either way - and
+       because frame pacing a platform's own timer had to own would belong here. It does not:
+       Timer already asks the running backend for the wait, and the Win32 backend already
+       answers a sub-period interval with a high-resolution waitable timer. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>

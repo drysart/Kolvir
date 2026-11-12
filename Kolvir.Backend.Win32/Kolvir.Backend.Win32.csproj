@@ -1,0 +1,24 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Backend.Win32</RootNamespace>
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- The source-generated COM marshallers behind the file dialogs emit pointer code. This is the
+         only reason; the backend's own source stays pointer-free. -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- The GL seam is internal on purpose. The Windows-only test assembly drives its fallback
+       decision with a fake probe; no public surface is widened for the test. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kolvir.Backend.Win32.Tests" />
+  </ItemGroup>
+
+</Project>

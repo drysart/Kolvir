@@ -1,0 +1,81 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application calls AddSvgImages(). -->
+  <PropertyGroup>
+    <!-- Every platform the feature supports, unconditionally: `dotnet pack` is what makes the package
+         and it needs all three in one build, so a build of this project on its own needs the macOS
+         workload, and so does a build of the solution that lists it. Narrow one inner build for local
+         work with `-p:TargetFramework=net10.0`; the plural `-p:TargetFrameworks=...` does not work as
+         a switch, because it reaches the restore graph and not the referenced projects' builds. An
+         application that references this project still builds only the inner build its own framework
+         can use. -->
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <RootNamespace>Kolvir</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- The feature is AOT compatible for the same reason the library is: an application that opts
+         in publishes the same way whether it did or not. Svg.Skia parses XML into its own model
+         rather than through a serializer, so there is nothing here for the trimmer to give up on;
+         the measurement and the warning review in the pull request are what say so. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>SVG images for Kolvir: an image format provider that renders SVG to a picture with Svg.Skia.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- Svg.Skia on every platform: the renderer is portable, and the only platform-specific part of
+       it is the HarfBuzz native that comes with it for text. The dependency is unconditional because
+       each inner build produces its own dependency group, and a group is the platform's whole
+       closure rather than its extras (section 4). -->
+  <ItemGroup>
+    <PackageReference Include="Svg.Skia" Version="5.2.3" />
+    <!-- Named explicitly because this assembly's loader registers a resolver against HarfBuzzSharp's
+         assembly by type, and a build asset cannot do that through a type it only inherits
+         transitively. The version matches the one Svg.Skia resolves; a later Svg.Skia that wants a
+         newer HarfBuzzSharp fails restore loudly with a downgrade error rather than silently
+         embedding the wrong native. -->
+    <PackageReference Include="HarfBuzzSharp" Version="14.2.0" />
+  </ItemGroup>
+
+  <!-- Build assets. A NuGet consumer imports these automatically; this repository's own projects get
+       them from Directory.Build.targets, because a ProjectReference imports no build assets. -->
+  <ItemGroup>
+    <None Include="buildTransitive\Kolvir.Feature.Svg.targets" Pack="true" PackagePath="buildTransitive\" />
+  </ItemGroup>
+
+  <!-- The cache is internal: an application names the provider and the Load helpers, never the cache,
+       and what it keys on is the sort of thing that changes when the implementation does. The tests
+       drive it directly, because "parsed once" is a claim that needs a counter to prove it. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kolvir.Feature.Svg.Tests" />
+  </ItemGroup>
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- Nothing here is platform-specific: Svg.Skia renders to an SKPicture and the control draws it,
+       so the two platform folders that exist for the layout's sake are empty. `linux/` is not, only
+       because the net10.0 assembly is the one NuGet hands a Windows or macOS application when a
+       lib folder is missing, and the guard there is what makes that silent failure loud. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>

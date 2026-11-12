@@ -1,9 +1,9 @@
-# XPlatUI application model - working design
+# Kolvir application model - working design
 
-An application model for XPlatUI, so that an **application** is one project that builds and runs on
+An application model for Kolvir, so that an **application** is one project that builds and runs on
 Windows, macOS and Linux - instead of one project per platform.
 
-The library today stops at `XPlatUiHost`: a platform-independent object that owns a control tree, a
+The library today stops at `UiHost`: a platform-independent object that owns a control tree, a
 client size, input routing, focus, selection and painting. Everything *around* it - creating an OS
 window, running a message loop, installing the clipboard/theme/context-menu services, loading the
 native Skia library, reacting to DPI and appearance changes - is written three times, once per
@@ -19,7 +19,7 @@ migration and is kept as the record of what the model had to absorb.
 
 ## 1. Where we are today
 
-`XPlatUiHost` is already the right seam. The three harnesses differ only in the plumbing around it:
+`UiHost` is already the right seam. The three harnesses differ only in the plumbing around it:
 
 | Responsibility | Win32 harness | GTK harness | AppKit harness |
 |---|---|---|---|
@@ -39,7 +39,7 @@ migration and is kept as the record of what the model had to absorb.
 The duplication is real but shallow: `WinFormsApp3/Program.cs` (81), `GtkHarness/Program.cs` (169),
 `MacHarness/Program.cs` (184). Each is 80% identical in *intent* and 0% identical in *code*.
 
-**The goal:** an application author writes `XPlatUI/...` code plus one `Program.cs`, and the platform
+**The goal:** an application author writes `Kolvir/...` code plus one `Program.cs`, and the platform
 choice is a project-file concern, not a source concern.
 
 ---
@@ -49,11 +49,11 @@ choice is a project-file concern, not a source concern.
 ```csharp
 // Program.cs - the whole thing. Identical on Windows, macOS and Linux.
 using SkiaSharp;
-using XPlatUI;
+using Kolvir;
 
-var app = new XPlatApplication(Backend.Create())
+var app = new Application(Backend.Create())
 {
-	MainWindow = new XPlatWindow("XPlatUI demo", new MainView())
+	MainWindow = new Window("Kolvir demo", new MainView())
 	{
 		MinimumClientSize = new SKSize(820, 660),
 	},
@@ -65,17 +65,17 @@ return app.Run();
 ```csharp
 // Backend.cs - the only file in the app that knows the platform exists.
 #if WINDOWS
-using XPlatUI.Backend.Win32;
+using Kolvir.Backend.Win32;
 #elif MACOS
-using XPlatUI.Backend.AppKit;
+using Kolvir.Backend.AppKit;
 #else
-using XPlatUI.Backend.Gtk4;
+using Kolvir.Backend.Gtk4;
 #endif
-using XPlatUI.Backend.Headless;
+using Kolvir.Backend.Headless;
 
 internal static class Backend
 {
-	public static IXPlatApplicationBackend Create(bool headless = false)
+	public static IApplicationBackend Create(bool headless = false)
 	{
 		if (headless)
 		{
@@ -104,59 +104,59 @@ The `#if` symbols above are measured, not assumed: `WINDOWS` is defined for `net
 
 | # | Topic | Decision | Rationale |
 |---|---|---|---|
-| **D1** | Type names - **decided** | `XPlatApplication`, `XPlatWindow`, and the `XPlat`-prefixed supporting types in section 4: `XPlatApplicationOptions`, `XPlatScreen`, `XPlatTimer`, `XPlatMenuBar`, `XPlatShutdownMode`, `XPlatDpiAwareness`, `XPlatWindowState`, `XPlatDialogService`, `XPlatDialogResult`. `XPlatUiHost` keeps its name. | The namespace is already `XPlatUI`, so a `UI` segment inside a type name is redundant, and it would have put both spellings (`XPlatUiHost` vs `XPlatUIWindow`) in one namespace. `XPlat` + noun matches every existing type (`XPlatControl`, `XPlatPanel`, `XPlatTheme`, `XPlatClipboard`). |
-| **D2** | Where backends live - **decided** | One project per platform: `XPlatUI.Backend.Win32`, `XPlatUI.Backend.AppKit`, `XPlatUI.Backend.Gtk4`, `XPlatUI.Backend.Headless`. | Matches the existing harness boundaries 1:1 (lift `Native/`, `MacUiView`, `GtkUiSurface` wholesale). Keeps `XPlatUI` itself `net10.0` + OS-free, which is what makes it AOT-friendly and trimmable. A single multi-TFM backend project would force `net10.0-macos` onto Linux machines. |
+| **D1** | Type names - **decided** | `Application`, `Window`, and the `Kolvir`-prefixed supporting types in section 4: `ApplicationOptions`, `Screen`, `Timer`, `MenuBar`, `ShutdownMode`, `DpiAwareness`, `WindowState`, `DialogService`, `DialogResult`. `UiHost` keeps its name. | The namespace is already `Kolvir`, so a `UI` segment inside a type name is redundant, and it would have put both spellings (`UiHost` vs `KolvirWindow`) in one namespace. `Kolvir` + noun matches every existing type (`Control`, `Panel`, `Theme`, `Clipboard`). |
+| **D2** | Where backends live - **decided** | One project per platform: `Kolvir.Backend.Win32`, `Kolvir.Backend.AppKit`, `Kolvir.Backend.Gtk4`, `Kolvir.Backend.Headless`. | Matches the existing harness boundaries 1:1 (lift `Native/`, `MacUiView`, `GtkUiSurface` wholesale). Keeps `Kolvir` itself `net10.0` + OS-free, which is what makes it AOT-friendly and trimmable. A single multi-TFM backend project would force `net10.0-macos` onto Linux machines. |
 | **D3** | Backend selection - **decided** | Compile-time `#if` in the app's own `Backend.cs`, as in section 2. No reflection, no assembly scanning, no module initializer. | Trimming and AOT delete code nothing references; reflection-based discovery needs `DynamicDependency` attributes and silently breaks under `PublishTrimmed`. An explicit factory is four lines and always visible in the call stack. |
-| **D4** | Service ownership - **decided** | The **application owns a service container** and is the composition root (section 5). The static ambient slots (`XPlatClipboard.Current`, `XPlatSystemTheme.Current`, `XPlatContextMenuPresenter.Current`, `XPlatTheme.FontFamily`, `XPlatTheme.Palette`) stay, but move to the **bottom** of the resolution chain as fallbacks rather than being the only mechanism. | The earlier answer - "have the app install the statics at startup" - made the app the single writer, which was the real fix for three harnesses disagreeing by hand. It did not let a backend contribute its services without the app naming each one, and it could not give two windows their own presenter. Keeping the statics as fallbacks is what makes the change cost six call sites instead of every control (section 5.9). |
-| **D5** | Host per window | Exactly one `XPlatUiHost` per `XPlatWindow`, owned by the window, exposed as `window.Host`. | Already true in all three harnesses. Multi-window therefore needs no change to the host, the control tree, focus, selection or input routing. |
+| **D4** | Service ownership - **decided** | The **application owns a service container** and is the composition root (section 5). The static ambient slots (`Clipboard.Current`, `SystemTheme.Current`, `ContextMenuPresenter.Current`, `Theme.FontFamily`, `Theme.Palette`) stay, but move to the **bottom** of the resolution chain as fallbacks rather than being the only mechanism. | The earlier answer - "have the app install the statics at startup" - made the app the single writer, which was the real fix for three harnesses disagreeing by hand. It did not let a backend contribute its services without the app naming each one, and it could not give two windows their own presenter. Keeping the statics as fallbacks is what makes the change cost six call sites instead of every control (section 5.9). |
+| **D5** | Host per window | Exactly one `UiHost` per `Window`, owned by the window, exposed as `window.Host`. | Already true in all three harnesses. Multi-window therefore needs no change to the host, the control tree, focus, selection or input routing. |
 | **D6** | Message loop ownership | The **backend** runs the loop; the application owns the lifecycle around it. `Run()` blocks on the UI thread and returns an exit code. | Each platform has a different loop (Win32 `GetMessage`, GLib `MainLoop`, `NSApplication.Run`). Pretending otherwise (a hand-rolled pump) would break native modal dialogs, menu tracking and the macOS app menu. |
 | **D7** | Shutdown semantics - **decided** | Three modes - `OnLastWindowClose` (default), `OnMainWindowClose`, `OnExplicitShutdown` - see section 4.7. macOS keeps the process alive with zero windows only when the app opts into `OnExplicitShutdown`. | The platform convention genuinely differs (a Mac app with no windows still owns the menu bar), but a cross-platform default must be predictable. The three names match WinForms, so nobody has to learn a new vocabulary. |
-| **D8** | Headless backend - **decided** | `XPlatUI.Backend.Headless` is a **first-class backend**, not a harness special case, and is delivered in migration step 2. The app reaches it through the same explicit factory as the others, so `--render` needs no `#if` of its own. | The render path already exists three times over, one copy per harness, and it is the only display-free check CI has. One implementation makes it testable on any machine and forces the model to work with no window server, which is exactly what migration step 2 depends on. |
+| **D8** | Headless backend - **decided** | `Kolvir.Backend.Headless` is a **first-class backend**, not a harness special case, and is delivered in migration step 2. The app reaches it through the same explicit factory as the others, so `--render` needs no `#if` of its own. | The render path already exists three times over, one copy per harness, and it is the only display-free check CI has. One implementation makes it testable on any machine and forces the model to work with no window server, which is exactly what migration step 2 depends on. |
 | **D9** | Application project shape - **decided** | One `csproj`, one TFM per OS chosen by an MSBuild condition on `TargetFramework`, backend pulled in by a conditional `ProjectReference`. | This is the only arrangement that gives "one project builds everywhere" without forcing the macOS workload onto non-Mac machines. See section 6. |
 | **D10** | Multi-window - **decided** | Multi-window is supported. `MainWindow` is identity and convenience, never a requirement: `Run()` is legal with zero windows. See section 4.6. | No platform requires a window to run its loop, but each needs a keep-alive when there is none. Making `MainWindow` mandatory would be a fiction the backends have to work around. |
 | **D11** | Service container - **decided** | `Microsoft.Extensions.DependencyInjection` is the container. The public surface is `IServiceCollection` / `IServiceProvider`; the model adds exactly one extension, `AddWindowScoped`. See section 5. | Reverses an earlier hand-written-container proposal, which was based on two claims that measurement disproved: MEDI 10.0.14 is AOT-annotated and warning-free, and it costs +666 KB on a SkiaSharp AOT binary rather than a megabyte (section 5.2). The decisive argument is interop: every ecosystem package registers through `IServiceCollection`, so anything else forces an adapter and a second service graph. Window scope is the one gap MEDI leaves, and it closes in ~40 lines (section 5.4). |
-| **D12** | Dialogs in v1 - **decided** | Message box, open/save/folder dialogs and modal `XPlatWindow.ShowDialog` ship in v1, through `IXPlatDialogService` (section 9). Every backend must therefore support a nested loop from migration step 1. | "Are you sure", "open", "save" are in every real app; deferring them leaves apps calling P/Invoke or pulling a third-party package against a window they do not own. The cost is paid once, in the contract, and the headless backend makes the nested path testable. |
-| **D13** | Menu bar in v1 - **decided** | `XPlatMenuBar` ships in v1, per window, mirrored to the global bar on macOS (section 10). | A macOS app with no menu bar is not merely unpolished, it is broken: Cmd+Q, Cmd+W and the Edit-menu clipboard shortcuts come from the menu bar, so text boxes cannot copy or paste without one. Windows and Linux want the same model drawn as a per-window bar. |
+| **D12** | Dialogs in v1 - **decided** | Message box, open/save/folder dialogs and modal `Window.ShowDialog` ship in v1, through `IDialogService` (section 9). Every backend must therefore support a nested loop from migration step 1. | "Are you sure", "open", "save" are in every real app; deferring them leaves apps calling P/Invoke or pulling a third-party package against a window they do not own. The cost is paid once, in the contract, and the headless backend makes the nested path testable. |
+| **D13** | Menu bar in v1 - **decided** | `MenuBar` ships in v1, per window, mirrored to the global bar on macOS (section 10). | A macOS app with no menu bar is not merely unpolished, it is broken: Cmd+Q, Cmd+W and the Edit-menu clipboard shortcuts come from the menu bar, so text boxes cannot copy or paste without one. Windows and Linux want the same model drawn as a per-window bar. |
 
 ---
 
 ## 4. The model
 
-### 4.1 `XPlatApplication`
+### 4.1 `Application`
 
 Owns the message loop, the window list and the platform services. One per process;
-`XPlatApplication.Current` is the ambient handle controls and services use to reach it.
+`Application.Current` is the ambient handle controls and services use to reach it.
 
 ```csharp
-namespace XPlatUI;
+namespace Kolvir;
 
-public sealed class XPlatApplication
+public sealed class Application
 {
-	public XPlatApplication(IXPlatApplicationBackend backend);
-	public XPlatApplication(IXPlatApplicationBackend backend, XPlatApplicationOptions options);
+	public Application(IApplicationBackend backend);
+	public Application(IApplicationBackend backend, ApplicationOptions options);
 
-	public static XPlatApplication? Current { get; }
-	public static int Run(XPlatApplication application);   // convenience for `return ...;`
+	public static Application? Current { get; }
+	public static int Run(Application application);   // convenience for `return ...;`
 
-	public IXPlatApplicationBackend Backend { get; }
-	public XPlatApplicationOptions Options { get; }
+	public IApplicationBackend Backend { get; }
+	public ApplicationOptions Options { get; }
 	public IServiceProvider Services { get; }          // application root provider; see section 5
 	public bool IsRunning { get; }
 	public int ExitCode { get; }
 
-	public XPlatWindow? MainWindow { get; set; }
-	public IReadOnlyList<XPlatWindow> Windows { get; }
-	public IReadOnlyList<XPlatScreen> Screens { get; }
-	public IXPlatDialogService Dialogs { get; }        // never null: the backend must register one (section 9)
+	public Window? MainWindow { get; set; }
+	public IReadOnlyList<Window> Windows { get; }
+	public IReadOnlyList<Screen> Screens { get; }
+	public IDialogService Dialogs { get; }        // never null: the backend must register one (section 9)
 
 	public event EventHandler? Startup;
-	public event EventHandler<XPlatExitEventArgs>? Exiting;                        // see step 2 notes
-	public event EventHandler<XPlatWindowEventArgs>? WindowOpened;
-	public event EventHandler<XPlatWindowEventArgs>? WindowClosed;
-	public event EventHandler<XPlatActivatedEventArgs>? Activated;                // dock / taskbar click
-	public event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;      // another launch was handed over
+	public event EventHandler<ExitEventArgs>? Exiting;                        // see step 2 notes
+	public event EventHandler<WindowEventArgs>? WindowOpened;
+	public event EventHandler<WindowEventArgs>? WindowClosed;
+	public event EventHandler<ActivatedEventArgs>? Activated;                // dock / taskbar click
+	public event EventHandler<SecondInstanceEventArgs>? SecondInstance;      // another launch was handed over
 	public event EventHandler? ThemeChanged;                                      // light/dark flipped
-	public event EventHandler<XPlatUnhandledExceptionEventArgs>? UnhandledException;  // fatal unless Handled
+	public event EventHandler<UnhandledExceptionEventArgs>? UnhandledException;  // fatal unless Handled
 
 	public bool IsPrimaryInstance { get; }    // false when another process owns the instance key
 
@@ -181,7 +181,7 @@ public sealed class XPlatApplication
 Every exception that escapes UI-thread code reaches `UnhandledException`; anything a handler does
 not claim is fatal. Concretely:
 
-- `XPlatUnhandledExceptionEventArgs.Handled` defaults to **false**, so surviving an exception is an
+- `UnhandledExceptionEventArgs.Handled` defaults to **false**, so surviving an exception is an
 explicit choice. This differs from WinForms, whose `Application.ThreadException` is implicitly
 swallowed: a UI that continues after a fault is usually broken in ways the user cannot see.
 - Dispatch points that are already covered: `Startup`, showing a window before the loop,
@@ -191,7 +191,7 @@ reaches the caller that is waiting for it.
 - Anything the model does not dispatch itself - a window procedure, an AppKit delegate override, a
 GObject signal handler, a paint callback - is a *native boundary*: an exception unwinding into it
 is a fail-fast with no hook at all. Backends hand those to
-`XPlatApplication.HandleNativeBoundary`, which is static because it must work when no application
+`Application.HandleNativeBoundary`, which is static because it must work when no application
 exists (a standalone host, as `--render` uses) and in that case rethrows.
 - A fault shuts the application down normally - windows close, services dispose, `Exiting` runs -
 and then `Run()` rethrows the original exception with its stack intact. The exit code becomes 1
@@ -199,22 +199,22 @@ whenever a fault was recorded, even if `Exiting` left it at 0.
 - `OutOfMemoryException`, `StackOverflowException` and `AccessViolationException` are never offered
 to a handler: the process state is already unusable, so reporting them would only hide a crash.
 
-### 4.2 `XPlatApplicationOptions`
+### 4.2 `ApplicationOptions`
 
 Configuration that every platform needs but that is not window-specific.
 
 ```csharp
-public sealed class XPlatApplicationOptions
+public sealed class ApplicationOptions
 {
 	public string? ApplicationName { get; set; }                 // menu bar, taskbar, about box
-	public XPlatShutdownMode ShutdownMode { get; set; } = XPlatShutdownMode.OnLastWindowClose;
+	public ShutdownMode ShutdownMode { get; set; } = ShutdownMode.OnLastWindowClose;
 	public bool FollowSystemAppearance { get; set; } = true;     // light/dark tracking
 	public bool? ForcedDarkMode { get; set; }                    // --dark / --light
 	public string? FontFamily { get; set; }                      // null = platform default
-	public XPlatDpiAwareness DpiAwareness { get; set; } = XPlatDpiAwareness.PerMonitor;
+	public DpiAwareness DpiAwareness { get; set; } = DpiAwareness.PerMonitor;
 	public bool AttachConsole { get; set; }                      // Windows: diagnostics to parent console
-	public XPlatMenuBar? MenuBar { get; set; }                 // application-wide default; see section 10
-	public XPlatIcon? Icon { get; set; }                       // application-wide default; see section 4.3
+	public MenuBar? MenuBar { get; set; }                 // application-wide default; see section 10
+	public Icon? Icon { get; set; }                       // application-wide default; see section 4.3
 	public bool SingleInstance { get; set; }                   // second launch hands over instead of starting
 	public string? InstanceKey { get; set; }                   // defaults to ApplicationName; scopes the claim
 	public IReadOnlyList<string>? CommandLine { get; set; }    // null = the real one, minus argv[0]
@@ -223,39 +223,39 @@ public sealed class XPlatApplicationOptions
 ```
 
 `--render` / `--dark` / `--light` command-line parsing is deliberately **not** in the model: it is a
-`XPlatApplicationOptions` factory that the headless backend and the sample apps share.
+`ApplicationOptions` factory that the headless backend and the sample apps share.
 
-### 4.3 `XPlatWindow`
+### 4.3 `Window`
 
-One OS window. Thin: it forwards to an `IXPlatWindowBackend` and raises the cross-platform events.
-It does **not** duplicate `XPlatUiHost`; `window.Host` *is* the host.
+One OS window. Thin: it forwards to an `IWindowBackend` and raises the cross-platform events.
+It does **not** duplicate `UiHost`; `window.Host` *is* the host.
 
 ```csharp
-public sealed class XPlatWindow : IDisposable
+public sealed class Window : IDisposable
 {
-	public XPlatWindow();
-	public XPlatWindow(XPlatControl content);
-	public XPlatWindow(string title, XPlatControl content);
+	public Window();
+	public Window(Control content);
+	public Window(string title, Control content);
 
-	public XPlatControl? Content { get; set; }     // becomes Host.Root
-	public XPlatUiHost Host { get; }
-	public XPlatApplication? Application { get; }
+	public Control? Content { get; set; }     // becomes Host.Root
+	public UiHost Host { get; }
+	public Application? Application { get; }
 	public IServiceProvider Services { get; }   // this window's scope; see section 5.4
-	public IXPlatWindowBackend Backend { get; }      // platform escape hatch; see section 12
-	public XPlatScreen? Screen { get; }
+	public IWindowBackend Backend { get; }      // platform escape hatch; see section 12
+	public Screen? Screen { get; }
 	public float ScaleFactor { get; }
 
 	public string Title { get; set; }
-	public XPlatIcon? Icon { get; set; }               // inherits XPlatApplicationOptions.Icon
+	public Icon? Icon { get; set; }               // inherits ApplicationOptions.Icon
 	public SKSize ClientSize { get; set; }             // logical px
 	public SKSize MinimumClientSize { get; set; }
 	public SKSize MaximumClientSize { get; set; }
 	public SKPoint Location { get; set; }              // logical px, screen space
 	public bool Resizable { get; set; }
 	public bool TopMost { get; set; }
-	public XPlatWindowState State { get; set; }      // Normal/Minimized/Maximized/FullScreen
-	public XPlatWindow? Owner { get; set; }
-	public XPlatMenuBar? MenuBar { get; set; }       // null = inherit XPlatApplicationOptions.MenuBar
+	public WindowState State { get; set; }      // Normal/Minimized/Maximized/FullScreen
+	public Window? Owner { get; set; }
+	public MenuBar? MenuBar { get; set; }       // null = inherit ApplicationOptions.MenuBar
 
 	public event EventHandler? Shown;
 	public event EventHandler<CancelEventArgs>? Closing;   // cancelable
@@ -268,8 +268,8 @@ public sealed class XPlatWindow : IDisposable
 
 	public SKPoint LogicalToScreen(SKPoint logical);   // menus and popups need screen space
 	public void Show();
-	public void Show(XPlatWindow owner);
-	public XPlatDialogResult ShowDialog(XPlatWindow? owner);   // modal, pumps a nested loop
+	public void Show(Window owner);
+	public DialogResult ShowDialog(Window? owner);   // modal, pumps a nested loop
 	public void Activate();
 	public void Close();                                            // raises Closing, then Closed
 	public void Dispose();
@@ -277,7 +277,7 @@ public sealed class XPlatWindow : IDisposable
 ```
 
 `Show()` before `Application.Run()` is legal: the window is created, but `Shown` is deferred until
-the loop starts. This keeps `MainWindow = new XPlatWindow(...)` inside the object initialiser.
+the loop starts. This keeps `MainWindow = new Window(...)` inside the object initialiser.
 
 **Sizing.** If `ClientSize` is never set, the window sizes to `Content.DesiredSize` clamped to the
 screen working area - the same "design size x scale, then clamp" logic that lives in the Win32
@@ -285,10 +285,10 @@ harness today. That logic moves into the model so all three platforms agree.
 
 **`ScaleFactor` and `ScaleChanged`.** A window dragged between monitors changes DPI; `ClientSize`
 stays logical, the framebuffer changes size. The backend reports it, the model re-runs layout and
-invalidates. This is the same contract `XPlatUiHost.SetClientSize` already implements; it just needs
+invalidates. This is the same contract `UiHost.SetClientSize` already implements; it just needs
 a cross-platform trigger.
 
-**Icons.** `XPlatIcon` is one type carrying both a bitmap and an optional icon-theme name, because
+**Icons.** `Icon` is one type carrying both a bitmap and an optional icon-theme name, because
 the three platforms share no icon API at all. Windows wants a pair of `HICON` handles - `ICON_SMALL`
 for the title bar, `ICON_BIG` for Alt-Tab and the taskbar - built at the sizes
 `GetSystemMetricsForDpi` reports and rebuilt on `WM_DPICHANGED`, so the bitmap is rasterised twice
@@ -298,8 +298,8 @@ process. GTK4 accepts only `gtk_window_set_icon_name`, a name looked up in the c
 so a pixel-only icon is stored and ignored there, and Wayland takes the icon from the desktop entry
 rather than from the window at all.
 
-That asymmetry is why `XPlatIcon` is one type with two halves rather than two properties:
-`XPlatIcon.FromBitmap(...)` (or `FromFile` / `FromStream`) reaches Windows and macOS, `FromName(...)`
+That asymmetry is why `Icon` is one type with two halves rather than two properties:
+`Icon.FromBitmap(...)` (or `FromFile` / `FromStream`) reaches Windows and macOS, `FromName(...)`
 reaches GTK, and setting `Name` on a pixel icon covers all three from one object. The icon owns every
 bitmap it hands out - `GetBitmap(size)` scales once per size and caches - so it must outlive the
 windows using it and must not be disposed while they do.
@@ -308,23 +308,23 @@ A shipping macOS `.app` should still put its icon in `Info.plist` as `CFBundleIc
 assignment is for builds without a bundle, which is what the sample harness is.
 
 **Shortcuts.** A menu item's `ShortcutText` is a hint that draws a key it does not dispatch. A
-working shortcut is an `XPlatShortcut`, and the window's menu bar - its own, else
-`XPlatApplicationOptions.MenuBar` - is consulted in `XPlatUiHost.ProcessKeyDown` *before* the
+working shortcut is an `Shortcut`, and the window's menu bar - its own, else
+`ApplicationOptions.MenuBar` - is consulted in `UiHost.ProcessKeyDown` *before* the
 focused control, which is the precedence native menus use. Because the lookup lives in the host
 rather than in a backend, it works on all three platforms, including the Win32 backend, which
 records the bar without drawing it yet.
 
-`XPlatShortcut`'s `Control` modifier means the platform's accelerator modifier, not a literal Ctrl:
+`Shortcut`'s `Control` modifier means the platform's accelerator modifier, not a literal Ctrl:
 `DisplayText` renders "Ctrl+D" on Windows and Linux and "Cmd+D" on macOS, and AppKit converts the
 same declaration into a real key equivalent. This works because AppKit never reports Command as
-`XPlatModifiers.Control`, so `Matches` stays an exact comparison and no key is claimed twice. A
+`Modifiers.Control`, so `Matches` stays an exact comparison and no key is claimed twice. A
 matching item claims the key even when it is disabled, so a greyed-out command does not fall through
 to the control that has focus.
 
 ### 4.4 Screens
 
 ```csharp
-public sealed class XPlatScreen
+public sealed class Screen
 {
 	public SKRect Bounds { get; }         // logical px
 	public SKRect WorkingArea { get; }    // excludes taskbar / dock / menu bar
@@ -339,10 +339,10 @@ are platform-independent. Today the Win32 harness does this inline and macOS/GTK
 ### 4.5 Timers
 
 ```csharp
-public sealed class XPlatTimer : IDisposable
+public sealed class Timer : IDisposable
 {
-	public XPlatTimer();
-	public XPlatTimer(TimeSpan interval);
+	public Timer();
+	public Timer(TimeSpan interval);
 	public TimeSpan Interval { get; set; }
 	public bool Enabled { get; set; }
 	public event EventHandler? Tick;      // always on the UI thread
@@ -354,10 +354,10 @@ public sealed class XPlatTimer : IDisposable
 
 Nothing in the application model runs a timer. Time-based behaviour belongs to the control that
 needs it, and behaviour that more than one control wants lives in a helper those controls share:
-`XPlatCaret` owns the timer that blinks the insertion caret and follows its control's focus and
-enabled state, so it runs only while the caret is on screen. `XPlatTextBox` is one line -
-`new XPlatCaret(this)` - and any future editable control gets the identical caret the same way.
-A control that animates something else uses `XPlatControl.CreateTimer` directly. A timer a control
+`Caret` owns the timer that blinks the insertion caret and follows its control's focus and
+enabled state, so it runs only while the caret is on screen. `TextBox` is one line -
+`new Caret(this)` - and any future editable control gets the identical caret the same way.
+A control that animates something else uses `Control.CreateTimer` directly. A timer a control
 owns is disposed with the control, so there is nothing to remember at shutdown; `Own` exists for
 helpers like the caret, which are disposed the same way.
 
@@ -367,12 +367,12 @@ that wants none), and it caps whatever the control does to the tick's resolution
 now has no timer at all, and a control that animates picks its own interval - the caret uses its
 real 530 ms blink instead of accumulating 250 ms ticks until they add up.
 
-`XPlatTimer` itself is public, so application code uses the same mechanism for polling, debouncing
+`Timer` itself is public, so application code uses the same mechanism for polling, debouncing
 or animation. Its `Tick` always arrives on the UI thread.
 
 ### 4.6 Main window and multi-window
 
-Multi-window is supported. `XPlatWindow` instances are independent: each owns its own `XPlatUiHost`,
+Multi-window is supported. `Window` instances are independent: each owns its own `UiHost`,
 its own control tree, its own focus and its own framebuffer. Nothing in the model assumes there is
 exactly one.
 
@@ -390,7 +390,7 @@ exactly one.
 So `MainWindow` is **identity and convenience, never a requirement**:
 
 - it is the default `Owner` for `ShowDialog()` when no owner is passed;
-- it is the window `XPlatApplication.Activate()` brings forward;
+- it is the window `Application.Activate()` brings forward;
 - it is the window re-shown when the user clicks the Dock icon or a second instance launches;
 - it is the window `OnMainWindowClose` watches;
 - on Windows its `HWND` is what taskbar grouping and `WM_DROPFILES` associate with.
@@ -402,17 +402,17 @@ Rules:
 - If `MainWindow` is null when the first window is shown, that window becomes `MainWindow`.
 - Closing `MainWindow` does **not** clear it, so an app can `Show()` it again later - that is the
   "reopen from the Dock" pattern. `Windows` is the authority on what is currently live.
-- `XPlatApplication.Activated` is raised when the OS asks the app to come forward (Dock click,
+- `Application.Activated` is raised when the OS asks the app to come forward (Dock click,
   taskbar click, second-instance launch, `open -a`). The default action re-shows and activates
   `MainWindow`; handling the event suppresses the default.
-- `XPlatApplicationOptions.SingleInstance` makes a second launch of the executable hand its command
+- `ApplicationOptions.SingleInstance` makes a second launch of the executable hand its command
   line to the running process instead of starting a second copy. `InstanceKey` scopes the claim, and
   the second process leaves `Run()` immediately, so a plain `return application.Run();` is enough.
-  `XPlatApplication.SecondInstance` carries those arguments and is always raised on the UI thread;
+  `Application.SecondInstance` carries those arguments and is always raised on the UI thread;
   its default action is `Activated`. Windows and macOS need a mutex and a named pipe for this,
   because neither OS makes a directly launched binary single-instance; GTK4 gets it from
   `Gio.Application`'s D-Bus registration, which is also the only way to raise another process's
-  window on Wayland. That is why the claim is an `IXPlatApplicationBackend` member
+  window on Wayland. That is why the claim is an `IApplicationBackend` member
   (`TryClaimSingleInstance`) rather than library code.
 
 #### Multi-window rules
@@ -427,7 +427,7 @@ Rules:
   children out and an `HWND` owner keeps its children alive. `Show(owner)` is shorthand for setting
   `Owner` then `Show()`.
 - `ShowDialog()` disables the owner and runs a nested loop; it returns once the window has closed.
-- Process-wide services (`XPlatClipboard`, `XPlatSystemTheme`, `XPlatTheme`) are shared by every
+- Process-wide services (`Clipboard`, `SystemTheme`, `Theme`) are shared by every
   window. The context-menu presenter is per window, which the existing interface already implies.
 - No timer is process-wide, so nothing has to be suspended when a window is hidden or minimized:
   a control-owned timer only runs while its control has focus.
@@ -435,13 +435,13 @@ Rules:
   `Host.FocusedControl`.
 - `ThemeChanged` is broadcast to every window, which then repaints.
 - Windows may be created at any time on the UI thread, including from inside an event handler.
-  `XPlatApplication.Current` is set for the whole process, so a control can reach the app without
+  `Application.Current` is set for the whole process, so a control can reach the app without
   being handed one.
 
 ### 4.7 Shutdown modes
 
 ```csharp
-public enum XPlatShutdownMode
+public enum ShutdownMode
 {
     OnLastWindowClose,   // default
     OnMainWindowClose,
@@ -457,7 +457,7 @@ public enum XPlatShutdownMode
 
 `Exit()` closes every window first: each raises `Closing`, and cancelling **any** of them aborts the
 shutdown (this matches WinForms, where `Application.Exit()` respects `FormClosing`). The
-`XPlatApplication.Exit` event runs last and can also cancel. `ExitCode` is set by `Exit(int)`, or by
+`Application.Exit` event runs last and can also cancel. `ExitCode` is set by `Exit(int)`, or by
 the backend when the platform ends the loop on its own (for example the macOS app menu's Quit).
 
 ---
@@ -476,12 +476,12 @@ surface:
 
 | Service | Interface | Registered by | Read by |
 |---|---|---|---|
-| Clipboard | `IXPlatClipboard` | the backend | `XPlatTextBox` cut/copy/paste, `XPlatUiHost.CopySelection` |
-| System appearance | `IXPlatSystemTheme` | the backend | `XPlatSystemTheme.Refresh` |
-| Context menus | `IXPlatContextMenuPresenter` | the backend | `XPlatContextMenu.Show` |
+| Clipboard | `IClipboard` | the backend | `TextBox` cut/copy/paste, `UiHost.CopySelection` |
+| System appearance | `ISystemTheme` | the backend | `SystemTheme.Refresh` |
+| Context menus | `IContextMenuPresenter` | the backend | `ContextMenu.Show` |
 
 That is six call sites in four files. Making them injectable is not the expensive part of this
-design; section 5.9 covers the part that is. `XPlatTheme` is deliberately *not* on the list, and section 5.8
+design; section 5.9 covers the part that is. `Theme` is deliberately *not* on the list, and section 5.8
 explains why.
 
 ### 5.2 Why MEDI, and what changed my mind
@@ -501,12 +501,12 @@ control case shows the analyzer is live rather than asleep: the same project ref
 | Probe | No MEDI | With MEDI | Delta |
 |---|---|---|---|
 | Console app, four services | 1,144 KB | 2,166 KB | +1,022 KB |
-| Console app + SkiaSharp + XPlatUI | 1,475 KB | 2,141 KB | **+666 KB** |
+| Console app + SkiaSharp + Kolvir | 1,475 KB | 2,141 KB | **+666 KB** |
 | `WinFormsApp3` AOT harness as it ships today | 7.59 MB | ~8.2 MB | ~ +8.8% |
 
 Only ~36 KB of the delta is MEDI's own IL. The rest is CoreLib machinery its resolve path needs -
 reflection invoke, generic dictionaries, interface dispatch maps, constructed EE types - and a
-SkiaSharp app already keeps most of that, which is why the marginal cost in a real XPlatUI binary
+SkiaSharp app already keeps most of that, which is why the marginal cost in a real Kolvir binary
 is 666 KB rather than a megabyte.
 
 **And the argument this document was not weighing is interop.** The .NET ecosystem registers through
@@ -525,28 +525,28 @@ model, so an app never sees it.
 The public surface is MEDI's own, so ecosystem packages drop in unchanged:
 
 ```csharp
-var app = new XPlatApplication(backend, new XPlatApplicationOptions
+var app = new Application(backend, new ApplicationOptions
 {
 	ConfigureServices = services =>
 	{
 	    services.AddLogging(b => b.AddDebug());                   // any MEDI package
 	    services.AddSingleton<IMainViewModel, MainViewModel>();
 	    services.AddWindowScoped<IDocumentViewModel>(
-	        (window, _) => new DocumentViewModel(window.Title));  // the one XPlat extension
+	        (window, _) => new DocumentViewModel(window.Title));  // the one Kolvir extension
 	},
 });
 ```
 
 | Surface | Type | Notes |
 |---|---|---|
-| `XPlatApplicationOptions.ConfigureServices` | `Action<IServiceCollection>` | runs after the backend, before model defaults |
-| `IXPlatApplicationBackend.RegisterServices` | `void (IServiceCollection)` | the backend's platform services (section 5.6) |
-| `XPlatApplication.Services` | `IServiceProvider` | the root provider |
-| `XPlatWindow.Services` | `IServiceProvider` | that window's scope |
-| `XPlatControl.Services` | `IServiceProvider?` | host -> window scope -> root; null when detached |
-| `AddWindowScoped<TService>` | `IServiceCollection` extension | the only XPlat-specific registration (section 5.4) |
+| `ApplicationOptions.ConfigureServices` | `Action<IServiceCollection>` | runs after the backend, before model defaults |
+| `IApplicationBackend.RegisterServices` | `void (IServiceCollection)` | the backend's platform services (section 5.6) |
+| `Application.Services` | `IServiceProvider` | the root provider |
+| `Window.Services` | `IServiceProvider` | that window's scope |
+| `Control.Services` | `IServiceProvider?` | host -> window scope -> root; null when detached |
+| `AddWindowScoped<TService>` | `IServiceCollection` extension | the only Kolvir-specific registration (section 5.4) |
 
-`XPlatUI` references `Microsoft.Extensions.DependencyInjection`, so `IServiceCollection` and every
+`Kolvir` references `Microsoft.Extensions.DependencyInjection`, so `IServiceCollection` and every
 package's `Add*` extension arrive transitively and an app does not add the reference itself.
 
 Two rules survive from the earlier draft:
@@ -566,8 +566,8 @@ every .NET developer already knows the vocabulary.
 
 | Lifetime | MEDI call | One per | Examples | Disposed |
 |---|---|---|---|---|
-| Application | `AddSingleton` | process | `IXPlatClipboard`, `IXPlatSystemTheme`, `IXPlatDialogService`, app view models | root provider dispose (section 8) |
-| Window | `AddScoped` | window | `IXPlatContextMenuPresenter`, per-window view models, menu bar host | that window's scope dispose |
+| Application | `AddSingleton` | process | `IClipboard`, `ISystemTheme`, `IDialogService`, app view models | root provider dispose (section 8) |
+| Window | `AddScoped` | window | `IContextMenuPresenter`, per-window view models, menu bar host | that window's scope dispose |
 | Transient | `AddTransient` | resolve | short-lived helpers, option objects | by the caller |
 
 The context-menu presenter is what forces the window lifetime. Today it is constructed as
@@ -579,25 +579,25 @@ The missing primitive is a scope created *with* the window. MEDI has `CreateScop
 immediately after creating the scope:
 
 ```csharp
-// XPlatUI/Services/XPlatWindowScope.cs - the whole mechanism.
-internal sealed class XPlatWindowAccessor { public XPlatWindow? Window { get; set; } }
+// Kolvir/Services/WindowScope.cs - the whole mechanism.
+internal sealed class WindowAccessor { public Window? Window { get; set; } }
 
-public static class XPlatServiceCollectionExtensions
+public static class ServiceCollectionExtensions
 {
 	/// <summary>One instance per window, built with the window, disposed when it closes.</summary>
 	public static IServiceCollection AddWindowScoped<TService>(
-	    this IServiceCollection services, Func<XPlatWindow, IServiceProvider, TService> factory)
+	    this IServiceCollection services, Func<Window, IServiceProvider, TService> factory)
 	    where TService : class
 	    => services.AddScoped<TService>(sp => factory(
-	        sp.GetRequiredService<XPlatWindowAccessor>().Window
+	        sp.GetRequiredService<WindowAccessor>().Window
 	            ?? throw new InvalidOperationException(
 	                   "A window-scoped service was resolved outside a window scope."),
 	        sp));
 }
 
-// XPlatWindow, when the platform creates it:
+// Window, when the platform creates it:
 _scope = _application.Services.CreateScope();
-_scope.ServiceProvider.GetRequiredService<XPlatWindowAccessor>().Window = this;
+_scope.ServiceProvider.GetRequiredService<WindowAccessor>().Window = this;
 Services = _scope.ServiceProvider;
 ```
 
@@ -606,48 +606,48 @@ independent instances. Because it is `AddScoped` underneath, a window-scoped ser
 singletons normally, and anything the *app* registers `AddScoped` also becomes per-window - which is
 the behaviour a view-model-per-window author expects.
 
-It also answers the escape-hatch question left open in section 12: the factory receives the `XPlatWindow`,
-whose `Backend` is the platform's own `IXPlatWindowBackend`, so a backend registers native services
+It also answers the escape-hatch question left open in section 12: the factory receives the `Window`,
+whose `Backend` is the platform's own `IWindowBackend`, so a backend registers native services
 without the model ever knowing what an `HWND` is.
 
 ### 5.5 How a control reaches its services
 
-`XPlatControl` already resolves its host up the parent chain:
+`Control` already resolves its host up the parent chain:
 
 ```csharp
-public XPlatUiHost? Host => _host ?? Parent?.Host;
+public UiHost? Host => _host ?? Parent?.Host;
 ```
 
 Services use the same chain, so the accessor is the same one-liner:
 
 ```csharp
-public sealed class XPlatControl
+public sealed class Control
 {
-	public XPlatUiHost? Host => _host ?? Parent?.Host;
+	public UiHost? Host => _host ?? Parent?.Host;
 	public IServiceProvider? Services => Host?.Services;
 	public TService? GetService<TService>() where TService : class
 	    => Services?.GetService(typeof(TService)) as TService;
 }
 ```
 
-`XPlatUiHost.Services` is set by the window that owns the host. Lookup for a platform service then
+`UiHost.Services` is set by the window that owns the host. Lookup for a platform service then
 reads:
 
     control -> host -> window scope -> root provider -> static `Current` -> built-in fallback
 
 The static slot stays in that chain on purpose. It is how a detached control still gets a clipboard,
 and it is why the migration in section 11 needs no flag day: existing harnesses keep assigning
-`XPlatClipboard.Current` and keep working while the backends move over.
+`Clipboard.Current` and keep working while the backends move over.
 
 The call sites become one-line fallbacks:
 
 ```csharp
-// XPlatTextBox
-(GetService<IXPlatClipboard>() ?? XPlatClipboard.Current).SetText(SelectedText);
+// TextBox
+(GetService<IClipboard>() ?? Clipboard.Current).SetText(SelectedText);
 
-// XPlatContextMenu.Show(host, ...) - the host is already a parameter
-var presenter = host.Services?.GetService<IXPlatContextMenuPresenter>()
-    ?? XPlatContextMenuPresenter.Current;
+// ContextMenu.Show(host, ...) - the host is already a parameter
+var presenter = host.Services?.GetService<IContextMenuPresenter>()
+    ?? ContextMenuPresenter.Current;
 ```
 
 ### 5.6 The backend registers the platform services
@@ -656,22 +656,22 @@ This is the part that pays for itself immediately. Today all three harnesses han
 services, in the same order, with the same fallbacks, in `Program.cs`:
 
 ```csharp
-XPlatClipboard.Current = new Win32Clipboard();
-XPlatSystemTheme.Current = new Win32SystemTheme();
-XPlatSystemTheme.Refresh();
-XPlatContextMenuPresenter.Current = new Win32ContextMenuPresenter(window.Handle, window.LogicalToScreen);
+Clipboard.Current = new Win32Clipboard();
+SystemTheme.Current = new Win32SystemTheme();
+SystemTheme.Refresh();
+ContextMenuPresenter.Current = new Win32ContextMenuPresenter(window.Handle, window.LogicalToScreen);
 ```
 
 Under the model the backend registers them and the app never mentions them. A single
 `RegisterServices` replaces the five `Create*`/`Dialogs` members section 7 used to carry, which also means
-a new platform service no longer changes `IXPlatApplicationBackend` and breaks every backend:
+a new platform service no longer changes `IApplicationBackend` and breaks every backend:
 
 ```csharp
-// XPlatUI.Backend.Win32
+// Kolvir.Backend.Win32
 public void RegisterServices(IServiceCollection services) => services
-	    .AddSingleton<IXPlatClipboard, Win32Clipboard>()
-	    .AddSingleton<IXPlatSystemTheme, Win32SystemTheme>()
-	    .AddWindowScoped<IXPlatContextMenuPresenter>((window, _) =>
+	    .AddSingleton<IClipboard, Win32Clipboard>()
+	    .AddSingleton<ISystemTheme, Win32SystemTheme>()
+	    .AddWindowScoped<IContextMenuPresenter>((window, _) =>
 	        new Win32ContextMenuPresenter(
 	            ((Win32WindowBackend)window.Backend).Handle, window.LogicalToScreen));
 ```
@@ -682,44 +682,44 @@ produced. See section 5.10 for the rest of the safe subset.
 
 ### 5.7 What the container is not for
 
-- **Controls are constructed, not resolved.** `new XPlatButton { ... }` stays how the tree is built,
+- **Controls are constructed, not resolved.** `new Button { ... }` stays how the tree is built,
   exactly as `DemoUi` does it. A container that builds controls has to answer "who sets `Parent`?",
   and every answer is worse than `Controls.Add`. Services are collaborators, not the tree.
 - **No service location during paint.** Resolve in a constructor or an event handler. A
   `GetService` inside `OnPaint` is a dictionary lookup per frame and a lifetime bug waiting to
   happen.
 - **The container being thread-safe does not make controls thread-safe.** MEDI's provider is safe to
-  resolve from any thread; `XPlatControl` state is not. `Invoke`/`BeginInvoke` (section 4.1) are still how
+  resolve from any thread; `Control` state is not. `Invoke`/`BeginInvoke` (section 4.1) are still how
   other threads reach the UI.
 - **It does not own the app's architecture.** No convention-based registration, no decorators, no
   interceptors. An app that wants those layers Scrutor or a source generator on top - and should
   read section 5.10 first, because assembly scanning is the one MEDI-adjacent pattern that is not AOT-safe.
 
-### 5.8 Why `XPlatTheme` stays static
+### 5.8 Why `Theme` stays static
 
-`XPlatTheme` is read 67 times across 11 files, nearly all of them inside paint methods, and it is
+`Theme` is read 67 times across 11 files, nearly all of them inside paint methods, and it is
 not really a service: it is branding state, the way `SystemColors` and WPF's merged resource
 dictionaries are process-wide. Injecting it would thread a parameter through every paint pass that
 is the same object for every control in the process, and would make the documented one-liner for
-dark mode - `XPlatTheme.Palette = XPlatPalette.Dark` - impossible without a provider handle.
+dark mode - `Theme.Palette = Palette.Dark` - impossible without a provider handle.
 
 So it stays static and stays out of the container. If per-window theming is ever wanted, the move
-is to make `XPlatTheme` a facade over an `XPlatThemeData` instance in the application scope, with
-`XPlatControl.Theme` defaulting to it: one class plus an accessor, not 67 call sites. That is
+is to make `Theme` a facade over an `ThemeData` instance in the application scope, with
+`Control.Theme` defaulting to it: one class plus an accessor, not 67 call sites. That is
 deliberately not v1.
 
 ### 5.9 What it costs
 
 | Change | Where | Size |
 |---|---|---|
-| `Microsoft.Extensions.DependencyInjection` package reference | `XPlatUI.csproj` | +666 KB on a SkiaSharp AOT binary |
-| `XPlatWindowScope` + `AddWindowScoped` | 1 new file in `XPlatUI/Services/` | ~40 lines |
-| Platform services read from the provider | `XPlatControl`, `XPlatUiHost`, `XPlatTextBox`, `XPlatContextMenu` | 6 call sites |
-| `Services` threaded through host and window | `XPlatUiHost`, `XPlatWindow`, `XPlatApplication` | ~20 lines |
+| `Microsoft.Extensions.DependencyInjection` package reference | `Kolvir.csproj` | +666 KB on a SkiaSharp AOT binary |
+| `WindowScope` + `AddWindowScoped` | 1 new file in `Kolvir/Services/` | ~40 lines |
+| Platform services read from the provider | `Control`, `UiHost`, `TextBox`, `ContextMenu` | 6 call sites |
+| `Services` threaded through host and window | `UiHost`, `Window`, `Application` | ~20 lines |
 | Backends register instead of exposing `Create*` | 3 backends | moves code, no new code |
 | Harness `Program.cs` shrinks | 3 harnesses | ~6 lines each |
 
-The 67 `XPlatTheme` reads are untouched, and that is the whole reason this is affordable now rather
+The 67 `Theme` reads are untouched, and that is the whole reason this is affordable now rather
 than after the control set grows.
 
 Against the hand-written container an earlier draft proposed, the trade is +666 KB and one package
@@ -727,11 +727,11 @@ dependency, in exchange for every MEDI-based package working unchanged, keyed se
 scope validation, `IDisposable`/`IAsyncDisposable` tracking, and a container that is not ours to
 debug. If binary size ever becomes the binding constraint, `Services` is only an `IServiceProvider`,
 so a smaller provider can be swapped in behind it - the assumption is confined to
-`XPlatUI/Services/`.
+`Kolvir/Services/`.
 
 ### 5.10 AOT and trimming guardrails
 
-`XPlatUI` is already `IsAotCompatible`, which turns on `EnableTrimAnalyzer`, `EnableAotAnalyzer` and
+`Kolvir` is already `IsAotCompatible`, which turns on `EnableTrimAnalyzer`, `EnableAotAnalyzer` and
 `EnableSingleFileAnalyzer` for the library; apps get the same by setting `PublishAot`. Three
 additions:
 
@@ -774,19 +774,19 @@ additions:
   </PropertyGroup>
 
   <ItemGroup>
-	<ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
-	<ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
+	<ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+	<ProjectReference Include="..\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
   </ItemGroup>
-  <!-- Microsoft.Extensions.DependencyInjection arrives transitively from XPlatUI (section 5.3). -->
+  <!-- Microsoft.Extensions.DependencyInjection arrives transitively from Kolvir (section 5.3). -->
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
-	<ProjectReference Include="..\XPlatUI.Backend.Win32\XPlatUI.Backend.Win32.csproj" />
+	<ProjectReference Include="..\Kolvir.Backend.Win32\Kolvir.Backend.Win32.csproj" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
-	<ProjectReference Include="..\XPlatUI.Backend.AppKit\XPlatUI.Backend.AppKit.csproj" />
+	<ProjectReference Include="..\Kolvir.Backend.AppKit\Kolvir.Backend.AppKit.csproj" />
   </ItemGroup>
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
-	<ProjectReference Include="..\XPlatUI.Backend.Gtk4\XPlatUI.Backend.Gtk4.csproj" />
+	<ProjectReference Include="..\Kolvir.Backend.Gtk4\Kolvir.Backend.Gtk4.csproj" />
   </ItemGroup>
 </Project>
 ```
@@ -837,9 +837,9 @@ PNGs comparable between runs.
 ### 6.3 Where the sample apps land
 
 The three harnesses become **three thin wrappers over the model** during the migration (section 11) and are
-eventually deleted, replaced by one `XPlatUIDemo.App` project that is multi-TFM per section 6.1. The shared
+eventually deleted, replaced by one `Kolvir.Demo.App` project that is multi-TFM per section 6.1. The shared
 sample control tree and `RenderToPng` are already the cross-platform content and do not change; they
-ended up inside `XPlatUIDemo.App` itself rather than in a project of their own, because a
+ended up inside `Kolvir.Demo.App` itself rather than in a project of their own, because a
 platform-neutral sample library resolves a feature package to its Linux folder even on Windows.
 
 ---
@@ -847,36 +847,36 @@ platform-neutral sample library resolves a feature package to its Linux folder e
 ## 7. Backend contract
 
 ```csharp
-public interface IXPlatApplicationBackend
+public interface IApplicationBackend
 {
-	void Initialize(XPlatApplication application);
+	void Initialize(Application application);
 	int Run();                                  // enter the platform loop; return the exit code
 	void Quit(int exitCode);
 	void Invoke(Action action, bool synchronous);
 
-	IXPlatWindowBackend CreateWindow(XPlatWindow window);
+	IWindowBackend CreateWindow(Window window);
 
 	// Single instance. Returns false when another process owns the instance key, in which case the
 	// backend has already forwarded Options.ResolveCommandLine() to it. Backends that get uniqueness
 	// from the toolkit (GTK4) forward through their own event instead of a pipe.
 	bool TryClaimSingleInstance();
-	event EventHandler<XPlatSecondInstanceEventArgs>? SecondInstance;
+	event EventHandler<SecondInstanceEventArgs>? SecondInstance;
 	event EventHandler? Activated;      // a re-activation the backend observes itself; may never fire
 
 	// Platform services, registered once before the app configures its own. See section 5.6.
 	void RegisterServices(IServiceCollection services);
 
-	IReadOnlyList<XPlatScreen> GetScreens();
+	IReadOnlyList<Screen> GetScreens();
 	void Shutdown();
 }
 ```
 
 ```csharp
-public interface IXPlatWindowBackend : IDisposable
+public interface IWindowBackend : IDisposable
 {
-	XPlatUiHost Host { get; }          // the backend creates and owns the host for its surface
+	UiHost Host { get; }          // the backend creates and owns the host for its surface
 	float ScaleFactor { get; }
-	XPlatScreen? Screen { get; }
+	Screen? Screen { get; }
 
 	string Title { get; set; }
 	SKSize ClientSize { get; set; }            // logical px
@@ -885,10 +885,10 @@ public interface IXPlatWindowBackend : IDisposable
 	SKPoint Location { get; set; }
 	bool Resizable { get; set; }
 	bool TopMost { get; set; }
-	XPlatWindowState State { get; set; }
-	IXPlatWindowBackend? Owner { get; set; }   // applied live, not just at creation
-	XPlatWindowState State { get; set; }
-	XPlatMenuBar? MenuBar { get; set; }         // per window; macOS mirrors the active bar
+	WindowState State { get; set; }
+	IWindowBackend? Owner { get; set; }   // applied live, not just at creation
+	WindowState State { get; set; }
+	MenuBar? MenuBar { get; set; }         // per window; macOS mirrors the active bar
 
 	void Show();
 	void ShowDialog();
@@ -896,7 +896,7 @@ public interface IXPlatWindowBackend : IDisposable
 	void Close();                              // request close; the window raises Closing
 	void SetTitleBarAppearance(bool dark);     // dark chrome on macOS, dark caption on Windows
 
-	// Raised by the platform; forwarded to XPlatWindow.
+	// Raised by the platform; forwarded to Window.
 	event EventHandler? Shown;
 	event EventHandler? CloseRequested;
 	event EventHandler? Closed;
@@ -910,7 +910,7 @@ public interface IXPlatWindowBackend : IDisposable
 
 `RegisterServices` replaces the `CreateSystemTheme` / `CreateClipboard` / `CreateContextMenuPresenter`
 / `Dialogs` members an earlier draft carried. A flat list of `Create*` methods makes every new
-platform service a breaking change to `IXPlatApplicationBackend`; one registration hook does not. It
+platform service a breaking change to `IApplicationBackend`; one registration hook does not. It
 also makes the platform services lazy, so the headless backend never constructs a clipboard it will
 not use.
 
@@ -919,7 +919,7 @@ not use.
 and `SetClientSize` - exactly as the harnesses do now. The model does not interpose on input; it
 only adds the lifecycle, services and loop around it.
 
-**Dialogs and menus are in the contract from day one** (D12, D13). `IXPlatDialogService` arrives
+**Dialogs and menus are in the contract from day one** (D12, D13). `IDialogService` arrives
 through `RegisterServices`, so the dialog implementations live in the backend without widening this
 interface. What the contract does require is that a backend tolerate a **nested loop**: `ShowMessage`,
 `OpenFile` and `ShowDialog` re-enter the platform loop and return only when the modal session ends,
@@ -933,18 +933,18 @@ presentations diverge.
 
 ```
 Main()
-  `- new XPlatApplication(backend, options)
+  `- new Application(backend, options)
 	   |- backend.Initialize(this)          native Skia, DPI awareness, console, app object
 	   |- build the container               ServiceCollection -> backend.RegisterServices ->
 	   |                                    Options.ConfigureServices -> BuildServiceProvider
-	   |- install service slots             XPlatClipboard.Current, XPlatSystemTheme.Current,
-	   |                                    XPlatContextMenuPresenter.Current, XPlatTheme.FontFamily
+	   |- install service slots             Clipboard.Current, SystemTheme.Current,
+	   |                                    ContextMenuPresenter.Current, Theme.FontFamily
   `- app.Run()
 	   |- Startup                            cancellable via Exit()
 	   |- show windows shown before Run()   Shown fires; MainWindow defaults to the first
 	   |- backend.Run()                      <- the platform message loop
 	   |    |- input  -> Host.Process*        routed to the window that received it
-	   |    `- theme  -> XPlatSystemTheme.Refresh() + ThemeChanged + invalidate all windows
+	   |    `- theme  -> SystemTheme.Refresh() + ThemeChanged + invalidate all windows
 	   |- loop ends: Exit() called, ShutdownMode condition met, or the platform quits
 	   |- Exit event                         cancellable
 	   `- teardown, in this order:
@@ -959,7 +959,7 @@ Teardown order matters and is exactly what is hand-coded (differently) in all th
 The macOS `CGImage`/`SKSurface` lifetime rule that the README documents lives inside window
 disposal; centralising it removes a class of crash-on-exit bug.
 
-**Threading.** Everything public on `XPlatApplication`, `XPlatWindow` and `XPlatControl` is
+**Threading.** Everything public on `Application`, `Window` and `Control` is
 UI-thread only. `Invoke`/`BeginInvoke` are the only cross-thread entry points, and `CheckAccess()`
 lets application code assert. No internal locking: the existing library is single-threaded and
 staying that way is a feature.
@@ -969,13 +969,13 @@ staying that way is a feature.
 ## 9. Dialogs
 
 ```csharp
-public interface IXPlatDialogService
+public interface IDialogService
 {
-	XPlatDialogResult ShowMessage(XPlatMessageBoxOptions options, XPlatWindow? owner);
-	string? OpenFile(XPlatFileDialogOptions options, XPlatWindow? owner);
-	string? SaveFile(XPlatFileDialogOptions options, XPlatWindow? owner);
-	string? PickFolder(XPlatFileDialogOptions options, XPlatWindow? owner);
-	XPlatFontSelection? PickFont(XPlatFontDialogOptions options, XPlatWindow? owner);
+	DialogResult ShowMessage(MessageBoxOptions options, Window? owner);
+	string? OpenFile(FileDialogOptions options, Window? owner);
+	string? SaveFile(FileDialogOptions options, Window? owner);
+	string? PickFolder(FileDialogOptions options, Window? owner);
+	FontSelection? PickFont(FontDialogOptions options, Window? owner);
 }
 ```
 
@@ -983,7 +983,7 @@ Backed by `MessageBoxW` / `IFileDialog` / `ChooseFontW` on Windows, `NSAlert` / 
 `NSFontPanel` on macOS, and `Gtk.AlertDialog` / `Gtk.FileDialog` / `Gtk.FontChooserDialog` on GTK.
 `IFileDialog` rather than `GetOpenFileNameW` because only the former can pick a *folder*
 (`FOS_PICKFOLDERS`), and `PickFolder` is one of the calls. `PickFont` returns an
-`XPlatFontSelection` value rather than an `XPlatFont`, so the caller owns the font it builds; null is
+`FontSelection` value rather than an `Font`, so the caller owns the font it builds; null is
 cancellation. The
 service arrives through `RegisterServices` (section 5.6)
 rather than as a nullable member on the backend interface, so the headless backend supplies a scripted
@@ -997,11 +997,11 @@ backends exist is how modal bugs get baked in.
 
 Dialogs are **v1** (D12). Concretely:
 
-- Every backend, headless included, registers an `IXPlatDialogService` in `RegisterServices` (section 5.6).
-- `XPlatWindow.ShowDialog` is a real modal window on all three platforms, not a model-side loop.
+- Every backend, headless included, registers an `IDialogService` in `RegisterServices` (section 5.6).
+- `Window.ShowDialog` is a real modal window on all three platforms, not a model-side loop.
 - The headless backend supplies a scripted service, so modal code paths are testable with no display.
 
-`XPlatApplication.Dialogs` (section 4.1) is the convenience accessor; `Services.GetService<IXPlatDialogService>()`
+`Application.Dialogs` (section 4.1) is the convenience accessor; `Services.GetService<IDialogService>()`
 is the general path a control or view model uses (section 5.5).
 
 ### 9.1 The Windows apartment requirement
@@ -1043,21 +1043,21 @@ Tier 1 **is** the v1 scope (D12, D13).
 | Window creation, show/close, sizing, placement | Currently 759 lines of P/Invoke on Windows alone. |
 | Platform-service bootstrap (Skia native load, clipboard, system theme, context-menu presenter, default font) | Three harnesses each wire it by hand; a missed one is a silent null-ref. |
 | DPI awareness + `ScaleChanged` | `SetProcessDpiAwarenessContext` must run before any window; the model owns "before". |
-| Control-owned timers -> caret blink | Caret blink without an idle clock, and the seam for animation later. `XPlatCaret` is the shared caret; `CreateTimer` is the seam. |
+| Control-owned timers -> caret blink | Caret blink without an idle clock, and the seam for animation later. `Caret` is the shared caret; `CreateTimer` is the seam. |
 | `Screens` + working-area clamping | Default window size/placement is currently platform-specific. |
 | `Exit`/`ExitCode`, `ShutdownMode`, cancellable `Exit` | Needed to make `Run()` return sanely. |
 | `Invoke`/`BeginInvoke`/`CheckAccess` | The only safe cross-thread entry point. |
 | `UnhandledException` | An exception on the UI thread otherwise kills the loop with no hook. Landed after step 6; see section 4.1.1. |
 | Headless backend + `--render` | CI depends on it today; it is the only display-free test path. |
 | Message box + file/folder dialogs | Every app needs "open", "save", "are you sure"; deferring it means apps reach for P/Invoke. v1 (D12). |
-| Menu bar (`XPlatMenuBar`) | macOS needs one to look native *and* to get Cmd+Q, Cmd+W and the Edit-menu clipboard shortcuts; Windows and Linux want it per window. One model, two presentations. v1 (D13). |
+| Menu bar (`MenuBar`) | macOS needs one to look native *and* to get Cmd+Q, Cmd+W and the Edit-menu clipboard shortcuts; Windows and Linux want it per window. One model, two presentations. v1 (D13). |
 
 ### Tier 2 - needed to be usable for real apps
 
 | Feature | Why |
 |---|---|
-| `XPlatTimer` (public) | Animations, polling, debounce - without it every app rolls its own `SetTimer`. |
-| Window icons | Title bar + taskbar; three different APIs. Done: one `XPlatIcon` carrying pixels and a theme name (section 4.3). |
+| `Timer` (public) | Animations, polling, debounce - without it every app rolls its own `SetTimer`. |
+| Window icons | Title bar + taskbar; three different APIs. Done: one `Icon` carrying pixels and a theme name (section 4.3). |
 | `Activated`/`Deactivated`, `TopMost`, `Owner` | Taskbar grouping and modality on Windows; window ordering on macOS. Done, with one caveat: GTK4 cannot keep a window above others (`TopMost`) and Wayland leaves the stacking of an owned window to the compositor. |
 | App-scoped single instance / re-activate | Common enough that every app writes it wrong. Done: `SingleInstance`/`InstanceKey` plus app-level `Activated` and `SecondInstance` (section 4.6). |
 
@@ -1065,16 +1065,16 @@ Tier 1 **is** the v1 scope (D12, D13).
 
 | Feature | Why |
 |---|---|
-| Accelerator/shortcut dispatch | Done: `XPlatShortcut` on `XPlatMenuItem`, dispatched by the window's menu bar before the focused control sees the key (section 4.3). |
-| Drag & drop + file open | OS-level, per platform, frequently requested. Done for drop: `AllowDrop` plus `DragEnter`/`DragOver`/`DragDrop`/`DragLeave` and `XPlatDataObject`; drag *out* is not started by the library yet. |
-| Clipboard image/file formats | `XPlatClipboard` handles text today. |
-| Native file-drop on window | Done: `IDropTarget` on Windows, `NSDraggingDestination` on macOS, `Gtk.DropTarget` on GTK4, all routed by the feature's own `XPlatDragDropRouter`; the core library names none of it (`README.md`, "Drag and drop"). |
+| Accelerator/shortcut dispatch | Done: `Shortcut` on `MenuItem`, dispatched by the window's menu bar before the focused control sees the key (section 4.3). |
+| Drag & drop + file open | OS-level, per platform, frequently requested. Done for drop: `AllowDrop` plus `DragEnter`/`DragOver`/`DragDrop`/`DragLeave` and `DataObject`; drag *out* is not started by the library yet. |
+| Clipboard image/file formats | `Clipboard` handles text today. |
+| Native file-drop on window | Done: `IDropTarget` on Windows, `NSDraggingDestination` on macOS, `Gtk.DropTarget` on GTK4, all routed by the feature's own `DragDropRouter`; the core library names none of it (`README.md`, "Drag and drop"). |
 | IME / dead keys / composed input | Text boxes are unusable for CJK and accented input without it. |
-| Notification / tray / dock badge | Badging is done, as a rung-3 package: `XPlatUI.Feature.Badges` puts a count, a label or a dot on the taskbar button or dock icon, with an urgent nudge, and names nothing in the backends but their public seams (`README.md`, "App badging"). On Linux it is a dock convention rather than a platform API, so a bare GNOME desktop shows nothing. Notifications and the tray are still deferred. |
+| Notification / tray / dock badge | Badging is done, as a rung-3 package: `Kolvir.Feature.Badges` puts a count, a label or a dot on the taskbar button or dock icon, with an urgent nudge, and names nothing in the backends but their public seams (`README.md`, "App badging"). On Linux it is a dock convention rather than a platform API, so a bare GNOME desktop shows nothing. Notifications and the tray are still deferred. |
 | Accessibility (UIA / NSAccessibility / AT-SPI) | Large, and worth designing separately. |
 | Custom window chrome | Only if the default chrome proves insufficient. |
 
-**Explicitly not the model's job** (stays in `XPlatUI`, unchanged): rendering, controls, layout,
+**Explicitly not the model's job** (stays in `Kolvir`, unchanged): rendering, controls, layout,
 measure/arrange, theming palettes, selection, input routing, focus, hit testing. The model wraps the
 library; it does not re-enter it.
 
@@ -1088,17 +1088,17 @@ that touches the painting path) is provably pixel-neutral before anything is del
 
 | # | Step | Scope | Done when |
 |---|---|---|---|
-| 1 | Extract the backend interfaces | `XPlatUI/Platform/*.cs` (interfaces only; the dialog service and the per-window menu bar are part of it) and `XPlatUI/Application/*.cs` (`XPlatScreen`, `XPlatWindowState`, and empty `partial` declarations of `XPlatApplication`/`XPlatWindow`) | Solution builds; no harness references them yet; the nested-loop requirement is documented on `IXPlatDialogService` |
-| 2 | `XPlatApplication` + `XPlatWindow` over a headless backend | `XPlatUI.Backend.Headless`; `XPlatUIDemo.RenderToPng` reimplemented on it | The existing PNG is byte-identical (or pixel-identical) and CI's render job passes |
-| 3 | Move the Win32 harness onto the model | `XPlatUI.Backend.Win32` from `WinFormsApp3/Native/*`; `Program.cs` shrinks to section 2 | Windows harness behaves identically; window resize, DPI, context menus and text input unchanged; message/file dialogs and the menu bar work |
-| 4 | Move the AppKit harness onto the model | `XPlatUI.Backend.AppKit` from `MacHarness/*`; `MacHarness.csproj` -> `net10.0-macos` app project | Mac build + headless render pass on `ssh mac`; no clipping, no memory regression; dialogs and the app menu bar work |
-| 5 | Move the GTK harness onto the model | `XPlatUI.Backend.Gtk4` from `GtkHarness/*` | GTK harness behaves identically; dialogs and the menu bar work |
+| 1 | Extract the backend interfaces | `Kolvir/Platform/*.cs` (interfaces only; the dialog service and the per-window menu bar are part of it) and `Kolvir/Application/*.cs` (`Screen`, `WindowState`, and empty `partial` declarations of `Application`/`Window`) | Solution builds; no harness references them yet; the nested-loop requirement is documented on `IDialogService` |
+| 2 | `Application` + `Window` over a headless backend | `Kolvir.Backend.Headless`; `KolvirDemo.RenderToPng` reimplemented on it | The existing PNG is byte-identical (or pixel-identical) and CI's render job passes |
+| 3 | Move the Win32 harness onto the model | `Kolvir.Backend.Win32` from `WinFormsApp3/Native/*`; `Program.cs` shrinks to section 2 | Windows harness behaves identically; window resize, DPI, context menus and text input unchanged; message/file dialogs and the menu bar work |
+| 4 | Move the AppKit harness onto the model | `Kolvir.Backend.AppKit` from `MacHarness/*`; `MacHarness.csproj` -> `net10.0-macos` app project | Mac build + headless render pass on `ssh mac`; no clipping, no memory regression; dialogs and the app menu bar work |
+| 5 | Move the GTK harness onto the model | `Kolvir.Backend.Gtk4` from `GtkHarness/*` | GTK harness behaves identically; dialogs and the menu bar work |
 | 6 | Replace the three harnesses with one multi-TFM app | section 6.1 project file; delete `WinFormsApp3`, `GtkHarness`, `MacHarness` | Three CI jobs build one project; `dotnet publish` AOT succeeds per OS |
 
 Step 1 is interfaces only, with one concession: the backend contract is written in terms of
-`XPlatApplication` and `XPlatWindow`, and C# has no forward declarations, so those two ship as empty
-`partial` classes. Step 2 fills them in additively rather than replacing them. `IXPlatClipboard`,
-`IXPlatSystemTheme` and `IXPlatContextMenuPresenter` already exist under `Core/` and `Menus/` and are
+`Application` and `Window`, and C# has no forward declarations, so those two ship as empty
+`partial` classes. Step 2 fills them in additively rather than replacing them. `IClipboard`,
+`ISystemTheme` and `IContextMenuPresenter` already exist under `Core/` and `Menus/` and are
 deliberately left where they are; they move into `Platform/` when the backends that implement them
 land, not before.
 
@@ -1116,13 +1116,13 @@ Three deviations from the sketches above, all deliberate:
 
 - **`Closing` uses `CancelEventArgs`.** `EventHandler<CancelEventArgs>`, not a custom type, so the
   handler signature matches WinForms and needs no using-directive archaeology.
-- **`ShowDialog` returns `XPlatDialogResult` and the window has a `DialogResult` property** defaulting
+- **`ShowDialog` returns `DialogResult` and the window has a `DialogResult` property** defaulting
   to `Cancel`, so an early-return path cannot be mistaken for `OK`.
-- **`XPlatWindow.ScaleChanged` re-runs `PerformLayout()` and `Invalidate()` before raising the event**,
+- **`Window.ScaleChanged` re-runs `PerformLayout()` and `Invalidate()` before raising the event**,
   because a scale change invalidates every cached measurement in the tree.
 
-The headless backend deliberately registers no `IXPlatSystemTheme`. With no display there is no
-system appearance to report, so `XPlatTheme` keeps its default and a headless render never depends on
+The headless backend deliberately registers no `ISystemTheme`. With no display there is no
+system appearance to report, so `Theme` keeps its default and a headless render never depends on
 the machine it runs on. That is also why the Linux render is now byte-identical with and without
 `DISPLAY` set: after the `--render` fix in section 6.2 the headless path never touches GTK.
 
@@ -1131,15 +1131,15 @@ the machine it runs on. That is also why the Linux render is now byte-identical 
 Step 3 was split in two. **3a** moves the Win32 harness onto the model with no new features; **3b**
 adds `Win32DialogService` and the menu bar. What follows covers 3a.
 
-`XPlatUI.Backend.Win32` is a new `net10.0-windows` project holding everything that used to live in
+`Kolvir.Backend.Win32` is a new `net10.0-windows` project holding everything that used to live in
 `WinFormsApp3/Native/`. `HarnessWindow.cs` split into `Win32WindowBackend` (the `HWND`, the message
 loop callbacks and the Skia surface) and `Win32ApplicationBackend` (the message loop, the `Invoke`
 queue, the nested modal loop and service registration). `Program.cs` shrank to the section 2 shape, and
-`DemoUi`/`Form1`/`XPlatSurface`/`WinFormsClipboard` are gone: the harness is no longer a WinForms
+`DemoUi`/`Form1`/`Surface`/`WinFormsClipboard` are gone: the harness is no longer a WinForms
 application at all.
 
 The render stayed byte-identical (89,937 bytes dark, 89,199 light), which took one non-obvious fix:
-`DemoUi.RenderToPng` builds a `HeadlessApplicationBackend`, which registers no `IXPlatSystemTheme`,
+`DemoUi.RenderToPng` builds a `HeadlessApplicationBackend`, which registers no `ISystemTheme`,
 so on a dark-mode machine the palette came out light. `Win32ApplicationBackend` therefore exposes its
 `SystemTheme` and the `--render` branch hands it to the render path. The alternative - letting the
 render path sniff the OS itself - would have put platform code back in the demo.
@@ -1147,18 +1147,18 @@ render path sniff the OS itself - would have put platform code back in the demo.
 Four behaviours changed on purpose:
 
 - **`UpdateHostSize()` now asks the host, not its own field.** The old version skipped the update when
-  the new size matched `_clientSize`, and `_clientSize` *always* matched: `XPlatWindow.ClientSize`
+  the new size matched `_clientSize`, and `_clientSize` *always* matched: `Window.ClientSize`
   assigns through the backend setter before the `HWND` exists, and that setter stores the value and
   returns early. So the very first `UpdateHostSize()` no-opped, `_host.ClientSize` stayed 0x0, and
   the control tree was never laid out - a blank window. The host is the authority on whether it has
   been told; the field is not.
 - **The caret blink timer moved, and later moved back.** The Win32 harness's own `WM_TIMER` went
   away in step 3 in favour of one application-wide tick. It came back as a timer the caret owns
-  (section 4.5) - `XPlatCaret`, which the text box builds and positions - because the shared tick ran
+  (section 4.5) - `Caret`, which the text box builds and positions - because the shared tick ran
   whether or not anything wanted it and quantised the blink to the tick's interval.
 - **`WM_CLOSE` raises `CloseRequested` and returns 0** instead of calling `DestroyWindow`. Closing is
   now a decision the model makes (D7's shutdown modes), so the backend may not act on it alone.
-- **`Win32MenuWindow` uses a per-window class name** (`XPlatUI.Window.N`). `UnregisterClassW` on a
+- **`Win32MenuWindow` uses a per-window class name** (`Kolvir.Window.N`). `UnregisterClassW` on a
   shared name would break every other window still using it.
 
 Two lessons for anyone writing visual tests against this thing, both learned the hard way:
@@ -1181,7 +1181,7 @@ monitors, which needs a second monitor.
 
 - **Source-generated COM, not `[ComImport]`.** NativeAOT trims built-in COM interop away, so the
   `IFileDialog` declarations are `[GeneratedComInterface]` (`Win32ComInterfaces.cs`). The cost is
-  `<AllowUnsafeBlocks>` in `XPlatUI.Backend.Win32`, because the generated marshallers work in pointers
+  `<AllowUnsafeBlocks>` in `Kolvir.Backend.Win32`, because the generated marshallers work in pointers
   (`ComInterfaceMarshaller<IFileDialog>.ConvertToManaged((void*)unknown)`).
 - **`SetFileTypes` cannot express "an array of structs that each hold two strings".** `COMDLG_FILTERSPEC`
   is `{ LPCWSTR name; LPCWSTR spec; }`, so `ComDlgFilterSpec` holds raw `IntPtr`s allocated with
@@ -1189,8 +1189,8 @@ monitors, which needs a second monitor.
   with `;`, which is what the dialog expects anyway.
 - **`FOS_PICKFOLDERS` is incompatible with the file-only flags.** It is applied on its own; combining
   it with `FOS_FILEMUSTEXIST` rejects every folder.
-- **Control code needs its window to parent a dialog.** `XPlatUiHost` gained `Window` (assigned by
-  `XPlatWindow`) and `XPlatControl` gained `Window`, so `control.Window?.Application.Dialogs` reaches
+- **Control code needs its window to parent a dialog.** `UiHost` gained `Window` (assigned by
+  `Window`) and `Control` gained `Window`, so `control.Window?.Application.Dialogs` reaches
   the service from anywhere in a control tree without threading a parameter through the layout code.
 - **`FinalReleaseComObject` is not for source-generated wrappers, and catching it is not enough.**
   What `ComInterfaceMarshaller` hands back is a `System.Runtime.InteropServices.Marshalling.ComObject`:
@@ -1235,7 +1235,7 @@ platform's own previous run):
 
 ### Step 4 notes
 
-`XPlatUI.Backend.AppKit` is a new `net10.0-macos` project holding the seven `MacHarness/*.cs` files
+`Kolvir.Backend.AppKit` is a new `net10.0-macos` project holding the seven `MacHarness/*.cs` files
 under new names: `MacUiView` -> `AppKitSkiaView`, `MacKeyMap` -> `AppKitKeyMap`, `MacClipboard` ->
 `AppKitClipboard`, `MacContextMenuPresenter` -> `AppKitContextMenuPresenter`, `MacSystemTheme` ->
 `AppKitSystemTheme`, `MacMenuBar` -> `AppKitMenuBar`, and `MacAppDelegate` split between
@@ -1260,7 +1260,7 @@ discoverable by reading the code:
   wrong name is silently a *new* method.
 - **`-stop:` does not end the run loop.** It clears a flag that `-run` checks between events, and the
   loop is parked inside the run-loop source waiting for an event, so the flag is never read again.
-  `XPlatApplication.Exit` therefore looked like it worked and the process stayed alive until it was
+  `Application.Exit` therefore looked like it worked and the process stayed alive until it was
   killed. The fix is to post an empty `NSEventType.ApplicationDefined` event immediately afterwards,
   which is what `WakeUp()` does. Deferring the call with `BeginInvokeOnMainThread` does not help: the
   deferral runs, and the loop is still parked.
@@ -1287,7 +1287,7 @@ configuration properties set afterwards.
 `osascript -e 'tell application "MacHarness" to quit'` reports *"User canceled. (-128)"* even though
 the quit works. That is correct: the backend answers `ApplicationShouldTerminate` with `Cancel` on
 purpose, because the model owns shutdown (D7), so AppKit's own termination is declined and the loop
-is ended by `XPlatApplication.Exit` instead.
+is ended by `Application.Exit` instead.
 
 Verification is limited by the machine: `screencapture` fails over `ssh` (no Screen Recording
 permission) and `osascript` UI scripting is refused (no assistive access), so nothing on screen can be
@@ -1312,7 +1312,7 @@ respond.
 
 ### Step 5 notes
 
-`XPlatUI.Backend.Gtk4` is a new `net10.0` project holding the five `GtkHarness/*.cs` files under new
+`Kolvir.Backend.Gtk4` is a new `net10.0` project holding the five `GtkHarness/*.cs` files under new
 names: `GtkUiSurface` -> `Gtk4SkiaView`, `GtkKeyMap` -> `Gtk4KeyMap`, `GtkClipboard` ->
 `Gtk4Clipboard`, `GtkContextMenuPresenter` -> `Gtk4ContextMenuPresenter`, `GtkSystemTheme` ->
 `Gtk4SystemTheme`. `Gtk4MenuBar` and `Gtk4MenuItemWidget` are the per-window menu strip that used to
@@ -1327,13 +1327,13 @@ are unchanged, which is expected - nothing outside `GtkHarness/` and the new pro
 GTK4 is the platform where the model's shape fought the toolkit hardest. Everything below compiled
 fine and then misbehaved at run time:
 
-- **A window cannot be created before `GApplication::startup`.** The model calls `XPlatWindow.Show()`
-  before `XPlatApplication.Run()`, so `Gtk4WindowBackend.Show` only *records* the intent
+- **A window cannot be created before `GApplication::startup`.** The model calls `Window.Show()`
+  before `Application.Run()`, so `Gtk4WindowBackend.Show` only *records* the intent
   (`_presentPending`, the owner) and returns; the `Gtk.ApplicationWindow` is created and presented
   from the `activate` signal. Doing it the other way round still produced a window, but on stderr:
   *"New application windows must be added after the GApplication::startup signal has been emitted"*.
 - **`Gtk.Application` must be held for the whole run.** GTK quits when the last window is destroyed,
-  which silently overrides `XPlatShutdownMode.OnExplicitExit`. `Run()` calls `Hold()` and
+  which silently overrides `ShutdownMode.OnExplicitExit`. `Run()` calls `Hold()` and
   `Shutdown()` calls `Release()`, so the application outlives its windows and the shutdown mode
   decides when the process ends.
 - **GTK has no run-loop modes and no stop flag.** Modal windows use a nested `GLib.MainLoop`
@@ -1343,7 +1343,7 @@ fine and then misbehaved at run time:
   queued work - including control timers - running inside a modal loop or a dialog pump.
 - **`Gtk.Window.OnCloseRequest` returning `true` vetoes destruction.** That is how the model's
   cancellable `Closing` gets to run; the backend raises `CloseRequested` and lets the model decide.
-- **GTK4 removed `gtk_window_set_position`.** `XPlatWindow.Location` is recorded and ignored, and
+- **GTK4 removed `gtk_window_set_position`.** `Window.Location` is recorded and ignored, and
   window placement is left to the compositor. `TopMost` and `MaximumClientSize` are likewise stored
   only, because the toolkit offers nothing to apply them with. This is the one place the GTK4
   backend is less capable than the other two, and the XML docs say so where a caller would look.
@@ -1375,7 +1375,7 @@ session.
 
 ### Step 6 notes
 
-`XPlatUIDemo.App` replaces `WinFormsApp3`, `GtkHarness` and `MacHarness`. It is one project with one
+`Kolvir.Demo.App` replaces `WinFormsApp3`, `GtkHarness` and `MacHarness`. It is one project with one
 `Program.cs`, and it builds a different target framework on each OS:
 
 ```xml
@@ -1391,17 +1391,17 @@ Three things follow from that, and each was load-bearing rather than cosmetic:
   the macOS build. Selecting one framework per OS keeps the outer build single-TFM.
 - **A portable `net10.0` build on a Mac would compile the wrong branch.** `WINDOWS` and `MACOS` are
   both undefined there, so `Program.cs` would fall through to the GTK code and link
-  `XPlatUI.Backend.Gtk4`. One framework per OS keeps the `#if` blocks honest instead of relying on
+  `Kolvir.Backend.Gtk4`. One framework per OS keeps the `#if` blocks honest instead of relying on
   the developer to remember a `-f` switch.
-- **The solution can therefore list the app unconditionally.** `XPlatUI.slnx` lists every project,
-  including the macOS-only backend, and `XPlatUIDemo.App` resolves to a different TFM on each
+- **The solution can therefore list the app unconditionally.** `Kolvir.slnx` lists every project,
+  including the macOS-only backend, and `Kolvir.Demo.App` resolves to a different TFM on each
   machine, which is what makes "three CI jobs build one project" true rather than aspirational.
 
-`AssemblyName` is `XPlatUIDemoApp`, not `XPlatUIDemo`: the macOS SDK names the `.app` bundle after the
-assembly, and the name was chosen when the sample control tree was a separate `XPlatUIDemo` library
-that would have collided with it. That library has since been folded into `XPlatUIDemo.App`, but the
+`AssemblyName` is `KolvirDemoApp`, not `KolvirDemo`: the macOS SDK names the `.app` bundle after the
+assembly, and the name was chosen when the sample control tree was a separate `KolvirDemo` library
+that would have collided with it. That library has since been folded into `Kolvir.Demo.App`, but the
 name stays because `Info.plist`, `app.manifest` and the platform workflows all use it.
-`Info.plist` uses `CFBundleExecutable` `XPlatUIDemoApp` and `CFBundleIdentifier` `com.xplatui.demo`,
+`Info.plist` uses `CFBundleExecutable` `KolvirDemoApp` and `CFBundleIdentifier` `dev.kolvir.demo`,
 and `app.manifest` keeps the PerMonitorV2 DPI declaration that used to live in `WinFormsApp3`.
 
 The three harnesses did not agree on the design client size and the difference is real, not drift.
@@ -1413,28 +1413,28 @@ Ordering in `Main` is unchanged from step 5 and still matters. `--render` is han
 through the headless backend, so it never touches GTK; only the live GTK path calls
 `Gtk.Module.Initialize()`, and it does so *before* options are parsed because
 `Gtk4SystemTheme.PreferredFontFamily()` reads `Gtk.Settings`. On Windows the render path has no
-`XPlatApplication` to install `IXPlatSystemTheme`, so `ApplyAppearanceOverride` assigns
-`Win32ApplicationBackend().SystemTheme` to `XPlatSystemTheme.Current` directly; macOS instead takes the
+`Application` to install `ISystemTheme`, so `ApplyAppearanceOverride` assigns
+`Win32ApplicationBackend().SystemTheme` to `SystemTheme.Current` directly; macOS instead takes the
 static `AppKitSystemTheme.PreferredFontFamily()`, which needs no application object.
 
 Verified after the move:
 
 - Solution build on Windows: **0 errors**, and the only warning in the whole solution is the
   pre-existing `GirCore1007` on `Gtk4DialogService.cs` (obsolete `AlertDialog` constructor).
-- `dotnet build XPlatUIDemo.App/XPlatUIDemo.App.csproj -c Debug -r osx-arm64
+- `dotnet build Kolvir.Demo.App/Kolvir.Demo.App.csproj -c Debug -r osx-arm64
   -p:ValidateXcodeVersion=false` on `ssh mac`: **0 warnings, 0 errors**.
 - All four render baselines are byte-identical to their recorded values: Windows 93,727 dark /
   92,945 light, macOS 163,795 / 164,747, Linux 122,364 / 123,501.
-- The macOS bundle launches (`open XPlatUIDemoApp.app`) and reports a 1280x852 window - the 820-point
-  client plus the 32-point title bar - under bundle id `com.xplatui.demo`.
+- The macOS bundle launches (`open KolvirDemoApp.app`) and reports a 1280x852 window - the 820-point
+  client plus the 32-point title bar - under bundle id `dev.kolvir.demo`.
 - `dotnet publish -p:PublishProfile=FolderProfile` from a `vcvars64` prompt emits exactly two files:
-  `XPlatUIDemoApp.exe` (8,839,168 bytes, of which 5,452,785 is the embedded gzip of
-  `libSkiaSharp.dll`) and `XPlatUIDemoApp.pdb`. No `libSkiaSharp.dll` is published. Running the
+  `KolvirDemoApp.exe` (8,839,168 bytes, of which 5,452,785 is the embedded gzip of
+  `libSkiaSharp.dll`) and `KolvirDemoApp.pdb`. No `libSkiaSharp.dll` is published. Running the
   executable from that directory renders 93,727 / 92,945 bytes - the baselines again, which is the
   proof that `SkiaNativeLoader` extracted and loaded the embedded native library - and launching it
-  normally opens a live window titled `XPlat UI - Win32` with a 38 MB working set.
+  normally opens a live window titled `Kolvir - Win32` with a 38 MB working set.
 
-`GtkHarness` also held two zero-byte files, `GtkBackend.cs` and `XPlatCanvas.cs`, left behind by an
+`GtkHarness` also held two zero-byte files, `GtkBackend.cs` and `Canvas.cs`, left behind by an
 earlier rename and referenced by nothing; they went with the rest of the directory.
 
 One packaging fix came out of the move: `Properties/PublishProfiles/FolderProfile.pubxml` is ignored
@@ -1450,13 +1450,13 @@ choices worth recording are these:
 - **`Handled` defaults to false.** WinForms' `Application.ThreadException` swallows by default, which
   is why so many WinForms apps "recover" from a fault into a corrupt UI. Opting in to survival makes
   the unsafe case the one that needs code.
-- **`XPlatApplication.HandleNativeBoundary` is static, and the instance method behind it is private.**
+- **`Application.HandleNativeBoundary` is static, and the instance method behind it is private.**
   A backend has to be able to report a fault when no application exists - `--render` drives a bare
-  `XPlatUiHost` - and in that case it rethrows to its caller. Making the entry point static means the
+  `UiHost` - and in that case it rethrows to its caller. Making the entry point static means the
   backends need no null check and no special access to the core assembly.
-- **`XPlatUiHost` and `XPlatWindow` are guarded in the core, not per backend.** `ProcessMouseMove`,
+- **`UiHost` and `Window` are guarded in the core, not per backend.** `ProcessMouseMove`,
   `ProcessMouseDown`, `ProcessMouseUp`, `ProcessMouseLeave`, `ProcessContextMenu`, `ProcessKeyDown`,
-  `ProcessKeyUp`, `ProcessTextInput`, `Paint` and the `XPlatWindow.OnBackend*` handlers
+  `ProcessKeyUp`, `ProcessTextInput`, `Paint` and the `Window.OnBackend*` handlers
   are the funnels every platform's native callback goes through, so one guard per funnel covers
   Windows, macOS and Linux at once. Only the Win32 `WindowProc` needed a backend-local guard, because
   it sees messages that never reach the host.
@@ -1470,7 +1470,7 @@ Verified with a throwaway headless harness (19 assertions, since deleted): a fau
 with exit code 1 and still runs `Exiting`; the same fault with `Handled = true` returns 0; a fault in
 `BeginInvoke` work and in `Exiting` both rethrow; a synchronous `Invoke` fault reaches its waiting
 caller and is *not* reported; a throwing handler leaves the original exception intact and does not stop
-the next handler; a standalone `XPlatUiHost.Paint` still throws to its caller; and a control that throws
+the next handler; a standalone `UiHost.Paint` still throws to its caller; and a control that throws
 in `OnMouseDown` is reported through the application.
 
 The change is pixel-neutral on all three platforms. Windows stayed at 93,727 / 92,945 bytes; Linux at
@@ -1487,7 +1487,7 @@ two were md5-identical. The Linux build reported 1 warning and 0 errors, the mac
 
 | # | Decision | Status | Notes |
 |---|---|---|---|
-| D1 | Type names `XPlatApplication` / `XPlatWindow` | **Settled** | Confirmed. Supporting types follow the same `XPlat` + noun rule; `XPlatUiHost` keeps its name. |
+| D1 | Type names `Application` / `Window` | **Settled** | Confirmed. Supporting types follow the same `Kolvir` + noun rule; `UiHost` keeps its name. |
 | D2 | Backend as separate projects | **Settled** | Confirmed. Folders would put `net10.0-macos` code in a `net10.0` assembly, which cannot compile, and one multi-TFM backend project would force the macOS workload onto Linux machines (section 6). |
 | D3 | `#if` selection, no reflection | **Settled** | Confirmed. Reflection discovery breaks under trimming/AOT; the explicit factory is four lines and always visible in the call stack. |
 | D4 | Application owns a service container; statics become fallbacks | **Settled** | Confirmed. Six call sites, not every control (section 5.9). |
@@ -1504,10 +1504,10 @@ this document is still open; what remains is implementation, sequenced by sectio
 
 One assumption is worth stating explicitly, because it is a design choice rather than a fact:
 
-**`XPlatWindow` is one type with a backend, not a partial type per platform.** D2 and D3 settle the
+**`Window` is one type with a backend, not a partial type per platform.** D2 and D3 settle the
 backend design and keep the model in `net10.0`; the partial-class design is what WinForms/WPF/Avalonia
 do and gives each platform room to expose platform-only members (an `NSWindow` handle, an `HWND`).
 Partial classes also make the headless backend awkward, since it would need its own partial file for
 every platform type it deliberately does not have. The escape hatch that argument was reaching for is
-`window.Backend` (section 4.3): a backend casts it to its own `IXPlatWindowBackend` and reaches `NSWindow` or
+`window.Backend` (section 4.3): a backend casts it to its own `IWindowBackend` and reaches `NSWindow` or
 `HWND` without the model ever exposing a platform type.

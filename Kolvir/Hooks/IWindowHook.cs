@@ -1,0 +1,32 @@
+namespace Kolvir;
+
+/// <summary>
+/// Per-window work that has to run at a point in a window's life that no event covers, such as
+/// attaching a native handle once it exists and detaching it before the handle dies.
+/// </summary>
+/// <remarks>
+/// <para>
+/// A window hook is a window-scoped service, so each window gets its own instance and per-window
+/// state lives on the hook instead of in a table keyed by window. It is disposed with the window's
+/// scope, after the window's own <see cref="WindowPhase.Disposed"/> phase.
+/// </para>
+/// <para>
+/// Register one with <see cref="ServiceCollectionExtensions.AddWindowHook"/>, or by name
+/// through <see cref="ApplicationOptions.ConfigureServices"/> using
+/// <see cref="ServiceCollectionExtensions.AddWindowScoped{TService}"/>. Either way the
+/// registration is the only thing that names the concrete type, which is what keeps a feature out
+/// of an application that never opts in.
+/// </para>
+/// <para>
+/// Hooks run on the UI thread. A hook that throws reaches
+/// <see cref="Application.AddUnhandledExceptionHandler"/> rather than unwinding into a platform
+/// callback.
+/// </para>
+/// </remarks>
+public interface IWindowHook
+{
+    /// <summary>Called once per phase.</summary>
+    /// <param name="phase">The phase being entered.</param>
+    /// <param name="window">The window it belongs to.</param>
+    void OnPhase(WindowPhase phase, Window window);
+}

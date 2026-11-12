@@ -1,0 +1,61 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The portable test suite: everything here runs on a machine with no display, through the
+       headless backend. It targets net10.0 rather than a platform framework on purpose - a test that
+       needed net10.0-windows could not run on Linux, and the point of the suite is that the same
+       tests run on all three CI runners. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <!-- The tests are not part of the shipped library, so the trim/AOT analyzers that
+         Directory.Build.props turns on for every consumer of Kolvir buy nothing here. -->
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- SkiaSharp's main package carries the Win32 native library only; macOS and Linux are separate
+       packages, and in a platform application the backend brings the one its own platform needs.
+       The test project has no backend to borrow it from, so it takes the native library itself.
+       This is a test-only dependency and changes nothing about the shipped library. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+    <ProjectReference Include="..\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+    <!-- Kolvir.Backend (the selector) is deliberately not referenced. It lists all three platform
+         frameworks unconditionally, so restoring it needs the macOS workload on the machine doing
+         the restore - true on a developer's machine here, false on a stock GitHub runner. The suite
+         needs the headless backend and nothing else, and a reference that only works where a
+         workload happens to be installed is worse than no reference. -->
+  </ItemGroup>
+
+  <!-- The one embedded face is the demo's, reused rather than copied: one .ttf in the repository
+       means the tests and the sample can never disagree about what the pinned font is. IBM Plex
+       Sans is OFL 1.1; the licence is Kolvir.Demo.App/Fonts/OFL.txt. -->
+  <ItemGroup>
+    <EmbeddedResource Include="..\Kolvir.Demo.App\Fonts\IBMPlexSans-Regular.ttf"
+                      LogicalName="Kolvir.Tests.Fonts.IBMPlexSans-Regular.ttf" />
+  </ItemGroup>
+
+</Project>

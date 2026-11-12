@@ -67,19 +67,19 @@ same `Add-Type` trick gives you the rest: `GetWindowRect`, `ClientToScreen`, `Se
 ### Build and run
 
 ```powershell
-dotnet build XPlatUI.slnx -v q --nologo            # everything, all target frameworks
-dotnet build XPlatUIDemo.App\XPlatUIDemo.App.csproj # just the sample
+dotnet build Kolvir.slnx -v q --nologo            # everything, all target frameworks
+dotnet build Kolvir.Demo.App\Kolvir.Demo.App.csproj # just the sample
 ```
 
 The solution builds every framework of every feature package, so it needs the `macos` workload. It is
 installed here; on a machine without it, build the specific project instead.
 
 ```powershell
-$exe = "XPlatUIDemo.App\bin\Debug\net10.0-windows\XPlatUIDemoApp.exe"
+$exe = "Kolvir.Demo.App\bin\Debug\net10.0-windows\KolvirDemoApp.exe"
 Start-Process -FilePath $exe -PassThru | ForEach-Object { $_.Id }   # remember the pid
 ```
 
-The window title is `XPlat UI - Win32`. Find it with `Get-Process -Name XPlatUIDemoApp` and read
+The window title is `Kolvir - Win32`. Find it with `Get-Process -Name KolvirDemoApp` and read
 `MainWindowHandle`: `FindWindow` with the title failed here, and the handle from the process is what the
 user actually sees.
 
@@ -91,7 +91,7 @@ The window does have a minimum size - asking for 1900 x 1050 comes back about 15
 `SetWindowPos` as a request:
 
 ```powershell
-[IntPtr]$hwnd = (Get-Process -Name XPlatUIDemoApp).MainWindowHandle
+[IntPtr]$hwnd = (Get-Process -Name KolvirDemoApp).MainWindowHandle
 [Native.Pos]::SetWindowPos($hwnd, [IntPtr]::Zero, 10, 20, 1900, 1500, 0x0004)   # SWP_NOZORDER
 ```
 
@@ -167,11 +167,11 @@ start with `export DISPLAY=:10.0`.
 ### Build and run
 
 ```sh
-cd ~/src/XPlatUI
+cd ~/src/Kolvir
 git fetch -q origin && git checkout -q -B <branch> origin/<branch>
-dotnet build XPlatUIDemo.App/XPlatUIDemo.App.csproj -v q --nologo
-nohup ./XPlatUIDemo.App/bin/Debug/net10.0/XPlatUIDemoApp > /tmp/demo.log 2>&1 &
-xwininfo -root -tree | grep -i "xplat ui"       # handle + geometry, e.g. 0x3200004 2560x1520+28+98
+dotnet build Kolvir.Demo.App/Kolvir.Demo.App.csproj -v q --nologo
+nohup ./Kolvir.Demo.App/bin/Debug/net10.0/KolvirDemoApp > /tmp/demo.log 2>&1 &
+xwininfo -root -tree | grep -i "kolvir -"       # handle + geometry, e.g. 0x3200004 2560x1520+28+98
 ```
 
 Run the binary from a terminal you can see, or the demo's GTK warnings go to a log nobody reads - and
@@ -186,7 +186,7 @@ xwd -id 0x3200004 -silent | ffmpeg -y -loglevel error -i - /tmp/window.png   # o
 xwd -root -silent   | ffmpeg -y -loglevel error -i - /tmp/screen.png         # the whole screen
 ```
 
-`xwd` needs the window **id**; `xwininfo -root -tree | grep -i xplat` has it. Do not be surprised when
+`xwd` needs the window **id**; `xwininfo -root -tree | grep -i kolvir` has it. Do not be surprised when
 the image is bigger than the screen: the window's own size is what gets captured.
 
 **The panel and the dock cannot be captured this way.** GNOME composites its own UI outside any X11
@@ -269,7 +269,7 @@ export YDOTOOL_SOCKET=/run/user/1000/.ydotool_socket
 
 Same as `linux`. Note that the sample is single-instance: launching it twice only activates the window
 that is already open, so a "new build didn't change anything" is usually the old process still running.
-Check `pgrep -f XPlatUIDemoApp` before believing a build.
+Check `pgrep -f KolvirDemoApp` before believing a build.
 
 ### Screenshots
 
@@ -360,11 +360,12 @@ UI (Alt+Tab, the overview) from a script.
 
 `MACOS-TESTRUN.md` is the document for building and launching on this machine; it is not repeated here.
 In short: export `PATH="$HOME/.dotnet:$PATH"`, build with `-p:ValidateXcodeVersion=false`, and run the
-**`.app` bundle** (`bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app`) with `open` - there is no
+**`.app` bundle** (`bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app`) with `open` - there is no
 loose executable beside it.
 
-The clone is `~/src/XPlatUI`; throwaway harnesses live under `~/badge` (`~/badge/src` is a second clone,
-`~/badge/harness` the harness project that references it).
+The clone is `~/src/Kolvir`, on all three Unix hosts. A throwaway harness or second clone goes in a
+directory you name for the job (`~/verify<n>`, `~/work<n>`) and is removed when the job is done; nothing
+is kept there between jobs, so do not assume a previous harness still exists.
 
 ### Screenshots
 
@@ -426,8 +427,8 @@ setup.
 - `StartupWMClass` must be the window's WM class, which for a GTK 4 app is the **binary name**, not the
   application id. An entry that gets this wrong can leave the app with no dock item at all, which looks
   exactly like a badge that does not work.
-- `XPlatUIDemo.App/install-badge-desktop-entry.sh` writes the sample's entry with the build's absolute
-  path; `XPlatUIDemo.App/com.xplatui.ixplatui.desktop` is the file it installs. Remove the entry when
+- `Kolvir.Demo.App/install-badge-desktop-entry.sh` writes the sample's entry with the build's absolute
+  path; `Kolvir.Demo.App/dev.kolvir.ikolvir.desktop` is the file it installs. Remove the entry when
   you are done.
 
 ### Files and scripts you ship to a host

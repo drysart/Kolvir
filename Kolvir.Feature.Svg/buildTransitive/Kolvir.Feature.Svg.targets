@@ -1,0 +1,129 @@
+<Project>
+
+  <!-- Build assets for anything that references Kolvir.Feature.Svg. A NuGet consumer gets this
+	   automatically, because it is packed into buildTransitive/; this repository's own projects use a
+	   ProjectReference, which imports nothing, so Directory.Build.targets imports it explicitly. Both
+	   routes end up in the same place, which is why the file lives here rather than in an app.
+
+	   The feature renders SVG through Svg.Skia, which shapes <text> with HarfBuzzSharp - a native
+	   library of its own, separate from SkiaSharp's. A NativeAOT publish emits a single native
+	   executable, so that library cannot simply sit next to it either. These targets compress the copy
+	   the build already resolved for this platform and embed it in the consuming application, which
+	   HarfBuzzNativeLoader extracts and loads before the first shaped text. Set
+	   $(EmbedHarfBuzzSharpNative) to false to leave the library as a loose file beside the executable
+	   instead. -->
+
+  <PropertyGroup>
+	<!-- Decided once, here, so every target below shares one condition. This mirrors
+		 Kolvir/buildTransitive/Kolvir.targets, including the reason the test is shaped this way:
+
+		 OutputType is part of the test because PublishAot can arrive as a global property, and a
+		 global property reaches every project the publish touches: a class library that references
+		 the feature is then built with PublishAot set while having no runtime identifier and
+		 therefore no native assets to find. Only an application has anything to embed a library in.
+
+		 macOS is excluded, as it is in the core targets, but for a measured reason rather than a
+		 copied one: a Kolvir macOS application is a net10.0-macos publish, which is an .app
+		 bundle even with PublishAot on, and the AOT image records
+		 @executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib as a load-time dependency
+		 (otool -L shows the LC_LOAD_DYLIB). Removing it from the bundle stops dyld before any
+		 managed code runs, so a resolver could not help. Extraction itself does work on macOS - a
+		 plain net10.0 Mach-O AOT build loads the cached dylib and shapes text - so the exclusion is
+		 about the bundle, not about the platform. README.md records both measurements. -->
+	<_KolvirFeatureSvgEmbedHarfBuzzSharpNative
+		Condition="'$(_KolvirFeatureSvgEmbedHarfBuzzSharpNative)' == ''
+				   and '$(PublishAot)' == 'true'
+				   and '$(EmbedHarfBuzzSharpNative)' != 'false'
+				   and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')
+				   and !$([MSBuild]::IsOSPlatform('osx'))">true</_KolvirFeatureSvgEmbedHarfBuzzSharpNative>
+  </PropertyGroup>
+
+  <UsingTask TaskName="KolvirFeatureSvgGZipFile"
+			 TaskFactory="RoslynCodeTaskFactory"
+			 AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+	<ParameterGroup>
+	  <Source ParameterType="System.String" Required="true" />
+	  <Destination ParameterType="System.String" Required="true" />
+	</ParameterGroup>
+	<Task>
+	  <Using Namespace="System.IO" />
+	  <Using Namespace="System.IO.Compression" />
+	  <Code Type="Fragment" Language="cs"><![CDATA[
+		using (var input = File.OpenRead(Source))
+		using (var output = File.Create(Destination))
+		using (var gzip = new GZipStream(output, CompressionLevel.Optimal))
+		{
+			input.CopyTo(gzip);
+		}
+	  ]]></Code>
+	</Task>
+  </UsingTask>
+
+  <!-- Finds the HarfBuzz library the package graph resolved for this platform and registers the
+	   compressed copy as an embedded resource. It hooks CreateManifestResourceNames for the same
+	   reason the core targets do: that is what turns @(EmbeddedResource) into compiler inputs.
+
+	   The file name is discovered rather than configured per target framework, and the extension is
+	   checked too, because the same package ships symbol files with the same stem and only the
+	   library itself is wanted.
+
+	   A missing library is not an error here, unlike in the core targets. HarfBuzz is optional per
+	   platform - on Windows libSkiaSharp shapes text itself - so an application is free to exclude
+	   the native asset packages, and the feature then carries no native of its own. The loader finds
+	   no archive and leaves the platform's default probing alone. -->
+  <Target Name="_KolvirFeatureSvgLocateHarfBuzzSharpNative"
+		  Condition="'$(_KolvirFeatureSvgEmbedHarfBuzzSharpNative)' == 'true'"
+		  DependsOnTargets="ResolvePackageAssets"
+		  BeforeTargets="CreateManifestResourceNames">
+	<ItemGroup>
+	  <_KolvirFeatureSvgHarfBuzzSharpNative Include="@(NativeCopyLocalItems)"
+											 Condition="'%(NativeCopyLocalItems.Filename)' == 'libHarfBuzzSharp'
+														and ('%(NativeCopyLocalItems.Extension)' == '.dll'
+															 or '%(NativeCopyLocalItems.Extension)' == '.so'
+															 or '%(NativeCopyLocalItems.Extension)' == '.dylib')" />
+	</ItemGroup>
+	<PropertyGroup>
+	  <!-- IntermediateOutputPath is only known at execution time, so the archive path is computed
+		   here. Forward slashes so the same path works on Windows and Unix. -->
+	  <_KolvirFeatureSvgHarfBuzzSharpNativeFileName>@(_KolvirFeatureSvgHarfBuzzSharpNative->'%(Filename)%(Extension)')</_KolvirFeatureSvgHarfBuzzSharpNativeFileName>
+	  <_KolvirFeatureSvgHarfBuzzSharpArchive>$(IntermediateOutputPath)native/$(_KolvirFeatureSvgHarfBuzzSharpNativeFileName).gz</_KolvirFeatureSvgHarfBuzzSharpArchive>
+	</PropertyGroup>
+	<ItemGroup Condition="'@(_KolvirFeatureSvgHarfBuzzSharpNative)' != ''">
+	  <!-- The logical name is the contract with HarfBuzzNativeLoader, which looks it up by the file
+		   name it expects: Kolvir.Feature.Svg.Native.<file>.gz. -->
+	  <EmbeddedResource Include="$(_KolvirFeatureSvgHarfBuzzSharpArchive)"
+						LogicalName="Kolvir.Feature.Svg.Native.$(_KolvirFeatureSvgHarfBuzzSharpNativeFileName).gz">
+		<Type>Non-Resx</Type>
+		<WithCulture>false</WithCulture>
+	  </EmbeddedResource>
+	</ItemGroup>
+  </Target>
+
+  <Target Name="_KolvirFeatureSvgCompressHarfBuzzSharpNative"
+		  Condition="'$(_KolvirFeatureSvgEmbedHarfBuzzSharpNative)' == 'true'
+					 and '@(_KolvirFeatureSvgHarfBuzzSharpNative)' != ''"
+		  DependsOnTargets="_KolvirFeatureSvgLocateHarfBuzzSharpNative"
+		  BeforeTargets="CreateManifestResourceNames"
+		  Inputs="@(_KolvirFeatureSvgHarfBuzzSharpNative->'%(FullPath)')"
+		  Outputs="$(_KolvirFeatureSvgHarfBuzzSharpArchive)">
+	<MakeDir Directories="$(IntermediateOutputPath)native" />
+	<KolvirFeatureSvgGZipFile Source="@(_KolvirFeatureSvgHarfBuzzSharpNative->'%(FullPath)')"
+							   Destination="$(_KolvirFeatureSvgHarfBuzzSharpArchive)" />
+  </Target>
+
+  <!-- The library now lives inside the executable, so keep it - and the symbol file that shares its
+	   name - out of the publish directory. What is left is the executable and its own symbol file
+	   (.pdb on Windows, .dbg on Linux), which the native compiler writes outside this item list.
+	   Matching the stem rather than the exact file is what catches libHarfBuzzSharp.pdb, which the
+	   Win32 asset package ships beside the DLL. -->
+  <Target Name="_KolvirFeatureSvgExcludeHarfBuzzSharpNativeFromPublish"
+		  Condition="'$(_KolvirFeatureSvgEmbedHarfBuzzSharpNative)' == 'true'
+					 and '$(_KolvirFeatureSvgHarfBuzzSharpNativeFileName)' != ''"
+		  AfterTargets="ComputeFilesToPublish">
+	<ItemGroup>
+	  <ResolvedFileToPublish Remove="@(ResolvedFileToPublish)"
+							 Condition="'%(ResolvedFileToPublish.Filename)' == 'libHarfBuzzSharp'" />
+	</ItemGroup>
+  </Target>
+
+</Project>

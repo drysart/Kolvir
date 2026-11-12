@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=Kolvir
+GenericName=Cross-platform UI sample
+Comment=The Kolvir sample application
+# The application id a GTK 4 application gets, which is what the dock matches a badge against and
+# what this file must therefore be called. See README.md, "App badging".
+Exec=KolvirDemoApp
+Icon=Kolvir
+Terminal=false
+Categories=Development;
+StartupWMClass=KolvirDemoApp
