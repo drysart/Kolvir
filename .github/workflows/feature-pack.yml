@@ -10,13 +10,13 @@ name: Feature pack
 # It packs and inspects; it does not publish. Publishing needs a feed and a version, which is a
 # release decision rather than a pull request one.
 #
-# Like the macOS build, this runs on a pull request against master and on demand, not on every push:
+# Like the macOS build, this runs on a pull request against develop and on demand, not on every push:
 # feature work in progress is packed on whichever machine the author has, and the only thing a runner
 # adds is the check that the package is complete.
 
 on:
   pull_request:
-    branches: [master]
+    branches: [develop]
     paths:
       - '.github/workflows/feature-pack.yml'
       - '.github/scripts/check-feature-package.py'
