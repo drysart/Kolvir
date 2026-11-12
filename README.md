@@ -3184,12 +3184,13 @@ and a dock that implements the protocol (Ubuntu's `ubuntu-dock`, dash-to-dock, P
 on the icon whose **desktop entry** matches the id in the signal. Two consequences:
 
 - The application must have an installed `.desktop` file whose name is its application id, which on
-  GTK 4 is derived from `InstanceKey`. Run out of a build directory with no entry installed and
-  nothing appears - silently, which is the one failure worth documenting.
+  GTK 4 is `dev.kolvir.` plus the `InstanceKey` - the project's domain, `kolvir.dev`, reversed. Run out
+  of a build directory with no entry installed and nothing appears - silently, which is the one failure
+  worth documenting.
 - Stock GNOME Shell implements none of it, so a bare GNOME desktop shows nothing however the
   capabilities read.
 
-The demo ships `Kolvir.Demo.App/com.kolvir.ikolvir.desktop` and
+The demo ships `Kolvir.Demo.App/dev.kolvir.ikolvir.desktop` and
 `Kolvir.Demo.App/install-badge-desktop-entry.sh`, which writes it to
 `~/.local/share/applications` with the build's absolute path. Run the script once and the **App
 badge** page's count appears on the dock.

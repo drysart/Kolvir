@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Kolvir Minimal</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.kolvir.minimal</string>
+	<string>dev.kolvir.minimal</string>
 	<key>CFBundleExecutable</key>
 	<string>Kolvir.Minimal</string>
 	<key>CFBundlePackageType</key>

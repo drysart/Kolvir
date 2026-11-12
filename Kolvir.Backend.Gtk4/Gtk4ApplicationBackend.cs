@@ -646,13 +646,15 @@ public sealed class Gtk4ApplicationBackend : IApplicationBackend
 
     /// <summary>
     /// Builds the reverse-DNS application id GTK needs for uniqueness from
-    /// <see cref="Application.InstanceKey"/>.
+    /// <see cref="Application.InstanceKey"/>. The registry is this project's domain, kolvir.dev, so the
+    /// id is <c>dev.kolvir.&lt;key&gt;</c>; the desktop entry the dock matches it against has to carry
+    /// the same name, which is why <c>Kolvir.Demo.App</c> ships one.
     /// </summary>
     private static string BuildApplicationId(string? instanceKey)
     {
         // A D-Bus name element cannot start with a digit, so the key becomes one element that
         // always starts with a letter and holds only lowercase ASCII letters and digits.
-        var builder = new StringBuilder("com.kolvir.i");
+        var builder = new StringBuilder("dev.kolvir.i");
 
         foreach (var c in instanceKey ?? string.Empty)
         {

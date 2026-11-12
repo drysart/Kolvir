@@ -7,7 +7,7 @@
 	<key>CFBundleDisplayName</key>
 	<string>Kolvir</string>
 	<key>CFBundleIdentifier</key>
-	<string>com.kolvir.demo</string>
+	<string>dev.kolvir.demo</string>
 	<key>CFBundleExecutable</key>
 	<string>KolvirDemoApp</string>
 	<key>CFBundlePackageType</key>

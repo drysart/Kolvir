@@ -3,7 +3,7 @@
 #
 # GNOME's dock badges an application whose installed desktop entry matches the application id in the
 # badge signal, and the demo's id is derived from its instance key: "Kolvir" becomes
-# com.kolvir.ikolvir. Without this entry the App badge page changes nothing on the dock, silently.
+# dev.kolvir.ikolvir. Without this entry the App badge page changes nothing on the dock, silently.
 #
 # Usage: ./install-badge-desktop-entry.sh [path-to-binary]
 # Defaults to the Debug build this script sits beside.
@@ -18,10 +18,10 @@ if [ ! -x "$binary" ]; then
     exit 1
 fi
 
-target="$HOME/.local/share/applications/com.kolvir.ikolvir.desktop"
+target="$HOME/.local/share/applications/dev.kolvir.ikolvir.desktop"
 mkdir -p "$(dirname "$target")"
 
-sed "s|^Exec=.*|Exec=$binary|" "$here/com.kolvir.ikolvir.desktop" > "$target"
+sed "s|^Exec=.*|Exec=$binary|" "$here/dev.kolvir.ikolvir.desktop" > "$target"
 
 echo "installed $target"
 echo "  Exec=$binary"

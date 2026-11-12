@@ -1401,7 +1401,7 @@ Three things follow from that, and each was load-bearing rather than cosmetic:
 assembly, and the name was chosen when the sample control tree was a separate `KolvirDemo` library
 that would have collided with it. That library has since been folded into `Kolvir.Demo.App`, but the
 name stays because `Info.plist`, `app.manifest` and the platform workflows all use it.
-`Info.plist` uses `CFBundleExecutable` `KolvirDemoApp` and `CFBundleIdentifier` `com.kolvir.demo`,
+`Info.plist` uses `CFBundleExecutable` `KolvirDemoApp` and `CFBundleIdentifier` `dev.kolvir.demo`,
 and `app.manifest` keeps the PerMonitorV2 DPI declaration that used to live in `WinFormsApp3`.
 
 The three harnesses did not agree on the design client size and the difference is real, not drift.
@@ -1426,7 +1426,7 @@ Verified after the move:
 - All four render baselines are byte-identical to their recorded values: Windows 93,727 dark /
   92,945 light, macOS 163,795 / 164,747, Linux 122,364 / 123,501.
 - The macOS bundle launches (`open KolvirDemoApp.app`) and reports a 1280x852 window - the 820-point
-  client plus the 32-point title bar - under bundle id `com.kolvir.demo`.
+  client plus the 32-point title bar - under bundle id `dev.kolvir.demo`.
 - `dotnet publish -p:PublishProfile=FolderProfile` from a `vcvars64` prompt emits exactly two files:
   `KolvirDemoApp.exe` (8,839,168 bytes, of which 5,452,785 is the embedded gzip of
   `libSkiaSharp.dll`) and `KolvirDemoApp.pdb`. No `libSkiaSharp.dll` is published. Running the

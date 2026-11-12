@@ -428,7 +428,7 @@ setup.
   application id. An entry that gets this wrong can leave the app with no dock item at all, which looks
   exactly like a badge that does not work.
 - `Kolvir.Demo.App/install-badge-desktop-entry.sh` writes the sample's entry with the build's absolute
-  path; `Kolvir.Demo.App/com.kolvir.ikolvir.desktop` is the file it installs. Remove the entry when
+  path; `Kolvir.Demo.App/dev.kolvir.ikolvir.desktop` is the file it installs. Remove the entry when
   you are done.
 
 ### Files and scripts you ship to a host
