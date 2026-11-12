@@ -41,13 +41,13 @@ photographed.
 |---|---|
 | OS | Windows 11 Pro, build 26300 (`Microsoft Windows NT 10.0.26300.0`) |
 | CPU | 13th Gen Intel Core i9-13900K |
-| Display | **3840 × 2160 physical**, 200% scale (system DPI 192) — a logical desktop of 1920 × 1080, delivered by an RDP virtual display |
+| Display | **3840 x 2160 physical**, 200% scale (system DPI 192) - a logical desktop of 1920 x 1080, delivered by an RDP virtual display |
 | Shell | Windows PowerShell 5.1 |
 | .NET SDK | 10.0.403, including the `macos` and `maui` workloads |
 
 The scale factor is the trap, and it bites twice. A DPI-unaware process is lied to about the whole
-desktop, not just about coordinates: it is told the screen is 1920 × 1080 and its captures come back as
-the **top-left quarter** of the real 3840 × 2160 display, which looks like a complete desktop and is not.
+desktop, not just about coordinates: it is told the screen is 1920 x 1080 and its captures come back as
+the **top-left quarter** of the real 3840 x 2160 display, which looks like a complete desktop and is not.
 `[System.Windows.Forms.Screen]::AllScreens` reports the lie; `GetSystemMetrics(SM_CXSCREEN)` in an aware
 process reports 3840.
 
@@ -60,7 +60,7 @@ Add-Type -Namespace Native -Name Dpi -MemberDefinition @'
 [Native.Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null   # PerMonitorAwareV2
 ```
 
-before the first `user32` call, and then use **physical** pixels everywhere: 3840 × 2160 of them. The
+before the first `user32` call, and then use **physical** pixels everywhere: 3840 x 2160 of them. The
 same `Add-Type` trick gives you the rest: `GetWindowRect`, `ClientToScreen`, `SetCursorPos`,
 `mouse_event`, `SetWindowPos`.
 
@@ -83,11 +83,11 @@ The window title is `XPlat UI - Win32`. Find it with `Get-Process -Name XPlatUID
 `MainWindowHandle`: `FindWindow` with the title failed here, and the handle from the process is what the
 user actually sees.
 
-At 200% scale the sample opens around 2586 × 1711 physical, which fits the 3840 × 2160 display, so
+At 200% scale the sample opens around 2586 x 1711 physical, which fits the 3840 x 2160 display, so
 nothing has to be moved on this host. The 59-item navigation list is longer than the visible list box
-either way: scroll it (wheel, ±120 a notch) rather than trying to see it all at once.
+either way: scroll it (wheel, +/-120 a notch) rather than trying to see it all at once.
 
-The window does have a minimum size - asking for 1900 × 1050 comes back about 1503 tall - so treat
+The window does have a minimum size - asking for 1900 x 1050 comes back about 1503 tall - so treat
 `SetWindowPos` as a request:
 
 ```powershell
@@ -106,7 +106,7 @@ $gfx.Dispose(); $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); $bm
 ```
 
 In a DPI-aware process that captures exactly the rectangle asked for, in physical pixels - so ask for
-the real desktop, 3840 × 2160, or for a window's `GetWindowRect`. Asking for 1920 × 1080 is not an
+the real desktop, 3840 x 2160, or for a window's `GetWindowRect`. Asking for 1920 x 1080 is not an
 error and not a smaller screenshot: it is the top-left quarter, captured without complaint.
 
 Three capture traps:
@@ -140,7 +140,7 @@ desktop and no message loop:
 [Native]::mouse_event(0x0004, 0, 0, 0, [UIntPtr]::Zero)   # LEFTUP
 ```
 
-- **The wheel takes ±120 per notch**, not ±1: `mouse_event(0x0800, 0, 0, [uint32]4294967176, …)` scrolls
+- **The wheel takes +/-120 per notch**, not +/-1: `mouse_event(0x0800, 0, 0, [uint32]4294967176, ...)` scrolls
   down one notch (that literal is -120 as a `uint32`; `0xFFFFFFFF` is rejected by PowerShell's binder).
 - **`SetForegroundWindow` on another process's window usually does nothing.** A real click activates it
   and is delivered, which is what a test wants anyway.
@@ -156,7 +156,7 @@ desktop and no message loop:
 |---|---|
 | OS | Ubuntu 24.04.5 LTS, kernel 7.0.0-42-generic |
 | Desktop | GNOME Shell 46.0, **X11**, `ubuntu-dock@ubuntu.com` |
-| Display | `:10.0`, 3840 × 2160 (RDP); the sample opens 2560 × 1520 at DPI 192 |
+| Display | `:10.0`, 3840 x 2160 (RDP); the sample opens 2560 x 1520 at DPI 192 |
 | .NET | 10.0.114 at `/usr/lib/dotnet` (`dotnet` is on `PATH`) |
 | Installed | `xwd`, `ffmpeg`, `python3`, `libXtst.so.6` |
 | Missing | `xdotool`, `xte`, `ydotool`, `wmctrl`, `scrot`, `import`, `gnome-screenshot` |
@@ -175,7 +175,7 @@ xwininfo -root -tree | grep -i "xplat ui"       # handle + geometry, e.g. 0x3200
 ```
 
 Run the binary from a terminal you can see, or the demo's GTK warnings go to a log nobody reads - and
-those warnings matter: `Gtk-CRITICAL … assertion 'GTK_IS_WIDGET (widget)' failed` is a real defect, not
+those warnings matter: `Gtk-CRITICAL ... assertion 'GTK_IS_WIDGET (widget)' failed` is a real defect, not
 noise.
 
 ### Screenshots
@@ -252,7 +252,7 @@ session down with it.
 |---|---|
 | OS | Ubuntu 26.04.1 LTS, kernel 7.0.0-42-generic |
 | Desktop | GNOME Shell 50.1, **Wayland**, `ubuntu-dock@ubuntu.com`, GTK 4.22 |
-| Display | 2560 × 1600 (`Virtual-1`) |
+| Display | 2560 x 1600 (`Virtual-1`) |
 | .NET | 10.0.114 at `/usr/lib/dotnet` |
 | Installed | `ydotool` + `ydotoold`, `gnome-screenshot`, `python3`, `dbus-monitor` |
 | Missing | `xdotool`, `grim`, `wmctrl` |
@@ -275,8 +275,8 @@ Check `pgrep -f XPlatUIDemoApp` before believing a build.
 
 The obvious routes all fail:
 
-- `org.gnome.Shell.Screenshot.Screenshot` → `AccessDenied: Screenshot is not allowed`.
-- `gnome-screenshot -f out.png` → "Unable to use GNOME Shell's builtin screenshot interface, resorting
+- `org.gnome.Shell.Screenshot.Screenshot` -> `AccessDenied: Screenshot is not allowed`.
+- `gnome-screenshot -f out.png` -> "Unable to use GNOME Shell's builtin screenshot interface, resorting
   to fallback X11", then a Gdk assertion, then nothing.
 - `grim` is not installed and would not work on GNOME anyway.
 
@@ -287,7 +287,7 @@ request handle; the `Response` signal on that handle carries a `uri` to the PNG:
 gdbus call --session --dest org.freedesktop.portal.Desktop \
   --object-path /org/freedesktop/portal/desktop \
   --method org.freedesktop.portal.Screenshot.Screenshot "" "{}"
-# → (objectpath '/org/freedesktop/portal/desktop/request/1_344/t')
+# -> (objectpath '/org/freedesktop/portal/desktop/request/1_344/t')
 ```
 
 Then subscribe to `org.freedesktop.portal.Request.Response` on that path. Doing the call and the wait
@@ -355,7 +355,7 @@ UI (Alt+Tab, the overview) from a script.
 |---|---|
 | Host | `Timothys-Virtual-Machine.local`, arm64 |
 | OS | macOS 27.2 (build 26B123) |
-| Xcode | 27.2 — needs `-p:ValidateXcodeVersion=false` (see `MACOS-TESTRUN.md`) |
+| Xcode | 27.2 - needs `-p:ValidateXcodeVersion=false` (see `MACOS-TESTRUN.md`) |
 | .NET | 10.0.403 at **`~/.dotnet/dotnet`**, not on the ssh `PATH` |
 
 `MACOS-TESTRUN.md` is the document for building and launching on this machine; it is not repeated here.
@@ -434,9 +434,10 @@ setup.
 
 - **Endings.** A `.sh` written by PowerShell has CRLF and will fail on the host. Write it with
   `[IO.File]::WriteAllText($path, $text.Replace("`r`n", "`n"))`.
-- **Encoding.** `Get-Content -Raw` plus `[IO.File]::WriteAllText` mangles UTF-8 (`§` becomes `Â§`,
-  `…` becomes `â€¦`) unless the writer is given `New-Object System.Text.UTF8Encoding($false)`. Use the
-  editor tool for anything with non-ASCII text in it, and check before committing.
+- **Encoding.** `Get-Content -Raw` plus `[IO.File]::WriteAllText` mangles UTF-8 unless the writer is
+  given `New-Object System.Text.UTF8Encoding($false)`: U+00A7 comes back as U+00C3 U+201A U+00C2
+  U+00A7, and nothing in the result says so. Read the file back rather than trusting the write; the
+  markdown is kept in ASCII for this reason, which removes the whole class of failure.
 - **Copying a project file** with `scp` once turned a newline into the literal `&#10;` mid-file. Read the
   file back on the host after copying it.
 

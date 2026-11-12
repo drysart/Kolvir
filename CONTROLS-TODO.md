@@ -18,7 +18,7 @@ The tiers were set when the library had twelve controls and they still describe 
 | --- | --- | --- |
 | 1 - common input | `XPlatCheckBox`, `XPlatRadioButton`, `XPlatProgressBar`, `XPlatGroupBox` | shipped |
 | 2 - popup-based | the popup layer (`IXPlatPopupService`, `XPlatPopup`, one popup window per backend), `XPlatComboBox`, `XPlatTabControl`/`XPlatTabPage`, `XPlatToolTip` | shipped |
-| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | in-library menus, `XPlatDateTimePicker` and text-box autocomplete shipped; drag previews in Ã‚Â§3 |
+| 2b - unlocked by the popup layer | in-library menus, `XPlatDateTimePicker`, text-box autocomplete, drag previews | in-library menus, `XPlatDateTimePicker` and text-box autocomplete shipped; drag previews in section 3 |
 | 3 - large list controls | `XPlatVirtualList` (the shared row base), `XPlatListView`, `XPlatTreeView` | shipped |
 | 4 - small widgets | `XPlatNumericUpDown`, `XPlatTrackBar`, `XPlatLinkLabel`, `XPlatStatusStrip`/`XPlatToolStrip` | shipped |
 
@@ -68,7 +68,7 @@ a reviewer should ask for each one rather than infer it.
   subject) rather than incidental internals. A bug fix carries a test that fails before it.
 - It is verified on Windows, macOS and GTK4: a headless `--render` of the new page on all three, plus
   a real-window check wherever the control's value is interaction (a popup, a drag, a keyboard path).
-- The pull request names the rung of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) Ã‚Â§4 it sits on
+- The pull request names the rung of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) section 4 it sits on
   and says why it could not sit lower.
 
 ## 3. Unlocked by the popup layer
@@ -131,8 +131,8 @@ Recorded so the decision is not re-litigated every time someone asks:
 
 ## 6. Suggested order
 
-1. **Drag previews** (Ã‚Â§3.1) - small, and independent of everything above.
-2. **The small batch in Ã‚Â§4.1** - landed: `XPlatSplitButton`, `XPlatExpander` (and its animated
+1. **Drag previews** (section 3.1) - small, and independent of everything above.
+2. **The small batch in section 4.1** - landed: `XPlatSplitButton`, `XPlatExpander` (and its animated
    fold in `XPlatUI.Feature.Animations`), `XPlatWrapPanel`, the busy indicator and the overlay, and
    the toast. Five small controls, each shipped on its own.
-3. Then the rest of Ã‚Â§4.1 in the order listed, and Ã‚Â§4.3 only once one of them has a plan document.
+3. Then the rest of section 4.1 in the order listed, and section 4.3 only once one of them has a plan document.

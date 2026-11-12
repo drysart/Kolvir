@@ -131,7 +131,7 @@ has to read `--classic-menus` before it can build a backend.
 Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
 does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
 construction where it can, by an opt-in registration where it cannot, and by its own package where
-neither is practical; Ã‚Â§8 of the policy has the measured sizes, including what opting into drag and
+neither is practical; section 8 of the policy has the measured sizes, including what opting into drag and
 drop costs on each platform.
 
 Controls that do not exist yet, and the order they are worth building in, are tracked in
@@ -284,7 +284,7 @@ root.Controls.Add(table);
 
 host.Root = root;
 host.SetClientSize(800, 600);   // lays out the tree
-host.Paint(canvas);             // any SKCanvas: window surface, bitmap, PDF, Ã¢â‚¬Â¦
+host.Paint(canvas);             // any SKCanvas: window surface, bitmap, PDF, ...
 ```
 
 Input is plain method calls, so any backend can drive it:
@@ -428,7 +428,7 @@ Orientation follows the WinForms convention:
 | `Horizontal` | `Panel1` top, `Panel2` bottom | `Panel1` height | `SizeNS` |
 
 `Panel1` is the sized panel; `Panel2` always fills the remaining space. The distance is
-clamped to `Panel1MinSize` Ã¢â‚¬Â¦ `Panel1MaxSize`, further limited by `Panel2MinSize` so the
+clamped to `Panel1MinSize` ... `Panel1MaxSize`, further limited by `Panel2MinSize` so the
 second panel never collapses.
 
 ```csharp
@@ -961,7 +961,7 @@ input, so it is neither focusable nor a tab stop.
 
 | Member | Behaviour |
 | --- | --- |
-| `Minimum`, `Maximum`, `Value`, `Percent` | The range and where in it the bar sits; `Value` is clamped, `Percent` is the fraction as `0 Ã¢â‚¬Â¦ 1` |
+| `Minimum`, `Maximum`, `Value`, `Percent` | The range and where in it the bar sits; `Value` is clamped, `Percent` is the fraction as `0 ... 1` |
 | `Step`, `PerformStep()`, `Increment(amount)` | `Step` is what `PerformStep` adds; both clamp and repaint only when the value moved |
 | `Style` | `Continuous`, `Blocks` (a segmented fill) or `Marquee` |
 | `MarqueeAnimationSpeed` | How often a marquee frame is drawn. Null, the default, is the display's own frame time; a `TimeSpan` pins it |
@@ -1841,7 +1841,7 @@ spell-checker style annotations, described in [Text box spans](#text-box-spans).
 | Member | Behaviour |
 | --- | --- |
 | `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line. Assigning a shorter value clamps the caret and the selection to the new end rather than resetting them, and assigning the value the field already holds does nothing - which is what makes an echo binding free |
-| `CaretIndex`, `SelectionStart`, `SelectionLength`, `SelectedText`, `HasSelection` | Selection state; the caret is `0 Ã¢â‚¬Â¦ Text.Length` |
+| `CaretIndex`, `SelectionStart`, `SelectionLength`, `SelectedText`, `HasSelection` | Selection state; the caret is `0 ... Text.Length` |
 | `Caret` | The `XPlatCaret` that draws and blinks the insertion point; its `BlinkInterval`, `Width` and `Color` can be changed |
 | `Select(start, length)`, `SelectAll()`, `ClearSelection()` | Programmatic selection |
 | `MaxLength` | Characters the user may type (`0` = unlimited); enforced for insertions and replacements |
@@ -2463,7 +2463,7 @@ var accent = XPlatTheme.ColorOf(XPlatThemeColor.Accent);
 `Secondary` (`Hover`/`Pressed`), `FocusRing`, `Splitter` (`Hover`), `InputBackground`, `Selection`,
 `Caret`, `Placeholder` and `DisabledBackground`/`DisabledForeground` - so a custom theme is just
 `XPlatPalette.Light with { Accent = SKColors.Teal }`. Assigning the palette (or any single colour,
-e.g. `XPlatTheme.Accent = Ã¢â‚¬Â¦`) runs the `XPlatTheme.AddChangedHandler` handlers and the next frame
+e.g. `XPlatTheme.Accent = ...`) runs the `XPlatTheme.AddChangedHandler` handlers and the next frame
 picks it up: controls never snapshot a colour at construction time.
 
 Controls resolve their colours while painting - through the inherited `Background`/`Foreground`
@@ -2573,7 +2573,7 @@ Fonts are not owned by the control that draws with them. Never dispose one that 
 came from `XPlatTheme`; keep an assigned font alive for as long as it is in use, and let the theme
 own the face given to `XPlatTheme.UseFont`.
 
-The cost is the one [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) Ã‚Â§3 names for members on a type
+The cost is the one [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) section 3 names for members on a type
 every application touches, and this feature is deliberately that: the three properties *are* the
 control's appearance, not an optional extra, so there is no lower rung to sit on. Measured on the
 trimmed `XPlatUI.Minimal` fixture, `win-x64`, publishing at the commit before this one and after it:
@@ -2981,7 +2981,7 @@ Wayland is also where ownership is weakest: `SetTransientFor` is a hint, so an o
 be stacked above its owner by the compositor. It still minimizes and closes with it.
 
 The demo exposes all three: the **Owned window** button in the header opens one from the UI on every
-platform, **Window Ã¢â€ â€™ Topmost** and **Window Ã¢â€ â€™ Owned Window** add the menu items on macOS and GTK, and
+platform, **Window -> Topmost** and **Window -> Owned Window** add the menu items on macOS and GTK, and
 the `--topmost` / `--owned` command-line flags work everywhere (Windows has no menu bar yet). The
 status line reports activation changes.
 
@@ -3250,7 +3250,7 @@ drop target, whether or not any control ever sets `AllowDrop`. `AllowDrop` can b
 on a control that is already inside a shown window, so there is no correct moment at which the
 native registration could depend on it. Leaving the call out is not an error: the code above still
 compiles and runs, nothing simply ever arrives. What the feature costs an application that never
-references the package is measured in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) Ã‚Â§8.
+references the package is measured in [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) section 8.
 
 `AddDragEnterHandler`, `AddDragOverHandler` and `AddDragDropHandler` share one argument type, so the
 same handler can serve all three. `AddDragLeaveHandler` takes a handler with no arguments: by the
@@ -3382,7 +3382,7 @@ var options = new XPlatApplicationOptions
 The opt-in registers one **frame clock for the application**, not one per control. Every
 `XPlatAnimationSet` attaches to it, and it starts when the first set starts and stops when the last
 one finishes, pauses or is disposed - so an application sitting still runs no timer at all, which is
-the rule `CONTROLS-TODO.md` Ã‚Â§2 sets for everything time-based in the library.
+the rule `CONTROLS-TODO.md` section 2 sets for everything time-based in the library.
 
 An **`XPlatAnimationSet`** is one or more value animations on a shared timeline:
 
@@ -3465,7 +3465,7 @@ A few consequences worth knowing before you rely on them:
 
 A **control gains its animation as an extension member**, not as a property the library carries:
 `XPlatExpander` has `ExpandDuration`, contributed by this package and stored in a weak table keyed
-by the control (FEATURE-COST-POLICY.md Ã‚Â§5). A section given one animates its `ExpandProgress` on the
+by the control (FEATURE-COST-POLICY.md section 5). A section given one animates its `ExpandProgress` on the
 application's clock, which moves the content height and the arrow together; a section given none
 does exactly what the control does on its own. Because the duration is not on the control, an
 application that never references the package pays nothing for it, and because the control asks the
@@ -3700,7 +3700,7 @@ SVG pages below are the same control and the same factory call with a different 
 SVG is a package of its own, `XPlatUI.Feature.Svg`, built on [Svg.Skia]. A vector renderer is not
 something a toolkit can trim down to nothing, so it does not live in `XPlatUI`: an application that
 shows no SVG does not reference the package and therefore does not contain it
-(FEATURE-COST-POLICY.md Ã‚Â§4, rung 3). Reference it and opt in:
+(FEATURE-COST-POLICY.md section 4, rung 3). Reference it and opt in:
 
 ```csharp
 using XPlatUI.Svg;
@@ -3867,7 +3867,7 @@ against an unfiltered twin, and the transform and clip path at the pixels they d
 
 #### What it costs
 
-Measured the way FEATURE-COST-POLICY.md Ã‚Â§8 says to: one fixture, published twice, with the project
+Measured the way FEATURE-COST-POLICY.md section 8 says to: one fixture, published twice, with the project
 reference to `XPlatUI.Feature.Svg` and the `AddSvgImages()` call switched off and on by a property,
 so the two numbers differ by the feature and nothing else. The feature build calls `AddSvgImages()`,
 loads a document through the factory, draws the image and writes it out. `PublishAot`,
@@ -4068,7 +4068,7 @@ on colours in regions rather than on a hash.
 
 #### What it costs
 
-Measured the way FEATURE-COST-POLICY.md Ã‚Â§8 says to, on win-x64: `XPlatUI.Minimal` published with
+Measured the way FEATURE-COST-POLICY.md section 8 says to, on win-x64: `XPlatUI.Minimal` published with
 `PublishAot` and `-p:EmbedSkiaSharpNative=false`, then published again with the project reference and
 an `AddAnimatedGifImages()` call added and one GIF loaded and drawn. The two numbers differ by the
 feature and nothing else.
@@ -4205,7 +4205,7 @@ the numbers in the message.
 
 #### What it costs
 
-Measured the way FEATURE-COST-POLICY.md Ã‚Â§8 says to, on win-x64, linux-x64 and osx-arm64:
+Measured the way FEATURE-COST-POLICY.md section 8 says to, on win-x64, linux-x64 and osx-arm64:
 `XPlatUI.Minimal` built with `PublishAot` and `-p:EmbedSkiaSharpNative=false`, then built again with
 an `XPlatImage` showing a PNG through the built-in decoder, then built a third time with the WebP
 package referenced, `AddAnimatedWebpImages()` called and the demo's animated WebP loaded and drawn.
@@ -4213,14 +4213,14 @@ The three numbers separate the image control and the timeline from the feature:
 
 | Measurement | win-x64 | linux-x64 | osx-arm64 |
 | --- | --- | --- | --- |
-| Executable, one label (the floor at this commit) | 3,283,968 | 4,276,144 | 4,080,304Ã¢â‚¬Â  |
-| Executable, one `XPlatImage` showing a PNG (image control and timeline paid for) | 3,526,656 | 4,590,160 | 4,080,304Ã¢â‚¬Â  |
-| Executable, the same control showing an animated WebP with the feature registered | 3,582,464 | 4,636,032 | 4,080,304Ã¢â‚¬Â  |
+| Executable, one label (the floor at this commit) | 3,283,968 | 4,276,144 | 4,080,304^ |
+| Executable, one `XPlatImage` showing a PNG (image control and timeline paid for) | 3,526,656 | 4,590,160 | 4,080,304^ |
+| Executable, the same control showing an animated WebP with the feature registered | 3,582,464 | 4,636,032 | 4,080,304^ |
 | Feature only, against the PNG fixture | +55,808 (54.5 KB) | +45,872 (44.8 KB) | 0 |
 | Whole use path, against the label fixture | +298,496 (291.5 KB, +9.1%) | +359,888 (351.5 KB, +8.4%) | 0 |
 | `libSkiaSharp` beside it | 12,903,776 | 12,262,408 | 15,804,304 |
 
-Ã¢â‚¬Â  macOS was measured with `dotnet build -c Release -r osx-arm64 -p:PublishAot=true` rather than
+^ macOS was measured with `dotnet build -c Release -r osx-arm64 -p:PublishAot=true` rather than
 `dotnet publish`, because `dsymutil` fails during publish on that host; that failure is pre-existing
 on master. The app bundle's binary is the one quoted, and the pre-strip `nativelibraries` binary was
 4,103,584 for all three builds as well. The arm64 image is linked in 16 KB pages and the feature fits
@@ -4271,7 +4271,7 @@ var options = new XPlatApplicationOptions
 
 `--no-hardware-acceleration` is the switch. It is read from `ResolveCommandLine()` **in the
 constructor**, so an explicit `CommandLine` list is honoured when it is passed to
-`XPlatApplicationOptions(IReadOnlyList<string>)` â€” the form to use when the arguments are known at
+`XPlatApplicationOptions(IReadOnlyList<string>)` - the form to use when the arguments are known at
 construction. `CommandLine` is a settable property, but assigning it after construction does not
 re-apply its switches: a launcher that owns the command line either uses the overload that takes it
 or assigns `GfxHardwareAcceleration` itself. An explicit assignment to `GfxHardwareAcceleration`
@@ -4335,7 +4335,7 @@ path and renderer at startup and keeps them in its footer, so a screenshot says 
 its numbers; the **Measured rendering** page is where the CPU/GL A/B is run.
 
 Measured cost on the `XPlatUI.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
-Ã‚Â§8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
+section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
 
 | Measurement | Bytes |
 | --- | ---: |
@@ -4807,7 +4807,7 @@ the same window captured with `--no-hardware-acceleration` on `master` and on th
 **byte-identical** over the whole client area (0 pixels differ, page 1, 1280 x 760 @ 2.00), which is
 what proves the tier really is the code that was already there.
 
-Measured cost on the `XPlatUI.Minimal` fixture (`linux-x64`, NativeAOT, the loose Skia row of Â§8 in
+Measured cost on the `XPlatUI.Minimal` fixture (`linux-x64`, NativeAOT, the loose Skia row of section 8 in
 [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
 
 ```
@@ -4944,7 +4944,7 @@ file anywhere and it runs, window and all.
 `XPlatUI.Minimal` is the measurement fixture: one window, one label, no features. It publishes to
 8,527,872 bytes (8.13 MiB) on Windows and 8,867,296 (8.46 MiB) on Linux, so everything the demo
 demonstrates costs about 0.7 MB on Windows and 0.6 MB on Linux over the floor an application starts
-from. [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) Ã‚Â§8 records the baseline that every feature is
+from. [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) section 8 records the baseline that every feature is
 measured against.
 
 SkiaSharp only ships a dynamic `libSkiaSharp.dll`/`libSkiaSharp.so`, so a native executable cannot
@@ -5026,7 +5026,7 @@ before any managed code runs and a resolver could never help. A plain `net10.0` 
 a different shape, and it *does* work - a probe published that way extracted the dylib to
 `~/Library/Application Support/XPlatUI/native/harfbuzz/` and shaped text with it, which is why the
 exclusion is about the bundle and not about what macOS allows. The demo's macOS bundle is unchanged
-by this: executable 15,790,224 Ã¢â€ â€™ 15,790,256 bytes, HarfBuzz still loose inside the bundle.
+by this: executable 15,790,224 -> 15,790,256 bytes, HarfBuzz still loose inside the bundle.
 
 ## Running the application
 
@@ -5423,12 +5423,12 @@ a PNG) and reports the numbers in the job summary.
 New features are held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md). A pull request that adds
 one says, in its description:
 
-* which rung of Ã‚Â§4 the feature sits on, and why it could not sit on a lower one;
+* which rung of section 4 the feature sits on, and why it could not sit on a lower one;
 * the published size of an application that does not use it, measured on every platform the change
   affects and quoted against the same application before the change;
-* anything in the Ã‚Â§9 checklist that needed a judgement call, and the judgement.
+* anything in the section 9 checklist that needed a judgement call, and the judgement.
 
-Ã‚Â§9 is the review checklist itself. A reviewer works through it line by line and asks for the answer
+Section 9 is the review checklist itself. A reviewer works through it line by line and asks for the answer
 rather than inferring it, because the failures it catches are silent ones: a registration that runs
 whether or not anything uses it, a `net10.0` assembly that lands in the wrong application, a
 reflection path that only fails under AOT. The short form is that nothing new appears on an
@@ -5439,7 +5439,7 @@ A feature that ships as its own package needs no multi-platform build. The `Feat
 packs every `XPlatUI.Feature.*` project on a macOS runner - `EnableWindowsTargeting=true` brings the
 Windows reference pack with it - then opens each package and fails unless it carries a `lib/` folder
 and a dependency group for every platform. That check exists because both omissions are silent in
-NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. Ã‚Â§4 of the
+NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. Section 4 of the
 policy has the details.
 
 ### Tests come with the change
@@ -5460,3 +5460,22 @@ public surface an application is meant to use.
 The suite's own conventions - a hand-driven clock, the pinned font, no shared state between tests -
 are what make that possible; [Running the tests](#running-the-tests) describes them. The same rule is
 one of the bullets in "What done means" in [CONTROLS-TODO.md](CONTROLS-TODO.md#2-what-done-means).
+
+### The markdown stays in 7-bit ASCII
+
+Every `.md` file in this repository is plain 7-bit ASCII, and a change keeps it that way: `-` rather
+than a typographic dash, `...` rather than an ellipsis character, `->` rather than an arrow, `x`
+rather than a multiplication sign, `section 8` rather than a section sign.
+
+The reason is not typographic purity. These files have been saved by editors and scripts that
+guessed a Windows code page, and every such save turned one character into two and then into three -
+a section sign came back as four characters of rubble, an arrow as eight - with nothing in the result
+to say what was meant. Plain ASCII cannot be mis-guessed: a file that is ASCII reads the same
+whatever tool touches it next. The whole documentation set was repaired once after exactly that
+happened, and that repair cost far more than catching it in review would have.
+
+Checking is one line, and it should print nothing:
+
+```
+grep -nP '[^\x00-\x7F]' *.md
+```
