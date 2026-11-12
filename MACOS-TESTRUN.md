@@ -4,9 +4,13 @@ Status: the one page to read before trying to launch the sample on a Mac. Every 
 measured on the current Mac test host, not inferred from the SDK docs. If a launch stops working,
 work through this document before experimenting.
 
-**The canonical Mac host is `macvm`** (`ssh macvm` → `Timothys-Virtual-Machine.local`, osx-arm64,
+For the hosts themselves - which machine to use, what is installed on it, and how to take a
+screenshot or drive the mouse and keyboard - see [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md). This page
+is only about getting a build to launch on macOS.
+
+**The canonical Mac host is `macvm`** (`ssh macvm` -> `Timothys-Virtual-Machine.local`, osx-arm64,
 macOS 27.2, .NET 10.0.403, Xcode 27.2). It replaced the Mac mini `Timothys-Mac-mini.local`, which is
-reachable as `ssh mac` but **retired** — do not use it unless you are specifically told to. Everything
+reachable as `ssh mac` but **retired** - do not use it unless you are specifically told to. Everything
 below that differs from the old host is called out as such, because the two hosts differ in ways that
 silently change what your test actually measured.
 
@@ -28,7 +32,7 @@ cd ~/src/XPlatUI
 dotnet build XPlatUIDemo.App -c Debug
 ```
 
-A build is required before any run route here — every route below launches whatever is already in
+A build is required before any run route here - every route below launches whatever is already in
 `bin/`.
 
 ## Machine prerequisites (`macvm`)
@@ -39,7 +43,7 @@ fresh `macvm`, and each fails with an error that does not name the real problem.
 ### 1. `dotnet` is a user-local install
 
 On `macvm` the SDK lives at **`~/.dotnet/dotnet`**, not `/usr/local/share/dotnet/dotnet`. It is on
-`PATH` for an interactive login shell but **not** for a non-interactive `ssh macvm '…'` command, whose
+`PATH` for an interactive login shell but **not** for a non-interactive `ssh macvm '...'` command, whose
 `PATH` is only `/usr/bin:/bin:/usr/sbin:/sbin`. Use the absolute path, or export it first:
 
 ```sh
@@ -68,7 +72,7 @@ That message blames your project; the actual problem is `xcode-select`. Permanen
 
 ```sh
 sudo xcode-select -s /Applications/Xcode.app/Contents/Developer
-xcode-select -p        # → /Applications/Xcode.app/Contents/Developer
+xcode-select -p        # -> /Applications/Xcode.app/Contents/Developer
 ```
 
 Without `sudo` you can point a single build at Xcode instead, which was measured working:
@@ -81,7 +85,7 @@ Note that the AppKit **library** builds fine with only the Command Line Tools; i
 that needs the full Xcode toolchain. A library-only build therefore proves nothing about whether the
 demo can run.
 
-## Plain `dotnet run` does not work — do not waste time on it
+## Plain `dotnet run` does not work - do not waste time on it
 
 ```sh
 dotnet run --project XPlatUIDemo.App -- --page 38     # exits immediately, code 0, nothing drawn
@@ -123,7 +127,7 @@ which makes a working feature look broken. See "Making the app frontmost without
 open -n ~/src/XPlatUI/XPlatUIDemo.App/bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app --args --page 38
 ```
 
-Goes through Launch Services, so the app **does** become frontmost — the right choice when a check
+Goes through Launch Services, so the app **does** become frontmost - the right choice when a check
 needs to receive synthetic clicks or keystrokes. `open -n` starts a second instance even if one is
 already running; use plain `open` to activate and reuse a running one.
 
@@ -133,7 +137,7 @@ already running; use plain `open` to activate and reuse a running one.
 ~/src/XPlatUI/XPlatUIDemo.App/bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app/Contents/MacOS/XPlatUIDemoApp --page 38
 ```
 
-Works — the process runs and draws. Like the launch-profile route it may not take activation, so use
+Works - the process runs and draws. Like the launch-profile route it may not take activation, so use
 it for renders and harnesses that do not need input, where it is the fastest option because it skips
 Launch Services entirely.
 
@@ -143,13 +147,13 @@ Launch Services entirely.
 | --- | --- |
 | A normal run while developing | `dotnet run --launch-profile mac -- --page N` |
 | A headless render or a harness with no input | the inner binary directly, or the launch profile |
-| A check that drives real clicks or keystrokes | `open -n …app --args --page N`, because it makes the app frontmost |
+| A check that drives real clicks or keystrokes | `open -n ...app --args --page N`, because it makes the app frontmost |
 | Anything at all | build first; `dotnet run` without the profile draws nothing |
 
 ## TCC permissions: what `macvm` needs, and how the failures look
 
 A remote session gets **no** privacy permissions by default. Two are needed, and macOS attributes an
-SSH session's requests to a process that is *not* the one you would guess — worth reading before you
+SSH session's requests to a process that is *not* the one you would guess - worth reading before you
 change anything, because granting the wrong path changes nothing and gives no feedback.
 
 Find the identity macOS is actually using:
@@ -164,12 +168,12 @@ which prints:
 attribution={responsible={ identifier=com.apple.sshd-keygen-wrapper,
                            responsible_path=/usr/libexec/sshd-keygen-wrapper,
                            binary_path=/usr/libexec/sshd-session },
-             accessing={ identifier=com.apple.screencapture, binary_path=/usr/sbin/screencapture }, …}
+             accessing={ identifier=com.apple.screencapture, binary_path=/usr/sbin/screencapture }, ...}
 Service kTCCServiceScreenCapture does not allow prompting; returning denied.
 ```
 
 So the **responsible** process is `/usr/libexec/sshd-keygen-wrapper`, while `/usr/libexec/sshd-session`
-is only the binary it execs. Grant both, in **System Settings → Privacy & Security** (use `+`, then
+is only the binary it execs. Grant both, in **System Settings -> Privacy & Security** (use `+`, then
 Cmd+Shift+G to type a path):
 
 | Setting | Path | Needed for |
@@ -184,7 +188,7 @@ The two failure messages name permissions at best indirectly:
 | --- | --- |
 | `could not create image from display` | Screen Recording, on `sshd-keygen-wrapper` |
 | `System Events got an error: osascript is not allowed assistive access. (-1728)` | Accessibility |
-| `Could not find a valid Xcode developer path` | not TCC at all — see the prerequisites above |
+| `Could not find a valid Xcode developer path` | not TCC at all - see the prerequisites above |
 
 `could not create image from display` reads like "the VM has no screen". It does: check with
 `CGGetActiveDisplayList` before believing that, because a headless-looking error on a machine with a
@@ -198,7 +202,7 @@ screencapture -x /tmp/probe.png && ls -l /tmp/probe.png
 ```
 
 Both must succeed. Note that `tell application "System Events" to return name of first process`
-succeeding proves **nothing** — it works with no permissions at all, which is exactly the trap that
+succeeding proves **nothing** - it works with no permissions at all, which is exactly the trap that
 made a broken session look healthy.
 
 ## Driving the app with `osascript`, and the `-25211` trap
@@ -211,7 +215,7 @@ blames permissions:
 
 ```
 tell application "System Events" to get name of every window of every process whose name contains "XPlat"
-→ System Events got an error: osascript is not allowed assistive access. (-25211)
+-> System Events got an error: osascript is not allowed assistive access. (-25211)
 ```
 
 Enumerating the **windows of every** process reaches into applications that do not expose themselves
@@ -220,7 +224,7 @@ directly instead, which works:
 
 ```sh
 osascript -e 'tell application "System Events" to tell process "XPlatUIDemoApp" to get name of every window'
-# → XPlat UI - AppKit
+# -> XPlat UI - AppKit
 ```
 
 Note the names: the **process** is `XPlatUIDemoApp`, while the **window** is titled `XPlat UI - AppKit`.
@@ -228,12 +232,12 @@ Note the names: the **process** is `XPlatUIDemoApp`, while the **window** is tit
 ## Making the app frontmost without Launch Services
 
 The launch-profile route does not activate the app, which matters because macOS delivers synthesised
-input to the frontmost application. Activate it explicitly — measured working:
+input to the frontmost application. Activate it explicitly - measured working:
 
 ```sh
 osascript -e 'tell application "System Events" to set frontmost of process "XPlatUIDemoApp" to true'
 osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'
-# → XPlatUIDemoApp
+# -> XPlatUIDemoApp
 ```
 
 So `dotnet run --launch-profile mac` followed by that activation is enough to drive real clicks and
@@ -246,7 +250,7 @@ Posting real CGEvents is what works, and it needs the Accessibility grant from t
 A minimal helper, compiled once with the Command Line Tools that are already installed:
 
 ```swift
-// click.swift — usage: click <x> <y>   (screen points, not pixels)
+// click.swift - usage: click <x> <y>   (screen points, not pixels)
 import CoreGraphics
 import Foundation
 let a = CommandLine.arguments
@@ -265,19 +269,19 @@ up.post(tap: .cghidEventTap)
 
 ```sh
 swiftc -O click.swift -o click
-./click 423 492          # points: pixel coordinate ÷ 2
+./click 423 492          # points: pixel coordinate / 2
 ```
 
 Diagnose a click that does nothing in this order, before suspecting the control:
 
-1. `CGPreflightPostEventAccess()` — if `false`, events are being dropped, and the fix is the TCC grant,
+1. `CGPreflightPostEventAccess()` - if `false`, events are being dropped, and the fix is the TCC grant,
    not the coordinates.
 2. Did the pointer move? Read it back with `CGEvent(source: nil)!.location`.
 3. **Are the coordinates in points?** Divide the screenshot pixel position by 2.
 4. Is the app frontmost? Synthesised input goes to whatever is frontmost.
 
 A click that lands in the wrong place is silent, so **measure the target instead of reading a scaled
-screenshot**. Render or capture the window, then find the control from the pixel data — for a filled
+screenshot**. Render or capture the window, then find the control from the pixel data - for a filled
 accent button, scan for the longest run of the accent colour in each row and take the middle of the
 band it occupies.
 
@@ -291,7 +295,7 @@ an obvious, reversible effect (the demo's **Switch appearance** flips the palett
 status bar) and confirm it before moving on to the feature you actually care about.
 
 ## Other things that bite on this host
-- **Screenshots** on `macvm` are **2992×1870 pixels for a 1496×935-point display — exactly 2×**.
+- **Screenshots** on `macvm` are **2992x1870 pixels for a 1496x935-point display - exactly 2x**.
   Coordinate systems are in points everywhere else (window origins, accessibility, CGEvent), so
   divide a pixel coordinate by two before clicking it. Getting this wrong does not error; it clicks
   somewhere else and the feature looks broken. Measure the target from the PNG rather than eyeballing
@@ -304,7 +308,7 @@ status bar) and confirm it before moving on to the feature you actually care abo
 ## Close the app when you are finished testing
 
 Always leave the Mac host as you found it: **no demo app still running**. A session that leaves the
-app up causes real problems for whoever comes next — a later launch fights the instance that is
+app up causes real problems for whoever comes next - a later launch fights the instance that is
 already there, synthetic input lands in the wrong process, a screenshot shows someone else's window,
 and a modal dialog left open can block the next test. Do this at the end of every run, whether the
 test passed or failed:
@@ -326,7 +330,7 @@ script, stop that script too rather than leaving it waiting on a child that no l
 The same applies to a harness or a temporary build directory: remove what you created, and leave the
 shared checkout on its own branch with a clean `git status`.
 
-This is not a macOS-only rule — the Windows and Linux hosts are test machines too, and a demo left
+This is not a macOS-only rule - the Windows and Linux hosts are test machines too, and a demo left
 running there causes the same confusion. Close it the same way after every run:
 
 ```powershell

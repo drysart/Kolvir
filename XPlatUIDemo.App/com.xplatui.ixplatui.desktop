@@ -1,0 +1,13 @@
+[Desktop Entry]
+Type=Application
+Version=1.0
+Name=XPlat UI
+GenericName=Cross-platform UI sample
+Comment=The XPlatUI sample application
+# The application id a GTK 4 application gets, which is what the dock matches a badge against and
+# what this file must therefore be called. See README.md, "App badging".
+Exec=XPlatUIDemoApp
+Icon=XPlatUI
+Terminal=false
+Categories=Development;
+StartupWMClass=XPlatUIDemoApp

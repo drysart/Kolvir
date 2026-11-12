@@ -1,6 +1,7 @@
 using SkiaSharp;
 using XPlatUI;
 using XPlatUI.Animations;
+using XPlatUI.Badges;
 using XPlatUI.Demo;
 using XPlatUI.DragDrop;
 using XPlatUI.Svg;
@@ -121,16 +122,18 @@ internal static class Program
             // three platforms.
             SingleInstance = true,
 
-            // The sample opts into five features, each for a page that uses it: drag and drop for
-            // its drops, animations for the easing pages, SVG for the icon pages, and the animated
-            // GIF and WebP providers for their picture pages. Each Add call is the whole opt-in;
-            // leaving one out keeps that feature's code out of an application that does not want it.
+            // The sample opts into six features, each for a page that uses it: drag and drop for
+            // its drops, animations for the easing pages, SVG for the icon pages, the animated
+            // GIF and WebP providers for their picture pages, and app badging for the badge page.
+            // Each Add call is the whole opt-in; leaving one out keeps that feature's code out of
+            // an application that does not want it.
             ConfigureServices = services => services
                 .AddDragDrop()
                 .AddAnimations()
                 .AddSvgImages()
                 .AddAnimatedGifImages()
-                .AddAnimatedWebpImages(),
+                .AddAnimatedWebpImages()
+                .AddAppBadges(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,

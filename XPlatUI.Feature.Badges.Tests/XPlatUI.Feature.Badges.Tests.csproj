@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The app badge feature's own suite, in an assembly of its own because the feature is a package of
+       its own: a rung-3 feature is not part of the core library, so its tests are not part of the core
+       suite either.
+
+       The feature is split by platform - `common/` plus one of windows, macos or linux compiled per
+       target framework - but these tests only touch `common/`, so the project takes one portable
+       target framework and the reference resolves the `net10.0` (linux) inner build of the feature on
+       every machine. Seeing a badge on a real taskbar button or dock icon needs the platform half and
+       a running desktop, which is what the demo application is for. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>XPlatUI.Badges.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\XPlatUI\XPlatUI.csproj" />
+    <ProjectReference Include="..\XPlatUI.Feature.Badges\XPlatUI.Feature.Badges.csproj" />
+    <!-- An attention request ends when the user comes back, which is an event only a real application
+         and window produce: the activation tests build both on the headless backend. -->
+    <ProjectReference Include="..\XPlatUI.Backend.Headless\XPlatUI.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>
