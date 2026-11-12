@@ -13,7 +13,6 @@ public class TableLayoutPanel : Panel
 {
     private readonly List<RowStyle> _rowStyles = new();
     private readonly List<ColumnStyle> _columnStyles = new();
-    private readonly Dictionary<Control, (int Column, int Row)> _cells = new();
 
     public TableLayoutPanel()
     {
@@ -33,25 +32,32 @@ public class TableLayoutPanel : Panel
     public Thickness CellPadding { get; set; }
 
     /// <summary>Sets the row and column a child occupies.</summary>
+    /// <remarks>
+    /// The position is attached to the control, not stored here (see
+    /// <see cref="TableLayoutPanelExtensions"/>), so it survives the control being moved to another
+    /// table and a child that leaves this one leaves nothing behind.
+    /// </remarks>
     public void SetCellPosition(Control control, int column, int row)
     {
         ArgumentNullException.ThrowIfNull(control);
-        _cells[control] = (Math.Max(0, column), Math.Max(0, row));
-        PerformLayout();
-        Invalidate();
+        TableLayoutPanelExtensions.SetCell(control, column, row);
     }
 
     public (int Column, int Row) GetCellPosition(Control control)
     {
         ArgumentNullException.ThrowIfNull(control);
-        return _cells.TryGetValue(control, out var cell) ? cell : (0, 0);
+        return TableLayoutPanelExtensions.GetCell(control);
     }
 
-    /// <summary>Convenience helper: adds a child at a specific cell.</summary>
+    /// <summary>Adds a child at a specific cell.</summary>
     public void Add(Control control, int column, int row)
     {
+        ArgumentNullException.ThrowIfNull(control);
+
+        // The cell is set before the control is added so the layout that adding triggers is already
+        // the right one. The other order lays the child out at (0, 0) and then again at its cell.
+        TableLayoutPanelExtensions.SetCell(control, column, row);
         Controls.Add(control);
-        SetCellPosition(control, column, row);
     }
 
     public void AddColumn(SizeType sizeType, float value) => AddColumn(new ColumnStyle(sizeType, value));

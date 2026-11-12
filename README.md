@@ -269,17 +269,23 @@ for scaling the canvas and the incoming pointer coordinates (the Win32 backend u
 var host = new UiHost { ClearColor = SKColors.White };
 
 var root = new Panel { BackColor = Theme.Background, Padding = new Thickness(16) };
-var table = new TableLayoutPanel { Dock = DockStyle.Fill };
-table.ColumnStyles.Add(ColumnStyle.Percent(50));
-table.ColumnStyles.Add(ColumnStyle.Percent(50));
-table.RowStyles.Add(RowStyle.AutoSize());
-table.RowStyles.Add(RowStyle.Percent(100));
 
-var button = new Button("Say hello") { Dock = DockStyle.Fill };
+var button = new Button("Say hello") { Dock = DockStyle.Fill, TableColumn = 1, TableRow = 1 };
 button.AddClickHandler(_ => Console.WriteLine("clicked"));
 
-table.Add(new Label("Hello") { AutoSize = true }, 0, 0);
-table.Add(button, 1, 1);
+// A cell is attached to the control, not held by the table, so a child can name its own place
+// in the initializer that creates it: no variables, and nothing to assign afterwards.
+var table = new TableLayoutPanel
+{
+    Dock = DockStyle.Fill,
+    ColumnStyles = { ColumnStyle.Percent(50), ColumnStyle.Percent(50) },
+    RowStyles = { RowStyle.AutoSize(), RowStyle.Percent(100) },
+    Controls =
+    {
+        new Label("Hello") { AutoSize = true, TableColumn = 0, TableRow = 0 },
+        button,
+    },
+};
 root.Controls.Add(table);
 
 host.Root = root;
