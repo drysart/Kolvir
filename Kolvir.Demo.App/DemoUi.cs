@@ -1120,7 +1120,10 @@ public sealed class DemoUi
     /// </summary>
     private Panel BuildTableLayoutDemo()
     {
-        var table = new TableLayoutPanel
+        // Every child names its own cell, so the whole grid - tracks, cells and their contents - is
+        // one initializer. The position is attached to the control rather than handed to the table
+        // afterwards; see "Using it" in README.md.
+        return new TableLayoutPanel
         {
             Dock = XDock.Fill,
             ShowFrame = false,
@@ -1130,32 +1133,36 @@ public sealed class DemoUi
             CornerRadius = 0f,
             Padding = new Thickness(0f),
             CellPadding = new Thickness(8f),
+            ColumnStyles =
+            {
+                new ColumnStyle(SizeType.Absolute, 160f),
+                new ColumnStyle(SizeType.Percent, 100f),
+                new ColumnStyle(SizeType.AutoSize, 0f),
+            },
+            RowStyles =
+            {
+                new RowStyle(SizeType.AutoSize, 0f),
+                new RowStyle(SizeType.Percent, 100f),
+                new RowStyle(SizeType.Absolute, 90f),
+                new RowStyle(SizeType.Absolute, 58f),
+            },
+            Controls =
+            {
+                Cell("Absolute column\n160 px", 0, 0),
+                Cell("Percent column\nall the space the other two leave", 1, 0),
+                Cell("AutoSize column\nfollows its content", 2, 0),
+                Cell("AutoSize row\nfollows its content", 0, 1),
+                Cell("The percent row and the percent column absorb whatever the fixed and AutoSize tracks leave over, which is why this cell is the one that grows and shrinks with the window.", 1, 1),
+                Cell("Drag the splitter, or resize the window, and only this column keeps its width.", 2, 1),
+                Cell("Absolute row\n90 px", 0, 2),
+                Cell("Percent row, percent column", 1, 2),
+                Cell("AutoSize\nboth ways", 2, 2),
+                Cell("One cell over all three columns: TableColumnSpan = 3", 0, 3, columnSpan: 3),
+            },
         };
-
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Absolute, 160f));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.Percent, 100f));
-        table.ColumnStyles.Add(new ColumnStyle(SizeType.AutoSize, 0f));
-
-        table.RowStyles.Add(new RowStyle(SizeType.AutoSize, 0f));
-        table.RowStyles.Add(new RowStyle(SizeType.Percent, 100f));
-        table.RowStyles.Add(new RowStyle(SizeType.Absolute, 90f));
-
-        table.Add(Cell("Absolute column\n160 px"), 0, 0);
-        table.Add(Cell("Percent column\nall the space the other two leave"), 1, 0);
-        table.Add(Cell("AutoSize column\nfollows its content"), 2, 0);
-
-        table.Add(Cell("AutoSize row\nfollows its content"), 0, 1);
-        table.Add(Cell("The percent row and the percent column absorb whatever the fixed and AutoSize tracks leave over, which is why this cell is the one that grows and shrinks with the window."), 1, 1);
-        table.Add(Cell("Drag the splitter, or resize the window, and only this column keeps its width."), 2, 1);
-
-        table.Add(Cell("Absolute row\n90 px"), 0, 2);
-        table.Add(Cell("Percent row, percent column"), 1, 2);
-        table.Add(Cell("AutoSize\nboth ways"), 2, 2);
-
-        return table;
     }
 
-    private static Panel Cell(string caption)
+    private static Panel Cell(string caption, int column, int row, int columnSpan = 1)
     {
         var cell = new Panel
         {
@@ -1163,6 +1170,9 @@ public sealed class DemoUi
             BorderWidth = 1f,
             CornerRadius = 8f,
             Padding = new Thickness(10f),
+            TableColumn = column,
+            TableRow = row,
+            TableColumnSpan = columnSpan,
         };
 
         cell.Controls.Add(new Label(caption)
