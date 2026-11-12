@@ -224,8 +224,6 @@ public sealed class SplitButtonTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,

@@ -78,7 +78,7 @@ has to read `--classic-menus` before it can build a backend.
 | `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
 | `Background` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
-| `Panel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree |
+| `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `Background` and `BorderWidth` for a card |
 | `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
 | `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
@@ -485,7 +485,8 @@ var stack = new StackPanel
     Dock = DockStyle.Fill,
     Spacing = 8f,
     Padding = new Thickness(12f),
-    ShowFrame = true,            // a stack panel draws no frame of its own by default
+    Background = Background.FromThemeColor(ThemeColor.Surface),   // a stack draws no frame of its own by default
+    BorderWidth = 1f,
 };
 
 stack.Controls.Add(new Button("Save"));
@@ -2551,8 +2552,9 @@ inheriting the panel's. Assign a `Foreground` when a whole subtree really should
 A nullable colour would have to mean both "no value" and "draw nothing", and then a label inside a
 filled panel would silently start painting a box of its own - with its own corners and opacity -
 the first time a panel got a colour. So a control whose class default is `None` (a label, a toggle,
-anything that draws no chrome) keeps painting nothing wherever it sits, and a control that does
-paint (a panel, a field) takes the nearest ancestor's assigned colour instead of its own default.
+a plain panel - anything that draws no chrome) keeps painting nothing wherever it sits, and a
+control that does paint (a field, a tab control, an expander) takes the nearest ancestor's assigned
+colour instead of its own default.
 Only a colour is inherited, not `None`: a layout container that paints nothing is the ordinary
 parent of a card that does, and suppressing what is inside it would take the card away with the
 container. A control that must not be filled assigns `None` to itself.

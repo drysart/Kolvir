@@ -61,8 +61,6 @@ public sealed class BusyOverlayTests : HeadlessTestBase
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BorderWidth = 0f,
             Padding = Thickness.Empty,
         };
@@ -287,8 +285,6 @@ public sealed class BusyOverlayTests : HeadlessTestBase
     private static Panel Muted() => new()
     {
         Dock = DockStyle.Fill,
-        ShowFrame = false,
-        IsCard = false,
         BackColor = null,
         BorderWidth = 0f,
         CornerRadius = 0f,

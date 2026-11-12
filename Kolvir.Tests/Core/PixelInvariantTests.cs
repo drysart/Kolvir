@@ -88,8 +88,6 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         var plain = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BorderWidth = 0f,
             Padding = Thickness.Empty,
         };
@@ -103,9 +101,12 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     [TestMethod]
     public void TheDarkPaletteChangesWhatASurfacePaints()
     {
+        // A panel paints nothing unless it is given a background, so this one asks for the surface
+        // role - the palette role, not a colour, which is what lets the swap below recolour it.
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
+            Background = Background.FromThemeColor(ThemeColor.Surface),
             Padding = Thickness.Empty,
             BorderWidth = 0f,
             CornerRadius = 0f,

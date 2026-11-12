@@ -459,8 +459,6 @@ internal sealed class ScaledPopupHost : Panel
     {
         _content = content;
 
-        ShowFrame = false;
-        IsCard = false;
         BackColor = null;
         BorderWidth = 0f;
         CornerRadius = 0f;

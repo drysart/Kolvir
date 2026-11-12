@@ -94,8 +94,6 @@ public sealed class ColorDialog
         {
             Dock = DockStyle.Bottom,
             Height = 40f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -108,8 +106,6 @@ public sealed class ColorDialog
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,

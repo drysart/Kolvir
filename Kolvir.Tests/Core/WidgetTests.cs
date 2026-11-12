@@ -286,7 +286,6 @@ public sealed class WidgetTests : HeadlessTestBase
             Dock = DockStyle.Fill,
             Padding = Thickness.Empty,
             BorderWidth = 0f,
-            ShowFrame = false,
         };
         group.Controls.Add(content);
 

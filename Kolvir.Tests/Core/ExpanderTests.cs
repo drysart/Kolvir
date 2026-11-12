@@ -165,8 +165,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -352,8 +350,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -498,8 +494,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         {
             Dock = DockStyle.Top,
             Height = 40f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -532,8 +526,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -562,8 +554,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,

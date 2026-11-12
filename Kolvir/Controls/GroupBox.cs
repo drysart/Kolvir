@@ -16,11 +16,8 @@ public class GroupBox : Panel
 {
     public GroupBox()
     {
-        // The panel's own chrome would draw a second, complete border; the caption needs a break
-        // in the top edge, so the frame is drawn here instead.
-        ShowFrame = false;
-        IsCard = false;
-
+        // The panel draws no chrome of its own, and the caption needs a break in the top edge, so
+        // the frame is drawn here instead.
         BorderWidth = 1f;
         CornerRadius = 8f;
         Padding = new Thickness(12f, 0f, 12f, 12f);

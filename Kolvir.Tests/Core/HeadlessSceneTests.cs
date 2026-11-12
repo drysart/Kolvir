@@ -120,7 +120,11 @@ public sealed class HeadlessSceneTests : HeadlessTestBase
     [TestMethod]
     public void PaintingProducesAFrameAtTheClientSize()
     {
-        var root = new Panel { Dock = DockStyle.Fill };
+        var root = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Background = Background.FromThemeColor(ThemeColor.Surface),
+        };
 
         using var scene = HeadlessScene.Create(root, 200f, 100f);
         using var bitmap = scene.Render();

@@ -37,8 +37,6 @@ public class Overlay : Panel, IInputSink
 
     public Overlay()
     {
-        ShowFrame = false;
-        IsCard = false;
         CornerRadius = 0f;
         Padding = Thickness.Empty;
         TabStop = false;
