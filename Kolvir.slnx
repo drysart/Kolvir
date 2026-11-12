@@ -1,0 +1,25 @@
+<Solution>
+  <Project Path="Kolvir.Backend.AppKit/Kolvir.Backend.AppKit.csproj" />
+  <Project Path="Kolvir.Backend.Gtk4/Kolvir.Backend.Gtk4.csproj" />
+  <Project Path="Kolvir.Backend.Headless/Kolvir.Backend.Headless.csproj" />
+  <Project Path="Kolvir.Backend.Win32/Kolvir.Backend.Win32.csproj" />
+  <Project Path="Kolvir.Backend.Win32.Tests/Kolvir.Backend.Win32.Tests.csproj" />
+  <Project Path="Kolvir.Backend/Kolvir.Backend.csproj" />
+  <Project Path="Kolvir.Demo.App/Kolvir.Demo.App.csproj" />
+  <Project Path="Kolvir/Kolvir.csproj" />
+  <Project Path="Kolvir.Feature.AnimatedGif/Kolvir.Feature.AnimatedGif.csproj" />
+  <Project Path="Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj" />
+  <Project Path="Kolvir.Feature.AnimatedWebp/Kolvir.Feature.AnimatedWebp.csproj" />
+  <Project Path="Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj" />
+  <Project Path="Kolvir.Feature.Animations/Kolvir.Feature.Animations.csproj" />
+  <Project Path="Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj" />
+  <Project Path="Kolvir.Feature.Badges/Kolvir.Feature.Badges.csproj" />
+  <Project Path="Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj" />
+  <Project Path="Kolvir.Feature.Badges.Tests.Windows/Kolvir.Feature.Badges.Tests.Windows.csproj" />
+  <Project Path="Kolvir.Feature.DragDrop/Kolvir.Feature.DragDrop.csproj" />
+  <Project Path="Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj" />
+  <Project Path="Kolvir.Feature.Svg/Kolvir.Feature.Svg.csproj" />
+  <Project Path="Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj" />
+  <Project Path="Kolvir.Minimal/Kolvir.Minimal.csproj" />
+  <Project Path="Kolvir.Tests/Kolvir.Tests.csproj" />
+</Solution>

@@ -15,21 +15,21 @@ below that differs from the old host is called out as such, because the two host
 silently change what your test actually measured.
 
 The macOS build is not a loose executable. The `net10.0-macos` target builds an **`.app` bundle**, and
-the only binary in it is `Contents/MacOS/XPlatUIDemoApp`:
+the only binary in it is `Contents/MacOS/KolvirDemoApp`:
 
 ```
-XPlatUIDemo.App/bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app/Contents/MacOS/XPlatUIDemoApp
+Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp
 ```
 
-There is no `XPlatUIDemoApp` beside the bundle and no supported way to run it as a plain managed
+There is no `KolvirDemoApp` beside the bundle and no supported way to run it as a plain managed
 assembly, because the app needs its native apphost to register with AppKit.
 
 ## Build first
 
 ```sh
 export PATH="$HOME/.dotnet:$PATH"          # macvm; see "Machine prerequisites" below
-cd ~/src/XPlatUI
-dotnet build XPlatUIDemo.App -c Debug
+cd ~/src/Kolvir
+dotnet build Kolvir.Demo.App -c Debug
 ```
 
 A build is required before any run route here - every route below launches whatever is already in
@@ -78,7 +78,7 @@ xcode-select -p        # -> /Applications/Xcode.app/Contents/Developer
 Without `sudo` you can point a single build at Xcode instead, which was measured working:
 
 ```sh
-DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer dotnet build XPlatUIDemo.App -c Debug
+DEVELOPER_DIR=/Applications/Xcode.app/Contents/Developer dotnet build Kolvir.Demo.App -c Debug
 ```
 
 Note that the AppKit **library** builds fine with only the Command Line Tools; it is the `.app` bundle
@@ -88,7 +88,7 @@ demo can run.
 ## Plain `dotnet run` does not work - do not waste time on it
 
 ```sh
-dotnet run --project XPlatUIDemo.App -- --page 38     # exits immediately, code 0, nothing drawn
+dotnet run --project Kolvir.Demo.App -- --page 38     # exits immediately, code 0, nothing drawn
 ```
 
 It resolves to a managed exec rather than the apphost, which is why it exits successfully having
@@ -96,7 +96,7 @@ drawn nothing:
 
 ```
 RunCommand   = dotnet
-RunArguments = exec ".../bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.dll"
+RunArguments = exec ".../bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.dll"
 ```
 
 No error is printed, so this looks like a silent failure rather than a misconfiguration. That is the
@@ -104,15 +104,15 @@ trap that cost time: the app never starts, and the absence of an error suggests 
 
 ## The route that works: `dotnet run` with the `mac` launch profile
 
-`XPlatUIDemo.App/Properties/launchSettings.json` carries a `mac` profile whose `commandName` is
+`Kolvir.Demo.App/Properties/launchSettings.json` carries a `mac` profile whose `commandName` is
 `Executable` and whose `executablePath` is the bundle's binary. With it, `dotnet run` launches the
 app properly, and arguments after `--` reach it:
 
 ```sh
-dotnet run --project XPlatUIDemo.App --launch-profile mac -- --page 38
+dotnet run --project Kolvir.Demo.App --launch-profile mac -- --page 38
 ```
 
-Measured: the process stays alive, and `pgrep -fl XPlatUIDemoApp` shows the binary running with
+Measured: the process stays alive, and `pgrep -fl KolvirDemoApp` shows the binary running with
 `--page 38`. This is the preferred route.
 
 **One caveat, measured:** an app launched this way does **not** come to the front. `lsappinfo front`
@@ -124,7 +124,7 @@ which makes a working feature look broken. See "Making the app frontmost without
 ## The other route that works: `open -n`
 
 ```sh
-open -n ~/src/XPlatUI/XPlatUIDemo.App/bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app --args --page 38
+open -n ~/src/Kolvir/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app --args --page 38
 ```
 
 Goes through Launch Services, so the app **does** become frontmost - the right choice when a check
@@ -134,7 +134,7 @@ already running; use plain `open` to activate and reuse a running one.
 ## Running the inner binary directly
 
 ```sh
-~/src/XPlatUI/XPlatUIDemo.App/bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app/Contents/MacOS/XPlatUIDemoApp --page 38
+~/src/Kolvir/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp --page 38
 ```
 
 Works - the process runs and draws. Like the launch-profile route it may not take activation, so use
@@ -214,7 +214,7 @@ There is one AppleScript form that fails, and it is worth knowing by name becaus
 blames permissions:
 
 ```
-tell application "System Events" to get name of every window of every process whose name contains "XPlat"
+tell application "System Events" to get name of every window of every process whose name contains "Kolvir"
 -> System Events got an error: osascript is not allowed assistive access. (-25211)
 ```
 
@@ -223,11 +223,11 @@ to accessibility, and System Events fails on the first one it cannot read. Addre
 directly instead, which works:
 
 ```sh
-osascript -e 'tell application "System Events" to tell process "XPlatUIDemoApp" to get name of every window'
-# -> XPlat UI - AppKit
+osascript -e 'tell application "System Events" to tell process "KolvirDemoApp" to get name of every window'
+# -> Kolvir - AppKit
 ```
 
-Note the names: the **process** is `XPlatUIDemoApp`, while the **window** is titled `XPlat UI - AppKit`.
+Note the names: the **process** is `KolvirDemoApp`, while the **window** is titled `Kolvir - AppKit`.
 
 ## Making the app frontmost without Launch Services
 
@@ -235,9 +235,9 @@ The launch-profile route does not activate the app, which matters because macOS 
 input to the frontmost application. Activate it explicitly - measured working:
 
 ```sh
-osascript -e 'tell application "System Events" to set frontmost of process "XPlatUIDemoApp" to true'
+osascript -e 'tell application "System Events" to set frontmost of process "KolvirDemoApp" to true'
 osascript -e 'tell application "System Events" to get name of first process whose frontmost is true'
-# -> XPlatUIDemoApp
+# -> KolvirDemoApp
 ```
 
 So `dotnet run --launch-profile mac` followed by that activation is enough to drive real clicks and
@@ -315,12 +315,12 @@ test passed or failed:
 
 ```sh
 # Close the app and the `dotnet run` that started it.
-pkill -f XPlatUIDemoApp
-pkill -f "dotnet run --project XPlatUIDemo.App"
+pkill -f KolvirDemoApp
+pkill -f "dotnet run --project Kolvir.Demo.App"
 
 # Confirm nothing is left: both commands must print nothing.
-pgrep -fl XPlatUIDemoApp
-pgrep -fl "dotnet run --project XPlatUIDemo.App"
+pgrep -fl KolvirDemoApp
+pgrep -fl "dotnet run --project Kolvir.Demo.App"
 ```
 
 Close any modal window the test opened before killing the process where you can, so a half-finished
@@ -335,10 +335,10 @@ running there causes the same confusion. Close it the same way after every run:
 
 ```powershell
 # Windows
-Stop-Process -Id (Get-Process XPlatUIDemoApp).Id
+Stop-Process -Id (Get-Process KolvirDemoApp).Id
 ```
 
 ```sh
 # Linux
-pkill -f XPlatUIDemoApp
+pkill -f KolvirDemoApp
 ```

@@ -3,15 +3,15 @@
 Status: in progress. Branch `feature/app-badges`.
 
 What this is: the unread count and the "red dot" on the application's own icon - the taskbar button on
-Windows, the Dock tile on macOS, the dock icon on Linux. The inline `XPlatBadge` reserved in
+Windows, the Dock tile on macOS, the dock icon on Linux. The inline `Badge` reserved in
 `CONTROLS-TODO.md` is a different feature (a count drawn on a tab or a button).
 
 ## 1. The rung: 3
 
-`XPlatUI.Feature.Badges`, one package, the four-folder layout of `FEATURE-COST-POLICY.md` section 4.
+`Kolvir.Feature.Badges`, one package, the four-folder layout of `FEATURE-COST-POLICY.md` section 4.
 
 A badge belongs to the application, not to a window or a control, so there is no call site the
-application can name that would keep the code out of the deliverable: `XPlatApplication` is retained
+application can name that would keep the code out of the deliverable: `Application` is retained
 by every application. Rung 1 is therefore unavailable, and rung 2 would put the implementation in the
 backend assemblies, which every application of that platform ships whether it shows a badge or not.
 What moves into the package is not a few glue lines: it is a Skia-drawn icon on Windows, a D-Bus
@@ -19,7 +19,7 @@ protocol on Linux, and the whole state machine. So the feature takes rung 3 and 
 opt-in.
 
 The consequence for the surface is section 5's rule: a separate assembly cannot add members to
-`XPlatApplication`, so everything is an extension block.
+`Application`, so everything is an extension block.
 
 **Nothing in the core library or in a backend names this feature.** The backends keep three seams
 that describe platform facilities instead (section 5).
@@ -66,7 +66,7 @@ Measured, not assumed:
 ## 3. The API
 
 ```csharp
-using XPlatUI.Badges;
+using Kolvir.Badges;
 
 options.ConfigureServices = services => services.AddAppBadges();   // the opt-in, one name per platform
 
@@ -99,14 +99,14 @@ an application badge at all).
 ## 4. Layout
 
 ```
-XPlatUI.Feature.Badges/
-  common/   XPlatAppBadge.cs              the state, the precedence, the capabilities
-            XPlatBadgeCapabilities.cs
-            IXPlatAppBadgePresenter.cs    what a platform half implements
-            XPlatApplicationBadgeExtensions.cs   the extension block
+Kolvir.Feature.Badges/
+  common/   AppBadge.cs              the state, the precedence, the capabilities
+            BadgeCapabilities.cs
+            IAppBadgePresenter.cs    what a platform half implements
+            ApplicationBadgeExtensions.cs   the extension block
   windows/  Win32BadgeServiceCollectionExtensions.cs   AddAppBadges()
             Win32BadgePresenter.cs       ITaskbarList3, DrawIconEx, one icon per window
-            Win32BadgeWindowHook.cs      IXPlatWin32WindowHook: attach at Shown, detach at Disposed
+            Win32BadgeWindowHook.cs      IWin32WindowHook: attach at Shown, detach at Disposed
             Win32BadgeIcon.cs            Skia at the small-icon metric -> HICON
             Win32BadgeNativeMethods.cs   the COM interface and the GDI calls
   macos/    AppKitBadgeServiceCollectionExtensions.cs
@@ -119,7 +119,7 @@ XPlatUI.Feature.Badges/
 
 | Platform | Seam | Why it is not a backend change |
 |---|---|---|
-| Win32 | `IXPlatWin32WindowHook`, `Handle`, `RegisterNativeTeardown`, `AddScaleChangedHandler` | Already public: a window's handle and its phases are the platform facility. |
+| Win32 | `IWin32WindowHook`, `Handle`, `RegisterNativeTeardown`, `AddScaleChangedHandler` | Already public: a window's handle and its phases are the platform facility. |
 | Win32 | **`AddMessageFilter`** (new) | `TaskbarButtonCreated` cannot be seen from a phase. Added as a generic facility that names no feature. |
 | macOS | `NSApplication.SharedApplication` | Process-global, no seam needed. |
 | GTK4 | `Gtk.Module.Initialize()`, `Gio.Application.GetDefault()`, `Gio.DBusConnection` | Public GLib/Gio surface, no seam needed. |
@@ -175,12 +175,12 @@ without a live window - the same split the backend uses for its other decisions.
 |---|---|
 | 1 | Done. `SetOverlayIcon` answers `S_OK` and the `DrawIconEx` round trip returns the pixels drawn (16/20/24/32 px). Two findings: the shell renders the overlay in the small-icon slot, so the icon must be built at `SM_CXSMICON` for the window's DPI; and the IID typo above, which made `ITaskbarList3` look unsupported. |
 | 2 | Done. `AddMessageFilter`/`RemoveMessageFilter` on `Win32WindowBackend`, dispatch in `Win32MessageFilters`, seven tests. |
-| 3 | Done. `common/` is the whole model: `XPlatAppBadge` (Count, Text, IsDot, Urgent, Clear), `XPlatBadgeCapabilities`, the resolved `XPlatBadgeState`, the presenter seam and `app.Badge`. Precedence is `IsDot` -> `Text` -> `Count`; a count of zero or less is no badge; setting the same value twice publishes once; `Clear()` publishes once however many members were set. An unsupported presentation degrades to `Urgent`, and a platform without urgency drops it. Without the opt-in nothing is published and `Capabilities` is empty. 19 tests. |
+| 3 | Done. `common/` is the whole model: `AppBadge` (Count, Text, IsDot, Urgent, Clear), `BadgeCapabilities`, the resolved `BadgeState`, the presenter seam and `app.Badge`. Precedence is `IsDot` -> `Text` -> `Count`; a count of zero or less is no badge; setting the same value twice publishes once; `Clear()` publishes once however many members were set. An unsupported presentation degrades to `Urgent`, and a platform without urgency drops it. Without the opt-in nothing is published and `Capabilities` is empty. 19 tests. |
 | 4 | Done. `AddAppBadges()` and `AppKitAppBadgePresenter`: the label is the count's digits, the text as given, or a bullet for the dot, with `dockTile.display()` after every change and `RequestUserAttention` on an urgent transition. Workers are queued on `NSOperationQueue.MainQueue` rather than touching AppKit off-thread. Seen on the Dock of a harness application: `3`, a bullet, `99+`, and cleared. 19 platform-neutral tests still pass; the macOS half has no unit tests because it is a property set on a global AppKit object. |
-| 5 | Done. `AddAppBadges()` and `Gtk4AppBadgePresenter`: `com.canonical.Unity.LauncherEntry.Update` every change with `count`, `count-visible` and `urgent`, all three each time because the dock keeps the last value. The desktop id comes from `Gtk4ApplicationBackend.NativeApplication.ApplicationId` - the backend registers itself in the container, so the presenter takes it as a constructor dependency instead of guessing at the id. Verified on X11 (`linux`) and Wayland (`linux2`): capabilities are count+urgent, text and dot degrade to urgent, three signals per run carry `application://com.xplatui.ibadgeharness.desktop`, and the window's `_GTK_APPLICATION_ID` matches the installed entry. Two findings: a presenter's constructor has to be **public** for the service provider to find it (an internal one fails at resolve time), and the dock cannot be photographed from these sessions at all - the shell composites it, so `xwd` misses it, `gnome-screenshot` falls back to X11 and the shell's screenshot method answers `AccessDenied`. |
+| 5 | Done. `AddAppBadges()` and `Gtk4AppBadgePresenter`: `com.canonical.Unity.LauncherEntry.Update` every change with `count`, `count-visible` and `urgent`, all three each time because the dock keeps the last value. The desktop id comes from `Gtk4ApplicationBackend.NativeApplication.ApplicationId` - the backend registers itself in the container, so the presenter takes it as a constructor dependency instead of guessing at the id. Verified on X11 (`linux`) and Wayland (`linux2`): capabilities are count+urgent, text and dot degrade to urgent, three signals per run carry `application://com.kolvir.ibadgeharness.desktop`, and the window's `_GTK_APPLICATION_ID` matches the installed entry. Two findings: a presenter's constructor has to be **public** for the service provider to find it (an internal one fails at resolve time), and the dock cannot be photographed from these sessions at all - the shell composites it, so `xwd` misses it, `gnome-screenshot` falls back to X11 and the shell's screenshot method answers `AccessDenied`. |
 | 6 | Done. `AddAppBadges()`, `Win32AppBadgePresenter` and `Win32BadgeWindowHook`: the overlay is drawn with Skia at `SM_CXSMICON` for each window's DPI and handed to `ITaskbarList3::SetOverlayIcon`; the hook attaches at `Shown`, releases at `Disposed`, and re-applies on `TaskbarButtonCreated` and `WM_DPICHANGED` through the message filter, which is what that seam was added for. A badge set from a worker is posted to each window and applied on its own thread. Counts cap at `99+` - the first cut truncated the digits, so 1200 drew "12+", which says twelve. Ten pixel tests over the drawing (disc, numeral, dot smaller than a badge, corner clear, every icon size, an empty badge making no handle) and the harness runs the whole sequence with no exceptions; the shell's rendering itself still cannot be photographed here. |
-| 7 | Done. The demo's **App badge** page (index 58) sets a count of 3, a count of 150, a dot, a label, an urgent nudge and a clear, and its readout prints what is showing next to what the backend says it can draw - which is what makes Linux honest instead of looking broken, because the headless backend used for the render reports all four false and the page says so. `README.md` gains "App badging" with the precedence rule, a per-platform table, the desktop-entry requirement and a "what the platforms cannot do" list; `APPLICATION-MODEL.md` section 10 turns the deferred row into what was built (and keeps notifications and tray deferred); `FEATURE-COST-POLICY.md` section 8 gains the rung-3 worked example. The demo ships `com.xplatui.ixplatui.desktop` and `install-badge-desktop-entry.sh`, because the Linux half silently does nothing without an installed entry. `tests.yml` names both badge suites - the portable one in the shared list, the pixel one on the Windows leg - since a suite CI does not name never runs. Verified: the solution builds with no warnings or errors and both suites pass (19 and 10). |
-| 8 | Done. Builds with no warnings on Windows, macOS, `linux` (X11) and `linux2` (Wayland), and the sample runs on all four. On Windows and macOS the launch is itself the check of the wiring: `app.Badge` is first read when a window attaches, so a presenter the container could not build would throw there. On Linux the entry installer was run against the sample's build output and the running sample's `_GTK_APPLICATION_ID` read back as `com.xplatui.ixplatui`, which is the name of the file the installer writes - the one link step 5 could only test with a harness. Suites: 19 portable, 10 Windows, 53 in the Win32 backend, and the five other feature suites, all green locally and in CI. One thing CI taught: this is the first feature suite that is not portable, and an unnarrowed restore of it evaluates the feature's macOS inner build and dies for want of a workload the job deliberately does not install (`NETSDK1147` from `XPlatUI.Backend.AppKit`, before anything is compiled). `-p:TargetFramework=net10.0-windows` is worse, not better: it overrides `XPlatUI` too, which is `net10.0`, and leaves assets restored for one framework and built for another. So the feature takes a scoped `-p:XPlatUIBadgeFrameworks=` that nothing but it reads. Five checks green on PR #64. Not photographed, as section 9 says: the Windows taskbar and the GNOME dock. |
+| 7 | Done. The demo's **App badge** page (index 58) sets a count of 3, a count of 150, a dot, a label, an urgent nudge and a clear, and its readout prints what is showing next to what the backend says it can draw - which is what makes Linux honest instead of looking broken, because the headless backend used for the render reports all four false and the page says so. `README.md` gains "App badging" with the precedence rule, a per-platform table, the desktop-entry requirement and a "what the platforms cannot do" list; `APPLICATION-MODEL.md` section 10 turns the deferred row into what was built (and keeps notifications and tray deferred); `FEATURE-COST-POLICY.md` section 8 gains the rung-3 worked example. The demo ships `com.kolvir.ikolvir.desktop` and `install-badge-desktop-entry.sh`, because the Linux half silently does nothing without an installed entry. `tests.yml` names both badge suites - the portable one in the shared list, the pixel one on the Windows leg - since a suite CI does not name never runs. Verified: the solution builds with no warnings or errors and both suites pass (19 and 10). |
+| 8 | Done. Builds with no warnings on Windows, macOS, `linux` (X11) and `linux2` (Wayland), and the sample runs on all four. On Windows and macOS the launch is itself the check of the wiring: `app.Badge` is first read when a window attaches, so a presenter the container could not build would throw there. On Linux the entry installer was run against the sample's build output and the running sample's `_GTK_APPLICATION_ID` read back as `com.kolvir.ikolvir`, which is the name of the file the installer writes - the one link step 5 could only test with a harness. Suites: 19 portable, 10 Windows, 53 in the Win32 backend, and the five other feature suites, all green locally and in CI. One thing CI taught: this is the first feature suite that is not portable, and an unnarrowed restore of it evaluates the feature's macOS inner build and dies for want of a workload the job deliberately does not install (`NETSDK1147` from `Kolvir.Backend.AppKit`, before anything is compiled). `-p:TargetFramework=net10.0-windows` is worse, not better: it overrides `Kolvir` too, which is `net10.0`, and leaves assets restored for one framework and built for another. So the feature takes a scoped `-p:KolvirBadgeFrameworks=` that nothing but it reads. Five checks green on PR #64. Not photographed, as section 9 says: the Windows taskbar and the GNOME dock. |
 | 9 | Done. `Urgent` was the last member of the feature that described a state while behaving like an event: Windows flashes until the window is foreground, macOS bounces until the application is activated, and a dock highlights until the window has focus, but the flag stayed true afterwards - so it misreported, and a second request was not a transition, which is exactly what the two native platforms key on. All three end on the same event, a window becoming active, which every backend already reports, so the badge watches it once in `common/` rather than three times in the platform folders, and the reset goes through the ordinary property so the platform half is told and the resolved state stays consistent. That made the badge changeable without the application, so it gained `AddChangedHandler` - fired after the platform half, so a readout built from it agrees with what is showing - and the sample's readout uses it; without it the page said `Urgent: yes` after the nudge had been answered. Verified with a second window standing in for the user coming back, in a harness on all three: `while away: urgent=True`, `after coming back: urgent=False`, `after asking again: urgent=True` on Win32, GTK4 on X11 and Wayland, and AppKit. Four new tests drive the same thing through a real application and windows on the headless backend. |
 
 ## 9. Risks

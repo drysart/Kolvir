@@ -1,4 +1,4 @@
-# XPlatUI
+# Kolvir
 
 A tiny, AOT-friendly, cross-platform UI layer that borrows the WinForms/WPF programming
 model (controls, docking, table layout, events) but draws everything with
@@ -7,45 +7,45 @@ supplies the window, the input, the clipboard, the dialogs and the system appear
 controls draw themselves on top of it. The same sample UI runs on all three platforms.
 
 ```
-XPlatUI/                  net10.0 class library (no OS-specific code, IsAotCompatible)
-  Application/            XPlatApplication, XPlatWindow, XPlatIcon, options, DI wiring, dialogs
+Kolvir/                   net10.0 class library (no OS-specific code, IsAotCompatible)
+  Application/            Application, Window, Icon, options, DI wiring, dialogs
   Core/                   primitives: control base class, geometry, painting, fonts, theme, clipboard
-  Controls/               XPlatPanel, XPlatStackPanel, XPlatTableLayoutPanel, XPlatSplitContainer, XPlatGroupBox, XPlatScrollBar, XPlatLabel, XPlatRichLabel, XPlatButton, XPlatCheckBox, XPlatRadioButton, XPlatProgressBar, XPlatTextBox, XPlatVirtualList, XPlatListBox, XPlatListView, XPlatTreeView, XPlatComboBox, XPlatTabControl, XPlatTabPage, XPlatToolTip, XPlatImage
+  Controls/               Panel, StackPanel, TableLayoutPanel, SplitContainer, GroupBox, ScrollBar, Label, RichLabel, Button, CheckBox, RadioButton, ProgressBar, TextBox, VirtualList, ListBox, ListView, TreeView, ComboBox, TabControl, TabPage, ToolTip, Image
   Layout/                 row/column sizing styles
   Menus/                  menu bar, menu, menu item, and the context menu contract
-  Popups/                 the popup contract (IXPlatPopupService) and XPlatPopup, which floats a control above its window
-  Platform/               the backend contract: IXPlatApplicationBackend, IXPlatWindowBackend, ...
+  Popups/                 the popup contract (IPopupService) and Popup, which floats a control above its window
+  Platform/               the backend contract: IApplicationBackend, IWindowBackend, ...
   Selection/              text selection and its clipboard plumbing
   Services/               window-scoped service helpers
   Native/                 SkiaNativeLoader.cs - unpacks the embedded Skia library in an AOT build
   buildTransitive/        the MSBuild that embeds it, shipped with the package
-  XPlatUiHost.cs          platform-neutral host: layout, painting, input routing, focus
-XPlatUIDemo.App/          the one application: net10.0-windows, net10.0-macos or net10.0
+  UiHost.cs               platform-neutral host: layout, painting, input routing, focus
+Kolvir.Demo.App/          the one application: net10.0-windows, net10.0-macos or net10.0
   Program.cs              pick a backend, describe a window, run
   DemoUi.cs               the sample layout, plus RenderToPng for headless renders
   DemoIcon.cs             the sample icon, drawn in code so no binary asset is needed
   app.manifest            per-monitor v2 DPI awareness (Windows)
   Info.plist              the bundle identity (macOS)
-XPlatUI.Backend.Win32/    net10.0-windows backend over raw Win32 (no WinForms, no System.Drawing)
-XPlatUI.Backend.AppKit/   net10.0-macos backend over AppKit
-XPlatUI.Backend.Gtk4/     net10.0 backend over GTK4
-XPlatUI.Backend.Headless/ net10.0 backend that paints offscreen; what --render and the tests use
-XPlatUI.Backend/          multi-targeting selector: the backend for whichever TFM you built for
-XPlatUI.Feature.DragDrop/ drag and drop, as a separate package: one project, one TFM per platform
+Kolvir.Backend.Win32/     net10.0-windows backend over raw Win32 (no WinForms, no System.Drawing)
+Kolvir.Backend.AppKit/    net10.0-macos backend over AppKit
+Kolvir.Backend.Gtk4/      net10.0 backend over GTK4
+Kolvir.Backend.Headless/  net10.0 backend that paints offscreen; what --render and the tests use
+Kolvir.Backend/           multi-targeting selector: the backend for whichever TFM you built for
+Kolvir.Feature.DragDrop/  drag and drop, as a separate package: one project, one TFM per platform
   common/                 the portable half: AllowDrop, the handler pairs, the router
   windows/                the opt-in, its hook and the OLE IDropTarget they register
   linux/                  the opt-in, its hook and the GtkDropTarget controllers they add
   macos/                  the opt-in, its hook, and the sink it installs on the view (below)
-XPlatUI.Feature.Animations/ timeline animations, as a separate package: same layout, all portable
+Kolvir.Feature.Animations/ timeline animations, as a separate package: same layout, all portable
   common/                 the set, the value animations, the easings and the app-wide frame clock
   windows/ macos/ linux/  empty: an animation is arithmetic, a clock and an invalidation
-XPlatUI.Feature.Svg/      SVG images, as a separate package: same layout, all portable
+Kolvir.Feature.Svg/       SVG images, as a separate package: same layout, all portable
   common/                 the format provider, the parse cache, the currentColor load helpers
   windows/ macos/ linux/  empty: Svg.Skia renders to an SKPicture on every platform
-XPlatUI.Minimal/          the measurement fixture: one window, one label, no features
+Kolvir.Minimal/           the measurement fixture: one window, one label, no features
 ```
 
-`XPlatUIDemo.App` builds exactly **one** target framework per operating system, chosen by
+`Kolvir.Demo.App` builds exactly **one** target framework per operating system, chosen by
 `$([MSBuild]::IsOSPlatform(...))`: `net10.0-windows` on Windows, `net10.0-macos` on macOS and
 `net10.0` on Linux. That is deliberate rather than tidy. `net10.0-macos` needs the macOS workload,
 and the `.app` it produces needs a Mac with the matching Xcode, so it must never appear in a TFM
@@ -54,18 +54,18 @@ list that Windows has to evaluate; and a portable `net10.0` build *on a Mac* def
 One TFM per OS is what keeps `Program.cs`'s `#if` blocks honest.
 See [On macOS (AppKit)](#on-macos-appkit).
 
-Building `XPlatUI.slnx` needs the macOS workload, because the solution lists
-`XPlatUI.Backend.AppKit` and `XPlatUI.Feature.DragDrop`, which both target `net10.0-macos`.
+Building `Kolvir.slnx` needs the macOS workload, because the solution lists
+`Kolvir.Backend.AppKit` and `Kolvir.Feature.DragDrop`, which both target `net10.0-macos`.
 `dotnet workload install macos` satisfies it where it is not already present; a build without it
 stops with `NETSDK1147`. Nothing else in the solution needs a workload, and an application that
 references either project still builds only the one inner build its own framework can use.
 
-`XPlatUI.Backend` is the way out of that `#if` for an application that wants nothing more than a
+`Kolvir.Backend` is the way out of that `#if` for an application that wants nothing more than a
 default backend. It is a project that multi-targets and references exactly one backend per target
 framework, so referencing *it* is enough: the framework the application builds for decides which
-backend it gets, and a publish carries only that one. `XPlatUIBackend.CreateDefault()` returns the
+backend it gets, and a publish carries only that one. `KolvirBackend.CreateDefault()` returns the
 backend and loads the embedded Skia library on the way, so `Main` names no platform and no graphics
-library. `XPlatUI.Minimal` is written that way. The selector's framework list is unconditional,
+library. `Kolvir.Minimal` is written that way. The selector's framework list is unconditional,
 because a selector that offered only the host's framework could not be packed for the others;
 restoring it therefore evaluates all three, and building the fixture needs the macOS workload on
 every platform, not just on the Mac.
@@ -75,58 +75,58 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `XPlatControl` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
-| `XPlatBackground` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
-| `XPlatUiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
-| `XPlatPanel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree |
-| `XPlatTableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
-| `XPlatSplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
-| `XPlatWrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
-| `XPlatGroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
-| `XPlatExpander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
-| `XPlatScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
-| `XPlatLabel` | `Label` | Nine-way alignment, optional word wrap |
-| `XPlatLinkLabel` | `LinkLabel` | A rich label styled as a link that hands its URI to the desktop through `IXPlatLauncher` |
-| `XPlatRichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
-| `XPlatButton` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
-| `XPlatSplitButton` / `XPlatDropDownButton` | `ToolStripSplitButton` / `ToolStripDropDownButton` | One button that is both a command and a menu: the main area raises a click and the arrow opens `Menu` in a popup; a drop-down button opens the menu from its whole face |
-| `XPlatCheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
-| `XPlatRadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
-| `XPlatProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
-| `XPlatBusyIndicator` | - | An indeterminate spinner: a ring with a rotating arc, on a timer that runs only while it is on screen and busy |
-| `XPlatOverlay` | - | A modal layer: dims what is under it, takes every press and swallows every key while it shows |
-| `XPlatToast` | - | A transient message bar: an accent bar coloured by severity, a message and a close glyph, dismissed by a countdown or by the user |
-| `XPlatTextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
-| `XPlatTextBox` + `XPlatUI.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
-| `XPlatTextBox` + `XPlatUI.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
-| `XPlatTextBox` + `XPlatUI.Spans` | `TextBox` (spell-check marks) | `Spans` as an opt-in extension: caller-owned annotated runs drawn as a squiggly underline, wrapped and scrolled with the text, and the span a right-click landed in reported on the context-menu event args |
-| `XPlatTextBox` + `XPlatUI.Undo` | `TextBox.UndoEnabled` | `UndoEnabled`, `CanUndo`/`CanRedo`, `Undo()`, `Redo()` and `ClearUndoStack()` as an opt-in extension: a coalescing history (five-second runs of typing or deleting, one entry per selection replacement) that records the caret, the selection and a multi-line field's scroll offsets with each entry |
-| `XPlatNumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
-| `XPlatTrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
-| `XPlatColorPicker` | `ColorDialog` (the picker half) | Spectrum square with saturation across and value or lightness down, a hue strip beside it, three component fields and a hex field; `ColorMode` switches the fields between RGB, HSL and HSV without changing the colour |
-| `XPlatVirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
-| `XPlatListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
-| `XPlatListView` | `ListView` | `List` and `Details` views over the same virtualized rows: columns, header-click sorting, grid lines |
-| `XPlatTreeView` | `TreeView` | Indented nodes with expanders and optional check boxes; the flattened visible nodes are the rows |
-| `XPlatComboBox` | `ComboBox` | Edit field plus a drop-down list shown in a popup, so it can leave the window |
-| `XPlatDateTimePicker` | `DateTimePicker` | Editable date and time field with a calendar in a popup: `Value`/`MinDate`/`MaxDate`, four formats, segment stepping and culture-aware typed parsing |
-| `XPlatTabControl` / `XPlatTabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
-| `XPlatToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
-| `XPlatToolStrip` / `XPlatStatusStrip` | `ToolStrip` / `StatusStrip` | A docked bar of *items* - button, label, separator, spring, progress bar - painted in one pass and taken as a single tab stop |
-| `XPlatMenuView` | `ContextMenuStrip` (the surface) | The portable menu: rows, hover pill, check/icon columns, shortcut hints, submenus in popups of their own and real controls hosted in a row. No platform code |
-| `XPlatMenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
-| `XPlatMenuPresenter` | `ToolStripDropDown` plumbing | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, on every backend, one popup per level of the chain |
-| `XPlatMenuPresentation` | - | Chooses the library's menus or the platform's, per application |
-| `XPlatImage` | `PictureBox` | Draws an `XPlatImageData` - a still picture or an animation, which are the same thing with different durations: `Image`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `ImageAlign`, `PlaceholderColor`. It decodes nothing and owns nothing: `IXPlatImageDataFactory` loads, the caller disposes |
-| `XPlatTheme` / `XPlatPalette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
-| `XPlatFont` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
-| `XPlatTheme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
-| `IXPlatDialogService.PickFont` | `FontDialog` | The platform's own font chooser: returns an `XPlatFontSelection` (family, size, weight, italic) or null when cancelled; the caller creates and owns the `XPlatFont` |
-| `XPlatColorDialog` | `ColorDialog` (the dialog half) | A modal window around `XPlatColorPicker` with OK and Cancel: library-drawn on every platform, returns the chosen `SKColor` or null, preserves the caller's alpha without offering an alpha control |
-| `XPlatSystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
-| `IXPlatLauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
-| `XPlatUI.Tests` | a test project | One portable `net10.0` MSTest assembly that drives the library through the headless backend, so a control is exercised with no display; a test that can only run on one platform carries a `Platform.*` category rather than being skipped by accident |
-| `XPlatAnimationSet` + `XPlatUI.Animations` | a hand-written storyboard, or `System.Windows.Media.Animation` | `Start()`/`Pause()`/`Resume()`/`Restart()`/`End()` and one finished handler, as an opt-in package: one or more value animations on a shared timeline, eased by the factories in `XPlatEasing`, advanced by a single application-wide frame clock that runs only while something is animating |
+| `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
+| `Background` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
+| `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
+| `Panel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree |
+| `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
+| `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
+| `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
+| `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
+| `Expander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
+| `ScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
+| `Label` | `Label` | Nine-way alignment, optional word wrap |
+| `LinkLabel` | `LinkLabel` | A rich label styled as a link that hands its URI to the desktop through `ILauncher` |
+| `RichLabel` | `RichTextBox`/`FlowDocument` | Wrapping runs of styled text with interactive spans and inline child controls |
+| `Button` | `Button` | Primary/Secondary/Ghost styles, hover/press/disabled states, Enter/Space activation |
+| `SplitButton` / `DropDownButton` | `ToolStripSplitButton` / `ToolStripDropDownButton` | One button that is both a command and a menu: the main area raises a click and the arrow opens `Menu` in a popup; a drop-down button opens the menu from its whole face |
+| `CheckBox` | `CheckBox` | Square glyph plus label; two-state by default, `ThreeState` adds the indeterminate state |
+| `RadioButton` | `RadioButton` | Round glyph; one checked per group, grouped by parent or by `GroupName`, arrow keys move the selection |
+| `ProgressBar` | `ProgressBar` | Continuous/Blocks/Marquee fill between `Minimum` and `Maximum`; only a marquee bar runs a timer, at the display's refresh rate by default |
+| `BusyIndicator` | - | An indeterminate spinner: a ring with a rotating arc, on a timer that runs only while it is on screen and busy |
+| `Overlay` | - | A modal layer: dims what is under it, takes every press and swallows every key while it shows |
+| `Toast` | - | A transient message bar: an accent bar coloured by severity, a message and a close glyph, dismissed by a countdown or by the user |
+| `TextBox` | `TextBox` | Single-line editor: caret, selection, clipboard, `MaxLength`, `ReadOnly`, password masking, placeholder |
+| `TextBox` + `Kolvir.AutoComplete` | `TextBox.AutoCompleteMode` | `AutoCompleteMode`, `AutoCompleteSource` and `AutoCompleteCustomSource` as an opt-in extension: a filtered suggestion list in a popup under the caret, inline append, and a bounded history of committed values |
+| `TextBox` + `Kolvir.Multiline` | `TextBox.Multiline` | `Multiline` and `WordWrap` as an opt-in extension: soft-wrapped visual lines, vertical scrolling, caret movement by visual line with a preferred column, and selection across lines |
+| `TextBox` + `Kolvir.Spans` | `TextBox` (spell-check marks) | `Spans` as an opt-in extension: caller-owned annotated runs drawn as a squiggly underline, wrapped and scrolled with the text, and the span a right-click landed in reported on the context-menu event args |
+| `TextBox` + `Kolvir.Undo` | `TextBox.UndoEnabled` | `UndoEnabled`, `CanUndo`/`CanRedo`, `Undo()`, `Redo()` and `ClearUndoStack()` as an opt-in extension: a coalescing history (five-second runs of typing or deleting, one entry per selection replacement) that records the caret, the selection and a multi-line field's scroll offsets with each entry |
+| `NumericUpDown` | `NumericUpDown` | A text box with a spinner: `decimal` value, `Minimum`/`Maximum`/`Increment`/`DecimalPlaces`, arrow-key, wheel and held-button stepping |
+| `TrackBar` | `TrackBar` | Horizontal or vertical track filled to the knob, tick marks, drag and click-to-page, arrow/`Home`/`End`/`PageUp`/`PageDown` keys |
+| `ColorPicker` | `ColorDialog` (the picker half) | Spectrum square with saturation across and value or lightness down, a hue strip beside it, three component fields and a hex field; `ColorMode` switches the fields between RGB, HSL and HSV without changing the colour |
+| `VirtualList` | - | The base the row lists share: virtualization, scrolling, selection, type-ahead and the visible-band paint loop |
+| `ListBox` | `ListBox` | Row list with all four `SelectionMode`s, keyboard navigation, type-ahead and optional scrollbars |
+| `ListView` | `ListView` | `List` and `Details` views over the same virtualized rows: columns, header-click sorting, grid lines |
+| `TreeView` | `TreeView` | Indented nodes with expanders and optional check boxes; the flattened visible nodes are the rows |
+| `ComboBox` | `ComboBox` | Edit field plus a drop-down list shown in a popup, so it can leave the window |
+| `DateTimePicker` | `DateTimePicker` | Editable date and time field with a calendar in a popup: `Value`/`MinDate`/`MaxDate`, four formats, segment stepping and culture-aware typed parsing |
+| `TabControl` / `TabPage` | `TabControl` / `TabPage` | Tab strip with a scrolling overflow, one page visible at a time |
+| `ToolTip` | `ToolTip` | One instance serves many controls; shows after a hover delay in a popup that does not take input |
+| `ToolStrip` / `StatusStrip` | `ToolStrip` / `StatusStrip` | A docked bar of *items* - button, label, separator, spring, progress bar - painted in one pass and taken as a single tab stop |
+| `MenuView` | `ContextMenuStrip` (the surface) | The portable menu: rows, hover pill, check/icon columns, shortcut hints, submenus in popups of their own and real controls hosted in a row. No platform code |
+| `MenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
+| `MenuPresenter` | `ToolStripDropDown` plumbing | Shows an `ContextMenu` in an `Popup` with `MenuView`, on every backend, one popup per level of the chain |
+| `MenuPresentation` | - | Chooses the library's menus or the platform's, per application |
+| `Image` | `PictureBox` | Draws an `ImageData` - a still picture or an animation, which are the same thing with different durations: `Source`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `ImageAlign`, `PlaceholderColor`. It decodes nothing and owns nothing: `IImageDataFactory` loads, the caller disposes |
+| `Theme` / `Palette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
+| `Font` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
+| `Theme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
+| `IDialogService.PickFont` | `FontDialog` | The platform's own font chooser: returns an `FontSelection` (family, size, weight, italic) or null when cancelled; the caller creates and owns the `Font` |
+| `ColorDialog` | `ColorDialog` (the dialog half) | A modal window around `ColorPicker` with OK and Cancel: library-drawn on every platform, returns the chosen `SKColor` or null, preserves the caller's alpha without offering an alpha control |
+| `SystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
+| `ILauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
+| `Kolvir.Tests` | a test project | One portable `net10.0` MSTest assembly that drives the library through the headless backend, so a control is exercised with no display; a test that can only run on one platform carries a `Platform.*` category rather than being skipped by accident |
+| `AnimationSet` + `Kolvir.Animations` | a hand-written storyboard, or `System.Windows.Media.Animation` | `Start()`/`Pause()`/`Resume()`/`Restart()`/`End()` and one finished handler, as an opt-in package: one or more value animations on a shared timeline, eased by the factories in `Easing`, advanced by a single application-wide frame clock that runs only while something is animating |
 
 Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
 does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
@@ -139,12 +139,12 @@ Controls that do not exist yet, and the order they are worth building in, are tr
 
 ### Running the tests
 
-`XPlatUI.Tests` is the portable suite. It targets `net10.0`, references the library and the
+`Kolvir.Tests` is the portable suite. It targets `net10.0`, references the library and the
 headless backend, and needs no display, window server or network, so the same command works on
 Windows, macOS and Linux:
 
 ```
-dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj
+dotnet test Kolvir.Tests/Kolvir.Tests.csproj
 ```
 
 Nothing in the suite needs a desktop. A check that does - a real taskbar flash, a Dock bounce, a
@@ -155,11 +155,11 @@ screenshot and input-injection routes that actually work on it.
 Three things keep the run deterministic, and a test that breaks one of them is a bug to fix rather
 than a flake to retry:
 
-- **Time is driven, not waited for.** `XPlatUndoClock.Current` is a `TimeProvider`, and
+- **Time is driven, not waited for.** `UndoClock.Current` is a `TimeProvider`, and
   `HeadlessScene`-based tests install a clock that only moves when the test calls `Advance`. There
   is no `Thread.Sleep` in the suite and no assertion that depends on wall-clock time.
 - **The font is pinned.** `TestFont` loads the demo application's embedded IBM Plex Sans from
-  `XPlatUIDemo.App/Fonts`, so a measured width, a wrap point or a caret position is the same
+  `Kolvir.Demo.App/Fonts`, so a measured width, a wrap point or a caret position is the same
   number on every platform. Tests that assert a metric pin it; tests that assert the default
   behaviour do not.
 - **Nothing is shared.** The theme, the clipboard, the undo clock and the menu presenter are
@@ -184,26 +184,26 @@ filters on:
 To run exactly what CI runs:
 
 ```
-dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj \
+dotnet test Kolvir.Tests/Kolvir.Tests.csproj \
   --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4"
 ```
 
 A rung-3 feature is a package of its own, so its tests are an assembly of their own:
 
 ```
-dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj \
+dotnet test Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj \
   -p:TargetFramework=net10.0
 
-dotnet test XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj \
+dotnet test Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj \
   -p:TargetFramework=net10.0
 
-dotnet test XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj \
+dotnet test Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj \
   -p:TargetFramework=net10.0
 
-dotnet test XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj \
+dotnet test Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj \
   -p:TargetFramework=net10.0
 
-dotnet test XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Tests.csproj \
+dotnet test Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj \
   -p:TargetFramework=net10.0
 ```
 
@@ -213,34 +213,34 @@ The Win32 backend has a Windows-only suite of its own, because its fallback deci
 and its target framework is `net10.0-windows`:
 
 ```
-dotnet test XPlatUI.Backend.Win32.Tests/XPlatUI.Backend.Win32.Tests.csproj
+dotnet test Kolvir.Backend.Win32.Tests/Kolvir.Backend.Win32.Tests.csproj
 ```
 
 The `Tests` workflow runs it on the Windows leg only. It drives the GL fallback decision with a
 probe that always fails, which is what a machine with no OpenGL ICD looks like; the accelerated
 path needs a real driver and is verified by hand through the demo's measured-rendering page.
 
-`XPlatUI.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
+`Kolvir.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
 `Animations` categories, the same filter, plain `net10.0` on every platform, and the same
 `-p:TargetFramework=net10.0` narrowing, because the feature lists all three frameworks
 unconditionally for `dotnet pack`. What its tests drive is the same code production runs: a
 `TestClock` the test advances and a `ManualFrameSource` the test fires are handed to a real
-`XPlatAnimationScheduler`, so the timeline's arithmetic and the clock's start and stop edges are
+`AnimationScheduler`, so the timeline's arithmetic and the clock's start and stop edges are
 exercised exactly rather than approximately, and nothing sleeps. The one thing the suite cannot show
 is a real timer waking a real window, which is what the demo's **Animations** page is for.
 
-`XPlatUI.Feature.DragDrop.Tests` uses the same categories, plus `Feature` and `DragDrop`, and the
+`Kolvir.Feature.DragDrop.Tests` uses the same categories, plus `Feature` and `DragDrop`, and the
 same filter. It targets plain `net10.0` on every platform even though the feature itself is split by
 platform: the tests only touch the feature's `common/` folder, and a test project that targeted
 `net10.0-macos` would need the .NET for macOS SDK with an exactly matching Xcode on whichever Mac
 builds it, which is a requirement no test project should impose.
 
 `-p:TargetFramework=net10.0` is what keeps that promise on a machine that has no macOS workload.
-`XPlatUI.Feature.DragDrop` lists `net10.0-windows;net10.0-macos;net10.0` unconditionally, because one
+`Kolvir.Feature.DragDrop` lists `net10.0-windows;net10.0-macos;net10.0` unconditionally, because one
 `dotnet pack` has to produce all three dependency groups, and restore follows every framework in the
 reference graph rather than only the inner build the tests bind. Restoring or testing the test
 project without the property therefore resolves the `net10.0-macos` inner build, finds
-`XPlatUI.Backend.AppKit` behind it and stops with `NETSDK1147`. The property selects the single
+`Kolvir.Backend.AppKit` behind it and stops with `NETSDK1147`. The property selects the single
 portable inner build instead; the plural `-p:TargetFrameworks=` does not work as a switch, because it
 reaches the restore graph and not the referenced projects' builds. The `Tests` workflow passes it on
 both its restore and its test step, so a local run with it matches CI.
@@ -250,8 +250,8 @@ it `InternalsVisibleTo` for exactly that. Both types are internal on purpose - a
 names them and the package ships no public API for them - but the behaviour they carry is real
 behaviour (which control a drag reaches, when it is told the drag arrived or left, what effect the
 target settles on) and it regresses silently if nothing watches it. The grant is one `ItemGroup` on
-the feature project, names only `XPlatUI.Feature.DragDrop.Tests`, and adds no public API for testing;
-`XPlatUI.Tests` and the core library are untouched. What still cannot be tested here is the native
+the feature project, names only `Kolvir.Feature.DragDrop.Tests`, and adds no public API for testing;
+`Kolvir.Tests` and the core library are untouched. What still cannot be tested here is the native
 half - a real drag from another application - which is what the demo application exercises.
 
 The suite deliberately has no committed golden images. Rasterisation of text differs by a fraction
@@ -266,19 +266,19 @@ for scaling the canvas and the incoming pointer coordinates (the Win32 backend u
 ## Using it
 
 ```csharp
-var host = new XPlatUiHost { ClearColor = SKColors.White };
+var host = new UiHost { ClearColor = SKColors.White };
 
-var root = new XPlatPanel { BackColor = XPlatTheme.Background, Padding = new XPlatThickness(16) };
-var table = new XPlatTableLayoutPanel { Dock = DockStyle.Fill };
-table.ColumnStyles.Add(XPlatColumnStyle.Percent(50));
-table.ColumnStyles.Add(XPlatColumnStyle.Percent(50));
-table.RowStyles.Add(XPlatRowStyle.AutoSize());
-table.RowStyles.Add(XPlatRowStyle.Percent(100));
+var root = new Panel { BackColor = Theme.Background, Padding = new Thickness(16) };
+var table = new TableLayoutPanel { Dock = DockStyle.Fill };
+table.ColumnStyles.Add(ColumnStyle.Percent(50));
+table.ColumnStyles.Add(ColumnStyle.Percent(50));
+table.RowStyles.Add(RowStyle.AutoSize());
+table.RowStyles.Add(RowStyle.Percent(100));
 
-var button = new XPlatButton("Say hello") { Dock = DockStyle.Fill };
+var button = new Button("Say hello") { Dock = DockStyle.Fill };
 button.AddClickHandler(_ => Console.WriteLine("clicked"));
 
-table.Add(new XPlatLabel("Hello") { AutoSize = true }, 0, 0);
+table.Add(new Label("Hello") { AutoSize = true }, 0, 0);
 table.Add(button, 1, 1);
 root.Controls.Add(table);
 
@@ -292,9 +292,9 @@ Input is plain method calls, so any backend can drive it:
 ```csharp
 var pt = new SKPoint(x, y);                    // logical coordinates
 host.ProcessMouseMove(pt);
-host.ProcessMouseDown(pt, XPlatMouseButtons.Left);
-host.ProcessMouseUp(pt, XPlatMouseButtons.Left);
-host.ProcessKeyDown(XPlatKey.Tab);             // cycles focus
+host.ProcessMouseDown(pt, MouseButtons.Left);
+host.ProcessMouseUp(pt, MouseButtons.Left);
+host.ProcessKeyDown(Key.Tab);             // cycles focus
 host.ProcessTextInput("a");
 ```
 
@@ -319,7 +319,7 @@ WinForms has, because an application author coming from it will expect it:
   it: index 1 on a container puts the container, then its contents, between index 0 and index 2.
 - **It wraps.** `Tab` at the last stop goes back to the first, and `Shift+Tab` at the first goes to
   the last; `host.FocusedControl` is the control the walk landed on.
-- **A container whose content is not showing takes no stops.** A collapsed `XPlatExpander` is the
+- **A container whose content is not showing takes no stops.** A collapsed `Expander` is the
   case: its section is still in the tree - folding is a matter of how much is drawn, not of hiding -
   so its children are left out of the walk even though they are `Visible`. The container answers
   this itself, by overriding `IsContentReachable`, so any container that arranges its children to
@@ -327,9 +327,9 @@ WinForms has, because an application author coming from it will expect it:
   control the user cannot see cannot be focused by anything.
 
 ```csharp
-var name = new XPlatTextBox { TabIndex = 0, Dock = DockStyle.Top };
-var notes = new XPlatTextBox { TabIndex = 2, Dock = DockStyle.Fill, Multiline = true };
-var ok = new XPlatButton("OK") { TabIndex = 1, Dock = DockStyle.Bottom };   // visited second
+var name = new TextBox { TabIndex = 0, Dock = DockStyle.Top };
+var notes = new TextBox { TabIndex = 2, Dock = DockStyle.Fill, Multiline = true };
+var ok = new Button("OK") { TabIndex = 1, Dock = DockStyle.Bottom };   // visited second
 ```
 
 The demo's **Tab order** page - `--page 34` - is the same rules by hand: it was created in a
@@ -356,7 +356,7 @@ when the control becomes displayed and stop the moment it stops being, including
 container or the window changed, with no timer left running for a window nobody is looking at.
 
 ```csharp
-var busy = new XPlatProgressBar { Dock = DockStyle.Fill, Style = XPlatProgressBarStyle.Marquee };
+var busy = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee };
 busy.IsDisplayed;      // false until the window is shown
 card.Visible = false;  // the sweep stops; the bar is still Visible itself
 card.Visible = true;   // and starts again from the phase it stopped at
@@ -372,7 +372,7 @@ There are no C# events. Every notification is a pair of methods, `Add<Name>Handl
 private to the library:
 
 ```csharp
-Action<object, XPlatMouseEventArgs> onDown = (sender, e) => Press(sender, e.Location);
+Action<object, MouseEventArgs> onDown = (sender, e) => Press(sender, e.Location);
 
 IDisposable subscription = control.AddMouseDownHandler(onDown);
 control.RemoveMouseDownHandler(onDown);      // the same callback: unsubscribes it
@@ -391,10 +391,10 @@ a subscription without storing the callback. A caller that already holds the cal
 
 ### Wrap panel
 
-`XPlatWrapPanel` lays its children out along one axis and starts a new line whenever the next one
+`WrapPanel` lays its children out along one axis and starts a new line whenever the next one
 would not fit - rows left to right that wrap downwards, the default, or columns top to bottom that
 wrap to the right. It is the layout a tag row, a group of buttons or a thumbnail grid wants, which
-`XPlatStackPanel` cannot do at all and `XPlatTableLayoutPanel` can only do with the columns known up
+`StackPanel` cannot do at all and `TableLayoutPanel` can only do with the columns known up
 front.
 
 | Member | Behaviour |
@@ -410,16 +410,16 @@ not part of the run - they take their edge first, the way they do in any panel -
 footer sits above or below the flow.
 
 ```csharp
-var tags = new XPlatWrapPanel { Dock = DockStyle.Fill, Spacing = 6f };
+var tags = new WrapPanel { Dock = DockStyle.Fill, Spacing = 6f };
 foreach (var tag in new[] { "design", "layout", "skia", "cross-platform" })
 {
-    tags.Controls.Add(new XPlatButton(tag) { AutoSize = true });
+    tags.Controls.Add(new Button(tag) { AutoSize = true });
 }
 ```
 
 ### Split container
 
-`XPlatSplitContainer` hosts exactly two panels with a draggable splitter between them.
+`SplitContainer` hosts exactly two panels with a draggable splitter between them.
 Orientation follows the WinForms convention:
 
 | `Orientation` | Layout | `SplitterDistance` is | Cursor |
@@ -432,10 +432,10 @@ clamped to `Panel1MinSize` ... `Panel1MaxSize`, further limited by `Panel2MinSiz
 second panel never collapses.
 
 ```csharp
-var split = new XPlatSplitContainer
+var split = new SplitContainer
 {
     Dock = DockStyle.Fill,
-    Orientation = XPlatOrientation.Vertical,   // side by side
+    Orientation = Orientation.Vertical,   // side by side
     SplitterDistance = 240f,                   // width of Panel1
     SplitterWidth = 6f,
     Panel1MinSize = 120f,
@@ -443,7 +443,7 @@ var split = new XPlatSplitContainer
     Panel2MinSize = 180f,
 };
 
-split.Panel1.Controls.Add(new XPlatLabel("Navigation"));
+split.Panel1.Controls.Add(new Label("Navigation"));
 split.Panel2.Controls.Add(content);
 split.AddSplitterMovedHandler(_ => Console.WriteLine($"panel 1 is now {split.SplitterDistance:0} px"));
 root.Controls.Add(split);
@@ -459,7 +459,7 @@ whenever the distance changes for any reason.
 
 ### Stack panel
 
-`XPlatStackPanel` lays its children out one after another along a single axis and sizes each one
+`StackPanel` lays its children out one after another along a single axis and sizes each one
 across that axis, which is the flow layout a plain panel does not have:
 
 | `Orientation` | Children run | Each child is stretched to the panel's |
@@ -472,16 +472,16 @@ buttons is a stack of full-width rows. `Spacing` is the gap between children; th
 the first or after the last.
 
 ```csharp
-var stack = new XPlatStackPanel
+var stack = new StackPanel
 {
     Dock = DockStyle.Fill,
     Spacing = 8f,
-    Padding = new XPlatThickness(12f),
+    Padding = new Thickness(12f),
     ShowFrame = true,            // a stack panel draws no frame of its own by default
 };
 
-stack.Controls.Add(new XPlatButton("Save"));
-stack.Controls.Add(new XPlatButton("Cancel"));
+stack.Controls.Add(new Button("Save"));
+stack.Controls.Add(new Button("Cancel"));
 root.Controls.Add(stack);
 ```
 
@@ -496,7 +496,7 @@ horizontal one, opts out of the stretch and leaves the child at its own size acr
 | `Far` | at the right, or the bottom |
 
 ```csharp
-stack.Controls.Add(new XPlatButton("Centred") { HorizontalAlignment = XPlatAlignment.Center });
+stack.Controls.Add(new Button("Centred") { HorizontalAlignment = Alignment.Center });
 ```
 
 - A child with `AutoSize = false` keeps the size it was given along the stack, which is how a run of
@@ -507,10 +507,10 @@ stack.Controls.Add(new XPlatButton("Centred") { HorizontalAlignment = XPlatAlign
   any panel does and the stack fills what is left, which is how a header or a footer is added:
 
 ```csharp
-stack.Controls.Add(new XPlatLabel("Header") { Dock = DockStyle.Top, AutoSize = false, Height = 24f });
+stack.Controls.Add(new Label("Header") { Dock = DockStyle.Top, AutoSize = false, Height = 24f });
 ```
 
-- The run of children is the scrollable content, so `VerticalScroll = XPlatScrollStyle.Automatic`
+- The run of children is the scrollable content, so `VerticalScroll = ScrollStyle.Automatic`
   scrolls a long stack; a docked header stays put while the rows scroll under it.
 - With `AutoSize = true` the stack is as long as the run and as wide as its widest child.
 - A child wider than the space across the stack is clipped to the panel rather than overflowing it,
@@ -518,8 +518,8 @@ stack.Controls.Add(new XPlatLabel("Header") { Dock = DockStyle.Top, AutoSize = f
 
 ### Scrolling
 
-`XPlatPanel` scrolls each axis independently. `HorizontalScroll` and `VerticalScroll` take an
-`XPlatScrollStyle`, and both default to `None`, so a panel that does not ask for scrolling pays
+`Panel` scrolls each axis independently. `HorizontalScroll` and `VerticalScroll` take an
+`ScrollStyle`, and both default to `None`, so a panel that does not ask for scrolling pays
 nothing for it:
 
 | Style | Layout | Behaviour |
@@ -534,16 +534,16 @@ the top-left of the viewport into `ScrollExtent`, and the visible bars are `Hori
 `VerticalScrollBar` if you need to restyle or drive them.
 
 ```csharp
-var list = new XPlatPanel
+var list = new Panel
 {
     Dock = DockStyle.Fill,
-    VerticalScroll = XPlatScrollStyle.Automatic,
-    Padding = new XPlatThickness(4f),
+    VerticalScroll = ScrollStyle.Automatic,
+    Padding = new Thickness(4f),
 };
 
 for (int i = 0; i < 20; i++)
 {
-    list.Controls.Add(new XPlatButton($"Row {i}")
+    list.Controls.Add(new Button($"Row {i}")
     {
         Bounds = new SKRect(4f, 4f + (i * 28f), 200f, 32f + (i * 28f)),
     });
@@ -557,30 +557,30 @@ root.Controls.Add(list);
 
 Scrolling is a paint-time translation, so children keep the `Bounds` you gave them and a scrolled
 panel moves them as a whole: hit testing, focus, selection and drag and drop all follow, because
-`XPlatUiHost` maps coordinates through the same offset. Two rules follow from that:
+`UiHost` maps coordinates through the same offset. Two rules follow from that:
 
 - Only children whose `Dock` is `DockStyle.None` contribute to `ScrollExtent`. A docked child is
   pinned to the viewport and never scrolls, which is what you want for a header or a filter row.
 - Content is measured from the top-left of the viewport, so a child positioned to the left of or
   above it is clipped rather than scrolled to. Lay content out from the origin.
 
-`XPlatScrollBar` is also usable on its own, exactly like the WinForms `ScrollBar`. It reports
+`ScrollBar` is also usable on its own, exactly like the WinForms `ScrollBar`. It reports
 `Minimum`, `Maximum`, `Value`, `SmallChange` and `LargeChange`, and distinguishes a change the user
 made (`AddScrollHandler`, raised by the arrows, the track, the thumb and the keyboard) from one the
 application made (`AddValueChangedHandler`, raised by any change at all). Setting `Value` from code
 moves the thumb and raises only the second.
 
-The mouse wheel scrolls the control under the pointer. `XPlatUiHost.ProcessMouseWheel` starts at the
+The mouse wheel scrolls the control under the pointer. `UiHost.ProcessMouseWheel` starts at the
 captured control, or the control under the pointer, and walks up the parent chain until something
 claims the turn, so a wheel event over a nested list scrolls the list and only reaches the panel
-around it once the list is at its end. `XPlatMouseEventArgs.Delta` is the distance in logical
+around it once the list is at its end. `MouseEventArgs.Delta` is the distance in logical
 pixels, positive toward the start of the content (up or left); a backend that reports a wheel in
-detents multiplies by `XPlatUiHost.WheelPixelsPerDetent`, one that reports lines multiplies by its
+detents multiplies by `UiHost.WheelPixelsPerDetent`, one that reports lines multiplies by its
 own platform's line height - macOS reports a wheel in ten-point lines and scales a line up by half
 again, so a typical three-line notch moves much the same distance as a detent - and one that reports
 precise deltas (a touchpad) passes them straight through. A panel scrolls vertically unless `Shift`
 is held and horizontal scrolling is possible, and falls back to the other axis when the preferred one
-cannot move. A standalone `XPlatScrollBar` moves three `SmallChange` steps per detent.
+cannot move. A standalone `ScrollBar` moves three `SmallChange` steps per detent.
 
 ```csharp
 list.AddMouseWheelHandler((sender, e) =>
@@ -592,9 +592,9 @@ list.AddMouseWheelHandler((sender, e) =>
 
 The bars a panel creates for itself are not focusable: they take clicks, drags and the wheel, but
 `Focusable` is `false`, so clicking one leaves the focus where the user was working, `Focus()` on it
-does nothing and `Tab` never lands on it. That is what `XPlatControl.Focusable` is for in general -
+does nothing and `Tab` never lands on it. That is what `Control.Focusable` is for in general -
 it gates click-to-focus, `Focus()` and the tab order without affecting mouse interaction. A
-standalone `XPlatScrollBar` is still `TabStop` and `Focusable`, so it can be driven from the
+standalone `ScrollBar` is still `TabStop` and `Focusable`, so it can be driven from the
 keyboard as before.
 
 A press that cannot move the focus also leaves the selection alone. Dragging a scrollbar, or
@@ -606,17 +606,17 @@ What is still missing is the overlay style: an overlay scrollbar floats over the
 not take a gutter. The bars are classic until that lands.
 
 A scrolling container and a scrolling list want the same plumbing, so it lives in one internal
-`XPlatScrollBars` helper that `XPlatPanel` and `XPlatListBox` both own: the visibility fixed point
+`ScrollBars` helper that `Panel` and `ListBox` both own: the visibility fixed point
 (a gutter can bring the other axis into play, so the two axes are resolved together), the bar
 placement, the offset clamping, `ScrollRectIntoView`, the wheel and the invalidation clip. A third
-scrolling control only has to say how big its content is - `XPlatPanel` measures its children, the
+scrolling control only has to say how big its content is - `Panel` measures its children, the
 list box multiplies its row count by the row height - and the helper does the rest.
 
 ### Panel zoom
 
-`XPlatPanel.ScaleFactor` is a **multiplier applied to the effective scale factor of the subtree**
-under that panel. It is not the absolute device scale factor: `XPlatWindow.ScaleFactor` and
-`IXPlatWindowBackend.ScaleFactor` report the logical-to-physical pixel ratio of the display, while
+`Panel.ScaleFactor` is a **multiplier applied to the effective scale factor of the subtree**
+under that panel. It is not the absolute device scale factor: `Window.ScaleFactor` and
+`IWindowBackend.ScaleFactor` report the logical-to-physical pixel ratio of the display, while
 this says how far the subtree is zoomed inside the window. The two multiply together only when a
 point finally reaches the platform.
 
@@ -634,7 +634,7 @@ doubles and the children are painted at half size.
 
 Multipliers compose down the tree, and no effective value is stored or propagated: each panel acts
 only on its own child space, so a panel at `2.0` containing a panel at `0.5` behaves exactly as an
-unzoomed one. `XPlatControl.EffectiveScaleMultiplier` is the product of the multipliers above a
+unzoomed one. `Control.EffectiveScaleMultiplier` is the product of the multipliers above a
 control, and every conversion between control and host coordinates (`GetPositionInHost`,
 `ClientToHost`, `HostToClient`, and the host's own input mapping) multiplies by it.
 
@@ -644,24 +644,24 @@ changes `Padding` itself. Scroll offsets and `ScrollExtent` are reported in the 
 the children are laid out in, while the bars stay in panel space and never zoom, and the damage
 rectangle a child asks for is multiplied back into panel space and rounded outwards.
 
-Containers that derive from `XPlatPanel` inherit the property for free: `XPlatGroupBox`,
-`XPlatOverlay`, `XPlatExpander`, `XPlatStackPanel`, `XPlatTableLayoutPanel`, `XPlatTabPage` and
-`XPlatWrapPanel`. `XPlatSplitContainer`, `XPlatTabControl`, `XPlatVirtualList` and `XPlatToolStrip`
-derive from `XPlatControl` and do not zoom.
+Containers that derive from `Panel` inherit the property for free: `GroupBox`,
+`Overlay`, `Expander`, `StackPanel`, `TableLayoutPanel`, `TabPage` and
+`WrapPanel`. `SplitContainer`, `TabControl`, `VirtualList` and `ToolStrip`
+derive from `Control` and do not zoom.
 
 Popup surfaces opened from a control inside a zoomed panel - combo drop-downs, date pickers,
 autocomplete lists, split-button menus, context menus and tooltips - are sized, painted, hit tested
 and placed at the owner's effective multiplier, so a drop-down is never half the size of the field
 that opened it. A popup hosts its content in a zoom wrapper for painting and input, and scales the
 outer window or overlay size and position. Menus that belong to the window rather than to a control
-- the `XPlatMenuBar` drop-downs - stay unzoomed, because the bar itself is outside the panel.
+- the `MenuBar` drop-downs - stay unzoomed, because the bar itself is outside the panel.
 Images are recorded into their pictures with linear sampling, so a raster image shrunk by a zoom is
 filtered rather than point sampled; animated GIF and WebP frames keep their own nearest sampling by
 design, which is what keeps pixel art crisp.
 
 ```csharp
-var zoom = new XPlatPanel { Dock = DockStyle.Fill, ScaleFactor = 1.75f };
-zoom.Controls.Add(new XPlatLabel("A 14 px label, at 24.5 px on screen") { Dock = DockStyle.Top });
+var zoom = new Panel { Dock = DockStyle.Fill, ScaleFactor = 1.75f };
+zoom.Controls.Add(new Label("A 14 px label, at 24.5 px on screen") { Dock = DockStyle.Top });
 ```
 
 The demo's **Zoom** page - `--page 55` - drives a panel from 0.5x to 3.0x and puts a reciprocal panel
@@ -682,7 +682,7 @@ try
     panel.Controls.Clear();
     for (int i = 0; i < count; i++)
     {
-        panel.Controls.Add(new XPlatButton($"Button {i}") { Location = new SKPoint(0f, i * 36f) });
+        panel.Controls.Add(new Button($"Button {i}") { Location = new SKPoint(0f, i * 36f) });
     }
 }
 finally
@@ -705,7 +705,7 @@ control do it.
 
 ### List box
 
-`XPlatListBox` is the WinForms list box: a vertical list of rows with a selection, keyboard
+`ListBox` is the WinForms list box: a vertical list of rows with a selection, keyboard
 navigation, type-ahead and optional scrollbars. It has no children and paints its own rows, so a
 thousand items cost one control.
 
@@ -720,24 +720,24 @@ thousand items cost one control.
 | `GetSelected(i)`, `SetSelected(i, bool)`, `ClearSelected()`, `SelectAll()` | The per-row form of the same thing |
 | `GetItemRect(i)`, `IndexFromPoint(point)` | Row geometry, in control coordinates; `IndexFromPoint` returns the nearest row and `-1` above the first |
 | `ItemHeight` | Row height; follows `Font.LineHeight` until assigned explicitly |
-| `Font` | Optional override of `XPlatTheme.DefaultFont` |
+| `Font` | Optional override of `Theme.DefaultFont` |
 | `TopIndex` | The first row at the top of the viewport, clamped to what can actually scroll |
-| `HorizontalScroll`, `VerticalScroll` | The same `XPlatScrollStyle` values a panel takes; vertical defaults to `Automatic`, horizontal to `None` |
+| `HorizontalScroll`, `VerticalScroll` | The same `ScrollStyle` values a panel takes; vertical defaults to `Automatic`, horizontal to `None` |
 | `ScrollBarThickness` | The gutter width, 16 px by default |
 | `VerticalOffset`, `HorizontalOffset`, `ViewportRect` | Where the rows are scrolled to, and the area they are painted into - the client area less the gutters of the bars that are showing |
 | `EmptyText` | Muted text drawn while the list has no rows |
 | `EnsureVisible(i)`, `ScrollTo`, `ScrollBy` | Bring a row into view, or drive the offset directly |
 | `RefreshItems()` | Redraw after mutating the objects in `Items` in place |
 | `AddSelectedIndexChangedHandler`, `AddItemActivatedHandler` | Selection changed; and a row was double-clicked or confirmed with `Enter` |
-| `AddDrawItemHandler` | Paints a row yourself: it is handed the canvas, the row rect, the item and an `XPlatDrawItemState` |
+| `AddDrawItemHandler` | Paints a row yourself: it is handed the canvas, the row rect, the item and an `DrawItemState` |
 | `BeginUpdate()`, `EndUpdate()` | Batch many changes into one layout and one repaint |
 
 ```csharp
-var list = new XPlatListBox
+var list = new ListBox
 {
     Dock = DockStyle.Fill,
-    SelectionMode = XPlatSelectionMode.One,
-    VerticalScroll = XPlatScrollStyle.Automatic,
+    SelectionMode = SelectionMode.One,
+    VerticalScroll = ScrollStyle.Automatic,
     EmptyText = "Nothing to show",
 };
 
@@ -767,8 +767,8 @@ on - in `None` mode, where nothing is ever selected, that rectangle is the only 
 
 ### Virtual row lists
 
-`XPlatListBox`, `XPlatListView` and `XPlatTreeView` are the same control with a different idea of
-what a row is, so everything that is not about the row lives in one abstract `XPlatVirtualList`
+`ListBox`, `ListView` and `TreeView` are the same control with a different idea of
+what a row is, so everything that is not about the row lives in one abstract `VirtualList`
 base: the scrolling helper, the selection set and its four modes, keyboard navigation and
 type-ahead, hover, drag-select and the wheel, the `BeginUpdate`/`EndUpdate` batch, and the paint
 loop that measures the rows, clips to the viewport and draws only the band that is showing. A
@@ -785,7 +785,7 @@ subclass answers five questions and inherits the rest:
 Every member the list box documents above - `SelectionMode`, `SelectedIndex`, `GetItemRect`,
 `IndexFromPoint`, `EnsureVisible`, `VerticalOffset`, `BeginUpdate` and the rest - is on the base, so
 it behaves the same way on all three. What the base does not own is what a row *is*: the list box
-keeps an `IList<object?>`, the list view keeps `XPlatListViewItem`s, the tree keeps nodes.
+keeps an `IList<object?>`, the list view keeps `ListViewItem`s, the tree keeps nodes.
 
 Three protected hooks exist for a subclass that is not a plain row list: `ScrollClient` (the area
 the rows are painted into, which the list view shrinks by its header), `ScrollPadding` and
@@ -801,39 +801,39 @@ it and every row would render its own number. The list box calls its object form
 
 ### List view
 
-`XPlatListView` is the WinForms list view: the same rows as either a single column of text
-(`XPlatView.List`) or a grid (`XPlatView.Details`), with header-click sorting and optional grid
+`ListView` is the WinForms list view: the same rows as either a single column of text
+(`View.List`) or a grid (`View.Details`), with header-click sorting and optional grid
 lines.
 
 | Member | Behaviour |
 | --- | --- |
-| `Items` | An `IList<XPlatListViewItem>`; an item's `Text` is its first cell, and `SetCell`/`GetCell` or the `(text, cells)` constructor fill the rest |
-| `Columns` | An `IList<XPlatListViewColumn>` of `Text`, `Width`, `Alignment` and an optional `Comparer` |
+| `Items` | An `IList<ListViewItem>`; an item's `Text` is its first cell, and `SetCell`/`GetCell` or the `(text, cells)` constructor fill the rest |
+| `Columns` | An `IList<ListViewColumn>` of `Text`, `Width`, `Alignment` and an optional `Comparer` |
 | `View` | `List` (one text column, no header) or `Details` (columns under a header) |
 | `HeaderHeight` | Height of the header band in `Details`; the rows are laid out below it |
 | `GridLines` | Draws the column separators and the row rules in `Details` |
 | `AllowColumnResize` | Whether a column's right edge can be dragged in the header; `true` by default |
 | `SortColumn`, `SortOrder` | Which column shows the header glyph, and which way it points |
-| `XPlatListViewColumn.Comparer` | Orders two rows for that column; `null` compares the cell text with the current culture |
+| `ListViewColumn.Comparer` | Orders two rows for that column; `null` compares the cell text with the current culture |
 | `Sort()` | Sorts `Items` by the current column and keeps the selection on the items it was on |
 | `AddColumnClickHandler` | A header was clicked; setting `Cancel` on the arguments stops the built-in sort so an application can sort its own way |
 | `ColumnFromPoint(point)` | Which column a point is in, or `-1` |
 
 ```csharp
-var list = new XPlatListView { Dock = DockStyle.Fill, View = XPlatView.Details, GridLines = true };
+var list = new ListView { Dock = DockStyle.Fill, View = View.Details, GridLines = true };
 
-list.Columns.Add(new XPlatListViewColumn("Name", 180f));
-list.Columns.Add(new XPlatListViewColumn("Size", 80f, XPlatContentAlignment.MiddleRight));
+list.Columns.Add(new ListViewColumn("Name", 180f));
+list.Columns.Add(new ListViewColumn("Size", 80f, ContentAlignment.MiddleRight));
 
 foreach (var file in files)
 {
-    var item = new XPlatListViewItem(file.Name);
+    var item = new ListViewItem(file.Name);
     item.SetCell(1, file.Size);
     list.Items.Add(item);
 }
 
 list.SortColumn = 0;
-list.SortOrder = XPlatSortOrder.Ascending;
+list.SortOrder = SortOrder.Ascending;
 list.Sort();
 root.Controls.Add(list);
 ```
@@ -849,15 +849,15 @@ Sorting on cell text is wrong as soon as the cell is formatted, because `"812 KB
 comparison is handed the two items whole, so the real value can live in `Tag`:
 
 ```csharp
-var size = new XPlatListViewColumn("Size", 80f, XPlatContentAlignment.MiddleRight)
+var size = new ListViewColumn("Size", 80f, ContentAlignment.MiddleRight)
 {
     Comparer = (left, right) => BytesOf(left).CompareTo(BytesOf(right)),
 };
 
 list.Columns.Add(size);
-list.Items.Add(new XPlatListViewItem("build.log", "812 KB") { Tag = 831_488L });
+list.Items.Add(new ListViewItem("build.log", "812 KB") { Tag = 831_488L });
 
-static long BytesOf(XPlatListViewItem item) => item.Tag is long bytes ? bytes : 0L;
+static long BytesOf(ListViewItem item) => item.Tag is long bytes ? bytes : 0L;
 ```
 
 Setting `Comparer` re-sorts straight away when that column is the one being sorted by, so the rows
@@ -876,12 +876,12 @@ than a width of its own, so set `Width` instead.
 
 ### Tree view
 
-`XPlatTreeView` is the WinForms tree view: nodes with an indented label, a triangular expander when
+`TreeView` is the WinForms tree view: nodes with an indented label, a triangular expander when
 they have children, and an optional check box.
 
 | Member | Behaviour |
 | --- | --- |
-| `Nodes` | The root `XPlatTreeNodeCollection`; every node has the same `Nodes` collection for its children |
+| `Nodes` | The root `TreeNodeCollection`; every node has the same `Nodes` collection for its children |
 | `Indent` | Pixels of indentation per level, 18 by default |
 | `CheckBoxes` | Shows a check box on every row; off by default |
 | `SelectedNode` | The one selected node, or `null` |
@@ -889,22 +889,22 @@ they have children, and an optional check box.
 | `ExpandAll()`, `CollapseAll()` | Set every branch's state at once, in one layout pass |
 | `IndexOf(node)` | The node's row index among the visible nodes, or `-1` when it is inside a collapsed branch |
 
-An `XPlatTreeNode` carries `Text`, `Tag`, `Nodes`, `Parent`, `Owner`, `Level`, `HasChildren`,
+An `TreeNode` carries `Text`, `Tag`, `Nodes`, `Parent`, `Owner`, `Level`, `HasChildren`,
 `FirstNode`/`LastNode`, `IsExpanded`, `IsVisible`, `Selected` and `CheckState`/`Checked`, plus
 `Expand`, `Collapse`, `Toggle`, `EnsureVisible` and `Remove`. Nothing is flattened up front: the
 visible nodes are rebuilt from the roots when the structure or an expansion changes, and that list
 is what the base virtualizes, so a collapsed branch costs nothing to paint no matter how deep it is.
 
 ```csharp
-var tree = new XPlatTreeView { Dock = DockStyle.Fill, CheckBoxes = true };
+var tree = new TreeView { Dock = DockStyle.Fill, CheckBoxes = true };
 
-var src = new XPlatTreeNode("src");
-src.Nodes.AddRange(new[] { new XPlatTreeNode("Core"), new XPlatTreeNode("Controls") });
+var src = new TreeNode("src");
+src.Nodes.AddRange(new[] { new TreeNode("Core"), new TreeNode("Controls") });
 tree.Nodes.Add(src);
 src.Expand();
 
 tree.SelectedNode = src.Nodes[0];
-tree.AddAfterCheckHandler(node => Console.WriteLine(((XPlatTreeNode)node).CheckState));
+tree.AddAfterCheckHandler(node => Console.WriteLine(((TreeNode)node).CheckState));
 ```
 
 The mouse and the keyboard do what a tree view does. Clicking the expander toggles the branch
@@ -912,7 +912,7 @@ without moving the selection, clicking the check box toggles the check without s
 clicking the label selects. Double-clicking or `Enter` activates the row, which toggles a parent and
 does nothing on a leaf. `Right` expands, `Left` collapses or moves to the parent, and `Space`
 toggles the check box when `CheckBoxes` is on and the expander otherwise; `+`, `-` and `*` expand,
-collapse and expand-everything, arriving through text input because `XPlatKey` has no punctuation.
+collapse and expand-everything, arriving through text input because `Key` has no punctuation.
 
 Checking a node pushes the state down to its whole subtree and then re-derives every ancestor from
 its children, so a parent whose children are all checked reads `Checked`, one whose children are
@@ -922,8 +922,8 @@ in the indeterminate state.
 
 ### Check boxes and radio buttons
 
-`XPlatCheckBox` and `XPlatRadioButton` are the same control with a different glyph, so the state
-machine, the label, the measuring and the input all live in one shared `XPlatToggleControl` base.
+`CheckBox` and `RadioButton` are the same control with a different glyph, so the state
+machine, the label, the measuring and the input all live in one shared `ToggleControl` base.
 
 | Member | Behaviour |
 | --- | --- |
@@ -945,18 +945,18 @@ Neither control paints a background, so the surface behind them shows through; o
 the label are drawn, and a disabled one greys both.
 
 ```csharp
-var remember = new XPlatCheckBox { Text = "Remember me", Checked = true };
+var remember = new CheckBox { Text = "Remember me", Checked = true };
 remember.AddCheckedChangedHandler(_ => Console.WriteLine(remember.CheckState));
 
-var partial = new XPlatCheckBox { Text = "Some files", ThreeState = true, CheckState = XPlatCheckState.Indeterminate };
+var partial = new CheckBox { Text = "Some files", ThreeState = true, CheckState = CheckState.Indeterminate };
 
-var small = new XPlatRadioButton { Text = "Small", GroupName = "size", Checked = true };
-var large = new XPlatRadioButton { Text = "Large", GroupName = "size" };
+var small = new RadioButton { Text = "Small", GroupName = "size", Checked = true };
+var large = new RadioButton { Text = "Large", GroupName = "size" };
 ```
 
 ### Progress bar
 
-`XPlatProgressBar` shows a value between `Minimum` and `Maximum` as a filled track. It takes no
+`ProgressBar` shows a value between `Minimum` and `Maximum` as a filled track. It takes no
 input, so it is neither focusable nor a tab stop.
 
 | Member | Behaviour |
@@ -974,7 +974,7 @@ resumes from the phase it stopped at, with the one timer the bar built. A contin
 only the strip the value actually crossed.
 
 A marquee that leaves `MarqueeAnimationSpeed` null asks
-`XPlatScreen.RefreshRate` for the refresh rate of the display the window is on and animates at that
+`Screen.RefreshRate` for the refresh rate of the display the window is on and animates at that
 frame time, falling back to 30 ms when the platform cannot report one. The rate is read when the
 sweep starts, so a bar that begins animating on another display picks that display up; a running one
 does not query the platform from inside its paint. A platform timer cannot tick faster than the OS
@@ -987,15 +987,15 @@ display's, though, so a fast panel costs more repaints than a fixed 30 ms would:
 explicitly when that matters more than smoothness.
 
 ```csharp
-var progress = new XPlatProgressBar { Dock = DockStyle.Top, Maximum = 200 };
+var progress = new ProgressBar { Dock = DockStyle.Top, Maximum = 200 };
 progress.Value = 80;                      // 40%
 progress.PerformStep();                   // 90
 
-var busy = new XPlatProgressBar { Dock = DockStyle.Top, Style = XPlatProgressBarStyle.Marquee };
-var calmer = new XPlatProgressBar
+var busy = new ProgressBar { Dock = DockStyle.Top, Style = ProgressBarStyle.Marquee };
+var calmer = new ProgressBar
 {
     Dock = DockStyle.Top,
-    Style = XPlatProgressBarStyle.Marquee,
+    Style = ProgressBarStyle.Marquee,
     MarqueeAnimationSpeed = TimeSpan.FromMilliseconds(50),   // ignore the display's own rate
 };
 ```
@@ -1012,11 +1012,11 @@ a spinner.
 
 | Control | Member | Behaviour |
 | --- | --- | --- |
-| `XPlatBusyIndicator` | `IsBusy` | Whether the ring is going round; defaults to true, and clearing it stops the clock |
+| `BusyIndicator` | `IsBusy` | Whether the ring is going round; defaults to true, and clearing it stops the clock |
 | | `Thickness`, `AnimationSpeed` | The width of the ring, and how often the sweep advances |
-| `XPlatOverlay` | `Dim` | How much of what is under it is covered, 0 to 1, painted with the palette's background so it darkens a light window and lightens a dark one |
+| `Overlay` | `Dim` | How much of what is under it is covered, 0 to 1, painted with the palette's background so it darkens a light window and lightens a dark one |
 | | `ChildAlignment` | Where a child that is not docked sits; `MiddleCenter` by default |
-| | `FadeDuration` | `XPlatUI.Feature.Animations` only: how long the layer takes to dim in, or null - the default - to appear at once |
+| | `FadeDuration` | `Kolvir.Feature.Animations` only: how long the layer takes to dim in, or null - the default - to appear at once |
 
 The spinner is the second control whose value is time, so it obeys the rule the marquee bar set: it
 runs a timer only while it is `IsDisplayed` and `IsBusy` and there is an application to deliver the
@@ -1027,16 +1027,16 @@ side sets the stroke so a wide control does not get a heavier ring. The layer is
 so it takes the presses by being the topmost thing in its container; putting it beside the content it
 holds still means both are `DockStyle.Fill` and cover the same area - a child docked to an edge keeps
 its band and is not covered. Keyboard input follows the focus rather than the pointer, so the layer
-also joins the window as an `IXPlatInputSink` while it is on screen: every key and every typed
+also joins the window as an `IInputSink` while it is on screen: every key and every typed
 character stops there, which is the same seam an open menu uses. Hiding or disabling the layer gives
 the keyboard back.
 
-On its own the layer appears at full strength in one frame. `XPlatUI.Feature.Animations` adds a
+On its own the layer appears at full strength in one frame. `Kolvir.Feature.Animations` adds a
 `FadeDuration` extension member, which dims the layer in over that duration when it becomes visible -
 and only then, because a layer on screen is what a fade is for:
 
 ```csharp
-// With XPlatUI.Feature.Animations referenced and AddAnimations() called:
+// With Kolvir.Feature.Animations referenced and AddAnimations() called:
 overlay.FadeDuration = TimeSpan.FromMilliseconds(120);
 overlay.Visible = true;                              // dims in, holding the keyboard throughout
 ```
@@ -1045,10 +1045,10 @@ There is deliberately no fade out: the layer is taken off the screen by assignin
 fade out would mean the control holding on to a hidden layer until a clock it may not have finished.
 
 ```csharp
-var overlay = new XPlatOverlay();                    // Dock = Fill
-var busy = new XPlatPanel { AutoSize = false, Size = new SKSize(220f, 72f) };
-busy.Controls.Add(new XPlatBusyIndicator { Dock = DockStyle.Left, Margin = new XPlatThickness(16f) });
-busy.Controls.Add(new XPlatLabel("Loading the project...") { Dock = DockStyle.Fill });
+var overlay = new Overlay();                    // Dock = Fill
+var busy = new Panel { AutoSize = false, Size = new SKSize(220f, 72f) };
+busy.Controls.Add(new BusyIndicator { Dock = DockStyle.Left, Margin = new Thickness(16f) });
+busy.Controls.Add(new Label("Loading the project...") { Dock = DockStyle.Fill });
 overlay.Controls.Add(busy);                          // centred by ChildAlignment
 
 page.Controls.Add(overlay);                          // over the content, while the work runs
@@ -1056,7 +1056,7 @@ page.Controls.Add(overlay);                          // over the content, while 
 
 ### Toast
 
-`XPlatToast` is the message that does not need a dialog: an accent bar, one line of text and a close
+`Toast` is the message that does not need a dialog: an accent bar, one line of text and a close
 glyph, which takes itself away after a few seconds. It is an ordinary control rather than a window,
 so the application decides where transient messages belong - docked across the top of a page, at the
 bottom of a card, beside the row that saved - and the layout moves around it, which a floating window
@@ -1067,7 +1067,7 @@ would not.
 | `Text` | The message |
 | `Severity` | `Info`, `Success`, `Warning` or `Error`, which is what the accent bar is coloured for |
 | `BarColor` | Overrides the severity's colour, for an application that brands its own messages |
-| `Duration` | How long it shows before dismissing itself; `XPlatToast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
+| `Duration` | How long it shows before dismissing itself; `Toast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
 | `Show()`, `Dismiss()`, `IsOpen` | The message state, so one control can be built once and reused |
 | `AddDismissedHandler` | Runs once the message went, whether by its countdown, its close glyph or the keyboard |
 | `ShowProgress` | How far the message has come in, 0 to 1, clamped. It follows `IsOpen` on its own, it is the message's opacity and how far it sits out of its docked edge, and it is what an animation drives |
@@ -1085,12 +1085,12 @@ Everything that brings the progress to 0 removes it - including a transition tha
 a toast can never be left half faded over the page. A message on its way out has already left the Tab
 order and given up the focus, and coming back with `Show` puts both back.
 
-On its own the message is a jump in and a jump out. `XPlatUI.Feature.Animations` adds `ShowDuration`
+On its own the message is a jump in and a jump out. `Kolvir.Feature.Animations` adds `ShowDuration`
 and `DismissDuration` extension members over exactly that seam, which fade and slide the message in
 from the edge it is docked against and reverse it on the way out:
 
 ```csharp
-// With XPlatUI.Feature.Animations referenced and AddAnimations() called:
+// With Kolvir.Feature.Animations referenced and AddAnimations() called:
 toast.ShowDuration = TimeSpan.FromMilliseconds(240);
 toast.DismissDuration = TimeSpan.FromMilliseconds(180);
 ```
@@ -1100,20 +1100,20 @@ slide is a single translate of the whole control rather than a change to its geo
 bar, the glyph and the text keep their shape all the way in.
 
 ```csharp
-var toast = new XPlatToast("Project saved") { Dock = DockStyle.Bottom, Severity = XPlatToastSeverity.Success };
+var toast = new Toast("Project saved") { Dock = DockStyle.Bottom, Severity = ToastSeverity.Success };
 page.Controls.Add(toast);
 
 toast.Show();                                        // up, and counting down from four seconds
 toast.Text = "Could not reach the server";
-toast.Severity = XPlatToastSeverity.Error;
+toast.Severity = ToastSeverity.Error;
 toast.Duration = null;                               // an error waits for the user
 toast.Show();
 ```
 
 ### Group box
 
-`XPlatGroupBox` is a labelled frame: the caption sits in a break in the top edge and the content is
-laid out below it. It is an `XPlatPanel`, so it keeps the scrolling and the child management of one.
+`GroupBox` is a labelled frame: the caption sits in a break in the top edge and the content is
+laid out below it. It is an `Panel`, so it keeps the scrolling and the child management of one.
 
 The caption band is reserved by overriding `ContentBounds` rather than by adding to `Padding`, so
 the layout, the hit testing and the invalidation clipping all move together and a scrolled child
@@ -1122,9 +1122,9 @@ clip instead of being painted over, so a group box on a coloured or textured bac
 right.
 
 ```csharp
-var group = new XPlatGroupBox { Dock = DockStyle.Top, Height = 140f, Text = "Appearance" };
-group.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
-group.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Snap to grid" });
+var group = new GroupBox { Dock = DockStyle.Top, Height = 140f, Text = "Appearance" };
+group.Controls.Add(new CheckBox { Dock = DockStyle.Top, Text = "Show grid" });
+group.Controls.Add(new CheckBox { Dock = DockStyle.Top, Text = "Snap to grid" });
 ```
 
 `Enabled` cascades, so disabling a group box greys its caption, its frame and everything inside it,
@@ -1135,8 +1135,8 @@ it the same way, without touching a single `Enabled` flag on the children.
 
 ### Expander
 
-`XPlatExpander` is the collapsible version of a group box: a header with a chevron and a caption,
-and the content folded away under it. It is an `XPlatPanel`, so the content keeps the docking,
+`Expander` is the collapsible version of a group box: a header with a chevron and a caption,
+and the content folded away under it. It is an `Panel`, so the content keeps the docking,
 scrolling and child management of one, and the header is taken out of the layout by overriding the
 content bounds rather than by adding to the padding - a scrolled child can never be arranged or
 painted under the caption.
@@ -1184,18 +1184,18 @@ Hiding a container is deliberately different: it keeps the focus its child held,
 hidden panel keeps its caret and picks it up again when the panel is shown. That is a documented
 behaviour with a test behind it, and a fold is not a hide.
 
-On its own the fold is a jump. Animating it belongs to `XPlatUI.Feature.Animations`, which this
+On its own the fold is a jump. Animating it belongs to `Kolvir.Feature.Animations`, which this
 control does not reference; that package adds an `ExpandDuration` extension member and animates
 `ExpandProgress`, so with one line the arrow and the height move together over the duration, and with
 none the control behaves exactly as described above.
 
 ```csharp
-var appearance = new XPlatExpander("Appearance") { Dock = DockStyle.Top, Height = 180f };
-appearance.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
+var appearance = new Expander("Appearance") { Dock = DockStyle.Top, Height = 180f };
+appearance.Controls.Add(new CheckBox { Dock = DockStyle.Top, Text = "Show grid" });
 appearance.AddExpandedChangedHandler(sender =>
-    Console.WriteLine(((XPlatExpander)sender).IsExpanded ? "opened" : "closed"));
+    Console.WriteLine(((Expander)sender).IsExpanded ? "opened" : "closed"));
 
-// With XPlatUI.Feature.Animations referenced and AddAnimations() called:
+// With Kolvir.Feature.Animations referenced and AddAnimations() called:
 appearance.ExpandDuration = TimeSpan.FromMilliseconds(180);
 ```
 
@@ -1205,9 +1205,9 @@ application that never registered the clock snaps instead of leaving a section f
 
 ### Combo boxes
 
-`XPlatComboBox` is an input field with a chevron; clicking it opens a drop-down list in a popup, so
+`ComboBox` is an input field with a chevron; clicking it opens a drop-down list in a popup, so
 the list is not clipped by the window and can overhang whatever is below it. The field is the
-control and the list is a separate `XPlatListBox` living in that popup, which is why the control
+control and the list is a separate `ListBox` living in that popup, which is why the control
 keeps the keyboard focus the whole time it is open - the arrow keys, Enter and Escape all go to the
 combo box, not to a second focused control.
 
@@ -1222,19 +1222,19 @@ combo box, not to a second focused control.
 
 A drop-down opens downwards and flips above the field when there is no room below it. Disabling
 the control closes the drop-down, and a disabled combo box neither opens nor takes input. The
-chevron and the text switch to `XPlatTheme.DisabledForeground`.
+chevron and the text switch to `Theme.DisabledForeground`.
 
 ```csharp
-var size = new XPlatComboBox { Dock = DockStyle.Top, EmptyText = "Choose a size" };
+var size = new ComboBox { Dock = DockStyle.Top, EmptyText = "Choose a size" };
 size.Items.AddRange("Small", "Medium", "Large");
-size.AddSelectedIndexChangedHandler(sender => Console.WriteLine(((XPlatComboBox)sender).SelectedText));
+size.AddSelectedIndexChangedHandler(sender => Console.WriteLine(((ComboBox)sender).SelectedText));
 ```
 
 ### Date and time pickers
 
-`XPlatDateTimePicker` is an editable date field with a calendar in a popup. The field is an
-`XPlatTextBox`, so typing, selection, the clipboard and the caret work the way they do everywhere
-else; the calendar is a control drawn inside an `XPlatPopup`, so it can hang past the window when
+`DateTimePicker` is an editable date field with a calendar in a popup. The field is an
+`TextBox`, so typing, selection, the clipboard and the caret work the way they do everywhere
+else; the calendar is a control drawn inside an `Popup`, so it can hang past the window when
 the platform layer provides popup windows. As with the combo box, the field keeps the keyboard
 while the popup is open.
 
@@ -1261,10 +1261,10 @@ outlined and the value filled in, and Today and Clear buttons in the footer. Day
 `MinDate`..`MaxDate` are muted and cannot be picked.
 
 ```csharp
-var when = new XPlatDateTimePicker(DateTime.Now) { Format = XPlatDateTimePickerFormat.Short };
+var when = new DateTimePicker(DateTime.Now) { Format = DateTimePickerFormat.Short };
 when.MinDate = DateTime.Today;
 when.MaxDate = DateTime.Today.AddYears(1);
-when.AddValueChangedHandler(sender => Console.WriteLine(((XPlatDateTimePicker)sender).Value));
+when.AddValueChangedHandler(sender => Console.WriteLine(((DateTimePicker)sender).Value));
 ```
 
 Left and right move between the date's segments (the month, the day, the year...), Up and Down step
@@ -1274,9 +1274,9 @@ Alt+Up closes it.
 
 ### Tab controls
 
-`XPlatTabControl` draws a strip of tabs and lays the selected `XPlatTabPage` out in the area below
+`TabControl` draws a strip of tabs and lays the selected `TabPage` out in the area below
 it; the other pages stay in `Controls` but are hidden, so their state survives a switch. A
-`XPlatTabPage` is an `XPlatPanel` with no frame of its own, so it scrolls and docks like one.
+`TabPage` is an `Panel` with no frame of its own, so it scrolls and docks like one.
 
 | Member | Behaviour |
 | --- | --- |
@@ -1290,16 +1290,16 @@ in WinForms: the left and right arrows move the selection, `Home`/`End` jump to 
 `Ctrl`+`Tab`/`Ctrl`+`Shift`+`Tab` cycle it.
 
 ```csharp
-var tabs = new XPlatTabControl { Dock = DockStyle.Fill };
-var general = new XPlatTabPage("General");
-general.Controls.Add(new XPlatCheckBox { Dock = DockStyle.Top, Text = "Show grid" });
+var tabs = new TabControl { Dock = DockStyle.Fill };
+var general = new TabPage("General");
+general.Controls.Add(new CheckBox { Dock = DockStyle.Top, Text = "Show grid" });
 tabs.TabPages.Add(general);
-tabs.TabPages.Add(new XPlatTabPage("Advanced"));
+tabs.TabPages.Add(new TabPage("Advanced"));
 ```
 
 ### Tool tips
 
-One `XPlatToolTip` serves any number of controls, like WinForms': give it the text for each
+One `ToolTip` serves any number of controls, like WinForms': give it the text for each
 control and it watches their pointer enter and leave. The tip appears after `InitialDelay`, stays
 for `AutoPopDelay`, wraps at `MaximumWidth` and is shown in a popup that does **not** take input,
 so moving the pointer across it still reaches whatever is underneath.
@@ -1323,14 +1323,14 @@ pending or drawn tip with it and stops the delay, because there is no mouse-leav
 container goes away. `Dispose` the instance when the controls it describes go away.
 
 ```csharp
-using var tips = new XPlatToolTip { InitialDelay = 500 };
+using var tips = new ToolTip { InitialDelay = 500 };
 tips.SetToolTip(saveButton, "Save the document");
 tips.SetToolTip(helpButton, "Open the help window");
 ```
 
 ### Numeric up-down and track bar
 
-`XPlatNumericUpDown` is an `XPlatTextBox` with a spinner pair in its right-hand edge, so the value
+`NumericUpDown` is an `TextBox` with a spinner pair in its right-hand edge, so the value
 can be typed or stepped. The value is a `decimal` rather than a float, because stepping a money
 amount a hundred times has to land on the amount and not on a rounding artefact.
 `DecimalPlaces` decides how many of those decimals are held and shown, and every value that comes
@@ -1343,7 +1343,7 @@ contain are dropped as they are typed, along with a second decimal separator, an
 formatting use the current culture so the separator is the one the user's keyboard produces. The
 arrow keys, the wheel and the buttons all step by `Increment`, and a held button repeats.
 
-`XPlatTrackBar` fills its track up to the knob, so the value reads without finding the knob first,
+`TrackBar` fills its track up to the knob, so the value reads without finding the knob first,
 and `TickFrequency` puts marks where the round values are. Pressing the knob starts a drag that
 keeps the grab point, so grabbing it off-centre does not make it jump under the pointer; pressing
 the track pages by `LargeChange` toward the press. Arrow keys move by `SmallChange`, `PageUp` and
@@ -1351,7 +1351,7 @@ the track pages by `LargeChange` toward the press. Arrow keys move by `SmallChan
 knob and the ticks through ninety degrees.
 
 ```csharp
-var amount = new XPlatNumericUpDown(1.5m)
+var amount = new NumericUpDown(1.5m)
 {
     Minimum = 0m,
     Maximum = 99.99m,
@@ -1359,13 +1359,13 @@ var amount = new XPlatNumericUpDown(1.5m)
     DecimalPlaces = 2,
 };
 
-var zoom = new XPlatTrackBar { Minimum = 25f, Maximum = 400f, Value = 100f, TickFrequency = 25f };
+var zoom = new TrackBar { Minimum = 25f, Maximum = 400f, Value = 100f, TickFrequency = 25f };
 zoom.AddValueChangedHandler(_ => SetStatus($"Zoom {zoom.Value:0}%"));
 ```
 
 ### Colour picker
 
-`XPlatColorPicker` is a spectrum square with a hue strip beside it, three component fields and a
+`ColorPicker` is a spectrum square with a hue strip beside it, three component fields and a
 hex field. The square's horizontal axis is saturation, from zero at the left to full at the right;
 its vertical axis is value in RGB and HSV and lightness in HSL, full at the top and zero at the
 bottom. The hue strip carries the third axis with 0 degrees (red) at the top and 359 at the bottom.
@@ -1420,10 +1420,10 @@ degree per arrow press and ten per page press, and Home and End jump to 0 and 35
 square, the hue strip, the three component fields and then the hex field.
 
 ```csharp
-var picker = new XPlatColorPicker
+var picker = new ColorPicker
 {
     Color = new SKColor(0x33, 0x66, 0x99),
-    ColorMode = XPlatColorMode.Hsv,
+    ColorMode = ColorMode.Hsv,
 };
 
 picker.AddColorChangedHandler(_ => SetStatus($"Chose #{picker.Color.Red:X2}{picker.Color.Green:X2}{picker.Color.Blue:X2}"));
@@ -1431,64 +1431,64 @@ picker.AddColorChangedHandler(_ => SetStatus($"Chose #{picker.Color.Red:X2}{pick
 
 ### Link labels
 
-`XPlatLinkLabel` is an `XPlatRichLabel` whose text is styled as a link, so extra spans can be added
+`LinkLabel` is an `RichLabel` whose text is styled as a link, so extra spans can be added
 around it to build a sentence. Clicking it - or pressing Enter or Space while it has focus - hands
-its `Url` to the desktop and raises `AddLinkClickedHandler` with an `XPlatLinkClickedEventArgs` that
+its `Url` to the desktop and raises `AddLinkClickedHandler` with an `LinkClickedEventArgs` that
 says which span was clicked and whether the platform accepted the URI. Setting `AutoLaunch` to
 `false` makes the label a notification only, which is what an application that navigates inside
 itself wants.
 
-Opening a URI needs the platform, so it goes through `IXPlatLauncher`: each backend installs its
-implementation into `XPlatLauncher.Current` (`ShellExecute` on Win32, `NSWorkspace.OpenUrl` on
+Opening a URI needs the platform, so it goes through `ILauncher`: each backend installs its
+implementation into `Launcher.Current` (`ShellExecute` on Win32, `NSWorkspace.OpenUrl` on
 AppKit, `Gtk.UriLauncher` on GTK4), and the fallback opens nothing and reports failure. The URI is
 expected to come from the application - a `file:` URI reaches the local file system, so
 user-supplied text belongs behind a scheme allow-list rather than straight into `OpenUrl`.
 
 ```csharp
-var link = new XPlatLinkLabel("Project home", "https://github.com/drysart/XPlatUI");
+var link = new LinkLabel("Project home", "https://github.com/drysart/Kolvir");
 link.AddLinkClickedHandler((_, e) => SetStatus(e.Opened ? "Opened" : "Could not open"));
 ```
 
 ### Tool strips and status strips
 
 A tool strip holds *items* rather than child controls, because a strip that accepted children would
-just be a panel. An item is a plain object - `XPlatToolStripButton`, `XPlatToolStripLabel`,
-`XPlatToolStripSeparator`, `XPlatToolStripProgressBar` or `XPlatToolStripSpring` - so a bar of nine
+just be a panel. An item is a plain object - `ToolStripButton`, `ToolStripLabel`,
+`ToolStripSeparator`, `ToolStripProgressBar` or `ToolStripSpring` - so a bar of nine
 items costs one control, one paint pass and one hit test rather than nine of each.
-`XPlatStatusStrip` is the same control with the status-bar defaults.
+`StatusStrip` is the same control with the status-bar defaults.
 
 | Member | Behaviour |
 | --- | --- |
 | `Items` | The item list: add, insert, remove and reorder without rebuilding the bar |
-| `XPlatToolStripItem.Alignment` | `Near` packs from the left, `Far` from the right; a `Spring` takes the slack between them |
-| `XPlatToolStripItem.Width` | A fixed width, or `NaN` to measure the item's own content |
-| `XPlatToolStripItem.Enabled` | A disabled item greys out and takes no input while the rest of the bar keeps working |
-| `XPlatToolStripButton.AddClickHandler` | Runs when the item is clicked, or activated from the keyboard |
-| `XPlatToolStripProgressBar` | `Minimum`/`Maximum`/`Value`/`Percent`; the fill needs no timer, unlike a marquee `XPlatProgressBar` |
+| `ToolStripItem.Alignment` | `Near` packs from the left, `Far` from the right; a `Spring` takes the slack between them |
+| `ToolStripItem.Width` | A fixed width, or `NaN` to measure the item's own content |
+| `ToolStripItem.Enabled` | A disabled item greys out and takes no input while the rest of the bar keeps working |
+| `ToolStripButton.AddClickHandler` | Runs when the item is clicked, or activated from the keyboard |
+| `ToolStripProgressBar` | `Minimum`/`Maximum`/`Value`/`Percent`; the fill needs no timer, unlike a marquee `ProgressBar` |
 
 The bar is a single tab stop: the arrow keys move a selection along the items, `Home` and `End`
 jump to the ends, and Enter or Space activates the selected item, so a strip does not put every one
-of its items into the tab order. `XPlatToolStrip` docks to the top of its container and
-`XPlatStatusStrip` to the bottom, each at its own natural height.
+of its items into the tab order. `ToolStrip` docks to the top of its container and
+`StatusStrip` to the bottom, each at its own natural height.
 
 ```csharp
-var toolbar = new XPlatToolStrip();
-toolbar.Items.Add(new XPlatToolStripButton("Save"));
-toolbar.Items.Add(new XPlatToolStripSeparator());
-toolbar.Items.Add(new XPlatToolStripSpring());
-toolbar.Items.Add(new XPlatToolStripLabel("UTF-8"));
+var toolbar = new ToolStrip();
+toolbar.Items.Add(new ToolStripButton("Save"));
+toolbar.Items.Add(new ToolStripSeparator());
+toolbar.Items.Add(new ToolStripSpring());
+toolbar.Items.Add(new ToolStripLabel("UTF-8"));
 ```
 
 ### Split buttons
 
-`XPlatSplitButton` is one button with two halves: the main area is the default action and the arrow
-at its right edge opens `Menu`. `XPlatDropDownButton` is the same control with the halves merged -
+`SplitButton` is one button with two halves: the main area is the default action and the arrow
+at its right edge opens `Menu`. `DropDownButton` is the same control with the halves merged -
 pressing anywhere opens the menu, and `AddClickHandler` still runs, which mirrors the WinForms
 `ToolStripDropDownButton`.
 
 | Member | Behaviour |
 | --- | --- |
-| `Menu` | The `XPlatContextMenu` the arrow opens: items, submenus, separators and mnemonics |
+| `Menu` | The `ContextMenu` the arrow opens: items, submenus, separators and mnemonics |
 | `ArrowWidth` | Width of the arrow region, 24 logical pixels by default; it is part of the measured width |
 | `IsDropDownOpen`, `OpenDropDown()`, `CloseDropDown()` | The menu's state |
 | `AddClickHandler` | The default action: a press and release in the main area, or Enter/Space while focused |
@@ -1499,18 +1499,18 @@ arrow region darkens under the pointer so it is clear which half is about to be 
 menu from the keyboard; once it is open the menu owns the keyboard, so its own arrows, Enter and
 Escape are what move and dismiss it.
 
-The menu is the library's own `XPlatMenuView` in an `XPlatPopup` shown by `XPlatMenuPresenter`, so it
+The menu is the library's own `MenuView` in an `Popup` shown by `MenuPresenter`, so it
 draws the same on all three platforms, opens submenus in popups of their own, and can leave the
 window when the backend provides popup windows. Nothing is built until the menu is first opened, and
 disabling or hiding the button closes an open menu.
 
 ```csharp
-var save = new XPlatSplitButton("Save") { Dock = DockStyle.Top, AutoSize = true };
+var save = new SplitButton("Save") { Dock = DockStyle.Top, AutoSize = true };
 save.AddClickHandler(_ => document.Save());          // the main area
 save.Menu.Add("Save as...", () => document.SaveAs());
 save.Menu.Add("Export as PDF", () => document.Export());
 
-var more = new XPlatDropDownButton("More") { Dock = DockStyle.Top, AutoSize = true };
+var more = new DropDownButton("More") { Dock = DockStyle.Top, AutoSize = true };
 more.Menu.Add("Rename", () => document.Rename());
 more.Menu.Add("Archive", () => document.Archive());
 ```
@@ -1518,17 +1518,17 @@ more.Menu.Add("Archive", () => document.Archive());
 ### Popups
 
 A popup is a control floated above the window: a drop-down list, a tool tip, anything that has to
-escape the clipping of the control that owns it. `XPlatPopup` is the portable half. It is given an
+escape the clipping of the control that owns it. `Popup` is the portable half. It is given an
 owner and a content control, and it either asks the platform layer for a real window or paints the
 content inside the owning window.
 
 | Piece | Role |
 | --- | --- |
-| `XPlatPopup(owner)` | `Content`, `Size`, `MaximumSize`, `DismissOnOutsideClick`, `Show(location)`, `MoveTo`, `Close()`, `IsOpen`, `AddClosedHandler` |
+| `Popup(owner)` | `Content`, `Size`, `MaximumSize`, `DismissOnOutsideClick`, `Show(location)`, `MoveTo`, `Close()`, `IsOpen`, `AddClosedHandler` |
 | `Presentation` | `Auto` (the default), `Window` or `Overlay`; `ActualPresentation` reports which one happened |
-| `IXPlatPopupService` | The platform seam: `CreatePopup(ownerHost, dismissOnOutsideClick)` returns an `IXPlatPopupWindow` or `null` |
-| `XPlatPopupService.Current` | The process-wide service, registered by the backend next to the other adapters |
-| `IXPlatPopupWindow` | `Host`, `DismissesOnOutsideClick`, `Dismissed`, `Show(ownerHost, location, size)`, `UpdateBounds`, `Hide` |
+| `IPopupService` | The platform seam: `CreatePopup(ownerHost, dismissOnOutsideClick)` returns an `IPopupWindow` or `null` |
+| `PopupService.Current` | The process-wide service, registered by the backend next to the other adapters |
+| `IPopupWindow` | `Host`, `DismissesOnOutsideClick`, `Dismissed`, `Show(ownerHost, location, size)`, `UpdateBounds`, `Hide` |
 
 When no service is registered - or when it declines, because the owner is not on screen yet - the
 popup falls back to the host's overlay layer, which paints it above the root control and routes
@@ -1536,7 +1536,7 @@ input to it first. That is what keeps the library platform free: a build that ne
 pays nothing for the feature, and the same code runs on a backend that has no popup surfaces.
 
 ```csharp
-var popup = new XPlatPopup(this) { Content = new XPlatListBox(), Size = new SKSize(200f, 160f) };
+var popup = new Popup(this) { Content = new ListBox(), Size = new SKSize(200f, 160f) };
 popup.AddClosedHandler(_ => Invalidate());
 popup.Show(new SKPoint(x, y));      // logical, in the owner's coordinate space
 ```
@@ -1553,7 +1553,7 @@ is on screen and how the screen is arranged:
 
 A popup window is never activated and never takes focus, so the owning control keeps the keyboard
 while its drop-down is open. Dismissal is the platform's job too: a press outside the popup, a
-scroll or a resize closes it, and `Dismissed` tells `XPlatPopup` to raise its `Closed` event.
+scroll or a resize closes it, and `Dismissed` tells `Popup` to raise its `Closed` event.
 
 The press that dismisses a popup belongs to the popup: it is consumed, not delivered to whatever it
 landed on. That is what the overlay presentation gets from its dismiss catcher, which covers the
@@ -1601,7 +1601,7 @@ costing the whole window:
 
 ```csharp
 // The caret blinks by repainting its own column, not the control around it.
-caret.Invalidate(XPlatGeometry.Inflate(bounds, 1f), invalidateChildren: false);
+caret.Invalidate(Geometry.Inflate(bounds, 1f), invalidateChildren: false);
 ```
 
 A child is only left out when it is `Opaque`, because one that is not lets the background show
@@ -1615,29 +1615,29 @@ A control never talks to the host. It clips the area to its own client area, map
 its parent's coordinates and calls the parent's `ChildInvalidate`; the default implementation of
 that hook clips the area to the parent's client area and invalidates the parent in turn, so the
 request walks up the tree one control at a time, and only the root - which has no parent - hands it
-to `XPlatUiHost`. A control therefore cannot reach past its own bounds, and the root cannot be
+to `UiHost`. A control therefore cannot reach past its own bounds, and the root cannot be
 reached around.
 
 That hop is the point: it is where a container decides what a child's request means.
 `ChildInvalidate` is `protected internal virtual` so a container can narrow the area, move it, or
 widen it to take in the decoration it draws around the child, and it receives the area in its own
-coordinates with the child's bounds already applied. `XPlatPanel` uses it to clip content to the
+coordinates with the child's bounds already applied. `Panel` uses it to clip content to the
 viewport, so a control scrolled out of sight asks for nothing and one that is half scrolled out
 asks only for the part that is showing; the scrollbars are left alone, because they live in the
 gutter the viewport excludes and are painted over the content rather than clipped with it.
 
 ```csharp
 // A container that frames its children repaints the frame along with whatever changed inside it.
-protected internal override void ChildInvalidate(XPlatControl child, SKRegion region)
+protected internal override void ChildInvalidate(Control child, SKRegion region)
 {
     region.Op(ToRectI(Inflate(child.Bounds, FrameThickness)), SKRegionOperation.Union);
     base.ChildInvalidate(child, region);
 }
 ```
 
-The paint itself is region-exact. `XPlatUiHost.Paint` clips to the dirty region - through its
+The paint itself is region-exact. `UiHost.Paint` clips to the dirty region - through its
 boundary path when the region is not a plain rectangle, so scattered invalidations do not repaint
-the gaps between them - clears that area and renders the tree into it. `XPlatControl.Render` calls
+the gaps between them - clears that area and renders the tree into it. `Control.Render` calls
 `canvas.QuickReject` on its own bounds before doing any work, so a subtree that cannot reach the
 clip is not walked at all. That is where most of the saving is, and it applies on every backend
 whether or not the backend can present part of a frame.
@@ -1653,21 +1653,21 @@ host directly would dirty a rectangle taller than the surface on every scroll st
 
 Arranging a child moves it, so a pass over many children asks for many repaints, and each one would
 otherwise walk up the parent chain. No frame can be painted while the pass is running, and the pass
-is about to repaint what it arranged, so `XPlatControl` folds the requests a pass causes into one
+is about to repaint what it arranged, so `Control` folds the requests a pass causes into one
 `Invalidate` of the control being laid out, made when the pass - including any nested passes it
 started - finishes. The repaint covers that control's client area, which for a scrolling container
 is the viewport rather than the content. That is what lets a stack panel of a hundred thousand
 buttons scroll in milliseconds instead of seconds.
 
 Hovering is not a repaint on its own. A control that draws itself differently under the pointer
-says so, by invalidating from its own `OnMouseEnter`/`OnMouseLeave`; the base `XPlatControl` only
+says so, by invalidating from its own `OnMouseEnter`/`OnMouseLeave`; the base `Control` only
 tracks `IsMouseOver` and raises the events. Repainting every control the pointer crosses is what a
 whole-window renderer gets away with, because the frame it would have drawn anyway costs the same:
 here it would put a title label's whole bounds into the next region, and with it everything
 between the label and whatever else changed. A label, a panel, a table and an image look the same
 hovered as not, so they are left out of it.
 
-A backend opts into partial presentation with `XPlatUiHost.PartialUpdates`. It is off by default
+A backend opts into partial presentation with `UiHost.PartialUpdates`. It is off by default
 because a backend that rasterizes the whole surface every frame - GTK4's CPU path and the headless
 renderer both do - would be left with blank patches where the retained content should be:
 
@@ -1716,13 +1716,13 @@ void OnPaint(SKRectI stale)     // the platform's update rectangle
 
 ### Seeing what gets repainted
 
-Set `XPLATUI_DEBUG_PAINT` to paint every invalidated area flat red for one frame before painting its
+Set `KOLVIR_DEBUG_PAINT` to paint every invalidated area flat red for one frame before painting its
 content over it. Partial repaints are invisible by design, which is what makes them hard to trust:
 this makes each one announce itself.
 
 ```powershell
-$env:XPLATUI_DEBUG_PAINT = '1'      # hold the red frame for the default 80 ms
-$env:XPLATUI_DEBUG_PAINT = '500'    # hold it for half a second
+$env:KOLVIR_DEBUG_PAINT = '1'      # hold the red frame for the default 80 ms
+$env:KOLVIR_DEBUG_PAINT = '500'    # hold it for half a second
 ```
 
 The red frame covers exactly the region the paint was given - the same clip, the same holes in it -
@@ -1742,7 +1742,7 @@ machine driving the demo is not the machine looking at it.
 
 ### Frame timing
 
-`XPlatUiHost` times the frames it paints, which is enough to see what a partial repaint buys
+`UiHost` times the frames it paints, which is enough to see what a partial repaint buys
 without reaching for a profiler:
 
 | Member | Reports |
@@ -1780,14 +1780,14 @@ because that backend presents the whole surface every frame.
 
 ### Rich label
 
-`XPlatRichLabel` flows styled runs of text into a wrapping paragraph. Formatting lives on
-`XPlatTextSpan` objects held in the `Spans` collection; a span can also carry a child control
+`RichLabel` flows styled runs of text into a wrapping paragraph. Formatting lives on
+`TextSpan` objects held in the `Spans` collection; a span can also carry a child control
 that is embedded **inline** in the text flow (CSS `inline-block` style) and a set of mouse
 events that make it behave like a hyperlink.
 
 | Member | Behaviour |
 | --- | --- |
-| `Spans` | Ordered list of `XPlatTextSpan`; add/remove directly or use the helpers below |
+| `Spans` | Ordered list of `TextSpan`; add/remove directly or use the helpers below |
 | `AddText(text)`, `AddSpan(span)`, `AddLink(text, onClick)` | Convenience appenders; `AddLink` returns the span so you can set `Tag`, colours or extra handlers |
 | `AddInlineControl(control, alignment)` | Places `control` in the flow, aligned `Top`/`Center`/`Bottom` to its text line |
 | `WrapText` | Word wrap (default `true`); when `false` the label is as wide as its longest line |
@@ -1806,22 +1806,22 @@ interactive: it shows a hand cursor by default (override with `Cursor`) and repo
 text.
 
 ```csharp
-var rich = new XPlatRichLabel { Dock = DockStyle.Fill, WrapText = true };
+var rich = new RichLabel { Dock = DockStyle.Fill, WrapText = true };
 
 rich.AddText("Read the ");
-rich.AddSpan(new XPlatTextSpan("terms of service") { Underline = true, ForeColor = XPlatTheme.Accent });
+rich.AddSpan(new TextSpan("terms of service") { Underline = true, ForeColor = Theme.Accent });
 rich.AddText(" and the ");
-rich.AddSpan(new XPlatTextSpan("privacy policy") { Bold = true });
+rich.AddSpan(new TextSpan("privacy policy") { Bold = true });
 rich.AddText(".\nInline controls:");
 
 var link = rich.AddLink("documentation", span => Open(span.Tag as string));
 link.Tag = "https://example.com/docs";
-link.HoverBackColor = XPlatTheme.Secondary;
+link.HoverBackColor = Theme.Secondary;
 
 rich.AddText(" ");
-rich.AddInlineControl(new XPlatButton("Retry") { AutoSize = true }, XPlatInlineAlignment.Center);
+rich.AddInlineControl(new Button("Retry") { AutoSize = true }, InlineAlignment.Center);
 rich.AddText(" ");
-rich.AddInlineControl(badge, XPlatInlineAlignment.Bottom);
+rich.AddInlineControl(badge, InlineAlignment.Bottom);
 
 rich.AddSpanClickHandler((_, e) => Console.WriteLine($"clicked {e.Span.Text}"));
 ```
@@ -1833,7 +1833,7 @@ label.
 
 ### Text box
 
-`XPlatTextBox` is a single-line editor: caret, selection, clipboard, password masking,
+`TextBox` is a single-line editor: caret, selection, clipboard, password masking,
 placeholder text and horizontal scrolling are all implemented by the control itself. Multi-line
 editing is a separate opt-in feature, described in [Multi-line text](#multi-line-text), and so are
 spell-checker style annotations, described in [Text box spans](#text-box-spans).
@@ -1842,13 +1842,13 @@ spell-checker style annotations, described in [Text box spans](#text-box-spans).
 | --- | --- |
 | `Text`, `AddTextChangedHandler` | Current value. Control characters (including line breaks) are stripped so the field stays single line. Assigning a shorter value clamps the caret and the selection to the new end rather than resetting them, and assigning the value the field already holds does nothing - which is what makes an echo binding free |
 | `CaretIndex`, `SelectionStart`, `SelectionLength`, `SelectedText`, `HasSelection` | Selection state; the caret is `0 ... Text.Length` |
-| `Caret` | The `XPlatCaret` that draws and blinks the insertion point; its `BlinkInterval`, `Width` and `Color` can be changed |
+| `Caret` | The `Caret` that draws and blinks the insertion point; its `BlinkInterval`, `Width` and `Color` can be changed |
 | `Select(start, length)`, `SelectAll()`, `ClearSelection()` | Programmatic selection |
 | `MaxLength` | Characters the user may type (`0` = unlimited); enforced for insertions and replacements |
 | `ReadOnly` | Selection and copy still work; typing, paste, cut and delete are blocked |
 | `IsPassword`, `PasswordChar` | Draws one mask glyph per character (`'\u2022'` by default) |
 | `PlaceholderText` | Muted text shown while the field is empty |
-| `Font` | Optional override of `XPlatTheme.DefaultFont` |
+| `Font` | Optional override of `Theme.DefaultFont` |
 | `Copy()`, `Cut()`, `Paste()`, `InsertText(text)` | Programmatic edit operations |
 
 Keyboard: `Left`/`Right` move by character (`Ctrl` moves by word), `Home`/`End` jump to the
@@ -1858,7 +1858,7 @@ consumed, so a form can still treat it as an accept gesture. The mouse sets the 
 drags a selection and supports double click (word) and triple click (everything).
 
 ```csharp
-var name = new XPlatTextBox
+var name = new TextBox
 {
     Dock = DockStyle.Top,
     PlaceholderText = "Type your name",
@@ -1866,31 +1866,31 @@ var name = new XPlatTextBox
 };
 name.AddTextChangedHandler(_ => Console.WriteLine(name.Text));
 
-var password = new XPlatTextBox { Dock = DockStyle.Top, IsPassword = true };
-var readOnly = new XPlatTextBox { Dock = DockStyle.Top, ReadOnly = true, Text = "fixed" };
+var password = new TextBox { Dock = DockStyle.Top, IsPassword = true };
+var readOnly = new TextBox { Dock = DockStyle.Top, ReadOnly = true, Text = "fixed" };
 ```
 
 The library itself stays platform free, so one thing remains the adapter's job:
 
-* **Clipboard** - implement `IXPlatClipboard` (`GetText`/`SetText`, plus the optional
-  `GetHtml`/`SetHtml` pair) and assign an instance to `XPlatClipboard.Current` once at startup;
+* **Clipboard** - implement `IClipboard` (`GetText`/`SetText`, plus the optional
+  `GetHtml`/`SetHtml` pair) and assign an instance to `Clipboard.Current` once at startup;
   without one an in-process fallback is used. The Win32 backend installs `Win32Clipboard`
   (`Win32Clipboard.cs`), which publishes a real `HTML Format` payload.
 
-The caret is a control of its own: `XPlatCaret` owns the timer that blinks it and follows its
+The caret is a control of its own: `Caret` owns the timer that blinks it and follows its
 control's focus, enabled state and display state, so it only runs while the caret is actually on
 screen - hiding a container above a focused field stops the blink, and showing it again resumes it -
-and an idle application has no timer running at all. `XPlatTextBox.Caret` exposes the instance it uses, so
+and an idle application has no timer running at all. `TextBox.Caret` exposes the instance it uses, so
 its interval, width and color can be changed, and a new editable control gets the same caret with
-`new XPlatCaret(this)`. A control that animates something else does the same through `CreateTimer`,
-which hands back an `XPlatTimer` the control owns and that is disposed with it. The wait itself comes
+`new Caret(this)`. A control that animates something else does the same through `CreateTimer`,
+which hands back an `Timer` the control owns and that is disposed with it. The wait itself comes
 from the backend's `CreateTimer`, so a control asks for an interval and the platform decides how to
 honour it; the underlying timer is created on the first `Start`, so a timer that never runs never
 asks for one.
 
 ### Text box autocomplete
 
-Autocomplete is an opt-in extension in `XPlatUI.AutoComplete`, so a text box that never turns it
+Autocomplete is an opt-in extension in `Kolvir.AutoComplete`, so a text box that never turns it
 on carries none of its state and an application that never imports the namespace carries none of
 its code. It adds the members a WinForms text box has:
 
@@ -1900,7 +1900,7 @@ its code. It adds the members a WinForms text box has:
 | `AutoCompleteSource` | `CustomSource` (the values in `AutoCompleteCustomSource`) or `HistoryList` (the values the user has committed in this box) |
 | `AutoCompleteCustomSource` | The values to suggest; read on every change, so adding one takes effect on the next keystroke |
 
-The suggestion list is an `XPlatListBox` in an `XPlatPopup` under the caret, so it can leave the
+The suggestion list is an `ListBox` in an `Popup` under the caret, so it can leave the
 window when the platform layer provides popup windows. It never takes the keyboard: the text box
 keeps the caret and forwards the keys to the list, the way the combo box does with its drop-down.
 `Up`/`Down` move the highlight, `Enter` takes it, `Escape` closes the list without clearing the
@@ -1918,12 +1918,12 @@ by leaving the field - deduplicated case-insensitively, most recent first, and c
 so it cannot grow without bound.
 
 ```csharp
-using XPlatUI.AutoComplete;
+using Kolvir.AutoComplete;
 
-var city = new XPlatTextBox
+var city = new TextBox
 {
-    AutoCompleteMode = XPlatAutoCompleteMode.SuggestAppend,
-    AutoCompleteSource = XPlatAutoCompleteSource.CustomSource,
+    AutoCompleteMode = AutoCompleteMode.SuggestAppend,
+    AutoCompleteSource = AutoCompleteSource.CustomSource,
 };
 city.AutoCompleteCustomSource.Add("Amsterdam");
 city.AutoCompleteCustomSource.Add("Athens");
@@ -1931,8 +1931,8 @@ city.AutoCompleteCustomSource.Add("Athens");
 
 ### Multi-line text
 
-`Multiline` turns the same `XPlatTextBox` into a multi-line editor. It is an opt-in extension in
-`XPlatUI.Multiline`, so a text box that never turns it on carries none of its state and an
+`Multiline` turns the same `TextBox` into a multi-line editor. It is an opt-in extension in
+`Kolvir.Multiline`, so a text box that never turns it on carries none of its state and an
 application that never imports the namespace carries none of its code. It adds:
 
 | Member | Behaviour |
@@ -1942,9 +1942,9 @@ application that never imports the namespace carries none of its code. It adds:
 | `VerticalScrollBar`, `HorizontalScrollBar`, `VerticalOffset`, `HorizontalOffset` | The bars and the scroll state, for an application that wants to read them |
 
 ```csharp
-using XPlatUI.Multiline;
+using Kolvir.Multiline;
 
-var notes = new XPlatTextBox
+var notes = new TextBox
 {
     Dock = XDock.Fill,
     Multiline = true,
@@ -1982,7 +1982,7 @@ Three behaviours are deliberate and worth stating:
   behave as `Suggest`. Typing a line break closes the list, because the new line's empty prefix has
   nothing to suggest.
 
-Scrolling reuses `XPlatScrollBars`, the helper the scrolling containers share, so the bars, the
+Scrolling reuses `ScrollBars`, the helper the scrolling containers share, so the bars, the
 wheel, the drag and the clamping behave like every other scrolling control. The scrolled region is
 the text area inside the padding; a bar takes its gutter out of that area, so the text never runs
 underneath one.
@@ -1999,27 +1999,27 @@ pastes back is unchanged.
 ### Text box spans
 
 `Spans` marks runs of characters with a squiggly underline, the way a spelling or grammar checker
-marks a word. It is an opt-in extension in `XPlatUI.Spans`, so a text box that never assigns a list
+marks a word. It is an opt-in extension in `Kolvir.Spans`, so a text box that never assigns a list
 carries none of its state and an application that never imports the namespace carries none of its
 code. It adds:
 
 | Member | Behaviour |
 | --- | --- |
 | `Spans` | The annotated runs, or null. Assigning replaces the whole set; assigning null or an empty list removes the feature again |
-| `XPlatTextBoxSpan` | One run: `Start`, `Length`, `End`, the squiggle's `Color`/`ThemeColor`, its `Thickness`, `Amplitude` and `Wavelength`, and a `Tag` for the caller's own data |
-| `XPlatContextMenuEventArgs.Span` | The span the right-click landed in, or null, as an extension member on the existing context-menu event args |
+| `TextBoxSpan` | One run: `Start`, `Length`, `End`, the squiggle's `Color`/`ThemeColor`, its `Thickness`, `Amplitude` and `Wavelength`, and a `Tag` for the caller's own data |
+| `ContextMenuEventArgs.Span` | The span the right-click landed in, or null, as an extension member on the existing context-menu event args |
 
 ```csharp
-using XPlatUI.Spans;
+using Kolvir.Spans;
 
 // A subclass hangs whatever the checker needs on the base type.
-sealed class SpellingError(int start, int length, string[] suggestions) : XPlatTextBoxSpan(start, length)
+sealed class SpellingError(int start, int length, string[] suggestions) : TextBoxSpan(start, length)
 {
     public string[] Suggestions { get; } = suggestions;
 }
 
 // A grammar note is the same squiggle in a different colour and shape.
-var grammar = new XPlatTextBoxSpan(start, length) { ThemeColor = XPlatThemeColor.Accent };
+var grammar = new TextBoxSpan(start, length) { ThemeColor = ThemeColor.Accent };
 
 field.Spans = [ new SpellingError(start, length, ["their", "there"]), grammar ];
 
@@ -2032,10 +2032,10 @@ field.AddContextMenuOpeningHandler(args =>
         return;
     }
 
-    menu.Insert(0, new XPlatMenuItem("&Add to dictionary", () => Ignore(error)));
-    menu.Insert(0, new XPlatMenuItem("&Ignore", () => Ignore(error)));
-    menu.Insert(0, new XPlatMenuItem("&Replace...", () => Suggest(error.Suggestions)));
-    menu.Insert(3, XPlatMenuItem.Separator);       // then the ordinary editing commands
+    menu.Insert(0, new MenuItem("&Add to dictionary", () => Ignore(error)));
+    menu.Insert(0, new MenuItem("&Ignore", () => Ignore(error)));
+    menu.Insert(0, new MenuItem("&Replace...", () => Suggest(error.Suggestions)));
+    menu.Insert(3, MenuItem.Separator);       // then the ordinary editing commands
 });
 ```
 
@@ -2051,7 +2051,7 @@ pixel constants, so the marker follows the text at any size and any display scal
 a descender therefore never touches it, and a glyph with one crosses it.
 
 The paint order is selection highlight, squiggle, text, caret - the same on a one-line and a
-multi-line field. The wash goes under the squiggle because `XPlatTheme.Selection` is caller-supplied
+multi-line field. The wash goes under the squiggle because `Theme.Selection` is caller-supplied
 and may be opaque, which would otherwise hide a marked word exactly while the reader is looking at
 it, whereas a descender crossing the wave reads better than a wave cut out of the descender. A
 marked word therefore stays marked while it is selected, and the caret is never covered.
@@ -2060,7 +2060,7 @@ Three contract decisions are worth stating:
 
 * **The list is caller-owned.** The box keeps the reference, never copies, reorders, merges or
   mutates it, and never rewrites a span when the text changes. A checker that re-runs on every
-  keystroke can clear its own `List<XPlatTextBoxSpan>`, refill it, and assign it again: no
+  keystroke can clear its own `List<TextBoxSpan>`, refill it, and assign it again: no
   allocation on the box's side, one repaint, and the new contents are what is drawn.
 * **Stale spans are clamped, never thrown.** A span that starts past the end of the text draws
   nothing and resolves no right-click, one that runs past the end is drawn up to the last
@@ -2079,7 +2079,7 @@ mark a warning), and `Wavelength` sets one full cycle's width.
 
 ### Text box undo and redo
 
-`UndoEnabled` gives a text box an undo history. It is an opt-in extension in `XPlatUI.Undo`, so a
+`UndoEnabled` gives a text box an undo history. It is an opt-in extension in `Kolvir.Undo`, so a
 text box that never turns it on carries none of its state and an application that never imports the
 namespace carries none of its code. It adds:
 
@@ -2091,12 +2091,12 @@ namespace carries none of its code. It adds:
 | `Undo()`, `Redo()` | Take the newest entry back out of the value, or put it back. Each returns false when there was nothing to do |
 | `ClearUndoStack()` | Drops both sides and leaves the text and the insertion point alone. A no-op on a box that never enabled the history |
 | `AddUndoStateChangedHandler` / `RemoveUndoStateChangedHandler` | Called after an edit is recorded, undone, redone or dropped - every moment `CanUndo` or `CanRedo` can change - so a menu or a pair of buttons can follow the field |
-| `XPlatUndoClock.Current` | The time source the five-second window is measured from. Defaults to `TimeProvider.System` |
+| `UndoClock.Current` | The time source the five-second window is measured from. Defaults to `TimeProvider.System` |
 
 ```csharp
-using XPlatUI.Undo;
+using Kolvir.Undo;
 
-var notes = new XPlatTextBox
+var notes = new TextBox
 {
     Multiline = true,
     UndoEnabled = true,
@@ -2117,7 +2117,7 @@ spelling for redo as well as the one Windows has always had. On macOS the same g
 `Cmd+Z` and `Cmd+Shift+Z`: AppKit consumes a Command chord before a view ever sees it, so the
 AppKit backend's own Edit menu carries **Undo** and **Redo** next to Cut, Copy, Paste and Select
 All and routes them back into the UI host, exactly as it already does for the editing commands.
-The physical Control key works there too, because `XPlatModifiers.Control` is what the AppKit
+The physical Control key works there too, because `Modifiers.Control` is what the AppKit
 backend reports for it.
 
 Six behaviours are deliberate and worth stating:
@@ -2168,7 +2168,7 @@ what makes them cooperate with the two features that also watch the value:
   history, because the value changes shape - line breaks are added to or dropped from it - and an
   entry from one shape cannot be applied to the other.
 
-The history runs no timer. The five-second window is measured from `XPlatUndoClock.Current` at the
+The history runs no timer. The five-second window is measured from `UndoClock.Current` at the
 moment of each edit, so an idle application has nothing ticking for it, and a test can replace the
 clock and drive the whole history - gaps and all - without sleeping.
 
@@ -2198,29 +2198,29 @@ When a selection is copied, every control it touches contributes its own piece i
 | --- | --- |
 | `GetSelectionText(start, length)` | The plain-text piece for a slice; override to control what a copy pastes into a text target |
 | `GetSelectionHtml(start, length)` | The HTML piece for the same slice, or `null` (default) to fall back to the escaped plain text |
-| `host.CopySelection()` | Writes both flavours to `XPlatClipboard`; `host.SelectionTextSeparator` joins the pieces |
+| `host.CopySelection()` | Writes both flavours to `Clipboard`; `host.SelectionTextSeparator` joins the pieces |
 | `host.ProcessContextMenu(point)` | Builds the menu: the control's own handler, then its `ContextMenu`, then the `AddContextMenuOpeningHandler` handlers on the host, then a default **Copy** item |
 
-`XPlatRichLabel` overrides `GetSelectionHtml` so a copy keeps its formatting: `<b>`, `<i>`,
+`RichLabel` overrides `GetSelectionHtml` so a copy keeps its formatting: `<b>`, `<i>`,
 `<u>`, `<s>` and a `<span style="...">` for colour and size overrides, wrapped around the
 *selected slice* of each span - a selection that starts mid-span gets markup for just those
 characters. A selection spanning several controls joins their pieces with a line break.
 
 ```csharp
 var html = rich.GetSelectionHtml(12, 4);   // "<b>bold</b>"
-XPlatClipboard.SetHtml(rich.GetSelectionText(12, 4), html);   // both flavours at once
+Clipboard.SetHtml(rich.GetSelectionText(12, 4), html);   // both flavours at once
 ```
 
 #### Built-in controls
 
 | Control | Defaults | Notes |
 | --- | --- | --- |
-| `XPlatLabel`, `XPlatRichLabel` | `Selectable = false`, `Partial` | Set `Selectable`; a drag selects character by character |
-| `XPlatTextBox` | `Selectable = true`, `Partial` | Its own caret and anchor answer for a drag that *starts* inside it; a drag that merely passes through it selects its text and drops the caret |
-| `XPlatButton`, `XPlatImage` | `Selectable = false`, `Whole` | Set `Selectable`; a drag over the control selects it as one unit |
-| `XPlatCheckBox`, `XPlatRadioButton`, `XPlatProgressBar` | `Selectable = false`, `Whole` | Only the check state of a toggle is its own; the label is not selectable text |
-| `XPlatListBox` | `Selectable = false`, `Whole` | Its row selection is its own; the host selection is not involved |
-| `XPlatPanel` and other containers | `Selectable = false`, `Whole` | A selectable container hides its children from the selection, so leave containers off unless the container itself is what should be selected |
+| `Label`, `RichLabel` | `Selectable = false`, `Partial` | Set `Selectable`; a drag selects character by character |
+| `TextBox` | `Selectable = true`, `Partial` | Its own caret and anchor answer for a drag that *starts* inside it; a drag that merely passes through it selects its text and drops the caret |
+| `Button`, `Image` | `Selectable = false`, `Whole` | Set `Selectable`; a drag over the control selects it as one unit |
+| `CheckBox`, `RadioButton`, `ProgressBar` | `Selectable = false`, `Whole` | Only the check state of a toggle is its own; the label is not selectable text |
+| `ListBox` | `Selectable = false`, `Whole` | Its row selection is its own; the host selection is not involved |
+| `Panel` and other containers | `Selectable = false`, `Whole` | A selectable container hides its children from the selection, so leave containers off unless the container itself is what should be selected |
 
 A text box is selectable by default and does not paint a second overlay: `GetSelectionOffset` and
 `GetSelectionRects` bridge the host's selection into the same `IndexFromX`/`MeasureX` axis the
@@ -2234,7 +2234,7 @@ what makes copying a multi-control selection work no matter which control was ri
 
 ### Context menus
 
-`host.ProcessContextMenu(point)` builds an `XPlatContextMenu` and hands it to the presenter
+`host.ProcessContextMenu(point)` builds an `ContextMenu` and hands it to the presenter
 installed on the host. The library owns the model; the presenter decides how to draw it, and there
 are two families of presenter: the platform's own menus, and the portable one that draws every menu
 with Skia. The portable one is the default, because a menu drawn from Skia is the same menu on
@@ -2242,17 +2242,17 @@ every platform and can carry icons, submenus and controls in a row.
 
 | Piece | What it does |
 | --- | --- |
-| `XPlatMenuItem` / `XPlatMenuBar` / `XPlatContextMenu` | The model: items, separators, submenus, checked and disabled state, shortcuts, icons and hosted controls |
-| `XPlatControl.AddContextMenuOpeningHandler` | A control's own right-click behaviour: runs for the control under the pointer, or the nearest ancestor that has one, and receives the menu the control contributed so it can add to it |
-| `XPlatUiHost.AddContextMenuOpeningHandler` | The window-wide fallback, run only when nothing under the pointer ran a handler or supplied a menu |
-| `XPlatMenuRenderer` | `Measure(menu, metrics, font, shadow, availableWidth, availableHeight)` lays the rows out and returns an `XPlatMenuLayout`: surface size, shadow margin, row bounds, scroll state, `HitTest` and `NextPickable`. `Paint(canvas, layout, hovered, surfaceAlpha, ..., scrollOffset)` draws the surface, drop shadow, hover pill, check column, icons, right-aligned shortcut hints and - for a menu that does not fit - the arrows at either end. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
-| `XPlatMenuMetrics` | Row height, padding, corner radii, shadow extent, the check/icon/control column widths and `ScrollIndicatorHeight`; `Default` is tuned to the Windows 11 menu |
-| `XPlatMenuView` | The control that shows one menu level, its in-menu controls and the submenu it has open |
-| `XPlatMenuPresenter` | Shows an `XPlatContextMenu` in an `XPlatPopup` with `XPlatMenuView`, one popup per level of the chain |
-| `XPlatMenuBarView` | The menu bar drawn inside the window |
+| `MenuItem` / `MenuBar` / `ContextMenu` | The model: items, separators, submenus, checked and disabled state, shortcuts, icons and hosted controls |
+| `Control.AddContextMenuOpeningHandler` | A control's own right-click behaviour: runs for the control under the pointer, or the nearest ancestor that has one, and receives the menu the control contributed so it can add to it |
+| `UiHost.AddContextMenuOpeningHandler` | The window-wide fallback, run only when nothing under the pointer ran a handler or supplied a menu |
+| `MenuRenderer` | `Measure(menu, metrics, font, shadow, availableWidth, availableHeight)` lays the rows out and returns an `MenuLayout`: surface size, shadow margin, row bounds, scroll state, `HitTest` and `NextPickable`. `Paint(canvas, layout, hovered, surfaceAlpha, ..., scrollOffset)` draws the surface, drop shadow, hover pill, check column, icons, right-aligned shortcut hints and - for a menu that does not fit - the arrows at either end. It does not clear the canvas, so whatever the caller painted underneath shows through a translucent surface |
+| `MenuMetrics` | Row height, padding, corner radii, shadow extent, the check/icon/control column widths and `ScrollIndicatorHeight`; `Default` is tuned to the Windows 11 menu |
+| `MenuView` | The control that shows one menu level, its in-menu controls and the submenu it has open |
+| `MenuPresenter` | Shows an `ContextMenu` in an `Popup` with `MenuView`, one popup per level of the chain |
+| `MenuBarView` | The menu bar drawn inside the window |
 | `Win32MenuWindow.cs` | The popup window the Win32 backend shows a menu in: layered, so the rounded corners and the drop shadow come from per-pixel alpha, with the acrylic backdrop described below |
 
-`XPlatMenuRenderer` contains no platform code, so every backend draws the same menu from it.
+`MenuRenderer` contains no platform code, so every backend draws the same menu from it.
 
 A context menu is **composed**, not replaced. The control under the pointer contributes its own
 menu first, and every handler after it receives that same menu to add to: a text box starts from
@@ -2272,16 +2272,16 @@ field.AddContextMenuOpeningHandler(args =>
         return;                                     // the editing commands stay as they are
     }
 
-    var menu = args.Menu ??= new XPlatContextMenu();
-    menu.Insert(0, new XPlatMenuItem($"&Ignore \"{span.Tag}\"", () => Ignore(span)));
-    menu.Insert(0, new XPlatMenuItem($"&Replace \"{span.Tag}\"", () => Replace(span)));
-    menu.Insert(2, XPlatMenuItem.Separator);         // Cut / Copy / Paste follow
+    var menu = args.Menu ??= new ContextMenu();
+    menu.Insert(0, new MenuItem($"&Ignore \"{span.Tag}\"", () => Ignore(span)));
+    menu.Insert(0, new MenuItem($"&Replace \"{span.Tag}\"", () => Replace(span)));
+    menu.Insert(2, MenuItem.Separator);         // Cut / Copy / Paste follow
 });
 
 // The window's own menu over its empty space stays a window concern.
 host.AddContextMenuOpeningHandler((_, args) =>
 {
-    if (args.Control is not XPlatTextBox && host.Selection.IsEmpty)
+    if (args.Control is not TextBox && host.Selection.IsEmpty)
     {
         args.Menu = BuildPageMenu();                // nothing under the pointer had one of its own
     }
@@ -2296,7 +2296,7 @@ application-wide fallback, so a text box's editing commands are never shadowed b
 event arguments say where the menu came from - `Control` and `Location`, and for a text box with
 annotations the span that was hit.
 
-To suppress what the control contributed, replace `args.Menu` (`args.Menu = new XPlatContextMenu()`)
+To suppress what the control contributed, replace `args.Menu` (`args.Menu = new ContextMenu()`)
 or clear it (`args.Menu?.Clear()`) and add your own; a handler that only adds leaves the block
 intact. Answering matters: when control, handlers and selection all decline, `ProcessContextMenu`
 shows nothing on any presenter, so a page with no menu-bearing control under the pointer looks
@@ -2304,40 +2304,40 @@ unresponsive. A window that wants a menu over its empty space therefore answers 
 
 ### Menus drawn by the library
 
-`XPlatMenuView` is the menu surface. It is a plain control: it paints through the normal control
-paint path, takes its colours from `XPlatTheme` at paint time and answers `MeasureContent`, which is
+`MenuView` is the menu surface. It is a plain control: it paints through the normal control
+paint path, takes its colours from `Theme` at paint time and answers `MeasureContent`, which is
 what lets the presenter size the popup around it:
 
 ```csharp
-var menu = new XPlatContextMenu()
-    .Add(new XPlatMenuItem("&Open...") { Image = openIcon, Shortcut = new XPlatShortcut(XPlatKey.O) })
+var menu = new ContextMenu()
+    .Add(new MenuItem("&Open...") { Image = openIcon, Shortcut = new Shortcut(Key.O) })
     .AddSeparator()
-    .Add(new XPlatMenuItem("Show &grid") { Checked = true });
+    .Add(new MenuItem("Show &grid") { Checked = true });
 
 listView.ContextMenu = menu;
 ```
 
-A menu bar is the same view with a strip above it. `XPlatMenuBarView` lays the top-level titles out
-in a row, paints the hover and open states, and opens a drop-down in an `XPlatPopup` so it can hang
+A menu bar is the same view with a strip above it. `MenuBarView` lays the top-level titles out
+in a row, paints the hover and open states, and opens a drop-down in an `Popup` so it can hang
 past the bottom of the window:
 
 | Behaviour | How it works |
 | --- | --- |
-| Reaching the bar | The bar is not focusable and takes no part in tab order. `Alt` plus a mnemonic is what reaches it, because `XPlatUiHost.ProcessKeyDown` offers the key to the bar before the focused control |
+| Reaching the bar | The bar is not focusable and takes no part in tab order. `Alt` plus a mnemonic is what reaches it, because `UiHost.ProcessKeyDown` offers the key to the bar before the focused control |
 | Switching menus | Pressing another title while a menu is open switches menus instead of closing and reopening, the way a native bar does |
 | Keys inside a menu | Up/Down walk the pickable rows (separators, disabled rows and control rows are skipped), Right opens a submenu, Left closes it, `Home`/`End` jump, `Tab` moves between the menu's own rows rather than leaving the menu, `Enter` or `Space` invokes, `Esc` closes the innermost menu and then dismisses the whole chain, and a mnemonic letter picks a row directly |
-| Dismissal | A click outside, losing activation or `Esc` closes the chain. The popup never takes the keyboard, so the menu is pushed onto the *owning* window as an `IXPlatInputSink` for as long as it is open |
+| Dismissal | A click outside, losing activation or `Esc` closes the chain. The popup never takes the keyboard, so the menu is pushed onto the *owning* window as an `IInputSink` for as long as it is open |
 
 Submenus are separate popups, not a child view drawn inside the menu that opened them: the presenter
-keeps a chain of levels, each with its own `XPlatPopup` and `XPlatMenuView`, and opening a submenu
+keeps a chain of levels, each with its own `Popup` and `MenuView`, and opening a submenu
 opens the next window instead of growing the one already on screen. That is what keeps a menu still:
 a submenu that is taller than the room beside its parent, or that opens and closes as the pointer
 crosses a row, can never resize or move the menu it hangs off. A submenu sits against the edge of the
 menu that opened it, overlapping by `SubMenuOverlap`, with its first row level with the row that
-opened it - so it is placed a little above that row, as `XPlatMenuMetrics.Padding` dictates.
+opened it - so it is placed a little above that row, as `MenuMetrics.Padding` dictates.
 
 Which side a submenu opens on is decided against the display, not the window: the presenter asks
-`IXPlatPopupService.GetPlacementArea` for the area a popup is allowed to occupy, which on Windows is
+`IPopupService.GetPlacementArea` for the area a popup is allowed to occupy, which on Windows is
 the monitor's work area and on macOS the screen's, and a submenu that would not fit to the right
 inside that area opens to the left of the menu that opened it instead. Each level is clamped into the
 area on its own, which is also why a menu can hang past the edge of the window it was opened from.
@@ -2345,7 +2345,7 @@ Once a chain has turned left it keeps going left, so a submenu of a submenu does
 across its parent. GTK4 is the one backend that reports no area, because a popover is clipped by its
 window there, so a menu on Linux is laid out inside the window and flips at the window's edge.
 
-Submenus nest as deeply as the model does: `XPlatMenuItem.SubItems` is the same list at every level,
+Submenus nest as deeply as the model does: `MenuItem.SubItems` is the same list at every level,
 and since every level measures, paints and hit-tests only its own rows while the keyboard walks the
 chain from the innermost menu outwards, nothing has to know how long the chain is. Nothing caps the
 depth;
@@ -2360,30 +2360,30 @@ that still does not fit keeps its width, stops growing, and scrolls its rows ins
 
 | Part | How it works |
 | --- | --- |
-| The window | `XPlatMenuLayout.ContentHeight` is the height the rows need and `SurfaceSize.Height` the height the menu is allowed, so the surface is a window onto the rows. `ContentViewport` is the surface minus the two strips |
+| The window | `MenuLayout.ContentHeight` is the height the rows need and `SurfaceSize.Height` the height the menu is allowed, so the surface is a window onto the rows. `ContentViewport` is the surface minus the two strips |
 | The strips | `ScrollIndicatorHeight` (20 by default) is reserved at the top and bottom and painted opaque, so a half-scrolled row cannot read through the arrows. The arrow at an end is greyed out once there is nothing more in that direction. Set `ScrollIndicatorHeight` to zero to turn scrolling off and let the menu overflow instead |
-| The pointer | The wheel scrolls; `XPlatMenuView.ScrollBy` and `ScrollTo` are the same thing from code, and a press on either arrow scrolls by one row and never picks an item |
+| The pointer | The wheel scrolls; `MenuView.ScrollBy` and `ScrollTo` are the same thing from code, and a press on either arrow scrolls by one row and never picks an item |
 | The keyboard | `Highlight` scrolls the highlighted row into view, so Up/Down/Home/End walk a long menu instead of moving the highlight off the visible part of it |
 
 An item can carry an icon, a tick, or a control. Icons are drawn in their own column and the tick in
-the check column, and `XPlatMenuTrimming.Trim` drops a separator that would lead, trail or double up,
+the check column, and `MenuTrimming.Trim` drops a separator that would lead, trail or double up,
 so a menu built by filtering a list still looks right. An in-menu control is a real control: it is
 parented to the open menu view, laid out in its row and taken out again when the menu closes. A
 control has one parent, so if two open menus share one, only the first shows it.
 
-`XPlatMenuItem.DisplayText` is the label with the mnemonic marker removed and never contains `&`;
-`Text` is the one that does. Mnemonics are matched against `XPlatMenuBar.Menus[i].Mnemonic`, which is
+`MenuItem.DisplayText` is the label with the mnemonic marker removed and never contains `&`;
+`Text` is the one that does. Mnemonics are matched against `MenuBar.Menus[i].Mnemonic`, which is
 the letter the item declared.
 
 ### Choosing native or portable menus
 
-`XPlatApplicationOptions.MenuPresentation` picks the family, and a backend resolves it once when it
+`ApplicationOptions.MenuPresentation` picks the family, and a backend resolves it once when it
 creates a window:
 
 | Value | Meaning |
 | --- | --- |
 | `Auto` | The library's menus, on every platform |
-| `XPlatUI` | Always the library's menus |
+| `Kolvir` | Always the library's menus |
 | `Native` | Always the platform's menus: the system bar on macOS, `TrackPopupMenuEx` and GTK4 popovers on Windows and Linux |
 
 A window drawn with Skia is drawn with Skia's menus too, so `Auto` does not fall back to the
@@ -2394,17 +2394,17 @@ The menu bar is the one exception, and only on macOS. The platform has a single 
 whole process, owned by AppKit and drawn at the top of the screen, and no way to put one in a
 window, so the bar there is the system's whichever presentation is asked for. It carries the same
 menus, with the same drop-downs, icons, shortcuts and submenus, but it is the system's row of titles
-and not `XPlatMenuBarView`, so what belongs to that view is not available: no bar inside the window,
-no `XPlatMenuBarView.TitleHeight` or bar font, and no controls hosted in a bar row. The system bar
+and not `MenuBarView`, so what belongs to that view is not available: no bar inside the window,
+no `MenuBarView.TitleHeight` or bar font, and no controls hosted in a bar row. The system bar
 also follows the active window rather than belonging to one window, and macOS answers a mnemonic
 from the first character of a title rather than from the `&` marker. A drop-down that is too tall for
 the screen scrolls with AppKit's own arrows rather than the library's, so `ScrollIndicatorHeight`
 does not reach it. This is a platform limitation, not a switch.
 
-`XPlatMenuPresentation.Native` is the escape hatch, and on macOS it additionally hands context menus
+`MenuPresentation.Native` is the escape hatch, and on macOS it additionally hands context menus
 to AppKit.
 
-The sample takes `--menus xplatui|native` to compare the two on any platform. On Windows,
+The sample takes `--menus kolvir|native` to compare the two on any platform. On Windows,
 `--classic-menus` is a further step down to `TrackPopupMenuEx` even when the portable menu is
 selected, which is only useful for looking at the difference.
 
@@ -2420,28 +2420,28 @@ capture fails, the surface falls back to fully opaque.
 ### Keyboard shortcuts
 
 `ShortcutText` is only a hint: it says what the menu draws on the right, and nothing dispatches it.
-A shortcut that actually works is an `XPlatShortcut` on the item:
+A shortcut that actually works is an `Shortcut` on the item:
 
 ```csharp
-var dark = new XPlatMenuItem("Dark Mode")
+var dark = new MenuItem("Dark Mode")
 {
-    Shortcut = new XPlatShortcut(XPlatKey.D),
-    Click = () => demo.SetAppearance(XPlatPalette.Dark),
+    Shortcut = new Shortcut(Key.D),
+    Click = () => demo.SetAppearance(Palette.Dark),
 };
 ```
 
-`XPlatShortcut(key, modifiers)` defaults `modifiers` to `XPlatModifiers.Control`, which means the
+`Shortcut(key, modifiers)` defaults `modifiers` to `Modifiers.Control`, which means the
 platform's accelerator modifier rather than a literal Ctrl key: `DisplayText` says "Ctrl+D" on
 Windows and Linux and "Cmd+D" on macOS, and AppKit turns the same declaration into a real key
 equivalent on the menu item. A shortcut with no modifier is rejected, because a bare key belongs to
 the focused control.
 
-The window checks its menu bar - the one on the `XPlatWindow`, falling back to
-`XPlatApplicationOptions.MenuBar` - before the focused control sees the key, which is the order
+The window checks its menu bar - the one on the `Window`, falling back to
+`ApplicationOptions.MenuBar` - before the focused control sees the key, which is the order
 native menus use. A matching item claims the key even when it is disabled, so a greyed-out command
 does not silently fall through to the control that has focus. The lookup walks into submenus, so a
 shortcut declared one or more levels down is still dispatched. Because the lookup happens in
-`XPlatUiHost.ProcessKeyDown`, it works on every backend and whichever way the bar is presented; on
+`UiHost.ProcessKeyDown`, it works on every backend and whichever way the bar is presented; on
 macOS the key equivalent on the `NSMenuItem` answers it first.
 
 `ShortcutText` still exists for a menu that wants to describe a key it does not dispatch itself;
@@ -2450,20 +2450,20 @@ when it is set it wins over the shortcut's own text in the menu drawing.
 ### Appearance
 
 Every default colour in the library is a palette role, so the whole UI can switch between light and
-dark at runtime. `XPlatTheme.Palette` holds the current one:
+dark at runtime. `Theme.Palette` holds the current one:
 
 ```csharp
-XPlatTheme.Palette = XPlatPalette.Dark;   // or XPlatPalette.Light, or your own
-XPlatTheme.IsDarkMode;                    // shortcut for Palette.IsDark
-var accent = XPlatTheme.ColorOf(XPlatThemeColor.Accent);
+Theme.Palette = Palette.Dark;   // or Palette.Light, or your own
+Theme.IsDarkMode;                    // shortcut for Palette.IsDark
+var accent = Theme.ColorOf(ThemeColor.Accent);
 ```
 
-`XPlatPalette` is a record with one colour per `XPlatThemeColor` role - `Background`, `Surface`,
+`Palette` is a record with one colour per `ThemeColor` role - `Background`, `Surface`,
 `Foreground`, `MutedForeground`, `Border`, `Accent` (`Hover`/`Pressed`/`Foreground`),
 `Secondary` (`Hover`/`Pressed`), `FocusRing`, `Splitter` (`Hover`), `InputBackground`, `Selection`,
 `Caret`, `Placeholder` and `DisabledBackground`/`DisabledForeground` - so a custom theme is just
-`XPlatPalette.Light with { Accent = SKColors.Teal }`. Assigning the palette (or any single colour,
-e.g. `XPlatTheme.Accent = ...`) runs the `XPlatTheme.AddChangedHandler` handlers and the next frame
+`Palette.Light with { Accent = SKColors.Teal }`. Assigning the palette (or any single colour,
+e.g. `Theme.Accent = ...`) runs the `Theme.AddChangedHandler` handlers and the next frame
 picks it up: controls never snapshot a colour at construction time.
 
 Controls resolve their colours while painting - through the inherited `Background`/`Foreground`
@@ -2475,56 +2475,56 @@ when the control itself assigns nothing - so a palette change re-applies nothing
 | `BackColor` | The WinForms name for `Background`: the effective colour, or `null` when nothing is painted |
 | `DefaultBackground` | Override to return the palette role a control of this class paints - the base control paints nothing |
 | `ForeColorRole` | The role used while neither this control nor an ancestor assigns a `Foreground` |
-| `BorderColor` | An explicitly assigned colour, otherwise `XPlatTheme.Border` |
+| `BorderColor` | An explicitly assigned colour, otherwise `Theme.Border` |
 | `Opacity` | Fades the control and everything inside it as one group, 0 to 1 |
-| `XPlatTextSpan.ThemeColor` | A role for one span of a rich label; `AddLink` uses `Accent` |
-| `XPlatTextSpan.HoverBackColorRole` | The role tinted behind a span while it is hovered |
-| `XPlatUiHost.ClearColor` | Follows `XPlatTheme.Background` until assigned |
+| `TextSpan.ThemeColor` | A role for one span of a rich label; `AddLink` uses `Accent` |
+| `TextSpan.HoverBackColorRole` | The role tinted behind a span while it is hovered |
+| `UiHost.ClearColor` | Follows `Theme.Background` until assigned |
 
 The library itself never asks the OS anything. A backend implements the two-property
-`IXPlatSystemTheme`, installs it, and calls `host.RefreshTheme()` whenever the OS reports a change:
+`ISystemTheme`, installs it, and calls `host.RefreshTheme()` whenever the OS reports a change:
 
 ```csharp
-XPlatSystemTheme.Current = new Win32SystemTheme();   // any IXPlatSystemTheme
-XPlatSystemTheme.Refresh();                         // read IsDarkMode, swap the palette if needed
+SystemTheme.Current = new Win32SystemTheme();   // any ISystemTheme
+SystemTheme.Refresh();                         // read IsDarkMode, swap the palette if needed
 ```
 
-`XPlatSystemTheme.Refresh()` returns whether the appearance actually changed, and
+`SystemTheme.Refresh()` returns whether the appearance actually changed, and
 `host.RefreshTheme()` additionally invalidates the tree. The Win32 backend
 (`Win32SystemTheme.cs`) reads
 `HKCU\Software\Microsoft\Windows\CurrentVersion\Themes\Personalize\AppsUseLightTheme` (falling back
 to the undocumented `uxtheme` `ShouldSystemUseDarkMode`), reacts to `WM_SETTINGCHANGE` and
 `WM_THEMECHANGED`, and darkens the title bar with
-`DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` - driven by `XPlatTheme.Changed`, so a manual
+`DwmSetWindowAttribute(DWMWA_USE_IMMERSIVE_DARK_MODE)` - driven by `Theme.Changed`, so a manual
 palette change updates the chrome too.
 
 ### Inherited appearance
 
-`Font`, `Foreground` and `Background` are properties of `XPlatControl`, and they are inherited down
+`Font`, `Foreground` and `Background` are properties of `Control`, and they are inherited down
 the tree the way WinForms' `Font`, `ForeColor` and `BackColor` are. Whatever a control assigns
 answers for itself and for everything inside it; a control that assigns none asks its parent, and a
-tree that assigns none falls back to the class default, which is where `XPlatTheme` supplies the
+tree that assigns none falls back to the class default, which is where `Theme` supplies the
 role.
 
 ```csharp
-var group = new XPlatPanel { Font = title, Foreground = XPlatTheme.Accent, Background = XPlatBackground.FromThemeColor(XPlatThemeColor.Secondary) };
+var group = new Panel { Font = title, Foreground = Theme.Accent, Background = Background.FromThemeColor(ThemeColor.Secondary) };
 
-group.Controls.Add(new XPlatLabel("24 pt, accent, on the secondary colour"));       // inherits all three
-group.Controls.Add(new XPlatLabel("has its own") { Font = small });                 // overrides the font only
-group.Controls.Add(new XPlatTextBox());                                             // paints its own input fill
+group.Controls.Add(new Label("24 pt, accent, on the secondary colour"));       // inherits all three
+group.Controls.Add(new Label("has its own") { Font = small });                 // overrides the font only
+group.Controls.Add(new TextBox());                                             // paints its own input fill
 ```
 
 The precedence is the one WPF uses for an inherited property: **a value assigned here, then the
 nearest ancestor that assigns one, then this control's class default.** `DefaultFont` and
-`DefaultBackground` are the class defaults, and `XPlatTheme` is what they contain:
+`DefaultBackground` are the class defaults, and `Theme` is what they contain:
 
 | Member | Meaning |
 | --- | --- |
 | `Font` | The effective font: assigned here, else the nearest ancestor's, else `DefaultFont` |
-| `DefaultFont` | The font a control of this class draws with when nothing else answers; the base control returns `XPlatTheme.DefaultFont`, a button and a group box `EmphasizedFont` |
+| `DefaultFont` | The font a control of this class draws with when nothing else answers; the base control returns `Theme.DefaultFont`, a button and a group box `EmphasizedFont` |
 | `ClearFont()` | Forget the font assigned here, so the control inherits one again |
 | `Foreground` (`ForeColor`) | The effective text colour, inherited the same way; `ForeColorRole` is the class default and is *not* inherited |
-| `Background` | An `XPlatBackground`: `Inherit`, `None`, or a colour or palette role |
+| `Background` | An `Background`: `Inherit`, `None`, or a colour or palette role |
 | `DefaultBackground` | The role this class paints when nothing else answers; `None` - the base control's answer - means it paints nothing |
 | `BackColor` | The WinForms name for `Background`: the effective colour, or `null` when nothing is painted |
 | `ClearBackground()`, `ClearForeground()` | Back to inheritance |
@@ -2536,9 +2536,9 @@ inheriting the panel's. Assign a `Foreground` when a whole subtree really should
 
 **`Background` has three states, and the difference between the last two is the point.**
 
-* `XPlatBackground.Inherit` - the initial value: ask the parent.
-* `XPlatBackground.None` - paint nothing here.
-* a colour, or `XPlatBackground.FromThemeColor(role)` - paint that, here and for everything below.
+* `Background.Inherit` - the initial value: ask the parent.
+* `Background.None` - paint nothing here.
+* a colour, or `Background.FromThemeColor(role)` - paint that, here and for everything below.
 
 A nullable colour would have to mean both "no value" and "draw nothing", and then a label inside a
 filled panel would silently start painting a box of its own - with its own corners and opacity -
@@ -2554,11 +2554,11 @@ measured and painted, never in a constructor, so a control created before the th
 still adopts it, and a live tree can be changed afterwards:
 
 ```csharp
-var panel = new XPlatPanel();
-panel.Controls.Add(new XPlatLabel("measured at one size"));
+var panel = new Panel();
+panel.Controls.Add(new Label("measured at one size"));
 ...                                   // the tree is built, laid out and on screen
-panel.Font = XPlatTheme.TitleFont;    // the label re-measures and the panel re-lays out
-XPlatTheme.FontFamily = "Inter";      // and the same for the theme, for every control that did not assign a font
+panel.Font = Theme.TitleFont;    // the label re-measures and the panel re-lays out
+Theme.FontFamily = "Inter";      // and the same for the theme, for every control that did not assign a font
 ```
 
 What the parent chain contributes is walked once and cached on the control that asked - not on every
@@ -2566,17 +2566,17 @@ glyph measurement. The cache is dropped for a control and everything under it wh
 assigned to an ancestor, when the control changes parent, or when the host sees a new theme font
 generation. Class defaults and palette roles are *not* cached: they are read when they are used, so
 a palette swap is still a repaint rather than a rebuild, exactly as before. A font is the size of
-the text, so any of these changes re-runs layout - `XPlatUiHost` lays the whole tree out again on the
+the text, so any of these changes re-runs layout - `UiHost` lays the whole tree out again on the
 frame that follows a theme font change, and assigning a font re-measures from the root at once.
 
 Fonts are not owned by the control that draws with them. Never dispose one that was inherited or
-came from `XPlatTheme`; keep an assigned font alive for as long as it is in use, and let the theme
-own the face given to `XPlatTheme.UseFont`.
+came from `Theme`; keep an assigned font alive for as long as it is in use, and let the theme
+own the face given to `Theme.UseFont`.
 
 The cost is the one [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) section 3 names for members on a type
 every application touches, and this feature is deliberately that: the three properties *are* the
 control's appearance, not an optional extra, so there is no lower rung to sit on. Measured on the
-trimmed `XPlatUI.Minimal` fixture, `win-x64`, publishing at the commit before this one and after it:
+trimmed `Kolvir.Minimal` fixture, `win-x64`, publishing at the commit before this one and after it:
 8,651,264 -> 8,654,848 bytes, a difference of **+3,584 bytes (0.04%)** - the size of the three
 properties, their resolution and the per-class defaults, less the thirteen per-control font fields
 and properties they replace.
@@ -2586,17 +2586,17 @@ a background role on screen, with what its children make of them, one label that
 a label that paints nothing in front of a panel that does. Its buttons change the panel's font and
 the theme's face on a live tree; `--appearance-change` makes the same two changes before a
 `--render` writes the frame, so the page can be screenshotted before and after it.
-`XPlatUI.Tests`' `InheritedAppearanceTests` runs the same resolution rules headlessly, one test per
+`Kolvir.Tests`' `InheritedAppearanceTests` runs the same resolution rules headlessly, one test per
 rule, through the headless backend.
 
 ### Fonts
 
-`XPlatFont` is a size plus a face, and the face can come from the machine or from font data:
+`Font` is a size plus a face, and the face can come from the machine or from font data:
 
 ```csharp
-using var body = new XPlatFont("Segoe UI", 13f);           // a family the desktop has
-using var pinned = XPlatFont.FromFile("Fonts/Inter-Regular.ttf");
-using var embedded = XPlatFont.FromStream(resourceStream);  // or FromBytes(bytes)
+using var body = new Font("Segoe UI", 13f);           // a family the desktop has
+using var pinned = Font.FromFile("Fonts/Inter-Regular.ttf");
+using var embedded = Font.FromStream(resourceStream);  // or FromBytes(bytes)
 using var title = pinned.WithSize(24f);                      // the same face, larger
 ```
 
@@ -2620,7 +2620,7 @@ after the one it came from is disposed: each derived font holds its own referenc
 
 **A loaded font is one face.** `WithSize` keeps it, and a weight or italic that the data does not
 contain is satisfied by the same face: nothing is synthesised, so `Weight` and `Italic` describe the
-face actually used rather than what was asked for. Span formatting in `XPlatRichLabel` follows the
+face actually used rather than what was asked for. Span formatting in `RichLabel` follows the
 same rule - a span that changes only weight, slant or size is derived from the label's own font, so
 a loaded face never falls back to a system family on a bold span. Load the bold file separately when
 an emphasis needs a real bold face.
@@ -2628,8 +2628,8 @@ an emphasis needs a real bold face.
 To make a face the application's font, say so once instead of per control:
 
 ```csharp
-XPlatTheme.UseFont(XPlatFont.FromFile("Fonts/Inter-Regular.ttf"));   // a file
-XPlatTheme.UseFont(XPlatFont.FromBytes(embeddedFontBytes));          // or an embedded resource
+Theme.UseFont(Font.FromFile("Fonts/Inter-Regular.ttf"));   // a file
+Theme.UseFont(Font.FromBytes(embeddedFontBytes));          // or an embedded resource
 ```
 
 It can be called at any point in the application's life, not only before the controls exist: a
@@ -2638,28 +2638,28 @@ control resolves its font when it measures and paints (see
 itself out again on the next frame. The theme's fonts are rebuilt from that face at their own sizes,
 so `DefaultFont`, `CaptionFont`, `TitleFont`, `SectionFont` and `EmphasizedFont` all come from it;
 because one file is one face, the large and emphasized ones are that face at their sizes rather than
-a bold one. Assigning `XPlatTheme.FontFamily` goes back to a family name, and the existing
-`XPlatApplicationOptions.FontFamily` path is unchanged - and, like `UseFont`, it can be assigned
+a bold one. Assigning `Theme.FontFamily` goes back to a family name, and the existing
+`ApplicationOptions.FontFamily` path is unchanged - and, like `UseFont`, it can be assigned
 after the controls exist.
 
-This lives on `XPlatTheme` rather than growing `XPlatApplicationOptions` on purpose. An option is
-read by `XPlatApplication` at start-up - a type every application runs - so a font read there would
+This lives on `Theme` rather than growing `ApplicationOptions` on purpose. An option is
+read by `Application` at start-up - a type every application runs - so a font read there would
 be reachable from every published application rather than only from the one that asked for it. The
-loading path stays behind application code: `XPlatApplicationOptions` gained no member.
+loading path stays behind application code: `ApplicationOptions` gained no member.
 
-The measured cost is one image-alignment step and nothing that runs. The `XPlatUI.Minimal` fixture
+The measured cost is one image-alignment step and nothing that runs. The `Kolvir.Minimal` fixture
 publishes at 3,194,368 bytes on `win-x64` against 3,189,248 at `b83e6cd`, a difference of 5,120
 bytes (0.16%) that is the size of one alignment step on that image - the picture is quantised, so a
 change of this size cannot be resolved more finely. What is there on every app's behalf is the
 theme's font source (one static reference and one branch when the theme fonts are rebuilt) and one
-flag on `XPlatFont` saying that a face is a single face, which fits in padding the object already
+flag on `Font` saying that a face is a single face, which fits in padding the object already
 had: no new per-instance field and no startup work. The loaders themselves are only reachable from
-the application code that calls them, and `XPlatApplicationOptions` keeps its old shape.
+the application code that calls them, and `ApplicationOptions` keeps its old shape.
 
 The demo's font page - `--page 32` - draws a label, a multi-line text box and a
-rich label with IBM Plex Sans Regular carried as an embedded resource (`XPlatUIDemo.App/Fonts`,
+rich label with IBM Plex Sans Regular carried as an embedded resource (`Kolvir.Demo.App/Fonts`,
 OFL licensed), and prints the width and line height it measures against the system face's.
-`XPlatUI.Tests`' `FontLoadingTests` asserts the same measurements and failure paths headlessly, so
+`Kolvir.Tests`' `FontLoadingTests` asserts the same measurements and failure paths headlessly, so
 the identities that make a pinned face portable can be compared on every runner, and
 `--embedded-font` applies the face to the whole sample UI, including a `--render`, which is the
 application-wide path in one switch.
@@ -2671,7 +2671,7 @@ message boxes:
 
 ```csharp
 var choice = window.Application.Dialogs.PickFont(
-    new XPlatFontDialogOptions
+    new FontDialogOptions
     {
         Title = "Choose a font",
         InitialFamilyName = preview.Font.FamilyName,
@@ -2692,14 +2692,14 @@ var font = choice.CreateFont();   // the caller owns this one
 preview.Font = font;
 ```
 
-The result is an `XPlatFontSelection`, not an `XPlatFont`, and that is deliberate. `XPlatFont` is
+The result is an `FontSelection`, not an `Font`, and that is deliberate. `Font` is
 `IDisposable` and owns a typeface, so a dialog returning one would leave the caller guessing whether
 the dialog kept a reference, whether the control it assigns it to owns it, and who disposes the one
 that was there before. A selection is an inert value with `FamilyName`, `Size`, `Weight` and
 `Italic`; `CreateFont()` is the one-line way to turn it into a font the caller owns. `null` is the
 only cancellation answer, so there is no "okay but empty" case to check for.
 
-Sizes are **logical pixels**, the unit `XPlatFont.Size` uses. Windows and GTK show point sizes and
+Sizes are **logical pixels**, the unit `Font.Size` uses. Windows and GTK show point sizes and
 the backend converts them at 96 DPI; macOS points and the library's logical pixels are the same
 unit. A size the user did not change is handed back exactly as it went in rather than round-tripped
 through a unit that cannot represent every pixel size.
@@ -2719,15 +2719,15 @@ least 600 by 400 points, centred on the owner window (or on the visible screen w
 owner) and clamped inside the visible frame of the screen the owner is on, in points rather than
 backing pixels.
 
-Weight is the OpenType value `XPlatFont.Weight` reports - 400 regular, 700 bold - which `LOGFONT`
+Weight is the OpenType value `Font.Weight` reports - 400 regular, 700 bold - which `LOGFONT`
 and Pango use directly. AppKit does not: `NSFontManager` reports a 0-15 index where 5 is regular and
-9 is bold. `XPlatFontMapping` holds that translation in one place, and the nine common weights (100
+9 is bold. `FontMapping` holds that translation in one place, and the nine common weights (100
 through 900 in hundreds) round-trip exactly; anything between them snaps to the nearest face the
 platform has, because that is what the font panel can select. The same class holds the point/pixel
 conversion, so the arithmetic is unit-tested instead of being duplicated in three backends.
 
 The dialog lists the families the operating system has installed. A face loaded with
-`XPlatFont.FromFile`, `FromStream` or `FromBytes` is not a system font unless the application also
+`Font.FromFile`, `FromStream` or `FromBytes` is not a system font unless the application also
 registered it with the OS, so it does not appear - and if a loaded face is the current font, the
 dialog opens on the nearest installed family instead. That is documented rather than half-supported:
 a backend cannot tell an arbitrary loaded face from an installed one, and offering to add it would
@@ -2736,30 +2736,30 @@ promise a system-wide result the platform does not give.
 The demo's **Font dialog** page opens the chooser, then applies the result to a panel so the labels,
 a nested panel and a button all inherit it. It is appended after the colour picker's page: the
 colour picker is index 36 and the font dialog is index 37.
-`XPlatUI.Tests`' `FontDialogTests` covers the scripted headless answer, cancellation, the options
+`Kolvir.Tests`' `FontDialogTests` covers the scripted headless answer, cancellation, the options
 round-trip and every pure conversion; the native dialogs themselves are the part that only a real
 window can prove.
 
 This is **rung 1**: nothing runs and no dialog code is reachable unless the application calls
-`PickFont`. The `XPlatUI.Minimal` fixture publishes at 3,203,072 bytes on `win-x64` both before and
+`PickFont`. The `Kolvir.Minimal` fixture publishes at 3,203,072 bytes on `win-x64` both before and
 after the change, a delta of 0, and the published image contains neither `comdlg32` nor
 `ChooseFontW`. The use check - the same fixture with one `PickFont` call - publishes at 3,207,680
 bytes (+4,608, 0.14%), contains the `comdlg32` import and publishes with
 `-p:TrimmerSingleWarn=false` reporting no IL2xxx or IL3xxx warning. Unlike a new always-registered
-service, the method added here sits behind `XPlatApplication.Dialogs`, which the fixture never
+service, the method added here sits behind `Application.Dialogs`, which the fixture never
 calls, so the whole dialog service is trimmed in an application that does not use it.
 
 ### Colour dialog
 
-`XPlatColorDialog` is the colour picker in its own modal window: the same `XPlatColorPicker` an
+`ColorDialog` is the colour picker in its own modal window: the same `ColorPicker` an
 application can put on a page, with OK and Cancel underneath it.
 
 ```csharp
-var dialog = new XPlatColorDialog(new XPlatColorDialogOptions
+var dialog = new ColorDialog(new ColorDialogOptions
 {
     Title = "Choose a colour",
     InitialColor = preview.BackColor ?? SKColors.Black,
-    ColorMode = XPlatColorMode.Hsv,
+    ColorMode = ColorMode.Hsv,
 });
 
 var chosen = dialog.Show(window);   // blocks until the dialog closes
@@ -2774,16 +2774,16 @@ preview.BackColor = chosen.Value;
 This one is **drawn by the library**, and the asymmetry with the native font dialog beside it is
 deliberate. A font chooser has no portable substitute: the installed families, the face list and
 the preview belong to the operating system, so the font dialog is three native implementations
-behind `IXPlatDialogService`. A colour chooser does have one, because `XPlatColorPicker` already
+behind `IDialogService`. A colour chooser does have one, because `ColorPicker` already
 implements the spectrum, the hue strip, the component fields and the hex field, and the suite
 already exercises it. A native colour chooser would replace that tested behaviour with three
 answers that look and behave differently, and the seam would grow for no new capability. The
-dialog is therefore an ordinary `XPlatWindow` built from public controls, on every platform, with
-no platform code and no change to `IXPlatDialogService`.
+dialog is therefore an ordinary `Window` built from public controls, on every platform, with
+no platform code and no change to `IDialogService`.
 
 Modality is the application model's rather than a loop of this class's own: `Show` calls
-`XPlatWindow.ShowDialog(owner)`, which disables the owner and re-enters the platform's loop on all
-three backends and returns `XPlatDialogResult`. The owner's content is also disabled for the
+`Window.ShowDialog(owner)`, which disables the owner and re-enters the platform's loop on all
+three backends and returns `DialogResult`. The owner's content is also disabled for the
 duration and restored afterwards. That is redundant where the window manager already blocks the
 owner, but it means the guarantee holds on a backend with no window manager - the headless one -
 which is what lets the suite assert it. Disabling the content would otherwise leave the owner
@@ -2811,7 +2811,7 @@ the control, changes only the representation, never the colour.
 The demo's **Colour dialog** page - index 38, appended after the colour picker's page 36 and the
 font dialog's page 37 - opens the dialog from a button, shows the chosen colour as a swatch and in
 a hex/RGB readout, and reopens from the current value. The owner is resolved from `Root.Window`, so
-the button works on whichever page is showing. `XPlatUI.Tests`' `ColorDialogTests` drives the
+the button works on whichever page is showing. `Kolvir.Tests`' `ColorDialogTests` drives the
 dialog headlessly with the host's own input entry points: OK is clicked at the button's position,
 Enter and Escape go through `ProcessKeyDown`, the returned colour is compared, the owner's blocked
 state is asserted while the dialog is open, and the centring and clamping arithmetic is checked
@@ -2820,10 +2820,10 @@ platform loop itself; that, and the real window positions, are verified on a rea
 backend.
 
 This is **rung 1** by construction: the dialog is a plain class built from public controls, it is
-not registered anywhere, and nothing in the library reaches it. The `XPlatUI.Minimal` fixture
+not registered anywhere, and nothing in the library reaches it. The `Kolvir.Minimal` fixture
 publishes at 8,660,480 bytes on `win-x64` both before and after the change - a delta of 0 - because
-an application that never names `XPlatColorDialog` keeps none of it. The use check - the same
-fixture with one `XPlatColorDialog.Show` call - publishes at 8,988,672 bytes (+328,192, 3.79%),
+an application that never names `ColorDialog` keeps none of it. The use check - the same
+fixture with one `ColorDialog.Show` call - publishes at 8,988,672 bytes (+328,192, 3.79%),
 which is the whole picker becoming reachable, and publishes with `-p:TrimmerSingleWarn=false`
 reporting no IL2xxx or IL3xxx warning.
 
@@ -2840,9 +2840,9 @@ opaque.
 
 ```csharp
 // The whole strip - background, text and the buttons inside it - at 60%.
-var strip = new XPlatPanel { Dock = XDock.Top, Height = 48f, Opacity = 0.6f };
-strip.Controls.Add(new XPlatLabel("Faded as one group"));
-strip.Controls.Add(new XPlatButton("And so is this"));
+var strip = new Panel { Dock = XDock.Top, Height = 48f, Opacity = 0.6f };
+strip.Controls.Add(new Label("Faded as one group"));
+strip.Controls.Add(new Button("And so is this"));
 ```
 
 Below 1 the control paints into a layer of its own, which is then composited once at that opacity.
@@ -2864,19 +2864,19 @@ the library.
 
 ### Window icons
 
-`XPlatIcon` carries a bitmap **and** an optional icon-theme name, because the three platforms take
+`Icon` carries a bitmap **and** an optional icon-theme name, because the three platforms take
 their icons in three unrelated ways:
 
 ```csharp
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ApplicationName = "My App",
-    Icon = XPlatIcon.FromFile("app.png"),   // Windows title bar/taskbar, macOS Dock
+    Icon = Icon.FromFile("app.png"),   // Windows title bar/taskbar, macOS Dock
 };
 
-using var application = new XPlatApplication(backend, options);
-var window = new XPlatWindow("My App", root);   // inherits the application icon
-window.Icon = XPlatIcon.FromFile("other.png");  // ...or override it per window
+using var application = new Application(backend, options);
+var window = new Window("My App", root);   // inherits the application icon
+window.Icon = Icon.FromFile("other.png");  // ...or override it per window
 ```
 
 | Platform | What happens | Which half of the icon is used |
@@ -2885,17 +2885,17 @@ window.Icon = XPlatIcon.FromFile("other.png");  // ...or override it per window
 | macOS | `NSApplication.ApplicationIconImage`, i.e. the Dock tile and app switcher for the whole process | pixels |
 | Linux (GTK4) | `gtk_window_set_icon_name`, and the application-wide `gtk_window_set_default_icon_name` | `Name` |
 
-So an icon with pixels only shows up on Windows and macOS, and `XPlatIcon.FromName("folder")` shows
+So an icon with pixels only shows up on Windows and macOS, and `Icon.FromName("folder")` shows
 up on Linux only. Set both halves on one icon to cover all three:
 
 ```csharp
-var icon = XPlatIcon.FromFile("app.png");
+var icon = Icon.FromFile("app.png");
 icon.Name = "my-app";      // the installed icon-theme name, for GTK
 ```
 
 On Linux the name has to exist in the desktop's icon theme, and on Wayland the window manager takes
 the icon from the application's `.desktop` entry instead. A shipping macOS `.app` should also set
-`CFBundleIconFile` in `Info.plist`. `XPlatIcon.GetBitmap(size)` scales once per requested size and
+`CFBundleIconFile` in `Info.plist`. `Icon.GetBitmap(size)` scales once per requested size and
 caches the result, and the bitmaps it returns belong to the icon: don't dispose them, and keep the
 icon alive for as long as a window refers to it.
 
@@ -2906,13 +2906,13 @@ process instead of starting a second copy. The second process exits from `Run` w
 was given, so a `Main` that simply returns `application.Run()` needs no extra handling:
 
 ```csharp
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ApplicationName = "My App",
     SingleInstance = true,          // InstanceKey defaults to ApplicationName
 };
 
-using var application = new XPlatApplication(backend, options);
+using var application = new Application(backend, options);
 
 if (application.IsPrimaryInstance)
 {
@@ -2959,7 +2959,7 @@ when this process is the second one; the headless backend always returns true.
 `AddActivatedHandler`/`AddDeactivatedHandler` report when a window gains or loses the foreground:
 
 ```csharp
-var tool = new XPlatWindow("Tool", panel) { Owner = window };   // or: tool.Show(window);
+var tool = new Window("Tool", panel) { Owner = window };   // or: tool.Show(window);
 tool.TopMost = true;                                            // needs Owner == null
 
 window.AddActivatedHandler(_ => status.Text = "Foreground");
@@ -3002,22 +3002,22 @@ corners, its resize band and its window behaviours, and the application owns eve
 first, because a backend that cannot do it throws rather than silently leaving the window decorated:
 
 ```csharp
-var window = new XPlatWindow("Chromeless", panel);
+var window = new Window("Chromeless", panel);
 
 // Capabilities answer without throwing, so this is how an application finds out.
 var caps = window.ChromeCapabilities;
 if (caps.Borderless)
 {
-    window.Chrome = XPlatWindowChrome.Borderless;         // System is the default
+    window.Chrome = WindowChrome.Borderless;         // System is the default
 }
 
 if (caps.CaptionButtons)
 {
-    window.CaptionButtons = XPlatCaptionButtons.Platform; // or None and draw your own
+    window.CaptionButtons = CaptionButtons.Platform; // or None and draw your own
 }
 else
 {
-    window.CaptionButtons = XPlatCaptionButtons.None;
+    window.CaptionButtons = CaptionButtons.None;
 }
 ```
 
@@ -3068,7 +3068,7 @@ titleBar.AddMouseDownHandler((_, _) =>
 });
 
 // an application-drawn grip can start a resize the same way
-bool resizing = window.TryBeginResize(XPlatResizeEdge.Bottom | XPlatResizeEdge.Right);
+bool resizing = window.TryBeginResize(ResizeEdge.Bottom | ResizeEdge.Right);
 ```
 
 Both return whether anything started, and both only work from inside a press that is still in flight,
@@ -3099,7 +3099,7 @@ them.
 The window itself stays reachable, because borderless is still a window: `Alt+F4` closes it,
 `Alt+Space` opens the system menu, `Alt+Tab`, the taskbar, `Win+arrow` snapping and the resize border
 all keep working. An application that needs its buttons reachable by assistive technology should ask
-for `XPlatCaptionButtons.None`, draw its own focusable buttons, and keep those keyboard equivalents
+for `CaptionButtons.None`, draw its own focusable buttons, and keep those keyboard equivalents
 working. A UI Automation provider for the emulated strip is deferred rather than forgotten - see
 [CHROMELESS-WINDOWS.md](CHROMELESS-WINDOWS.md).
 
@@ -3112,17 +3112,17 @@ area in either chrome; the two buttons in that header keep their own clicks.
 ### App badging
 
 An unread count or a dot on the application's own icon - the taskbar button on Windows, the Dock tile
-on macOS, the dock icon on Linux - is a package of its own, `XPlatUI.Feature.Badges`, because an
+on macOS, the dock icon on Linux - is a package of its own, `Kolvir.Feature.Badges`, because an
 application that never shows one should not carry three platform implementations of it. Reference the
 package and opt in with one line:
 
 ```csharp
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ConfigureServices = services => services.AddAppBadges(),
 };
 
-using var application = new XPlatApplication(XPlatUIBackend.CreateDefault(), options);
+using var application = new Application(KolvirBackend.CreateDefault(), options);
 ```
 
 `AddAppBadges()` is the whole opt-in and has the same name on every platform, so nothing in the
@@ -3189,8 +3189,8 @@ on the icon whose **desktop entry** matches the id in the signal. Two consequenc
 - Stock GNOME Shell implements none of it, so a bare GNOME desktop shows nothing however the
   capabilities read.
 
-The demo ships `XPlatUIDemo.App/com.xplatui.ixplatui.desktop` and
-`XPlatUIDemo.App/install-badge-desktop-entry.sh`, which writes it to
+The demo ships `Kolvir.Demo.App/com.kolvir.ikolvir.desktop` and
+`Kolvir.Demo.App/install-badge-desktop-entry.sh`, which writes it to
 `~/.local/share/applications` with the build's absolute path. Run the script once and the **App
 badge** page's count appears on the dock.
 
@@ -3218,31 +3218,31 @@ button usable more than once.
 
 ### Drag and drop
 
-Drag and drop is a package of its own, `XPlatUI.Feature.DragDrop`, because most applications never
+Drag and drop is a package of its own, `Kolvir.Feature.DragDrop`, because most applications never
 accept a drop and the ones that do not should not carry the code that makes one possible. Reference
 the package and then opt in: until the application asks for it, a window registers no drop target,
 which is what keeps OLE, the COM target, the pasteboard types and the GTK controllers out of the
 build. Asking for it is one line:
 
 ```csharp
-using XPlatUI.DragDrop;
+using Kolvir.DragDrop;
 
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ConfigureServices = services => services.AddDragDrop(),
 };
 ```
 
 With that in place, setting `AllowDrop` on a control makes it, and everything inside it, a drop
-target. Both `AllowDrop` and the four handlers come from `XPlatUI.DragDrop`. The four drag handlers
-receive an `XPlatDragEventArgs`; the drop handler sets `Effect` to say what it did:
+target. Both `AllowDrop` and the four handlers come from `Kolvir.DragDrop`. The four drag handlers
+receive an `DragEventArgs`; the drop handler sets `Effect` to say what it did:
 
 ```csharp
 root.AllowDrop = true;
 
-root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
-    ? XPlatDragDropEffects.Copy
-    : XPlatDragDropEffects.None);
+root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(DataFormats.FileDrop)
+    ? DragDropEffects.Copy
+    : DragDropEffects.None);
 
 root.AddDragDropHandler((_, e) =>
 {
@@ -3251,7 +3251,7 @@ root.AddDragDropHandler((_, e) =>
         status.Text = $"Dropped {Path.GetFileName(path)}";
     }
 
-    e.Effect = XPlatDragDropEffects.Copy;
+    e.Effect = DragDropEffects.Copy;
 });
 ```
 
@@ -3268,8 +3268,8 @@ time a drag has left, there is nothing left to say.
 `Location` is in the control's own logical pixels, the same units `Paint` uses, and `Modifiers`
 reports the shift, control and alt keys held at that moment.
 
-The data on offer is an `XPlatDataObject`: a bag of values keyed by `XPlatDataFormat`. `Text`,
-`Html` and `FileDrop` are the formats the backends fill in themselves; `XPlatDataFormats.Custom` is
+The data on offer is an `DataObject`: a bag of values keyed by `DataFormat`. `Text`,
+`Html` and `FileDrop` are the formats the backends fill in themselves; `DataFormats.Custom` is
 there for a drag this library is not the only participant in. `GetFiles` returns absolute paths.
 
 | Platform | Mechanism | What a drag carries |
@@ -3281,8 +3281,8 @@ there for a drag this library is not the only participant in. `GetFiles` returns
 The mechanisms themselves live in the package wherever the platform allows it, so a backend assembly
 that no application opted into carries no drag and drop code at all. Windows and Linux are in that
 category: the COM target is an object registered against a window handle, and a `GtkDropTarget` is a
-controller added to a widget, so both moved out of `XPlatUI.Backend.Win32` and
-`XPlatUI.Backend.Gtk4` and only a generic slot for releasing them when the window goes remains.
+controller added to a widget, so both moved out of `Kolvir.Backend.Win32` and
+`Kolvir.Backend.Gtk4` and only a generic slot for releasing them when the window goes remains.
 macOS is the exception, because AppKit delivers a drag to the `NSView` that registered for the
 dragged types, through `NSDraggingDestination` methods on that view's own class; there is no separate
 destination object to hand the window, so the five overrides cannot leave `AppKitSkiaView`. What they
@@ -3297,7 +3297,7 @@ counts as wanting the drop when its `DragEnter` or `DragOver` answers with somet
 `None`, so a text box that takes text but not files lets a file drop land on the panel behind it.
 The feature clamps whatever `Effect` a handler sets to the effects the drag source allowed, so a
 control cannot claim a move the source never offered. All of that routing lives in the package's own
-`XPlatDragDropRouter`, one per window: the library names none of it and keeps no state for it.
+`DragDropRouter`, one per window: the library names none of it and keeps no state for it.
 
 The demo turns the whole window into a drop target: dropping files prints their names on the status
 line, and dropping text prints the first sixty characters.
@@ -3307,14 +3307,14 @@ using the object for the rest of the drag, so the feature takes one of its own b
 releases exactly that before returning. Page 56, **Drag/drop lifetime**, measures that contract: it
 samples the object's live reference count at `DragEnter`, every `DragOver` and `Drop` with a net-zero
 `AddRef`/`Release` pair, shows the sequence and the verdict - the count must never fall during a drag -
-and says FAIL with the numbers when it does. `XPLATUI_DRAG_TRACE=1` writes the same samples to
+and says FAIL with the numbers when it does. `KOLVIR_DRAG_TRACE=1` writes the same samples to
 standard error. Its "Collect during drag" toggle forces a collection on every drag-over, which is what
 pulls a wrapper's finalizer into the middle of a drag instead of leaving the damage to chance.
 
 #### Migrating from the old surface
 
-Setting `AllowDrop` and subscribing to the four drag handlers used to be members of `XPlatControl`.
-They are extension members in `XPlatUI.DragDrop` now, and the events are `Add`/`Remove` handler
+Setting `AllowDrop` and subscribing to the four drag handlers used to be members of `Control`.
+They are extension members in `Kolvir.DragDrop` now, and the events are `Add`/`Remove` handler
 pairs like every other notification, so the two things an application does with the feature look
 like this:
 
@@ -3322,9 +3322,9 @@ like this:
 // before: members of the control, registered unconditionally at window creation
 root.AllowDrop = true;
 
-root.DragEnter += (_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
-    ? XPlatDragDropEffects.Copy
-    : XPlatDragDropEffects.None;
+root.DragEnter += (_, e) => e.Effect = e.Data.Contains(DataFormats.FileDrop)
+    ? DragDropEffects.Copy
+    : DragDropEffects.None;
 
 root.DragDrop += (_, e) =>
 {
@@ -3333,15 +3333,15 @@ root.DragDrop += (_, e) =>
         status.Text = $"Dropped {Path.GetFileName(path)}";
     }
 
-    e.Effect = XPlatDragDropEffects.Copy;
+    e.Effect = DragDropEffects.Copy;
 };
 ```
 
 ```csharp
 // after: the same handlers, from the feature's namespace, plus one line at startup
-using XPlatUI.DragDrop;
+using Kolvir.DragDrop;
 
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ConfigureServices = services => services.AddDragDrop(),
 };
@@ -3349,9 +3349,9 @@ var options = new XPlatApplicationOptions
 // unchanged: a control still accepts a drop by saying so
 root.AllowDrop = true;
 
-root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(XPlatDataFormats.FileDrop)
-    ? XPlatDragDropEffects.Copy
-    : XPlatDragDropEffects.None);
+root.AddDragEnterHandler((_, e) => e.Effect = e.Data.Contains(DataFormats.FileDrop)
+    ? DragDropEffects.Copy
+    : DragDropEffects.None);
 
 root.AddDragDropHandler((_, e) =>
 {
@@ -3360,11 +3360,11 @@ root.AddDragDropHandler((_, e) =>
         status.Text = $"Dropped {Path.GetFileName(path)}";
     }
 
-    e.Effect = XPlatDragDropEffects.Copy;
+    e.Effect = DragDropEffects.Copy;
 });
 ```
 
-`e` is the same `XPlatDragEventArgs` in both, and `Effect`, `Data`, `GetFiles()` and `Modifiers` are
+`e` is the same `DragEventArgs` in both, and `Effect`, `Data`, `GetFiles()` and `Modifiers` are
 unchanged, so a handler body moves across untouched: `+=` becomes `Add<Name>Handler` and `-=`
 becomes `Remove<Name>Handler`, as it did for every other notification. `DragLeave` is the one that
 lost its payload, so `root.DragLeave += (_, _) => Reset();` becomes
@@ -3375,39 +3375,39 @@ this code is written against, which is the point of it being a package.
 
 ### Animations
 
-Animations are a package of their own, `XPlatUI.Feature.Animations`, because an application that
+Animations are a package of their own, `Kolvir.Feature.Animations`, because an application that
 animates nothing should not carry a timeline. Nothing in it is native - an animation is arithmetic,
 a clock and an invalidation - so the whole feature is portable code and the package has one
 `common/` folder and three empty platform folders. Reference it and opt in:
 
 ```csharp
-using XPlatUI.Animations;
+using Kolvir.Animations;
 
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ConfigureServices = services => services.AddAnimations(),
 };
 ```
 
 The opt-in registers one **frame clock for the application**, not one per control. Every
-`XPlatAnimationSet` attaches to it, and it starts when the first set starts and stops when the last
+`AnimationSet` attaches to it, and it starts when the first set starts and stops when the last
 one finishes, pauses or is disposed - so an application sitting still runs no timer at all, which is
 the rule `CONTROLS-TODO.md` section 2 sets for everything time-based in the library.
 
-An **`XPlatAnimationSet`** is one or more value animations on a shared timeline:
+An **`AnimationSet`** is one or more value animations on a shared timeline:
 
 ```csharp
-var set = new XPlatAnimationSet();
+var set = new AnimationSet();
 
-set.Add(XPlatValueAnimation.Create(
+set.Add(ValueAnimation.Create(
     0f, 1f, TimeSpan.FromMilliseconds(240), value => card.Opacity = value,
-    easing: XPlatEasing.EaseOutCubic));
+    easing: Easing.EaseOutCubic));
 
 // a stagger: same animation, three start times, measured from the same zero
 for (int i = 0; i < 3; i++)
 {
     var tile = tiles[i];
-    set.Add(XPlatValueAnimation.Create(
+    set.Add(ValueAnimation.Create(
         0f, 1f, TimeSpan.FromMilliseconds(300), value => tile.Opacity = value,
         startTime: TimeSpan.FromMilliseconds(80 * i)));
 }
@@ -3417,23 +3417,23 @@ using var subscription = set.AddFinishedHandler(finished => Console.WriteLine($"
 set.Start();
 ```
 
-An **`XPlatValueAnimation`** carries a start value, an end value, a duration, a start time relative
-to the set, an easing curve and the callback that assigns the current value. `XPlatValueAnimation.Create`
+An **`ValueAnimation`** carries a start value, an end value, a duration, a start time relative
+to the set, an easing curve and the callback that assigns the current value. `ValueAnimation.Create`
 has overloads for `float`, `double`, `SKColor`, `SKPoint`, `SKSize` and `SKRect`; for anything else,
-construct `XPlatValueAnimation<T>` with your own blend, which is the trim-safe way to extend it -
+construct `ValueAnimation<T>` with your own blend, which is the trim-safe way to extend it -
 there is no registry, no reflection and no static state:
 
 ```csharp
-var lift = new XPlatValueAnimation<Level>(
+var lift = new ValueAnimation<Level>(
     Level.Quiet, Level.Loud, TimeSpan.FromMilliseconds(500),
     value => meter.SetLevel(value),
     (from, to, t) => Level.Blend(from, to, t));
 ```
 
-**Easing** functions are static methods on `XPlatEasing`, pure and allocation-free: `Linear`,
+**Easing** functions are static methods on `Easing`, pure and allocation-free: `Linear`,
 `EaseInQuad`, `EaseOutQuad`, `EaseInOutQuad`, and the same three for `Cubic` and `Sine`. Each maps
 `0` to `0` and `1` to `1`, which is what makes an animation settle exactly on its end value; a curve
-you write has to do the same. `XPlatInterpolation` has the blends, as overloads of `Lerp` so a
+you write has to do the same. `Interpolation` has the blends, as overloads of `Lerp` so a
 method group picks the right one.
 
 The five methods and what each one means:
@@ -3452,7 +3452,7 @@ A few consequences worth knowing before you rely on them:
   notification in the library: `AddFinishedHandler(Action<object>)` returns a token that unsubscribes
   on dispose, and the argument is the set. It runs once per run, on the UI thread, after the values
   are already at their end. A handler that throws is reported through
-  `XPlatApplication.AddUnhandledExceptionHandler` and stops the handlers after it, exactly as a C#
+  `Application.AddUnhandledExceptionHandler` and stops the handlers after it, exactly as a C#
   event would.
 - **`End()` mid-flight runs the handler.** The timeline is over however it got there.
 - **A zero-length set costs nothing.** A set with no animations, or only zero-duration ones at time
@@ -3469,12 +3469,12 @@ A few consequences worth knowing before you rely on them:
   A set ended from application code - by `End()`, `Pause()` or `Dispose()` - stops the clock before
   the call returns.
 - **A callback that throws is reported, not retried.** It goes to
-  `XPlatApplication.AddUnhandledExceptionHandler` (the same route drag and drop uses) and the rest of
+  `Application.AddUnhandledExceptionHandler` (the same route drag and drop uses) and the rest of
   the frame still runs, so one bad animation cannot freeze the others. With no application in the
   process there is nowhere to report it and the exception surfaces at the caller.
 
 A **control gains its animation as an extension member**, not as a property the library carries:
-`XPlatExpander` has `ExpandDuration`, contributed by this package and stored in a weak table keyed
+`Expander` has `ExpandDuration`, contributed by this package and stored in a weak table keyed
 by the control (FEATURE-COST-POLICY.md section 5). A section given one animates its `ExpandProgress` on the
 application's clock, which moves the content height and the arrow together; a section given none
 does exactly what the control does on its own. Because the duration is not on the control, an
@@ -3490,9 +3490,9 @@ The same shape covers the two controls that had no animation of their own:
 
 | Control | Extension member | What it drives |
 | --- | --- | --- |
-| `XPlatExpander` | `ExpandDuration` | `ExpandProgress`, so the height and the chevron fold together |
-| `XPlatToast` | `ShowDuration`, `DismissDuration` | `ShowProgress`, so the message fades and slides in from its docked edge and reverses on the way out |
-| `XPlatOverlay` | `FadeDuration` | `Opacity`, so the layer - and the card inside it - dims in as one picture |
+| `Expander` | `ExpandDuration` | `ExpandProgress`, so the height and the chevron fold together |
+| `Toast` | `ShowDuration`, `DismissDuration` | `ShowProgress`, so the message fades and slides in from its docked edge and reverses on the way out |
+| `Overlay` | `FadeDuration` | `Opacity`, so the layer - and the card inside it - dims in as one picture |
 
 Each of the three progress values follows its control on its own, so none of them is state that only
 an animation can reach: `ExpandProgress` follows `IsExpanded`, `ShowProgress` follows `IsOpen`, and
@@ -3510,16 +3510,16 @@ over the panel it holds still.
 ### Images and animations
 
 A picture is an animation whose duration is zero, so there is one type, one timeline and one code
-path - not a still path and an animation path that have to be kept in step. `XPlatImage` draws an
-`XPlatImageData` and does nothing else with it:
+path - not a still path and an animation path that have to be kept in step. `Image` draws an
+`ImageData` and does nothing else with it:
 
 ```csharp
-var image = new XPlatImage { SizeMode = XPlatSizeMode.Zoom };
-image.Image = factory.LoadFromStream(stream);    // a PNG is a zero-duration animation
+var image = new Image { SizeMode = SizeMode.Zoom };
+image.Source = factory.LoadFromStream(stream);    // a PNG is a zero-duration animation
 ```
 
-The control's image surface is `Image`, `SizeMode`, `ImageAlign` and `PlaceholderColor`. It has no
-loader - `IXPlatImageDataFactory` is where bytes become an image - and it has no ownership of what it
+The control's image surface is `Source`, `SizeMode`, `ImageAlign` and `PlaceholderColor`. It has no
+loader - `IImageDataFactory` is where bytes become an image - and it has no ownership of what it
 shows. That is `PictureBox`'s convention and the one to arrive with: you create the image, you assign
 it, you dispose it. Disposing the control does not dispose the image, and assigning a second image
 does not dispose the first, so a long-running page that replaces its image has to dispose the old one
@@ -3529,7 +3529,7 @@ where there is nobody to catch anything.
 #### The data: one timeline
 
 ```csharp
-public interface IXPlatImageDataSource : IDisposable
+public interface IImageDataSource : IDisposable
 {
     TimeSpan Duration { get; }                        // Zero for a still picture
     SKSize NaturalSize { get; }                       // fixed for the source, never per-frame
@@ -3538,10 +3538,10 @@ public interface IXPlatImageDataSource : IDisposable
     TimeSpan? TimeUntilNextFrame(TimeSpan position);  // null when there is nothing to wait for
 }
 
-public sealed class XPlatImageData : IDisposable
+public sealed class ImageData : IDisposable
 {
-    public XPlatImageData(IXPlatImageDataSource source);
-    public static XPlatImageData FromPicture(SKPicture picture, bool disposePictureWithData = false);
+    public ImageData(IImageDataSource source);
+    public static ImageData FromPicture(SKPicture picture, bool disposePictureWithData = false);
 
     public TimeSpan Duration { get; }
     public SKSize NaturalSize { get; }
@@ -3563,7 +3563,7 @@ matters: true gives the data the picture, and the source that produces it has to
 picture it hands out.
 
 `NaturalSize` is fixed for the source rather than measured from the current frame, and it is what
-`AutoSize` measures and every `XPlatSizeMode` scales from. An animation whose frames differ by a pixel
+`AutoSize` measures and every `SizeMode` scales from. An animation whose frames differ by a pixel
 therefore cannot make the layout twitch once a second.
 
 **`Position` is computed, never accumulated.** `Play` records an anchor - a position and a
@@ -3571,7 +3571,7 @@ therefore cannot make the layout twitch once a second.
 when the animation loops and clamped otherwise. There is no timer in that arithmetic, which is why an
 animation that spent three seconds behind another page is three seconds further on when it comes
 back: time spent hidden counts, and the frame it shows is the one the clock says rather than the one
-it left on. `TimeProvider` is the same seam `XPlatUndoClock` uses, and it is `TimeProvider.System`
+it left on. `TimeProvider` is the same seam `UndoClock` uses, and it is `TimeProvider.System`
 unless an application supplies another, so a test drives the whole timeline with the `TestClock` that
 already exists.
 
@@ -3613,23 +3613,23 @@ counting while it is gone, and the frame it comes back on is the one the readout
 #### Loading: the factory
 
 ```csharp
-public interface IXPlatImageDataFactory
+public interface IImageDataFactory
 {
-    XPlatImageData LoadFromPath(string path, IXPlatImageFormatOptions? options = null);
-    XPlatImageData LoadFromStream(Stream stream, IXPlatImageFormatOptions? options = null);
-    XPlatImageData LoadFromBytes(ReadOnlySpan<byte> bytes, IXPlatImageFormatOptions? options = null);
+    ImageData LoadFromPath(string path, IImageFormatOptions? options = null);
+    ImageData LoadFromStream(Stream stream, IImageFormatOptions? options = null);
+    ImageData LoadFromBytes(ReadOnlySpan<byte> bytes, IImageFormatOptions? options = null);
 }
 ```
 
 One call loads anything the application can read, and the answer to "how do I load this image" does
 not depend on which formats happen to be enabled. An application resolves the factory from its
-services - `XPlatApplication` registers one, composed from every provider the features declared, and
-`XPlatApplication.Services` is the provider it lives in - and assigns what comes back:
+services - `Application` registers one, composed from every provider the features declared, and
+`Application.Services` is the provider it lives in - and assigns what comes back:
 
 ```csharp
-var factory = services.GetRequiredService<IXPlatImageDataFactory>();
+var factory = services.GetRequiredService<IImageDataFactory>();
 
-image.Image = factory.LoadFromPath("art/logo.png");
+image.Source = factory.LoadFromPath("art/logo.png");
 ```
 
 A factory with nothing registered reads every raster format Skia does - PNG, JPEG, WebP, GIF (its
@@ -3637,8 +3637,8 @@ first frame), BMP and ICO - because the built-in decoder is part of the factory 
 package. Without a container, compose by hand:
 
 ```csharp
-var factory = new XPlatImageDataFactory();                              // raster formats only
-var withSvg = new XPlatImageDataFactory([XPlatSvgImageFormatProvider.Shared]);
+var factory = new ImageDataFactory();                              // raster formats only
+var withSvg = new ImageDataFactory([SvgImageFormatProvider.Shared]);
 ```
 
 The list is copied and sorted once, and it is the factory's for its lifetime: registration is a
@@ -3647,10 +3647,10 @@ process - or two tests in one process - cannot see each other's formats.
 
 | Situation | What happens |
 | --- | --- |
-| A load fails to recognise the bytes, or the decoder fails | It throws `XPlatImageFormatException`. There is no bool-and-handler convention left: the caller is the one who asked for the image, so a failure is an ordinary exception where it can be handled. |
+| A load fails to recognise the bytes, or the decoder fails | It throws `ImageFormatException`. There is no bool-and-handler convention left: the caller is the one who asked for the image, so a failure is an ordinary exception where it can be handled. |
 | Two providers claim the same bytes | The higher `Priority` wins; at equal priority the later registration wins. A load never tries a second provider for the same bytes. |
 | A provider throws while sniffing | It has not claimed the bytes - the exception is swallowed and the next provider is asked - because identifying a stream must not be able to fail a load. |
-| The claiming provider throws | The load throws an `XPlatImageFormatException` naming the provider, with what it threw inside it, and does **not** fall through to the next claim. |
+| The claiming provider throws | The load throws an `ImageFormatException` naming the provider, with what it threw inside it, and does **not** fall through to the next claim. |
 | No provider claims the bytes | The built-in decoder gets them. It is fallback behaviour, not a provider with a priority, which is exactly why registering a GIF or WebP provider takes that format away from it. |
 | The stream cannot seek | It is buffered, bounded by `BufferLimit` (64 MiB by default), rather than refused - a network stream or a pipe is the case a real application hits. A larger one can be copied to a file first. |
 | The data outlives the factory | Fine, and expected: the data owns fully decoded pixels, not the stream or the factory. |
@@ -3661,34 +3661,34 @@ a provider identifies itself from the content.
 
 #### The provider seam
 
-A format arrives as an `IXPlatImageFormatProvider`:
+A format arrives as an `IImageFormatProvider`:
 
 ```csharp
-public interface IXPlatImageFormatProvider
+public interface IImageFormatProvider
 {
     string Name { get; }
     int Priority { get; }
     bool CanDecode(ReadOnlySpan<byte> header);
-    XPlatImageData Create(Stream stream, string? extensionHint, IXPlatImageFormatOptions? options);
+    ImageData Create(Stream stream, string? extensionHint, IImageFormatOptions? options);
 }
 ```
 
 A provider is asked about *the first 512 bytes* and, if it claims them, is handed the whole seekable
-stream and returns the `XPlatImageData` the control will play. There is no reflection, no assembly
+stream and returns the `ImageData` the control will play. There is no reflection, no assembly
 scanning and no registration by attribute: a provider is added to the service container, and the
 `Add...()` call a feature package ships is that call with the package's provider in it.
 
-Options travel through the same seam. `IXPlatImageFormatOptions` is an empty marker, so core can
+Options travel through the same seam. `IImageFormatOptions` is an empty marker, so core can
 carry a format's settings without knowing what any of them mean; a package declares the concrete
 type and overloads the factory methods with it, and the provider that claims the bytes is the one
 that receives them:
 
 ```csharp
-using XPlatUI.Svg;
+using Kolvir.Svg;
 
-image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
+image.Source = factory.LoadFromPath("icons/badge.svg", new SvgOptions
 {
-    CurrentColor = XPlatTheme.Foreground,
+    CurrentColor = Theme.Foreground,
 });
 ```
 
@@ -3707,48 +3707,48 @@ SVG pages below are the same control and the same factory call with a different 
 
 ### SVG images
 
-SVG is a package of its own, `XPlatUI.Feature.Svg`, built on [Svg.Skia]. A vector renderer is not
-something a toolkit can trim down to nothing, so it does not live in `XPlatUI`: an application that
+SVG is a package of its own, `Kolvir.Feature.Svg`, built on [Svg.Skia]. A vector renderer is not
+something a toolkit can trim down to nothing, so it does not live in `Kolvir`: an application that
 shows no SVG does not reference the package and therefore does not contain it
 (FEATURE-COST-POLICY.md section 4, rung 3). Reference it and opt in:
 
 ```csharp
-using XPlatUI.Svg;
+using Kolvir.Svg;
 
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ConfigureServices = services => services.AddSvgImages(),
 };
 ```
 
-or, without a service container, `new XPlatImageDataFactory([XPlatSvgImageFormatProvider.Shared])`.
+or, without a service container, `new ImageDataFactory([SvgImageFormatProvider.Shared])`.
 Either way the package's contribution is one registered **format provider** - the seam the images
 section above describes - and after that nothing about the call site changes:
 
 ```csharp
-var icon = new XPlatImage { SizeMode = XPlatSizeMode.Zoom };
+var icon = new Image { SizeMode = SizeMode.Zoom };
 icon.Image = factory.LoadFromPath("icons/star.svg");   // the same call that reads a PNG
 ```
 
 Referencing the package is not the opt-in; the `AddSvgImages()` call is. An application that
 references it and never calls it gets no SVG at all: nothing claims the bytes, the built-in decoder
-does not read XML, and the load throws an `XPlatImageFormatException` naming no provider - the same
+does not read XML, and the load throws an `ImageFormatException` naming no provider - the same
 failure a stream that is not an image has always had.
 
 #### What the package adds to the seam
 
 The provider (at priority 100, above anything else registered) is the whole of its loading story:
-there is no `XPlatSvg` loader, no second way to get an `XPlatImageData`, and nothing an application
+there is no `Svg` loader, no second way to get an `ImageData`, and nothing an application
 can call that skips the factory. What the package adds around it is the document work - the secure
 parse, the cache, `currentColor` resolution - and one options type, which reaches the provider as a
 **typed overload** of the same three factory calls:
 
 ```csharp
-using XPlatUI.Svg;
+using Kolvir.Svg;
 
-image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
+image.Source = factory.LoadFromPath("icons/badge.svg", new SvgOptions
 {
-    CurrentColor = XPlatTheme.Foreground,
+    CurrentColor = Theme.Foreground,
 });
 ```
 
@@ -3759,7 +3759,7 @@ an extension method that has real work to do is a sign that the work belongs in 
 #### Sizing, and what `viewBox` means to `AutoSize`
 
 The picture's bounds are the document's natural size, and that is what `AutoSize` measures and what
-every `XPlatSizeMode` scales from:
+every `SizeMode` scales from:
 
 | Document | Natural size |
 | --- | --- |
@@ -3778,9 +3778,9 @@ An icon that draws with `currentColor` can follow the palette, and nothing else 
 without rewriting the document:
 
 ```csharp
-image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
+image.Source = factory.LoadFromPath("icons/badge.svg", new SvgOptions
 {
-    CurrentColor = XPlatTheme.Foreground,
+    CurrentColor = Theme.Foreground,
 });
 ```
 
@@ -3791,18 +3791,18 @@ Switching a small palette back and forth therefore settles and stops parsing, wh
 safe to reload icons on a theme change:
 
 ```csharp
-XPlatTheme.AddChangedHandler(_ =>
+Theme.AddChangedHandler(_ =>
 {
     image.Image?.Dispose();
-    image.Image = factory.LoadFromPath("icons/badge.svg", new XPlatSvgOptions
+    image.Source = factory.LoadFromPath("icons/badge.svg", new SvgOptions
     {
-        CurrentColor = XPlatTheme.Foreground,
+        CurrentColor = Theme.Foreground,
     });
 });
 ```
 
 Reloading recolours also shows the ownership rule in use: the control does not dispose what it was
-showing, so the handler disposes the previous `XPlatImageData` itself before assigning the next one.
+showing, so the handler disposes the previous `ImageData` itself before assigning the next one.
 A document that fails to parse throws out of the load, which is where the code that asked for it can
 catch it.
 
@@ -3812,7 +3812,7 @@ A document is parsed once per (content, colour) and the parsed result is reused:
 fresh recording of it - a few hundred bytes of display list - so that the control's ownership rule
 never disposes something the cache is still handing out, and two controls showing one icon draw two
 recordings of one parse. The cache holds 64 entries and evicts the oldest, so an application that
-renders an SVG per database row does not leak; `XPlatSvg.ClearCache()` empties it, and a control's
+renders an SVG per database row does not leak; `Svg.ClearCache()` empties it, and a control's
 recording outlives the parsed document it came from.
 
 #### Security
@@ -3838,7 +3838,7 @@ it today" is not the same claim as "this feature refuses it":
   removing it makes the entity-bomb test fail, because the renderer happily expands the document.
 - **The document cap is one megabyte.** The whole document is in memory by the time it is parsed, so
   the limit is one the library chose rather than one it inherited.
-- **Malformed input surfaces as an `XPlatImageFormatException`** with the parser's exception inside
+- **Malformed input surfaces as an `ImageFormatException`** with the parser's exception inside
   it, thrown by the load that asked for the document. It is never thrown at the paint thread, and an
   image a control is already showing stays on screen.
 
@@ -3878,10 +3878,10 @@ against an unfiltered twin, and the transform and clip path at the pixels they d
 #### What it costs
 
 Measured the way FEATURE-COST-POLICY.md section 8 says to: one fixture, published twice, with the project
-reference to `XPlatUI.Feature.Svg` and the `AddSvgImages()` call switched off and on by a property,
+reference to `Kolvir.Feature.Svg` and the `AddSvgImages()` call switched off and on by a property,
 so the two numbers differ by the feature and nothing else. The feature build calls `AddSvgImages()`,
 loads a document through the factory, draws the image and writes it out. `PublishAot`,
-`-p:EmbedSkiaSharpNative=false`, three RIDs. The fixture is `XPlatUI.Minimal` with one `XPlatImage`
+`-p:EmbedSkiaSharpNative=false`, three RIDs. The fixture is `Kolvir.Minimal` with one `Image`
 on its page - 88 KB above the policy's 3,203,072 floor on win-x64, which is what an image control
 costs before any format is added:
 
@@ -3915,7 +3915,7 @@ every node under its assembly, win-x64, feature build minus floor build. Code is
 | `ShimSkiaSharp` | +115,301 | the immediate-mode drawing model Svg.Skia renders through |
 | `ExCSS` | +330,302 | the CSS parser behind `<style>` and `class` |
 | `HarfBuzzSharp` | +36,791 | the managed half of text shaping |
-| `XPlatUI.Feature.Svg` | +5,690 | this package: the provider, the cache, the secure parse |
+| `Kolvir.Feature.Svg` | +5,690 | this package: the provider, the cache, the secure parse |
 | `System.Private.CoreLib` | +1,402,755 | generic instantiations, string and collection code the model pulls in |
 | `System.Net` | +757,892 | the HTTP stack, see below |
 | `System.Private.Xml` | +332,912 | the XML reader the document is parsed with |
@@ -3925,7 +3925,7 @@ every node under its assembly, win-x64, feature build minus floor build. Code is
 | `System.Diagnostics` | +53,684 | stack traces |
 | linker bookkeeping, unrelated vtables and boxed statics | +4,775,243 | metadata blobs, stack-trace mapping, frozen segments, vtables |
 
-So the SVG stack itself - the seven assemblies above `XPlatUI.Feature.Svg` - is **2.47 MB**. The
+So the SVG stack itself - the seven assemblies above `Kolvir.Feature.Svg` - is **2.47 MB**. The
 other 8.3 MB is what the BCL adds once a large generic-heavy model with an XML parser, a CSS parser
 and a regex engine becomes reachable, plus the linker's own metadata. That is the shape of the
 number, and it is why "trim the SVG packages" does not get far.
@@ -3945,7 +3945,7 @@ number, and it is why "trim the SVG packages" does not get far.
     `HarfBuzzSharp.NativeAssets.*` packages excluded, `<text>` renders pixel-identically, because
     the Windows `libSkiaSharp.dll` shapes text itself.
   - linux-x64: it cannot. `Svg.Skia` reaches HarfBuzz for `<text>` and the load fails with
-    `DllNotFoundException`, surfaced correctly as an `XPlatImageFormatException` at the factory call
+    `DllNotFoundException`, surfaced correctly as an `ImageFormatException` at the factory call
     rather than thrown at the paint thread.
   - osx-arm64: it cannot, and not even later - the AOT image links
     `@executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib` at load time, so removing
@@ -3980,9 +3980,9 @@ what opting in costs. It does not prove that a document using more of SVG pulls 
 one gradient, one `<text>` and no filter, and a program that uses filters and masks keeps code this
 one trims.
 
-The seam every application does pay is small. `XPlatUI.Minimal` publishes at 3,203,072 before and
+The seam every application does pay is small. `Kolvir.Minimal` publishes at 3,203,072 before and
 after this change - the same bytes, because it names no image - and a fixture that is the floor plus
-one `XPlatImage` loading a PNG publishes at 3,325,440 against 3,318,784 at `1b63ea1`, so the factory,
+one `Image` loading a PNG publishes at 3,325,440 against 3,318,784 at `1b63ea1`, so the factory,
 the provider interface and the header sniff cost 6,656 bytes to an application that shows an image
 and never adds a format.
 
@@ -3990,12 +3990,12 @@ and never adds a format.
 
 ### Animated GIF
 
-Animated GIF is a package of its own, `XPlatUI.Feature.AnimatedGif`, and it is a small one: SkiaSharp
+Animated GIF is a package of its own, `Kolvir.Feature.AnimatedGif`, and it is a small one: SkiaSharp
 already decodes GIF frames, so what the package adds is the compositor, the loop-declaration walk and
 the timeline glue, with no native library of its own. Reference it and opt in:
 
 ```csharp
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ConfigureServices = services => services.AddAnimatedGifImages(),
 };
@@ -4009,12 +4009,12 @@ somebody else declined, so a GIF stops being a still picture and becomes an anim
 single change at the call site.
 
 ```csharp
-using XPlatUI;   // XPlatGifOptions
+using Kolvir;   // GifOptions
 
-image.Image = factory.LoadFromPath("art/spinner.gif");
+image.Source = factory.LoadFromPath("art/spinner.gif");
 
 // or, from a stream, with the feature's own settings
-image.Image = factory.LoadFromStream(stream, new XPlatGifOptions
+image.Source = factory.LoadFromStream(stream, new GifOptions
 {
     DecodedSizeLimit = 32L * 1024 * 1024,
 });
@@ -4025,7 +4025,7 @@ image.Image = factory.LoadFromStream(stream, new XPlatGifOptions
 | In the file | What the animation gets |
 | --- | --- |
 | Per-frame delays | Per-frame delays: a GIF with mixed delays plays mixed delays |
-| A delay of zero | `XPlatGifOptions.ZeroDelayMinimum`, 100 ms by default |
+| A delay of zero | `GifOptions.ZeroDelayMinimum`, 100 ms by default |
 | A Netscape loop extension with any count, `0` or `N` | `Loop` starts `true` |
 | No loop extension | `Loop` starts `false` |
 | Frames | All of them, decoded up front |
@@ -4047,7 +4047,7 @@ replaced: a declared 10 ms is a delay the author chose, and it is played at 10 m
 
 Every frame is decoded and composited up front, because the timeline lets a viewer seek anywhere -
 backwards included - and a lazy window cannot go back. That makes the cost predictable, frames x width
-x height x 4 bytes, and it is bounded by `XPlatGifOptions.DecodedSizeLimit`: 256 MiB by default, which
+x height x 4 bytes, and it is bounded by `GifOptions.DecodedSizeLimit`: 256 MiB by default, which
 a 2000x2000 GIF of 60 frames exceeds at 960 MB of pixels. A file over the limit is refused rather than
 partially decoded, so a load either produces a complete animation or throws with the numbers in the
 message.
@@ -4078,7 +4078,7 @@ on colours in regions rather than on a hash.
 
 #### What it costs
 
-Measured the way FEATURE-COST-POLICY.md section 8 says to, on win-x64: `XPlatUI.Minimal` published with
+Measured the way FEATURE-COST-POLICY.md section 8 says to, on win-x64: `Kolvir.Minimal` published with
 `PublishAot` and `-p:EmbedSkiaSharpNative=false`, then published again with the project reference and
 an `AddAnimatedGifImages()` call added and one GIF loaded and drawn. The two numbers differ by the
 feature and nothing else.
@@ -4096,7 +4096,7 @@ provider, `SKCodec`, the compositing, the timeline - is reachable and cheap. Wha
 is that a large file is free: frame memory is `frames x width x height x 4` and that is bounded at
 run time by `DecodedSizeLimit`, not by the size of the executable.
 
-The rest is the `XPlatImageData` every image has: `Loop` can be reassigned after the load, `Play`,
+The rest is the `ImageData` every image has: `Loop` can be reassigned after the load, `Play`,
 `Pause` and `Seek` are the same timeline a PNG has, and the control never disposes it.
 
 The demo's **Animated GIF** page plays the sample with play, pause, a seek bar and a position readout;
@@ -4105,13 +4105,13 @@ back with a button, so the frame it returns on can be compared with the readout.
 
 ### Animated WebP
 
-Animated WebP is a package of its own, `XPlatUI.Feature.AnimatedWebp`, and it follows the animated GIF
+Animated WebP is a package of its own, `Kolvir.Feature.AnimatedWebp`, and it follows the animated GIF
 package rung for rung: SkiaSharp already decodes WebP, so what the package adds is the RIFF container
 walk, the compositor and the timeline glue, with no native library of its own. Reference it and opt
 in:
 
 ```csharp
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     ConfigureServices = services => services.AddAnimatedWebpImages(),
 };
@@ -4126,12 +4126,12 @@ the feature therefore cannot make a static WebP worse, which is what the GIF pac
 single-frame GIF as well.
 
 ```csharp
-using XPlatUI;   // XPlatWebpOptions
+using Kolvir;   // WebpOptions
 
-image.Image = factory.LoadFromPath("art/spinner.webp");
+image.Source = factory.LoadFromPath("art/spinner.webp");
 
 // or, from a stream, with the feature's own settings
-image.Image = factory.LoadFromStream(stream, new XPlatWebpOptions
+image.Source = factory.LoadFromStream(stream, new WebpOptions
 {
     DecodedSizeLimit = 32L * 1024 * 1024,
 });
@@ -4156,7 +4156,7 @@ exactly once: the parser moves the frame's image chunks, and the decoder reads t
 | In the file | What the animation gets |
 | --- | --- |
 | Per-frame durations | Per-frame durations: a WebP with mixed durations plays mixed durations |
-| A duration of zero | `XPlatWebpOptions.ZeroDelayMinimum`, 100 ms by default - the same number `XPlatGifOptions` uses |
+| A duration of zero | `WebpOptions.ZeroDelayMinimum`, 100 ms by default - the same number `GifOptions` uses |
 | An `ANIM` chunk with any count, `0` or `N` | `Loop` starts `true` |
 | No `ANIM` chunk | `Loop` starts `false` |
 | A single `ANMF` | A still picture: duration zero, no loop - the GIF feature's answer for a single-frame GIF |
@@ -4208,7 +4208,7 @@ than decoration.
 
 Every frame is decoded and composited up front, because the timeline lets a viewer seek anywhere -
 backwards included - and a lazy window cannot go back. The cost is predictable, frames x canvas
-width x canvas height x 4 bytes, and it is bounded by `XPlatWebpOptions.DecodedSizeLimit`: 256 MiB by
+width x canvas height x 4 bytes, and it is bounded by `WebpOptions.DecodedSizeLimit`: 256 MiB by
 default, which a 2000x2000 WebP of 60 frames exceeds at 960 MB of pixels. A file over the limit is
 refused rather than partially decoded, so a load either produces a complete animation or throws with
 the numbers in the message.
@@ -4216,15 +4216,15 @@ the numbers in the message.
 #### What it costs
 
 Measured the way FEATURE-COST-POLICY.md section 8 says to, on win-x64, linux-x64 and osx-arm64:
-`XPlatUI.Minimal` built with `PublishAot` and `-p:EmbedSkiaSharpNative=false`, then built again with
-an `XPlatImage` showing a PNG through the built-in decoder, then built a third time with the WebP
+`Kolvir.Minimal` built with `PublishAot` and `-p:EmbedSkiaSharpNative=false`, then built again with
+an `Image` showing a PNG through the built-in decoder, then built a third time with the WebP
 package referenced, `AddAnimatedWebpImages()` called and the demo's animated WebP loaded and drawn.
 The three numbers separate the image control and the timeline from the feature:
 
 | Measurement | win-x64 | linux-x64 | osx-arm64 |
 | --- | --- | --- | --- |
 | Executable, one label (the floor at this commit) | 3,283,968 | 4,276,144 | 4,080,304^ |
-| Executable, one `XPlatImage` showing a PNG (image control and timeline paid for) | 3,526,656 | 4,590,160 | 4,080,304^ |
+| Executable, one `Image` showing a PNG (image control and timeline paid for) | 3,526,656 | 4,590,160 | 4,080,304^ |
 | Executable, the same control showing an animated WebP with the feature registered | 3,582,464 | 4,636,032 | 4,080,304^ |
 | Feature only, against the PNG fixture | +55,808 (54.5 KB) | +45,872 (44.8 KB) | 0 |
 | Whole use path, against the label fixture | +298,496 (291.5 KB, +9.1%) | +359,888 (351.5 KB, +8.4%) | 0 |
@@ -4248,7 +4248,7 @@ the package, because the PNG fixture already links the built-in raster path and 
 lives in the same Skia library; the +55,808 and +45,872 byte figures are the package's own code and
 the metadata that keeps it reachable, while osx-arm64 absorbs the same code into existing page slack.
 
-The rest is the `XPlatImageData` every image has: `Loop` can be reassigned after the load, `Play`,
+The rest is the `ImageData` every image has: `Loop` can be reassigned after the load, `Play`,
 `Pause` and `Seek` are the same timeline a PNG has, and the control never disposes it.
 
 The demo's **Animated WebP** page plays the sample with play, pause, a seek bar and a position
@@ -4259,7 +4259,7 @@ same core code with a different byte stream and would not test anything WebP-spe
 
 ## Hardware acceleration (Windows)
 
-`XPlatApplicationOptions.GfxHardwareAcceleration` is a `bool`: **true by default on Windows and
+`ApplicationOptions.GfxHardwareAcceleration` is a `bool`: **true by default on Windows and
 Linux, false on macOS**. The macOS default is explained in
 [Hardware acceleration (macOS)](#hardware-acceleration-macos) and the Linux one, which is also
 `true`, in [Hardware acceleration (Linux)](#hardware-acceleration-linux); neither is a carried-over
@@ -4271,7 +4271,7 @@ those succeeds does the window present with `wglSwapBuffers`; any failure silent
 the existing DIB + `BitBlt` path.
 
 ```csharp
-var options = new XPlatApplicationOptions
+var options = new ApplicationOptions
 {
     // Windows and macOS. True by default on Windows and Linux, false on macOS; this is the shape
     // to use when the launcher owns the command line and wants the switch honoured explicitly.
@@ -4281,7 +4281,7 @@ var options = new XPlatApplicationOptions
 
 `--no-hardware-acceleration` is the switch. It is read from `ResolveCommandLine()` **in the
 constructor**, so an explicit `CommandLine` list is honoured when it is passed to
-`XPlatApplicationOptions(IReadOnlyList<string>)` - the form to use when the arguments are known at
+`ApplicationOptions(IReadOnlyList<string>)` - the form to use when the arguments are known at
 construction. `CommandLine` is a settable property, but assigning it after construction does not
 re-apply its switches: a launcher that owns the command line either uses the overload that takes it
 or assigns `GfxHardwareAcceleration` itself. An explicit assignment to `GfxHardwareAcceleration`
@@ -4339,17 +4339,17 @@ reports the GL vendor and device. The reason names the failing step rather than 
 gfx: cpu (no gl interface; gdi: no wgl context (error 2000))
 ```
 
-Set `XPLATUI_GL_TRACE=1` to print every probe attempt, the chosen flavour and format number, the
+Set `KOLVIR_GL_TRACE=1` to print every probe attempt, the chosen flavour and format number, the
 described colour/stencil/sample counts and the renderer to stderr. The demo prints the one-line
 path and renderer at startup and keeps them in its footer, so a screenshot says which path produced
 its numbers; the **Measured rendering** page is where the CPU/GL A/B is run.
 
-Measured cost on the `XPlatUI.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
+Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
 section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
 
 | Measurement | Bytes |
 | --- | ---: |
-| `XPlatUI.Minimal` floor before this change | 3,283,456 |
+| `Kolvir.Minimal` floor before this change | 3,283,456 |
 | After the Win32 GL seam, the flavour probe, damage-aware present and the `GfxHardwareAcceleration` option | 3,334,656 |
 | Delta | +51,200 (+1.56 %) |
 
@@ -4363,7 +4363,7 @@ cost about 75 KB in a trimmed native image.
 
 ## Hardware acceleration (macOS)
 
-`XPlatApplicationOptions.GfxHardwareAcceleration` is the same `bool` as Windows, with the same
+`ApplicationOptions.GfxHardwareAcceleration` is the same `bool` as Windows, with the same
 mechanics, but a different default: **true on Windows and Linux, false on macOS**. The AppKit
 backend honours the flag exactly as the Win32 backend does - there is no separate opt-in mechanism
 - so an application whose content is heavy turns Metal on by assigning the property. The demo
@@ -4423,7 +4423,7 @@ The rules the implementation follows:
   is no shift rather than an assumption.
 
 `AppKitWindowBackend.GraphicsPath` reports `metal` or `cpu (...)` with the reason, and
-`GraphicsRenderer` reports the Metal device name. Set `XPLATUI_METAL_TRACE=1` to print the device,
+`GraphicsRenderer` reports the Metal device name. Set `KOLVIR_METAL_TRACE=1` to print the device,
 queue, context, drawable sizes, per-frame damage state and every failure to stderr. The demo prints
 `gfx: metal; renderer: <device>` at startup and keeps the line in its footer.
 
@@ -4436,7 +4436,7 @@ default is the CPU path. The measured-rendering page (index 54) works exactly as
 1. Run the demo on the machine being measured - host access, screenshots and input injection are in
    [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md). Check the footer says `gfx: metal` and the device is
    the one you expect. On a fallback it says `gfx: cpu (...)` with the step that failed; rerun with
-   `XPLATUI_METAL_TRACE=1` to capture every step.
+   `KOLVIR_METAL_TRACE=1` to capture every step.
 2. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
    **Measure 600 frames**. The first 30 frames are discarded.
 3. Press again with the other damage mode.
@@ -4452,7 +4452,7 @@ shape:
 BENCH mode="metal" renderer="Apple M4" size=1280x820 scale=2.00 damage=full frames=600 warmup=30 p50=0.883 p95=1.207 max=7.823 mean=0.872 fps=60.1 area=1280x820
 ```
 
-`p50`/`p95`/`max`/`mean` are `XPlatUiHost.LastFrameTime`, the host's paint. The offscreen snapshot,
+`p50`/`p95`/`max`/`mean` are `UiHost.LastFrameTime`, the host's paint. The offscreen snapshot,
 the drawable blit, `PresentDrawable` and `Commit` happen after that and are **not** in the number, so
 the Metal partial row is the paint of the 180 x 180 swatch plus an unmeasured full-buffer blit and a
 vsync'd present, not the whole frame. `fps` is the wall-clock cadence and does include the present.
@@ -4531,19 +4531,19 @@ The CPU path itself is unchanged: headless `--render` of all 54 pages is byte-id
 on 53 pages, and the one difference is page 49's animated GIF phase - the same timing difference the
 Windows comparison recorded.
 
-Measured cost on the `XPlatUI.Minimal` fixture (osx-arm64, NativeAOT, the app-bundle binary because
+Measured cost on the `Kolvir.Minimal` fixture (osx-arm64, NativeAOT, the app-bundle binary because
 the full publish can fail in `dsymutil` on some macOS hosts, a pre-existing failure on `master`).
 `master` and this branch were built back to back on the same machine with the same toolchain
 (macvm, SDK 10.0.403) and the same command:
 
 ```
-dotnet build XPlatUI.Minimal/XPlatUI.Minimal.csproj -c Release -r osx-arm64 \
+dotnet build Kolvir.Minimal/Kolvir.Minimal.csproj -c Release -r osx-arm64 \
   -p:PublishAot=true -p:TrimmerSingleWarn=false
 ```
 
 | Measurement | Bytes |
 | --- | ---: |
-| `XPlatUI.Minimal` floor before this change | 4,080,320 |
+| `Kolvir.Minimal` floor before this change | 4,080,320 |
 | After the Metal seam, the tier fallback, the platform default and the `GraphicsPath` diagnostics | 4,080,640 |
 | Delta | +320 (+0.008 %) |
 
@@ -4554,7 +4554,7 @@ measurement of the same pair before the API simplification gave the same +320 by
 
 ## Hardware acceleration (Linux)
 
-`XPlatApplicationOptions.GfxHardwareAcceleration` is the same `bool`, with the same mechanics and
+`ApplicationOptions.GfxHardwareAcceleration` is the same `bool`, with the same mechanics and
 the same `--no-hardware-acceleration` switch. It defaults to **true on Linux**, as it does on
 Windows, and the GTK4 backend honours it exactly as the other two do: an application that assigns
 it false, or launches with the switch, gets the CPU texture path and nothing else changes.
@@ -4632,7 +4632,7 @@ gfx: gl; renderer: Mesa / llvmpipe (LLVM 20.1.2, 256 bits)
 Unlike Win32 and AppKit, the GTK4 decision cannot be made while the window is being shown - a GL
 context only exists once the area has been allocated and drawn - so `AddGraphicsPathChangedHandler`
 runs once it is made, and reads immediately for a window that never asked for acceleration. Set
-`XPLATUI_GL_TRACE=1` to print the framebuffer, the retained target, per-frame damage and every
+`KOLVIR_GL_TRACE=1` to print the framebuffer, the retained target, per-frame damage and every
 failure to stderr.
 
 ### Measuring the GTK4 GPU path by hand
@@ -4643,7 +4643,7 @@ The measured-rendering page (index 54) works exactly as it does on Windows and m
 1. Make sure no other instance is running first: the demo is `SingleInstance = true`, so a launch
    can be handed to a window that is already up instead of starting a new one - the status line then
    reads "A second launch was handed to this window" and the `BENCH` line you get back describes the
-   *other* window's geometry, or none arrives at all. `pgrep -af XPlatUIDemoApp` before each run.
+   *other* window's geometry, or none arrives at all. `pgrep -af KolvirDemoApp` before each run.
 2. **Keep the window in sight.** Leave it unobscured on the current workspace, not minimised, and the
    session unlocked. The measurement counts frames the host actually painted, and GTK stops painting
    a toplevel that reports itself non-visible - so a covered window starves the count and the run
@@ -4655,7 +4655,7 @@ The measured-rendering page (index 54) works exactly as it does on Windows and m
    finishes. A `BENCH stalled: ...` line on stderr names that case; see below.
 3. Run the demo - host access, screenshots and input injection are in
    [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md). The footer says `gfx: gl` and the renderer string, or
-   `gfx: cpu (...)` with the step that failed; rerun with `XPLATUI_GL_TRACE=1` to capture every step.
+   `gfx: cpu (...)` with the step that failed; rerun with `KOLVIR_GL_TRACE=1` to capture every step.
 4. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
    **Measure 600 frames**. The first 30 frames are discarded.
 5. Press again with the other damage mode.
@@ -4817,17 +4817,17 @@ the same window captured with `--no-hardware-acceleration` on `master` and on th
 **byte-identical** over the whole client area (0 pixels differ, page 1, 1280 x 760 @ 2.00), which is
 what proves the tier really is the code that was already there.
 
-Measured cost on the `XPlatUI.Minimal` fixture (`linux-x64`, NativeAOT, the loose Skia row of section 8 in
+Measured cost on the `Kolvir.Minimal` fixture (`linux-x64`, NativeAOT, the loose Skia row of section 8 in
 [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
 
 ```
-dotnet publish XPlatUI.Minimal/XPlatUI.Minimal.csproj -c Release -r linux-x64 \
+dotnet publish Kolvir.Minimal/Kolvir.Minimal.csproj -c Release -r linux-x64 \
   -p:EmbedSkiaSharpNative=false -p:TrimmerSingleWarn=false
 ```
 
 | Measurement | Bytes |
 | --- | ---: |
-| `XPlatUI.Minimal` floor before this change | 4,276,144 |
+| `Kolvir.Minimal` floor before this change | 4,276,144 |
 | After the GL seam, its tier fallback and the `GraphicsPath` diagnostics | 4,338,944 |
 | Delta | +62,800 (+1.47 %) |
 
@@ -4857,17 +4857,17 @@ the code: `EnsureSize` for the scale case, and a lost context drops to the CPU p
 
 ## Writing a backend
 
-A backend is two interfaces plus one registration hook. `IXPlatApplicationBackend` owns the platform
-loop and the platform-wide services; `IXPlatWindowBackend` owns one native window and the
-`XPlatUiHost` that paints into it. `XPlatUI.Backend.Win32`, `XPlatUI.Backend.AppKit`,
-`XPlatUI.Backend.Gtk4` and `XPlatUI.Backend.Headless` are the four worked examples.
+A backend is two interfaces plus one registration hook. `IApplicationBackend` owns the platform
+loop and the platform-wide services; `IWindowBackend` owns one native window and the
+`UiHost` that paints into it. `Kolvir.Backend.Win32`, `Kolvir.Backend.AppKit`,
+`Kolvir.Backend.Gtk4` and `Kolvir.Backend.Headless` are the four worked examples.
 
-1. `Initialize` gets the `XPlatApplication`; `Run` enters the platform loop and returns its exit
+1. `Initialize` gets the `Application`; `Run` enters the platform loop and returns its exit
    code; `Quit` leaves it; `Invoke` marshals a callback onto the UI thread;
    `TryClaimSingleInstance` returns false when another process already owns the instance key, and
    runs the `AddSecondInstanceHandler` handlers when a later launch is handed over.
-2. `CreateWindow` returns an `IXPlatWindowBackend`. It creates the native window and an `SKSurface`
-   (or a bitmap-backed surface) of its client size, and it creates and owns the `XPlatUiHost`.
+2. `CreateWindow` returns an `IWindowBackend`. It creates the native window and an `SKSurface`
+   (or a bitmap-backed surface) of its client size, and it creates and owns the `UiHost`.
 3. On resize: `Host.SetClientSize(width / scale, height / scale)`. On paint: `canvas.Scale(scale)`
    then `Host.Paint(canvas)`, which paints everything unless the backend has opted into
    `PartialUpdates`. A backend that keeps its surface between frames sets `PartialUpdates = true`,
@@ -4881,7 +4881,7 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
    scale factor. There is no tick to forward: a control that needs time runs its own timer.
 5. Run the `Shown`, `CloseRequested`, `Closed`, `Activated`, `Deactivated`, `ClientSizeChanged`,
    `ScaleChanged` and `StateChanged` handlers; the model forwards each to the matching
-   `XPlatWindow` method.
+   `Window` method.
 6. `RegisterServices` adds the platform services to MEDI's `IServiceCollection` - the clipboard, the
    system theme, the dialog service and the context menu presenter. Doing it through one hook
    instead of a `Create*` member per service keeps adding a service from breaking every backend, and
@@ -4889,16 +4889,16 @@ loop and the platform-wide services; `IXPlatWindowBackend` owns one native windo
 7. Implement `GetScreens`, reporting each display's refresh rate when the platform can supply one -
    it is what a marquee progress bar animates at - and `Shutdown` releases whatever `Initialize`
    took.
-8. Implement `CreateTimer`, returning an `IXPlatTimerBackend` that calls the callback it is handed
+8. Implement `CreateTimer`, returning an `ITimerBackend` that calls the callback it is handed
    once per interval. `new ThreadPoolTimerBackend(tick)` is the whole implementation for a platform
    whose own timer is fine-grained; the Win32 backend answers an interval under the 15.625 ms system
    timer period with a high-resolution waitable timer instead, because a pool timer there cannot
    fire any faster than the period however small the interval is. It is a `Create*` member rather
    than a registered service for the same reason `CreateWindow` is: a timer is an object the backend
    owns for as long as a control needs it, not a singleton the container holds. Dropping overlapping
-   ticks and moving the callback to the UI thread stay in `XPlatTimer`, so a backend only has to get
+   ticks and moving the callback to the UI thread stay in `Timer`, so a backend only has to get
    the wait right.
-9. Optionally assign an `IXPlatPopupService` to `XPlatPopupService.Current` so popups become real
+9. Optionally assign an `IPopupService` to `PopupService.Current` so popups become real
    windows instead of overlays inside the owning window. It is a static rather than a DI service
    because a popup belongs to one owner host rather than to the application, and because leaving it
    null is a valid implementation: the overlay fallback then draws every popup inside the window.
@@ -4912,19 +4912,19 @@ standard Edit key equivalents come from being in it.
 
 ## NativeAOT
 
-`XPlatUI` sets `IsAotCompatible` and uses no reflection, so it publishes with NativeAOT.
+`Kolvir` sets `IsAotCompatible` and uses no reflection, so it publishes with NativeAOT.
 Verified locally with the Win32 build of the demo application itself (no Windows Forms, no
 System.Drawing). The `FolderProfile` publish profile
-(`XPlatUIDemo.App/Properties/PublishProfiles/FolderProfile.pubxml`) is preconfigured for AOT +
+(`Kolvir.Demo.App/Properties/PublishProfiles/FolderProfile.pubxml`) is preconfigured for AOT +
 trimming, so publishing is just:
 
 ```
-dotnet publish XPlatUIDemo.App\XPlatUIDemo.App.csproj -p:PublishProfile=FolderProfile
+dotnet publish Kolvir.Demo.App\Kolvir.Demo.App.csproj -p:PublishProfile=FolderProfile
 ```
 
 or right-click **Publish** in Visual Studio. The result is a **single** self-contained
-`XPlatUIDemoApp.exe` (9,270,272 bytes, 8.84 MiB, of which 5.2 MiB is the compressed Skia native
-binary) and an optional `XPlatUIDemoApp.pdb` for debugging. Nothing else is needed to run it - the
+`KolvirDemoApp.exe` (9,270,272 bytes, 8.84 MiB, of which 5.2 MiB is the compressed Skia native
+binary) and an optional `KolvirDemoApp.pdb` for debugging. Nothing else is needed to run it - the
 AOT build opens the real window and renders the demo.
 
 On Windows this needs the MSVC linker (`link.exe`). The profile switches to
@@ -4934,7 +4934,7 @@ calls `vcvars64.bat` first):
 
 ```
 call "C:\Program Files\Microsoft Visual Studio\18\Enterprise\VC\Auxiliary\Build\vcvars64.bat"
-dotnet publish XPlatUIDemo.App\XPlatUIDemo.App.csproj -p:PublishProfile=FolderProfile
+dotnet publish Kolvir.Demo.App\Kolvir.Demo.App.csproj -p:PublishProfile=FolderProfile
 ```
 
 From a plain shell the SDK locates the toolset itself with `vswhere.exe`; if that fails (for
@@ -4944,31 +4944,31 @@ Linux publishes the same way, and does not need a `clang` or `lld` installation:
 package carries its own toolchain.
 
 ```
-dotnet publish XPlatUIDemo.App/XPlatUIDemo.App.csproj -c Release -r linux-x64 -p:PublishAot=true
+dotnet publish Kolvir.Demo.App/Kolvir.Demo.App.csproj -c Release -r linux-x64 -p:PublishAot=true
 ```
 
-The result is a **single** `publish/XPlatUIDemoApp` (9,537,712 bytes, 9.10 MiB, a stripped ELF
-executable) plus an optional `XPlatUIDemoApp.dbg`. It is genuinely standalone - copy just that one
+The result is a **single** `publish/KolvirDemoApp` (9,537,712 bytes, 9.10 MiB, a stripped ELF
+executable) plus an optional `KolvirDemoApp.dbg`. It is genuinely standalone - copy just that one
 file anywhere and it runs, window and all.
 
-`XPlatUI.Minimal` is the measurement fixture: one window, one label, no features. It publishes to
+`Kolvir.Minimal` is the measurement fixture: one window, one label, no features. It publishes to
 8,527,872 bytes (8.13 MiB) on Windows and 8,867,296 (8.46 MiB) on Linux, so everything the demo
 demonstrates costs about 0.7 MB on Windows and 0.6 MB on Linux over the floor an application starts
 from. [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) section 8 records the baseline that every feature is
 measured against.
 
 SkiaSharp only ships a dynamic `libSkiaSharp.dll`/`libSkiaSharp.so`, so a native executable cannot
-simply link it. When `PublishAot` is on, XPlatUI's own build assets (`buildTransitive/` in the
+simply link it. When `PublishAot` is on, Kolvir's own build assets (`buildTransitive/` in the
 package, which `Directory.Build.targets` imports for this repository's projects) gzip the
 RID-specific native library and embed it in the application as the manifest resource
-`XPlatUI.Native.libSkiaSharp.dll.gz` (or `...libSkiaSharp.so.gz`); `SkiaNativeLoader`, in the
-library, extracts it on first use to `%LOCALAPPDATA%\XPlatUI\native\<version>-<size>\libSkiaSharp.dll`
-(`~/.local/share/XPlatUI/native/<version>-<size>/libSkiaSharp.so` on Linux, honouring
+`Kolvir.Native.libSkiaSharp.dll.gz` (or `...libSkiaSharp.so.gz`); `SkiaNativeLoader`, in the
+library, extracts it on first use to `%LOCALAPPDATA%\Kolvir\native\<version>-<size>\libSkiaSharp.dll`
+(`~/.local/share/Kolvir/native/<version>-<size>/libSkiaSharp.so` on Linux, honouring
 `XDG_DATA_HOME`), which is cached so later runs just load it, and redirects SkiaSharp's P/Invoke at it
 before the first call into Skia. The redirect is not optional on Linux: `libSkiaSharp.so` carries no
 `SONAME`, so a library loaded by full path is not what `dlopen("libSkiaSharp.so")` resolves to. The
 resource belongs to the application's assembly, because the copy to embed is the one the
-application's build resolved for its platform. `XPlatUIBackend.CreateDefault()` names it for you: it
+application's build resolved for its platform. `KolvirBackend.CreateDefault()` names it for you: it
 calls `SkiaNativeLoader.EnsureLoaded(Assembly.GetEntryAssembly())` before it returns the backend, so
 an application's `Main` never mentions SkiaSharp at all. Calling `EnsureLoaded` yourself as well is
 harmless; it is idempotent. A regular (non-AOT) build is untouched:
@@ -4984,16 +4984,16 @@ the deliverable. See [Bundle size](#bundle-size).
 
 ### The SVG feature's second native library
 
-`XPlatUI.Feature.Svg` renders `<text>` through Svg.Skia, which shapes it with **HarfBuzzSharp** - a
+`Kolvir.Feature.Svg` renders `<text>` through Svg.Skia, which shapes it with **HarfBuzzSharp** - a
 native library of its own, separate from SkiaSharp's. A publish of an application that shows an SVG
 used to drop `libHarfBuzzSharp.dll`/`.so`/`.dylib` beside the executable even though `libSkiaSharp`
 had stopped being loose. The feature now carries build assets of its own (`buildTransitive/` in its
 package, imported by `Directory.Build.targets` here) that do exactly what the core ones do: find the
 native the build resolved, gzip it, embed it in the application as
-`XPlatUI.Feature.Svg.Native.libHarfBuzzSharp.dll.gz` (or `.so`/`.dylib`), and keep it out of the
+`Kolvir.Feature.Svg.Native.libHarfBuzzSharp.dll.gz` (or `.so`/`.dylib`), and keep it out of the
 publish output. `HarfBuzzNativeLoader`, in the feature assembly, extracts it on first use to
-`%LOCALAPPDATA%\XPlatUI\native\harfbuzz\<version>-<size>\` (`~/.local/share/XPlatUI/native/harfbuzz`
-on Linux, `~/Library/Application Support/XPlatUI/native/harfbuzz` on macOS) and redirects
+`%LOCALAPPDATA%\Kolvir\native\harfbuzz\<version>-<size>\` (`~/.local/share/Kolvir/native/harfbuzz`
+on Linux, `~/Library/Application Support/Kolvir/native/harfbuzz` on macOS) and redirects
 HarfBuzzSharp's P/Invoke at it.
 
 Three things about it are worth knowing rather than discovering:
@@ -5028,13 +5028,13 @@ executable and its own symbol file, and nothing else** - no `libSkiaSharp.*` and
 | win-x64 | 22,616,576 | 23,661,568 (+1,044,992) | 2,065,248 |
 | linux-x64 | 23,056,880 | 24,294,000 (+1,237,120) | 3,059,496 |
 
-macOS is excluded here too, and this one was measured rather than copied. An XPlatUI macOS
+macOS is excluded here too, and this one was measured rather than copied. A Kolvir macOS
 application publishes as a `net10.0-macos` **`.app` bundle** even with `PublishAot` on, and its AOT
 executable records the dylib as a *load-time* dependency: `otool -L` lists
 `@executable_path/../../Contents/MonoBundle/libHarfBuzzSharp.dylib`, so deleting the file stops dyld
 before any managed code runs and a resolver could never help. A plain `net10.0` Mach-O AOT build is
 a different shape, and it *does* work - a probe published that way extracted the dylib to
-`~/Library/Application Support/XPlatUI/native/harfbuzz/` and shaped text with it, which is why the
+`~/Library/Application Support/Kolvir/native/harfbuzz/` and shaped text with it, which is why the
 exclusion is about the bundle and not about what macOS allows. The demo's macOS bundle is unchanged
 by this: executable 15,790,224 -> 15,790,256 bytes, HarfBuzz still loose inside the bundle.
 
@@ -5047,15 +5047,15 @@ all of which differ host by host. Its recipes were run rather than transcribed, 
 known not to work it says so.
 
 ```
-dotnet run --project XPlatUIDemo.App
+dotnet run --project Kolvir.Demo.App
 ```
 
 `Program.cs` is the whole program: it picks the backend for the platform this build is for, describes
-one `XPlatWindow` around `new DemoUi().Root`, and runs the `XPlatApplication`. Everything else lives
+one `Window` around `new DemoUi().Root`, and runs the `Application`. Everything else lives
 behind the backend - `Win32WindowBackend` creates the window with raw `user32` P/Invoke, owns a 32-bit
 DIB section that Skia draws into (or a WGL-backed Skia surface when hardware acceleration is on),
 blits it on `WM_PAINT` (or swaps the GL surface), and forwards mouse/keyboard messages to the
-`XPlatUiHost`.
+`UiHost`.
 
 The sample is organised as a navigation list down the left and a stage on the right that shows one
 demo at a time, so adding a demo is a row in `DemoUi.Demos` rather than another crowded card. Every
@@ -5064,14 +5064,14 @@ page is built once and kept, and switching pages re-parents one control into the
 To render the same sample UI headlessly (useful for visual checks in CI):
 
 ```
-XPlatUIDemoApp.exe --render out.png 1280 820
-XPlatUIDemoApp.exe --render out.png 1280 820 --page 3
+KolvirDemoApp.exe --render out.png 1280 820
+KolvirDemoApp.exe --render out.png 1280 820 --page 3
 ```
 
 Add `--light` or `--dark` to either mode to force an appearance instead of using the system one; the
 header's **Switch appearance** button flips it at runtime. `--page` picks a stage page by index in
 both modes, which is what makes a single page renderable on its own.
-`XPlatUI.Tests`' `UndoHistoryTests` covers the history headlessly instead: it drives real text boxes
+`Kolvir.Tests`' `UndoHistoryTests` covers the history headlessly instead: it drives real text boxes
 through the host's own input entry points with a clock the test moves by hand, and one failed
 assertion names the coalescing rule that broke.
 `--undo-focus` puts the caret in the undo page's field, the way `--span-menu`
@@ -5094,7 +5094,7 @@ The footer always names the live path - `gfx: gl - <vendor> / <renderer>` or
 1. Run the demo on the machine being measured. Check the footer says `gfx: gl` and that the
    renderer is the GPU you expect. On a fallback it says `gfx: cpu (...)` with the step that
    failed, for example `cpu (no gl interface; gdi: no wgl context (error 2000))`; rerun with
-   `XPLATUI_GL_TRACE=1` to capture every probe attempt for a bug report.
+   `KOLVIR_GL_TRACE=1` to capture every probe attempt for a bug report.
    That is the fallback doing its job rather than a failure to record.
 2. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
    **Measure 600 frames**. The page is invalidated from one 15 ms timer (about 66 Hz, which is what
@@ -5123,7 +5123,7 @@ The readout is driven by the same timer and is included in the frame it reports;
 own label about four times a second, so a completely idle window has one small repaint roughly
 every 250 ms. In **partial** mode the measured area is the 180 x 180 swatch, which does not
 overlap the readout; the caveat is the timer itself, not the label's area. The frame time is the
-host's paint (`XPlatUiHost.LastFrameTime`), so a GL run's `SwapBuffers` happens after the number
+host's paint (`UiHost.LastFrameTime`), so a GL run's `SwapBuffers` happens after the number
 and is not included.
 
 The timer starts only when the page is displayed and stops when it is left, which is the same
@@ -5161,7 +5161,7 @@ frame now leaves 6x more of it.
 
 #### What the frame number excludes
 
-`p50`/`p95`/`max`/`mean` are the host's paint (`XPlatUiHost.LastFrameTime`). A GL frame's
+`p50`/`p95`/`max`/`mean` are the host's paint (`UiHost.LastFrameTime`). A GL frame's
 offscreen-to-window blit and `wglSwapBuffers` happen after that paint and are **not** in the number.
 The blit was timed separately at **0.054 ms** on the software VM, but it has **not** been timed on
 this hardware, so the true hardware partial frame is 0.047 ms plus an unmeasured blit - still
@@ -5191,7 +5191,7 @@ the hardware table above is the one to quote.
 
 ### On Linux (GTK4)
 
-The Linux build of `XPlatUIDemo.App` uses the
+The Linux build of `Kolvir.Demo.App` uses the
 [GirCore](https://github.com/gircore/gircore) GTK4 bindings, so the build needs the GTK4 runtime and
 development headers, plus a font backend for SkiaSharp:
 
@@ -5203,7 +5203,7 @@ The Skia native library comes from the `SkiaSharp.NativeAssets.Linux` package, s
 installed for it. Then:
 
 ```
-dotnet run --project XPlatUIDemo.App
+dotnet run --project Kolvir.Demo.App
 ```
 
 The window is a plain `Gtk.ApplicationWindow` whose child is a `Gtk.Box` holding the view: a
@@ -5223,17 +5223,17 @@ driver on the first resize, because the renderer still holds the previous frame'
 the price of that - about 1.3 ms of a 4.4 ms frame at 2560x1452 on llvmpipe.
 
 Everything else mirrors the Win32 backend: `Gtk.GestureClick`, `Gtk.EventControllerMotion` and
-`Gtk.EventControllerKey` feed `XPlatUiHost.Process*`, and the system appearance is read from
+`Gtk.EventControllerKey` feed `UiHost.Process*`, and the system appearance is read from
 `org.gnome.desktop.interface color-scheme` (falling back to `GTK_THEME` and
 `GtkSettings.GtkApplicationPreferDarkTheme`). Context menus are real `Gtk.Popover`s, and the desktop
-UI font (`GtkSettings.GtkFontName`) is handed to the library through `XPlatTheme.FontFamily`, so the
+UI font (`GtkSettings.GtkFontName`) is handed to the library through `Theme.FontFamily`, so the
 controls look native on GNOME.
 
 The same headless switches work, and they run before any GTK type is loaded, so they need no display
 at all - no Xvfb, and they work over ssh:
 
 ```
-dotnet XPlatUIDemoApp.dll --render out.png 1280 820 --dark
+dotnet KolvirDemoApp.dll --render out.png 1280 820 --dark
 ```
 
 That ordering is load-bearing rather than tidy. `Gtk.Module.Initialize()` opens the display and
@@ -5244,17 +5244,17 @@ GSettings: it takes the palette from `--dark` / `--light` (light by default) and
 typeface instead of the desktop UI font. That also makes CI screenshots deterministic, at the cost of
 the render not using the same font as the window does.
 
-Set `XPLATUI_DEBUG=1` to trace host work (frames, buffer reallocation) to stderr.
+Set `KOLVIR_DEBUG=1` to trace host work (frames, buffer reallocation) to stderr.
 
 ### On macOS (AppKit)
 
-The macOS build of `XPlatUIDemo.App` is a native macOS application. It targets `net10.0-macos` and
+The macOS build of `Kolvir.Demo.App` is a native macOS application. It targets `net10.0-macos` and
 uses Apple's AppKit bindings, so the window, its title bar, the menu bar, the context menus and the
 clipboard are all the real thing; only the contents of the window are drawn by the library.
 
 That target framework is why the macOS build has to happen on a Mac: it needs the macOS workload and
 the Xcode tools that bundle and sign the `.app`. `Program.cs` selects it with
-`$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `XPlatUI.slnx` on every platform
+`$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `Kolvir.slnx` on every platform
 and simply resolves to a different target framework on each. Build it on a Mac, or let the
 `macOS build` GitHub Actions workflow do it - that workflow runs on pull requests against `master`
 and on demand (`workflow_dispatch`), not on every push, so a branch that is still being worked on
@@ -5262,32 +5262,32 @@ is expected to be built locally:
 
 ```
 dotnet workload install macos
-dotnet build XPlatUIDemo.App/XPlatUIDemo.App.csproj
-open XPlatUIDemo.App/bin/Debug/net10.0-macos/osx-arm64/XPlatUIDemoApp.app
+dotnet build Kolvir.Demo.App/Kolvir.Demo.App.csproj
+open Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app
 ```
 
 The macOS workload only accepts an Xcode whose major.minor version matches the one its bindings were
 generated against, and the error it raises (`requires Xcode 27.1`) is easy to mistake for a real
-problem. `XPlatUIDemo.App.csproj` therefore sets `ValidateXcodeVersion` to `false` for
+problem. `Kolvir.Demo.App.csproj` therefore sets `ValidateXcodeVersion` to `false` for
 `net10.0-macos`: a newer Xcode builds and renders this app unchanged, so the exact-match rule only
 ever gets in the way on a workstation that has been kept up to date. The guard is a property, so it
 can be turned back on per build:
 
 ```
-dotnet build XPlatUIDemo.App/XPlatUIDemo.App.csproj -p:ValidateXcodeVersion=true
+dotnet build Kolvir.Demo.App/Kolvir.Demo.App.csproj -p:ValidateXcodeVersion=true
 ```
 
 Nothing here compiles native code, so a mismatched Xcode cannot actually break the build. The
 `macOS build` workflow still selects the Xcode the workload expects (`/Applications/Xcode_27.1.app`
 on the `xcode-27` image) rather than relying on either setting.
 
-The bundle is produced by the build itself; its identity lives in `XPlatUIDemo.App/Info.plist`. It is
-signed ad-hoc, so a copy downloaded from CI needs `xattr -dr com.apple.quarantine XPlatUIDemoApp.app`
+The bundle is produced by the build itself; its identity lives in `Kolvir.Demo.App/Info.plist`. It is
+signed ad-hoc, so a copy downloaded from CI needs `xattr -dr com.apple.quarantine KolvirDemoApp.app`
 before it will open. The same headless switches work, and they run before AppKit is initialised, so
 they work over ssh too:
 
 ```
-XPlatUIDemoApp.app/Contents/MacOS/XPlatUIDemoApp --render out.png 1280 820 --dark
+KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp --render out.png 1280 820 --dark
 ```
 
 `AppKitSkiaView` is a plain `NSView`, flipped so y grows downwards like every other backend, and it is
@@ -5329,7 +5329,7 @@ process's memory high-water mark came from. Because the
 buffer outgrows the window, each frame clips the canvas to the window before painting; the clip is
 applied *after* the scale, in the same logical units the controls paint in, or it would only cover
 the top left `1/scale` of the view. Mouse and
-keyboard events are forwarded to `XPlatUiHost.Process*` from the `NSResponder` overrides, a 250 ms
+keyboard events are forwarded to `UiHost.Process*` from the `NSResponder` overrides, a 250 ms
 `NSTimer` drains the UI-thread queue and doubles as the poll for a system appearance change
 (`NSAppearance.FindBestMatch`), and a tracking area keeps `MouseMoved`/`MouseEntered`/`MouseExited`
 coming so hover states and cursors work.
@@ -5365,12 +5365,12 @@ freed memory draws whatever the allocator left there.
 
 macOS reports accelerators through `Command` rather than `Control`, so `AppKitMenuBar` gives Cut, Copy,
 Paste and Select All real menu items whose `Cmd` key equivalents feed the same editing commands into
-the host. `AppKitKeyMap` deliberately does *not* map `Command` onto `XPlatModifiers.Control`: a `Cmd`
+the host. `AppKitKeyMap` deliberately does *not* map `Command` onto `Modifiers.Control`: a `Cmd`
 combination that the menu bar did not claim is swallowed instead of typing its letter, while
 `Control` combinations reach the library as shortcuts. The system UI font (`SF Pro Text`) is handed
-to the library through `XPlatTheme.FontFamily`.
+to the library through `Theme.FontFamily`.
 
-Set `XPLATUI_DEBUG=1` to trace frames and buffer reallocation to stderr. It also prints a `stats:`
+Set `KOLVIR_DEBUG=1` to trace frames and buffer reallocation to stderr. It also prints a `stats:`
 line every five seconds - frame rate, frames drawn, buffers allocated, managed heap, total managed
 allocation and resident memory - which is how a runaway repaint (a high frame rate with idle input)
 or a per-frame retention (resident memory climbing while the frame rate stays low) shows itself.
@@ -5404,8 +5404,8 @@ exactly the same pixels. The project leaves `LinkMode` alone.
 Publishing therefore needs no extra switches:
 
 ```
-dotnet publish XPlatUIDemo.App/XPlatUIDemo.App.csproj -c Release -r osx-arm64 -p:CreatePackage=false
-open XPlatUIDemo.App/bin/Release/net10.0-macos/osx-arm64/XPlatUIDemoApp.app
+dotnet publish Kolvir.Demo.App/Kolvir.Demo.App.csproj -c Release -r osx-arm64 -p:CreatePackage=false
+open Kolvir.Demo.App/bin/Release/net10.0-macos/osx-arm64/KolvirDemoApp.app
 ```
 
 Two details are easy to trip over:
@@ -5446,7 +5446,7 @@ always-retained type, nothing runs unless the application opted in, and the pull
 number instead of an assurance.
 
 A feature that ships as its own package needs no multi-platform build. The `Feature pack` workflow
-packs every `XPlatUI.Feature.*` project on a macOS runner - `EnableWindowsTargeting=true` brings the
+packs every `Kolvir.Feature.*` project on a macOS runner - `EnableWindowsTargeting=true` brings the
 Windows reference pack with it - then opens each package and fails unless it carries a `lib/` folder
 and a dependency group for every platform. That check exists because both omissions are silent in
 NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. Section 4 of the
@@ -5459,7 +5459,7 @@ pull request rather than a follow-up. A bug fix carries a regression test that f
 and passes after it; a new feature carries tests for the behaviour it introduces, including the
 public surface an application is meant to use.
 
-- They go in `XPlatUI.Tests`, or in the feature's own `XPlatUI.Feature.*.Tests` assembly when the
+- They go in `Kolvir.Tests`, or in the feature's own `Kolvir.Feature.*.Tests` assembly when the
   work lives outside the core library - the same place the surrounding tests for that area live,
   rather than a new file of their own.
 - They run headless, on all three platforms, with no display, window server or network, and under

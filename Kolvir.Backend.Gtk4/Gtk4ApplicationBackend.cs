@@ -1,0 +1,789 @@
+using System.Runtime.ExceptionServices;
+using System.Text;
+using Microsoft.Extensions.DependencyInjection;
+using SkiaSharp;
+
+namespace Kolvir.Backend.Gtk4;
+
+/// <summary>
+/// The GTK4 application backend: it owns the <see cref="Gtk.Application"/>, the main loop, the
+/// cross-thread work queue and the process-wide services (clipboard, system theme, dialogs).
+/// </summary>
+/// <remarks>
+/// <para>
+/// GTK has no run-loop modes and no "stop" flag, so the two jobs AppKit splits between an
+/// <c>NSApplication</c> stop and a posted event are done here by the GLib main context: queued work
+/// is drained from an idle source, and a repeating timeout keeps the loop honest while a nested
+/// modal loop or a dialog owns it.
+/// </para>
+/// <para>
+/// The application holds a GLib application reference for as long as it runs
+/// (<see cref="Gio.Application.Hold"/>), because GTK would otherwise end the loop the moment the
+/// last window was destroyed, which would defeat <see cref="ShutdownMode.OnExplicitExit"/>.
+/// </para>
+/// </remarks>
+public sealed class Gtk4ApplicationBackend : IApplicationBackend
+{
+    private Action<object>? _activated;
+    private Action<object, SecondInstanceEventArgs>? _secondInstance;
+    private static readonly TimeSpan PollInterval = TimeSpan.FromMilliseconds(250);
+
+    private readonly Queue<Action> _pending = new();
+    private readonly object _pendingGate = new();
+    private readonly List<Gtk4WindowBackend> _windows = [];
+    private readonly object _windowsGate = new();
+    private readonly List<GLib.MainLoop> _modalLoops = [];
+    private readonly GLib.SourceFunc _drain;
+    private readonly GLib.SourceFunc _poll;
+
+    private Gtk.Application? _native;
+    private uint _pollSource;
+    private Gtk4WindowBackend? _activeWindow;
+    private int _uiThreadId;
+    private int _exitCode;
+    private bool _held;
+    private bool _initialized;
+    private bool _loopRunning;
+    private bool _shutDown;
+
+    /// <summary>Creates the backend. Nothing touches GTK until <see cref="Initialize"/>.</summary>
+    public Gtk4ApplicationBackend()
+    {
+        _uiThreadId = Environment.CurrentManagedThreadId;
+        _drain = DrainIdle;
+        _poll = OnPoll;
+    }
+
+    /// <summary>The application this backend belongs to, or null before <see cref="Initialize"/>.</summary>
+    public Application? Application { get; private set; }
+
+    /// <summary>
+    /// The desktop's light/dark preference, as the application will see it.
+    /// </summary>
+    /// <remarks>
+    /// Exposed because the palette sometimes has to be right before an <see
+    /// cref="Application"/> exists: the harness's headless <c>--render</c> mode paints through
+    /// the headless backend, which installs no system theme, so the host applies this one itself.
+    /// </remarks>
+    public ISystemTheme SystemTheme { get; } = new Gtk4SystemTheme();
+
+    /// <summary>The GTK application, or null before <see cref="Initialize"/>.</summary>
+    public Gtk.Application? NativeApplication => _native;
+
+    /// <inheritdoc />
+    public void Initialize(Application application)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+
+        Application = application;
+        _uiThreadId = Environment.CurrentManagedThreadId;
+
+        // Opens the display and registers the native library resolver. Without a display GDK ends
+        // the process here, which is why a host that only wants to render to a PNG must never
+        // create an application.
+        Gtk.Module.Initialize();
+
+        var native = Gtk.Application.New(
+            BuildApplicationId(application.InstanceKey),
+            application.Options.SingleInstance
+                ? Gio.ApplicationFlags.HandlesCommandLine
+                : Gio.ApplicationFlags.NonUnique);
+
+        native.OnActivate += (_, _) => OnActivate();
+        native.OnCommandLine += (_, args) => OnCommandLine(args);
+        _native = native;
+
+        // The default icon name is the application-wide half of ApplicationOptions.Icon; each
+        // window still sets its own, which is what an X11 window manager reads.
+        if (application.Options.Icon?.Name is { Length: > 0 } iconName)
+        {
+            Gtk.Window.SetDefaultIconName(iconName);
+        }
+
+        if (SystemTheme is Gtk4SystemTheme theme)
+        {
+            theme.AddChangedHandler(OnSystemThemeChanged);
+            theme.Attach();
+        }
+
+        _initialized = true;
+    }
+
+    /// <inheritdoc />
+    public int Run()
+    {
+        _uiThreadId = Environment.CurrentManagedThreadId;
+
+        if (!_initialized || _native is null)
+        {
+            return -1;
+        }
+
+        StartPollTimer();
+
+        // Keeps the application alive even with no windows, so the shutdown mode decides when it
+        // ends rather than GTK's last-window rule.
+        Hold();
+
+        IReadOnlyList<string> arguments = Application?.Options.ResolveCommandLine() ?? [];
+
+        _native.Run([Environment.ProcessPath ?? "Kolvir", .. arguments]);
+        return _exitCode;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// GTK decides, through the session bus: registering the application id either wins it for this
+    /// process or reveals that another one owns it. A forwarded launch is delivered over D-Bus and
+    /// the <see cref="Gio.Application"/> loop returns as soon as it has been sent.
+    /// </remarks>
+    public bool TryClaimSingleInstance()
+    {
+        if (!_initialized || _native is null || Application is not { Options.SingleInstance: true })
+        {
+            return true;
+        }
+
+        try
+        {
+            if (!_native.Register(null!))
+            {
+                // No session bus, so uniqueness cannot be established. Starting beats refusing to.
+                return true;
+            }
+
+            if (!_native.IsRemote)
+            {
+                return true;
+            }
+
+            IReadOnlyList<string> arguments = Application.Options.ResolveCommandLine();
+
+            _native.Run([Environment.ProcessPath ?? "Kolvir", .. arguments]);
+            return false;
+        }
+        catch (Exception)
+        {
+            // A D-Bus failure must not stop the application from starting.
+            return true;
+        }
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Never run here: a GTK application is brought forward by a forwarded command line, which
+    /// arrives through <see cref="AddSecondInstanceHandler"/> instead.
+    /// </remarks>
+    public IDisposable AddActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new HandlerToken<Action<object>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
+
+    /// <inheritdoc />
+    public IDisposable AddSecondInstanceHandler(Action<object, SecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new HandlerToken<Action<object, SecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, SecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
+
+    /// <inheritdoc />
+    public void Quit(int exitCode)
+    {
+        _exitCode = exitCode;
+
+        if (!_initialized)
+        {
+            return;
+        }
+
+        // A nested modal loop owns the loop while it runs, so it is ended first; the application's
+        // own quit would not be seen until that loop returned.
+        foreach (var loop in _modalLoops.ToArray())
+        {
+            if (loop.IsRunning())
+            {
+                loop.Quit();
+            }
+        }
+
+        _modalLoops.Clear();
+
+        _native?.Quit();
+        Wake();
+    }
+
+    /// <inheritdoc />
+    public void Invoke(Action action, bool synchronous)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (synchronous && Environment.CurrentManagedThreadId == _uiThreadId)
+        {
+            action();
+            return;
+        }
+
+        if (!synchronous)
+        {
+            lock (_pendingGate)
+            {
+                _pending.Enqueue(action);
+            }
+
+            Wake();
+            return;
+        }
+
+        using var completed = new ManualResetEventSlim();
+        ExceptionDispatchInfo? failure = null;
+
+        lock (_pendingGate)
+        {
+            _pending.Enqueue(() =>
+            {
+                try
+                {
+                    action();
+                }
+                catch (Exception ex)
+                {
+                    failure = ExceptionDispatchInfo.Capture(ex);
+                }
+                finally
+                {
+                    completed.Set();
+                }
+            });
+        }
+
+        Wake();
+        completed.Wait();
+        failure?.Throw();
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// Linux honours a sub-millisecond interval on a pool timer, so the portable wait is already
+    /// as precise as anything the display can show.
+    /// </remarks>
+    public ITimerBackend CreateTimer(Action tick) => new ThreadPoolTimerBackend(tick);
+
+    /// <inheritdoc />
+    public IWindowBackend CreateWindow(Window window)
+    {
+        ArgumentNullException.ThrowIfNull(window);
+
+        var backend = new Gtk4WindowBackend(this, window);
+
+        lock (_windowsGate)
+        {
+            _windows.Add(backend);
+        }
+
+        return backend;
+    }
+
+    /// <inheritdoc />
+    public void RegisterServices(IServiceCollection services)
+    {
+        ArgumentNullException.ThrowIfNull(services);
+
+        services.AddSingleton(this);
+        services.AddSingleton<Gtk4Clipboard>();
+        services.AddSingleton<IClipboard>(static provider => provider.GetRequiredService<Gtk4Clipboard>());
+        services.AddSingleton<Gtk4Launcher>();
+        services.AddSingleton<ILauncher>(static provider => provider.GetRequiredService<Gtk4Launcher>());
+        services.AddSingleton(SystemTheme);
+        services.AddSingleton<IDialogService, Gtk4DialogService>();
+    }
+
+    /// <inheritdoc />
+    public IReadOnlyList<Screen> GetScreens()
+    {
+        var screens = new List<Screen>();
+
+        try
+        {
+            var monitors = Gdk.Display.GetDefault()?.GetMonitors();
+            if (monitors is not null)
+            {
+                var count = monitors.GetNItems();
+
+                for (uint i = 0; i < count; i++)
+                {
+                    if (monitors.GetObject(i) is Gdk.Monitor monitor && monitor.Valid)
+                    {
+                        screens.Add(ToScreen(monitor, isPrimary: i == 0));
+                    }
+                }
+            }
+        }
+        catch (Exception)
+        {
+            // No display - a service, a CI agent, an ssh session. Reported below as one synthetic
+            // display so a window still has somewhere to centre itself.
+        }
+
+        if (screens.Count == 0)
+        {
+            screens.Add(new Screen(
+                new SKRect(0f, 0f, 1920f, 1080f),
+                new SKRect(0f, 0f, 1920f, 1055f),
+                1f,
+                isPrimary: true));
+        }
+
+        return screens;
+    }
+
+    /// <inheritdoc />
+    public void RunApplicationHooks(ApplicationPhase phase, Application application)
+    {
+        // Empty on purpose: this backend declares no typed application hooks yet.
+    }
+
+    /// <inheritdoc />
+    public void Shutdown()
+    {
+        if (_shutDown)
+        {
+            return;
+        }
+
+        _shutDown = true;
+
+        StopPollTimer();
+
+        lock (_pendingGate)
+        {
+            _pending.Clear();
+        }
+
+        lock (_windowsGate)
+        {
+            _windows.Clear();
+        }
+
+        _modalLoops.Clear();
+        _activeWindow = null;
+        _loopRunning = false;
+
+        if (SystemTheme is Gtk4SystemTheme theme)
+        {
+            theme.RemoveChangedHandler(OnSystemThemeChanged);
+        }
+
+        Release();
+
+        _native?.Dispose();
+        _native = null;
+
+        ContextMenuPresenter.Current = null;
+
+        if (ReferenceEquals(Kolvir.SystemTheme.Current, SystemTheme))
+        {
+            Kolvir.SystemTheme.Current = null;
+        }
+
+        _initialized = false;
+    }
+
+    /// <summary>True once GTK has entered its main loop, which is when windows can be presented.</summary>
+    internal bool IsLoopRunning => _loopRunning;
+
+    /// <summary>The primary display, as <see cref="IWindowBackend.Screen"/> needs before a window exists.</summary>
+    internal Screen PrimaryScreen
+    {
+        get
+        {
+            var screens = GetScreens();
+
+            foreach (var screen in screens)
+            {
+                if (screen.IsPrimary)
+                {
+                    return screen;
+                }
+            }
+
+            return screens[0];
+        }
+    }
+
+    /// <summary>The window that currently has focus, or null when none does.</summary>
+    internal Gtk4WindowBackend? ActiveWindow => _activeWindow;
+
+    /// <summary>Records that <paramref name="window"/> became the active window.</summary>
+    internal void NotifyWindowActivated(Gtk4WindowBackend window)
+    {
+        if (ReferenceEquals(_activeWindow, window))
+        {
+            return;
+        }
+
+        _activeWindow = window;
+
+        // A context menu is anchored to the view that shows it, so the presenter follows the active
+        // window rather than being installed once per window.
+        ContextMenuPresenter.Current = window.Presenter;
+    }
+
+    /// <summary>Records that <paramref name="window"/> stopped being the active window.</summary>
+    internal void NotifyWindowDeactivated(Gtk4WindowBackend window)
+    {
+        if (ReferenceEquals(_activeWindow, window))
+        {
+            _activeWindow = null;
+        }
+    }
+
+    /// <summary>Drops a disposed window from the bookkeeping the screens and presenters rely on.</summary>
+    internal void RemoveWindow(Gtk4WindowBackend window)
+    {
+        lock (_windowsGate)
+        {
+            _windows.Remove(window);
+        }
+
+        if (ReferenceEquals(_activeWindow, window))
+        {
+            _activeWindow = null;
+        }
+
+        if (ReferenceEquals(ContextMenuPresenter.Current, window.Presenter))
+        {
+            ContextMenuPresenter.Current = null;
+        }
+    }
+
+    /// <summary>
+    /// Registers a nested main loop that owns the event loop while a modal window is up.
+    /// </summary>
+    internal void EnterModal(GLib.MainLoop loop) => _modalLoops.Add(loop);
+
+    internal void ExitModal(GLib.MainLoop loop) => _modalLoops.Remove(loop);
+
+    /// <summary>Converts one GDK monitor into the library's logical, y-down space.</summary>
+    internal static Screen ToScreen(Gdk.Monitor monitor, bool isPrimary)
+    {
+        var geometry = monitor.Geometry;
+        var bounds = new SKRect(
+            geometry.X,
+            geometry.Y,
+            geometry.X + geometry.Width,
+            geometry.Y + geometry.Height);
+
+        // GTK reports a monitor's geometry but not its work area: the panel and dock are drawn by
+        // the shell over the display, so the usable area is reported as the whole monitor.
+        return new Screen(
+            bounds,
+            bounds,
+            Math.Max(monitor.ScaleFactor, 1),
+            isPrimary,
+            RefreshRateOf(monitor));
+    }
+
+    /// <summary>The display's refresh rate in Hz, or null when GDK does not report one.</summary>
+    private static float? RefreshRateOf(Gdk.Monitor monitor)
+    {
+        // GDK reports milli-Hertz, and zero for an unknown rate.
+        var rate = monitor.RefreshRate;
+        return rate > 0d ? (float)(rate / 1000d) : null;
+    }
+
+    /// <summary>The display a window is on, in logical units.</summary>
+    internal static Screen? ScreenForWindow(Gtk.Window window)
+    {
+        try
+        {
+            var display = window.GetDisplay();
+            var surface = window.GetSurface();
+            if (display is null || surface is null)
+            {
+                return null;
+            }
+
+            var monitor = display.GetMonitorAtSurface(surface);
+            if (monitor is null || !monitor.Valid)
+            {
+                return null;
+            }
+
+            return ToScreen(monitor, isPrimary: IsPrimaryMonitor(display, monitor));
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    private static bool IsPrimaryMonitor(Gdk.Display display, Gdk.Monitor monitor)
+    {
+        var monitors = display.GetMonitors();
+        if (monitors is null || monitors.GetNItems() == 0)
+        {
+            return false;
+        }
+
+        if (monitors.GetObject(0) is not Gdk.Monitor first || !first.Valid)
+        {
+            return false;
+        }
+
+        var geometry = monitor.Geometry;
+        var candidate = first.Geometry;
+
+        return geometry.X == candidate.X
+            && geometry.Y == candidate.Y
+            && geometry.Width == candidate.Width
+            && geometry.Height == candidate.Height;
+    }
+
+    private void OnActivate()
+    {
+        if (_loopRunning)
+        {
+            // Re-entry means another process asked this application to come forward over D-Bus,
+            // which is GTK's equivalent of a Dock click. The startup activate never lands here
+            // because the command-line handler marks the launch as handled.
+            var window = _activeWindow;
+
+            if (window is null)
+            {
+                lock (_windowsGate)
+                {
+                    window = _windows.Count > 0 ? _windows[0] : null;
+                }
+            }
+
+            window?.Activate();
+            _activated?.Invoke(this);
+            return;
+        }
+
+        // The activate signal is GTK's "the application is up", which is the earliest moment a
+        // window can be presented.
+        _loopRunning = true;
+
+        Gtk4WindowBackend[] windows;
+        lock (_windowsGate)
+        {
+            windows = [.. _windows];
+        }
+
+        foreach (var window in windows)
+        {
+            window.PresentPending();
+        }
+    }
+
+    /// <summary>
+    /// Handles the <c>command-line</c> signal, which GTK only emits when the application was
+    /// created with <see cref="Gio.ApplicationFlags.HandlesCommandLine"/>.
+    /// </summary>
+    /// <returns>
+    /// One, meaning handled. GLib would otherwise follow the signal with an <c>activate</c>, which
+    /// would present the windows a second time and report a re-activation that never happened.
+    /// </returns>
+    private int OnCommandLine(Gio.Application.CommandLineSignalArgs args)
+    {
+        var line = args.CommandLine;
+
+        if (line is null)
+        {
+            return 1;
+        }
+
+        var argv = line.GetArguments(out _);
+        IReadOnlyList<string> arguments = argv.Length > 1 ? argv[1..] : [];
+
+        if (line.GetIsRemote())
+        {
+            // Another launch was handed to this process: it is the primary's job to come forward,
+            // and the launch that forwarded it is already on its way out.
+            _secondInstance?.Invoke(this, new SecondInstanceEventArgs(arguments));
+        }
+        else if (!_loopRunning)
+        {
+            // Our own command line, which replaces the startup activate.
+            _loopRunning = true;
+
+            Gtk4WindowBackend[] windows;
+            lock (_windowsGate)
+            {
+                windows = [.. _windows];
+            }
+
+            foreach (var window in windows)
+            {
+                window.PresentPending();
+            }
+        }
+
+        // Every path has to answer, or the process that forwarded the command line waits forever.
+        line.SetExitStatus(0);
+        line.Done();
+
+        return 1;
+    }
+
+    /// <summary>
+    /// Builds the reverse-DNS application id GTK needs for uniqueness from
+    /// <see cref="Application.InstanceKey"/>.
+    /// </summary>
+    private static string BuildApplicationId(string? instanceKey)
+    {
+        // A D-Bus name element cannot start with a digit, so the key becomes one element that
+        // always starts with a letter and holds only lowercase ASCII letters and digits.
+        var builder = new StringBuilder("com.kolvir.i");
+
+        foreach (var c in instanceKey ?? string.Empty)
+        {
+            if (c is >= 'A' and <= 'Z')
+            {
+                builder.Append((char)(c + ('a' - 'A')));
+            }
+            else if (c is >= 'a' and <= 'z' or >= '0' and <= '9')
+            {
+                builder.Append(c);
+            }
+        }
+
+        return builder.ToString();
+    }
+
+    private void Hold()
+    {
+        if (_held)
+        {
+            return;
+        }
+
+        _native?.Hold();
+        _held = true;
+    }
+
+    private void Release()
+    {
+        if (!_held)
+        {
+            return;
+        }
+
+        _native?.Release();
+        _held = false;
+    }
+
+    /// <summary>
+    /// Posts an idle source so the main loop comes back around and drains the queue. GLib's idle
+    /// sources are safe to add from any thread.
+    /// </summary>
+    private void Wake()
+    {
+        if (!_initialized)
+        {
+            // Nothing is draining yet: Run has not been entered, so the queue waits for it.
+            return;
+        }
+
+        GLib.Functions.IdleAdd(0, _drain);
+    }
+
+    private bool DrainIdle()
+    {
+        Drain();
+        return false;
+    }
+
+    private void Drain()
+    {
+        while (true)
+        {
+            Action next;
+
+            lock (_pendingGate)
+            {
+                if (_pending.Count == 0)
+                {
+                    return;
+                }
+
+                next = _pending.Dequeue();
+            }
+
+            next();
+        }
+    }
+
+    private void StartPollTimer()
+    {
+        if (_pollSource != 0)
+        {
+            return;
+        }
+
+        // A default-priority timeout keeps firing inside nested modal loops and while a dialog is
+        // pumping the context, so queued work keeps running there.
+        _pollSource = GLib.Functions.TimeoutAdd(0, (uint)PollInterval.TotalMilliseconds, _poll);
+    }
+
+    private void StopPollTimer()
+    {
+        if (_pollSource == 0)
+        {
+            return;
+        }
+
+        GLib.Functions.SourceRemove(_pollSource);
+        _pollSource = 0;
+    }
+
+    private bool OnPoll()
+    {
+        Drain();
+
+        Gtk4WindowBackend[] windows;
+        lock (_windowsGate)
+        {
+            windows = [.. _windows];
+        }
+
+        foreach (var window in windows)
+        {
+            window.ReportStatistics();
+        }
+
+        return true;
+    }
+
+    private void OnSystemThemeChanged(object sender)
+    {
+        // A forced palette is an explicit choice, so the system must not override it.
+        if (Application?.Options.ForcedDarkMode is not null)
+        {
+            return;
+        }
+
+        if (ReferenceEquals(Kolvir.SystemTheme.Current, SystemTheme))
+        {
+            Kolvir.SystemTheme.Refresh();
+        }
+    }
+}

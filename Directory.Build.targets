@@ -1,15 +1,15 @@
 <Project>
 
   <!-- A NuGet consumer imports buildTransitive/*.targets from the package automatically. This
-	   repository's projects reference XPlatUI by project instead, and a ProjectReference imports no
+	   repository's projects reference Kolvir by project instead, and a ProjectReference imports no
 	   build assets at all, so the same file is imported here once. Every target in it is conditioned
 	   on publishing with AOT, which makes it inert for the library, the backends and the demo. -->
 
-  <Import Project="$(MSBuildThisFileDirectory)XPlatUI\buildTransitive\XPlatUI.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)Kolvir\buildTransitive\Kolvir.targets" />
 
   <!-- The same arrangement for the SVG feature's own native library. Both files are inert unless an
 	   application publishes with AOT, so importing them here changes nothing about the library, the
 	   backends, the tests or a normal demo run. -->
-  <Import Project="$(MSBuildThisFileDirectory)XPlatUI.Feature.Svg\buildTransitive\XPlatUI.Feature.Svg.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)Kolvir.Feature.Svg\buildTransitive\Kolvir.Feature.Svg.targets" />
 
 </Project>

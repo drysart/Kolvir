@@ -1,0 +1,145 @@
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Kolvir;
+
+/// <summary>
+/// The platform half of an <see cref="Application"/>: it owns the message loop, creates
+/// windows and registers the platform services. One instance per process, handed to the
+/// <c>Application</c> constructor.
+/// </summary>
+/// <remarks>
+/// <para>
+/// Backends are selected with <c>#if</c>, never by reflection: reflection discovery breaks under
+/// trimming and AOT, and an explicit factory is a few lines that stay visible in the call stack.
+/// </para>
+/// <para>
+/// <b>The loop may be nested.</b> <see cref="Run"/> enters the platform loop, and modal work -
+/// <see cref="IDialogService"/> methods and <see cref="IWindowBackend.ShowDialog"/> -
+/// re-enters it for as long as the modal session lasts. <see cref="Invoke"/> callbacks must keep
+/// dispatching to the same UI thread throughout.
+/// </para>
+/// </remarks>
+public interface IApplicationBackend
+{
+    /// <summary>
+    /// Binds the backend to <paramref name="application"/>: installs the platform services and
+    /// reads the application's options. Runs before the first window is created.
+    /// </summary>
+    void Initialize(Application application);
+
+    /// <summary>
+    /// Runs the platform message loop until the application exits and returns its exit code.
+    /// Blocks the calling thread, which becomes the UI thread for the rest of the process.
+    /// </summary>
+    int Run();
+
+    /// <summary>
+    /// Claims this process's single-instance slot when
+    /// <see cref="ApplicationOptions.SingleInstance"/> is set, or hands this launch to the
+    /// process that already owns it.
+    /// </summary>
+    /// <returns>
+    /// True when this process is the primary instance and should run; false when the launch was
+    /// forwarded and this process should exit.
+    /// </returns>
+    /// <remarks>
+    /// Called once, from the <see cref="Application"/> constructor, before any window exists
+    /// and before <see cref="Run"/>. The key to claim is <see
+    /// cref="Application.InstanceKey"/>; a backend whose platform needs a different shape,
+    /// such as GTK4's reverse-DNS application id, converts it itself. A backend that forwards a
+    /// launch runs the handlers added by
+    /// <see cref="AddSecondInstanceHandler"/>.
+    /// </remarks>
+    bool TryClaimSingleInstance();
+
+    /// <summary>
+    /// Adds a handler that runs when the platform asks the application to come forward without a
+    /// new launch, such as a click on the macOS Dock tile. Handlers may run on any thread.
+    /// </summary>
+    /// <remarks>
+    /// A backend whose platform cannot deliver this never raises it: on Windows the shell restores
+    /// the window itself, and on GTK4 the request arrives as a forwarded command line instead.
+    /// </remarks>
+    IDisposable AddActivatedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    void RemoveActivatedHandler(Action<object> handler);
+
+    /// <summary>
+    /// Adds a handler that runs when another launch of the application was forwarded to this
+    /// process, with that launch's command line. Handlers may run on any thread.
+    /// </summary>
+    IDisposable AddSecondInstanceHandler(Action<object, SecondInstanceEventArgs> handler);
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    void RemoveSecondInstanceHandler(Action<object, SecondInstanceEventArgs> handler);
+
+    /// <summary>Asks the loop to end with <paramref name="exitCode"/>. Safe to call from any thread.</summary>
+    void Quit(int exitCode);
+
+    /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread: synchronously when
+    /// <paramref name="synchronous"/> is true, otherwise queued behind the current work.
+    /// </summary>
+    void Invoke(Action action, bool synchronous);
+
+    /// <summary>Creates the native window behind <paramref name="window"/>.</summary>
+    IWindowBackend CreateWindow(Window window);
+
+    /// <summary>
+    /// Creates the wait behind an <see cref="Timer"/>: an <see cref="ITimerBackend"/>
+    /// that calls <paramref name="tick"/> once per interval, on whatever thread the platform's
+    /// timer runs on.
+    /// </summary>
+    /// <param name="tick">The callback to run once per interval. It must not block.</param>
+    /// <remarks>
+    /// The wait is the only part a backend owns: dropping overlapping ticks and moving the
+    /// callback to the UI thread stay in <see cref="Timer"/>. Return a
+    /// <see cref="ThreadPoolTimerBackend"/> unless the platform's own timer is too coarse for the
+    /// intervals the UI asks for, which on Windows means anything under the 15.625 ms system timer
+    /// period.
+    /// </remarks>
+    ITimerBackend CreateTimer(Action tick);
+
+    /// <summary>
+    /// Registers the platform services. Called once, before the application's own
+    /// <c>ConfigureServices</c> runs, so an application can override any of them.
+    /// </summary>
+    /// <remarks>
+    /// One registration hook rather than a <c>Create*</c> member per service: a flat list of
+    /// factory methods makes every new platform service a breaking change to this interface, and
+    /// lazy resolution means the headless backend never constructs a clipboard it will not use.
+    /// Every backend must register an <see cref="IDialogService"/>, since dialogs are part of
+    /// v1.
+    /// </remarks>
+    void RegisterServices(IServiceCollection services);
+
+    /// <summary>The displays attached to the machine.</summary>
+    IReadOnlyList<Screen> GetScreens();
+
+    /// <summary>Releases the loop's resources once <see cref="Run"/> has returned.</summary>
+    void Shutdown();
+
+    /// <summary>
+    /// Runs the backend's own typed application hooks for <paramref name="phase"/>.
+    /// </summary>
+    /// <param name="phase">The phase the application has just entered.</param>
+    /// <param name="application">The application it belongs to.</param>
+    /// <remarks>
+    /// <para>
+    /// The model calls this once per phase, after the portable
+    /// <see cref="IApplicationHook"/>s in an ascending phase and before them in a descending
+    /// one, so a typed hook always tears down before the portable hook that set it up. The backend
+    /// resolves its own <c>I&lt;Platform&gt;ApplicationHook</c> services from
+    /// <paramref name="application"/> and runs them in registration order, reversed for a
+    /// descending phase.
+    /// </para>
+    /// <para>
+    /// An empty body is the correct implementation for a backend with no typed hooks: nothing
+    /// registers them unless a feature or the application does, and a hook nobody registers is
+    /// trimmed away with its registration. The member exists so a feature can add a typed hook
+    /// without the always-on path naming it.
+    /// </para>
+    /// </remarks>
+    void RunApplicationHooks(ApplicationPhase phase, Application application);
+}

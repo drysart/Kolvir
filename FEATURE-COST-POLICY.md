@@ -1,6 +1,6 @@
 # Feature cost policy
 
-How XPlatUI adds features without taxing the applications that do not use them.
+How Kolvir adds features without taxing the applications that do not use them.
 
 Status: in force. Every new feature states, in its pull request, which rung it sits on, why it could
 not sit lower, and the measured cost for an application that does not use it.
@@ -9,7 +9,7 @@ not sit lower, and the measured cost for an application that does not use it.
 
 ## 1. Why this policy exists
 
-XPlatUI's reason to exist is a small, trimmed, AOT-compiled deliverable: a UI library that ships as
+Kolvir's reason to exist is a small, trimmed, AOT-compiled deliverable: a UI library that ships as
 a few megabytes of native code with no runtime, on Windows, macOS and Linux. Every feature we add
 works against that, because the trimmer can only remove code it can prove is unreachable. A feature
 that hangs off a type every application touches, or that registers itself when a window is created,
@@ -37,7 +37,7 @@ it?". The patterns that answer "yes" are the ones to avoid:
 
 | Pattern | Why the code survives trimming |
 |---|---|
-| A new member on `XPlatControl` or on a backend view type: a virtual method, an interface implementation, or an event | The type is always retained, and a retained type keeps its overrides and interface implementations to fill its vtable. Field-like events add a delegate field to every instance and keep their accessors. All of it is kept even if nothing calls it. Section 5 is the shape that avoids this. |
+| A new member on `Control` or on a backend view type: a virtual method, an interface implementation, or an event | The type is always retained, and a retained type keeps its overrides and interface implementations to fill its vtable. Field-like events add a delegate field to every instance and keep their accessors. All of it is kept even if nothing calls it. Section 5 is the shape that avoids this. |
 | Work performed at window creation | Runs for every window in every app, and is reachable from `Show`, so the code behind it is kept. |
 | Reflection: `Activator.CreateInstance`, `Type.GetType`, assembly scanning, attribute-driven registration | The trimmer cannot prove what is reachable, so it keeps the world (or warns and keeps it). |
 | Module initializers, or static constructors and static state on a type every app touches | They run the first time the type is touched, which every app does. |
@@ -84,7 +84,7 @@ buys nothing at publish time and risks a feature that is broken half the time at
 
 ### Rung 3: separate package
 
-If neither of the above is practical, the implementation does not go into the base `XPlatUI`
+If neither of the above is practical, the implementation does not go into the base `Kolvir`
 projects at all. It goes into its own project that applications reference explicitly, so the base
 deliverable never contains it and no amount of trimming cleverness is required.
 
@@ -92,11 +92,11 @@ The library ships as a small set of packages, and this rung is where the rest of
 
 | Package | Contents |
 |---|---|
-| `XPlatUI` | Everything platform-independent: the controls, the drawing model, the application and window types, and the hook seam. An application that uses only the common controls needs nothing else. |
-| `XPlatUI.Backend.<platform>` | One per supported platform. Exactly one is referenced by an application, and it is the only place that platform's native code lives. |
-| `XPlatUI.Feature.<feature>` | A feature that could not reach rung 1 or 2, or that is rare enough not to belong in the main package. One package covers every platform the feature supports. |
+| `Kolvir` | Everything platform-independent: the controls, the drawing model, the application and window types, and the hook seam. An application that uses only the common controls needs nothing else. |
+| `Kolvir.Backend.<platform>` | One per supported platform. Exactly one is referenced by an application, and it is the only place that platform's native code lives. |
+| `Kolvir.Feature.<feature>` | A feature that could not reach rung 1 or 2, or that is rare enough not to belong in the main package. One package covers every platform the feature supports. |
 
-An application references `XPlatUI` and one backend. That is enough for a simple application using
+An application references `Kolvir` and one backend. That is enough for a simple application using
 the common controls, and it is what the project templates contain. Everything else is a reference
 the application adds, which is the opt-in in its packaging form: a feature that is not referenced
 cannot be used and cannot be in the deliverable.
@@ -107,7 +107,7 @@ the consuming project's target framework. Nothing is dispatched at run time, and
 were not selected are not in the deliverable.
 
 One consequence applies to every rung-3 feature: its surface is extension members, because a
-separate assembly cannot add members to a type declared in `XPlatUI`. Section 5's shape is therefore
+separate assembly cannot add members to a type declared in `Kolvir`. Section 5's shape is therefore
 not a preference here but the only option, and a feature that genuinely needs a member on a core
 type cannot take this rung at all.
 
@@ -123,7 +123,7 @@ is measured rather than assumed.
 One project, four folders:
 
 ```
-XPlatUI.Feature.<feature>/
+Kolvir.Feature.<feature>/
     common/     portable code, compiled into every platform
     windows/    net10.0-windows
     macos/      net10.0-macos
@@ -173,7 +173,7 @@ host detection and no condition choosing which platform to reference. Only the f
 build enumerates all three, which matters in one case: a direct or solution build of the project
 needs the macOS workload, because that is the one platform whose reference assemblies do not come
 with the SDK. A machine without it fails with `NETSDK1147`. The development solution lists the
-feature project and `XPlatUI.Backend.AppKit`, which carries the same requirement, so the workload is
+feature project and `Kolvir.Backend.AppKit`, which carries the same requirement, so the workload is
 a prerequisite for building the solution and a contributor meets it once with
 `dotnet workload install macos`. That is a deliberate trade: the feature and the backend are visible
 in the IDE and compiled by the ordinary build, at the cost of one prerequisite, rather than being
@@ -191,7 +191,7 @@ Pin the macOS target framework version rather than writing the floating `net10.0
 `lib/` folder name carries whatever platform version the build machine's workload supplies, and an
 unpinned build produces `lib/net10.0-macos26.0/`. A consumer on an older workload then resolves to a
 lower platform version and does not match the folder. A feature project whose `ProjectReference` to
-`XPlatUI.Backend.AppKit` has to name that backend's framework cannot pin it, so the pin is a
+`Kolvir.Backend.AppKit` has to name that backend's framework cannot pin it, so the pin is a
 publishing decision that arrives with the first published package rather than a rule the project can
 keep on its own.
 
@@ -202,7 +202,7 @@ own `lib/` folder and its own dependency group:
 
 1. One `lib/<tfm>/` folder per platform, each holding that platform's assembly. Nothing else needs
    to go in it, because `common/` was compiled into it.
-2. One dependency group per platform, naming `XPlatUI` plus whatever feed packages that platform
+2. One dependency group per platform, naming `Kolvir` plus whatever feed packages that platform
    needs, generated from the same `$(TargetFramework)` conditions that selected the source folder.
 
 No merge step, no hand-written groups, no `SuppressDependenciesWhenPacking`, and no `NU5128`.
@@ -227,7 +227,7 @@ requires.
 #### The pack job
 
 Both of those failures are silent, so the pipeline does not take `dotnet pack`'s exit code as the
-answer. `.github/workflows/feature-pack.yml` packs every `XPlatUI.Feature.*` project on a macOS
+answer. `.github/workflows/feature-pack.yml` packs every `Kolvir.Feature.*` project on a macOS
 runner with `EnableWindowsTargeting=true`, then hands each package to
 `.github/scripts/check-feature-package.py`, which reads the `.nuspec` out of the archive, lists the
 `lib/` folders, and fails if a folder has no dependency group of the same name or a group has no
@@ -253,7 +253,7 @@ internal static class PlatformGuard
         if (!OperatingSystem.IsLinux())
         {
             Environment.FailFast(
-                "XPlatUI.Feature.<feature>: the net10.0 (Linux) assembly was loaded on "
+                "Kolvir.Feature.<feature>: the net10.0 (Linux) assembly was loaded on "
                 + RuntimeInformation.OSDescription
                 + ". The package is missing this platform's lib folder.");
         }
@@ -282,8 +282,8 @@ are worth knowing:
   of the feature. An application that never touches the feature never loads the assembly, and has
   nothing to guard.
 
-Packaging does not change the namespace (section 5.6). A feature in `XPlatUI.Feature.Clocks` is still
-`namespace XPlatUI.Clocks`, so moving a feature between rung 2 and rung 3 does not touch application
+Packaging does not change the namespace (section 5.6). A feature in `Kolvir.Feature.Clocks` is still
+`namespace Kolvir.Clocks`, so moving a feature between rung 2 and rung 3 does not touch application
 code.
 
 This rung has a cost of its own (a project to version and publish, a workload requirement to build
@@ -291,7 +291,7 @@ it, and a package to keep correct), so it is chosen for a stated reason rather t
 
 ## 5. Expressing a feature as an extension
 
-The most natural way for a feature to present itself is as new members on `XPlatControl` or on one
+The most natural way for a feature to present itself is as new members on `Control` or on one
 of its subclasses: a property here, a method there, an event when something happens. Those members
 must not be added to the type. The feature's implementation goes in its own namespace and is exposed
 through extension members, so the surface reads as part of the control while the code stays
@@ -322,7 +322,7 @@ Verified against the toolchain this repository builds with (`net10.0`, C# 14):
 |---|---|---|
 | Methods | Yes | The classic extension method. |
 | Properties, including setters | Yes | Extension blocks (`extension(T value) { ... }`), not only methods. |
-| Properties in object initializers | Yes | `new XPlatLabel { AllowDrop = true }` still compiles, so the object-initializer style the demo uses survives. |
+| Properties in object initializers | Yes | `new Label { AllowDrop = true }` still compiles, so the object-initializer style the demo uses survives. |
 | Indexers, operators, static members | Yes | Available if a feature needs them. |
 | Events | No | `CS9282`, "This member is not allowed in an extension block". Use the handler methods in section 5.4 instead. |
 
@@ -333,11 +333,11 @@ same compiler. They are, because the library targets `net10.0`.
 
 - **Access.** An extension block in the same assembly can read and write `internal` members of the
   extended type; it cannot reach `private` ones. That is enough for a rung 1 feature, which lives in
-  `XPlatUI` and can use internal seams instead of widening the public API. A feature that has to
+  `Kolvir` and can use internal seams instead of widening the public API. A feature that has to
   live in its own assembly (rung 3) uses the backend's public seam (section 6.5) and nothing else: it gets
   no friend access, and no backend names it.
 - **State.** Extension members cannot add fields to the control, so per-control state belongs to the
-  feature: a lazily created state object, or a `ConditionalWeakTable<XPlatControl, TState>` keyed
+  feature: a lazily created state object, or a `ConditionalWeakTable<Control, TState>` keyed
   on the control. Both are trimmed with the feature, but both cost a lookup per access, so a hot
   path caches the state rather than looking it up again.
 - **No reflection discovery.** Extension members are invisible to `GetMethods()` on the type. That
@@ -351,8 +351,8 @@ makes the feature read as bolted on, the library does not use the C# `event` key
 event is a pair of methods taking an `Action`:
 
 ```csharp
-public IDisposable AddDroppedHandler(Action<object, XPlatDragEventArgs> handler);
-public void RemoveDroppedHandler(Action<object, XPlatDragEventArgs> handler);
+public IDisposable AddDroppedHandler(Action<object, DragEventArgs> handler);
+public void RemoveDroppedHandler(Action<object, DragEventArgs> handler);
 ```
 
 The callback is the sender followed by the payload, and an event that carries no payload has no
@@ -360,7 +360,7 @@ second parameter. That is most of them:
 
 ```csharp
 public IDisposable AddClosedHandler(Action<object> handler);
-public IDisposable AddKeyDownHandler(Action<object, XPlatKeyEventArgs> handler);
+public IDisposable AddKeyDownHandler(Action<object, KeyEventArgs> handler);
 ```
 
 No wrapper type is involved. The payload is whatever the event already carries, so a handler
@@ -376,7 +376,7 @@ control.RemoveDroppedHandler(handler);
 ```
 
 This is a codebase-wide convention rather than a rule for opt-in features only. Core events on
-`XPlatControl`, `XPlatWindow`, `XPlatApplication` and the backend interfaces use the same shape, so
+`Control`, `Window`, `Application` and the backend interfaces use the same shape, so
 there is one way to subscribe to anything.
 
 Rules:
@@ -392,7 +392,7 @@ Rules:
   anyway. The pair is also what makes the shape look like the event it replaces; a lone `Add` would
   read as a subscription that can only be ended by holding a token. Both are one line per event.
 - Handlers run on the UI thread in subscription order. A handler that throws stops those after it,
-  as a C# event would, and the exception reaches `XPlatApplication.UnhandledException`.
+  as a C# event would, and the exception reaches `Application.UnhandledException`.
 - The backing storage is private and unchanged: one field per event, exactly as a field-like event
   has today, so a core event costs no more than it does now. The field sits with its `Add` and
   `Remove` at the top of the type, ahead of the members that use it, so a reader looking for what a
@@ -401,7 +401,7 @@ Rules:
   its per-control state (section 5.3), which is trimmed along with the feature.
 - No `event` keyword anywhere, including interfaces and backend types. A review that finds one has
   found a bug in the convention.
-- The payload is whatever the event already carries. `XPlatDragEventArgs`, `XPlatMouseEventArgs` and
+- The payload is whatever the event already carries. `DragEventArgs`, `MouseEventArgs` and
   friends stay as they are, and a feature that needs a payload defines its own type rather than
   wrapping a value in a generic one.
 - A payload class is a plain class with no base type, so a feature that defines one has nothing to
@@ -421,11 +421,11 @@ Three exceptions, each of which has to be stated in the pull request:
 
 ### 5.6 Naming
 
-- One namespace per feature: `XPlatUI.DragDrop`, rather than members sprinkled across `XPlatUI`.
-- The `using` is the visible opt-in. An application that never writes `using XPlatUI.DragDrop;`
+- One namespace per feature: `Kolvir.DragDrop`, rather than members sprinkled across `Kolvir`.
+- The `using` is the visible opt-in. An application that never writes `using Kolvir.DragDrop;`
   never sees the surface, which also reminds the reader that it is not paying for it.
 - Extension classes are named for the type they extend plus the feature:
-  `XPlatControlDragDropExtensions`.
+  `ControlDragDropExtensions`.
 - Handler methods follow section 5.4: `AddDragDropHandler`, `RemoveDragDropHandler`.
 - A feature that needs per-control state keeps it behind an extension property or an extension
   method on the control, never behind an object the application has to hold on to.
@@ -437,11 +437,11 @@ through a hook.
 
 ### 6.1 Two phases, because services and work happen at different times
 
-`XPlatApplication` builds its container in one place and runs the loop in another, so a feature may
+`Application` builds its container in one place and runs the loop in another, so a feature may
 need two distinct things:
 
 1. **Contribute services**, before `BuildServiceProvider`. This already exists as
-   `XPlatApplicationOptions.ConfigureServices`, which receives MEDI's `IServiceCollection` and is
+   `ApplicationOptions.ConfigureServices`, which receives MEDI's `IServiceCollection` and is
    documented to stay inside the AOT-safe subset (generic `AddSingleton<TService, TImpl>()`, factory
    overloads, `AddWindowScoped<T>`; no assembly scanning).
 2. **Run work**, after the container exists, at one of the phases in section 6.3. This is the hook.
@@ -451,7 +451,7 @@ A feature that needs both registers a service and a hook, in the same opt-in cal
 ### 6.2 The application hook
 
 ```csharp
-public enum XPlatApplicationPhase
+public enum ApplicationPhase
 {
 	Creating,
 	Created,
@@ -460,9 +460,9 @@ public enum XPlatApplicationPhase
 	Disposed,
 }
 
-public interface IXPlatApplicationHook
+public interface IApplicationHook
 {
-	void OnPhase(XPlatApplicationPhase phase, XPlatApplication application);
+	void OnPhase(ApplicationPhase phase, Application application);
 }
 ```
 
@@ -470,12 +470,12 @@ The application-level hook is a singleton, because the work it does is process-w
 has its own hook with its own lifetime; see section 6.3, which also says when each phase fires and why they
 are split where they are.
 
-`XPlatApplication` resolves them once, immediately after `BuildServiceProvider`, and keeps the
+`Application` resolves them once, immediately after `BuildServiceProvider`, and keeps the
 instances for the rest of its life:
 
 ```csharp
-_applicationHooks = _provider.GetServices<IXPlatApplicationHook>().ToArray();
-RaisePhase(XPlatApplicationPhase.Creating);
+_applicationHooks = _provider.GetServices<IApplicationHook>().ToArray();
+RaisePhase(ApplicationPhase.Creating);
 ```
 
 One lookup for the whole run, the same instances and the same order at every phase, and nothing
@@ -486,9 +486,9 @@ the outside, and contains an exception so that one hook cannot stop the next.
 The application opts in through the registration it already has:
 
 ```csharp
-new XPlatApplicationOptions
+new ApplicationOptions
 {
-	ConfigureServices = services => services.AddSingleton<IXPlatApplicationHook, DragDropHook>(),
+	ConfigureServices = services => services.AddSingleton<IApplicationHook, DragDropHook>(),
 }
 ```
 
@@ -500,39 +500,39 @@ ConfigureServices = services => services.AddDragDrop(),
 ```
 
 A hook that is a single call does not need a class of its own. One overload in
-`XPlatServiceCollectionExtensions` wraps the action in a hook that already exists:
+`ServiceCollectionExtensions` wraps the action in a hook that already exists:
 
 ```csharp
-public static IServiceCollection AddXPlatApplicationHook(
+public static IServiceCollection AddApplicationHook(
 	this IServiceCollection services,
-	XPlatApplicationPhase phase,
-	Action<XPlatApplication> hookFunc)
+	ApplicationPhase phase,
+	Action<Application> hookFunc)
 {
 	ArgumentNullException.ThrowIfNull(services);
 	ArgumentNullException.ThrowIfNull(hookFunc);
 
-	return services.AddSingleton<IXPlatApplicationHook>(
+	return services.AddSingleton<IApplicationHook>(
 		_ => new ActionBasedAppHook(phase, hookFunc));
 }
 
-/// <summary>Shorthand for a hook at <see cref="XPlatApplicationPhase.Creating"/>.</summary>
-public static IServiceCollection AddXPlatApplicationStartupHook(
+/// <summary>Shorthand for a hook at <see cref="ApplicationPhase.Creating"/>.</summary>
+public static IServiceCollection AddApplicationStartupHook(
 	this IServiceCollection services,
-	Action<XPlatApplication> startupHookFunc) =>
-	services.AddXPlatApplicationHook(XPlatApplicationPhase.Creating, startupHookFunc);
+	Action<Application> startupHookFunc) =>
+	services.AddApplicationHook(ApplicationPhase.Creating, startupHookFunc);
 
-internal sealed class ActionBasedAppHook : IXPlatApplicationHook
+internal sealed class ActionBasedAppHook : IApplicationHook
 {
-	private readonly XPlatApplicationPhase _phase;
-	private readonly Action<XPlatApplication> _hookFunc;
+	private readonly ApplicationPhase _phase;
+	private readonly Action<Application> _hookFunc;
 
-	public ActionBasedAppHook(XPlatApplicationPhase phase, Action<XPlatApplication> hookFunc)
+	public ActionBasedAppHook(ApplicationPhase phase, Action<Application> hookFunc)
 	{
 		_phase = phase;
 		_hookFunc = hookFunc;
 	}
 
-	public void OnPhase(XPlatApplicationPhase phase, XPlatApplication application)
+	public void OnPhase(ApplicationPhase phase, Application application)
 	{
 		if (phase == _phase)
 		{
@@ -542,7 +542,7 @@ internal sealed class ActionBasedAppHook : IXPlatApplicationHook
 }
 ```
 
-Window hooks get the same treatment: `AddXPlatWindowHook` takes one optional callback per point, so
+Window hooks get the same treatment: `AddWindowHook` takes one optional callback per point, so
 a feature that only cares about teardown still writes a single lambda. The wrappers are seam types,
 so the seam pays for them once whether or not anything calls them; see section 7.
 
@@ -579,7 +579,7 @@ instance serves every phase and a feature normally cares about more than one of 
 
 | Phase | When it fires | Direction | Raised from |
 |---|---|---|---|
-| `Creating` | The container exists, the process services are installed, and no window exists yet. | Ascending | The end of the `XPlatApplication` constructor |
+| `Creating` | The container exists, the process services are installed, and no window exists yet. | Ascending | The end of the `Application` constructor |
 | `Created` | Every window shown before `Run()` is visible, and the loop is about to start. | Ascending | Immediately before `Backend.Run()` |
 | `Stopping` | The loop has returned. Every window, the backend and every service are still alive. | Descending | The start of `TearDown` |
 | `Stopped` | Every window is gone, and the services are about to be. | Descending | Inside `TearDown`, after the windows are disposed |
@@ -612,7 +612,7 @@ the two are not guaranteed to both happen, and `Disposed` is the only teardown t
 #### Window phases
 
 ```csharp
-public enum XPlatWindowPhase
+public enum WindowPhase
 {
 	Created,
 	Showing,
@@ -624,9 +624,9 @@ public enum XPlatWindowPhase
 	Disposed,
 }
 
-public interface IXPlatWindowHook
+public interface IWindowHook
 {
-	void OnPhase(XPlatWindowPhase phase, XPlatWindow window);
+	void OnPhase(WindowPhase phase, Window window);
 }
 ```
 
@@ -641,7 +641,7 @@ public interface IXPlatWindowHook
 | `Closed` | The native window is gone and the backend is disposed. | Descending | Yes |
 | `Disposed` | The window object is being disposed; its scope is still alive. | Descending | Yes |
 
-`Hiding` and `Hidden` are declared and raised by nothing, because `XPlatWindow` has no `Visible`
+`Hiding` and `Hidden` are declared and raised by nothing, because `Window` has no `Visible`
 property and no `Hide` method yet. Declaring them now costs one enum member and stops the hide and
 show feature from renumbering a public enum later.
 
@@ -652,17 +652,17 @@ phases that take it down descend. Reversing the teardown half is what makes a pa
 arrive in. The rule holds at application level as well, where the two hooks may not even live in the
 same assembly.
 
-The window lifetime already exists, so this costs nothing new. `XPlatWindow` creates an
+The window lifetime already exists, so this costs nothing new. `Window` creates an
 `IServiceScope` in its constructor, exposes it as `Services`, and disposes it when it closes.
-`AddWindowScoped<T>` is `AddScoped` with the window handed to the factory, and `XPlatWindowAccessor`
+`AddWindowScoped<T>` is `AddScoped` with the window handed to the factory, and `WindowAccessor`
 is how a scoped service reaches its window. A window hook is therefore registered like this, and one
 window's instance is nobody else's:
 
 ```csharp
-services.AddWindowScoped<IXPlatWindowHook>((window, provider) => new DragDropWindowHook(window));
+services.AddWindowScoped<IWindowHook>((window, provider) => new DragDropWindowHook(window));
 ```
 
-The ordering matters and is easy to get wrong. `XPlatWindow` disposes the backend, then raises
+The ordering matters and is easy to get wrong. `Window` disposes the backend, then raises
 `Closed`, then disposes the scope. `Closing` therefore fires while the native handle is alive and
 `Closed` after it is gone, which is the split a feature needs: revoking a drop target before the
 window is destroyed belongs in `Closing`, and releasing managed bookkeeping belongs in `Closed` or
@@ -705,8 +705,8 @@ and each added point is permanent cost in the seam.
 - **Portable hooks are the outer layer.** They run before a backend's typed hooks (section 6.5) in an
   ascending phase and after them in a descending one, so a typed hook always tears down before the
   portable hook that set it up.
-- **Typed hooks never derive from portable ones.** An `IXPlatWin32WindowHook` that also implemented
-  `IXPlatWindowHook` would be found by both loops and invoked twice.
+- **Typed hooks never derive from portable ones.** An `IWin32WindowHook` that also implemented
+  `IWindowHook` would be found by both loops and invoked twice.
 - **A backend's window phase entry point survives its own `Dispose`.** The window's `Disposed` phase
   fires after the backend is disposed and before the scope goes, so `RunWindowHooks` must touch
   nothing native by then and must not assume the backend is alive.
@@ -727,7 +727,7 @@ A feature that is native on every platform is three layers, and only the middle 
 
 | Layer | Lives in | Cost when the feature is unused |
 |---|---|---|
-| Contract: service interface, event args, control extension members | `XPlatUI`, in the feature's namespace | Trimmed per member |
+| Contract: service interface, event args, control extension members | `Kolvir`, in the feature's namespace | Trimmed per member |
 | Implementation: `Win32DragDropWindowHook`, `AppKitDragDropWindowHook`, `Gtk4DragDropWindowHook` | The feature's platform folder, or the backend assembly for a rung-2 feature | Trimmed, unless something retained names it |
 | Selection: which implementation exists | The backend project reference in the app's project file | None |
 
@@ -739,7 +739,7 @@ reflection, no operating system check.
 feature's namespace, so the application calls it without knowing which platform it is on:
 
 ```csharp
-using XPlatUI.DragDrop;
+using Kolvir.DragDrop;
 
 options.ConfigureServices = services => services.AddDragDrop();
 ```
@@ -762,28 +762,28 @@ with a cast. Instead each backend declares its own hook interfaces, which name t
 concrete type:
 
 ```csharp
-public interface IXPlatWin32ApplicationHook
+public interface IWin32ApplicationHook
 {
 	void OnPhase(
-		XPlatApplicationPhase phase, XPlatApplication application, Win32ApplicationBackend backend);
+		ApplicationPhase phase, Application application, Win32ApplicationBackend backend);
 }
 
-public interface IXPlatWin32WindowHook
+public interface IWin32WindowHook
 {
-	void OnPhase(XPlatWindowPhase phase, XPlatWindow window, Win32WindowBackend backend);
+	void OnPhase(WindowPhase phase, Window window, Win32WindowBackend backend);
 }
 ```
 
 They live in the backend assembly, so core pays nothing, and they are unrelated to the portable
-interfaces (section 6.4). `XPlatApplication` runs the portable hooks and then hands the phase to the
+interfaces (section 6.4). `Application` runs the portable hooks and then hands the phase to the
 backend, which runs its own loop over its typed interface:
 
 ```csharp
-// IXPlatApplicationBackend, after the portable hooks for the phase
-void RunApplicationHooks(XPlatApplicationPhase phase, XPlatApplication application);
+// IApplicationBackend, after the portable hooks for the phase
+void RunApplicationHooks(ApplicationPhase phase, Application application);
 
-// IXPlatWindowBackend, after the portable hooks for the phase
-void RunWindowHooks(XPlatWindowPhase phase, XPlatWindow window);
+// IWindowBackend, after the portable hooks for the phase
+void RunWindowHooks(WindowPhase phase, Window window);
 ```
 
 Two seam members with empty bodies in `Headless`, and nothing else in the always-on path: a hook
@@ -797,7 +797,7 @@ resolves any typed one, so typed application hooks are disposed first.
 
 **A rung-3 feature reuses all of this.** The typed interfaces live in the backend assembly, so a
 feature package cannot add to them, and does not need to: the feature's platform folder references
-the backend package, implements `IXPlatWin32WindowHook` there, and registers itself from its own
+the backend package, implements `IWin32WindowHook` there, and registers itself from its own
 `Add<Feature>()`. The backend's loop finds it in the container whether the implementation came from
 the backend or from a package that referenced the backend.
 
@@ -892,12 +892,12 @@ Claims about cost are worth nothing without a number. Every feature lands with:
 4. **A use check.** Confirm that an application that does use the feature still gets it, still
    publishes cleanly, and still trims.
 
-This needs a stable measurement fixture: `XPlatUI.Minimal`, one window and one label, kept in the
+This needs a stable measurement fixture: `Kolvir.Minimal`, one window and one label, kept in the
 repository and published by the same command every time. Without a fixed fixture the numbers are not
 comparable and the policy becomes folklore.
 
 ```
-dotnet publish XPlatUI.Minimal/XPlatUI.Minimal.csproj -c Release -r <rid> -p:EmbedSkiaSharpNative=false
+dotnet publish Kolvir.Minimal/Kolvir.Minimal.csproj -c Release -r <rid> -p:EmbedSkiaSharpNative=false
 ```
 
 The fixture is NativeAOT with no publish profile, so `-c Release -r <rid>` is the whole
@@ -921,7 +921,7 @@ The opt-in half has one worked example, the only feature measured end to end so 
 that registers the drag and drop hook publishes at 3,222,016 bytes on win-x64 against 3,070,976
 without it, so the feature costs 151,040 bytes when it is actually used. The same feature measured
 4,223,456 on linux-x64 and 4,234,544 on osx-arm64 against 4,062,656 and 4,234,528 without it while
-its types still lived in the core assembly; moving them into `XPlatUI.Feature.DragDrop` changed no
+its types still lived in the core assembly; moving them into `Kolvir.Feature.DragDrop` changed no
 code, only the assembly each type is compiled into, and Windows moved by 3,584 bytes from linker
 layout alone. Replacing the backends' friend assemblies with the public seam of section 6.5 added a further
 8,192 bytes on win-x64: the teardown registration list, the per-window lease dictionary the two
@@ -932,11 +932,11 @@ linker had already paid for, and opting in costs 16 bytes.
 
 That last measurement is also why the types no longer live in the core assembly. While they did, an
 application that never opted in still paid 16,432 bytes for them on osx-arm64, because a member on
-`XPlatUiHost` and virtuals on `XPlatControl` made them reachable from types that are always
-retained. Nothing in `XPlatUI` may name a feature type, on any platform, for exactly this reason.
+`UiHost` and virtuals on `Control` made them reachable from types that are always
+retained. Nothing in `Kolvir` may name a feature type, on any platform, for exactly this reason.
 
-`XPlatUI.Feature.Animations` is the case where the package is the whole story and the number that
-matters is zero. Nothing in `XPlatUI` or the backends changed - the diff against `c1af86b` over the
+`Kolvir.Feature.Animations` is the case where the package is the whole story and the number that
+matters is zero. Nothing in `Kolvir` or the backends changed - the diff against `c1af86b` over the
 core library, its tests and all four backends is empty - so an application that does not reference
 the package cannot contain a line of it, and the measurement confirms the construction: the fixture
 publishes at 3,201,024 bytes on win-x64 both before and after, a delta of 0. The use check is the
@@ -948,10 +948,10 @@ reported no IL2xxx or IL3xxx warning, which is what a feature made of arithmetic
 supposed to look like. Only win-x64 was weighed: unlike a platform feature, there is no native half
 for the other two platforms to pay differently for.
 
-Scrolling is the rung 1 worked example... `XPlatScrollBar` and the scrolling half of `XPlatPanel` are
+Scrolling is the rung 1 worked example... `ScrollBar` and the scrolling half of `Panel` are
 reached only by an application that names them, and the fixture publishes at 3,070,976 bytes with
 them in the tree - the same number as before they existed. The one always-retained member is
-`XPlatControl.GetChildOffset`, a `protected internal virtual` returning `SKPoint.Empty` that
+`Control.GetChildOffset`, a `protected internal virtual` returning `SKPoint.Empty` that
 `HitTest` and the host's coordinate mapping consult, and it is there because a scrolling container
 has to tell the framework where it painted its children; that is the exception section 9 asks a feature to
 state. It is stated here, and it is the reason the fixture's zero is a weaker claim than it looks:
@@ -961,17 +961,17 @@ scrolling code behind it.
 Mouse wheel input is the second worked example, and it is the case where the exception had to be
 taken. A wheel turn has to reach whichever control is under the pointer, and no opt-in hook can
 carry it there, because the control that wants it is a panel the application created rather than a
-feature it registered. So four members are always retained: `XPlatMouseEventArgs.Delta` (a float
-and a property on an args class that is already retained), `XPlatControl.OnMouseWheel` plus its
-`AddMouseWheelHandler`/`RemoveMouseWheelHandler` pair, and `XPlatUiHost.ProcessMouseWheel`, which
-each backend forwards to. `XPlatControl.Focusable` is retained alongside them for the same reason:
+feature it registered. So four members are always retained: `MouseEventArgs.Delta` (a float
+and a property on an args class that is already retained), `Control.OnMouseWheel` plus its
+`AddMouseWheelHandler`/`RemoveMouseWheelHandler` pair, and `UiHost.ProcessMouseWheel`, which
+each backend forwards to. `Control.Focusable` is retained alongside them for the same reason:
 the bars a panel creates for itself must not be focusable, and gating that per-instance needs a
 property on the base class rather than a flag the panel can keep privately. The fixture publishes at
 3,072,000 bytes with all four, against 3,070,976 without them: 1,024 bytes, one image-alignment step,
 measured on win-x64 only. This is exception 1 of section 5.5 rather than the rule - a container that cannot
 be scrolled by the wheel is not a working container - and the additions are portable managed code
 with no per-platform surface, so the Linux and macOS images, which are quantised to larger pages,
-were not re-measured. The overlay scrollbar style is still a later phase, so `XPlatPanel` draws
+were not re-measured. The overlay scrollbar style is still a later phase, so `Panel` draws
 classic non-overlay bars only.
 
 Invalidation is the third worked example, and the first one whose cost every platform pays. The
@@ -991,16 +991,16 @@ unaffected. This is exception 1 of section 5.5, and the exception is the point: 
 property of the framework's paint loop rather than a capability a control opts into. Routing the
 area a moved control vacates through its parent's `ChildInvalidate`, and folding the repaints a
 layout pass causes into one at the end of the pass, added two private fields and three private
-methods to `XPlatControl` - a type that is already retained - and published at the same 3,093,504
+methods to `Control` - a type that is already retained - and published at the same 3,093,504
 bytes on win-x64, with no IL2xxx or IL3xxx warning.
 
-`XPlatListBox` is the fourth worked example and the cleanest rung 1 case so far. Nothing
-always-retained names it: it derives from `XPlatControl`, so it is reached only when an application
-constructs one, and the two enums it introduced (`XPlatSelectionMode`, `XPlatDrawItemState`) are
-reachable only from its own members. The scrolling it needs was extracted out of `XPlatPanel` into
-`XPlatScrollBars`, an `internal sealed` class that the list box and the panel both hold a private
+`ListBox` is the fourth worked example and the cleanest rung 1 case so far. Nothing
+always-retained names it: it derives from `Control`, so it is reached only when an application
+constructs one, and the two enums it introduced (`SelectionMode`, `DrawItemState`) are
+reachable only from its own members. The scrolling it needs was extracted out of `Panel` into
+`ScrollBars`, an `internal sealed` class that the list box and the panel both hold a private
 field of, so the extraction added no retained member of its own - it moved code from one rung 1 type
-to another. The one edit to an always-retained type is `XPlatControl.ToRectI`, which widened from
+to another. The one edit to an always-retained type is `Control.ToRectI`, which widened from
 `private` to `protected internal static`; the method already existed and was already retained, so
 the change is visibility rather than content. The fixture publishes at 3,092,992 bytes on win-x64
 both before and after, so the delta is 0. That zero is weaker than it reads for the same reason the
@@ -1012,25 +1012,25 @@ IL3xxx warning from the new code.
 Debug symbols are excluded from every row: `.pdb` on Windows, `.dbg` on Linux, and dSYM bundles on
 macOS. They are not shipped to users.
 
-`XPlatUI.Feature.Badges` is the first rung 3 worked example, and the one that shows why the rung is a
+`Kolvir.Feature.Badges` is the first rung 3 worked example, and the one that shows why the rung is a
 packaging decision rather than a trimming trick. A badge belongs to the application, so no call site
-can decide whether the code ships: `XPlatApplication` is retained by every application, and a rung 1
+can decide whether the code ships: `Application` is retained by every application, and a rung 1
 member on it would be retained whether or not anyone set a badge. Rung 2 would have put the
 implementations in the backends, where every application of that platform carries them. Instead the
 package holds all three - a Skia-drawn overlay icon and `ITaskbarList3` on Windows, `NSDockTile` on
 macOS, a D-Bus convention on Linux - and the backends gained one member between them:
 `Win32WindowBackend.AddMessageFilter`, which describes a platform facility (a window's messages) and
 names no feature, and which exists because the shell throws an overlay icon away when it re-creates a
-taskbar button. Everything else the feature reaches was already public: `IXPlatWin32WindowHook`,
+taskbar button. Everything else the feature reaches was already public: `IWin32WindowHook`,
 `Handle`, `NSApplication.SharedApplication`, `Gio.Application`, `Gio.DBusConnection`, and the window
 lifecycle the badge watches so that an attention request ends when the user comes back
-(`XPlatApplication.AddWindowOpenedHandler`, `XPlatWindow.AddActivatedHandler`). The surface
-is an extension block on `XPlatApplication`, per section 5, because a separate assembly cannot add a
-member to a type in `XPlatUI`. See [APP-BADGING.md](APP-BADGING.md).
+(`Application.AddWindowOpenedHandler`, `Window.AddActivatedHandler`). The surface
+is an extension block on `Application`, per section 5, because a separate assembly cannot add a
+member to a type in `Kolvir`. See [APP-BADGING.md](APP-BADGING.md).
 
 ## 9. Checklist for a new feature
 
-- [ ] Does any always-retained type (a control, a backend view, `XPlatUiHost`, `XPlatApplication`)
+- [ ] Does any always-retained type (a control, a backend view, `UiHost`, `Application`)
 	  gain a member or an interface implementation? If so, why is that unavoidable?
 - [ ] Does anything run at application startup or window creation? If so, is it behind an opt-in
 	  hook?
@@ -1045,7 +1045,7 @@ member to a type in `XPlatUI`. See [APP-BADGING.md](APP-BADGING.md).
 	  quoted in the pull request?
 - [ ] Were the trim/AOT warnings for the new code reviewed?
 - [ ] If it could not be made opt-in, is it in a separate package instead, with the reason recorded?
-- [ ] If the feature wants members on `XPlatControl` or a subclass, is it exposed as extension
+- [ ] If the feature wants members on `Control` or a subclass, is it exposed as extension
 	  members in its own namespace instead, with the exception stated if not?
 - [ ] If it needs events, does it expose them as `AddXHandler`/`RemoveXHandler` extension methods?
 - [ ] If it is native, is the implementation in each backend or in the feature's platform folder,

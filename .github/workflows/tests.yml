@@ -1,7 +1,7 @@
 name: Tests
 
 # All six suites are portable net10.0 assemblies, so they need no window server, no display and
-# no platform workload: every test drives XPlatUI through the headless backend, the animation suite
+# no platform workload: every test drives Kolvir through the headless backend, the animation suite
 # drives its own clock and frame source rather than a real timer, and the image suites drive their
 # timelines with a hand-advanced TimeProvider. That is why no leg of this
 # workflow installs a workload - the macOS build and feature pack workflows are the only jobs
@@ -20,14 +20,14 @@ on:
     branches: [master]
     paths:
       - '.github/workflows/tests.yml'
-      - 'XPlatUI.Tests/**'
-      - 'XPlatUI/**'
-      - 'XPlatUI.Backend/**'
-      - 'XPlatUI.Backend.Headless/**'
-      - 'XPlatUI.Backend.Win32/**'
-      - 'XPlatUI.Backend.Win32.Tests/**'
-      - 'XPlatUI.Feature.*/**'
-      - 'XPlatUIDemo.App/Fonts/**'
+      - 'Kolvir.Tests/**'
+      - 'Kolvir/**'
+      - 'Kolvir.Backend/**'
+      - 'Kolvir.Backend.Headless/**'
+      - 'Kolvir.Backend.Win32/**'
+      - 'Kolvir.Backend.Win32.Tests/**'
+      - 'Kolvir.Feature.*/**'
+      - 'Kolvir.Demo.App/Fonts/**'
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
   workflow_dispatch:
@@ -68,13 +68,13 @@ jobs:
       # solution lists every platform backend and the platform workloads they need, and a runner
       # has none of those workloads installed.
       #
-      # The core suite is portable as it stands: XPlatUI.Tests references the library and the
-      # headless backend and, on purpose, not XPlatUI.Backend, whose three-framework list would bring
+      # The core suite is portable as it stands: Kolvir.Tests references the library and the
+      # headless backend and, on purpose, not Kolvir.Backend, whose three-framework list would bring
       # the workload in with it. The feature suite needs one property to be equally portable.
-      # XPlatUI.Feature.DragDrop lists net10.0-windows;net10.0-macos;net10.0 unconditionally, because
+      # Kolvir.Feature.DragDrop lists net10.0-windows;net10.0-macos;net10.0 unconditionally, because
       # a single `dotnet pack` needs all three at once, and restore follows every framework in the
       # reference graph rather than only the inner build the test project binds. A plain restore
-      # therefore resolves the net10.0-macos inner build, finds XPlatUI.Backend.AppKit behind it and
+      # therefore resolves the net10.0-macos inner build, finds Kolvir.Backend.AppKit behind it and
       # stops with NETSDK1147 on a machine with no workload. -p:TargetFramework=net10.0 pins restore
       # to the single inner build the tests actually run against - the same narrowing the feature
       # project's own comment recommends for local work. The plural -p:TargetFrameworks= does not
@@ -82,13 +82,13 @@ jobs:
       # builds.
       - name: Restore
         run: |
-          dotnet restore XPlatUI.Tests/XPlatUI.Tests.csproj --nologo
-          dotnet restore XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --nologo -p:TargetFramework=net10.0
-          dotnet restore XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj --nologo -p:TargetFramework=net10.0
-          dotnet restore XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj --nologo -p:TargetFramework=net10.0
-          dotnet restore XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj --nologo -p:TargetFramework=net10.0
-          dotnet restore XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Tests.csproj --nologo -p:TargetFramework=net10.0
-          dotnet restore XPlatUI.Feature.Badges.Tests/XPlatUI.Feature.Badges.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore Kolvir.Tests/Kolvir.Tests.csproj --nologo
+          dotnet restore Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -98,11 +98,11 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Tests/Kolvir.Tests.csproj --no-restore --nologo \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=tests.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
-            --collect:"XPlat Code Coverage" \
+            --collect:"Kolvir Code Coverage" \
             --blame-hang-timeout 5m 2>&1 | tee "$RUNNER_TEMP/test.log"
 
       # The feature suite is a second assembly because a rung-3 feature is a package of its own: an
@@ -119,7 +119,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Feature.DragDrop.Tests/XPlatUI.Feature.DragDrop.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj --no-restore --nologo \
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=dragdrop.trx" \
@@ -135,7 +135,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Feature.Animations.Tests/XPlatUI.Feature.Animations.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj --no-restore --nologo \
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=animations.trx" \
@@ -151,7 +151,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Feature.Svg.Tests/XPlatUI.Feature.Svg.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj --no-restore --nologo \
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=svg.trx" \
@@ -165,7 +165,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Feature.AnimatedGif.Tests/XPlatUI.Feature.AnimatedGif.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj --no-restore --nologo \
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=gif.trx" \
@@ -179,7 +179,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Feature.AnimatedWebp.Tests/XPlatUI.Feature.AnimatedWebp.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj --no-restore --nologo \
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=webp.trx" \
@@ -193,7 +193,7 @@ jobs:
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Feature.Badges.Tests/XPlatUI.Feature.Badges.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj --no-restore --nologo \
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=badges.trx" \
@@ -206,14 +206,14 @@ jobs:
       # documented in the README rather than asserted here.
       - name: Restore the Win32 backend tests
         if: runner.os == 'Windows'
-        run: dotnet restore XPlatUI.Backend.Win32.Tests/XPlatUI.Backend.Win32.Tests.csproj --nologo
+        run: dotnet restore Kolvir.Backend.Win32.Tests/Kolvir.Backend.Win32.Tests.csproj --nologo
 
       - name: Test the Win32 backend
         if: runner.os == 'Windows'
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Backend.Win32.Tests/XPlatUI.Backend.Win32.Tests.csproj --no-restore --nologo \
+          dotnet test Kolvir.Backend.Win32.Tests/Kolvir.Backend.Win32.Tests.csproj --no-restore --nologo \
             --logger "trx;LogFileName=win32.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
@@ -223,20 +223,20 @@ jobs:
       # the portable suite. Windows only, like the backend suite above, and narrowed to the one
       # framework it uses for the reason the feature csproj gives: an unnarrowed restore evaluates
       # all three of the feature's frameworks and stops for the macOS workload this job never
-      # installs. -p:XPlatUIBadgeFrameworks= rather than -p:TargetFramework=, because the latter
-      # would also override XPlatUI's own net10.0 and leave it restored for one framework and built
+      # installs. -p:KolvirBadgeFrameworks= rather than -p:TargetFramework=, because the latter
+      # would also override Kolvir's own net10.0 and leave it restored for one framework and built
       # for another.
       - name: Restore the Windows badge tests
         if: runner.os == 'Windows'
-        run: dotnet restore XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj --nologo -p:XPlatUIBadgeFrameworks=net10.0-windows
+        run: dotnet restore Kolvir.Feature.Badges.Tests.Windows/Kolvir.Feature.Badges.Tests.Windows.csproj --nologo -p:KolvirBadgeFrameworks=net10.0-windows
 
       - name: Test the Windows badge icon
         if: runner.os == 'Windows'
         shell: bash
         run: |
           set -o pipefail
-          dotnet test XPlatUI.Feature.Badges.Tests.Windows/XPlatUI.Feature.Badges.Tests.Windows.csproj --no-restore --nologo \
-            -p:XPlatUIBadgeFrameworks=net10.0-windows \
+          dotnet test Kolvir.Feature.Badges.Tests.Windows/Kolvir.Feature.Badges.Tests.Windows.csproj --no-restore --nologo \
+            -p:KolvirBadgeFrameworks=net10.0-windows \
             --logger "trx;LogFileName=badges-win32.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"

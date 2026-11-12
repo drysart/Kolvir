@@ -20,9 +20,9 @@ on:
     paths:
       - '.github/workflows/feature-pack.yml'
       - '.github/scripts/check-feature-package.py'
-      - 'XPlatUI.Feature.*/**'
-      - 'XPlatUI/**'
-      - 'XPlatUI.Backend.*/**'
+      - 'Kolvir.Feature.*/**'
+      - 'Kolvir/**'
+      - 'Kolvir.Backend.*/**'
   workflow_dispatch:
 
 concurrency:
@@ -53,9 +53,9 @@ jobs:
           shopt -s nullglob
           # Feature projects live at the repository root. The development solution lists them, but
           # this job is what builds all three frameworks of each and packs the result.
-          projects=(XPlatUI.Feature.*/*.csproj)
+          projects=(Kolvir.Feature.*/*.csproj)
           if [ ${#projects[@]} -eq 0 ]; then
-            echo "::error::No XPlatUI.Feature.*/*.csproj in this tree, so there is nothing to pack."
+            echo "::error::No Kolvir.Feature.*/*.csproj in this tree, so there is nothing to pack."
             exit 1
           fi
           printf '%s\n' "${projects[@]}" | tee "$RUNNER_TEMP/projects.txt"

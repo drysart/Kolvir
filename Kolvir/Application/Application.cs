@@ -1,0 +1,949 @@
+using System.Reflection;
+using System.Runtime.ExceptionServices;
+using Microsoft.Extensions.DependencyInjection;
+
+namespace Kolvir;
+
+/// <summary>
+/// Owns the message loop, the window list and the platform services. One per process;
+/// <see cref="Current"/> is the ambient handle controls and services use to reach it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The application is the composition root: it builds the service container from the backend's
+/// platform services plus the application's own registrations, then runs the backend's loop. Every
+/// public member is UI-thread only; <see cref="Invoke"/> and <see cref="BeginInvoke"/> are the only
+/// cross-thread entry points.
+/// </para>
+/// <para>
+/// Disposing the application is the teardown path for one that never ran, such as a headless
+/// render. <see cref="Run"/> tears down on its own and calls it too, so disposing afterwards is
+/// harmless.
+/// </para>
+/// </remarks>
+public sealed partial class Application : IDisposable
+{
+    private Action<object>? _startup;
+    private Action<object, ExitEventArgs>? _exiting;
+    private Action<object, WindowEventArgs>? _windowOpened;
+    private Action<object, WindowEventArgs>? _windowClosed;
+    private Action<object>? _themeChanged;
+    private Action<object, ActivatedEventArgs>? _activated;
+    private Action<object, SecondInstanceEventArgs>? _secondInstance;
+    private Action<object, UnhandledExceptionEventArgs>? _unhandledException;
+    /// <summary>The exit code a fault produces when nothing else has set one.</summary>
+    private const int FaultExitCode = 1;
+
+    private static readonly bool ValidateScopes =
+#if DEBUG
+        true;
+#else
+        false;
+#endif
+
+    private readonly ServiceProvider _provider;
+    private readonly List<Window> _windows = [];
+    private readonly IApplicationHook[] _applicationHooks;
+    private ExceptionDispatchInfo? _fault;
+    private ExceptionDispatchInfo? _handlerFault;
+    private IReadOnlyList<Screen>? _screens;
+    private IDialogService? _dialogs;
+    private int _uiThreadId;
+    private int _exitCode;
+    private bool _exitRequested;
+    private bool _exitInProgress;
+    private bool _running;
+    private bool _runCalled;
+    private bool _primaryInstance = true;
+    private bool _tornDown;
+
+    /// <summary>Creates the application with default <see cref="ApplicationOptions"/>.</summary>
+    /// <param name="backend">The platform half. The application owns it and shuts it down.</param>
+    public Application(IApplicationBackend backend)
+        : this(backend, new ApplicationOptions())
+    {
+    }
+
+    /// <summary>Creates the application, its service container and the backend, in that order.</summary>
+    /// <param name="backend">The platform half. The application owns it and shuts it down.</param>
+    /// <param name="options">Application-wide configuration.</param>
+    /// <exception cref="InvalidOperationException">An application already exists in this process.</exception>
+    public Application(IApplicationBackend backend, ApplicationOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(backend);
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (Current is not null)
+        {
+            throw new InvalidOperationException(
+                "An Application already exists in this process. One per process is the supported model; " +
+                "use Application.Current to reach it.");
+        }
+
+        Backend = backend;
+        Options = options;
+        _uiThreadId = Environment.CurrentManagedThreadId;
+        InstanceKey = ResolveInstanceKey(options);
+        Current = this;
+
+        backend.Initialize(this);
+
+        // Subscribed before the claim, so a launch forwarded while this process is still starting up
+        // is queued behind the loop rather than lost.
+        backend.AddActivatedHandler(OnBackendActivated);
+        backend.AddSecondInstanceHandler(OnBackendSecondInstance);
+
+        _primaryInstance = !options.SingleInstance || backend.TryClaimSingleInstance();
+
+        var services = new ServiceCollection();
+        services.AddSingleton(this);
+        services.AddSingleton(options);
+        services.AddScoped<WindowAccessor>();
+
+        backend.RegisterServices(services);
+        options.ConfigureServices?.Invoke(services);
+
+        // Composed after the application has declared its features, so the factory sees every format
+        // they registered. One factory per application, built once from a fixed list: a control
+        // resolves this one, and nothing can add a format to it at run time.
+        services.AddSingleton<IImageDataFactory>(provider =>
+            new ImageDataFactory(provider.GetServices<IImageFormatProvider>()));
+
+        _provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = ValidateScopes });
+        Services = _provider;
+
+        InstallProcessServices();
+        Theme.AddChangedHandler(OnThemeChanged);
+
+        // Resolved once for the life of the application: the same instances, in registration order,
+        // at every phase, and nothing resolved while the application is tearing itself down.
+        _applicationHooks = _provider.GetServices<IApplicationHook>().ToArray();
+        RaisePhase(ApplicationPhase.Creating);
+
+        // A hook that failed has already been reported. There is nothing left to run, so leave the
+        // application in the state a failed start produces and let Run rethrow the fault.
+        if (_fault is not null)
+        {
+            _exitRequested = true;
+        }
+    }
+
+    /// <summary>The application in this process, or null before one has been created.</summary>
+    public static Application? Current { get; private set; }
+
+    /// <summary>Runs <paramref name="application"/>, so <c>Main</c> can be <c>return Application.Run(app);</c>.</summary>
+    /// <param name="application">The application to run.</param>
+    /// <returns>The process exit code.</returns>
+    public static int Run(Application application)
+    {
+        ArgumentNullException.ThrowIfNull(application);
+        return application.Run();
+    }
+
+    /// <summary>The platform half this application drives.</summary>
+    public IApplicationBackend Backend { get; }
+
+    /// <summary>The options this application was created with.</summary>
+    public ApplicationOptions Options { get; }
+
+    /// <summary>
+    /// What identifies the application to the platform's single-instance mechanism:
+    /// <see cref="ApplicationOptions.InstanceKey"/>, or <see cref="ApplicationOptions.ApplicationName"/>,
+    /// or the entry assembly's name.
+    /// </summary>
+    /// <remarks>
+    /// Set before the backend is initialized, because a backend that needs the key to create its
+    /// native application - GTK4's D-Bus application id - has to know it then.
+    /// </remarks>
+    public string InstanceKey { get; }
+
+    /// <summary>The application-scoped service provider. One per process.</summary>
+    public IServiceProvider Services { get; }
+
+    /// <summary>True from the moment <see cref="Run"/> enters until it has returned.</summary>
+    public bool IsRunning => _running;
+
+    /// <summary>
+    /// True unless <see cref="ApplicationOptions.SingleInstance"/> is set and another process
+    /// already owns the application, in which case this launch has been handed to that process.
+    /// </summary>
+    /// <remarks>
+    /// A forwarded launch does nothing: <see cref="Run"/> returns 0 without raising
+    /// <see cref="AddStartupHandler"/> and without showing a window, so a second launch never flashes one.
+    /// </remarks>
+    public bool IsPrimaryInstance => _primaryInstance;
+
+    /// <summary>The exit code <see cref="Run"/> returns, or will return once it is called.</summary>
+    public int ExitCode => _exitCode;
+
+    /// <summary>
+    /// The application's main window, or null when it has none. This is identity, never a
+    /// requirement: it is the default owner for modal windows, the window <see cref="Activate"/>
+    /// brings forward, and the window <see cref="ShutdownMode.OnMainWindowClose"/> watches.
+    /// The first window shown becomes the main window; closing it does not clear it, so it can be
+    /// shown again.
+    /// </summary>
+    public Window? MainWindow { get; set; }
+
+    /// <summary>The open windows. A snapshot, so it is safe to enumerate while closing windows.</summary>
+    public IReadOnlyList<Window> Windows => _windows.ToArray();
+
+    /// <summary>The displays attached to the machine, as the backend reports them.</summary>
+    public IReadOnlyList<Screen> Screens => _screens ??= Backend.GetScreens();
+
+    /// <summary>
+    /// The platform's message, file, folder and font dialogs. Never null: every backend registers
+    /// one, because dialogs are part of v1.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">The backend registered no <see cref="IDialogService"/>.</exception>
+    public IDialogService Dialogs => _dialogs ??= Services.GetService<IDialogService>()
+        ?? throw new InvalidOperationException(
+            "The backend registered no IDialogService. Every backend must register one; " +
+            "see IApplicationBackend.RegisterServices.");
+
+    /// <summary>Adds a handler that runs inside <see cref="Run"/>, before any window is shown.</summary>
+    public IDisposable AddStartupHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _startup += handler;
+        return new HandlerToken<Action<object>>(RemoveStartupHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddStartupHandler"/> added.</summary>
+    public void RemoveStartupHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _startup -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs once as the loop ends, before windows are closed.
+    /// <see cref="ExitEventArgs.ExitCode"/> can be replaced here.
+    /// </summary>
+    /// <remarks>
+    /// Not cancellable on purpose. By the time the loop has ended there is nothing to return to on
+    /// any of the three platforms, so a cancel flag would be a lie; a window that wants to refuse a
+    /// shutdown does it from <see cref="Window.AddClosingHandler"/>, whose handlers run while
+    /// the exit is still being decided.
+    /// </remarks>
+    public IDisposable AddExitingHandler(Action<object, ExitEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _exiting += handler;
+        return new HandlerToken<Action<object, ExitEventArgs>>(RemoveExitingHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddExitingHandler"/> added.</summary>
+    public void RemoveExitingHandler(Action<object, ExitEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _exiting -= handler;
+    }
+
+    /// <summary>Adds a handler that runs after a window has been shown.</summary>
+    public IDisposable AddWindowOpenedHandler(Action<object, WindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowOpened += handler;
+        return new HandlerToken<Action<object, WindowEventArgs>>(RemoveWindowOpenedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddWindowOpenedHandler"/> added.</summary>
+    public void RemoveWindowOpenedHandler(Action<object, WindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowOpened -= handler;
+    }
+
+    /// <summary>Adds a handler that runs after a window has closed and has left <see cref="Windows"/>.</summary>
+    public IDisposable AddWindowClosedHandler(Action<object, WindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowClosed += handler;
+        return new HandlerToken<Action<object, WindowEventArgs>>(RemoveWindowClosedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddWindowClosedHandler"/> added.</summary>
+    public void RemoveWindowClosedHandler(Action<object, WindowEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _windowClosed -= handler;
+    }
+
+    /// <summary>Adds a handler that runs after <see cref="Theme.Palette"/>, <see cref="Theme.FontFamily"/> or <see cref="Theme.UseFont"/> changed.</summary>
+    public IDisposable AddThemeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _themeChanged += handler;
+        return new HandlerToken<Action<object>>(RemoveThemeChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddThemeChangedHandler"/> added.</summary>
+    public void RemoveThemeChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _themeChanged -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs when the platform asks the application to come to the foreground
+    /// without a new launch, such as a click on the macOS Dock tile. <see cref="Activate"/> is the
+    /// default action.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Handlers always run on the UI thread, at a point where windows may be shown or closed. Set
+    /// <see cref="ActivatedEventArgs.Handled"/> to replace the default action, which is to
+    /// bring <see cref="MainWindow"/> forward.
+    /// </para>
+    /// <para>
+    /// Not every platform delivers this: on Windows the shell restores the window itself, and on
+    /// GTK4 a re-launch arrives as <see cref="AddSecondInstanceHandler"/> instead.
+    /// </para>
+    /// </remarks>
+    public IDisposable AddActivatedHandler(Action<object, ActivatedEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated += handler;
+        return new HandlerToken<Action<object, ActivatedEventArgs>>(RemoveActivatedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddActivatedHandler"/> added.</summary>
+    public void RemoveActivatedHandler(Action<object, ActivatedEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _activated -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs when another launch of the application was forwarded to this
+    /// process because
+    /// <see cref="ApplicationOptions.SingleInstance"/> is set.
+    /// </summary>
+    /// <remarks>
+    /// Handlers always run on the UI thread. <see cref="SecondInstanceEventArgs.Arguments"/>
+    /// carries the second launch's command line, so a launch can open a document or a window here.
+    /// The default action is to raise activation; set
+    /// <see cref="SecondInstanceEventArgs.Handled"/> to replace it.
+    /// </remarks>
+    public IDisposable AddSecondInstanceHandler(Action<object, SecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance += handler;
+        return new HandlerToken<Action<object, SecondInstanceEventArgs>>(RemoveSecondInstanceHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSecondInstanceHandler"/> added.</summary>
+    public void RemoveSecondInstanceHandler(Action<object, SecondInstanceEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _secondInstance -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs when an exception escapes application, window or control code on
+    /// the UI thread, instead of letting it unwind into the platform's message pump.
+    /// </summary>
+    /// <remarks>
+    /// The exception is fatal unless a handler sets
+    /// <see cref="UnhandledExceptionEventArgs.Handled"/>: the application then shuts down
+    /// through the normal path - windows close, <see cref="AddExitingHandler"/> runs, services are
+    /// disposed - and <see cref="Run"/> rethrows it. A handled exception is swallowed and the loop
+    /// keeps running, unless the failure happened inside the platform's own loop, in which case
+    /// there is nothing left to run and the application exits with code 1.
+    /// </remarks>
+    public IDisposable AddUnhandledExceptionHandler(Action<object, UnhandledExceptionEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _unhandledException += handler;
+        return new HandlerToken<Action<object, UnhandledExceptionEventArgs>>(RemoveUnhandledExceptionHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddUnhandledExceptionHandler"/> added.</summary>
+    public void RemoveUnhandledExceptionHandler(Action<object, UnhandledExceptionEventArgs> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _unhandledException -= handler;
+    }
+
+    /// <summary>Runs the message loop and returns the exit code. Call it once.</summary>
+    /// <returns>The process exit code.</returns>
+    /// <exception cref="InvalidOperationException"><see cref="Run()"/> was already called.</exception>
+    /// <exception cref="Exception">An unhandled exception reached <see cref="AddUnhandledExceptionHandler"/> and was not handled.</exception>
+    public int Run()
+    {
+        if (_runCalled)
+        {
+            throw new InvalidOperationException("Run() may only be called once per application.");
+        }
+
+        _runCalled = true;
+
+        if (!_primaryInstance)
+        {
+            // The launch was handed to the process that owns the application, so there is nothing to
+            // show and no loop to enter. Tearing down still releases the backend's resources.
+            TearDown();
+            return _exitCode;
+        }
+
+        _uiThreadId = Environment.CurrentManagedThreadId;
+        _running = true;
+
+        try
+        {
+            if (!_exitRequested)
+            {
+                Guard(() => _startup?.Invoke(this));
+
+                // Windows shown before Run() become visible now, in the order they were created.
+                foreach (var window in _windows.ToArray())
+                {
+                    if (_exitRequested)
+                    {
+                        break;
+                    }
+
+                    Guard(window.ShowNow);
+                }
+
+                if (!_exitRequested)
+                {
+                    RaisePhase(ApplicationPhase.Created);
+                }
+
+                if (!_exitRequested)
+                {
+                    _exitCode = Backend.Run();
+                }
+            }
+        }
+        catch (Exception ex) when (IsCatchable(ex))
+        {
+            // The loop is gone, so a handler can only decide whether Run rethrows.
+            RecordFault(ReportUnhandledException(ex) ? null : ex);
+        }
+        finally
+        {
+            _running = false;
+            TearDown();
+        }
+
+        _fault?.Throw();
+        return _exitCode;
+    }
+
+    /// <summary>Asks the application to exit with code 0.</summary>
+    public void Exit() => Exit(0);
+
+    /// <summary>
+    /// Asks the application to exit. Every open window is closed first and any of them may refuse,
+    /// which aborts the exit; the handlers <see cref="AddExitingHandler"/> added run from
+    /// <see cref="Run"/> once the loop has ended.
+    /// </summary>
+    /// <param name="exitCode">The process exit code to return.</param>
+    public void Exit(int exitCode)
+    {
+        if (_tornDown || _exitInProgress)
+        {
+            return;
+        }
+
+        _exitInProgress = true;
+        try
+        {
+            _exitCode = exitCode;
+            _exitRequested = true;
+
+            foreach (var window in _windows.ToArray())
+            {
+                if (!window.RequestClose())
+                {
+                    _exitRequested = false;
+                    return;
+                }
+            }
+
+            if (_running)
+            {
+                Backend.Quit(exitCode);
+            }
+        }
+        finally
+        {
+            _exitInProgress = false;
+        }
+    }
+
+    /// <summary>Brings <see cref="MainWindow"/> forward, or the first open window when there is none.</summary>
+    /// <remarks>
+    /// The default action of <see cref="AddActivatedHandler"/> and <see
+    /// cref="AddSecondInstanceHandler"/>. Does nothing once the application has been torn down or
+    /// when every window is closed, so it stays safe to call from a platform callback that arrives
+    /// during shutdown.
+    /// </remarks>
+    public void Activate()
+    {
+        if (_tornDown)
+        {
+            return;
+        }
+
+        var window = MainWindow ?? (_windows.Count > 0 ? _windows[0] : null);
+
+        if (window is { IsClosed: false })
+        {
+            window.Activate();
+        }
+    }
+
+    /// <summary>True when the calling thread is the UI thread.</summary>
+    /// <returns>True on the UI thread.</returns>
+    public bool CheckAccess() => Environment.CurrentManagedThreadId == _uiThreadId;
+
+    /// <summary>Runs <paramref name="action"/> on the UI thread, waiting for it when called from another thread.</summary>
+    /// <param name="action">The work to run.</param>
+    public void Invoke(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+
+        if (CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        Backend.Invoke(action, synchronous: true);
+    }
+
+    /// <summary>
+    /// Queues <paramref name="action"/> on the UI thread and returns immediately. Queued work runs
+    /// when the loop runs, so queueing before <see cref="Run"/> is legal but does not run early.
+    /// </summary>
+    /// <param name="action">The work to queue.</param>
+    /// <remarks>
+    /// A queued action has no caller to report to, so an exception it throws is routed through
+    /// <see cref="AddUnhandledExceptionHandler"/> rather than allowed to unwind into the message pump, where
+    /// a native frame would make it unrecoverable.
+    /// </remarks>
+    public void BeginInvoke(Action action)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        Backend.Invoke(() => Guard(action), synchronous: false);
+    }
+
+    /// <summary>Tears the application down. Idempotent, and safe to call after <see cref="Run"/>.</summary>
+    public void Dispose() => TearDown();
+
+    internal void RegisterWindow(Window window)
+    {
+        if (!_windows.Contains(window))
+        {
+            _windows.Add(window);
+        }
+    }
+
+    internal void UnregisterWindow(Window window)
+    {
+        if (!_windows.Remove(window))
+        {
+            return;
+        }
+
+        Guard(() =>
+        {
+            _windowClosed?.Invoke(this, new WindowEventArgs(window));
+            CheckShutdownMode(window);
+        });
+    }
+
+    internal void NotifyWindowShown(Window window)
+    {
+        MainWindow ??= window;
+        Guard(() => _windowOpened?.Invoke(this, new WindowEventArgs(window)));
+    }
+
+    /// <summary>
+    /// Reports <paramref name="exception"/> through <see cref="AddUnhandledExceptionHandler"/>.
+    /// </summary>
+    /// <param name="exception">The exception that escaped UI-thread code.</param>
+    /// <returns>True when a handler claimed the exception.</returns>
+    internal bool ReportUnhandledException(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        if (_unhandledException is not { } handlers)
+        {
+            return false;
+        }
+
+        var args = new UnhandledExceptionEventArgs(exception);
+
+        foreach (var handler in handlers.GetInvocationList())
+        {
+            try
+            {
+                ((Action<object, UnhandledExceptionEventArgs>)handler)(this, args);
+            }
+            catch (Exception ex) when (IsCatchable(ex))
+            {
+                // A handler that throws must not stop the ones after it. Its own exception is only
+                // used when nothing else was recorded, so the original fault is never displaced.
+                _handlerFault ??= ExceptionDispatchInfo.Capture(ex);
+            }
+        }
+
+        return args.Handled;
+    }
+
+    /// <summary>
+    /// What identifies the application to the platform's single-instance mechanism.
+    /// </summary>
+    private static string ResolveInstanceKey(ApplicationOptions options)
+    {
+        if (!string.IsNullOrWhiteSpace(options.InstanceKey))
+        {
+            return options.InstanceKey;
+        }
+
+        if (!string.IsNullOrWhiteSpace(options.ApplicationName))
+        {
+            return options.ApplicationName;
+        }
+
+        return Assembly.GetEntryAssembly()?.GetName().Name ?? nameof(Application);
+    }
+
+    private void OnBackendActivated(object sender)
+    {
+        if (!CheckAccess())
+        {
+            BeginInvoke(RaiseActivated);
+            return;
+        }
+
+        RaiseActivated();
+    }
+
+    private void OnBackendSecondInstance(object? sender, SecondInstanceEventArgs e)
+    {
+        if (!CheckAccess())
+        {
+            BeginInvoke(() => RaiseSecondInstance(e.Arguments));
+            return;
+        }
+
+        RaiseSecondInstance(e.Arguments);
+    }
+
+    private void RaiseActivated()
+    {
+        if (_tornDown)
+        {
+            return;
+        }
+
+        var args = new ActivatedEventArgs();
+        Guard(() => _activated?.Invoke(this, args));
+
+        if (!args.Handled)
+        {
+            Activate();
+        }
+    }
+
+    private void RaiseSecondInstance(IReadOnlyList<string> arguments)
+    {
+        if (_tornDown)
+        {
+            return;
+        }
+
+        var args = new SecondInstanceEventArgs(arguments);
+        Guard(() => _secondInstance?.Invoke(this, args));
+
+        if (!args.Handled)
+        {
+            RaiseActivated();
+        }
+    }
+
+    private void CheckShutdownMode(Window closed)
+    {
+        if (_tornDown || !_running || _exitRequested)
+        {
+            return;
+        }
+
+        switch (Options.ShutdownMode)
+        {
+            case ShutdownMode.OnLastWindowClose when _windows.Count == 0:
+            case ShutdownMode.OnMainWindowClose when ReferenceEquals(MainWindow, closed):
+                Exit(_exitCode);
+                break;
+        }
+    }
+
+    private void InstallProcessServices()
+    {
+        if (_provider.GetService<IClipboard>() is { } clipboard)
+        {
+            Clipboard.Current = clipboard;
+        }
+
+        if (_provider.GetService<ILauncher>() is { } launcher)
+        {
+            Launcher.Current = launcher;
+        }
+
+        // A system theme only arrives from a backend. Without one there is no desktop preference
+        // to follow, so the palette is left exactly as the application set it - which is what keeps
+        // a headless render deterministic regardless of how the host machine is configured.
+        if (_provider.GetService<ISystemTheme>() is { } theme)
+        {
+            SystemTheme.Current = theme;
+        }
+
+        if (!string.IsNullOrWhiteSpace(Options.FontFamily))
+        {
+            Theme.FontFamily = Options.FontFamily;
+        }
+
+        if (Options.ForcedDarkMode is { } dark)
+        {
+            Theme.Palette = dark ? Palette.Dark : Palette.Light;
+        }
+        else if (Options.FollowSystemAppearance && _provider.GetService<ISystemTheme>() is not null)
+        {
+            SystemTheme.Refresh();
+        }
+    }
+
+    private void OnThemeChanged(object sender)
+    {
+        Guard(() =>
+        {
+            foreach (var window in _windows.ToArray())
+            {
+                window.Backend.SetTitleBarAppearance(Theme.IsDarkMode);
+                window.Host.Invalidate();
+            }
+
+            _themeChanged?.Invoke(this);
+        });
+    }
+
+    /// <summary>
+    /// Reports an exception caught where it cannot be allowed to propagate - a platform callback
+    /// such as a window procedure, whose caller is native code with no way to unwind a managed
+    /// exception. Exceptions the model refuses to swallow are rethrown, which at such a boundary
+    /// ends the process; that is the correct outcome for them.
+    /// </summary>
+    /// <param name="exception">The exception that escaped UI-thread code.</param>
+    /// <remarks>
+    /// <para>
+    /// A backend calls this from every callback it hands to the platform, because an exception that
+    /// unwinds into a native frame is a fail-fast with no hook. Exceptions the model dispatches
+    /// itself - <see cref="AddStartupHandler"/>, <see cref="AddWindowOpenedHandler"/>, <see
+    /// cref="AddWindowClosedHandler"/>,
+    /// <see cref="AddThemeChangedHandler"/>, <see cref="AddExitingHandler"/>, <see cref="BeginInvoke"/> work and the
+    /// tick - already go through it, so a backend only has to cover its own callbacks.
+    /// </para>
+    /// <para>
+    /// When there is no <see cref="Current"/> application - a host painted standalone, as
+    /// <c>--render</c> does - the exception is rethrown, so a plain <see cref="UiHost"/> keeps
+    /// letting its caller see failures.
+    /// </para>
+    /// </remarks>
+    public static void HandleNativeBoundary(Exception exception)
+    {
+        ArgumentNullException.ThrowIfNull(exception);
+
+        if (Current is { } application)
+        {
+            application.HandleNativeBoundaryException(exception);
+            return;
+        }
+
+        ExceptionDispatchInfo.Capture(exception).Throw();
+    }
+
+    private void HandleNativeBoundaryException(Exception exception)
+    {
+        if (!IsCatchable(exception))
+        {
+            ExceptionDispatchInfo.Capture(exception).Throw();
+        }
+
+        if (!ReportUnhandledException(exception))
+        {
+            Fault(exception);
+        }
+    }
+
+    /// <summary>
+    /// Runs work the model dispatches on the UI thread, so an exception reaches
+    /// <see cref="AddUnhandledExceptionHandler"/> instead of unwinding into the platform's message pump.
+    /// </summary>
+    private void Guard(Action action)
+    {
+        try
+        {
+            action();
+        }
+        catch (Exception ex)
+        {
+            HandleNativeBoundaryException(ex);
+        }
+    }
+
+    /// <summary>
+    /// Records an unhandled exception as fatal and asks the application to exit. The loop is still
+    /// alive here, so the shutdown is a normal one and <see cref="Run"/> rethrows afterwards.
+    /// </summary>
+    private void Fault(Exception exception)
+    {
+        RecordFault(exception);
+
+        if (!_running || _exitRequested)
+        {
+            return;
+        }
+
+        try
+        {
+            Exit(_exitCode);
+        }
+        catch (Exception ex) when (IsCatchable(ex))
+        {
+            // The shutdown path itself failed. Stop the loop anyway; the first fault still wins.
+            RecordFault(ex);
+            _exitRequested = true;
+            Backend.Quit(_exitCode);
+        }
+    }
+
+    private void RecordFault(Exception? exception)
+    {
+        if (exception is not null)
+        {
+            _fault ??= ExceptionDispatchInfo.Capture(exception);
+        }
+
+        _fault ??= _handlerFault;
+
+        if (_exitCode == 0)
+        {
+            _exitCode = FaultExitCode;
+        }
+    }
+
+    /// <summary>
+    /// Exceptions that no application should be able to swallow: the process state is already
+    /// unusable, so reporting them through the model would only hide a failure that must crash.
+    /// </summary>
+    private static bool IsCatchable(Exception exception) =>
+        exception is not (OutOfMemoryException or StackOverflowException or AccessViolationException);
+
+    /// <summary>
+    /// Raises <paramref name="phase"/> on the portable hooks and then hands it to the backend's
+    /// typed ones, reversing both layers for a descending phase.
+    /// </summary>
+    /// <remarks>
+    /// Reversing is what makes a pair of hooks nest: if <c>A</c> registers before <c>B</c>,
+    /// <c>A</c> sets up before <c>B</c> and tears down after it. A hook that throws reaches
+    /// <see cref="AddUnhandledExceptionHandler"/> and does not stop the hooks after it.
+    /// </remarks>
+    private void RaisePhase(ApplicationPhase phase)
+    {
+        var ascending = phase is ApplicationPhase.Creating or ApplicationPhase.Created;
+
+        if (!ascending)
+        {
+            RunBackendHooks(phase);
+        }
+
+        for (var i = 0; i < _applicationHooks.Length; i++)
+        {
+            var hook = _applicationHooks[ascending ? i : _applicationHooks.Length - 1 - i];
+
+            try
+            {
+                hook.OnPhase(phase, this);
+            }
+            catch (Exception ex)
+            {
+                HandleNativeBoundaryException(ex);
+            }
+        }
+
+        if (ascending)
+        {
+            RunBackendHooks(phase);
+        }
+    }
+
+    private void RunBackendHooks(ApplicationPhase phase)
+    {
+        try
+        {
+            Backend.RunApplicationHooks(phase, this);
+        }
+        catch (Exception ex)
+        {
+            HandleNativeBoundaryException(ex);
+        }
+    }
+
+    private void TearDown()
+    {
+        if (_tornDown)
+        {
+            return;
+        }
+
+        _tornDown = true;
+        _running = false;
+        Theme.RemoveChangedHandler(OnThemeChanged);
+
+        // A forwarded launch never entered the loop, so there is no exit to report.
+        if (_runCalled && _primaryInstance)
+        {
+            RaisePhase(ApplicationPhase.Stopping);
+
+            var args = new ExitEventArgs(_exitCode);
+            Guard(() => _exiting?.Invoke(this, args));
+
+            // A fault is never reported as success, whatever Exiting left behind.
+            _exitCode = args.ExitCode == 0 && _fault is not null ? FaultExitCode : args.ExitCode;
+        }
+
+        foreach (var window in _windows.ToArray())
+        {
+            window.Dispose();
+        }
+
+        _windows.Clear();
+        _dialogs = null;
+        _screens = null;
+
+        if (_runCalled && _primaryInstance)
+        {
+            RaisePhase(ApplicationPhase.Stopped);
+        }
+
+        // Unconditional, unlike Stopping and Stopped: this is the only teardown a forwarded launch
+        // or a headless render sees, and the last point at which a hook can reach a service the
+        // container still owns.
+        RaisePhase(ApplicationPhase.Disposed);
+
+        _provider.Dispose();
+
+        if (ReferenceEquals(Current, this))
+        {
+            Current = null;
+        }
+
+        Backend.Shutdown();
+    }
+}

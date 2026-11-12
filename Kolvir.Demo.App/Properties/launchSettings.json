@@ -1,0 +1,17 @@
+{
+  "profiles": {
+    "Kolvir.Demo.App": {
+      "commandName": "Project"
+    },
+    "Demo (Debug Paint)": {
+      "commandName": "Project",
+      "environmentVariables": {
+        "KOLVIR_DEBUG_PAINT": "1"
+      }
+    },
+    "mac": {
+      "commandName": "Executable",
+      "executablePath": "Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp"
+    }
+  }
+}

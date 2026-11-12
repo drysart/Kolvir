@@ -1,0 +1,98 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The one application, for all three platforms (see APPLICATION-MODEL.md, "6. One project, three
+       platforms"). Each OS builds exactly one TFM: net10.0-macos needs the macOS workload and Xcode,
+       which only exist on a Mac, so it must never appear in a TFM list that Windows has to evaluate. -->
+  <PropertyGroup>
+    <TargetFramework Condition="$([MSBuild]::IsOSPlatform('windows'))">net10.0-windows</TargetFramework>
+    <TargetFramework Condition="$([MSBuild]::IsOSPlatform('osx'))">net10.0-macos</TargetFramework>
+    <TargetFramework Condition="$([MSBuild]::IsOSPlatform('linux'))">net10.0</TargetFramework>
+    <TargetFramework Condition="'$(TargetFramework)' == ''">net10.0</TargetFramework>
+    <!-- The macOS SDK names the bundle after the assembly, so this decides what the bundle is
+         called. KolvirDemoApp predates the sample UI moving into this project, and it stays
+         because Info.plist, app.manifest, the platform workflows and README.md all name it. -->
+    <AssemblyName>KolvirDemoApp</AssemblyName>
+    <RootNamespace>Kolvir.Demo.App</RootNamespace>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <!-- No Windows Forms, no System.Drawing, no reflection: the whole application is SkiaSharp plus
+         the platform backend, so it publishes with NativeAOT. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <!-- The macOS 27 bindings refuse to build for anything older than macOS 14, and nothing here
+         needs a newer API than that. -->
+    <SupportedOSPlatformVersion Condition="'$(TargetFramework)' == 'net10.0-macos'">14.0</SupportedOSPlatformVersion>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <!-- No console for a GUI executable; diagnostics are borrowed from the parent console instead
+         (ApplicationOptions.AttachConsole). Declaring DPI awareness in the manifest is what
+         makes the raw Win32 window crisp. -->
+    <OutputType>WinExe</OutputType>
+    <ApplicationManifest>app.manifest</ApplicationManifest>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' != 'net10.0-windows'">
+    <OutputType>Exe</OutputType>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <!-- The macOS workload refuses to build unless Xcode's major.minor is *exactly* the version its
+         bindings were generated against (27.1 for workload 27.0.10742), so simply having a newer
+         Xcode installed fails a build that works perfectly - 27.2 compiles this app and renders it
+         pixel-identically. The check is skipped here so a local Mac stays usable after an Xcode
+         update; set this back to true to restore it. CI does not rely on the check either - the
+         macOS build workflow selects the Xcode the workload expects by hand. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+    <ProjectReference Include="..\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+
+    <!-- The animations feature is portable end to end - arithmetic, a clock and an invalidation -
+         so this is the single unconditional line FEATURE-COST-POLICY.md section 4 describes: the
+         framework the application builds for selects the matching lib/ folder, and nothing here has
+         to be conditioned on the platform to pick the right one. The SVG feature is portable in
+         exactly the same way: Svg.Skia renders to an SKPicture on all three platforms, and its
+         HarfBuzz native comes along per-platform from the package's own dependency groups. -->
+    <ProjectReference Include="..\Kolvir.Feature.Animations\Kolvir.Feature.Animations.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.AnimatedGif\Kolvir.Feature.AnimatedGif.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.AnimatedWebp\Kolvir.Feature.AnimatedWebp.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Svg\Kolvir.Feature.Svg.csproj" />
+  </ItemGroup>
+
+  <!-- The demo's bundled face. It travels inside the assembly rather than beside the executable,
+       because that is what a trimmed single-file publish can carry, and because the point of the
+       feature is a face the machine may not have. Fonts/OFL.txt is its licence. -->
+  <ItemGroup>
+    <EmbeddedResource Include="Fonts\IBMPlexSans-Regular.ttf"
+                      LogicalName="Kolvir.Demo.App.Fonts.IBMPlexSans-Regular.ttf" />
+  </ItemGroup>
+
+  <!-- Exactly one backend and one feature per TFM, and only the ones that TFM can actually use. The
+       feature is a package like any other: leaving it out still compiles, and the window simply
+       never becomes a drop target. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <ProjectReference Include="..\Kolvir.Backend.Win32\Kolvir.Backend.Win32.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.DragDrop\Kolvir.Feature.DragDrop.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Badges\Kolvir.Feature.Badges.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <ProjectReference Include="..\Kolvir.Backend.AppKit\Kolvir.Backend.AppKit.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.DragDrop\Kolvir.Feature.DragDrop.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Badges\Kolvir.Feature.Badges.csproj" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <ProjectReference Include="..\Kolvir.Backend.Gtk4\Kolvir.Backend.Gtk4.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.DragDrop\Kolvir.Feature.DragDrop.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Badges\Kolvir.Feature.Badges.csproj" />
+  </ItemGroup>
+
+  <!-- The SkiaSharp native library is embedded in an AOT publish by Kolvir's own build assets
+       (Kolvir/buildTransitive/Kolvir.targets), so no application has to carry that MSBuild. Set
+       EmbedSkiaSharpNative to false to keep the library as a loose file beside the executable. The
+       SVG feature's HarfBuzz native is embedded by its own build assets the same way, and needs no
+       switch here at all: an application that publishes with AOT gets both folded in. -->
+</Project>

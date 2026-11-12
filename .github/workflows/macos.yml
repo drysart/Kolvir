@@ -1,6 +1,6 @@
 name: macOS build
 
-# XPlatUIDemo.App targets net10.0-macos on macOS, so it needs the macOS workload and can only be
+# Kolvir.Demo.App targets net10.0-macos on macOS, so it needs the macOS workload and can only be
 # built on a Mac. This job is the compile check for it: it builds the bundle and then renders the
 # sample UI headlessly, which also proves the library itself runs on the machine.
 #
@@ -15,10 +15,10 @@ on:
     branches: [master]
     paths:
       - '.github/workflows/macos.yml'
-      - 'XPlatUIDemo.App/**'
-      - 'XPlatUI/**'
-      - 'XPlatUI.Backend.*/**'
-      - 'XPlatUI.Feature.*/**'
+      - 'Kolvir.Demo.App/**'
+      - 'Kolvir/**'
+      - 'Kolvir.Backend.*/**'
+      - 'Kolvir.Feature.*/**'
   workflow_dispatch:
 
 concurrency:
@@ -28,7 +28,7 @@ concurrency:
 jobs:
   build:
     name: Build the macOS app
-    # The project turns the workload's Xcode version check off (see XPlatUIDemo.App.csproj), so any
+    # The project turns the workload's Xcode version check off (see Kolvir.Demo.App.csproj), so any
     # Xcode the SDK can find will do as far as .NET's own check is concerned - but the local SDK still
     # has to be new enough for the headers the workload's bindings were generated against, which is
     # why the step below selects the newest one rather than a named one.
@@ -83,7 +83,7 @@ jobs:
           # -r matches the publishes below: the macOS SDK otherwise defaults to osx-x64, and the
           # rendered pixels then differ from an osx-arm64 build for reasons that have nothing to do
           # with trimming.
-          dotnet build XPlatUIDemo.App/XPlatUIDemo.App.csproj -c Release -r osx-arm64 --nologo 2>&1 | tee "$RUNNER_TEMP/build.log"
+          dotnet build Kolvir.Demo.App/Kolvir.Demo.App.csproj -c Release -r osx-arm64 --nologo 2>&1 | tee "$RUNNER_TEMP/build.log"
 
       # MSBuild diagnostics are not workflow annotations, so lift the first few into the job
       # summary and into annotations: those are readable without downloading the raw log.
@@ -116,15 +116,15 @@ jobs:
       - name: Render the sample UI headlessly
         run: |
           set -euo pipefail
-          APP="$(find XPlatUIDemo.App/bin/Release -path '*XPlatUIDemoApp.app/Contents/MacOS/XPlatUIDemoApp' -type f | head -n 1)"
+          APP="$(find Kolvir.Demo.App/bin/Release -path '*KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp' -type f | head -n 1)"
           if [ -z "$APP" ]; then
-            echo "::error::The build did not produce an XPlatUIDemoApp.app bundle."
-            find XPlatUIDemo.App/bin/Release -maxdepth 6 \( -name '*.app' -o -name 'XPlatUIDemoApp' \) | head -n 20
+            echo "::error::The build did not produce a KolvirDemoApp.app bundle."
+            find Kolvir.Demo.App/bin/Release -maxdepth 6 \( -name '*.app' -o -name 'KolvirDemoApp' \) | head -n 20
             exit 1
           fi
           echo "app: $APP"
           echo "BUILD_BUNDLE=$(dirname "$(dirname "$(dirname "$APP")")")" >> "$GITHUB_ENV"
-          "$APP" --render "$RUNNER_TEMP/xplatui.png"
+          "$APP" --render "$RUNNER_TEMP/kolvir.png"
 
       # Only `dotnet publish` runs the trimmer - a plain `dotnet build` leaves the bundle at ~137 MB -
       # and the link mode decides how much it takes away. Publishing the three modes side by side
@@ -160,7 +160,7 @@ jobs:
 
           # The build bundle is measured before anything is published, because a publish writes to the
           # same directory: measuring it afterwards would just measure the last publish again.
-          "$BUILD_BUNDLE/Contents/MacOS/XPlatUIDemoApp" --render "$RUNNER_TEMP/xplatui-build.png" > /dev/null 2>&1
+          "$BUILD_BUNDLE/Contents/MacOS/KolvirDemoApp" --render "$RUNNER_TEMP/kolvir-build.png" > /dev/null 2>&1
           manifest "$BUILD_BUNDLE" > "$RUNNER_TEMP/files-build.txt"
           build_mb="$(apparent_mb "$BUILD_BUNDLE")"
           build_files="$(file_count "$BUILD_BUNDLE")"
@@ -174,7 +174,7 @@ jobs:
             echo '| --- | --- | --- | --- | --- | --- |'
           } >> "$GITHUB_STEP_SUMMARY"
 
-          pubdir="XPlatUIDemo.App/bin/Release/net10.0-macos/osx-arm64"
+          pubdir="Kolvir.Demo.App/bin/Release/net10.0-macos/osx-arm64"
           ref=""
           for link in None SdkOnly Full; do
             # The bundle is written next to the build output, not into the publish directory, so it
@@ -185,27 +185,27 @@ jobs:
               # The only way to turn the trimmer off is LinkMode=None together with TrimMode=copy.
               extra="-p:TrimMode=copy"
             fi
-            dotnet publish XPlatUIDemo.App/XPlatUIDemo.App.csproj -c Release -r osx-arm64 --nologo \
+            dotnet publish Kolvir.Demo.App/Kolvir.Demo.App.csproj -c Release -r osx-arm64 --nologo \
               -p:LinkMode=$link -p:CreatePackage=false $extra 2>&1 | tee "$RUNNER_TEMP/publish-$link.log"
-            app="$pubdir/XPlatUIDemoApp.app"
+            app="$pubdir/KolvirDemoApp.app"
             if [ ! -d "$app" ]; then
               echo "::error::publish with LinkMode=$link produced no .app bundle in $pubdir"
               find "$pubdir" -maxdepth 1 | head -n 20
               exit 1
             fi
-            "$app/Contents/MacOS/XPlatUIDemoApp" --render "$RUNNER_TEMP/xplatui-$link.png" \
+            "$app/Contents/MacOS/KolvirDemoApp" --render "$RUNNER_TEMP/kolvir-$link.png" \
               > "$RUNNER_TEMP/render-$link.log" 2>&1
             if [ -z "$ref" ]; then
-              ref="$RUNNER_TEMP/xplatui-$link.png"
+              ref="$RUNNER_TEMP/kolvir-$link.png"
               # Rendering the same bundle twice says whether this is a usable reference at all.
-              "$app/Contents/MacOS/XPlatUIDemoApp" --render "$RUNNER_TEMP/refcheck.png" > /dev/null 2>&1
+              "$app/Contents/MacOS/KolvirDemoApp" --render "$RUNNER_TEMP/refcheck.png" > /dev/null 2>&1
               if cmp -s "$ref" "$RUNNER_TEMP/refcheck.png"; then
                 verdict="reference (stable)"
               else
                 verdict="reference (**unstable**: two renders differ)"
               fi
             else
-              px="$(pixel_diff "$ref" "$RUNNER_TEMP/xplatui-$link.png")"
+              px="$(pixel_diff "$ref" "$RUNNER_TEMP/kolvir-$link.png")"
               if [ -z "$px" ]; then
                 verdict="pixel identical to LinkMode=None"
               else
@@ -215,12 +215,12 @@ jobs:
             mb="$(apparent_mb "$app")"
             echo "| LinkMode=$link | $mb | $(file_count "$app") | $(dll_count "$app") | $(skia "$app") | $verdict |" >> "$GITHUB_STEP_SUMMARY"
             echo "- \`LinkMode=$link\` largest files: $(largest "$app")" >> "$GITHUB_STEP_SUMMARY"
-            echo "::notice::LinkMode=$link: $mb, $(file_count "$app") files, $(dll_count "$app") dlls, $(dims "$RUNNER_TEMP/xplatui-$link.png"); $verdict; $(grep -h '^Font:' "$RUNNER_TEMP/render-$link.log" || true); largest: $(largest "$app")"
+            echo "::notice::LinkMode=$link: $mb, $(file_count "$app") files, $(dll_count "$app") dlls, $(dims "$RUNNER_TEMP/kolvir-$link.png"); $verdict; $(grep -h '^Font:' "$RUNNER_TEMP/render-$link.log" || true); largest: $(largest "$app")"
             manifest "$app" > "$RUNNER_TEMP/files-$link.txt"
-            ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/XPlatUIDemoApp-$link.app.zip"
+            ditto -c -k --sequesterRsrc --keepParent "$app" "$RUNNER_TEMP/KolvirDemoApp-$link.app.zip"
           done
 
-          px="$(pixel_diff "$ref" "$RUNNER_TEMP/xplatui-build.png")"
+          px="$(pixel_diff "$ref" "$RUNNER_TEMP/kolvir-build.png")"
           if [ -z "$px" ]; then
             build_verdict="pixel identical to LinkMode=None"
           else
@@ -228,7 +228,7 @@ jobs:
           fi
           echo "| plain \`dotnet build\` | $build_mb | $build_files | $build_dlls | $build_skia | $build_verdict |" >> "$GITHUB_STEP_SUMMARY"
           echo "- \`dotnet build\` largest files: $build_largest" >> "$GITHUB_STEP_SUMMARY"
-          echo "::notice::Plain \`dotnet build\`: $build_mb, $build_files files, $build_dlls dlls, $(dims "$RUNNER_TEMP/xplatui-build.png"); $build_verdict; largest: $build_largest"
+          echo "::notice::Plain \`dotnet build\`: $build_mb, $build_files files, $build_dlls dlls, $(dims "$RUNNER_TEMP/kolvir-build.png"); $build_verdict; largest: $build_largest"
 
           # SdkOnly trims the BCL only, Full also trims the application's own assemblies. Which files
           # each mode drops, and what it grows, is the interesting part of the comparison.
@@ -252,12 +252,12 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: macos-render
-          path: ${{ runner.temp }}/xplatui*.png
+          path: ${{ runner.temp }}/kolvir*.png
           if-no-files-found: error
 
       - name: Upload the app bundles
         uses: actions/upload-artifact@v4
         with:
-          name: XPlatUIDemoApp-bundles
-          path: ${{ runner.temp }}/XPlatUIDemoApp-*.app.zip
+          name: KolvirDemoApp-bundles
+          path: ${{ runner.temp }}/KolvirDemoApp-*.app.zip
           if-no-files-found: error

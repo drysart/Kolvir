@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application calls AddAnimatedGifImages(). -->
+  <PropertyGroup>
+    <!-- Every platform the feature supports, unconditionally, so `dotnet pack` needs all three in one
+         build. Narrow one inner build for local work with `-p:TargetFramework=net10.0`; the plural
+         `-p:TargetFrameworks=...` does not work as a switch, because it reaches the restore graph
+         and not the referenced projects' builds. -->
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <RootNamespace>Kolvir</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- The feature is AOT compatible for the same reason the library is: an application that opts
+         in publishes the same way whether it did or not. Decoding is SkiaSharp's codec plus array
+         arithmetic, all of it statically reachable, and the measurement in the pull request is what
+         says so. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Animated GIF images for Kolvir: an image format provider that decodes every frame up front and plays them on the image timeline.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- No package references beyond the library's own: the decoder is SkiaSharp's SKCodec, which core
+       already brings, and compositing the frames is arithmetic on decoded pixels. There are no native
+       assets of its own, so this package has no buildTransitive folder. -->
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- Nothing here is platform-specific: SkiaSharp decodes the file and the compositing is arithmetic,
+       so the platform folders that exist for the layout's sake are empty. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>
