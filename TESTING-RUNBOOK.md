@@ -41,13 +41,17 @@ photographed.
 |---|---|
 | OS | Windows 11 Pro, build 26300 (`Microsoft Windows NT 10.0.26300.0`) |
 | CPU | 13th Gen Intel Core i9-13900K |
-| Display | 1920 × 1080, **200% scale (DPI 192)** — a logical desktop of 960 × 540 |
+| Display | **3840 × 2160 physical**, 200% scale (system DPI 192) — a logical desktop of 1920 × 1080, delivered by an RDP virtual display |
 | Shell | Windows PowerShell 5.1 |
 | .NET SDK | 10.0.403, including the `macos` and `maui` workloads |
 
-The scale factor is the trap. A DPI-unaware process is lied to: `GetWindowRect` and `SetCursorPos`
-both work in half-pixels, so a click aimed from a screenshot lands somewhere else entirely. Anything
-that clicks or measures has to call
+The scale factor is the trap, and it bites twice. A DPI-unaware process is lied to about the whole
+desktop, not just about coordinates: it is told the screen is 1920 × 1080 and its captures come back as
+the **top-left quarter** of the real 3840 × 2160 display, which looks like a complete desktop and is not.
+`[System.Windows.Forms.Screen]::AllScreens` reports the lie; `GetSystemMetrics(SM_CXSCREEN)` in an aware
+process reports 3840.
+
+Anything that clicks, measures or captures has to call
 
 ```powershell
 Add-Type -Namespace Native -Name Dpi -MemberDefinition @'
@@ -56,8 +60,9 @@ Add-Type -Namespace Native -Name Dpi -MemberDefinition @'
 [Native.Dpi]::SetProcessDpiAwarenessContext([IntPtr](-4)) | Out-Null   # PerMonitorAwareV2
 ```
 
-before the first `user32` call, and then use **physical** pixels everywhere. The same `Add-Type` trick
-gives you the rest: `GetWindowRect`, `ClientToScreen`, `SetCursorPos`, `mouse_event`, `SetWindowPos`.
+before the first `user32` call, and then use **physical** pixels everywhere: 3840 × 2160 of them. The
+same `Add-Type` trick gives you the rest: `GetWindowRect`, `ClientToScreen`, `SetCursorPos`,
+`mouse_event`, `SetWindowPos`.
 
 ### Build and run
 
@@ -78,13 +83,16 @@ The window title is `XPlat UI - Win32`. Find it with `Get-Process -Name XPlatUID
 `MainWindowHandle`: `FindWindow` with the title failed here, and the handle from the process is what the
 user actually sees.
 
-At 200% scale the sample opens around 2586 × 1711 physical, which is **taller than the screen**. To
-reach the bottom of its 59-item navigation list, move the window up rather than trying to shrink it -
-it has a minimum height of about 751 logical pixels:
+At 200% scale the sample opens around 2586 × 1711 physical, which fits the 3840 × 2160 display, so
+nothing has to be moved on this host. The 59-item navigation list is longer than the visible list box
+either way: scroll it (wheel, ±120 a notch) rather than trying to see it all at once.
+
+The window does have a minimum size - asking for 1900 × 1050 comes back about 1503 tall - so treat
+`SetWindowPos` as a request:
 
 ```powershell
 [IntPtr]$hwnd = (Get-Process -Name XPlatUIDemoApp).MainWindowHandle
-[Native.Pos]::SetWindowPos($hwnd, [IntPtr]::Zero, 10, -420, 1900, 1500, 0x0004)   # SWP_NOZORDER
+[Native.Pos]::SetWindowPos($hwnd, [IntPtr]::Zero, 10, 20, 1900, 1500, 0x0004)   # SWP_NOZORDER
 ```
 
 ### Screenshots
@@ -97,13 +105,25 @@ $gfx.CopyFromScreen($left, $top, 0, 0, (New-Object System.Drawing.Size($w, $h)))
 $gfx.Dispose(); $bmp.Save($path, [System.Drawing.Imaging.ImageFormat]::Png); $bmp.Dispose()
 ```
 
-In a DPI-aware process that captures exactly the rectangle asked for. Two things are not capturable:
+In a DPI-aware process that captures exactly the rectangle asked for, in physical pixels - so ask for
+the real desktop, 3840 × 2160, or for a window's `GetWindowRect`. Asking for 1920 × 1080 is not an
+error and not a smaller screenshot: it is the top-left quarter, captured without complaint.
 
-- **The Windows 11 taskbar.** The task buttons live in a composition island; `PrintWindow` on the
-  taskbar returns only the tray and search box, and a screen grab of the taskbar area comes back
-  without the buttons. A taskbar flash therefore cannot be photographed - verify it indirectly, from a
-  harness log or from the sample's own readout.
-- **Anything when the session is locked.** There is no error, just a stale frame.
+Three capture traps:
+
+- **`PrintWindow` is not a screen capture.** On the Windows 11 taskbar it returns only the tray and the
+  search box, because the task buttons live in a composition island that does not render into a DC.
+  `CopyFromScreen` is different: it copies what the compositor is showing, so the taskbar - buttons,
+  underlines and **badge overlay icons** - comes out correctly. A 90-pixel strip along the bottom of the
+  4K display (y 2070-2160) with a running harness shows its button and the red count disc on top of it,
+  which makes badges checkable by eye: crop about 200 px either side of the button and look.
+- **A taskbar *flash* may not be photographable, though.** Take the burst anyway - 100-odd frames at
+  ~100 ms across the moment the request is made, hashing each frame and saving only the changes - but do
+  not conclude from a flat sequence that the flash did not happen. In one measured run over an RDP
+  session (130 frames spanning `Urgent` being set while the window was away) the four distinct frames
+  were all hover and relayout noise; the overlay icon and the button never brightened. Trust the API
+  return value and the app's own readout for `Urgent`, and treat the pixels as a bonus.
+- **A locked session has no error.** The capture simply returns a stale or black frame.
 
 For a picture of a page without a window at all, use the sample's headless renderer, which needs no
 desktop and no message loop:
