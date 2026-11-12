@@ -4233,7 +4233,7 @@ The three numbers separate the image control and the timeline from the feature:
 
 ^ macOS was measured with `dotnet build -c Release -r osx-arm64 -p:PublishAot=true` rather than
 `dotnet publish`, because `dsymutil` fails during publish on that host; that failure is pre-existing
-on master. The app bundle's binary is the one quoted, and the pre-strip `nativelibraries` binary was
+on develop. The app bundle's binary is the one quoted, and the pre-strip `nativelibraries` binary was
 4,103,584 for all three builds as well. The arm64 image is linked in 16 KB pages and the feature fits
 in slack the linker had already paid for: the file lengths are byte-for-byte identical while the
 hashes differ and the feature's assembly is present in the WebP build and absent from the floor.
@@ -4500,7 +4500,7 @@ Apple M4 (Virtual), macOS 27.2, `AppleParavirtGPUMetalIOGPUFamily`, 1280 x 800 l
 2026-11-09. CPU rows are `--no-hardware-acceleration`. **These are paravirtual-GPU numbers: they
 show the shape of the change, not what physical Apple hardware does.** They were taken from a Debug
 build because a Release non-AOT app bundle is rejected by macOS code-signing validation on this VM
-(the same failure reproduces on unmodified `master`); the AOT executable is measured separately
+(the same failure reproduces on unmodified `develop`); the AOT executable is measured separately
 below.
 
 | Mode | Damage | p50 | p95 | max | mean | Painted area |
@@ -4528,13 +4528,13 @@ because two freshly built instances are at different animation frames; that is t
 rasteriser. Nothing is structurally different, and flat fills and text stay within the same 10-11/255
 rounding the Windows work measured.
 
-The CPU path itself is unchanged: headless `--render` of all 54 pages is byte-identical to `master`
+The CPU path itself is unchanged: headless `--render` of all 54 pages is byte-identical to `develop`
 on 53 pages, and the one difference is page 49's animated GIF phase - the same timing difference the
 Windows comparison recorded.
 
 Measured cost on the `Kolvir.Minimal` fixture (osx-arm64, NativeAOT, the app-bundle binary because
-the full publish can fail in `dsymutil` on some macOS hosts, a pre-existing failure on `master`).
-`master` and this branch were built back to back on the same machine with the same toolchain
+the full publish can fail in `dsymutil` on some macOS hosts, a pre-existing failure on `develop`).
+`develop` and this branch were built back to back on the same machine with the same toolchain
 (macvm, SDK 10.0.403) and the same command:
 
 ```
@@ -4760,7 +4760,7 @@ deferred anywhere - and page 54 is content-dependent on the compositing stack: a
 on X11, a wash on Wayland, never a regression. Neither table says anything about a real GPU.
 
 **The Linux default stays at `true`, and that is a decision made here rather than a value inherited
-from `master`.** Nothing measured above proves it on hardware - neither machine has a GPU.
+from `develop`.** Nothing measured above proves it on hardware - neither machine has a GPU.
 What the evidence does establish, and what the decision rests on:
 
 - GTK4 already composites these windows through GL. The option does not add a GL stack that would
@@ -4814,7 +4814,7 @@ by at most 10/255 - the amplified diff is a uniform field of that image, with no
 difference anywhere else. Page 54 is compared below its live readout, which prints numbers that
 change every frame and cannot be compared between two runs. All three are inside the 11-30/255
 antialiasing band the Windows and macOS comparisons recorded. The CPU path itself is unchanged:
-the same window captured with `--no-hardware-acceleration` on `master` and on this branch is
+the same window captured with `--no-hardware-acceleration` on `develop` and on this branch is
 **byte-identical** over the whole client area (0 pixels differ, page 1, 1280 x 760 @ 2.00), which is
 what proves the tier really is the code that was already there.
 
@@ -4841,7 +4841,7 @@ Both builds report **0 IL2xxx/IL3xxx warnings** with `-p:TrimmerSingleWarn=false
 
 Exercised on the X11 VM, each with a screenshot to confirm the frame survived: window resize,
 minimise and restore, occluded-then-uncovered, and close-then-reopen. The CPU path was captured on
-`master` and on this branch for the last of those and compares byte-identical, so a reopened window
+`develop` and on this branch for the last of those and compares byte-identical, so a reopened window
 starts on the same code it always did.
 
 Exercised on the Wayland VM: open, resize, minimise and restore, occluded-then-uncovered, and a full
@@ -5257,7 +5257,7 @@ That target framework is why the macOS build has to happen on a Mac: it needs th
 the Xcode tools that bundle and sign the `.app`. `Program.cs` selects it with
 `$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `Kolvir.slnx` on every platform
 and simply resolves to a different target framework on each. Build it on a Mac, or let the
-`macOS build` GitHub Actions workflow do it - that workflow runs on pull requests against `master`
+`macOS build` GitHub Actions workflow do it - that workflow runs on pull requests against `develop`
 and on demand (`workflow_dispatch`), not on every push, so a branch that is still being worked on
 is expected to be built locally:
 
