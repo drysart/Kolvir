@@ -1,0 +1,139 @@
+name: Pack the Kolvir packages
+description: >-
+  Packs Kolvir, every Kolvir.Backend.* and every Kolvir.Feature.* project at one version and uploads
+  the .nupkg files as an artifact. It runs on macOS because Kolvir.Backend.AppKit and the features'
+  net10.0-macos inner build need the macOS workload, and EnableWindowsTargeting is what brings the
+  Windows reference pack to that runner.
+
+inputs:
+  version:
+    description: 'PackageVersion for every package, such as 1.2.3 or 1.2.3-alpha1.'
+    required: true
+  artifact-name:
+    description: 'Name of the artifact the .nupkg files are uploaded as.'
+    required: false
+    default: kolvir-packages
+  configuration:
+    description: 'Build configuration to pack.'
+    required: false
+    default: Release
+
+outputs:
+  packages-path:
+    description: 'Directory on the runner that holds the .nupkg files, for a later step to publish from.'
+    value: ${{ steps.pack.outputs.packages-path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up .NET
+      uses: actions/setup-dotnet@v4
+      with:
+        dotnet-version: '10.0.x'
+
+    - name: Install the macOS workload
+      shell: bash
+      run: dotnet workload install macos
+
+    - name: Pack
+      id: pack
+      shell: bash
+      env:
+        PACKAGE_VERSION: ${{ inputs.version }}
+        CONFIGURATION: ${{ inputs.configuration }}
+      run: |
+        set -euo pipefail
+
+        out="$RUNNER_TEMP/packages"
+        rm -rf "$out"
+        mkdir -p "$out"
+        echo "packages-path=$out" >> "$GITHUB_OUTPUT"
+
+        # The library, every backend and every feature package: one package per project, at one
+        # version. The globs also reach the test projects, which are not packages, so the name
+        # filter drops them.
+        projects=()
+        for dir in Kolvir Kolvir.Backend* Kolvir.Feature*; do
+          [ -d "$dir" ] || continue
+          for project in "$dir"/*.csproj; do
+            [ -f "$project" ] || continue
+            case "$(basename "$project" .csproj)" in
+              *.Tests|*.Tests.*) continue ;;
+            esac
+            projects+=("$project")
+          done
+        done
+
+        if [ ${#projects[@]} -eq 0 ]; then
+          echo "::error::No Kolvir, Kolvir.Backend.* or Kolvir.Feature.* project was found, so there is nothing to pack."
+          exit 1
+        fi
+
+        {
+          echo "### Packing ${#projects[@]} project(s) at $PACKAGE_VERSION"
+          echo '```'
+          printf '%s\n' "${projects[@]}"
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+
+        for project in "${projects[@]}"; do
+          name="$(basename "$project" .csproj)"
+          echo "::group::pack $name"
+          # EnableWindowsTargeting is what lets the net10.0-windows inner build run on macOS;
+          # without it the SDK stops with NETSDK1100. Nothing else is overridden: the package
+          # carries assemblies, so the trimmer and AOT settings do not apply to it. PackageVersion
+          # reaches the referenced projects too, so a package's dependencies pin the same version.
+          dotnet pack "$project" \
+            -c "$CONFIGURATION" \
+            --nologo \
+            -p:EnableWindowsTargeting=true \
+            -p:PackageVersion="$PACKAGE_VERSION" \
+            -p:PackageOutputPath="$out" \
+            2>&1 | tee "$RUNNER_TEMP/pack-$name.log"
+          echo "::endgroup::"
+        done
+
+        # One package per project, no exceptions: a project that silently stops packing would still
+        # leave a plausible-looking artifact, and the missing package would only be noticed by a
+        # consumer who went looking for it.
+        expected=${#projects[@]}
+        produced=$(ls "$out"/*.nupkg 2>/dev/null | wc -l | tr -d ' ')
+        echo "produced $produced of $expected packages"
+        if [ "$produced" -ne "$expected" ]; then
+          echo "::error::expected $expected packages, found $produced"
+          ls -l "$out"
+          exit 1
+        fi
+        ls -l "$out"
+
+    - name: Summarise pack errors
+      if: failure()
+      shell: bash
+      run: |
+        set -euo pipefail
+        grep -hE ': (error|warning) [A-Z]+[0-9]+' "$RUNNER_TEMP"/pack-*.log 2>/dev/null \
+          | head -n 25 > errors.txt || true
+        if [ ! -s errors.txt ]; then
+          tail -n 20 "$RUNNER_TEMP"/pack-*.log > errors.txt 2>/dev/null || true
+        fi
+        {
+          echo '### Pack diagnostics'
+          echo '```'
+          cat errors.txt
+          echo '```'
+          echo '### Environment'
+          echo '```'
+          dotnet --version
+          dotnet workload list
+          echo '```'
+        } >> "$GITHUB_STEP_SUMMARY"
+        head -n 10 errors.txt | while IFS= read -r line; do
+          echo "::error::$line"
+        done
+
+    - name: Upload the packages
+      uses: actions/upload-artifact@v4
+      with:
+        name: ${{ inputs.artifact-name }}
+        path: ${{ steps.pack.outputs.packages-path }}/*.nupkg
+        if-no-files-found: error

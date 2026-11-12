@@ -7,6 +7,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>The GTK4 backend for Kolvir: a GtkWindow host with client-side decoration, the menu bar, dialogs and the clipboard.</Description>
     <RootNamespace>Kolvir.Backend.Gtk4</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
     <!-- The Skia surface is created directly over Cairo's pixel buffer. -->

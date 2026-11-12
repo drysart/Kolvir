@@ -1,0 +1,49 @@
+name: Packages
+
+# Every pull request that touches the library, a backend or a feature builds all of the NuGet
+# packages at one version and publishes them as an artifact, so the packaging path is part of the
+# review rather than something discovered at release time. A project that stops packing, a target
+# framework that stops restoring, or a project that drops out of the enumeration shows up on the
+# pull request that caused it.
+#
+# Nothing is published to a feed from a pull request; release.yml does that from a tag. The version
+# here is a 1.0.0 prerelease keyed on the run number, so two builds of one commit are distinct
+# packages and neither claims to be a real version.
+
+on:
+  pull_request:
+    branches: [develop]
+    paths:
+      - '.github/workflows/packages.yml'
+      - '.github/actions/pack-nuget/**'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+      - 'Kolvir.slnx'
+      - 'Kolvir/**'
+      - 'Kolvir.Backend*/**'
+      - 'Kolvir.Feature*/**'
+  workflow_dispatch:
+
+concurrency:
+  group: packages-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  pack:
+    name: Pack every package
+    # The same image the feature pack uses: the packages include a net10.0-macos assembly, and only
+    # macOS supplies that workload. EnableWindowsTargeting, which the action sets, brings the
+    # Windows reference pack to the same runner so one job produces every package.
+    runs-on: xcode-27
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Pack the packages
+        uses: ./.github/actions/pack-nuget
+        with:
+          version: 1.0.0-pr.${{ github.run_number }}
+          artifact-name: kolvir-packages-pr-${{ github.run_number }}

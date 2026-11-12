@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>The headless backend for Kolvir: paints offscreen for --render and the tests, and needs no display server.</Description>
     <RootNamespace>Kolvir.Backend.Headless</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>

@@ -14,6 +14,7 @@
     <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>The Kolvir backend selector: whichever platform backend matches the target framework the application builds for.</Description>
     <RootNamespace>Kolvir.Backend</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>
