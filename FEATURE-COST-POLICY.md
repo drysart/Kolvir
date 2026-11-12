@@ -227,12 +227,12 @@ requires.
 #### The pack job
 
 Both of those failures are silent, so the pipeline does not take `dotnet pack`'s exit code as the
-answer. `.github/workflows/feature-pack.yml` packs every `Kolvir.Feature.*` project on a macOS
-runner with `EnableWindowsTargeting=true`, then hands each package to
-`.github/scripts/check-feature-package.py`, which reads the `.nuspec` out of the archive, lists the
-`lib/` folders, and fails if a folder has no dependency group of the same name or a group has no
-folder. The check reports the layout as a table in the job summary, so a review sees the platforms
-the package covers without downloading it.
+answer. `.github/actions/pack-nuget` packs the library, every backend and every `Kolvir.Feature.*`
+project on a macOS runner with `EnableWindowsTargeting=true`, then hands each package to its own
+`check-package-layout.py`, which reads the `.nuspec` out of the archive, lists the `lib/` folders,
+and fails if a folder has no dependency group of the same name or a group has no folder. The check
+reports the layout as a table in the job summary, so a review sees the platforms the package covers
+without downloading it.
 
 #### The `net10.0` fallback guard
 

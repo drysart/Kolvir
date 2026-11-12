@@ -19,7 +19,7 @@ on:
     branches: [develop]
     paths:
       - '.github/workflows/feature-pack.yml'
-      - '.github/scripts/check-feature-package.py'
+      - '.github/actions/pack-nuget/check-package-layout.py'
       - 'Kolvir.Feature.*/**'
       - 'Kolvir/**'
       - 'Kolvir.Backend.*/**'
@@ -95,7 +95,7 @@ jobs:
             echo "::error::No package was produced."
             exit 1
           fi
-          python3 .github/scripts/check-feature-package.py "${packages[@]}" \
+          python3 .github/actions/pack-nuget/check-package-layout.py "${packages[@]}" \
             | tee -a "$GITHUB_STEP_SUMMARY"
 
       - name: Summarise pack errors

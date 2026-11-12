@@ -5443,7 +5443,8 @@ job produces every package.
 `.github/actions/pack-nuget` is that job as a composite action. It takes a `version` (applied as
 `-p:PackageVersion`, which reaches the referenced projects too, so a package's dependencies pin the
 same version), a `configuration` and an `artifact-name`; it enumerates the projects, packs each,
-fails unless one `.nupkg` per project exists, and uploads them. Two workflows use it:
+fails unless one `.nupkg` per project exists, opens every package to check its layout, and uploads
+them. Two workflows use it:
 
 | workflow | trigger | version | publishes to |
 | --- | --- | --- | --- |
@@ -5476,12 +5477,13 @@ reflection path that only fails under AOT. The short form is that nothing new ap
 always-retained type, nothing runs unless the application opted in, and the pull request carries a
 number instead of an assurance.
 
-A feature that ships as its own package needs no multi-platform build. The `Feature pack` workflow
-packs every `Kolvir.Feature.*` project on a macOS runner - `EnableWindowsTargeting=true` brings the
-Windows reference pack with it - then opens each package and fails unless it carries a `lib/` folder
-and a dependency group for every platform. That check exists because both omissions are silent in
-NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. Section 4 of the
-policy has the details.
+A feature that ships as its own package needs no multi-platform build. The `Packages` workflow runs
+`.github/actions/pack-nuget` on a macOS runner - `EnableWindowsTargeting=true` brings the Windows
+reference pack with it - and that action opens every package it produced and fails unless it carries
+a `lib/` folder and a dependency group for every platform. The check applies to the library and the
+backends as well, since they are multi-targeted the same way. It exists because both omissions are
+silent in NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly.
+Section 4 of the policy has the details.
 
 ### Tests come with the change
 

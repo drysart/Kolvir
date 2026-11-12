@@ -106,6 +106,25 @@ runs:
         fi
         ls -l "$out"
 
+    - name: Check every package's layout
+      shell: bash
+      env:
+        PACKAGES: ${{ steps.pack.outputs.packages-path }}
+      run: |
+        set -euo pipefail
+        shopt -s nullglob
+        packages=("$PACKAGES"/*.nupkg)
+        if [ ${#packages[@]} -eq 0 ]; then
+          echo "::error::No package was produced."
+          exit 1
+        fi
+        # A missing lib/ folder or dependency group is silent at every other stage: NuGet falls
+        # back to the nearest framework, so an application ships another platform's assembly and
+        # nothing anywhere reports it. The check opens each package and compares the two lists.
+        # See FEATURE-COST-POLICY.md section 4.
+        python3 "${{ github.action_path }}/check-package-layout.py" "${packages[@]}" \
+          | tee -a "$GITHUB_STEP_SUMMARY"
+
     - name: Summarise pack errors
       if: failure()
       shell: bash
