@@ -147,10 +147,10 @@ Windows, macOS and Linux:
 dotnet test XPlatUI.Tests/XPlatUI.Tests.csproj
 ```
 
-Nothing in the suite needs a desktop. When a check does - a real taskbar flash, a Dock bounce, a
-window that has to lose and regain focus - [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md) is the page to
-read first: it lists every test host with its versions, its use criteria, and the screenshot and
-input-injection routes that actually work on each one.
+Nothing in the suite needs a desktop. A check that does - a real taskbar flash, a Dock bounce, a
+window that has to lose and regain focus - has to run on a host, and every host is described in
+[TESTING-RUNBOOK.md](TESTING-RUNBOOK.md): its versions and use criteria, its display, and the
+screenshot and input-injection routes that actually work on it.
 
 Three things keep the run deterministic, and a test that breaks one of them is a bug to fix rather
 than a flake to retry:
@@ -4423,7 +4423,8 @@ The footer always names the live path. The demo assigns `GfxHardwareAcceleration
 opts into Metal; an application that wants the accelerated path must do the same, because the macOS
 default is the CPU path. The measured-rendering page (index 54) works exactly as it does on Windows:
 
-1. Run the demo on the machine being measured. Check the footer says `gfx: metal` and the device is
+1. Run the demo on the machine being measured - host access, screenshots and input injection are in
+   [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md). Check the footer says `gfx: metal` and the device is
    the one you expect. On a fallback it says `gfx: cpu (...)` with the step that failed; rerun with
    `XPLATUI_METAL_TRACE=1` to capture every step.
 2. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
@@ -4642,8 +4643,9 @@ The measured-rendering page (index 54) works exactly as it does on Windows and m
    9.1-9.6 fps instead of about 49, and every run completed within seconds of the cover going away.
    A window that gets no frames at all (minimised, another workspace, a locked session) never
    finishes. A `BENCH stalled: ...` line on stderr names that case; see below.
-3. Run the demo. The footer says `gfx: gl` and the renderer string, or `gfx: cpu (...)` with the
-   step that failed; rerun with `XPLATUI_GL_TRACE=1` to capture every step.
+3. Run the demo - host access, screenshots and input injection are in
+   [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md). The footer says `gfx: gl` and the renderer string, or
+   `gfx: cpu (...)` with the step that failed; rerun with `XPLATUI_GL_TRACE=1` to capture every step.
 4. Open **Measured rendering**, choose **Damage: full** or **Damage: partial**, and press
    **Measure 600 frames**. The first 30 frames are discarded.
 5. Press again with the other damage mode.
@@ -5027,6 +5029,12 @@ exclusion is about the bundle and not about what macOS allows. The demo's macOS 
 by this: executable 15,790,224 Ã¢â€ â€™ 15,790,256 bytes, HarfBuzz still loose inside the bundle.
 
 ## Running the application
+
+Work that has to run on a testing host - this machine, one of the Linux VMs, the Apple silicon Macs,
+CI - starts with [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md): which host to use and when, its OS, display
+server and display size, how to take a screenshot of it, and how to inject mouse and keyboard input,
+all of which differ host by host. Its recipes were run rather than transcribed, and where a route is
+known not to work it says so.
 
 ```
 dotnet run --project XPlatUIDemo.App
