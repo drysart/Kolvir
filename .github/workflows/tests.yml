@@ -4,13 +4,13 @@ name: Tests
 # no platform workload: every test drives Kolvir through the headless backend, the animation suite
 # drives its own clock and frame source rather than a real timer, and the image suites drive their
 # timelines with a hand-advanced TimeProvider. That is why no leg of this
-# workflow installs a workload - the macOS build and feature pack workflows are the only jobs
-# that do, because they compile or pack the net10.0-macos target. The matrix is the point rather than
+# workflow installs a workload - the packaging workflow is the only job that does, because it packs
+# the net10.0-macos target. The matrix is the point rather than
 # a formality - the same tests run on all three platforms, which is what keeps the portable claims
 # honest, and a control that only behaves on one of them fails here.
 #
-# It runs on a pull request against develop and on demand. Pushes are deliberately not a trigger,
-# for the same reason the macOS workflow is not: work in progress is built and tested locally,
+# It runs on a pull request against develop and on demand. Pushes are deliberately not a trigger:
+# work in progress is built and tested locally,
 # where a run takes seconds, so a runner spinning up on every push to a feature branch only adds
 # latency. A merge to develop does not need a rebuild either - the pull request that produced it
 # already ran the same tests. Use workflow_dispatch to verify a branch that has no pull request.

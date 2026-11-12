@@ -819,8 +819,10 @@ keeps `Backend.cs` honest.
 | Linux | `net10.0` | GTK4 | `dotnet publish -r linux-x64` |
 | Headless (CI, tests) | any of the above | Headless | In-process; renders a PNG, never opens a window |
 
-CI keeps one job per OS, each on its own runner, each doing build -> headless render -> publish. No
-change to the existing `.github/workflows/macos.yml` shape.
+CI runs one job per OS for the tests, each on its own runner (`tests.yml`). It does not build the
+application any more: the macOS bundle is built on `macvm`, where a build takes seconds and the app
+can be run for real (`MACOS-TESTRUN.md`), and the packaging workflows exist to produce packages
+rather than applications.
 
 One constraint on the render step, measured rather than assumed: on Linux it has to run before any
 GTK type is loaded. `Gtk.Module.Initialize()` opens the display and exits the process with code 1
@@ -1093,7 +1095,7 @@ that touches the painting path) is provably pixel-neutral before anything is del
 | 3 | Move the Win32 harness onto the model | `Kolvir.Backend.Win32` from `WinFormsApp3/Native/*`; `Program.cs` shrinks to section 2 | Windows harness behaves identically; window resize, DPI, context menus and text input unchanged; message/file dialogs and the menu bar work |
 | 4 | Move the AppKit harness onto the model | `Kolvir.Backend.AppKit` from `MacHarness/*`; `MacHarness.csproj` -> `net10.0-macos` app project | Mac build + headless render pass on `ssh mac`; no clipping, no memory regression; dialogs and the app menu bar work |
 | 5 | Move the GTK harness onto the model | `Kolvir.Backend.Gtk4` from `GtkHarness/*` | GTK harness behaves identically; dialogs and the menu bar work |
-| 6 | Replace the three harnesses with one multi-TFM app | section 6.1 project file; delete `WinFormsApp3`, `GtkHarness`, `MacHarness` | Three CI jobs build one project; `dotnet publish` AOT succeeds per OS |
+| 6 | Replace the three harnesses with one multi-TFM app | section 6.1 project file; delete `WinFormsApp3`, `GtkHarness`, `MacHarness` | One project builds on all three platforms; `dotnet publish` AOT succeeds per OS |
 
 Step 1 is interfaces only, with one concession: the backend contract is written in terms of
 `Application` and `Window`, and C# has no forward declarations, so those two ship as empty
@@ -1395,12 +1397,13 @@ Three things follow from that, and each was load-bearing rather than cosmetic:
   the developer to remember a `-f` switch.
 - **The solution can therefore list the app unconditionally.** `Kolvir.slnx` lists every project,
   including the macOS-only backend, and `Kolvir.Demo.App` resolves to a different TFM on each
-  machine, which is what makes "three CI jobs build one project" true rather than aspirational.
+  machine - which is what makes one project build on all three rather than three projects that
+  have to be kept in step.
 
 `AssemblyName` is `KolvirDemoApp`, not `KolvirDemo`: the macOS SDK names the `.app` bundle after the
 assembly, and the name was chosen when the sample control tree was a separate `KolvirDemo` library
 that would have collided with it. That library has since been folded into `Kolvir.Demo.App`, but the
-name stays because `Info.plist`, `app.manifest` and the platform workflows all use it.
+name stays because `Info.plist`, `app.manifest` and `MACOS-TESTRUN.md` all name it.
 `Info.plist` uses `CFBundleExecutable` `KolvirDemoApp` and `CFBundleIdentifier` `dev.kolvir.demo`,
 and `app.manifest` keeps the PerMonitorV2 DPI declaration that used to live in `WinFormsApp3`.
 

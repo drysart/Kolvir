@@ -5256,10 +5256,9 @@ clipboard are all the real thing; only the contents of the window are drawn by t
 That target framework is why the macOS build has to happen on a Mac: it needs the macOS workload and
 the Xcode tools that bundle and sign the `.app`. `Program.cs` selects it with
 `$([MSBuild]::IsOSPlatform('osx'))`, so the project is part of `Kolvir.slnx` on every platform
-and simply resolves to a different target framework on each. Build it on a Mac, or let the
-`macOS build` GitHub Actions workflow do it - that workflow runs on pull requests against `develop`
-and on demand (`workflow_dispatch`), not on every push, so a branch that is still being worked on
-is expected to be built locally:
+and simply resolves to a different target framework on each. No CI job builds the application: it is
+built on the `macvm` host, where the build takes seconds and the app can be run for real.
+[MACOS-TESTRUN.md](MACOS-TESTRUN.md) is the runbook for that machine. On any Mac:
 
 ```
 dotnet workload install macos
@@ -5278,9 +5277,9 @@ can be turned back on per build:
 dotnet build Kolvir.Demo.App/Kolvir.Demo.App.csproj -p:ValidateXcodeVersion=true
 ```
 
-Nothing here compiles native code, so a mismatched Xcode cannot actually break the build. The
-`macOS build` workflow still selects the Xcode the workload expects (`/Applications/Xcode_27.1.app`
-on the `xcode-27` image) rather than relying on either setting.
+Nothing here compiles native code, so a mismatched Xcode cannot actually break the build. CI's
+packaging runner (`xcode-27`, see [Packages and releases](#packages-and-releases)) installs the
+workload against whatever Xcode that image ships, rather than relying on either setting.
 
 The bundle is produced by the build itself; its identity lives in `Kolvir.Demo.App/Info.plist`. It is
 signed ad-hoc, so a copy downloaded from CI needs `xattr -dr com.apple.quarantine KolvirDemoApp.app`
@@ -5425,9 +5424,41 @@ because the `.app` bundle is already the unit of distribution: folding the runti
 would not make the deliverable any smaller, only less debuggable. Windows and Linux do publish AOT
 (see [NativeAOT](#nativeaot)).
 
-The `macOS build` workflow publishes all three link modes, renders each bundle with `--render`,
-compares the *decoded* bitmaps (`sips` to BMP plus `cmp`, because a one pixel change rewrites most of
-a PNG) and reports the numbers in the job summary.
+Those numbers were measured by publishing all three link modes, rendering each bundle with
+`--render` and comparing the *decoded* bitmaps (`sips` to BMP plus `cmp`, because a one pixel change
+rewrites most of a PNG). [MACOS-TESTRUN.md](MACOS-TESTRUN.md) has the recipe; the comparison is a
+hand measurement on `macvm` now, not a CI job.
+
+## Packages and releases
+
+Three things ship as NuGet packages, all at one version: `Kolvir` itself, every `Kolvir.Backend.*`
+and every `Kolvir.Feature.*`. The package id is the project name, and the projects are what the
+packaging target enumerates - there is no separate list to keep in step.
+
+Packing needs macOS. `Kolvir.Backend.AppKit` targets `net10.0-macos`, and every feature's `lib/`
+carries a `net10.0-macos` folder, so the workload that only macOS supplies has to be on the runner;
+`EnableWindowsTargeting=true` is what brings the Windows reference pack to the same machine, so one
+job produces every package.
+
+`.github/actions/pack-nuget` is that job as a composite action. It takes a `version` (applied as
+`-p:PackageVersion`, which reaches the referenced projects too, so a package's dependencies pin the
+same version), a `configuration` and an `artifact-name`; it enumerates the projects, packs each,
+fails unless one `.nupkg` per project exists, opens every package to check its layout, and uploads
+them. Two workflows use it:
+
+| workflow | trigger | version | publishes to |
+| --- | --- | --- | --- |
+| `Packages` | a pull request against `develop` that touches the library, a backend, a feature or the action | `1.0.0-pr.<run number>` | nowhere; the artifact is the output |
+| `Release` | a tag `v<major>.<minor>.<revision>`, optionally `-<prerelease>` such as `-alpha1` | the tag's version | this repository's GitHub Packages feed |
+
+The version is passed at pack time rather than written into `Directory.Build.props`, because a
+release is a tag and nothing else: two tags can name two versions of the same commit, and a pull
+request's packages must never claim to be a real version.
+
+`Release` pushes with `GITHUB_TOKEN` and `permissions: packages: write`, and passes
+`--skip-duplicate` so a re-run of a partially failed publish only adds what is missing. nuget.org is
+deliberately not wired up yet - it needs an API key and a decision about who may publish, so the feed
+to measure the process against is the one that only this account's consumers can reach.
 
 ## Contributing a feature
 
@@ -5446,12 +5477,13 @@ reflection path that only fails under AOT. The short form is that nothing new ap
 always-retained type, nothing runs unless the application opted in, and the pull request carries a
 number instead of an assurance.
 
-A feature that ships as its own package needs no multi-platform build. The `Feature pack` workflow
-packs every `Kolvir.Feature.*` project on a macOS runner - `EnableWindowsTargeting=true` brings the
-Windows reference pack with it - then opens each package and fails unless it carries a `lib/` folder
-and a dependency group for every platform. That check exists because both omissions are silent in
-NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly. Section 4 of the
-policy has the details.
+A feature that ships as its own package needs no multi-platform build. The `Packages` workflow runs
+`.github/actions/pack-nuget` on a macOS runner - `EnableWindowsTargeting=true` brings the Windows
+reference pack with it - and that action opens every package it produced and fails unless it carries
+a `lib/` folder and a dependency group for every platform. The check applies to the library and the
+backends as well, since they are multi-targeted the same way. It exists because both omissions are
+silent in NuGet: the consumer falls back to the `net10.0` one and ships another platform's assembly.
+Section 4 of the policy has the details.
 
 ### Tests come with the change
 

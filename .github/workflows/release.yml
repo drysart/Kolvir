@@ -1,0 +1,89 @@
+name: Release
+
+# A tag is the release decision. The tag names the version - `v<major>.<minor>.<revision>`, with an
+# optional prerelease suffix such as `-alpha1` - and every package in the release carries exactly
+# that version, because the version is passed to the pack rather than derived from anything in the
+# tree.
+#
+# The packages go to this repository's GitHub Packages feed. nuget.org is a later step: it needs an
+# API key and a supply-chain decision about who may publish, and until that exists a tag publishes
+# somewhere that only this account's consumers can reach.
+
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+  packages: write
+
+concurrency:
+  group: release-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  publish:
+    name: Build ${{ github.ref_name }} and publish it
+    # macOS, for the same reason the packages workflow uses it: the packages include a
+    # net10.0-macos assembly and only macOS has that workload.
+    runs-on: xcode-27
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Read the version from the tag
+        id: version
+        shell: bash
+        run: |
+          set -euo pipefail
+          tag="$GITHUB_REF_NAME"
+          # v<major>.<minor>.<revision>, optionally dash a prerelease of dot-separated identifiers.
+          # NuGet accepts only ASCII letters, digits and hyphens there and requires each identifier
+          # to start with a letter or digit; this pattern enforces the same rule, so a tag that
+          # would fail at pack time fails here instead, before anything is built.
+          if [[ ! "$tag" =~ ^v[0-9]+\.[0-9]+\.[0-9]+(-[0-9A-Za-z][0-9A-Za-z.-]*)?$ ]]; then
+            echo "::error::tag '$tag' is not v<major>.<minor>.<revision>[-<prerelease>]"
+            exit 1
+          fi
+          version="${tag#v}"
+          echo "version=$version" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Release $version"
+            echo "Tag \`$tag\` publishes every Kolvir package at $version."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Pack the packages
+        id: pack
+        uses: ./.github/actions/pack-nuget
+        with:
+          version: ${{ steps.version.outputs.version }}
+          artifact-name: kolvir-packages-${{ steps.version.outputs.version }}
+
+      - name: Publish to GitHub Packages
+        shell: bash
+        env:
+          VERSION: ${{ steps.version.outputs.version }}
+          PACKAGES: ${{ steps.pack.outputs.packages-path }}
+          TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          feed="https://nuget.pkg.github.com/${{ github.repository_owner }}/index.json"
+          packages=("$PACKAGES"/*.nupkg)
+          if [ ${#packages[@]} -eq 0 ]; then
+            echo "::error::no packages were produced, so there is nothing to publish"
+            exit 1
+          fi
+          # --skip-duplicate makes a re-run of a tag a no-op for the versions that already landed
+          # rather than a failure, which is what a partially failed publish needs.
+          dotnet nuget push "${packages[@]}" \
+            --source "$feed" \
+            --api-key "$TOKEN" \
+            --skip-duplicate
+          {
+            echo "### Published $VERSION to GitHub Packages"
+            echo '```'
+            for package in "${packages[@]}"; do basename "$package"; done
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"

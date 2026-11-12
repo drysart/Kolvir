@@ -11,6 +11,7 @@
     <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>The AppKit backend for Kolvir: a real NSWindow, the application menu, dialogs and the clipboard, with SkiaSharp drawing the window's contents.</Description>
     <RootNamespace>Kolvir.Backend.AppKit</RootNamespace>
     <IsAotCompatible>true</IsAotCompatible>
   </PropertyGroup>

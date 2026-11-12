@@ -1,17 +1,18 @@
 #!/usr/bin/env python3
-"""Check that a feature package carries one lib/ folder and one dependency group per platform.
+"""Check that a package carries one lib/ folder and one dependency group per platform.
 
 NuGet selects a lib/ folder and a dependency group by nearest-framework match, so a missing
 platform is not an error: a net10.0-windows consumer of a package with no Windows folder compiles
 against the net10.0 folder instead and ships the Linux assembly, and a missing dependency group
 falls back to the net10.0 one. Both failures are silent at every stage except this one, which is
-why the pack job opens the package rather than trusting that `dotnet pack` succeeded.
+why the pack job opens every package rather than trusting that `dotnet pack` succeeded.
 
 The expected shape is in FEATURE-COST-POLICY.md section 4: one folder and one group per platform,
 the group holding that platform's whole closure, and an empty group where a platform needs no
-extra packages.
+extra packages. Every package here is multi-targeted the same way, so the check applies to the
+library and the backends as well as to the features.
 
-Usage: check-feature-package.py <package.nupkg>...
+Usage: check-package-layout.py <package.nupkg>...
 Exit code 1 if any package is missing a folder or a group.
 """
 

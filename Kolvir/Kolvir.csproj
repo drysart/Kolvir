@@ -4,6 +4,7 @@
     <TargetFramework>net10.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
+    <Description>The Kolvir control layer: window, controls, menus, dialogs and the platform backend contract, rendered with SkiaSharp.</Description>
     <RootNamespace>Kolvir</RootNamespace>
     <!-- The library must stay trim/AOT friendly: no reflection, no serializers, no dynamic. -->
     <IsAotCompatible>true</IsAotCompatible>

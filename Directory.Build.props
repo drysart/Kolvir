@@ -1,5 +1,16 @@
 <Project>
 
+  <!-- Package metadata that every project shares. It lives here because it is identical across the
+       projects and because the alternative is what the SDK falls back to: a package on a feed whose
+       description reads "Package Description". Only packable projects are affected - the sample, the
+       measurement fixture and the test projects are never packaged. -->
+  <PropertyGroup>
+    <Authors>drysart</Authors>
+    <PackageProjectUrl>https://kolvir.dev</PackageProjectUrl>
+    <RepositoryUrl>https://github.com/drysart/Kolvir</RepositoryUrl>
+    <RepositoryType>git</RepositoryType>
+  </PropertyGroup>
+
   <!-- A NuGet consumer imports buildTransitive/Kolvir.props from the package automatically. This
 	   repository's projects reference Kolvir by project instead, and a ProjectReference imports no
 	   build assets at all, so the same file is imported here. Keeping the two routes identical is
