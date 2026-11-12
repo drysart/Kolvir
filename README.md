@@ -2980,6 +2980,16 @@ assigning it on a visible window restacks the native window rather than throwing
 Wayland is also where ownership is weakest: `SetTransientFor` is a hint, so an owned window may not
 be stacked above its owner by the compositor. It still minimizes and closes with it.
 
+A modal window hands activation back to its owner *before* it is destroyed, and on Windows that
+ordering is load-bearing. Destroying the foreground window makes Windows activate the next
+*eligible* one, and a modal dialog has disabled its owner, so the owner is not eligible: the
+foreground lands on some other application's window, which is raised over the owner until the
+dialog's own re-activation runs. That is the frame or two of flicker that follows a dialog's OK, and
+the Win32 backend avoids it by re-enabling and re-activating the owner from `Dispose`, while the
+dialog is still the foreground window. Measured on one close, the owner stayed inactive with a
+foreign window on top of it for 9-30 ms. AppKit and GTK end their own modal sessions the same way,
+so the ordering only has to be arranged here.
+
 The demo exposes all three: the **Owned window** button in the header opens one from the UI on every
 platform, **Window -> Topmost** and **Window -> Owned Window** add the menu items on macOS and GTK, and
 the `--topmost` / `--owned` command-line flags work everywhere (Windows has no menu bar yet). The

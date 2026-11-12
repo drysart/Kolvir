@@ -703,6 +703,9 @@ internal static class NativeMethods
     internal static extern bool EnableWindow(IntPtr hwnd, bool bEnable);
 
     [DllImport("user32.dll")]
+    internal static extern bool IsWindowEnabled(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
     internal static extern bool IsZoomed(IntPtr hwnd);
 
     [DllImport("user32.dll")]
