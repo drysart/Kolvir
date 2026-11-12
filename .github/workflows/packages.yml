@@ -34,9 +34,9 @@ permissions:
 jobs:
   pack:
     name: Pack every package
-    # The same image the feature pack uses: the packages include a net10.0-macos assembly, and only
-    # macOS supplies that workload. EnableWindowsTargeting, which the action sets, brings the
-    # Windows reference pack to the same runner so one job produces every package.
+    # The packages include a net10.0-macos assembly and only macOS supplies that workload.
+    # EnableWindowsTargeting, which the action sets, brings the Windows reference pack to the same
+    # runner so one job produces every package.
     runs-on: xcode-27
     steps:
       - name: Check out
