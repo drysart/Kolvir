@@ -148,6 +148,76 @@ public sealed class TableCellTests
         Assert.AreEqual(1, child.TableColumn);
     }
 
+    [TestMethod]
+    public void ASpanCoversTheTracksBesideItsCell()
+    {
+        using var table = Grid();
+        using var child = Filling(column: 0, row: 0, columnSpan: 2, rowSpan: 2);
+        table.Controls.Add(child);
+
+        using var scene = HeadlessScene.Create(table, 200f, 130f);
+
+        Assert.AreEqual(new SKRect(0f, 0f, 200f, 130f), child.Bounds, "both columns and both rows");
+        Assert.AreEqual((2, 2), table.GetCellSpan(child));
+    }
+
+    [TestMethod]
+    public void ASpanStopsAtTheLastTrack()
+    {
+        using var table = Grid();
+        using var child = Filling(column: 1, row: 1, columnSpan: 9, rowSpan: 9);
+        table.Controls.Add(child);
+
+        using var scene = HeadlessScene.Create(table, 200f, 130f);
+
+        Assert.AreEqual(new SKRect(60f, 30f, 200f, 130f), child.Bounds, "the last cell, however far it asked to go");
+    }
+
+    [TestMethod]
+    public void ASpanBelowOneTakesOneTrack()
+    {
+        using var table = Grid();
+        using var child = Filling(column: 0, row: 0, columnSpan: 0, rowSpan: -4);
+        table.Controls.Add(child);
+
+        using var scene = HeadlessScene.Create(table, 200f, 130f);
+
+        Assert.AreEqual(new SKRect(0f, 0f, 60f, 30f), child.Bounds);
+        Assert.AreEqual((1, 1), table.GetCellSpan(child));
+    }
+
+    [TestMethod]
+    public void TwoAutoSizeTracksShareTheWidthASpanningChildNeeds()
+    {
+        using var table = PlainGrid();
+        using var wide = Sized(column: 0, row: 0, columnSpan: 2, width: 120f);
+        using var right = Sized(column: 1, row: 0, columnSpan: 1, width: 10f);
+
+        table.Controls.Add(wide);
+        table.Controls.Add(right);
+
+        using var scene = HeadlessScene.Create(table, 200f, 20f);
+
+        Assert.AreEqual(new SKRect(0f, 0f, 120f, 20f), wide.Bounds, "the span is what has to fit");
+        Assert.AreEqual(60f, right.Bounds.Left, "so each AutoSize column took half of it");
+    }
+
+    [TestMethod]
+    public void SettingTheSpanOfAChildAlreadyInTheTableWidensIt()
+    {
+        using var table = Grid();
+        using var child = Filling(column: 0, row: 0);
+        table.Controls.Add(child);
+
+        using var scene = HeadlessScene.Create(table, 200f, 130f);
+        Assert.AreEqual(new SKRect(0f, 0f, 60f, 30f), child.Bounds, "the one column to start with");
+
+        // No PerformLayout here, for the same reason as the cell: the property is the whole API.
+        child.TableColumnSpan = 2;
+
+        Assert.AreEqual(new SKRect(0f, 0f, 200f, 30f), child.Bounds);
+    }
+
     private static TableLayoutPanel Grid() => new()
     {
         Dock = DockStyle.Fill,
@@ -169,6 +239,34 @@ public sealed class TableCellTests
         },
     };
 
+    private static TableLayoutPanel PlainGrid() => new()
+    {
+        Dock = DockStyle.Fill,
+        ShowFrame = false,
+        IsCard = false,
+        BorderWidth = 0f,
+        CornerRadius = 0f,
+        Padding = Thickness.Empty,
+        CellPadding = Thickness.Empty,
+        ColumnStyles =
+        {
+            new ColumnStyle(SizeType.AutoSize, 0f),
+            new ColumnStyle(SizeType.AutoSize, 0f),
+        },
+        RowStyles =
+        {
+            new RowStyle(SizeType.Absolute, 20f),
+        },
+    };
+
+    /// <summary>A control whose measurement is fixed, so an AutoSize track has something known to fit.</summary>
+    private static Panel Sized(int column, int row, int columnSpan, float width)
+    {
+        var panel = Filling(column, row, columnSpan);
+        panel.MinimumSize = new SKSize(width, 10f);
+        return panel;
+    }
+
     private static TableLayoutPanel Placed(float x)
     {
         var table = Grid();
@@ -178,7 +276,7 @@ public sealed class TableCellTests
         return table;
     }
 
-    private static Panel Filling(int column, int row) => new()
+    private static Panel Filling(int column, int row, int columnSpan = 1, int rowSpan = 1) => new()
     {
         ShowFrame = false,
         IsCard = false,
@@ -188,5 +286,7 @@ public sealed class TableCellTests
         Dock = DockStyle.Fill,
         TableColumn = column,
         TableRow = row,
+        TableColumnSpan = columnSpan,
+        TableRowSpan = rowSpan,
     };
 }

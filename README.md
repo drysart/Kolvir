@@ -79,7 +79,7 @@ has to read `--classic-menus` before it can build a backend.
 | `Background` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `Panel` | `Panel` | Docking layout, optional frame/card chrome, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree |
-| `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions |
+| `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
 | `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
 | `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
@@ -275,15 +275,17 @@ button.AddClickHandler(_ => Console.WriteLine("clicked"));
 
 // A cell is attached to the control, not held by the table, so a child can name its own place
 // in the initializer that creates it: no variables, and nothing to assign afterwards.
+// TableColumnSpan and TableRowSpan widen a cell onto the tracks beside it.
 var table = new TableLayoutPanel
 {
     Dock = DockStyle.Fill,
     ColumnStyles = { ColumnStyle.Percent(50), ColumnStyle.Percent(50) },
-    RowStyles = { RowStyle.AutoSize(), RowStyle.Percent(100) },
+    RowStyles = { RowStyle.AutoSize(), RowStyle.Percent(100), RowStyle.AutoSize() },
     Controls =
     {
         new Label("Hello") { AutoSize = true, TableColumn = 0, TableRow = 0 },
         button,
+        new Label("both columns") { AutoSize = true, TableColumn = 0, TableRow = 2, TableColumnSpan = 2 },
     },
 };
 root.Controls.Add(table);

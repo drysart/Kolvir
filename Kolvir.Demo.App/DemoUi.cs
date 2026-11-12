@@ -1144,6 +1144,7 @@ public sealed class DemoUi
                 new RowStyle(SizeType.AutoSize, 0f),
                 new RowStyle(SizeType.Percent, 100f),
                 new RowStyle(SizeType.Absolute, 90f),
+                new RowStyle(SizeType.Absolute, 58f),
             },
             Controls =
             {
@@ -1156,11 +1157,12 @@ public sealed class DemoUi
                 Cell("Absolute row\n90 px", 0, 2),
                 Cell("Percent row, percent column", 1, 2),
                 Cell("AutoSize\nboth ways", 2, 2),
+                Cell("One cell over all three columns: TableColumnSpan = 3", 0, 3, columnSpan: 3),
             },
         };
     }
 
-    private static Panel Cell(string caption, int column, int row)
+    private static Panel Cell(string caption, int column, int row, int columnSpan = 1)
     {
         var cell = new Panel
         {
@@ -1170,6 +1172,7 @@ public sealed class DemoUi
             Padding = new Thickness(10f),
             TableColumn = column,
             TableRow = row,
+            TableColumnSpan = columnSpan,
         };
 
         cell.Controls.Add(new Label(caption)

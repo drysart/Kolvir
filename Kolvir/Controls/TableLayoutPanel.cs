@@ -49,6 +49,25 @@ public class TableLayoutPanel : Panel
         return TableLayoutPanelExtensions.GetCell(control);
     }
 
+    /// <summary>
+    /// Sets how many columns and rows a child covers, counting the cell its position names.
+    /// </summary>
+    /// <remarks>
+    /// Attached to the control for the same reason the position is: it is a fact about the child, and
+    /// a span that would run past the last track stops at it rather than throwing.
+    /// </remarks>
+    public void SetCellSpan(Control control, int columnSpan, int rowSpan)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        TableLayoutPanelExtensions.SetSpan(control, columnSpan, rowSpan);
+    }
+
+    public (int ColumnSpan, int RowSpan) GetCellSpan(Control control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+        return TableLayoutPanelExtensions.GetSpan(control);
+    }
+
     /// <summary>Adds a child at a specific cell.</summary>
     public void Add(Control control, int column, int row)
     {
@@ -132,11 +151,15 @@ public class TableLayoutPanel : Panel
             column = Math.Clamp(column, 0, columns.Length - 1);
             row = Math.Clamp(row, 0, rows.Length - 1);
 
+            var (columnSpan, rowSpan) = GetCellSpan(child);
+            int lastColumn = Math.Min(column + columnSpan, columns.Length) - 1;
+            int lastRow = Math.Min(row + rowSpan, rows.Length) - 1;
+
             var cell = new SKRect(
                 content.Left + columnOffsets[column],
                 content.Top + rowOffsets[row],
-                content.Left + columnOffsets[column + 1],
-                content.Top + rowOffsets[row + 1]);
+                content.Left + columnOffsets[lastColumn + 1],
+                content.Top + rowOffsets[lastRow + 1]);
 
             var inner = Geometry.Deflate(cell, CellPadding);
             if (child.AutoSize)
@@ -200,8 +223,12 @@ public class TableLayoutPanel : Panel
             column = Math.Clamp(column, 0, columns.Length - 1);
             row = Math.Clamp(row, 0, rows.Length - 1);
 
-            bool autoColumn = _columnStyles[column].SizeType == SizeType.AutoSize;
-            bool autoRow = _rowStyles[row].SizeType == SizeType.AutoSize;
+            var (columnSpan, rowSpan) = GetCellSpan(child);
+            int lastColumn = Math.Min(column + columnSpan, columns.Length) - 1;
+            int lastRow = Math.Min(row + rowSpan, rows.Length) - 1;
+
+            bool autoColumn = HasAutoSize(_columnStyles, column, lastColumn);
+            bool autoRow = HasAutoSize(_rowStyles, row, lastRow);
             if (!autoColumn && !autoRow)
             {
                 continue;
@@ -210,18 +237,71 @@ public class TableLayoutPanel : Panel
             var desired = child.Measure(availableSize);
             if (autoColumn)
             {
-                columns[column] = MathF.Max(columns[column], desired.Width + CellPadding.Horizontal);
+                GrowSpannedTracks(columns, _columnStyles, column, lastColumn, desired.Width + CellPadding.Horizontal);
             }
 
             if (autoRow)
             {
-                rows[row] = MathF.Max(rows[row], desired.Height + CellPadding.Vertical);
+                GrowSpannedTracks(rows, _rowStyles, row, lastRow, desired.Height + CellPadding.Vertical);
             }
         }
 
         DistributePercent(_columnStyles, columns, availableSize.Width);
         DistributePercent(_rowStyles, rows, availableSize.Height);
         return (columns, rows);
+    }
+
+    private static bool HasAutoSize<T>(IList<T> styles, int first, int last)
+        where T : RowOrColumnStyle
+    {
+        for (int i = first; i <= last; i++)
+        {
+            if (styles[i].SizeType == SizeType.AutoSize)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Grows the AutoSize tracks of a span so together they hold <paramref name="required"/>.
+    /// </summary>
+    /// <remarks>
+    /// A child that spans tracks asks for room over the whole span, so the shortfall is shared equally
+    /// between the AutoSize tracks it covers instead of loading the whole of it onto the first. With a
+    /// span of one track - the ordinary case - that is the same as sizing that track to the child.
+    /// Absolute and percent tracks keep their sizes: content cannot claim them.
+    /// </remarks>
+    private static void GrowSpannedTracks<T>(float[] sizes, IList<T> styles, int first, int last, float required)
+        where T : RowOrColumnStyle
+    {
+        float spanned = 0f;
+        int autoTracks = 0;
+        for (int i = first; i <= last; i++)
+        {
+            spanned += sizes[i];
+            if (styles[i].SizeType == SizeType.AutoSize)
+            {
+                autoTracks++;
+            }
+        }
+
+        float missing = required - spanned;
+        if (missing <= 0f || autoTracks == 0)
+        {
+            return;
+        }
+
+        float share = missing / autoTracks;
+        for (int i = first; i <= last; i++)
+        {
+            if (styles[i].SizeType == SizeType.AutoSize)
+            {
+                sizes[i] += share;
+            }
+        }
     }
 
     private static void DistributePercent<T>(IList<T> styles, float[] sizes, float available)

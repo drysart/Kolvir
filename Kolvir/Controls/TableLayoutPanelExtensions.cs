@@ -27,6 +27,10 @@ public static class TableLayoutPanelExtensions
     internal static (int Column, int Row) GetCell(Control control) =>
         Cells.TryGetValue(control, out var cell) ? (cell.Column, cell.Row) : (0, 0);
 
+    /// <summary>The cell a control covers, or one track each way where it has never been given one.</summary>
+    internal static (int ColumnSpan, int RowSpan) GetSpan(Control control) =>
+        Cells.TryGetValue(control, out var cell) ? (cell.ColumnSpan, cell.RowSpan) : (1, 1);
+
     /// <summary>
     /// Moves a control to a cell. Nothing here looks for the table: the state goes on the control,
     /// and the parent is needed only for the layout the move invalidates - the counterpart of the
@@ -38,7 +42,20 @@ public static class TableLayoutPanelExtensions
         var cell = Cells.GetOrCreateValue(control);
         cell.Column = Math.Max(0, column);
         cell.Row = Math.Max(0, row);
+        InvalidateParent(control);
+    }
 
+    /// <summary>Widens a control onto the tracks next to its cell, keeping at least one track each way.</summary>
+    internal static void SetSpan(Control control, int columnSpan, int rowSpan)
+    {
+        var cell = Cells.GetOrCreateValue(control);
+        cell.ColumnSpan = Math.Max(1, columnSpan);
+        cell.RowSpan = Math.Max(1, rowSpan);
+        InvalidateParent(control);
+    }
+
+    private static void InvalidateParent(Control control)
+    {
         if (control.Parent is { } parent)
         {
             parent.PerformLayout();
@@ -67,13 +84,37 @@ public static class TableLayoutPanelExtensions
             get => GetCell(control).Row;
             set => SetCell(control, GetCell(control).Column, value);
         }
+
+        /// <summary>
+        /// How many columns this control covers, counting the one its <see cref="TableColumn"/>
+        /// names. One unless set; a span that would run past the last column stops at it.
+        /// </summary>
+        public int TableColumnSpan
+        {
+            get => GetSpan(control).ColumnSpan;
+            set => SetSpan(control, value, GetSpan(control).RowSpan);
+        }
+
+        /// <summary>
+        /// How many rows this control covers, counting the one its <see cref="TableRow"/> names.
+        /// One unless set; a span that would run past the last row stops at it.
+        /// </summary>
+        public int TableRowSpan
+        {
+            get => GetSpan(control).RowSpan;
+            set => SetSpan(control, GetSpan(control).ColumnSpan, value);
+        }
     }
 
-    /// <summary>What is attached to a control that has been given a cell.</summary>
+    /// <summary>What is attached to a control that has been given a cell or a span.</summary>
     private sealed class TableCellInfo
     {
         public int Column;
 
         public int Row;
+
+        public int ColumnSpan = 1;
+
+        public int RowSpan = 1;
     }
 }
