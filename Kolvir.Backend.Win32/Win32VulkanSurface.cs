@@ -638,9 +638,14 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         {
             sType = StructureTypeSwapchainCreateInfoKhr,
             surface = device.Surface,
-            minImageCount = capabilities.maxImageCount > 0 && capabilities.minImageCount + 1 > capabilities.maxImageCount
-                ? capabilities.maxImageCount
-                : capabilities.minImageCount + 1,
+
+            // The driver's minimum, not one more: an extra image lets the window queue a frame that
+            // the display has not taken yet, so two frames can be in flight with the second shown a
+            // refresh or two after it was drawn. That extra slack is what the compositor turns into
+            // uneven spacing between frames - the animation runs at its own rate, but the time each
+            // image stays on screen varies by a refresh, which reads as a hitch. With the minimum the
+            // acquire is the pacing point: it cannot hand out an image the display is still using.
+            minImageCount = capabilities.minImageCount,
             imageFormat = format,
             imageColorSpace = ColorSpaceSrgbNonLinear,
             imageExtent = new VkExtent2D { width = (uint)width, height = (uint)height },

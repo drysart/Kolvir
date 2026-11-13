@@ -1083,10 +1083,18 @@ internal static class Win32Gfx
 
     /// <summary>
     /// Set <c>KOLVIR_NO_VULKAN</c> to take the WGL tier instead, for comparing the two on one
-    /// machine. Read once, so a run cannot change its mind halfway through a window.
+    /// machine. <c>0</c>, <c>false</c> and <c>no</c> mean what they say, so a command line that
+    /// spells the switch out either way does what it reads like. Read once, so a run cannot change
+    /// its mind halfway through a window.
     /// </summary>
-    private static readonly bool Win32VulkanDisabled =
-        Environment.GetEnvironmentVariable("KOLVIR_NO_VULKAN") is { Length: > 0 };
+    private static readonly bool Win32VulkanDisabled = ResolveVulkanDisabled();
+
+    private static bool ResolveVulkanDisabled() =>
+        Environment.GetEnvironmentVariable("KOLVIR_NO_VULKAN")?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "0" or "false" or "no" or "off" => false,
+            _ => true,
+        };
 
     /// <summary>
     /// Picks the best tier the machine will give, which is Vulkan first and GL after it.
