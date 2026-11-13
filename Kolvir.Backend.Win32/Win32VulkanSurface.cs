@@ -402,6 +402,7 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
     private SKSurface? _retained;
     private IntPtr[] _barrierPools = [];
     private IntPtr[] _barrierBuffers = [];
+    private IntPtr[] _swapChainImages = [];
 
     // Present timings, reported once a second when the trace is on. A frame that is late can be the
     // UI thread waiting for the display, the drawing, or the present call itself, and the three look
@@ -486,9 +487,9 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
             return null;
         }
 
-        if (!surface.CreateRetained())
+        if (!surface.RefreshImages() || !surface.CreateRetained())
         {
-            failure = "vulkan: no retained surface";
+            failure = "vulkan: no swap chain images";
             surface.Dispose();
             return null;
         }
@@ -579,7 +580,7 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         _height = extent.height;
         _usage = usage;
 
-        return CreateRetained();
+        return RefreshImages() && CreateRetained();
     }
 
     private static bool CreateSwapChain(
@@ -704,7 +705,6 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
             return Win32PresentResult.RetryDirect;
         }
 
-        var getImages = (delegate* unmanaged<IntPtr, IntPtr, uint*, IntPtr*, int>)_device.DeviceProc("vkGetSwapchainImagesKHR");
         var acquire = (delegate* unmanaged<IntPtr, IntPtr, ulong, IntPtr, IntPtr, uint*, int>)_device.DeviceProc("vkAcquireNextImageKHR");
         var waitFences = (delegate* unmanaged<IntPtr, uint, IntPtr*, uint, ulong, int>)_device.DeviceProc("vkWaitForFences");
         var resetFences = (delegate* unmanaged<IntPtr, uint, IntPtr*, int>)_device.DeviceProc("vkResetFences");
@@ -714,7 +714,7 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         // The present is in this list because the barrier below signals a semaphore that only the
         // present waits on: submitting it with nothing to hand the frame to would leave the
         // semaphore signalled and the image in a layout nobody presented.
-        if (getImages == null || acquire == null || waitFences == null || resetFences == null || present == null)
+        if (acquire == null || waitFences == null || resetFences == null || present == null)
         {
             return Win32PresentResult.Lost;
         }
@@ -738,16 +738,16 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         resetFences(_device.Device, 1, &fence);
         long acquiredAt = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        uint count = 0;
-        getImages(_device.Device, _swapChain, &count, null);
-        var images = new IntPtr[count];
+        uint count = (uint)_swapChainImages.Length;
 
-        fixed (IntPtr* imagePtrs = images)
+        if (count == 0 && !RefreshImages())
         {
-            getImages(_device.Device, _swapChain, &count, imagePtrs);
+            return Win32PresentResult.Lost;
         }
 
-        if (index >= count)
+        var images = _swapChainImages;
+
+        if (index >= (uint)images.Length)
         {
             return Win32PresentResult.Lost;
         }
@@ -1022,6 +1022,32 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
 
         _barrierPools = pools;
         _barrierBuffers = buffers;
+        return true;
+    }
+
+    /// <summary>
+    /// Reads the swap chain's images once. They cannot change while the chain lives, and asking the
+    /// driver for the list on every frame is a call and an allocation at the worst possible moment.
+    /// </summary>
+    private bool RefreshImages()
+    {
+        var getImages = (delegate* unmanaged<IntPtr, IntPtr, uint*, IntPtr*, int>)_device.DeviceProc("vkGetSwapchainImagesKHR");
+        uint count = 0;
+
+        if (getImages == null || getImages(_device.Device, _swapChain, &count, null) != 0 || count == 0)
+        {
+            _swapChainImages = [];
+            return false;
+        }
+
+        var images = new IntPtr[count];
+
+        fixed (IntPtr* imagePtrs = images)
+        {
+            getImages(_device.Device, _swapChain, &count, imagePtrs);
+        }
+
+        _swapChainImages = images;
         return true;
     }
 
