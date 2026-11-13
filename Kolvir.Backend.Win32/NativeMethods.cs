@@ -137,6 +137,19 @@ internal static class NativeMethods
 
     /// <summary>The height of a caption bar at a given DPI: what an emulated one has to match.</summary>
     internal const int SmCaption = 4;
+
+    /// <summary>
+    /// The resize frame around a window. The caption band is this plus
+    /// <see cref="SmCaption"/> plus <see cref="SmCxPaddedBorder"/>: <see cref="SmCaption"/> is only
+    /// the band the text sits in, and a caption button fills the whole band.
+    /// </summary>
+    internal const int SmCySizeFrame = 33;
+
+    /// <summary>
+    /// The border DWM pads around a window, which is what makes the frame look wider than it is.
+    /// Zero when composition is off, so adding it needs no branch.
+    /// </summary>
+    internal const int SmCxPaddedBorder = 92;
     internal const uint WmMouseActivate = 0x0021;
     internal const uint WmMove = 0x0003;
     internal const int WaInactive = 0;

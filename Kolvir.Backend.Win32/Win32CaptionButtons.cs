@@ -16,9 +16,10 @@ namespace Kolvir.Backend.Win32;
 /// the illusion away is that Skia draws them instead of the non-client painter.
 /// </para>
 /// <para>
-/// Everything here is in logical pixels, in client coordinates, like the rest of the seam. The one
-/// number taken from the platform is the caption height, which is what makes the strip line up with
-/// where Windows would have put it.
+/// Everything here is in logical pixels, in client coordinates, like the rest of the seam. The numbers
+/// taken from the platform are the three the caption band is made of - the caption, the resize frame
+/// and DWM's padded border - which is what makes the strip line up with where Windows would have put
+/// it.
 /// </para>
 /// </remarks>
 internal static class Win32CaptionButtons
@@ -37,17 +38,74 @@ internal static class Win32CaptionButtons
     private const float GlyphCorner = 1f;
 
     /// <summary>
-    /// The height of the strip, in logical pixels: the caption height the system would use, so the
+    /// The caption band a 96 DPI desktop reports - 23 for the text, 4 for the frame, 4 for the padded
+    /// border - used only when the platform refuses to answer for a metric at all.
+    /// </summary>
+    private const float CaptionBandFallback = 31f;
+
+    /// <summary>
+    /// The height of the strip, in logical pixels: the caption band the system would use, so the
     /// buttons sit where a decomposed title bar would have put them.
     /// </summary>
     /// <param name="dpi">The window's DPI.</param>
     /// <param name="scale">Logical-to-device ratio for that DPI.</param>
     /// <returns>The strip height in logical pixels.</returns>
+    /// <remarks>
+    /// Asks the platform for the three metrics the band is made of and hands them to
+    /// <see cref="Height(int, int, int, float)"/>, which is where the arithmetic and its reasoning
+    /// are. The caption probe doubles as the failure test: a call that fails returns zero for every
+    /// metric, while a caption band of zero is not something a real desktop reports.
+    /// </remarks>
     internal static float Height(uint dpi, float scale)
     {
-        var device = NativeMethods.GetSystemMetricsForDpi(NativeMethods.SmCaption, dpi == 0 ? 96u : dpi);
-        return device > 0 ? device / (scale > 0f ? scale : 1f) : 23f;
+        var metricsDpi = dpi == 0 ? 96u : dpi;
+        var caption = NativeMethods.GetSystemMetricsForDpi(NativeMethods.SmCaption, metricsDpi);
+        if (caption <= 0)
+        {
+            // The 96 DPI band rather than the 96 DPI caption: the fallback stands in for the whole
+            // thing, so it is 31 and not 23.
+            return CaptionBandFallback;
+        }
+
+        return Height(
+            caption,
+            NativeMethods.GetSystemMetricsForDpi(NativeMethods.SmCySizeFrame, metricsDpi),
+            NativeMethods.GetSystemMetricsForDpi(NativeMethods.SmCxPaddedBorder, metricsDpi),
+            scale);
     }
+
+    /// <summary>
+    /// The caption band from the three metrics the platform composes it out of, in logical pixels.
+    /// </summary>
+    /// <param name="caption">The caption's text band, <c>SM_CAPTION</c>, in device pixels.</param>
+    /// <param name="frame">The resize frame, <c>SM_CYSIZEFRAME</c>, in device pixels.</param>
+    /// <param name="padded">DWM's padded border, <c>SM_CXPADDEDBORDER</c>, in device pixels.</param>
+    /// <param name="scale">Logical-to-device ratio for the DPI the metrics were read at.</param>
+    /// <returns>The strip height in logical pixels.</returns>
+    /// <remarks>
+    /// <para>
+    /// The sum is the band, and the caption alone is not: <c>SM_CAPTION</c> is the height of the
+    /// area the text sits in, while a caption button fills the band from the top edge of the window
+    /// down to the client - which is the text band, plus the resize frame above it, plus the border
+    /// DWM pads around that. Measured against a decorated window rather than assumed: at 192 DPI the
+    /// three read 45, 5 and 8 device pixels, the sum is 58, and the window really does put its client
+    /// 58 device pixels below its top in both its normal and its maximized state. Using the caption
+    /// alone left the strip 13 device pixels short, which is what a button that ends above the
+    /// platform's own looks like.
+    /// </para>
+    /// <para>
+    /// Adding these up is what the platform itself does to compute its non-client top, so the result
+    /// matches Windows' own arithmetic, including how it rounds each metric at fractional scale,
+    /// rather than approximating it. The padded border is legitimately zero when DWM composition is
+    /// off, in which case the band is the classic caption plus frame and no special case is needed.
+    /// </para>
+    /// <para>
+    /// Kept separate from the query so a test can pin the arithmetic without a display, which is the
+    /// only part of this that can be wrong in a way a headless test would not otherwise catch.
+    /// </para>
+    /// </remarks>
+    internal static float Height(int caption, int frame, int padded, float scale) =>
+        (caption + frame + padded) / (scale > 0f ? scale : 1f);
 
     /// <summary>
     /// Lays the buttons out against the right edge of the client, in drawing order, together with the
