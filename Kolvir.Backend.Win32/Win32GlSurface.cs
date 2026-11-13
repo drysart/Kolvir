@@ -884,6 +884,13 @@ internal sealed class Win32GlSurface : IDisposable
             return "cpu (no current context)";
         }
 
+        if (Win32GlTrace.IsEnabled && _offscreen is not null)
+        {
+            // Paired with the 'retained' line: a create without a release at the same size means the
+            // old buffer is still alive when the driver builds the next one.
+            Win32GlTrace.Write($"release retained {_width}x{_height}");
+        }
+
         _surface?.Dispose();
         _surface = null;
         _target?.Dispose();
@@ -967,6 +974,16 @@ internal sealed class Win32GlSurface : IDisposable
         _height = height;
         _needsFull = true;
 
+        if (Win32GlTrace.IsEnabled)
+        {
+            // What this resize cost us, in bytes, so a report of a large window can be compared
+            // against it instead of guessed at.
+            long ours = _offscreen is null ? 0 : 4L * width * height;
+
+            Win32GlTrace.Write(
+                $"retained {width}x{height} samples={samples} ours={ours / (1024 * 1024)}MB stencil={_context.StencilBits}");
+        }
+
         return null;
     }
 
@@ -1041,6 +1058,13 @@ internal sealed class Win32GlSurface : IDisposable
         }
         catch (Exception)
         {
+        }
+
+        if (Win32GlTrace.IsEnabled && _offscreen is not null)
+        {
+            // Paired with the 'retained' line: a create without a release at the same size means the
+            // old buffer is still alive when the driver builds the next one.
+            Win32GlTrace.Write($"release retained {_width}x{_height}");
         }
 
         _surface?.Dispose();

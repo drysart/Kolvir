@@ -2739,6 +2739,13 @@ public sealed class Win32WindowBackend : IWindowBackend
 
     private void EnsureBuffer(int width, int height)
     {
+        if (Win32GlTrace.IsEnabled && (width != _bufferWidth || height != _bufferHeight))
+        {
+            // The one place a resize turns into an allocation: the size asked for here is the whole
+            // memory story of a larger window, so a measurement can read it rather than infer it.
+            Win32GlTrace.Write(
+                $"buffer {width}x{height} px={width * height} scale={_scale} tier={(_gl is not null ? "gl" : "cpu")}");
+        }
         if (_gl is not null)
         {
             if (_gl.Resize(width, height))
