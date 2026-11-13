@@ -5207,7 +5207,6 @@ public sealed class DemoUi
         image.Source = Images.LoadFromStream(stream, new SvgOptions { CurrentColor = colour });
     }
 
-    /// <summary>
     /// The animated GIF page: the picture itself, play and pause, a seek bar, and a readout that says
     /// where in the pass it is.
     /// </summary>

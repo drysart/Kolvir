@@ -177,6 +177,37 @@ public sealed class ImageAnimationTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void ARunningCountdownIsReaimedAtTheBoundaryRatherThanLeftOnItsPeriod()
+    {
+        var backend = new TestApplicationBackend();
+        using var source = new StepSource([100, 200, 300, 100]);
+        using var data = new ImageData(source) { Loop = true };
+        var image = new Image { Dock = DockStyle.Fill, Source = data };
+
+        using var scene = HeadlessScene.Create(backend, image, 40f, 40f);
+
+        scene.RunWhileShown(() =>
+        {
+            data.Play();
+            Assert.AreEqual(TimeSpan.FromMilliseconds(100), backend.Timer.Interval, "armed to the first boundary");
+
+            // Sixty milliseconds into a hundred-millisecond frame, a repaint. The countdown has to be
+            // re-aimed at what is left of the window. Left running on the interval it was armed with,
+            // it fires on that period instead of on the boundary, and the error carries into the next
+            // arm: the ticks walk a fraction earlier every frame until one lands just before a
+            // boundary, repaints the frame that is about to be replaced, and leaves that frame on
+            // screen for a millisecond - four times a second on a twelve-frame GIF at 80 ms.
+            _clock.Advance(60);
+            scene.Paint();
+
+            Assert.AreEqual(
+                TimeSpan.FromMilliseconds(40),
+                backend.Timer.Interval,
+                "re-aimed at the 100 ms boundary from where the clock now is");
+        });
+    }
+
+    [TestMethod]
     public void PausingHidingAndAStillImageAllStopTheTimer()
     {
         var backend = new TestApplicationBackend();

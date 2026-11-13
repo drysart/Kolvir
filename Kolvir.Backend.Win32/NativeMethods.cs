@@ -9,11 +9,19 @@ namespace Kolvir.Backend.Win32;
 /// </summary>
 internal static class NativeMethods
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr LoadLibraryW(string fileName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+    internal static extern IntPtr GetProcAddress(IntPtr module, string procName);
+
     // Window styles and messages.
     internal const uint WsOverlappedWindow = 0x00CF0000;
     internal const uint CsHRedraw = 0x0002;
     internal const uint CsVRedraw = 0x0001;
     internal const uint CsDblClks = 0x0008;
+
+    internal const int BlackBrush = 4;
 
     internal const uint WmDestroy = 0x0002;
     internal const uint WmSize = 0x0005;
@@ -576,6 +584,13 @@ internal static class NativeMethods
     internal static extern bool GetClientRect(IntPtr hwnd, out RECT lpRect);
 
     [DllImport("user32.dll")]
+    internal static extern int FillRect(IntPtr hdc, ref RECT lprc, IntPtr hbr);
+
+    /// <summary>The bounding rectangle of what Windows still wants painted, in client coordinates.</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool GetUpdateRect(IntPtr hwnd, out RECT lpRect, bool bErase);
+
+    [DllImport("user32.dll")]
     internal static extern bool SetWindowPos(IntPtr hwnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
     [DllImport("user32.dll")]
@@ -766,6 +781,17 @@ internal static class NativeMethods
 
     [DllImport("gdi32.dll")]
     internal static extern bool DeleteObject(IntPtr hObject);
+
+    /// <summary>
+    /// Returns one of the system's shared stock objects. A brush it returns must not be deleted, and
+    /// is the only kind that may be put in a registered window class.
+    /// </summary>
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr GetStockObject(int objectIndex);
+
+    /// <summary>A solid brush in a colour the caller owns, and so must delete.</summary>
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr CreateSolidBrush(uint colorRef);
 
     /// <summary>Creates a device-dependent bitmap, used here for an icon's monochrome AND mask.</summary>
     [DllImport("gdi32.dll")]

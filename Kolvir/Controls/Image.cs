@@ -46,7 +46,6 @@ public class Image : Control
     private ImageData? _image;
     private SizeMode _sizeMode = SizeMode.Zoom;
     private Timer? _frameTimer;
-    private TimeSpan? _scheduledFor;
 
     public Image()
     {
@@ -225,14 +224,15 @@ public class Image : Control
             return;
         }
 
-        // A repaint that changes nothing must not restart the countdown, so the timer is left alone
-        // while it is already aiming at the boundary this position asks for.
-        var target = position + wait;
-        if (_frameTimer is { Enabled: true } && _scheduledFor == target)
-        {
-            return;
-        }
-
+        // The countdown is aimed at the boundary from the position just read, every time this runs -
+        // on a tick and on every repaint. Leaving a running countdown alone because it was already
+        // pointing at the same boundary was the mistake: the timer's own period is what it was last
+        // armed with, which is a fraction of a millisecond short of a frame whenever the arm happened
+        // inside the window, so the error accumulates until a tick lands just before a boundary. That
+        // tick repaints the frame about to be replaced, the boundary repaint follows a millisecond
+        // later, and the frame it belonged to is on screen for a millisecond - which is what a dropped
+        // frame looks like. Re-aiming costs a timer restart and cannot drift, because the fire time is
+        // always the boundary rather than the boundary plus an error.
         var interval = wait > MinimumFrameDelay ? wait : MinimumFrameDelay;
 
         if (_frameTimer is null)
@@ -244,14 +244,14 @@ public class Image : Control
             _frameTimer.Interval = interval;
         }
 
-        _scheduledFor = target;
+        // Start restarts the countdown from now, which is what makes the fire time the boundary
+        // rather than the boundary plus whatever error the last arm left behind.
         _frameTimer.Start();
     }
 
     private void StopFrames()
     {
         _frameTimer?.Stop();
-        _scheduledFor = null;
     }
 
     private void OnFrameTick(object sender)
