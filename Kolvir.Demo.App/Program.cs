@@ -72,11 +72,13 @@ internal static class Program
         // headless backend rather than the window one, so it needs no window, no message loop and no
         // display, and it works over ssh:
         //   KolvirDemoApp --render output.png [width height] [--dark|--light]
-        //   KolvirDemoApp --render output.png 1200 800 --page 55 [--zoom 2.0 | --zoom-popup dropdown]
+        //   KolvirDemoApp --render output.png 1200 800 --page zoom [--zoom 2.0 | --zoom-popup dropdown]
         //
-        // --page picks a page by index, --zoom drives the Zoom page's slider and --zoom-popup opens
-        // one of that page's popup surfaces (dropdown, menu or tooltip), so a screenshot of
-        // something that normally needs a click can be reproduced from any machine.
+        // --page picks a page by its id ("zoom", "menus", "audio") or by its position in the
+        // navigation list, --zoom drives the Zoom page's slider and --zoom-popup opens one of that
+        // page's popup surfaces (dropdown, menu or tooltip), so a screenshot of something that
+        // normally needs a click can be reproduced from any machine. The id is what a script should
+        // use: it survives a page being inserted above the one it names.
         //
         // This has to come before anything touches a toolkit. GDK's initialisation prints
         // "Failed to open display" and terminates the process with exit code 1 when there is no
@@ -211,7 +213,15 @@ internal static class Program
         // out describing the window it is actually in rather than the one it would have been.
         demo.AttachWindow(window);
 
-        demo.SelectPage(PageArgument(args));
+        // --page names a page by id or by position; both are resolved before the window is shown, so
+        // the first frame is already the page that was asked for.
+        int page = PageArgument(args);
+        demo.SelectPage(page);
+
+        if (PageArgumentWarning(args, page) is { } pageWarning)
+        {
+            demo.SetStatus(pageWarning);
+        }
 
         if (Array.IndexOf(args, "--benchmark") >= 0)
         {
@@ -448,11 +458,17 @@ internal static class Program
 
         ApplyAppearanceOverride(args);
 
+        int page = PageArgument(args);
+        if (PageArgumentWarning(args, page) is { } pageWarning)
+        {
+            Console.WriteLine(pageWarning);
+        }
+
         DemoUi.RenderToPng(
             path,
             width,
             height,
-            PageArgument(args),
+            page,
             CreateMenuBar,
             AfterShownArgument(args));
         Console.WriteLine($"Rendered {width}x{height} sample UI to {path}");
@@ -559,12 +575,21 @@ internal static class Program
         return spanMenu ? (window, demo) => demo.OpenSpanDemo(window) : null;
     }
 
-    /// <summary>The value of <c>--page</c>, or -1 when the sample should show its first page.</summary>
-    private static int PageArgument(string[] args)
-    {
-        int index = Array.IndexOf(args, "--page");
-        return index >= 0 && index + 1 < args.Length && int.TryParse(args[index + 1], out var page) ? page : -1;
-    }
+    /// <summary>
+    /// The page <c>--page</c> names, or -1 when it names none: a page id such as <c>audio</c>, or a
+    /// position in the navigation list such as <c>59</c>.
+    /// </summary>
+    private static int PageArgument(string[] args) => DemoUi.PageIndex(ArgumentValue(args, "--page"));
+
+    /// <summary>
+    /// The line to report when <c>--page</c> named no page, or null when it named one or was not
+    /// given. A typo in it is the one argument mistake that would otherwise be invisible: the sample
+    /// would come up on its first page and look like it had been asked for exactly that.
+    /// </summary>
+    private static string? PageArgumentWarning(string[] args, int page) =>
+        page < 0 && ArgumentValue(args, "--page") is { } selector
+            ? $"--page \"{selector}\" is not a page id or a position in the list, so the first page is showing."
+            : null;
 
     /// <summary>
     /// The value of a <c>--name value</c> switch, or null when it was not given. A flag that takes a

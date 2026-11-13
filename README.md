@@ -348,7 +348,7 @@ var notes = new TextBox { TabIndex = 2, Dock = DockStyle.Fill, Multiline = true 
 var ok = new Button("OK") { TabIndex = 1, Dock = DockStyle.Bottom };   // visited second
 ```
 
-The demo's **Tab order** page - `--page 34` - is the same rules by hand: it was created in a
+The demo's **Tab order** page - `--page tab-order` - is the same rules by hand: it was created in a
 different order from its indices, carries a nested container whose children order among themselves,
 a scrollable panel that is a tab stop, two controls that share an index, and two that are meant to be
 skipped, with a readout naming whatever has the focus, its `TabIndex` and its place in the sequence.
@@ -681,7 +681,7 @@ var zoom = new Panel { Dock = DockStyle.Fill, ScaleFactor = 1.75f };
 zoom.Controls.Add(new Label("A 14 px label, at 24.5 px on screen") { Dock = DockStyle.Top });
 ```
 
-The demo's **Zoom** page - `--page 55` - drives a panel from 0.5x to 3.0x and puts a reciprocal panel
+The demo's **Zoom** page - `--page zoom` - drives a panel from 0.5x to 3.0x and puts a reciprocal panel
 inside it, so the readout shows the effective multiplier cancelling back to 1.00.
 
 ### Adding many children at once
@@ -2599,11 +2599,11 @@ trimmed `Kolvir.Minimal` fixture, `win-x64`, publishing at the commit before thi
 properties, their resolution and the per-class defaults, less the thirteen per-control font fields
 and properties they replace.
 
-The demo's appearance page - `--page 33` - puts a panel that assigns a font, a foreground colour and
-a background role on screen, with what its children make of them, one label that overrides both, and
-a label that paints nothing in front of a panel that does. Its buttons change the panel's font and
-the theme's face on a live tree; `--appearance-change` makes the same two changes before a
-`--render` writes the frame, so the page can be screenshotted before and after it.
+The demo's appearance page - `--page inherited-appearance` - puts a panel that assigns a font, a
+foreground colour and a background role on screen, with what its children make of them, one label that
+overrides both, and a label that paints nothing in front of a panel that does. Its buttons change the
+panel's font and the theme's face on a live tree; `--appearance-change` makes the same two changes
+before a `--render` writes the frame, so the page can be screenshotted before and after it.
 `Kolvir.Tests`' `InheritedAppearanceTests` runs the same resolution rules headlessly, one test per
 rule, through the headless backend.
 
@@ -2674,7 +2674,7 @@ flag on `Font` saying that a face is a single face, which fits in padding the ob
 had: no new per-instance field and no startup work. The loaders themselves are only reachable from
 the application code that calls them, and `ApplicationOptions` keeps its old shape.
 
-The demo's font page - `--page 32` - draws a label, a multi-line text box and a
+The demo's font page - `--page fonts-from-a-file` - draws a label, a multi-line text box and a
 rich label with IBM Plex Sans Regular carried as an embedded resource (`Kolvir.Demo.App/Fonts`,
 OFL licensed), and prints the width and line height it measures against the system face's.
 `Kolvir.Tests`' `FontLoadingTests` asserts the same measurements and failure paths headlessly, so
@@ -4500,11 +4500,11 @@ default is the CPU path. The measured-rendering page (index 54) works exactly as
 3. Press again with the other damage mode.
 4. Quit, rerun with `--no-hardware-acceleration`, and repeat. That is the CPU half of the A/B.
 
-`--page N --benchmark` starts the same measurement on any page, not only 54. Page 54 is
-deliberately light, so it is the wrong page for a full-frame comparison on Apple silicon; **page 11
-(Images and layout)** is the heavy one. `--partial-damage` selects the partial row on page 54, so
-all four of its rows can be captured without a pointer. The `BENCH` line has exactly the Windows
-shape:
+`--page <id> --benchmark` starts the same measurement on any page, not only `measured-rendering`.
+That page is deliberately light, so it is the wrong page for a full-frame comparison on Apple silicon;
+**`images-and-layout`** is the heavy one. `--partial-damage` selects the partial row on
+`measured-rendering`, so all four of its rows can be captured without a pointer. The `BENCH` line has
+exactly the Windows shape:
 
 ```
 BENCH mode="metal" renderer="Apple M4" size=1280x820 scale=2.00 damage=full frames=600 warmup=30 p50=0.883 p95=1.207 max=7.823 mean=0.872 fps=60.1 area=1280x820
@@ -4695,8 +4695,8 @@ failure to stderr.
 
 ### Measuring the GTK4 GPU path by hand
 
-The measured-rendering page (index 54) works exactly as it does on Windows and macOS, and
-`--page N --benchmark` starts the same measurement on any page:
+The measured-rendering page works exactly as it does on Windows and macOS, and
+`--page <id> --benchmark` starts the same measurement on any page:
 
 1. Make sure no other instance is running first: the demo is `SingleInstance = true`, so a launch
    can be handed to a window that is already up instead of starting a new one - the status line then
@@ -5190,12 +5190,16 @@ To render the same sample UI headlessly (useful for visual checks in CI):
 
 ```
 KolvirDemoApp.exe --render out.png 1280 820
-KolvirDemoApp.exe --render out.png 1280 820 --page 3
+KolvirDemoApp.exe --render out.png 1280 820 --page audio
 ```
 
 Add `--light` or `--dark` to either mode to force an appearance instead of using the system one; the
-header's **Switch appearance** button flips it at runtime. `--page` picks a stage page by index in
-both modes, which is what makes a single page renderable on its own.
+header's **Switch appearance** button flips it at runtime. `--page` picks a stage page in both modes,
+either by its id - the name in the first column of `DemoUi.Demos`, such as `audio` - or by its
+position in the navigation list, so `--page 59` and `--page audio` are the same page. That is what
+makes a single page renderable on its own, and the id is the one to write down in a script: it
+survives a page being inserted above the one it names, where a position renumbers every script after
+it.
 `Kolvir.Tests`' `UndoHistoryTests` covers the history headlessly instead: it drives real text boxes
 through the host's own input entry points with a clock the test moves by hand, and one failed
 assertion names the coalescing rule that broke.

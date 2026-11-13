@@ -1,3 +1,4 @@
+using System.Diagnostics.CodeAnalysis;
 using SkiaSharp;
 
 namespace Kolvir;
@@ -312,6 +313,27 @@ public class Control : IDisposable
     /// <summary>Diagnostic name; defaults to the type name.</summary>
     public string Name { get; set; }
 
+    /// <summary>
+    /// An optional identifier for this control, so code that did not create it can find it again -
+    /// the counterpart of a name in a hand-written view, for an application that builds a window from
+    /// a designer, a configuration file or a data template and then has to reach one control in it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Null by default, and nothing in the library reads it. It is a key for
+    /// <see cref="TryGetControlById"/>, not a diagnostic: <see cref="Name"/> is what a debugger and a
+    /// tree dump show, while this never appears in either.
+    /// </para>
+    /// <para>
+    /// <b>Uniqueness is not enforced.</b> It is expected to be unique within a window, because that is
+    /// the only way a lookup means anything, and <see cref="TryGetControlById"/> in a tree that breaks
+    /// that expectation finds one of the matching controls and does not tell you which. Nothing
+    /// allocates a registry or compares ids as controls are added, so a duplicate costs nothing until
+    /// something looks one up.
+    /// </para>
+    /// </remarks>
+    public string? Id { get; set; }
+
     /// <summary>Arbitrary user data associated with the control.</summary>
     public object? Tag { get; set; }
 
@@ -392,6 +414,62 @@ public class Control : IDisposable
 
     /// <summary>True when at least one child is attached. Avoids creating the collection for leaves.</summary>
     internal bool HasChildren => _controls is { Count: > 0 };
+
+    /// <summary>
+    /// Finds a control in this control's own subtree - this control and every descendant - whose
+    /// <see cref="Id"/> is <paramref name="id"/>.
+    /// </summary>
+    /// <param name="id">The identifier to look for. Compared ordinally, so case matters.</param>
+    /// <param name="control">The control found, or null when there is none.</param>
+    /// <returns>True when a control was found.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// The tree is walked depth first, in z-order, so the first match in tree order wins. Ids are not
+    /// required to be unique - see <see cref="Id"/> - so when two controls share one this returns
+    /// whichever the walk reaches first, which is a detail of the walk rather than a promise.
+    /// </para>
+    /// <para>
+    /// Every control is searched, including the ones inside a collapsed panel, an unselected tab or a
+    /// scrolled-out list: this answers "is it in the tree", not "is it on screen", which is the
+    /// question a lookup by id is asked.
+    /// </para>
+    /// </remarks>
+    public bool TryGetControlById(string id, [NotNullWhen(true)] out Control? control)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+
+        // Iterative rather than recursive: a control tree is as deep as the application makes it, and
+        // a lookup that overflows the stack on a pathological one would be a hard bug to attribute.
+        var pending = new Stack<Control>();
+        pending.Push(this);
+
+        while (pending.Count > 0)
+        {
+            var current = pending.Pop();
+
+            if (string.Equals(current.Id, id, StringComparison.Ordinal))
+            {
+                control = current;
+                return true;
+            }
+
+            if (!current.HasChildren)
+            {
+                continue;
+            }
+
+            // Pushed in reverse so the first child is popped first, which keeps the walk in z-order.
+            var children = current.Controls;
+            for (int index = children.Count - 1; index >= 0; index--)
+            {
+                pending.Push(children[index]);
+            }
+        }
+
+        control = null;
+        return false;
+    }
 
     /// <summary>
     /// The extra translation this control applies to one of its children when painting and hit

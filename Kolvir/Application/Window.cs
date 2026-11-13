@@ -1,4 +1,5 @@
 using System.ComponentModel;
+using System.Diagnostics.CodeAnalysis;
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
@@ -120,6 +121,38 @@ public sealed partial class Window : IDisposable
 
     /// <summary>The host that paints this window's control tree.</summary>
     public UiHost Host { get; }
+
+    /// <summary>
+    /// Finds a control in this window's control tree whose <see cref="Control.Id"/> is
+    /// <paramref name="id"/>.
+    /// </summary>
+    /// <param name="id">The identifier to look for. Compared ordinally, so case matters.</param>
+    /// <param name="control">The control found, or null when there is none.</param>
+    /// <returns>True when a control was found.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="id"/> is null.</exception>
+    /// <remarks>
+    /// <para>
+    /// The same walk as <see cref="Control.TryGetControlById"/> with the window's own
+    /// <see cref="Content"/> as its root, which is the form an application uses: the window is what an
+    /// id is expected to be unique within, so it is the scope a lookup is normally asked in.
+    /// </para>
+    /// <para>
+    /// A window with no content has no controls and finds nothing. Menus, tool strips and dialogs are
+    /// not part of the tree the root reaches, so a control in one of those is not found from here.
+    /// </para>
+    /// </remarks>
+    public bool TryGetControlById(string id, [NotNullWhen(true)] out Control? control)
+    {
+        ArgumentNullException.ThrowIfNull(id);
+
+        if (Content is { } content)
+        {
+            return content.TryGetControlById(id, out control);
+        }
+
+        control = null;
+        return false;
+    }
 
     /// <summary>The application this window belongs to.</summary>
     public Application Application => _application;
