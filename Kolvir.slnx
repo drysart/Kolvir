@@ -13,6 +13,8 @@
   <Project Path="Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj" />
   <Project Path="Kolvir.Feature.Animations/Kolvir.Feature.Animations.csproj" />
   <Project Path="Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj" />
+  <Project Path="Kolvir.Feature.Audio/Kolvir.Feature.Audio.csproj" />
+  <Project Path="Kolvir.Feature.Audio.Tests/Kolvir.Feature.Audio.Tests.csproj" />
   <Project Path="Kolvir.Feature.Badges/Kolvir.Feature.Badges.csproj" />
   <Project Path="Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj" />
   <Project Path="Kolvir.Feature.Badges.Tests.Windows/Kolvir.Feature.Badges.Tests.Windows.csproj" />

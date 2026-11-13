@@ -195,6 +195,49 @@ lower platform version and does not match the folder. A feature project whose `P
 publishing decision that arrives with the first published package rather than a rule the project can
 keep on its own.
 
+#### A dependency only one platform can use
+
+The layout above decides which *files* compile per framework. A feature may also need a package only
+one platform can use, and that is a stronger claim: the assembly still has to be reachable only from
+the platform that wants it.
+
+`Kolvir.Feature.Audio` is the worked example. XAudio2 is how Windows plays a sound and
+`Vortice.XAudio2` is the bindings, and both are meaningless on the other two platforms - so the
+reference sits in the framework's own item group, beside the files:
+
+```xml
+<ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+  <Compile Include="windows/**" />
+  <PackageReference Include="Vortice.XAudio2" Version="3.8.3" />
+</ItemGroup>
+```
+
+That condition is load-bearing, and not only at restore. `Vortice.XAudio2` ships `lib/net10.0`, not
+`lib/net10.0-windows`, so an unconditional reference also restores and *compiles* on the macOS and
+Linux legs: the mistake is invisible until a voice is created, which is to say until it is on a user's
+machine. The rule is therefore the same one section 4 applies to files - the platform folder and the
+platform package are conditioned together - and the check is the package itself. `dotnet pack` writes
+one dependency group per framework, so `unzip -p *.nupkg '*.nuspec'` shows whether the platform-only
+package leaked:
+
+```xml
+<group targetFramework="net10.0"><dependency id="Kolvir" version="1.0.0" /></group>
+<group targetFramework="net10.0-macos26.0"><dependency id="Kolvir" version="1.0.0" /></group>
+<group targetFramework="net10.0-windows7.0">
+  <dependency id="Kolvir" version="1.0.0" />
+  <dependency id="Vortice.XAudio2" version="3.8.3" />
+</group>
+```
+
+A Linux or macOS application referencing the package restores `Kolvir` and nothing else, which is what
+makes "one package covers every platform" true without a framework installed for each.
+
+The same reading applies to a platform package that is merely *missing*. The audio platform halves
+probe for their own native library before using it - `NativeLibrary.TryLoad` on `xaudio2_9.dll`,
+`libpulse.so.0`, and the frameworks on macOS - so a machine without one reports the silent device with
+a reason rather than throwing from a type initialiser, which for a package that only one application
+in a hundred references is the difference between a feature and a bug report.
+
 #### Shipping: one pack
 
 `dotnet pack` on the project produces the whole package, because each inner build contributes its
