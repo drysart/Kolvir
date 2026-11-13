@@ -47,6 +47,9 @@ Kolvir.Feature.Audio/     sound, as a separate package: same layout, one real ha
   windows/                MMDevice enumeration and XAudio2 voices, through Vortice.XAudio2
   macos/                  CoreAudio HAL enumeration and AudioQueue output
   linux/                  PulseAudio enumeration and one pa_simple stream per voice
+Kolvir.Feature.WoffFonts/ web fonts, as a separate package: same layout, all portable
+  common/                 the format provider, the WOFF unwrap, the WOFF 2 glyph reconstruction
+  windows/ macos/ linux/  empty: a container is zlib, Brotli and arithmetic over bytes
 Kolvir.Minimal/           the measurement fixture: one window, one label, no features
 ```
 
@@ -213,9 +216,12 @@ dotnet test Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.
 
 dotnet test Kolvir.Feature.Audio.Tests/Kolvir.Feature.Audio.Tests.csproj \
   -p:TargetFramework=net10.0
+
+dotnet test Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj \
+  -p:TargetFramework=net10.0
 ```
 
-All six portable suites are what the `Tests` workflow dispatches, on all three platforms.
+All seven portable suites are what the `Tests` workflow dispatches, on all three platforms.
 
 The Win32 backend has a Windows-only suite of its own, because its fallback decision is internal
 and its target framework is `net10.0-windows`:
@@ -2632,9 +2638,11 @@ not have to match another.
 
 `FromFile` reads the whole file, `FromStream` reads the whole stream and `FromBytes` copies the span,
 so nothing is tied to the source afterwards. A path that does not exist throws
-`FileNotFoundException`; a stream or span that is not a font throws `ArgumentException`, and so does
-empty data. Disposing a font twice does nothing, and a font obtained with `WithSize` keeps working
-after the one it came from is disposed: each derived font holds its own reference to the face.
+`FileNotFoundException`; a stream or span that is not a font throws `FontFormatException`, and so does
+empty data. `FontFormatException` derives from `ArgumentException`, so a handler written against the
+old type still catches it. Disposing a font twice does nothing, and a font obtained with `WithSize`
+keeps working after the one it came from is disposed: each derived font holds its own reference to the
+face.
 
 **A loaded font is one face.** `WithSize` keeps it, and a weight or italic that the data does not
 contain is satisfied by the same face: nothing is synthesised, so `Weight` and `Italic` describe the
@@ -2681,6 +2689,82 @@ OFL licensed), and prints the width and line height it measures against the syst
 the identities that make a pinned face portable can be compared on every runner, and
 `--embedded-font` applies the face to the whole sample UI, including a `--render`, which is the
 application-wide path in one switch.
+
+### Web fonts (WOFF)
+
+Skia reads TrueType and OpenType, and a `.ttf` or `.otf` is what `Font.FromFile` and its siblings take.
+It does not read **WOFF** or **WOFF 2** - the containers a web font is usually downloaded in - so this
+library reads neither on its own. `Kolvir.Feature.WoffFonts` adds them:
+
+```csharp
+using var application = new Application(backend, new ApplicationOptions
+{
+    ConfigureServices = services => services.AddWoffFonts(),
+});
+
+var fonts = application.Services.GetRequiredService<IFontLoader>();
+
+using var body = fonts.LoadFromPath("Fonts/Inter-Regular.woff2", 14f);
+```
+
+The point of the example is that the last line is **the same call for every format**. `IFontLoader` is
+the font counterpart of `IImageDataFactory`: an application does not decide which loader to use by
+format, it registers the formats it wants once and then hands bytes to one loader. A `.ttf`, a `.woff`
+and a `.woff2` all arrive at `LoadFromPath` and none of them needs a branch at the call site.
+
+The seam is `IFontFormatProvider`, and its one job is to **unwrap a container**:
+
+```csharp
+public interface IFontFormatProvider
+{
+    string Name { get; }
+    int Priority { get; }
+    bool CanLoad(ReadOnlySpan<byte> header);              // "is this mine?", from the first 512 bytes
+    ReadOnlyMemory<byte> Decode(ReadOnlyMemory<byte> data); // the same font without the wrapper
+}
+```
+
+A provider converts bytes to the OpenType Skia reads; it does not parse outlines and it does not draw.
+That is deliberate: the alternative is a second font engine beside the one that already works, and the
+whole of WOFF 2 can be done without one. The loader's rules are the image factory's rules, because a
+seam that behaves differently in two places is two seams: providers are consulted before the built-in
+path, the higher `Priority` wins, the later registration wins at equal priority, a provider that
+throws while being asked has answered "not mine", and a provider that claims data and then fails is
+named in the `FontFormatException` rather than falling through to another parser.
+
+What the two formats actually cost, as measured on a 200 KB face:
+
+| | WOFF | WOFF 2 |
+|---|---|---|
+| the container | the same tables, each zlib-compressed | one Brotli stream, a variable-length directory |
+| the payload | nothing to undo | `glyf` re-encoded into contour, point, flag and coordinate streams; `loca` not stored at all |
+| this package | 90 lines, no dependency | 900 lines: the triplet decoder and the glyph-record writer |
+| decoding | decompression | Brotli (in the BCL) plus glyph reconstruction |
+| expected output | the same tables | the same outlines, a different `glyf` spelling |
+| verified | the decoded font draws pixel-identical glyphs | same |
+
+WOFF 2 is the one that matters in practice - a web font kit hands a modern client nothing else - and
+it is where the work is. The specification splits `glyf` into six substreams and re-encodes each point
+as a *triplet*: one flag byte and a variable-length signed delta pair whose width and base come from a
+table of 128 cases. Rebuilding the font means undoing that glyph by glyph and writing standard TrueType
+records back out, including recomputing every bounding box the file chose not to store. `loca` follows
+from the offsets that produces. The reconstructed `glyf` is not byte-identical to the original - the
+format allows several valid spellings of the same outline - so what is tested is the drawing:
+`Kolvir.Feature.WoffFonts.Tests` renders every printable ASCII glyph from the decoded file and from the
+plain `.ttf` it came from, and compares the pixels.
+
+The three transforms WOFF 2 defines are all handled: `glyf` and `loca` (which always come as a pair),
+and `hmtx` - the one that drops a left side bearing array on the grounds that a bearing is the glyph's
+`xMin`. No encoder in the wild emits the `hmtx` transform, so that one is covered by a unit test on
+synthetic streams rather than by a file, and the docs say so rather than implying a corpus that does not
+exist.
+
+A font **collection** - `.ttc`, or a `ttcf` flavor - is refused by name rather than decoded into
+something that is not a font. Neither container's collection layout is implemented.
+
+The demo's font page - `--page fonts-from-a-file` - carries the same face twice, as a 200 KB `.ttf` and
+a 63 KB `.woff2`, and loads the second through `IFontLoader` on the page rather than through
+`Font.FromBytes`. That is the whole integration: the page asks a loader for a font and hands it bytes.
 
 ### Font dialog
 

@@ -22,6 +22,8 @@
   <Project Path="Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj" />
   <Project Path="Kolvir.Feature.Svg/Kolvir.Feature.Svg.csproj" />
   <Project Path="Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj" />
+  <Project Path="Kolvir.Feature.WoffFonts/Kolvir.Feature.WoffFonts.csproj" />
+  <Project Path="Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj" />
   <Project Path="Kolvir.Minimal/Kolvir.Minimal.csproj" />
   <Project Path="Kolvir.Tests/Kolvir.Tests.csproj" />
 </Solution>

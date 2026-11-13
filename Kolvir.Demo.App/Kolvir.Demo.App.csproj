@@ -59,14 +59,19 @@
     <ProjectReference Include="..\Kolvir.Feature.AnimatedGif\Kolvir.Feature.AnimatedGif.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.AnimatedWebp\Kolvir.Feature.AnimatedWebp.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.Svg\Kolvir.Feature.Svg.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.WoffFonts\Kolvir.Feature.WoffFonts.csproj" />
   </ItemGroup>
 
   <!-- The demo's bundled face. It travels inside the assembly rather than beside the executable,
        because that is what a trimmed single-file publish can carry, and because the point of the
-       feature is a face the machine may not have. Fonts/OFL.txt is its licence. -->
+       feature is a face the machine may not have. Fonts/OFL.txt is its licence. The WOFF 2 file is
+       the same face in the format the web downloads, which the fonts page loads through the
+       application's font loader. -->
   <ItemGroup>
     <EmbeddedResource Include="Fonts\IBMPlexSans-Regular.ttf"
                       LogicalName="Kolvir.Demo.App.Fonts.IBMPlexSans-Regular.ttf" />
+    <EmbeddedResource Include="Fonts\IBMPlexSans-Regular.woff2"
+                      LogicalName="Kolvir.Demo.App.Fonts.IBMPlexSans-Regular.woff2" />
   </ItemGroup>
 
   <!-- Exactly one backend and one feature per TFM, and only the ones that TFM can actually use. The

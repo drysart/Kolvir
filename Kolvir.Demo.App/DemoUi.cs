@@ -13,6 +13,7 @@ using Kolvir.Multiline;
 using Kolvir.Spans;
 using Kolvir.Svg;
 using Kolvir.Undo;
+using Kolvir.WoffFonts;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;
@@ -183,6 +184,15 @@ public sealed class DemoUi
     /// <summary>The audio page's readout: the device list, what is playing and how far in it is.</summary>
     private Label? _audioReadout;
 
+    /// <summary>
+    /// The fonts page's web-font label. It is built wearing the theme's face and re-dressed once the
+    /// window exists, because a page is built before there are services and the loader is a service.
+    /// </summary>
+    private Label? _fontPageWebLabel;
+
+    /// <summary>The line under it, which says what the loader reported once it has run.</summary>
+    private Label? _fontPageWebReadout;
+
     /// <summary>The audio page's device picker, whose selected index reads into <see cref="_audioDeviceList"/>.</summary>
     private ComboBox? _audioDevices;
 
@@ -265,10 +275,53 @@ public sealed class DemoUi
 
         RefreshBadgeReadout();
 
+        // The fonts page's web font, which needs the application's loader and therefore a window.
+        LoadWebFontSample(window);
+
         // The audio page's device list is a live reading of what the machine offers, and the page is
         // built before there is a window to ask through, so it is read once here.
         RefreshAudioDevices();
     }
+
+    /// <summary>
+    /// Loads the fonts page's WOFF 2 sample through the application's font loader.
+    /// </summary>
+    /// <remarks>
+    /// This is the part of the feature that matters, and it is deliberately the least code in the
+    /// sample: the page asks a loader for a font and hands it bytes. It does not know they are a web
+    /// font, and nothing about it would change if they were a plain file. What makes WOFF work is the
+    /// single <c>AddWoffFonts()</c> in the sample's own options - a format the page never names.
+    /// </remarks>
+    private void LoadWebFontSample(Window window)
+    {
+        if (_fontPageWebLabel is not { } label || window.Services.GetService<IFontLoader>() is not { } fonts)
+        {
+            return;
+        }
+
+        try
+        {
+            var web = fonts.LoadFromBytes(DemoFont.WoffData, 15f);
+            label.Font = web;
+
+            if (_fontPageWebReadout is { } readout)
+            {
+                var formats = fonts is FontLoader loader ? loader.Providers.Count : 0;
+                readout.Text =
+                    $"Loaded through IFontLoader: \"{web.FamilyName}\" at " +
+                    $"{web.Size.ToString("0.##", CultureInfo.InvariantCulture)} pt, " +
+                    $"{formats} format provider(s) registered by this application. The label above asked " +
+                    "for a font and got one; AddWoffFonts() is what made the bytes readable.";
+            }
+        }
+        catch (FontFormatException exception)
+        {
+            // The sample opts in, so a failure here is a broken build rather than a supported state.
+            // Saying so beats a page that quietly keeps the theme's face and looks fine.
+            label.Text = $"The web font could not be loaded: {exception.Message}";
+        }
+    }
+
     /// <summary>Shows the page that holds the first text field and puts the caret in it, which then blinks.</summary>
     public void FocusFirstTextBox()    {
         for (int index = 0; index < _pages.Length; index++)
@@ -413,7 +466,15 @@ public sealed class DemoUi
         demo.SelectPage(page);
 
         var backend = new HeadlessApplicationBackend();
-        using var application = new Application(backend);
+
+        // The same features the sample's own window declares, because a page is entitled to them and a
+        // render that lacked one would show a page the application never shows. The fonts page is the
+        // one that depends on it: it loads its web font through the loader.
+        using var application = new Application(backend, new ApplicationOptions
+        {
+            ConfigureServices = services => services.AddWoffFonts(),
+        });
+
         var window = new Window("Kolvir sample", demo.Root)
         {
             ClientSize = new SKSize(width, height),
@@ -7541,6 +7602,34 @@ public sealed class DemoUi
             " - which stays this face rather than falling back to a system font, because one file holds " +
             "one face and no weight is invented.");
         card.Controls.Add(rich);
+
+        card.Controls.Add(Caption("The same face as a web font, loaded through the application's font loader"));
+        _fontPageWebLabel = new Label(
+            "This label's face came from a .woff2 file - 63 KB against the 200 KB above - through " +
+            "IFontLoader, which is the same call an application makes for a .ttf: no format branch at " +
+            "the call site, and no knowledge of WOFF in the page that uses it.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 62f,
+            WrapText = true,
+            Font = Theme.DefaultFont,
+            TextAlign = ContentAlignment.TopLeft,
+        };
+
+        card.Controls.Add(_fontPageWebLabel);
+
+        _fontPageWebReadout = new Label("Waiting for the window, which is when services exist.")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 20f,
+            Font = Theme.CaptionFont,
+            ForeColorRole = ThemeColor.MutedForeground,
+        };
+
+        card.Controls.Add(_fontPageWebReadout);
+
 
         card.Controls.Add(new Label(
             $"Measured here: \"{sample}\" is {F(loaded.MeasureWidth(sample))} px in the loaded face and " +

@@ -62,7 +62,7 @@ public sealed class Font : IDisposable
     /// <param name="size">The size to draw at, in logical pixels. Defaults to 13, the theme's default size.</param>
     /// <returns>A font of exactly the face in the file, on every platform.</returns>
     /// <exception cref="FileNotFoundException">The file does not exist.</exception>
-    /// <exception cref="ArgumentException">The file does not contain a font this build can read.</exception>
+    /// <exception cref="FontFormatException">The file does not contain a font this build can read.</exception>
     public static Font FromFile(string path, float size = LoadedDefaultSize)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
@@ -73,7 +73,7 @@ public sealed class Font : IDisposable
     /// <param name="stream">The stream to read to its end. It is not disposed and is not used again.</param>
     /// <param name="size">The size to draw at, in logical pixels. Defaults to 13, the theme's default size.</param>
     /// <returns>A font of exactly the face in the data, on every platform.</returns>
-    /// <exception cref="ArgumentException">The stream does not contain a font this build can read.</exception>
+    /// <exception cref="FontFormatException">The stream does not contain a font this build can read.</exception>
     public static Font FromStream(Stream stream, float size = LoadedDefaultSize)
     {
         ArgumentNullException.ThrowIfNull(stream);
@@ -89,7 +89,7 @@ public sealed class Font : IDisposable
     /// <param name="data">The bytes of a <c>.ttf</c> or <c>.otf</c>.</param>
     /// <param name="size">The size to draw at, in logical pixels. Defaults to 13, the theme's default size.</param>
     /// <returns>A font of exactly the face in the data, on every platform.</returns>
-    /// <exception cref="ArgumentException">The data is empty or does not contain a font this build can read.</exception>
+    /// <exception cref="FontFormatException">The data is empty or does not contain a font this build can read.</exception>
     public static Font FromBytes(ReadOnlySpan<byte> data, float size = LoadedDefaultSize) =>
         Load(data, size, nameof(data));
 
@@ -97,7 +97,7 @@ public sealed class Font : IDisposable
     {
         if (data.IsEmpty)
         {
-            throw new ArgumentException("The font data is empty.", paramName);
+            throw new FontFormatException(null, paramName);
         }
 
         SKTypeface? typeface;
@@ -110,13 +110,13 @@ public sealed class Font : IDisposable
         {
             // Skia owns the parsing, and a stream that is not a font is a caller mistake rather than
             // a crash: report it the way an unusable argument is reported.
-            throw new ArgumentException("The data is not a font this build can read.", paramName, exception);
+            throw new FontFormatException(null, paramName, exception);
         }
 
         if (typeface is null || typeface == SKTypeface.Empty || string.IsNullOrEmpty(typeface.FamilyName))
         {
             typeface?.Dispose();
-            throw new ArgumentException("The data is not a font this build can read.", paramName);
+            throw new FontFormatException(null, paramName);
         }
 
         // One face is all the data contains: every size and every derived font keeps exactly this

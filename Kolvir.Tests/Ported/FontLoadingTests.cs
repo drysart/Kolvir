@@ -135,7 +135,7 @@ public sealed class FontLoadingTests : HeadlessTestBase
     {
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes("This is not a font, it is a sentence."));
 
-        Assert.ThrowsExactly<ArgumentException>(() => Font.FromStream(stream));
+        Assert.ThrowsExactly<FontFormatException>(() => Font.FromStream(stream));
     }
 
     [TestMethod]
@@ -143,13 +143,17 @@ public sealed class FontLoadingTests : HeadlessTestBase
     {
         using var stream = new MemoryStream();
 
-        Assert.ThrowsExactly<ArgumentException>(() => Font.FromStream(stream));
+        Assert.ThrowsExactly<FontFormatException>(() => Font.FromStream(stream));
     }
 
     [TestMethod]
     public void ATruncatedFontIsRejected()
     {
-        Assert.ThrowsExactly<ArgumentException>(() => Font.FromBytes(TestFont.Data.AsSpan(0, 1024)));
+        var exception = Assert.ThrowsExactly<FontFormatException>(() => Font.FromBytes(TestFont.Data.AsSpan(0, 1024)));
+
+        // No provider claimed it, so the failure cannot name one: this is the built-in loader's
+        // answer, and it is the failure a caller handles for a file that is simply not a font.
+        Assert.AreEqual(string.Empty, exception.ProviderName);
     }
 
     [TestMethod]
