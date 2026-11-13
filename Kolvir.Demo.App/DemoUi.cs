@@ -5208,6 +5208,32 @@ public sealed class DemoUi
     }
 
     /// <summary>
+    /// The GIF page's image, with a trace of the position it is painted at. Temporary: it exists to
+    /// tell a frame the player never drew apart from one the window never displayed.
+    /// </summary>
+    private sealed class TracedImage : Image
+    {
+        private static readonly bool Tracing = Environment.GetEnvironmentVariable("KOLVIR_GL_TRACE") is { Length: > 0 };
+
+        private int _lastFrame = -1;
+
+        protected override void OnPaint(SKCanvas canvas, SKRect rect)
+        {
+            if (Tracing && Source is { } source)
+            {
+                int frame = (int)(source.Position.TotalMilliseconds / 80);
+                var line = frame == _lastFrame
+                    ? $"kolvir-gif: repaint of frame {frame} at {source.Position.TotalMilliseconds:F0} ms"
+                    : $"kolvir-gif: frame {frame} at {source.Position.TotalMilliseconds:F0} ms";
+                _lastFrame = frame;
+                Console.Error.WriteLine(line);
+            }
+
+            base.OnPaint(canvas, rect);
+        }
+    }
+
+    /// <summary>
     /// The animated GIF page: the picture itself, play and pause, a seek bar, and a readout that says
     /// where in the pass it is.
     /// </summary>
@@ -5235,7 +5261,7 @@ public sealed class DemoUi
             Padding = new Thickness(0f),
         };
 
-        var image = new Image
+        var image = new TracedImage
         {
             AutoSize = false,
             SizeMode = SizeMode.Zoom,
