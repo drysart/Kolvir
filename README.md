@@ -42,6 +42,11 @@ Kolvir.Feature.Animations/ timeline animations, as a separate package: same layo
 Kolvir.Feature.Svg/       SVG images, as a separate package: same layout, all portable
   common/                 the format provider, the parse cache, the currentColor load helpers
   windows/ macos/ linux/  empty: Svg.Skia renders to an SKPicture on every platform
+Kolvir.Feature.Audio/     sound, as a separate package: same layout, one real half per platform
+  common/                 the engine, the device list, the voice timeline, the silent device, WAV
+  windows/                MMDevice enumeration and XAudio2 voices, through Vortice.XAudio2
+  macos/                  CoreAudio HAL enumeration and AudioQueue output
+  linux/                  PulseAudio enumeration and one pa_simple stream per voice
 Kolvir.Minimal/           the measurement fixture: one window, one label, no features
 ```
 
@@ -204,6 +209,9 @@ dotnet test Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.cs
   -p:TargetFramework=net10.0
 
 dotnet test Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj \
+  -p:TargetFramework=net10.0
+
+dotnet test Kolvir.Feature.Audio.Tests/Kolvir.Feature.Audio.Tests.csproj \
   -p:TargetFramework=net10.0
 ```
 
@@ -5088,11 +5096,78 @@ a different shape, and it *does* work - a probe published that way extracted the
 exclusion is about the bundle and not about what macOS allows. The demo's macOS bundle is unchanged
 by this: executable 15,790,224 -> 15,790,256 bytes, HarfBuzz still loose inside the bundle.
 
+### Audio
+
+`Kolvir.Feature.Audio` plays short sounds: load a WAV, play it on the default or a chosen output
+device, loop it, pause it, and read where it is while it plays. It is a rung-3 feature of
+[FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md), so it is a package and an opt-in:
+
+```csharp
+options.ConfigureServices = services => services.AddAudio();
+```
+
+```csharp
+var audio = services.GetRequiredService<IAudioEngine>();
+
+foreach (var device in audio.Devices)          // real devices, then the silent one
+{
+    Console.WriteLine($"{device.Name}{(device.IsDefault ? " (default)" : string.Empty)}");
+}
+
+var clip = audio.Load(File.OpenRead("click.wav"));
+
+clip.Play();                                   // the default device, fire and forget
+clip.Play(volume: 0.4f);
+
+using var voice = clip.Start(device: audio.Devices[0], loop: true);
+voice.Volume = 0.6f;
+voice.Pause();
+voice.Resume();
+voice.Stop();
+
+var where = voice.Position;                    // where in the clip, right now
+```
+
+**There is always a device.** `Devices` is never empty and `DefaultDevice` is never null: when the
+machine has nothing to play through, the list ends with a `NullAudioDevice` that becomes the default.
+It is not a stub - a voice on it advances a real timeline, reports when the clip would have ended, and
+reports it late rather than early - so code that chains one sound onto the next behaves the same on a
+build machine as on a desktop. It carries a `Reason` (`no output device`, `no sound server`,
+`libpulse is not installed`) and `audio.Path` says what the feature bound to, in the same spirit as
+the graphics path.
+
+**The position is computed, never accumulated.** A voice records the position and timestamp it
+started at, and `Position` is that anchor plus the clock - the same rule `ImageData` follows. A
+paused voice is frozen at the position it paused at, a looping voice wraps inside the clip, and a
+late audio callback cannot make the readout drift. `Finished` is posted through
+`Application.BeginInvoke`, so a handler may touch controls; it fires for a clip that reached its end
+or whose device went away, not for a voice the application stopped.
+
+| | Windows | macOS | Linux |
+|---|---|---|---|
+| Enumeration | MMDevice (`IMMDeviceEnumerator`) | CoreAudio HAL (`kAudioHardwarePropertyDevices`) | PulseAudio (`pa_context_get_sink_info_list`) |
+| Playback | XAudio2, through [Vortice.XAudio2](https://www.nuget.org/packages/Vortice.XAudio2) | `AudioQueue` | `pa_simple` |
+| Looping | `XAUDIO2_BUFFER.LoopCount` | the buffer is re-enqueued | the writer rewinds |
+| Device selection | the MMDevice id string | the device UID | the sink name |
+
+Each platform mixes streams for us, so one voice is one stream and the package carries no mixer.
+`Vortice.XAudio2` is the only NuGet dependency and it is referenced by the Windows target alone: the
+packed dependency groups put it under `net10.0-windows` only, so a Linux or macOS application never
+restores it.
+
+**WAV is decoded in managed code, into 16-bit signed PCM.** Nothing native is needed for a beep, and
+one format means the three platform halves agree on what they are opening a stream with. 8-, 24- and
+32-bit integers, 32-bit floats and the `WAVE_FORMAT_EXTENSIBLE` header are all converted on the way
+in; a compressed or truncated file throws from `Load` rather than playing as silence, on every
+machine, whether or not there is anything to hear it through.
+
+The sample's **Audio** page plays a click, a tone and a sweep on the device picked from the live
+list, and reports the voice's position while it plays - which is the one thing no test can check.
+
 ## Running the application
 
 Work that has to run on a testing host - this machine, one of the Linux VMs, the Apple silicon Macs,
-CI - starts with [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md): which host to use and when, its OS, display
-server and display size, how to take a screenshot of it, and how to inject mouse and keyboard input,
+CI - starts with [TESTING-RUNBOOK.md](TESTING-RUNBOOK.md): which host to use and when, its OS, displayserver and display size, how to take a screenshot of it, and how to inject mouse and keyboard input,
 all of which differ host by host. Its recipes were run rather than transcribed, and where a route is
 known not to work it says so.
 

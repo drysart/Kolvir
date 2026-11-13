@@ -1,6 +1,7 @@
 using SkiaSharp;
 using Kolvir;
 using Kolvir.Animations;
+using Kolvir.Audio;
 using Kolvir.Badges;
 using Kolvir.Demo;
 using Kolvir.DragDrop;
@@ -122,9 +123,10 @@ internal static class Program
             // three platforms.
             SingleInstance = true,
 
-            // The sample opts into six features, each for a page that uses it: drag and drop for
+            // The sample opts into seven features, each for a page that uses it: drag and drop for
             // its drops, animations for the easing pages, SVG for the icon pages, the animated
-            // GIF and WebP providers for their picture pages, and app badging for the badge page.
+            // GIF and WebP providers for their picture pages, app badging for the badge page,
+            // and audio for its audio page.
             // Each Add call is the whole opt-in; leaving one out keeps that feature's code out of
             // an application that does not want it.
             ConfigureServices = services => services
@@ -133,7 +135,8 @@ internal static class Program
                 .AddSvgImages()
                 .AddAnimatedGifImages()
                 .AddAnimatedWebpImages()
-                .AddAppBadges(),
+                .AddAppBadges()
+                .AddAudio(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,

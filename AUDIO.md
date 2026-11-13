@@ -270,7 +270,7 @@ target only, and nothing else.
 | 6 | `windows/`: MMDevice enumeration, XAudio2 voices through `Vortice.XAudio2`, scoped to the Windows target | **done** |
 | 7 | `macos/`: CoreAudio enumeration and AudioQueue output | **done** |
 | 8 | Tests: the timeline, the null device's invariants, WAV decoding, volume | **done** |
-| 9 | Demo **Audio** page; `README.md` section; `FEATURE-COST-POLICY.md` worked example | |
+| 9 | Demo **Audio** page; `README.md` section; `FEATURE-COST-POLICY.md` worked example | **done** |
 
 ### Spike runs
 

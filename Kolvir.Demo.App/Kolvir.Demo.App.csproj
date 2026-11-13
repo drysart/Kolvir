@@ -76,18 +76,21 @@
     <ProjectReference Include="..\Kolvir.Backend.Win32\Kolvir.Backend.Win32.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.DragDrop\Kolvir.Feature.DragDrop.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.Badges\Kolvir.Feature.Badges.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Audio\Kolvir.Feature.Audio.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
     <ProjectReference Include="..\Kolvir.Backend.AppKit\Kolvir.Backend.AppKit.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.DragDrop\Kolvir.Feature.DragDrop.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.Badges\Kolvir.Feature.Badges.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Audio\Kolvir.Feature.Audio.csproj" />
   </ItemGroup>
 
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
     <ProjectReference Include="..\Kolvir.Backend.Gtk4\Kolvir.Backend.Gtk4.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.DragDrop\Kolvir.Feature.DragDrop.csproj" />
     <ProjectReference Include="..\Kolvir.Feature.Badges\Kolvir.Feature.Badges.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Audio\Kolvir.Feature.Audio.csproj" />
   </ItemGroup>
 
   <!-- The SkiaSharp native library is embedded in an AOT publish by Kolvir's own build assets
