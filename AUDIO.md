@@ -39,8 +39,8 @@ The surface consequence is section 5's rule again: a separate assembly cannot ad
 |---|---|---|---|
 | Enumerate outputs | `IMMDeviceEnumerator` (id, friendly name, default role) | HAL: `AudioObjectGetPropertyData` on `kAudioHardwarePropertyDevices`, filtered to devices with output streams | `pa_context_get_sink_info_list` |
 | Default device | `eConsole`/`eMultimedia` role | `kAudioHardwarePropertyDefaultOutputDevice` | `pa_context_get_sink_info_by_name("@DEFAULT_SINK@")` |
-| Play to a chosen endpoint | WASAPI: `IMMDevice::Activate(IAudioClient)` on the MMDevice id | `AudioQueue` with `kAudioQueueProperty_CurrentDevice` set to the device UID | `pa_simple_new(dev: sinkName, ...)` |
-| Mixing and resampling | `AUTOCONVERTPCM` + `SRC_DEFAULT_QUALITY` convert to the mix format; mixing is ours | AudioQueue's converter; mixing is ours | neither: the package converts to the sink's rate itself |
+| Play to a chosen endpoint | `IXAudio2::CreateMasteringVoice` with the MMDevice id, through `Vortice.XAudio2` | `AudioQueue` with `kAudioQueueProperty_CurrentDevice` set to the device UID | `pa_simple_new(dev: sinkName, ...)` |
+| Mixing and resampling | XAudio2 mixes the voices and resamples to the mastering voice | AudioQueue converts; the device mixes | the server mixes across streams; the package converts to the sink's rate |
 | Decode | Media Foundation, or ours | AVFoundation/AudioToolbox, or ours | GStreamer, or ours |
 | With no sound server | normal on any desktop | normal | **the common case on a bare VM or a container** |
 
@@ -49,23 +49,30 @@ in section 9.
 
 - **XAudio2 2.9 has no device enumeration.** `IXAudio2::GetDeviceCount`/`GetDeviceDetails` are the
   XAudio2 2.8 API; 2.9 deprecated them, and the header confirms slots 11 and 12 are now
-  `GetPerformanceData` and `SetDebugConfiguration`. So enumeration has to come from MMDevice whatever
-  plays the sound.
-- **XAudio2's voice interfaces are not reachable from .NET without a wrapper.** Its vtables are
-  hand-declared (about 30 slots for `IXAudio2Voice` plus `IXAudio2SourceVoice`). Attempting it: the
-  master voice's `GetVoiceDetails` returned garbage and `IXAudio2SourceVoice::GetState` fast-failed.
-  Binding a device *does* work - `XAudio2Create` plus `CreateMasteringVoice` succeed on the default and
-  on an explicit MMDevice id - but nothing above a mastering voice can be driven safely. Since a
-  wrapper library is excluded by section 8, Windows playback is WASAPI, which is in-box COM with a
-  15-slot interface and a documented contract.
-- **WASAPI accepts a format the device is not running at.** `Initialize` with `AUTOCONVERTPCM` and
-  `SRC_DEFAULT_QUALITY` takes S16 44.1 kHz stereo on a device whose mix format is 48 kHz, so the
-  package pushes decoded clip PCM and the platform resamples. That is one converter fewer to write,
-  and the same call shape on every Windows device.
-- **A render loop can be polled instead of evented.** Asking for `AUDCLNT_STREAMFLAGS_EVENTCALLBACK`
-  without calling `SetEventHandle` fails with `AUDCLNT_E_EVENTHANDLE_NOT_SET` (0x88890014); polling
-  `GetCurrentPadding` and filling the free space paces correctly against the device clock, measured at
-  15,964 frames in 400 ms against an expected 17,640.
+  `GetPerformanceData` and `SetDebugConfiguration`. Enumeration has to come from MMDevice whatever
+  plays the sound, and the id that ties the two together is the MMDevice id string that
+  `CreateMasteringVoice` accepts.
+- **XAudio2's voice interfaces cannot be driven by hand from .NET.** Its vtables are hand-declared:
+  about 30 slots for `IXAudio2Voice` plus `IXAudio2SourceVoice`. Attempting it, the master voice's
+  `GetVoiceDetails` returned garbage and `IXAudio2SourceVoice::GetState` fast-failed. Binding a device
+  works - `XAudio2Create` plus `CreateMasteringVoice` succeed on the default and on an explicit id -
+  but a `SourceVoice` is not reachable that way, and a source voice is the whole feature.
+- **`Vortice.XAudio2` fixes exactly that, and was measured.** 3.8.3, MIT, on the `Remote Audio`
+  endpoint: mastering voice on an explicit MMDevice id, source voice with `BufferEnd`/`StreamEnd`
+  callbacks, `Volume` set and read back at 0.50, native `LoopCount` giving three loop-ends for a
+  200 ms clip, and pause/resume through `Stop()`/`Start()` with the queued buffer intact - paused at
+  23,814 samples, still 23,814 after 150 ms, resumed to 30,429. That covers every v1 behaviour:
+  one-shot, loop, volume, pause and stop, and completion.
+- **`SamplesPlayed` is zero after a stream ends**, because ending the stream stops the voice. Read it
+  mid-stream (7,497 samples at half way through a 400 ms clip) or not at all. This is the clock rule
+  in section 3 being right for a reason nobody predicted: the platform's own counter is not a
+  position.
+- **The wrapper has two sharp edges, both handled in section 6.** Its packages ship `lib/net10.0` and
+  not `-windows`, so an unconditional reference compiles on the macOS and Linux legs and fails only
+  at runtime - it must be scoped to the Windows target group, which was verified by building a
+  `net10.0-macos` project against it. And it resolves `xaudio2_9.dll`, then `xaudio2_8.dll`, then
+  `xaudio2_9redist.dll`, and throws from a static constructor if none is found, so the package probes
+  for the DLL itself first and reports a null device rather than letting a type initialiser explode.
 - **`AVAudioEngine` cannot choose an output.** It always renders to the system default; per-device
   selection on macOS means CoreAudio. `AudioQueue` takes `kAudioQueueProperty_CurrentDevice` as a
   device *UID* (a `CFString`), not a device id, which is a different identifier from the one
@@ -80,14 +87,15 @@ in section 9.
 - **`pa_context_get_server_info` could not be decoded.** `default_sink_name` read as garbage from the
   `pa_server_info` layout, so the default is resolved with `pa_context_get_sink_info_by_name` on the
   literal name `@DEFAULT_SINK@`, which returns an ordinary `pa_sink_info`.
-- **Everything here is in-box except Linux's `libpulse`.** That is the one runtime dependency, and the
-  one place a missing library has to read as "no audio device" rather than as an exception.
+- **Everything here is in-box except two libraries.** Linux's `libpulse` is a system library and the
+  one place a missing library has to read as "no audio device" rather than as an exception;
+  `Vortice.XAudio2` is the package's only NuGet dependency and gets the same probe-first treatment.
 - **One machine with no hardware is a useful test.** The Windows machine used for the spike has no
   PnP sound device and no registry render endpoints, but one active MMDevice render endpoint:
-  `Remote Audio`, a virtual endpoint. Enumeration and the default-role lookup agreed on it and WASAPI
-  rendered to it. A virtual endpoint is still an endpoint, so the null-device path is not what that
-  machine exercised - it is exercised by having no endpoint at all, which on Linux is the normal
-  state and is why section 4 exists.
+  `Remote Audio`, a virtual endpoint. Enumeration and the default-role lookup agreed on it, and
+  XAudio2 and WASAPI both played through it. A virtual endpoint is still an endpoint, so the
+  null-device path is not what that machine exercised - it is exercised by having no endpoint at all,
+  which on Linux is the normal state and is why section 4 exists.
 
 ## 3. The API
 
@@ -132,7 +140,7 @@ The rules, each one already the rule somewhere else in the library:
 - **Decoding is validation.** `Load` throws on a stream it cannot read, on every machine, whether or
   not there is anything to play it through. A machine with no audio must not be a machine where bad
   files go unnoticed.
-- **`audio.Path` is the diagnostic**, in the same form as `GraphicsPath`: `wasapi: Remote Audio`,
+- **`audio.Path` is the diagnostic**, in the same form as `GraphicsPath`: `xaudio2: Remote Audio`,
   `coreaudio: LG UltraFine Display Audio`, or `audio (no sound server)`.
 
 ## 4. Devices, and the null device
@@ -179,7 +187,7 @@ Stated in the feature's own terms, the way the badge feature states its own:
 ```
 Kolvir.Feature.Audio/
     common/     IAudioEngine, AudioDeviceInfo, AudioClip, Voice, the timeline, WAV decoding
-    windows/    MMDevice enumeration, WASAPI playback
+    windows/    MMDevice enumeration, XAudio2 playback through Vortice.XAudio2
     macos/      CoreAudio enumeration, AudioQueue playback
     linux/      libpulse enumeration and playback
 ```
@@ -189,8 +197,20 @@ and the WAV decoder, because all three are ordinary code. The platform folders h
 enumerate, open an endpoint at a format, write frames, close. That is a small interface, and the
 voice timeline, looping, volume and the null device are written once against it.
 
+**`Vortice.XAudio2` is the package's one NuGet dependency, and it is Windows-only in two senses.** It
+belongs in the `net10.0-windows` item group of the package's project file and nowhere else: its
+assembly targets plain `net10.0`, so an unconditional `PackageReference` restores and compiles on the
+macOS and Linux legs too and would fail only when a voice was created. The reference is scoped, and a
+build of the non-Windows targets is how that scoping is checked.
+
+It is also the one place the package calls a third-party assembly, so it is treated the way `libpulse`
+is: probed before use, and never the reason a call throws. `NativeLibrary.TryLoad` on `xaudio2_9.dll`
+happens first; if it fails, Windows reports the null device with a reason, exactly as Linux does
+without `libpulse`.
+
 The package does not reference SkiaSharp and does not depend on a display: it references `Kolvir` for
-`Application`, `TimeProvider` and the service-extensions pattern, and nothing else.
+`Application`, `TimeProvider` and the service-extensions pattern, `Vortice.XAudio2` on the Windows
+target only, and nothing else.
 
 ## 7. Testing
 
@@ -217,8 +237,8 @@ The package does not reference SkiaSharp and does not depend on a display: it re
 | v1 is UI sounds only | One-shot, loop, volume, position, pause/stop. Rejected for now: streaming music with seek, mixing graph, DSP, capture, MIDI. |
 | Devices are enumerable and selectable | Requested, and it is cheaper to do now than to retrofit: it decides the API shape (`Start(device:)`), and on Linux it forces the asynchronous `pa_context` for enumeration rather than the simple API alone. |
 | A `NullAudioDevice`, always present and the default when nothing else is | Never-empty `Devices`, never-null `DefaultDevice`, no `if` at every call site, and a silent machine is the common case on Linux VMs and CI. It is clock-driven so timing-dependent application logic keeps working, and it carries a `Reason` so silence is explainable. |
-| No third-party audio library | Rejected SDL2 (brings a competing window and event loop), miniaudio (a native blob in the deliverable), NAudio (Windows only). Everything used is in-box except `libpulse`, which is a system library rather than a shipped one. |
-| Windows playback is WASAPI, not XAudio2 | XAudio2 enumerates nothing in 2.9, so MMDevice was needed anyway, and its voice interfaces cannot be driven from .NET without hand-declaring a 30-slot vtable that returned garbage when tried (`GetVoiceDetails`) and fast-failed (`GetState`). WASAPI is documented in-box COM, accepts our format through `AUTOCONVERTPCM`, and paces to the device clock. Rejected: XAudio2 behind a wrapper library (excluded above), and WASAPI exclusive mode (section 10 on latency). |
+| No third-party audio library | Rejected SDL2 (brings a competing window and event loop), miniaudio (a native blob in the deliverable), NAudio (Windows only, and a wrapper over WASAPI anyway). Everything used is in-box except `libpulse`, a system library rather than a shipped one - and `Vortice.XAudio2`, see the next row. |
+| Windows playback is XAudio2 through `Vortice.XAudio2` | XAudio2 enumerates nothing in 2.9, so MMDevice was needed regardless, and its voice interfaces cannot be hand-declared from .NET (measured: garbage from `GetVoiceDetails`, fast-fail in `GetState`). The wrapper is MIT, 65 KB itself, and was measured doing every v1 behaviour - device selection, callbacks, volume, native loop, pause/resume. What it buys is that the package stays a thin shim on all three platforms: XAudio2 mixes, resamples and loops, so there is no Windows-only mixer here. Rejected: hand-rolled WASAPI (works, was spiked, but XAudio2 gives no volume, no loop and no mixing, so Windows alone would need a mixer and a render thread), XAudio2 behind our own vtable interop (the measurement above), and WASAPI exclusive mode (section 10 on latency). |
 | WAV in managed code first | Zero native cost and it covers UI sounds. Vorbis/MP3 later, as vendored single-file decoders in this package rather than by dragging in Media Foundation or GStreamer for a beep. |
 | Position computed from a clock | Section 3. Rejected: a frame counter incremented by the audio callback, which is wrong the moment a callback is late and wrong in a different way when the clock is a test's. |
 | No hotplug events in v1 | A snapshot list and `Refresh()`. The change notifications exist on all three platforms and are a follow-up, not a v1 requirement. |
@@ -232,7 +252,7 @@ The package does not reference SkiaSharp and does not depend on a display: it re
 | 3 | Spike Windows: MMDevice enumeration and playback on an id, including the no-device path | **done** |
 | 4 | `common/`: `IAudioEngine`, `AudioDeviceInfo`, `AudioClip`, `Voice`, the timeline, the null device, WAV decoding, `AddAudio()` | |
 | 5 | `linux/`: `IPlatformAudio` over libpulse, with `NativeLibrary.TryLoad` and the reason strings | |
-| 6 | `windows/`: MMDevice enumeration and WASAPI render | |
+| 6 | `windows/`: MMDevice enumeration, XAudio2 voices through `Vortice.XAudio2`, scoped to the Windows target | |
 | 7 | `macos/`: CoreAudio enumeration and AudioQueue output | |
 | 8 | Tests: the timeline, the null device's invariants, WAV decoding, volume | |
 | 9 | Demo **Audio** page; `README.md` section; `FEATURE-COST-POLICY.md` worked example | |
@@ -282,11 +302,16 @@ default render endpoint: {3.0.0.00000002}.{6C26BA7D-F0B2-4225-B422-8168C5261E45}
 device list and default agree
 xaudio2: mastered a voice on the default device
 wasapi: rendered 15964 frames in 400 ms (expected about 17640), buffer 970 frames
+vortice.xaudio2: played 400 ms, 7497 samples at half way, stream end fired, volume read back 0.50
+vortice.xaudio2 loop: 3 loop ends in 600 ms, 23814 samples, paused at 23814 then resumed to 30429
 PASS
 ```
 
-The `xaudio2` line is kept because it is the measurement that chose WASAPI: binding works, and
-everything the package would have needed above it does not.
+The first three lines are the package's own MMDevice interop; the `wasapi` line is the hand-rolled
+alternative, kept because it is what the decision in section 8 was measured against; the `vortice`
+lines are the path the package takes. The loop line is the important one: a 200 ms clip with
+`LoopCount = 255` reported three loop-ends in 600 ms, and a `Stop()` froze the sample count while
+`Start()` resumed it, so loop, pause and resume need no code of ours on Windows.
 
 ## 10. Risks
 
@@ -303,5 +328,10 @@ everything the package would have needed above it does not.
 - **Latency is not a goal and will not be one.** Shared-mode output is 10-40 ms; a UI sound wants
   under a hundred. An application that needs tighter than that is out of scope, and saying so early
   is cheaper than being asked to add WASAPI exclusive mode later.
+- **The one dependency is a pre-release's shape as well as a package's.** `Vortice.XAudio2` 3.8.3
+  pulls `SharpGen.Runtime` **2.4.2-beta** and `Vortice.DirectX` 3.8.3 - five assemblies, about 785 KB
+  in the deliverable. That is the price of not writing a Windows mixer and render thread, and it is
+  paid only on the Windows target. If a future version of it becomes unusable, the fallback is the
+  WASAPI path already spiked, not a rewrite.
 - **A silent success can hide a misconfiguration.** An application that expected sound and got none
   has only `Path` and `Reason` to go on, so both have to be exact rather than generic.
