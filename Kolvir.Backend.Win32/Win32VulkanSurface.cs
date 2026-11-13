@@ -402,6 +402,19 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
     private SKSurface? _retained;
     private IntPtr[] _barrierPools = [];
     private IntPtr[] _barrierBuffers = [];
+
+    // Present timings, reported once a second when the trace is on. A frame that is late can be the
+    // UI thread waiting for the display, the drawing, or the present call itself, and the three look
+    // identical from outside - so they are measured separately rather than guessed at.
+    private long _statsStarted = -1;
+    private int _statsPresents;
+    private long _statsAcquire;
+    private long _statsWorstAcquire;
+    private long _statsDraw;
+    private long _statsWorstDraw;
+    private long _statsPresent;
+    private long _statsWorstPresent;
+    private int _statsImages;
     private bool _needsFull = true;
 
     public SKSurface? Surface => _retained;
@@ -707,6 +720,7 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         }
 
         uint index = 0;
+        long started = System.Diagnostics.Stopwatch.GetTimestamp();
         int acquired = acquire(_device.Device, _swapChain, TimeoutInfinite, IntPtr.Zero, _device.Fence, &index);
 
         if (acquired == ErrorOutOfDateKhr)
@@ -722,6 +736,7 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         IntPtr fence = _device.Fence;
         waitFences(_device.Device, 1, &fence, 1, TimeoutInfinite);
         resetFences(_device.Device, 1, &fence);
+        long acquiredAt = System.Diagnostics.Stopwatch.GetTimestamp();
 
         uint count = 0;
         getImages(_device.Device, _swapChain, &count, null);
@@ -776,6 +791,8 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
             _skia.Submit(synchronous: false);
         }
 
+        long drawnAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
         if (!EnsureBarrierRing(images.Length) || !MoveToPresentState(images[index], index))
         {
             return Win32PresentResult.Lost;
@@ -796,6 +813,9 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         };
 
         int presented = present(_device.Queue, &presentInfo);
+        long presentedAt = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        ReportTimings(acquiredAt - started, drawnAt - acquiredAt, presentedAt - drawnAt, images.Length);
 
         if (presented == ErrorOutOfDateKhr)
         {
@@ -804,6 +824,62 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
 
         return presented == 0 || presented == SuboptimalKhr ? Win32PresentResult.Presented : Win32PresentResult.Lost;
     }
+
+    /// <summary>
+    /// Accumulates one present's timings and prints a line a second, so a late frame can be blamed on
+    /// the display, the drawing or the present call rather than on whichever is easiest to suspect.
+    /// </summary>
+    private void ReportTimings(long acquireTicks, long drawTicks, long presentTicks, int imageCount)
+    {
+        if (!Win32GlTrace.IsEnabled)
+        {
+            return;
+        }
+
+        _statsPresents++;
+        _statsAcquire += acquireTicks;
+        _statsDraw += drawTicks;
+        _statsPresent += presentTicks;
+        _statsWorstAcquire = Math.Max(_statsWorstAcquire, acquireTicks);
+        _statsWorstDraw = Math.Max(_statsWorstDraw, drawTicks);
+        _statsWorstPresent = Math.Max(_statsWorstPresent, presentTicks);
+        _statsImages = imageCount;
+
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        if (_statsStarted < 0)
+        {
+            _statsStarted = now;
+            return;
+        }
+
+        double window = Milliseconds(now - _statsStarted);
+
+        if (window < 1000.0)
+        {
+            return;
+        }
+
+        double presents = _statsPresents * 1000.0 / window;
+        double count = Math.Max(1, _statsPresents);
+
+        Win32GlTrace.Write(
+            string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"vulkan {presents:F1} presents/s  acquire {Milliseconds(_statsAcquire) / count:F2}/{Milliseconds(_statsWorstAcquire):F2}ms  draw {Milliseconds(_statsDraw) / count:F2}/{Milliseconds(_statsWorstDraw):F2}ms  present {Milliseconds(_statsPresent) / count:F2}/{Milliseconds(_statsWorstPresent):F2}ms  images {_statsImages}"));
+
+        _statsStarted = now;
+        _statsPresents = 0;
+        _statsAcquire = 0;
+        _statsDraw = 0;
+        _statsPresent = 0;
+        _statsWorstAcquire = 0;
+        _statsWorstDraw = 0;
+        _statsWorstPresent = 0;
+    }
+
+    private static double Milliseconds(long ticks) =>
+        ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
     /// <summary>
     /// Barriers the image into the layout present requires. Skia leaves it as a colour attachment,
