@@ -122,6 +122,11 @@ public sealed class Win32WindowBackend : IWindowBackend
     private bool _gpuUnavailable;
     private string _gfxReason = "cpu (not started)";
 
+    // The brush the window erases to before a frame exists, kept across paints because a resize is
+    // a bad time to be creating GDI objects; deleted with the window.
+    private IntPtr _eraseBrush;
+    private uint _eraseBrushColor;
+
     private bool _trackingLeave;
     private long _lastClickTime;
     private int _clickCount;
@@ -1040,6 +1045,7 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         ReleaseIcons();
         ReleaseBuffer();
+        ReleaseEraseBrush();
 
         if (_classRegistered)
         {
@@ -1523,13 +1529,14 @@ public sealed class Win32WindowBackend : IWindowBackend
                 return IntPtr.Zero;
 
             case NativeMethods.WmEraseBkgnd:
-                // The frame we present covers the whole client area, so there is nothing to paint
-                // here in the steady state - but a resize is not the steady state: Windows asks for
-                // the new area to be erased before the next frame exists, and leaving it to the
-                // class brush paints it black rather than leaving the desktop's leftovers in it.
-                // Every invalidation this backend raises passes bErase: false, so this only runs
-                // when Windows itself decides the client area needs erasing.
-                return NativeMethods.DefWindowProcW(hwnd, message, wParam, lParam);
+                // A resize exposes client area before the next frame exists, and this is the one
+                // paint the window does itself. The colour is the window's own background rather
+                // than the class brush's black, so the strip reads as the window instead of as a
+                // frame that has not arrived. Both paint paths cover the whole update region in the
+                // same BeginPaint/EndPaint, so this is never a flash of its own.
+                return EraseBackground(wParam)
+                    ? new IntPtr(1)
+                    : NativeMethods.DefWindowProcW(hwnd, message, wParam, lParam);
 
             case NativeMethods.WmSize:
                 OnSize(NativeMethods.LowWord(lParam), NativeMethods.HighWord(lParam), (uint)wParam);
@@ -2895,6 +2902,53 @@ public sealed class Win32WindowBackend : IWindowBackend
     {
         _gpu?.Dispose();
         _gpu = null;
+    }
+
+    /// <summary>
+    /// Erases the area Windows has decided is stale, in the window's own background colour.
+    /// </summary>
+    /// <remarks>
+    /// Only the update region is filled, never the whole client area: this runs before the paint and
+    /// the paint covers exactly that region, so anything outside it would be left as erase colour
+    /// with no frame coming to correct it.
+    /// </remarks>
+    /// <param name="hdc">The device context Windows handed to <c>WM_ERASEBKGND</c>.</param>
+    /// <returns>False when there is no brush to fill with, leaving the erase to the class background.</returns>
+    private bool EraseBackground(IntPtr hdc)
+    {
+        var color = Win32EraseColor.Resolve(_host.Root, _clientSize, _host.ClearColor);
+
+        // 0x00BBGGRR: a GDI brush takes Win32 colour order, not RGB.
+        uint wanted = (uint)(color.Red | (color.Green << 8) | (color.Blue << 16));
+
+        if (_eraseBrush == IntPtr.Zero || _eraseBrushColor != wanted)
+        {
+            ReleaseEraseBrush();
+
+            _eraseBrush = NativeMethods.CreateSolidBrush(wanted);
+            _eraseBrushColor = wanted;
+        }
+
+        if (_eraseBrush == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        if (NativeMethods.GetUpdateRect(_hwnd, out var stale, false))
+        {
+            NativeMethods.FillRect(hdc, ref stale, _eraseBrush);
+        }
+
+        return true;
+    }
+
+    private void ReleaseEraseBrush()
+    {
+        if (_eraseBrush != IntPtr.Zero)
+        {
+            NativeMethods.DeleteObject(_eraseBrush);
+            _eraseBrush = IntPtr.Zero;
+        }
     }
 
     /// <inheritdoc />

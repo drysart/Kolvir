@@ -584,6 +584,13 @@ internal static class NativeMethods
     internal static extern bool GetClientRect(IntPtr hwnd, out RECT lpRect);
 
     [DllImport("user32.dll")]
+    internal static extern int FillRect(IntPtr hdc, ref RECT lprc, IntPtr hbr);
+
+    /// <summary>The bounding rectangle of what Windows still wants painted, in client coordinates.</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool GetUpdateRect(IntPtr hwnd, out RECT lpRect, bool bErase);
+
+    [DllImport("user32.dll")]
     internal static extern bool SetWindowPos(IntPtr hwnd, IntPtr hWndInsertAfter, int x, int y, int cx, int cy, uint uFlags);
 
     [DllImport("user32.dll")]
@@ -781,6 +788,10 @@ internal static class NativeMethods
     /// </summary>
     [DllImport("gdi32.dll")]
     internal static extern IntPtr GetStockObject(int objectIndex);
+
+    /// <summary>A solid brush in a colour the caller owns, and so must delete.</summary>
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr CreateSolidBrush(uint colorRef);
 
     /// <summary>Creates a device-dependent bitmap, used here for an icon's monochrome AND mask.</summary>
     [DllImport("gdi32.dll")]

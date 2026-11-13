@@ -4354,6 +4354,14 @@ The rules the implementation follows:
   submitted at all. An uncovered or restored window blits the retained buffer without repainting
   the tree. The offscreen buffer has undefined contents when it is created, so the first frame
   after creation and after any resize or DPI change is painted in full.
+- **The erase the window does itself is the window's own colour.** A resize exposes client area
+  before the next frame exists, and Windows asks the window to erase it first. Left to the class
+  background that strip is black, which is right on no page in particular; this window fills it
+  with the colour it is about to paint - the host's `ClearColor`, which follows the palette, or the
+  background of a control that covers the whole client area and paints (a root, or a page directly
+  inside it). Only the update region is filled, never the whole client area, so nothing outside the
+  region the coming paint covers is touched, and the brush is kept between paints so a resize is
+  not a time to be creating GDI objects.
 - **Four tiers with a reason.** Vulkan is the normal Tier 1 and WGL is Tier 2. Within GL, the
   offscreen FBO is the normal shape: if the offscreen surface cannot be created, or a snapshot/blit
   fails, the window drops to direct-to-FBO-0 GL for the rest of its life (with one full repaint to
