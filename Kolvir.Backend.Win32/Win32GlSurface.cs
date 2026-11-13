@@ -558,7 +558,7 @@ internal sealed class Win32GlContext : IDisposable
     }
 
     /// <summary>Binds this context to the calling (UI) thread.</summary>
-    internal bool MakeCurrent() =>
+    public bool MakeCurrent() =>
         _context != IntPtr.Zero && NativeMethods.wglMakeCurrent(_dc, _context);
 
     /// <summary>Presents the back buffer. The context must be current on this thread.</summary>
@@ -622,26 +622,13 @@ internal sealed class Win32GlContext : IDisposable
     }
 }
 
-/// <summary>Outcome of a present attempt, so the window can fall back without guessing.</summary>
-internal enum Win32GlPresentResult
-{
-    /// <summary>The frame reached the window and the buffers were swapped.</summary>
-    Presented,
-
-    /// <summary>The retained buffer failed; repaint once against the default framebuffer.</summary>
-    RetryDirect,
-
-    /// <summary>The context or the swap was lost; the window must fall back to the DIB.</summary>
-    Lost,
-}
-
 /// <summary>
 /// Skia's side of the seam: a <c>GRContext</c>, a render target for the window's default
 /// framebuffer, a retained offscreen surface the control tree paints its damage into, and the blit
 /// that presents it. Created by <see cref="Win32Gfx"/>, owned by the window, and presented with
 /// <see cref="Present"/>.
 /// </summary>
-internal sealed class Win32GlSurface : IDisposable
+internal sealed class Win32GlSurface : IWin32GpuSurface
 {
     private readonly Win32GlContext _context;
     private GRGlInterface? _interface;
@@ -656,16 +643,16 @@ internal sealed class Win32GlSurface : IDisposable
 
     private Win32GlSurface(Win32GlContext context) => _context = context;
 
-    internal SKSurface? Surface => _offscreen ?? _surface;
+    public SKSurface? Surface => _offscreen ?? _surface;
 
     /// <summary>True while the retained offscreen buffer is the paint target.</summary>
-    internal bool HasRetainedBuffer => _offscreen is not null;
+    public bool HasRetainedBuffer => _offscreen is not null;
 
     /// <summary>True when the retained buffer's contents are undefined and a full paint is owed.</summary>
-    internal bool NeedsFullRepaint => _needsFull;
+    public bool NeedsFullRepaint => _needsFull;
 
     /// <summary>Consumes the full-repaint flag; the frame that asks is the one that clears it.</summary>
-    internal bool TakeNeedsFull()
+    public bool TakeNeedsFull()
     {
         bool needed = _needsFull;
         _needsFull = false;
@@ -673,13 +660,15 @@ internal sealed class Win32GlSurface : IDisposable
     }
 
     /// <summary>The vendor and renderer string, for the demo's one-line diagnostic.</summary>
-    internal string Renderer => _context.Renderer;
+    public string Tier => "gl";
+
+    public string Renderer => _context.Renderer;
 
     internal int Width => _width;
 
     internal int Height => _height;
 
-    internal bool MakeCurrent() => _context.MakeCurrent();
+    public bool MakeCurrent() => _context.MakeCurrent();
 
     /// <summary>
     /// Validates that Skia can use this native context, without creating a window-sized surface.
@@ -844,7 +833,7 @@ internal sealed class Win32GlSurface : IDisposable
     }
 
     /// <summary>Recreates the render target after a resize. False means GL must be abandoned.</summary>
-    internal bool Resize(int width, int height)
+    public bool Resize(int width, int height)
     {
         if (width <= 0 || height <= 0)
         {
@@ -971,11 +960,11 @@ internal sealed class Win32GlSurface : IDisposable
     }
 
     /// <summary>Presents the frame and swaps the back buffer onto the window.</summary>
-    internal Win32GlPresentResult Present()
+    public Win32PresentResult Present()
     {
         if (_contextState is null || _surface is null || !_context.MakeCurrent())
         {
-            return Win32GlPresentResult.Lost;
+            return Win32PresentResult.Lost;
         }
 
         if (_offscreen is not null)
@@ -990,7 +979,7 @@ internal sealed class Win32GlSurface : IDisposable
                 if (image is null)
                 {
                     DropRetainedBuffer();
-                    return Win32GlPresentResult.RetryDirect;
+                    return Win32PresentResult.RetryDirect;
                 }
 
                 _surface.Canvas.DrawImage(
@@ -1007,7 +996,7 @@ internal sealed class Win32GlSurface : IDisposable
                 Win32GlTrace.Write(
                     $"offscreen present threw {exception.GetType().Name}, dropping to direct");
                 DropRetainedBuffer();
-                return Win32GlPresentResult.RetryDirect;
+                return Win32PresentResult.RetryDirect;
             }
         }
         else
@@ -1016,11 +1005,11 @@ internal sealed class Win32GlSurface : IDisposable
         }
 
         return _context.Present()
-            ? Win32GlPresentResult.Presented
-            : Win32GlPresentResult.Lost;
+            ? Win32PresentResult.Presented
+            : Win32PresentResult.Lost;
     }
 
-    private void DropRetainedBuffer()
+    public void DropRetainedBuffer()
     {
         _offscreen?.Dispose();
         _offscreen = null;
@@ -1090,5 +1079,73 @@ internal static class Win32Gfx
         }
 
         return Win32GlSurface.TryCreate(hwnd, probe, width, height, out reason);
+    }
+
+    /// <summary>
+    /// Picks the best tier the machine will give, which is Vulkan first and GL after it.
+    /// </summary>
+    /// <remarks>
+    /// Vulkan leads because its resize path is the one that releases: the swap chain is destroyed and
+    /// rebuilt, so a window that changes size does not accumulate a drawable per size the way a WGL
+    /// window does on some drivers. GL follows because it is what the backend had, and the window
+    /// still falls back to its DIB when neither can be built.
+    /// </remarks>
+    /// <param name="hardwareAcceleration">The application option, read once when the window exists.</param>
+    /// <param name="hwnd">The window's native handle.</param>
+    /// <param name="glProbe">The GL context probe; the production one is <see cref="Win32GlProbe"/>.</param>
+    /// <param name="vulkanProbe">The Vulkan device probe; the production one is <see cref="Win32VulkanProbe"/>.</param>
+    /// <param name="width">The framebuffer width in physical pixels.</param>
+    /// <param name="height">The framebuffer height in physical pixels.</param>
+    /// <param name="reason">A one-line diagnostic naming the path taken.</param>
+    internal static IWin32GpuSurface? TryCreateAccelerated(
+        bool hardwareAcceleration,
+        IntPtr hwnd,
+        IWin32GlProbe glProbe,
+        IWin32VulkanProbe vulkanProbe,
+        int width,
+        int height,
+        out string reason)
+    {
+        if (!hardwareAcceleration)
+        {
+            reason = "cpu (disabled)";
+            return null;
+        }
+
+        // The cheap refusals are decided once here, before either tier pays for a window probe.
+        if (hwnd == IntPtr.Zero)
+        {
+            reason = "cpu (no window)";
+            return null;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            reason = "cpu (empty surface)";
+            return null;
+        }
+
+        var vulkan = Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, width, height, out var vulkanReason);
+
+        if (vulkan is not null)
+        {
+            reason = $"vulkan: {vulkan.Renderer}";
+            return vulkan;
+        }
+
+        var gl = TryCreate(hardwareAcceleration, hwnd, glProbe, width, height, out var glReason);
+
+        if (gl is not null)
+        {
+            reason = glReason;
+            return gl;
+        }
+
+        // Both failed: keep what each said, so the diagnostic line names every attempt.
+        reason = glReason.StartsWith("cpu (", StringComparison.Ordinal)
+            ? $"cpu ({vulkanReason}; {glReason[5..^1]})"
+            : $"cpu ({vulkanReason})";
+
+        return null;
     }
 }

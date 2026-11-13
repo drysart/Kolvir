@@ -9,6 +9,12 @@ namespace Kolvir.Backend.Win32;
 /// </summary>
 internal static class NativeMethods
 {
+    [DllImport("kernel32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
+    internal static extern IntPtr LoadLibraryW(string fileName);
+
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi, SetLastError = true)]
+    internal static extern IntPtr GetProcAddress(IntPtr module, string procName);
+
     // Window styles and messages.
     internal const uint WsOverlappedWindow = 0x00CF0000;
     internal const uint CsHRedraw = 0x0002;

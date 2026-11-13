@@ -118,8 +118,8 @@ public sealed class Win32WindowBackend : IWindowBackend
     private int _bufferGeneration;
     private int _paintedGeneration;
 
-    private Win32GlSurface? _gl;
-    private bool _glUnavailable;
+    private IWin32GpuSurface? _gpu;
+    private bool _gpuUnavailable;
     private string _gfxReason = "cpu (not started)";
 
     private bool _trackingLeave;
@@ -161,7 +161,7 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         if (!_useHardwareAcceleration)
         {
-            _glUnavailable = true;
+            _gpuUnavailable = true;
             _gfxReason = "cpu (disabled)";
         }
     }
@@ -170,17 +170,18 @@ public sealed class Win32WindowBackend : IWindowBackend
     public UiHost Host => _host;
 
     /// <summary>
-    /// What this window is presenting with, for a one-line diagnostic: <c>gl</c> when the OpenGL
-    /// surface came up, or <c>cpu (...)</c> naming why it did not. It is decided when the native
-    /// window allocates its drawing surface, so it is meaningful from <c>Shown</c> onwards.
+    /// What this window is presenting with, for a one-line diagnostic: <c>vulkan: &lt;device&gt;</c>
+    /// or <c>gl</c> when an accelerated surface came up, or <c>cpu (...)</c> naming why none did. It
+    /// is decided when the native window allocates its drawing surface, so it is meaningful from
+    /// <c>Shown</c> onwards.
     /// </summary>
-    public string GraphicsPath => _gl is not null ? "gl" : _gfxReason;
+    public string GraphicsPath => _gfxReason;
 
     /// <summary>
-    /// The GL vendor and renderer strings when <see cref="GraphicsPath"/> is <c>gl</c>, or null on
-    /// the DIB path. Diagnostic only, and the same lifetime rule as the path.
+    /// The adapter name of the live tier - the Vulkan device, or the GL vendor and device - or null
+    /// on the DIB path. Diagnostic only, and the same lifetime rule as the path.
     /// </summary>
-    public string? GraphicsRenderer => _gl?.Renderer;
+    public string? GraphicsRenderer => _gpu?.Renderer;
 
     /// <inheritdoc />
     public float ScaleFactor => _scale;
@@ -1026,7 +1027,7 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         // The context belongs to the window's device context, so it has to go before the window
         // that owns that DC is destroyed.
-        ReleaseGl();
+        ReleaseGpu();
 
         if (_hwnd != IntPtr.Zero)
         {
@@ -1652,7 +1653,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         var hdc = NativeMethods.BeginPaint(hwnd, out var paint);
         try
         {
-            if (_gl is not null)
+            if (_gpu is not null)
             {
                 // The retained offscreen buffer is the frame. A damaged paint updates only the
                 // region the host accumulated; presenting stamps that whole buffer onto the window
@@ -1663,13 +1664,13 @@ public sealed class Win32WindowBackend : IWindowBackend
                     && paint.rcPaint.Bottom > paint.rcPaint.Top;
 
                 bool damaged = _host.IsUpdatePending
-                    || _gl.NeedsFullRepaint
+                    || _gpu.NeedsFullRepaint
                     || _paintedGeneration != _bufferGeneration;
 
                 if (Win32GlTrace.IsEnabled)
                 {
                     Win32GlTrace.Write(
-                        $"paint damaged={damaged} stale={stalePixels} retained={_gl.HasRetainedBuffer}");
+                        $"paint damaged={damaged} stale={stalePixels} retained={_gpu.HasRetainedBuffer}");
                 }
 
                 if (!damaged && !stalePixels)
@@ -1681,13 +1682,13 @@ public sealed class Win32WindowBackend : IWindowBackend
 
                 SKRectI glArea = SKRectI.Empty;
 
-                if (damaged || !_gl.HasRetainedBuffer)
+                if (damaged || !_gpu.HasRetainedBuffer)
                 {
                     // The direct tier has no retained contents of its own, so every paint it serves
                     // is a full frame. The retained tier paints only the damage.
-                    glArea = Render(full: !_gl.HasRetainedBuffer);
+                    glArea = Render(full: !_gpu.HasRetainedBuffer);
 
-                    if (_gl is null)
+                    if (_gpu is null)
                     {
                         // The context was lost while rendering; the frame is now in the CPU buffer,
                         // so copy it out instead of leaving this paint empty until the next one.
@@ -1696,28 +1697,28 @@ public sealed class Win32WindowBackend : IWindowBackend
                     }
                 }
 
-                var result = _gl.Present();
+                var result = _gpu.Present();
 
-                if (result == Win32GlPresentResult.RetryDirect)
+                if (result == Win32PresentResult.RetryDirect)
                 {
                     // The retained buffer failed; repaint this one frame against the default
                     // framebuffer and present again. The next paint stays on the direct tier.
                     glArea = Render(full: true);
 
-                    if (_gl is null)
+                    if (_gpu is null)
                     {
                         Blit(hdc, glArea);
                         return;
                     }
 
-                    result = _gl.Present();
+                    result = _gpu.Present();
                 }
 
-                if (result != Win32GlPresentResult.Presented)
+                if (result != Win32PresentResult.Presented)
                 {
-                    // A driver reset, an RDP session change or a lost device: drop the GL stack and
-                    // let the next paint use the DIB, rather than throwing from a paint handler.
-                    LoseGl(invalidate: true);
+                    // A driver reset, an RDP session change or a lost device: drop the accelerated tier
+                    // and let the next paint use the DIB, rather than throwing from a paint handler.
+                    LoseGpu(invalidate: true);
                 }
 
                 return;
@@ -1763,7 +1764,7 @@ public sealed class Win32WindowBackend : IWindowBackend
 
     private void OnPrintClient(IntPtr hdc)
     {
-        if (_gl is not null)
+        if (_gpu is not null)
         {
             // WM_PRINTCLIENT hands over a foreign DC, and a GL back buffer cannot be BitBlt'd from.
             // Paint one CPU frame into a temporary DIB instead, so a screenshot or a visual test
@@ -1810,15 +1811,15 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <returns>The area that was painted, in logical pixels.</returns>
     private SKRectI Render(bool full = false)
     {
-        if (_gl is not null && !_gl.MakeCurrent())
+        if (_gpu is not null && !_gpu.MakeCurrent())
         {
             // The context cannot be made current - the window never paints GL on any other thread,
             // so this is a lost context, not a threading mistake. Fall back for the rest of the
             // window's life.
-            LoseGl(invalidate: false);
+            LoseGpu(invalidate: false);
         }
 
-        var surface = _gl?.Surface ?? _skia;
+        var surface = _gpu?.Surface ?? _skia;
         if (surface is null)
         {
             return SKRectI.Empty;
@@ -1832,7 +1833,7 @@ public sealed class Win32WindowBackend : IWindowBackend
             full = true;
         }
 
-        if (_gl?.TakeNeedsFull() == true)
+        if (_gpu?.TakeNeedsFull() == true)
         {
             full = true;
         }
@@ -2739,9 +2740,9 @@ public sealed class Win32WindowBackend : IWindowBackend
 
     private void EnsureBuffer(int width, int height)
     {
-        if (_gl is not null)
+        if (_gpu is not null)
         {
-            if (_gl.Resize(width, height))
+            if (_gpu.Resize(width, height))
             {
                 _bufferWidth = width;
                 _bufferHeight = height;
@@ -2751,31 +2752,32 @@ public sealed class Win32WindowBackend : IWindowBackend
 
             // A resize that cannot rebuild the render target is as final as a lost context: keep the
             // window alive on the DIB rather than throwing from WM_SIZE.
-            LoseGl(invalidate: false);
+            LoseGpu(invalidate: false);
         }
-        else if (_useHardwareAcceleration && !_glUnavailable)
+        else if (_useHardwareAcceleration && !_gpuUnavailable)
         {
-            var gl = Win32Gfx.TryCreate(
+            var gpu = Win32Gfx.TryCreateAccelerated(
                 hardwareAcceleration: true,
                 _hwnd,
                 Win32GlProbe.Instance,
+                Win32VulkanProbe.Instance,
                 width,
                 height,
                 out var reason);
 
             _gfxReason = reason;
 
-            if (gl is not null)
+            if (gpu is not null)
             {
                 ReleaseBuffer();
-                _gl = gl;
+                _gpu = gpu;
                 _bufferWidth = width;
                 _bufferHeight = height;
                 _bufferGeneration++;
                 return;
             }
 
-            _glUnavailable = true;
+            _gpuUnavailable = true;
         }
 
         EnsureCpuBuffer(width, height);
@@ -2850,22 +2852,26 @@ public sealed class Win32WindowBackend : IWindowBackend
     }
 
     /// <summary>
-    /// Drops the GL stack and returns the window to its retained DIB. Used for a lost context, a
-    /// failed present or a render target that cannot be rebuilt; the fallback lasts for the rest of
-    /// this window's life rather than risking a context that keeps failing.
+    /// Drops the accelerated stack - Vulkan or GL, whichever came up - and returns the window to its
+    /// retained DIB. Used for a lost device or context, a failed present or a render target that cannot
+    /// be rebuilt; the fallback lasts for the rest of this window's life rather than risking a stack
+    /// that keeps failing.
     /// </summary>
     /// <param name="invalidate">Ask for a repaint, which the next WM_PAINT will satisfy with GDI.</param>
-    private void LoseGl(bool invalidate)
+    private void LoseGpu(bool invalidate)
     {
         int width = _bufferWidth;
         int height = _bufferHeight;
+        var tier = _gpu?.Tier ?? "gl";
 
-        ReleaseGl();
-        _glUnavailable = true;
-        _gfxReason = "cpu (gl context lost)";
+        ReleaseGpu();
+        _gpuUnavailable = true;
 
-        // The CPU buffer may be gone (it was released when GL took over), so rebuild it at the
-        // current framebuffer size before anything paints again.
+        // The GL wording is what this line has always said; a Vulkan surface that dies names itself.
+        _gfxReason = tier == "gl" ? "cpu (gl context lost)" : $"cpu ({tier} surface lost)";
+
+        // The CPU buffer may be gone (it was released when the accelerated tier took over), so rebuild
+        // it at the current framebuffer size before anything paints again.
         EnsureCpuBuffer(width, height);
 
         if (invalidate)
@@ -2874,10 +2880,10 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
     }
 
-    private void ReleaseGl()
+    private void ReleaseGpu()
     {
-        _gl?.Dispose();
-        _gl = null;
+        _gpu?.Dispose();
+        _gpu = null;
     }
 
     /// <inheritdoc />

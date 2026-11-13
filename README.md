@@ -4274,11 +4274,12 @@ same core code with a different byte stream and would not test anything WebP-spe
 Linux, false on macOS**. The macOS default is explained in
 [Hardware acceleration (macOS)](#hardware-acceleration-macos) and the Linux one, which is also
 `true`, in [Hardware acceleration (Linux)](#hardware-acceleration-linux); neither is a carried-over
-value. When it is true the Win32 backend
-tries to build a WGL-backed Skia surface: a context on the window's own device
-context, `GRGlInterface.Create()` plus `Validate()`, `GRContext.CreateGl()`, a
-`GRBackendRenderTarget` for the default framebuffer, and an `SKSurface`. Only when every one of
-those succeeds does the window present with `wglSwapBuffers`; any failure silently falls back to
+value. When it is true the Win32 backend tries **Vulkan first**: a `VkInstance`, a surface on the
+window, a device with a graphics queue that can present, a `VK_KHR_swapchain`, and
+`GRContext.CreateVulkan()`. When any of those is missing it tries a WGL-backed Skia surface: a
+context on the window's own device context, `GRGlInterface.Create()` plus `Validate()`,
+`GRContext.CreateGl()`, a `GRBackendRenderTarget` for the default framebuffer, and an `SKSurface`.
+Only when a tier succeeds does the window present through it; anything else silently falls back to
 the existing DIB + `BitBlt` path.
 
 ```csharp
@@ -4300,8 +4301,24 @@ wins over whatever the constructor resolved.
 
 The rules the implementation follows:
 
-- **WGL only when the option is true.** `Win32PopupWindow` and `Win32MenuWindow` stay on the DIB
-  path, and the headless backend has no such seam. AppKit has its own Metal seam, described in
+- **Vulkan leads because of resize, and that is the whole reason it is here.** A WGL window that
+  changes size leaves the driver holding a drawable and its back buffers for *every distinct size*
+  it has ever had, and nothing in WGL releases them: the retention is inside the driver, keyed by
+  the drawable, and it is freed only when the context dies. Dragging a corner through thirty sizes
+  took a 2774x1729 window from under 100 MB of GPU memory to 540 MB, and returning to the small
+  size did not give it back. A Vulkan swap chain has no such cache: the images *are* the frames, and
+  a size change destroys the chain and builds a new one, which is an explicit release. Measured on
+  an RTX 5090, a drag from 464x261 to 1384x861 and back held the process at 57.2 MB of GPU memory
+  for the whole drag, at 1.22 ms mean and 2.6 ms worst frame time. The tier asks for a 1.0 instance
+  with `VK_KHR_swapchain`, declares `MaxAPIVersion` 1.1, creates the swap chain with
+  `COLOR_ATTACHMENT | TRANSFER_SRC | TRANSFER_DST | SAMPLED` intersected with what the surface
+  supports - Skia inspects those flags when it wraps a texture and refuses one that cannot be a
+  render target - presents in `FIFO`, and wraps each acquired image as `UNDEFINED`, because every
+  pixel is overwritten and Skia will not wrap an image it is told is in `PRESENT_SRC`. The frame is
+  one blit from the retained buffer into that image, and the image is barriered to `PRESENT_SRC`
+  before `vkQueuePresentKHR`.
+- **Accelerated only when the option is true.** `Win32PopupWindow` and `Win32MenuWindow` stay on the
+  DIB path, and the headless backend has no such seam. AppKit has its own Metal seam, described in
   [Hardware acceleration (macOS)](#hardware-acceleration-macos), and GTK4 its own GL seam,
   described in [Hardware acceleration (Linux)](#hardware-acceleration-linux). `--render` is
   headless and cannot reach any of them.
@@ -4337,17 +4354,21 @@ The rules the implementation follows:
   submitted at all. An uncovered or restored window blits the retained buffer without repainting
   the tree. The offscreen buffer has undefined contents when it is created, so the first frame
   after creation and after any resize or DPI change is painted in full.
-- **Three tiers with a reason.** Offscreen-FBO GL is the normal Tier 1. If the offscreen surface
-  cannot be created, or a snapshot/blit fails, the window drops to direct-to-FBO-0 GL for the rest
-  of its life (with one full repaint to recover the frame); if the context or the swap fails, it
-  drops to the CPU DIB. Each step is named, so a screenshot says which tier is live.
+- **Four tiers with a reason.** Vulkan is the normal Tier 1 and WGL is Tier 2. Within GL, the
+  offscreen FBO is the normal shape: if the offscreen surface cannot be created, or a snapshot/blit
+  fails, the window drops to direct-to-FBO-0 GL for the rest of its life (with one full repaint to
+  recover the frame); if the context or the swap fails, it drops to the CPU DIB. A Vulkan surface
+  that loses its device drops to the same DIB. Each step is named, so a screenshot says which tier
+  is live.
 
-`Win32WindowBackend.GraphicsPath` reports `gl` or `cpu (...)` with the reason, and `GraphicsRenderer`
-reports the GL vendor and device. The reason names the failing step rather than a generic
+`Win32WindowBackend.GraphicsPath` reports `vulkan: <device>`, `gl` or `cpu (...)` with the reason,
+and `GraphicsRenderer`
+reports the GL vendor and device, or the Vulkan device name. The reason names the failing step
+rather than a generic
 "no context", for example:
 
 ```
-gfx: cpu (no gl interface; gdi: no wgl context (error 2000))
+gfx: cpu (no physical devices; no gl interface; gdi: no wgl context (error 2000))
 ```
 
 Set `KOLVIR_GL_TRACE=1` to print every probe attempt, the chosen flavour and format number, the
