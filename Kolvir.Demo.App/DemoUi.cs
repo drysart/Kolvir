@@ -324,6 +324,38 @@ public sealed class DemoUi
     }
 
     /// <summary>
+    /// The position of the page <paramref name="page"/> names, or -1 when it names none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A page is named two ways, and <c>--page</c> takes either: by its id - the word in the first
+    /// column of <see cref="Demos"/>, such as <c>audio</c> - or by its position in the navigation
+    /// list, so <c>--page 59</c> and <c>--page audio</c> are the same page.
+    /// </para>
+    /// <para>
+    /// A number is read as a position, which is what keeps a command line written before ids existed
+    /// working unchanged; anything else is matched against an id. Ids are compared ordinally, so case
+    /// matters and <c>--page Audio</c> names nothing.
+    /// </para>
+    /// </remarks>
+    /// <param name="page">An id or a position, or null to name no page.</param>
+    /// <returns>The page's position, or -1 when nothing matched.</returns>
+    public static int PageIndex(string? page)
+    {
+        if (string.IsNullOrWhiteSpace(page))
+        {
+            return -1;
+        }
+
+        if (int.TryParse(page, NumberStyles.Integer, CultureInfo.InvariantCulture, out var index))
+        {
+            return index >= 0 && index < Demos.Length ? index : -1;
+        }
+
+        return Array.FindIndex(Demos, demo => string.Equals(demo.Id, page, StringComparison.Ordinal));
+    }
+
+    /// <summary>
     /// The menu a page offers when the control under the pointer has none of its own: the two moves
     /// a reader of a page wants, and a line about what the sample is. It is built per right-click so
     /// the page moves know which page they are on.
@@ -614,71 +646,80 @@ public sealed class DemoUi
     }
 
     /// <summary>
-    /// The stage pages, in the order the navigation lists them. The row text and the builder sit
-    /// together, so a page cannot be added without a row to select it by.
+    /// The stage pages, in the order the navigation lists them. The id, the row text and the builder
+    /// sit together, so a page cannot be added without a row to select it by or an id to name it by.
     /// </summary>
-    private static readonly (string Title, Func<DemoUi, Control> Build)[] Demos =
+    /// <remarks>
+    /// <b>The id is the page's stable name, and what <c>--page</c> accepts.</b> Without one a
+    /// screenshot script has to count rows, so inserting a page anywhere but the end renumbers every
+    /// script that names a page after it - and a script that names a page with <c>--page 55</c> says
+    /// nothing to a reader about which page it meant. With one the script says <c>--page zoom</c> and
+    /// keeps working wherever the row ends up. The position is still a selector, so an id is a
+    /// convenience rather than a requirement; ids are compared ordinally, so they are lower case with
+    /// hyphens between words.
+    /// </remarks>
+    private static readonly (string Id, string Title, Func<DemoUi, Control> Build)[] Demos =
     {
-        ("Split container", demo => Page(demo.BuildSplitDemo())),
-        ("Stack panel", demo => Page(demo.BuildStackPanelDemo())),
-        ("Text input", demo => Page(demo.BuildTextInputDemo())),
-        ("Dialogs", demo => Page(demo.BuildDialogDemo())),
-        ("Table layout", demo => Page(demo.BuildTableLayoutDemo())),
-        ("Labels and text", demo => Page(demo.BuildLabelsCard())),
-        ("Buttons and input", demo => Page(demo.BuildButtonsCard())),
-        ("Check boxes and radios", demo => Page(demo.BuildToggleDemo())),
-        ("Progress bars", demo => Page(demo.BuildProgressDemo())),
-        ("Group boxes", demo => Page(demo.BuildGroupBoxDemo())),
-        ("Rich text", demo => Page(demo.BuildRichTextCard())),
-        ("Images and layout", demo => Page(BuildImagesCard())),
-        ("Selection and clipboard", demo => Page(demo.BuildSelectionCard())),
-        ("Scrolling", demo => Page(demo.BuildScrollingCard())),
-        ("Lists", demo => Page(demo.BuildListBoxCard())),
-        ("Performance: list box", demo => Page(demo.BuildPerformancePage())),
-        ("Performance: controls", demo => Page(demo.BuildControlStackPage())),
-        ("Combo boxes", demo => Page(demo.BuildComboBoxDemo())),
-        ("Tab controls", demo => Page(demo.BuildTabControlDemo())),
-        ("Tool tips", demo => Page(demo.BuildToolTipDemo())),
-        ("List views", demo => Page(demo.BuildListViewDemo())),
-        ("Tree view", demo => Page(demo.BuildTreeViewDemo())),
-        ("Numeric up-down", demo => Page(demo.BuildNumericUpDownDemo())),
-        ("Track bars", demo => Page(demo.BuildTrackBarDemo())),
-        ("Link labels", demo => Page(demo.BuildLinkLabelDemo())),
-        ("Status and tool strips", demo => Page(demo.BuildToolStripDemo())),
-        ("Menus", demo => Page(demo.BuildMenuDemo())),
-        ("Date and time", demo => Page(demo.BuildDateTimePickerDemo())),
-        ("Text box autocomplete", demo => Page(demo.BuildAutoCompleteDemo())),
-        ("Multi-line text", demo => Page(demo.BuildMultilineDemo())),
-        ("Text box spans", demo => Page(demo.BuildSpanDemo())),
-        ("Undo and redo", demo => Page(demo.BuildUndoDemo())),
-        ("Fonts from a file", demo => Page(demo.BuildFontDemo())),
-        ("Inherited appearance", demo => Page(demo.BuildAppearanceDemo())),
-        ("Tab order", demo => Page(demo.BuildTabOrderDemo())),
-        ("Animations", demo => Page(demo.BuildAnimationDemo())),
-        ("Colour picker", demo => Page(demo.BuildColorPickerDemo())),
-        ("Font dialog", demo => Page(demo.BuildFontDialogDemo())),
-        ("Colour dialog", demo => Page(demo.BuildColorDialogDemo())),
-        ("Split buttons", demo => Page(demo.BuildSplitButtonDemo())),
-        ("Expander", demo => Page(demo.BuildExpanderDemo())),
-        ("Wrap panel", demo => Page(demo.BuildWrapPanelDemo())),
-        ("Busy indicator and overlay", demo => Page(demo.BuildBusyOverlayDemo())),
-        ("Toast", demo => Page(demo.BuildToastDemo())),
-        ("Toast animation", demo => Page(demo.BuildToastAnimationDemo())),
-        ("Overlay fade", demo => Page(demo.BuildOverlayFadeDemo())),
-        ("SVG icons", demo => Page(BuildSvgIconGallery())),
-        ("SVG recolour", demo => Page(BuildSvgRecolourDemo())),
-        ("SVG and a raster twin", demo => Page(BuildSvgRasterTwinDemo())),
-        ("Animated GIF", demo => Page(demo.BuildAnimatedGifDemo())),
-        ("GIF frames", demo => Page(demo.BuildGifFrameDemo())),
-        ("GIF out of view", demo => Page(demo.BuildGifScrollDemo())),
-        ("Animated WebP", demo => Page(demo.BuildAnimatedWebpDemo())),
-        ("WebP frames", demo => Page(demo.BuildWebpFrameDemo())),
-        ("Measured rendering", demo => Page(demo.BuildMetricsPage())),
-        ("Zoom", demo => Page(demo.BuildZoomPage())),
-        ("Drag/drop lifetime", demo => Page(demo.BuildDragLifetimePage())),
-        ("Chromeless window", demo => Page(demo.BuildChromelessPage())),
-        ("App badge", demo => Page(demo.BuildBadgePage())),
-        ("Audio", demo => Page(demo.BuildAudioPage())),
+        ("split-container", "Split container", demo => Page(demo.BuildSplitDemo())),
+        ("stack-panel", "Stack panel", demo => Page(demo.BuildStackPanelDemo())),
+        ("text-input", "Text input", demo => Page(demo.BuildTextInputDemo())),
+        ("dialogs", "Dialogs", demo => Page(demo.BuildDialogDemo())),
+        ("table-layout", "Table layout", demo => Page(demo.BuildTableLayoutDemo())),
+        ("labels-and-text", "Labels and text", demo => Page(demo.BuildLabelsCard())),
+        ("buttons-and-input", "Buttons and input", demo => Page(demo.BuildButtonsCard())),
+        ("check-boxes-and-radios", "Check boxes and radios", demo => Page(demo.BuildToggleDemo())),
+        ("progress-bars", "Progress bars", demo => Page(demo.BuildProgressDemo())),
+        ("group-boxes", "Group boxes", demo => Page(demo.BuildGroupBoxDemo())),
+        ("rich-text", "Rich text", demo => Page(demo.BuildRichTextCard())),
+        ("images-and-layout", "Images and layout", demo => Page(BuildImagesCard())),
+        ("selection-and-clipboard", "Selection and clipboard", demo => Page(demo.BuildSelectionCard())),
+        ("scrolling", "Scrolling", demo => Page(demo.BuildScrollingCard())),
+        ("lists", "Lists", demo => Page(demo.BuildListBoxCard())),
+        ("performance-list-box", "Performance: list box", demo => Page(demo.BuildPerformancePage())),
+        ("performance-controls", "Performance: controls", demo => Page(demo.BuildControlStackPage())),
+        ("combo-boxes", "Combo boxes", demo => Page(demo.BuildComboBoxDemo())),
+        ("tab-controls", "Tab controls", demo => Page(demo.BuildTabControlDemo())),
+        ("tool-tips", "Tool tips", demo => Page(demo.BuildToolTipDemo())),
+        ("list-views", "List views", demo => Page(demo.BuildListViewDemo())),
+        ("tree-view", "Tree view", demo => Page(demo.BuildTreeViewDemo())),
+        ("numeric-up-down", "Numeric up-down", demo => Page(demo.BuildNumericUpDownDemo())),
+        ("track-bars", "Track bars", demo => Page(demo.BuildTrackBarDemo())),
+        ("link-labels", "Link labels", demo => Page(demo.BuildLinkLabelDemo())),
+        ("status-and-tool-strips", "Status and tool strips", demo => Page(demo.BuildToolStripDemo())),
+        ("menus", "Menus", demo => Page(demo.BuildMenuDemo())),
+        ("date-and-time", "Date and time", demo => Page(demo.BuildDateTimePickerDemo())),
+        ("text-box-autocomplete", "Text box autocomplete", demo => Page(demo.BuildAutoCompleteDemo())),
+        ("multi-line-text", "Multi-line text", demo => Page(demo.BuildMultilineDemo())),
+        ("text-box-spans", "Text box spans", demo => Page(demo.BuildSpanDemo())),
+        ("undo-and-redo", "Undo and redo", demo => Page(demo.BuildUndoDemo())),
+        ("fonts-from-a-file", "Fonts from a file", demo => Page(demo.BuildFontDemo())),
+        ("inherited-appearance", "Inherited appearance", demo => Page(demo.BuildAppearanceDemo())),
+        ("tab-order", "Tab order", demo => Page(demo.BuildTabOrderDemo())),
+        ("animations", "Animations", demo => Page(demo.BuildAnimationDemo())),
+        ("colour-picker", "Colour picker", demo => Page(demo.BuildColorPickerDemo())),
+        ("font-dialog", "Font dialog", demo => Page(demo.BuildFontDialogDemo())),
+        ("colour-dialog", "Colour dialog", demo => Page(demo.BuildColorDialogDemo())),
+        ("split-buttons", "Split buttons", demo => Page(demo.BuildSplitButtonDemo())),
+        ("expander", "Expander", demo => Page(demo.BuildExpanderDemo())),
+        ("wrap-panel", "Wrap panel", demo => Page(demo.BuildWrapPanelDemo())),
+        ("busy-indicator-and-overlay", "Busy indicator and overlay", demo => Page(demo.BuildBusyOverlayDemo())),
+        ("toast", "Toast", demo => Page(demo.BuildToastDemo())),
+        ("toast-animation", "Toast animation", demo => Page(demo.BuildToastAnimationDemo())),
+        ("overlay-fade", "Overlay fade", demo => Page(demo.BuildOverlayFadeDemo())),
+        ("svg-icons", "SVG icons", demo => Page(BuildSvgIconGallery())),
+        ("svg-recolour", "SVG recolour", demo => Page(BuildSvgRecolourDemo())),
+        ("svg-and-a-raster-twin", "SVG and a raster twin", demo => Page(BuildSvgRasterTwinDemo())),
+        ("animated-gif", "Animated GIF", demo => Page(demo.BuildAnimatedGifDemo())),
+        ("gif-frames", "GIF frames", demo => Page(demo.BuildGifFrameDemo())),
+        ("gif-out-of-view", "GIF out of view", demo => Page(demo.BuildGifScrollDemo())),
+        ("animated-webp", "Animated WebP", demo => Page(demo.BuildAnimatedWebpDemo())),
+        ("webp-frames", "WebP frames", demo => Page(demo.BuildWebpFrameDemo())),
+        ("measured-rendering", "Measured rendering", demo => Page(demo.BuildMetricsPage())),
+        ("zoom", "Zoom", demo => Page(demo.BuildZoomPage())),
+        ("drag-drop-lifetime", "Drag/drop lifetime", demo => Page(demo.BuildDragLifetimePage())),
+        ("chromeless-window", "Chromeless window", demo => Page(demo.BuildChromelessPage())),
+        ("app-badge", "App badge", demo => Page(demo.BuildBadgePage())),
+        ("audio", "Audio", demo => Page(demo.BuildAudioPage())),
     };
 
     /// <summary>
@@ -691,6 +732,10 @@ public sealed class DemoUi
         for (int index = 0; index < Demos.Length; index++)
         {
             _pages[index] = Demos[index].Build(this);
+
+            // Set here rather than in each builder, so a page cannot be added to the table without
+            // carrying the id the table gives it - the two halves of the name stay together.
+            _pages[index].Id = Demos[index].Id;
         }
 
         _stage = new Panel

@@ -58,8 +58,9 @@ a reviewer should ask for each one rather than infer it.
   application must run no timers; only the marquee progress bar, tool-tip delays and the caret blink
   are allowed to have one, and each of them stops.
 - It has a README section (in the `Design` table as well as its own `###` section) and a demo page
-  appended to `Demos` in `Kolvir.Demo.App/DemoUi.cs` - appended, not inserted, because `--page N`
-  and the render harness address pages by index.
+  in `Demos` in `Kolvir.Demo.App/DemoUi.cs`, carrying an id of its own. The table is ordered so the
+  sample reads well rather than to protect indices: `--page <id>` is what a script uses, and it
+  survives a page being inserted above the one it names.
 - Its behaviour is covered by tests in `Kolvir.Tests` - or in the feature's own
   `Kolvir.Feature.*.Tests` assembly when the control is part of a feature package - written in the
   same change rather than a follow-up. The suite runs headless with no display, window server or
