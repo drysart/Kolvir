@@ -4385,7 +4385,14 @@ gfx: cpu (no physical devices; no gl interface; gdi: no wgl context (error 2000)
 Set `KOLVIR_GL_TRACE=1` to print every probe attempt, the chosen flavour and format number, the
 described colour/stencil/sample counts and the renderer to stderr. The demo prints the one-line
 path and renderer at startup and keeps them in its footer, so a screenshot says which path produced
-its numbers; the **Measured rendering** page is where the CPU/GL A/B is run.
+its numbers; the **Measured rendering** page is where the CPU/GL A/B is run. On the Vulkan tier the
+same switch prints a line a second with what a present cost: how long it waited for a swap chain
+image, how long the drawing and submission took, and how long the present call took, with the mean
+and the worst of each.
+
+Set `KOLVIR_NO_VULKAN=1` to take the WGL tier on a machine that has Vulkan, which is the only way to
+compare the two on one box. It is a diagnostic, not a preference: the tier is chosen once, when the
+window allocates its surface.
 
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
 section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):

@@ -1082,6 +1082,13 @@ internal static class Win32Gfx
     }
 
     /// <summary>
+    /// Set <c>KOLVIR_NO_VULKAN</c> to take the WGL tier instead, for comparing the two on one
+    /// machine. Read once, so a run cannot change its mind halfway through a window.
+    /// </summary>
+    private static readonly bool Win32VulkanDisabled =
+        Environment.GetEnvironmentVariable("KOLVIR_NO_VULKAN") is { Length: > 0 };
+
+    /// <summary>
     /// Picks the best tier the machine will give, which is Vulkan first and GL after it.
     /// </summary>
     /// <remarks>
@@ -1125,7 +1132,10 @@ internal static class Win32Gfx
             return null;
         }
 
-        var vulkan = Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, width, height, out var vulkanReason);
+        var vulkanReason = "vulkan: disabled by KOLVIR_NO_VULKAN";
+        var vulkan = Win32VulkanDisabled
+            ? null
+            : Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, width, height, out vulkanReason);
 
         if (vulkan is not null)
         {
