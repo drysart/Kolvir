@@ -1099,6 +1099,12 @@ public sealed class Win32WindowBackend : IWindowBackend
             lpfnWndProc = Marshal.GetFunctionPointerForDelegate(_wndProc),
             hInstance = _moduleHandle,
             lpszClassName = _className,
+
+            // Black, and this is the one paint the window does not own. A resize exposes a strip of
+            // client area before the next frame is ready, and with no class brush Windows leaves
+            // whatever was behind the window smeared there; with one, the strip is erased to black
+            // and the frame paints over it. A stock brush needs no lifetime of its own here.
+            hbrBackground = NativeMethods.GetStockObject(NativeMethods.BlackBrush),
         };
 
         var icon = NativeMethods.LoadIconW(IntPtr.Zero, new IntPtr(NativeMethods.IdiApplication));
@@ -1517,8 +1523,13 @@ public sealed class Win32WindowBackend : IWindowBackend
                 return IntPtr.Zero;
 
             case NativeMethods.WmEraseBkgnd:
-                // The Skia back buffer always covers the whole client area.
-                return new IntPtr(1);
+                // The frame we present covers the whole client area, so there is nothing to paint
+                // here in the steady state - but a resize is not the steady state: Windows asks for
+                // the new area to be erased before the next frame exists, and leaving it to the
+                // class brush paints it black rather than leaving the desktop's leftovers in it.
+                // Every invalidation this backend raises passes bErase: false, so this only runs
+                // when Windows itself decides the client area needs erasing.
+                return NativeMethods.DefWindowProcW(hwnd, message, wParam, lParam);
 
             case NativeMethods.WmSize:
                 OnSize(NativeMethods.LowWord(lParam), NativeMethods.HighWord(lParam), (uint)wParam);

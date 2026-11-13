@@ -21,6 +21,8 @@ internal static class NativeMethods
     internal const uint CsVRedraw = 0x0001;
     internal const uint CsDblClks = 0x0008;
 
+    internal const int BlackBrush = 4;
+
     internal const uint WmDestroy = 0x0002;
     internal const uint WmSize = 0x0005;
     internal const uint WmSetFocus = 0x0007;
@@ -772,6 +774,13 @@ internal static class NativeMethods
 
     [DllImport("gdi32.dll")]
     internal static extern bool DeleteObject(IntPtr hObject);
+
+    /// <summary>
+    /// Returns one of the system's shared stock objects. A brush it returns must not be deleted, and
+    /// is the only kind that may be put in a registered window class.
+    /// </summary>
+    [DllImport("gdi32.dll")]
+    internal static extern IntPtr GetStockObject(int objectIndex);
 
     /// <summary>Creates a device-dependent bitmap, used here for an icon's monochrome AND mask.</summary>
     [DllImport("gdi32.dll")]
