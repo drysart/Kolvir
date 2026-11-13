@@ -194,8 +194,20 @@ Kolvir.Feature.Audio/
 
 `common/` holds everything that is not a platform call, including the null device, the voice timeline
 and the WAV decoder, because all three are ordinary code. The platform folders hold `IPlatformAudio`:
-enumerate, open an endpoint at a format, write frames, close. That is a small interface, and the
-voice timeline, looping, volume and the null device are written once against it.
+enumerate, and open a voice - a stream - for one clip on one device. That is a small interface, and
+the voice timeline, looping, volume and the null device are written once against it.
+
+Two shapes inside the seam are worth naming, because they decide the platform halves:
+
+- **One voice is one stream.** All three platforms mix streams for us, so a voice opens its own and
+  none of them has to share a stream between voices. That is also what lets a platform loop natively
+  where it can, and it is why there is no mixer in this package.
+- **Clips are 16-bit signed PCM.** The WAV reader converts 8-, 24- and 32-bit integers and 32-bit
+  floats to that one format as it loads, so the platform halves agree on one format to open a stream
+  with and no conversion happens twice.
+- **The silent device runs on one timer.** A voice there has no samples to consume, so the engine
+  keeps the deadlines and aims a single timer at the nearest one, re-aiming it every time it fires.
+  That is why a chained sequence of sounds takes the same time on a build machine as on speakers.
 
 **`Vortice.XAudio2` is the package's one NuGet dependency, and it is Windows-only in two senses.** It
 belongs in the `net10.0-windows` item group of the package's project file and nowhere else: its
@@ -240,6 +252,7 @@ target only, and nothing else.
 | No third-party audio library | Rejected SDL2 (brings a competing window and event loop), miniaudio (a native blob in the deliverable), NAudio (Windows only, and a wrapper over WASAPI anyway). Everything used is in-box except `libpulse`, a system library rather than a shipped one - and `Vortice.XAudio2`, see the next row. |
 | Windows playback is XAudio2 through `Vortice.XAudio2` | XAudio2 enumerates nothing in 2.9, so MMDevice was needed regardless, and its voice interfaces cannot be hand-declared from .NET (measured: garbage from `GetVoiceDetails`, fast-fail in `GetState`). The wrapper is MIT, 65 KB itself, and was measured doing every v1 behaviour - device selection, callbacks, volume, native loop, pause/resume. What it buys is that the package stays a thin shim on all three platforms: XAudio2 mixes, resamples and loops, so there is no Windows-only mixer here. Rejected: hand-rolled WASAPI (works, was spiked, but XAudio2 gives no volume, no loop and no mixing, so Windows alone would need a mixer and a render thread), XAudio2 behind our own vtable interop (the measurement above), and WASAPI exclusive mode (section 10 on latency). |
 | WAV in managed code first | Zero native cost and it covers UI sounds. Vorbis/MP3 later, as vendored single-file decoders in this package rather than by dragging in Media Foundation or GStreamer for a beep. |
+| Clips are normalised to 16-bit PCM on load | One format for the three platform halves to open a stream with, and one the platforms all accept without a resampler in the path. Rejected: keeping each file's own width and letting the platform convert, which would make a 24-bit file sound wrong on whichever platform did not convert it correctly. |
 | Position computed from a clock | Section 3. Rejected: a frame counter incremented by the audio callback, which is wrong the moment a callback is late and wrong in a different way when the clock is a test's. |
 | No hotplug events in v1 | A snapshot list and `Refresh()`. The change notifications exist on all three platforms and are a follow-up, not a v1 requirement. |
 
@@ -250,8 +263,8 @@ target only, and nothing else.
 | 1 | Spike Linux: `libpulse` enumeration of sinks and playback to a chosen sink on `linux` (pipewire-pulse) | **done** |
 | 2 | Spike macOS: CoreAudio enumeration and `AudioQueue` playback to a chosen device on `mac` | **done** |
 | 3 | Spike Windows: MMDevice enumeration and playback on an id, including the no-device path | **done** |
-| 4 | `common/`: `IAudioEngine`, `AudioDeviceInfo`, `AudioClip`, `Voice`, the timeline, the null device, WAV decoding, `AddAudio()` | |
-| 5 | `linux/`: `IPlatformAudio` over libpulse, with `NativeLibrary.TryLoad` and the reason strings | |
+| 4 | `common/`: `IAudioEngine`, `AudioDeviceInfo`, `AudioClip`, `Voice`, the timeline, the null device, WAV decoding | **done** |
+| 5 | `linux/`: `IPlatformAudio` over libpulse, with `NativeLibrary.TryLoad` and the reason strings, and `AddAudio()` | |
 | 6 | `windows/`: MMDevice enumeration, XAudio2 voices through `Vortice.XAudio2`, scoped to the Windows target | |
 | 7 | `macos/`: CoreAudio enumeration and AudioQueue output | |
 | 8 | Tests: the timeline, the null device's invariants, WAV decoding, volume | |

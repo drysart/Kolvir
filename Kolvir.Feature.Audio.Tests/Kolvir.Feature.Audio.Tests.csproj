@@ -1,0 +1,44 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The audio feature's own suite, in an assembly of its own because the feature is a package of
+       its own: a rung-3 feature is not part of the core library, so its tests are not part of the core
+       suite either.
+
+       The feature is split by platform - `common/` plus one of windows, macos or linux compiled per
+       target framework - but these tests only touch `common/`, so the project takes one portable
+       target framework and the reference resolves the `net10.0` (linux) inner build of the feature on
+       every machine. Hearing a sound needs the platform half and a speaker, which is what the demo
+       application is for. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Audio.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+    <ProjectReference Include="..\Kolvir.Feature.Audio\Kolvir.Feature.Audio.csproj" />
+    <!-- The null device's timeline is a Kolvir timer, and a timer asks the running application for
+         its wait. The tests create a real application on the headless backend so they can own that
+         wait rather than sleep through it. -->
+    <ProjectReference Include="..\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>

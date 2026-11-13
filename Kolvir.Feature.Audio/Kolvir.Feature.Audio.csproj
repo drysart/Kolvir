@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application calls AddAudio(). -->
+  <PropertyGroup>
+    <!-- Every platform the feature supports, unconditionally, because `dotnet pack` is what makes the
+         package and it needs all three in one build. Narrow one inner build for local work with
+         `-p:KolvirAudioFrameworks=net10.0`; the plural `-p:TargetFrameworks=...` does not work as a
+         switch, because it reaches the restore graph and not the referenced projects' builds. An
+         application that references this project still builds only the inner build its own framework
+         can use. -->
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <!-- The test project narrows the list here, so its restore does not evaluate the macOS inner build
+         on a machine without the macOS workload. -->
+    <TargetFrameworks Condition="'$(KolvirAudioFrameworks)' != ''">$(KolvirAudioFrameworks)</TargetFrameworks>
+    <RootNamespace>Kolvir.Audio</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- The feature is AOT compatible for the same reason the library is: an application that opts
+         in publishes the same way whether it did or not. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Audio for Kolvir: UI sounds on the default or a chosen output device, with a silent device that is always present and the per-platform implementation.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- The engine seam is internal on purpose: an application is handed an IAudioEngine, never a
+       platform, and the library ships no public API for the platform half. The tests drive it
+       directly, because the timeline, the looping and the null device's invariants are real behaviour
+       that regresses silently if nothing watches it. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kolvir.Feature.Audio.Tests" />
+  </ItemGroup>
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- XAudio2 is how Windows plays a sound, and `Vortice.XAudio2` is the only package dependency in
+       the feature. It is referenced here and nowhere else: its assembly targets plain net10.0, so an
+       unconditional reference would also compile on the macOS and Linux legs and fail only when a
+       voice was created. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+    <PackageReference Include="Vortice.XAudio2" Version="3.8.3" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>
