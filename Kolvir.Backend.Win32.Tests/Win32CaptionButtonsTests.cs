@@ -122,4 +122,37 @@ public sealed class Win32CaptionButtonsTests
             Win32CaptionButtons.HitTest(buttons, new SKPoint(close.Right - 1f, close.MidY)),
             "the last pixel before the edge is still close");
     }
+
+    [TestMethod]
+    public void TheStripIsTheCaptionBandAndNotJustTheCaptionTextArea()
+    {
+        // The three metrics a 100% Windows desktop reports: the caption's text band, the resize frame
+        // above it and DWM's padded border. A caption button fills all three.
+        Assert.AreEqual(
+            31f, Win32CaptionButtons.Height(caption: 23, frame: 4, padded: 4, scale: 1f), 0.001f,
+            "23 for the caption alone is what left the buttons short");
+
+        // The same three read at 192 DPI on the machine this was measured on, whose decorated window
+        // really does put its client 58 device pixels below its top in both states.
+        Assert.AreEqual(
+            29f, Win32CaptionButtons.Height(caption: 45, frame: 5, padded: 8, scale: 2f), 0.001f,
+            "58 device pixels is the band, so 29 logical");
+    }
+
+    [TestMethod]
+    public void TheStripFallsBackToTheClassicBandWhenCompositionIsOff()
+    {
+        // With DWM composition off there is no padded border, and the band is the caption plus the
+        // frame rather than nothing - so the sum degrades on its own and needs no branch.
+        Assert.AreEqual(
+            27f, Win32CaptionButtons.Height(caption: 23, frame: 4, padded: 0, scale: 1f), 0.001f);
+    }
+
+    [TestMethod]
+    public void TheStripTreatsAnUnusableScaleAsOne()
+    {
+        Assert.AreEqual(
+            31f, Win32CaptionButtons.Height(caption: 23, frame: 4, padded: 4, scale: 0f), 0.001f,
+            "a window that has not reported a scale yet still gets a strip");
+    }
 }
