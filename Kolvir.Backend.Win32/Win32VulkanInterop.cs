@@ -52,7 +52,6 @@ internal static unsafe class Vulkan
     internal const uint QueueFamilyIgnored = 0xFFFFFFFF;
     internal const uint QueueFlagGraphics = 0x1;
     internal const uint CompositeAlphaOpaque = 0x1;
-    internal const int TransformIdentity = 0x1;
 
     // COLOR_ATTACHMENT is what presenting needs. Skia also inspects the usage flags of a texture it
     // wraps, so the swapchain asks for these alongside it, filtered by what the surface allows.
@@ -61,14 +60,11 @@ internal static unsafe class Vulkan
     internal const uint ImageUsageSampled = 0x4;
     internal const uint ImageUsageColorAttachment = 0x10;
 
-    internal const uint MemoryPropertyDeviceLocal = 0x1;
-
     internal const ulong TimeoutInfinite = 0xFFFFFFFFFFFFFFFF;
 
     // A swapchain that no longer matches its window: recreate it and present again.
     internal const int ErrorOutOfDateKhr = -1000001004;
     internal const int SuboptimalKhr = 1000001003;
-    internal const int ErrorSurfaceLostKhr = -1000000001;
     internal const int ErrorIncompatibleDriver = -9;
 
     [StructLayout(LayoutKind.Sequential)]
