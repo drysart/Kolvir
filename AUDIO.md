@@ -140,8 +140,10 @@ The rules, each one already the rule somewhere else in the library:
 - **Decoding is validation.** `Load` throws on a stream it cannot read, on every machine, whether or
   not there is anything to play it through. A machine with no audio must not be a machine where bad
   files go unnoticed.
-- **`audio.Path` is the diagnostic**, in the same form as `GraphicsPath`: `xaudio2: Remote Audio`,
-  `coreaudio: LG UltraFine Display Audio`, or `audio (no sound server)`.
+- **`audio.Path` is the diagnostic**, in the same form as `GraphicsPath`: `XAudio2`, `CoreAudio`,
+  `PulseAudio`, or the reason it bound to nothing - `audio (libpulse is not installed)`,
+  `audio (no platform)`. One line, because when a machine makes no noise the first question is what
+  the feature thinks it is talking to.
 
 ## 4. Devices, and the null device
 
@@ -264,9 +266,9 @@ target only, and nothing else.
 | 2 | Spike macOS: CoreAudio enumeration and `AudioQueue` playback to a chosen device on `mac` | **done** |
 | 3 | Spike Windows: MMDevice enumeration and playback on an id, including the no-device path | **done** |
 | 4 | `common/`: `IAudioEngine`, `AudioDeviceInfo`, `AudioClip`, `Voice`, the timeline, the null device, WAV decoding | **done** |
-| 5 | `linux/`: `IPlatformAudio` over libpulse, with `NativeLibrary.TryLoad` and the reason strings, and `AddAudio()` | |
-| 6 | `windows/`: MMDevice enumeration, XAudio2 voices through `Vortice.XAudio2`, scoped to the Windows target | |
-| 7 | `macos/`: CoreAudio enumeration and AudioQueue output | |
+| 5 | `linux/`: `IPlatformAudio` over libpulse, with `NativeLibrary.TryLoad` and the reason strings, and `AddAudio()` | **done** |
+| 6 | `windows/`: MMDevice enumeration, XAudio2 voices through `Vortice.XAudio2`, scoped to the Windows target | **done** |
+| 7 | `macos/`: CoreAudio enumeration and AudioQueue output | **done** |
 | 8 | Tests: the timeline, the null device's invariants, WAV decoding, volume | |
 | 9 | Demo **Audio** page; `README.md` section; `FEATURE-COST-POLICY.md` worked example | |
 
@@ -325,6 +327,61 @@ alternative, kept because it is what the decision in section 8 was measured agai
 lines are the path the package takes. The loop line is the important one: a 200 ms clip with
 `LoopCount = 255` reported three loop-ends in 600 ms, and a `Stop()` froze the sample count while
 `Start()` resumed it, so loop, pause and resume need no code of ours on Windows.
+
+### The platform halves, run on the real machines
+
+The programs above were throwaway spikes. What ships was then exercised the way an application uses
+it - `AddAudio()`, `IAudioEngine`, `Load`, `Start` - on all three hosts.
+
+**linux** (ubuntu 24.04, pipewire-pulse, one sink):
+
+```
+path: PulseAudio
+  * xrdp-sink [xrdp-sink]
+    No audio device [] (silent: not selected)
+default: xrdp-sink
+  one-shot at 150 ms: position 151 ms, finished False
+  one-shot after 550 ms: position 300 ms, finished True, handler ran 1
+  on 'xrdp-sink': position 120 ms
+  loop: before 100 ms, paused 101 ms, resumed 221 ms, finished False
+```
+
+**windows** (Windows 11, the `Remote Audio` endpoint):
+
+```
+path: XAudio2
+  * Remote Audio [{3.0.0.00000002}.{6C26BA7D-F0B2-4225-B422-8168C5261E45}]
+default: Remote Audio
+  one-shot after 550 ms: position 300 ms, finished True, handler ran 1
+  on 'Remote Audio': position 150 ms
+  loop: before 122 ms, paused 122 ms, resumed 246 ms, finished False
+```
+
+**mac** (osx-arm64, three output devices):
+
+```
+path: CoreAudio
+  * USB Audio Device [AppleUSBAudioEngine:C-Media Electronics Inc.:USB Audio Device:...]
+    LG UltraFine Display Audio [AppleUSBAudioEngine:LG Electronics Inc.:LG UltraFine Display Audio:...]
+    Mac mini Speakers [BuiltInSpeakerDevice]
+default: USB Audio Device
+  one-shot after 550 ms: position 300 ms, finished True, handler ran 1
+  on 'USB Audio Device': position 300 ms
+  on 'LG UltraFine Display Audio': position 220 ms
+  on 'Mac mini Speakers': position 174 ms
+  loop: before 61 ms, paused 61 ms, resumed 184 ms, finished False
+```
+
+Two things the Windows numbers show that the others do not. Its position reaches the end of the clip
+before the end is reported, because 300 ms of audio is sitting in the device's buffer while the clock
+has already passed it - the position is the clock's and the end is the device's, which is the design
+rather than a discrepancy. And it is the only host where a voice's end arrives from two callbacks
+(`BufferEnd` and `StreamEnd`); the voice's state guard is what keeps `Finished` to one.
+
+The macOS half was verified from a portable `net10.0` assembly rather than the `net10.0-macos` one,
+because that machine's installed .NET-for-macOS pack wants Xcode 27.1 and it has 27.2. The platform
+folder is plain P/Invokes with no OS-specific reference, so the code under test is the code that
+ships; it builds for `net10.0-macos` on the development machine.
 
 ## 10. Risks
 
