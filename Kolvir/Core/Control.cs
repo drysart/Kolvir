@@ -1281,8 +1281,8 @@ public class Control : IDisposable
 
     /// <summary>
     /// Background painted while <see cref="Background"/> has never been assigned and no ancestor
-    /// sets one. The base control paints nothing; containers default to the theme surface and
-    /// editable fields to the input fill.
+    /// sets one. The base control paints nothing; controls whose look is a filled surface - a field,
+    /// a tab control, an expander - default to a theme role.
     /// </summary>
     /// <remarks>
     /// A theme role rather than a colour on purpose: the role is resolved at paint time, so a

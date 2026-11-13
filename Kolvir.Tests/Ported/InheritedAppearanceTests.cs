@@ -122,7 +122,11 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
 
             Assert.IsTrue(label.Background.IsNone, "a label should paint no background of its own");
             Assert.IsNull(label.BackColor);
-            Assert.AreEqual(AncestorColour, card.Background.Color, "a panel should take the ancestor's colour");
+
+            // A panel is a container, not a card: with nothing assigned it paints nothing either,
+            // so the stage's colour reaches the pixel the same way the label's does.
+            Assert.IsTrue(card.Background.IsNone, "an unassigned panel should paint no background");
+            Assert.IsNull(card.BackColor);
 
             var labelArea = Pixel(host, (int)label.Bounds.Left + 300, (int)label.Bounds.MidY);
             var cardArea = Pixel(host, (int)card.Bounds.Left + 300, (int)card.Bounds.MidY);
@@ -137,7 +141,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
     {
         WithStage((root, host) =>
         {
-            var stack = new StackPanel { Dock = DockStyle.Fill, ShowFrame = false };
+            var stack = new StackPanel { Dock = DockStyle.Fill };
             var label = new Label(Sample) { AutoSize = true };
             stack.Controls.Add(label);
             root.Controls.Add(stack);
@@ -167,7 +171,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             using var small = Font.FromBytes(TestFont.Data, 9f);
             using var large = Font.FromBytes(TestFont.Data, 26f);
 
-            var stack = new StackPanel { Dock = DockStyle.Fill, ShowFrame = false, Font = small };
+            var stack = new StackPanel { Dock = DockStyle.Fill, Font = small };
             var label = new Label(Sample) { AutoSize = true };
             stack.Controls.Add(label);
             root.Controls.Add(stack);
@@ -217,7 +221,12 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
     {
         WithStage((root, host) =>
         {
-            var panel = new Panel { Dock = DockStyle.Top, Height = Height };
+            var panel = new Panel
+            {
+                Dock = DockStyle.Top,
+                Height = Height,
+                Background = Background.FromThemeColor(ThemeColor.Surface),
+            };
             var label = new Label(Sample) { Dock = DockStyle.Top, AutoSize = true };
             panel.Controls.Add(label);
             root.Controls.Add(panel);
@@ -259,8 +268,6 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
     private static Panel NoChrome() => new()
     {
         Dock = DockStyle.Fill,
-        ShowFrame = false,
-        IsCard = false,
         BorderWidth = 0f,
         CornerRadius = 0f,
         Padding = new Thickness(0f),

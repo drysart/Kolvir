@@ -11,8 +11,6 @@ public class TabPage : Panel
 {
     public TabPage()
     {
-        ShowFrame = false;
-        IsCard = false;
         BorderWidth = 0f;
         CornerRadius = 0f;
         Padding = new Thickness(10f);

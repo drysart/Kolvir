@@ -10,6 +10,13 @@ namespace Kolvir;
 /// </summary>
 /// <remarks>
 /// <para>
+/// The panel brings no look of its own: it paints no background and draws no border unless
+/// <see cref="Control.Background"/>, <see cref="Control.BorderWidth"/> and
+/// <see cref="Control.CornerRadius"/> say otherwise. A card is those three set to
+/// <c>Background.FromThemeColor(ThemeColor.Surface)</c>, a width and a radius, which keeps the
+/// choice of how a container looks with the code that wants it.
+/// </para>
+/// <para>
 /// Each axis can scroll independently through <see cref="HorizontalScroll"/> and
 /// <see cref="VerticalScroll"/>. A visible scrollbar takes a gutter out of the client area
 /// (classic, non-overlay style) and the remaining <see cref="ViewportRect"/> clips the children.
@@ -51,20 +58,8 @@ public class Panel : Control
     public Panel()
     {
         _scroll = new ScrollBars(this);
-        BorderWidth = 1f;
-        CornerRadius = 8f;
         Padding = new Thickness(8f);
     }
-
-    /// <summary>A framed panel is a raised surface; a plain grouping container is transparent.</summary>
-    protected override Background DefaultBackground =>
-        ShowFrame ? Background.FromThemeColor(ThemeColor.Surface) : Background.None;
-
-    /// <summary>When true the panel paints its background and border. Set false for a plain grouping container.</summary>
-    public bool ShowFrame { get; set; } = true;
-
-    /// <summary>When true the panel paints itself like a card: filled surface plus a 1px border.</summary>
-    public bool IsCard { get; set; } = true;
 
     /// <summary>
     /// The multiplier applied to the effective scale factor of the subtree under this panel.
@@ -740,27 +735,5 @@ public class Panel : Control
             default:
                 return remaining;
         }
-    }
-
-    protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
-    {
-        if (ShowFrame && BackColor is { } backColor)
-        {
-            Painter.Fill(canvas, rect, backColor, CornerRadius);
-            return;
-        }
-
-        base.OnPaintBackground(canvas, rect);
-    }
-
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        if (ShowFrame && IsCard)
-        {
-            Painter.DrawBorder(canvas, rect, BorderColor, BorderWidth <= 0f ? 1f : BorderWidth, CornerRadius);
-            return;
-        }
-
-        base.OnPaintBorder(canvas, rect);
     }
 }

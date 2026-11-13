@@ -71,14 +71,15 @@ public class Expander : Panel
 
     public Expander()
     {
-        ShowFrame = true;
-        IsCard = true;
         BorderWidth = 1f;
         CornerRadius = 8f;
         Padding = new Thickness(12f, 0f, 12f, 12f);
         TabStop = true;
         Cursor = Cursor.Hand;
     }
+
+    /// <summary>An expander is a card: a surface with a border, which is what it was drawn as.</summary>
+    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
 
     /// <summary>Creates an expander whose header reads <paramref name="header"/>.</summary>
     public Expander(string header)

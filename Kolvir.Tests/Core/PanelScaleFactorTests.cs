@@ -567,8 +567,6 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
 
     private static Panel Group() => new()
     {
-        ShowFrame = false,
-        IsCard = false,
         BackColor = null,
         BorderWidth = 0f,
         CornerRadius = 0f,

@@ -276,8 +276,6 @@ public sealed class ExpanderAnimationTests : AnimationsTestBase
             var root = new Panel
             {
                 Dock = DockStyle.Fill,
-                ShowFrame = false,
-                IsCard = false,
                 BackColor = null,
                 BorderWidth = 0f,
                 CornerRadius = 0f,

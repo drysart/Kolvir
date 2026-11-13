@@ -454,8 +454,6 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
 
     private static Panel Plain() => new()
     {
-        ShowFrame = false,
-        IsCard = false,
         BorderWidth = 0f,
         CornerRadius = 0f,
         Padding = Thickness.Empty,
@@ -464,8 +462,6 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
     private static TableLayoutPanel PlainTable() => new()
     {
         Dock = DockStyle.Fill,
-        ShowFrame = false,
-        IsCard = false,
         BorderWidth = 0f,
         CornerRadius = 0f,
         Padding = Thickness.Empty,

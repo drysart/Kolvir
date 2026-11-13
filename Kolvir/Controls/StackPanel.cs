@@ -49,9 +49,7 @@ public class StackPanel : Panel
 
     public StackPanel()
     {
-        // A stack is a layout container rather than a card, so it does not paint a surface of its
-        // own and its bounds are exactly the run of its children.
-        ShowFrame = false;
+        // A stack is a layout container: its bounds are exactly the run of its children.
         Padding = Thickness.Empty;
     }
 

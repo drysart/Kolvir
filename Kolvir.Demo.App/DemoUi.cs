@@ -384,8 +384,6 @@ public sealed class DemoUi
         // The window background comes from the host's ClearColor, which follows the palette.
         var root = new Panel
         {
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -410,8 +408,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 100f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -519,12 +515,10 @@ public sealed class DemoUi
 
     private Panel BuildFooter()
     {
-        var footer = new Panel
+        var footer = new SurfacePanel
         {
             Dock = XDock.Bottom,
             Height = 64f,
-            ShowFrame = true,
-            IsCard = false,
             BorderWidth = 0f,
             CornerRadius = 0f,
             Padding = new Thickness(0f),
@@ -674,8 +668,6 @@ public sealed class DemoUi
         _stage = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -702,8 +694,6 @@ public sealed class DemoUi
         var nav = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -729,8 +719,6 @@ public sealed class DemoUi
 
         foreach (var panel in new[] { split.Panel1, split.Panel2 })
         {
-            panel.ShowFrame = false;
-            panel.IsCard = false;
             panel.BackColor = null;
             panel.BorderWidth = 0f;
             panel.CornerRadius = 0f;
@@ -753,8 +741,6 @@ public sealed class DemoUi
         var page = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -795,8 +781,6 @@ public sealed class DemoUi
             // rather than stretching the inputs to the height of the window.
             Dock = XDock.Top,
             Height = 54f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -829,8 +813,6 @@ public sealed class DemoUi
         var row = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -852,8 +834,6 @@ public sealed class DemoUi
         {
             Dock = fill ? XDock.Fill : XDock.Left,
             Width = fill ? 0f : width,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -884,8 +864,6 @@ public sealed class DemoUi
             // than stretching to the height of the stage.
             Dock = XDock.Top,
             Height = 44f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -895,8 +873,6 @@ public sealed class DemoUi
         var row = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -1012,7 +988,7 @@ public sealed class DemoUi
             return;
         }
 
-        var panel = new Panel
+        var panel = new SurfacePanel
         {
             Padding = new Thickness(16f),
         };
@@ -1038,12 +1014,10 @@ public sealed class DemoUi
 
     private Panel BuildSplitDemo()
     {
-        var section = new Panel
+        // The split container's own panels paint nothing, so the surface behind them is the page's.
+        var section = new SurfacePanel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
-            BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
             Padding = new Thickness(0f),
@@ -1126,8 +1100,6 @@ public sealed class DemoUi
         return new TableLayoutPanel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -1164,7 +1136,7 @@ public sealed class DemoUi
 
     private static Panel Cell(string caption, int column, int row, int columnSpan = 1)
     {
-        var cell = new Panel
+        var cell = new SurfacePanel
         {
             Dock = XDock.Fill,
             BorderWidth = 1f,
@@ -1216,15 +1188,14 @@ public sealed class DemoUi
     /// The framing the stacks on this page share: a bordered box, so the bounds the stack arranges
     /// its children in are visible.
     /// </summary>
-    private static StackPanel StackBox() => new()
+    private static StackPanel StackBox() => new SurfaceStackPanel()
     {
         Dock = XDock.Top,
-        ShowFrame = true,
-        IsCard = true,
-        CornerRadius = 8f,
         Padding = new Thickness(8f),
         Spacing = 6f,
         Margin = new Thickness(0f, 0f, 0f, 10f),
+        BorderWidth = 1f,
+        CornerRadius = 8f,
     };
 
     private StackPanel BuildVerticalStack()
@@ -1318,7 +1289,7 @@ public sealed class DemoUi
         return button;
     }
 
-    private static Panel Card() => new()
+    private static Panel Card() => new SurfacePanel()
     {
         Dock = XDock.Fill,
         BorderWidth = 1f,
@@ -1550,8 +1521,6 @@ public sealed class DemoUi
         var section = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -1716,8 +1685,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 32f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -1862,8 +1829,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 34f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -1937,8 +1902,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 150f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -2024,7 +1987,7 @@ public sealed class DemoUi
         readout.Margin = new Thickness(0f, 0f, 0f, 12f);
         card.Controls.Add(readout);
 
-        var target = new Panel
+        var target = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 96f,
@@ -2382,7 +2345,7 @@ public sealed class DemoUi
         editorStatus.Items.Add(new ToolStripSeparator());
         editorStatus.Items.Add(new ToolStripProgressBar { Width = 90f, Value = 65f });
 
-        var editor = new Panel
+        var editor = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 156f,
@@ -2438,7 +2401,7 @@ public sealed class DemoUi
 
         void SyncPercent() => percentLabel.Text = $"{(int)MathF.Round(progress.Percent * 100f)}%";
 
-        var statusBox = new Panel
+        var statusBox = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 92f,
@@ -2525,8 +2488,6 @@ public sealed class DemoUi
         var section = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -2537,8 +2498,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Left,
             Width = 320f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -2598,8 +2557,6 @@ public sealed class DemoUi
         var list = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -3095,7 +3052,7 @@ public sealed class DemoUi
 
         // The partial-damage target is deliberately separate from the readout: repainting this
         // swatch every frame costs about nothing, and it is the area the partial numbers describe.
-        _metricsSwatch = new Panel
+        _metricsSwatch = new SurfacePanel
         {
             Dock = XDock.Left,
             Width = 180f,
@@ -3224,7 +3181,7 @@ public sealed class DemoUi
 
         // The application's own title bar: a press here asks the platform to move the window, which is
         // the one thing a borderless window cannot do for itself once the platform's caption is gone.
-        var handle = new Panel
+        var handle = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 36f,
@@ -3638,11 +3595,9 @@ public sealed class DemoUi
         readout.Height = 18f;
         card.Controls.Add(readout);
 
-        var zoomed = new Panel
+        var zoomed = new SurfacePanel
         {
             Dock = XDock.Fill,
-            ShowFrame = true,
-            IsCard = true,
             Padding = new Thickness(0f),
             HorizontalScroll = ScrollStyle.Automatic,
             VerticalScroll = ScrollStyle.Automatic,
@@ -3652,7 +3607,7 @@ public sealed class DemoUi
 
         // The nested panel carries the reciprocal multiplier, so its children see the same logical
         // space at every position of the slider: the two multipliers cancel.
-        var nested = new Panel
+        var nested = new SurfacePanel
         {
             Bounds = new SKRect(8f, 8f, 348f, 96f),
         };
@@ -3865,12 +3820,10 @@ public sealed class DemoUi
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
 
-        var zone = new Panel
+        var zone = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 76f,
-            ShowFrame = true,
-            IsCard = true,
             CornerRadius = 8f,
             Padding = new Thickness(8f),
             Margin = new Thickness(0f, 0f, 0f, 10f),
@@ -4517,8 +4470,8 @@ public sealed class DemoUi
             VerticalScroll = ScrollStyle.Automatic,
             HorizontalScroll = ScrollStyle.None,
             Spacing = ButtonPitch - ButtonHeight,
-            ShowFrame = true,
-            IsCard = true,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
         };
 
         return PerformanceCard(panel, "buttons", count =>
@@ -4668,8 +4621,6 @@ public sealed class DemoUi
     {
         Dock = XDock.Top,
         Height = height,
-        ShowFrame = false,
-        IsCard = false,
         BackColor = null,
         BorderWidth = 0f,
         CornerRadius = 0f,
@@ -4728,8 +4679,6 @@ public sealed class DemoUi
     {
         Dock = XDock.Top,
         Height = 30f,
-        ShowFrame = false,
-        IsCard = false,
         BackColor = null,
         BorderWidth = 0f,
         CornerRadius = 0f,
@@ -4744,7 +4693,7 @@ public sealed class DemoUi
     /// </summary>
     private Panel BuildAutoScrollList()
     {
-        var list = new Panel
+        var list = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 90f,
@@ -4771,7 +4720,7 @@ public sealed class DemoUi
     /// <summary>An <see cref="ScrollStyle.Always"/> panel: the bar is shown even when it fits.</summary>
     private Panel BuildAlwaysScrollStrip()
     {
-        var strip = new Panel
+        var strip = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 36f,
@@ -4859,8 +4808,6 @@ public sealed class DemoUi
         var faded = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5009,8 +4956,6 @@ public sealed class DemoUi
             {
                 Dock = XDock.Left,
                 Width = 120f,
-                ShowFrame = false,
-                IsCard = false,
                 BackColor = null,
                 BorderWidth = 0f,
                 CornerRadius = 0f,
@@ -5112,8 +5057,6 @@ public sealed class DemoUi
     {
         Dock = XDock.Top,
         Height = height,
-        ShowFrame = false,
-        IsCard = false,
         BackColor = null,
         BorderWidth = 0f,
         CornerRadius = 0f,
@@ -5128,8 +5071,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Left,
             Width = size + 20f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5160,8 +5101,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Left,
             Width = 120f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5197,8 +5136,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Left,
             Width = 200f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5292,8 +5229,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 206f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5445,8 +5380,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 206f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5539,8 +5472,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 150f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5554,6 +5485,8 @@ public sealed class DemoUi
             VerticalScroll = ScrollStyle.Automatic,
             Padding = new Thickness(4f),
             Spacing = 4f,
+            BorderWidth = 1f,
+            CornerRadius = 8f,
         };
         viewportFrame.Controls.Add(viewport);
 
@@ -5659,8 +5592,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 34f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5795,8 +5726,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 206f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -5949,8 +5878,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 206f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -6822,8 +6749,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 34f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -7413,7 +7338,7 @@ public sealed class DemoUi
 
         // The subtree: a panel that assigns a font, a foreground colour and a background role. Every
         // control added below inherits all three unless it says otherwise.
-        var stage = new Panel
+        var stage = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 214f,
@@ -7436,7 +7361,7 @@ public sealed class DemoUi
 
         // A panel that paints a background of its own and assigns nothing: it takes the colour its
         // parent assigned instead of its own surface, which is the inheritance doing its work.
-        var nested = new Panel
+        var nested = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 76f,
@@ -7597,8 +7522,6 @@ public sealed class DemoUi
         var section = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -7699,8 +7622,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 436f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -7728,12 +7649,10 @@ public sealed class DemoUi
 
         // A nested container: not a stop itself, so it takes the place its own index gives it in the
         // outer order (15) and its children order among themselves.
-        var addressPanel = new Panel
+        var addressPanel = new SurfacePanel
         {
             TabIndex = 15,
             Bounds = new SKRect(0f, 136f, 628f, 232f),
-            IsCard = true,
-            ShowFrame = true,
             BorderWidth = 1f,
             CornerRadius = 8f,
             Padding = new Thickness(8f),
@@ -7812,8 +7731,6 @@ public sealed class DemoUi
             TabStop = true,
             Bounds = new SKRect(0f, 300f, 628f, 396f),
             VerticalScroll = ScrollStyle.Automatic,
-            IsCard = true,
-            ShowFrame = true,
             BorderWidth = 1f,
             CornerRadius = 8f,
             Padding = new Thickness(8f),
@@ -7940,8 +7857,6 @@ public sealed class DemoUi
         var stage = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -7951,7 +7866,7 @@ public sealed class DemoUi
         var eastward = new SKColor(0xFF2F6FED);
         var westward = new SKColor(0xFFEC4899);
 
-        var runner = new Panel
+        var runner = new SurfacePanel
         {
             Bounds = new SKRect(8f, 14f, 52f, 58f),
             BackColor = eastward,
@@ -7959,14 +7874,14 @@ public sealed class DemoUi
         };
         stage.Controls.Add(runner);
 
-        stage.Controls.Add(new Panel
+        stage.Controls.Add(new SurfacePanel
         {
             Bounds = new SKRect(8f, 62f, 348f, 64f),
             BackColor = Theme.Border,
             CornerRadius = 1f,
         });
 
-        var bar = new Panel
+        var bar = new SurfacePanel
         {
             Bounds = new SKRect(8f, 82f, 348f, 102f),
             BackColor = eastward,
@@ -7986,7 +7901,7 @@ public sealed class DemoUi
         // run is what brings them in rather than a value the page was built at.
         for (int index = 0; index < tileColors.Length; index++)
         {
-            var tile = new Panel
+            var tile = new SurfacePanel
             {
                 Bounds = new SKRect(8f + (index * 76f), 186f, 72f + (index * 76f), 250f),
                 BackColor = tileColors[index],
@@ -8140,8 +8055,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 318f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -8164,8 +8077,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Left,
             Width = width,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -8283,7 +8194,7 @@ public sealed class DemoUi
 
         // The subtree: the panel assigns the chosen font and everything under it inherits it,
         // including the button, whose class default is the theme's emphasized font.
-        var stage = new Panel
+        var stage = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 236f,
@@ -8306,7 +8217,7 @@ public sealed class DemoUi
             TextAlign = ContentAlignment.TopLeft,
         });
 
-        var nested = new Panel
+        var nested = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 72f,
@@ -8466,7 +8377,7 @@ public sealed class DemoUi
             Margin = new Thickness(0f, 0f, 0f, 10f),
         });
 
-        var swatch = new Panel
+        var swatch = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 110f,
@@ -8754,7 +8665,7 @@ public sealed class DemoUi
         // A spinner in a box that is deliberately nothing like square - wide and short, with the box
         // drawn round it so the control's shape is visible. The circle comes from the shorter side
         // and is centred, so it reads as a spinner rather than as a stretched oval.
-        var wideBox = new Panel
+        var wideBox = new SurfacePanel
         {
             Dock = XDock.Left,
             Width = 240f,
@@ -8770,7 +8681,7 @@ public sealed class DemoUi
 
         // The shell that gets blocked: its content and the layer are both Fill children, so they
         // cover the same area and the layer is above it.
-        var shell = new Panel
+        var shell = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 170f,
@@ -8783,8 +8694,6 @@ public sealed class DemoUi
         var content = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -8821,7 +8730,7 @@ public sealed class DemoUi
         content.Controls.Add(box);
         content.Controls.Add(readout);
 
-        var busyCard = new Panel
+        var busyCard = new SurfacePanel
         {
             AutoSize = false,
             Size = new SKSize(260f, 76f),
@@ -8944,6 +8853,8 @@ public sealed class DemoUi
             Height = 96f,
             Spacing = 6f,
             Margin = new Thickness(0f, 0f, 0f, 14f),
+            BorderWidth = 1f,
+            CornerRadius = 8f,
         };
 
         foreach (string tag in new[]
@@ -8980,9 +8891,11 @@ public sealed class DemoUi
             Height = 56f,
             Spacing = 8f,
             Margin = new Thickness(0f, 0f, 0f, 14f),
+            BorderWidth = 1f,
+            CornerRadius = 8f,
         };
 
-        var stretched = new Panel
+        var stretched = new SurfacePanel
         {
             AutoSize = false,
             Size = new SKSize(120f, 24f),
@@ -8991,7 +8904,7 @@ public sealed class DemoUi
         };
         heights.Controls.Add(stretched);
 
-        var centred = new Panel
+        var centred = new SurfacePanel
         {
             AutoSize = false,
             Size = new SKSize(120f, 24f),
@@ -9002,7 +8915,7 @@ public sealed class DemoUi
         heights.Controls.Add(centred);
 
         // The tallest item sets the line, and the Stretched one beside it fills that height.
-        heights.Controls.Add(new Panel
+        heights.Controls.Add(new SurfacePanel
         {
             AutoSize = false,
             Size = new SKSize(120f, 44f),
@@ -9029,6 +8942,8 @@ public sealed class DemoUi
             Orientation = StackOrientation.Vertical,
             Spacing = 4f,
             Margin = new Thickness(0f, 0f, 0f, 14f),
+            BorderWidth = 1f,
+            CornerRadius = 8f,
         };
 
         var palette = new[]
@@ -9041,7 +8956,7 @@ public sealed class DemoUi
 
         for (int index = 0; index < palette.Length; index++)
         {
-            var swatch = new Panel
+            var swatch = new SurfacePanel
             {
                 AutoSize = false,
                 Size = new SKSize(44f, 26f),
@@ -9100,8 +9015,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 340f,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -9417,7 +9330,7 @@ public sealed class DemoUi
             Margin = new Thickness(0f, 0f, 0f, 12f),
         });
 
-        var shell = new Panel
+        var shell = new SurfacePanel
         {
             Dock = XDock.Top,
             Height = 170f,
@@ -9430,8 +9343,6 @@ public sealed class DemoUi
         var content = new Panel
         {
             Dock = XDock.Fill,
-            ShowFrame = false,
-            IsCard = false,
             BackColor = null,
             BorderWidth = 0f,
             CornerRadius = 0f,
@@ -9466,7 +9377,7 @@ public sealed class DemoUi
         content.Controls.Add(new CheckBox("A control under the layer") { Dock = XDock.Top, AutoSize = true });
         content.Controls.Add(readout);
 
-        var busyCard = new Panel
+        var busyCard = new SurfacePanel
         {
             AutoSize = false,
             Size = new SKSize(260f, 76f),

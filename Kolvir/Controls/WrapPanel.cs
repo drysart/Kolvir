@@ -40,9 +40,7 @@ public class WrapPanel : Panel
 
     public WrapPanel()
     {
-        // A flow is a layout container rather than a card: it paints no surface of its own and its
-        // bounds are exactly the run of its children.
-        ShowFrame = false;
+        // A flow is a layout container: its bounds are exactly the run of its children.
         Padding = Thickness.Empty;
     }
 
