@@ -269,7 +269,7 @@ target only, and nothing else.
 | 5 | `linux/`: `IPlatformAudio` over libpulse, with `NativeLibrary.TryLoad` and the reason strings, and `AddAudio()` | **done** |
 | 6 | `windows/`: MMDevice enumeration, XAudio2 voices through `Vortice.XAudio2`, scoped to the Windows target | **done** |
 | 7 | `macos/`: CoreAudio enumeration and AudioQueue output | **done** |
-| 8 | Tests: the timeline, the null device's invariants, WAV decoding, volume | |
+| 8 | Tests: the timeline, the null device's invariants, WAV decoding, volume | **done** |
 | 9 | Demo **Audio** page; `README.md` section; `FEATURE-COST-POLICY.md` worked example | |
 
 ### Spike runs
