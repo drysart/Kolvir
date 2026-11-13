@@ -131,14 +131,32 @@ public sealed class WoffFontLoadingTests
     }
 
     [TestMethod]
-    public void ALoaderWithoutTheProviderRefusesAWoffFile()
+    public void TheBuiltInLoaderIsThePlatformsAndTheProviderDoesNotDependOnIt()
     {
-        // The point of the seam: a plain loader has not enabled the format, and says so rather than
-        // failing somewhere inside a decoder.
-        var exception = Assert.ThrowsExactly<FontFormatException>(
-            () => new FontLoader().LoadFromBytes(Woff.Value));
+        // SkiaSharp is built on FreeType on macOS and Linux, and FreeType reads WOFF 1.0, so on those
+        // platforms a loader with no provider loads the file by itself. On Windows SkiaSharp is built
+        // on DirectWrite, which reads neither container. That difference is Skia's, not Kolvir's, so
+        // this test records it rather than asserting one platform's answer on all three: a plain
+        // loader either refuses the container or reads the same font, and neither outcome is a bug.
+        var plain = new FontLoader();
 
-        Assert.AreEqual(string.Empty, exception.ProviderName, "no provider claimed it, so none is named");
+        try
+        {
+            using var font = plain.LoadFromBytes(Woff.Value);
+
+            Assert.AreEqual("IBM Plex Sans", font.FamilyName, "and reads it as the same font");
+        }
+        catch (FontFormatException exception)
+        {
+            Assert.AreEqual(string.Empty, exception.ProviderName, "no provider claimed it, so none is named");
+        }
+
+        // WOFF 2 is not among them: it needs the glyph reconstruction, and no FreeType Skia ships is
+        // built against Brotli. So the package is not redundant on any of the three platforms.
+        var refused = Assert.ThrowsExactly<FontFormatException>(
+            () => plain.LoadFromBytes(Woff2.Value));
+
+        Assert.AreEqual(string.Empty, refused.ProviderName);
     }
 
     [TestMethod]
