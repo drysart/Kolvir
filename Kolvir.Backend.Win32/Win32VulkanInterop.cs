@@ -36,6 +36,7 @@ internal static unsafe class Vulkan
     internal const int StructureTypeCommandBufferAllocateInfo = 40;
     internal const int StructureTypeCommandBufferBeginInfo = 42;
     internal const int StructureTypeImageMemoryBarrier = 45;
+    internal const int StructureTypeSemaphoreCreateInfo = 9;
     internal const int FormatBgra8Unorm = 44;
     internal const int FormatBgra8Srgb = 50;
     internal const int FormatRgba8Unorm = 37;
@@ -206,6 +207,15 @@ internal static unsafe class Vulkan
 
     [StructLayout(LayoutKind.Sequential)]
     internal struct VkFenceCreateInfo
+    {
+        public int sType;
+        public IntPtr pNext;
+        public uint flags;
+    }
+
+    /// <summary>Nothing to say: a binary semaphore is created with no flags and no pNext chain.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct VkSemaphoreCreateInfo
     {
         public int sType;
         public IntPtr pNext;

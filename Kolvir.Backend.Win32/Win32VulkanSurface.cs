@@ -38,6 +38,7 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
         IntPtr queue,
         IntPtr surface,
         IntPtr fence,
+        IntPtr renderSemaphore,
         uint family,
         string renderer)
     {
@@ -48,6 +49,7 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
         Queue = queue;
         Surface = surface;
         Fence = fence;
+        RenderSemaphore = renderSemaphore;
         Family = family;
         Renderer = renderer;
     }
@@ -65,6 +67,12 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
     internal IntPtr Surface { get; }
 
     internal IntPtr Fence { get; }
+
+    /// <summary>
+    /// Signalled by the barrier submit and waited on by the present, so the image is in
+    /// <c>PRESENT_SRC</c> before the display reads it without the CPU waiting to find out.
+    /// </summary>
+    internal IntPtr RenderSemaphore { get; }
 
     internal uint Family { get; }
 
@@ -217,8 +225,20 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
             return null;
         }
 
+        var createSemaphore = (delegate* unmanaged<IntPtr, VkSemaphoreCreateInfo*, IntPtr, IntPtr*, int>)loader.DeviceProc(device, instance, "vkCreateSemaphore");
+        var semaphoreInfo = new VkSemaphoreCreateInfo { sType = StructureTypeSemaphoreCreateInfo };
+        IntPtr renderSemaphore = IntPtr.Zero;
+
+        if (createSemaphore == null || createSemaphore(device, &semaphoreInfo, IntPtr.Zero, &renderSemaphore) != 0)
+        {
+            failure = "vulkan: no render semaphore";
+            DestroyDevice(loader, device, instance);
+            DestroyInstance(loader, instance);
+            return null;
+        }
+
         failure = string.Empty;
-        return new Win32VulkanDevice(loader, instance, physical, device, queue, surface, fence, family, renderer);
+        return new Win32VulkanDevice(loader, instance, physical, device, queue, surface, fence, renderSemaphore, family, renderer);
     }
 
     private static bool SelectPhysicalDevice(
@@ -333,6 +353,16 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
             waitIdle(Device);
         }
 
+        if (RenderSemaphore != IntPtr.Zero)
+        {
+            var destroySemaphore = (delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)DeviceProc("vkDestroySemaphore");
+
+            if (destroySemaphore != null)
+            {
+                destroySemaphore(Device, RenderSemaphore, IntPtr.Zero);
+            }
+        }
+
         DestroyDevice(_loader, Device, Instance);
         DestroyInstance(_loader, Instance);
     }
@@ -370,8 +400,8 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
     private int _height;
     private GRContext? _skia;
     private SKSurface? _retained;
-    private IntPtr _presentPool;
-    private IntPtr _presentBuffer;
+    private IntPtr[] _barrierPools = [];
+    private IntPtr[] _barrierBuffers = [];
     private bool _needsFull = true;
 
     public SKSurface? Surface => _retained;
@@ -504,7 +534,19 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         }
 
         // The old swap chain is handed back as the old one so the driver can retire it in place, and
-        // destroyed afterwards; the images it owned are released with it.
+        // destroyed afterwards; the images it owned are released with it. Nothing may still be in
+        // flight while that happens, including presents this window queued: a swap chain is only
+        // destroyable once its images are nobody's.
+        if (_swapChain != IntPtr.Zero)
+        {
+            var waitIdle = (delegate* unmanaged<IntPtr, int>)_device.DeviceProc("vkDeviceWaitIdle");
+
+            if (waitIdle != null)
+            {
+                waitIdle(_device.Device);
+            }
+        }
+
         if (!CreateSwapChain(_device, _swapChain, width, height, out var swapChain, out var format, out var usage, out var extent, out var failure))
         {
             Win32GlTrace.Write($"vulkan resize failed: {failure}");
@@ -653,9 +695,13 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         var acquire = (delegate* unmanaged<IntPtr, IntPtr, ulong, IntPtr, IntPtr, uint*, int>)_device.DeviceProc("vkAcquireNextImageKHR");
         var waitFences = (delegate* unmanaged<IntPtr, uint, IntPtr*, uint, ulong, int>)_device.DeviceProc("vkWaitForFences");
         var resetFences = (delegate* unmanaged<IntPtr, uint, IntPtr*, int>)_device.DeviceProc("vkResetFences");
+        var present = (delegate* unmanaged<IntPtr, VkPresentInfoKhr*, int>)_device.DeviceProc("vkQueuePresentKHR");
 
         // A device that does not answer for these cannot present, and asking it anyway is a null call.
-        if (getImages == null || acquire == null || waitFences == null || resetFences == null)
+        // The present is in this list because the barrier below signals a semaphore that only the
+        // present waits on: submitting it with nothing to hand the frame to would leave the
+        // semaphore signalled and the image in a layout nobody presented.
+        if (getImages == null || acquire == null || waitFences == null || resetFences == null || present == null)
         {
             return Win32PresentResult.Lost;
         }
@@ -722,21 +768,28 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
                 }
             }
 
+            // Submitted, not waited on: the barrier and the present are ordered behind this work on
+            // the same queue, and the present's semaphore carries that ordering to the display.
+            // Every wait the CPU does here is a frame the animation cannot spend drawing the next
+            // one, and two of them per frame is what shows up as skipped animation frames.
             _skia!.Flush();
-            _skia.Submit(true);
+            _skia.Submit(synchronous: false);
         }
 
-        if (!MoveToPresentState(images[index]))
+        if (!EnsureBarrierRing(images.Length) || !MoveToPresentState(images[index], index))
         {
             return Win32PresentResult.Lost;
         }
 
-        var present = (delegate* unmanaged<IntPtr, VkPresentInfoKhr*, int>)_device.DeviceProc("vkQueuePresentKHR");
         uint imageIndex = index;
+
         IntPtr chain = _swapChain;
+        IntPtr renderSemaphore = _device.RenderSemaphore;
         var presentInfo = new VkPresentInfoKhr
         {
             sType = StructureTypePresentInfoKhr,
+            waitSemaphoreCount = 1,
+            pWaitSemaphores = (IntPtr)(&renderSemaphore),
             swapchainCount = 1,
             pSwapchains = (IntPtr)(&chain),
             pImageIndices = (IntPtr)(&imageIndex),
@@ -758,38 +811,37 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
     /// place a frame's ordering is the app's to get right.
     /// </summary>
     /// <remarks>
-    /// The pool and its one command buffer live as long as the surface: a frame resets the pool and
-    /// records the barrier again, which is a few microseconds, where creating and destroying a pool
-    /// per frame is not. Present is not a queue operation, so nothing here would order it after the
-    /// submit - hence the wait, which is also what makes the wait on the present path unnecessary.
+    /// Nothing here waits. The barrier is submitted after Skia's own work on the same queue, so it
+    /// runs after the drawing without the CPU having to find out when that finished, and the submit
+    /// signals a semaphore the present waits on. A command pool per swap chain image is what makes
+    /// the reset safe: an image can only be acquired again once its present has completed, which
+    /// means the submit that preceded it is finished and its command buffer is not pending. One
+    /// shared pool would need a wait to prove the same thing.
     /// </remarks>
-    private bool MoveToPresentState(IntPtr image)
+    private bool MoveToPresentState(IntPtr image, uint imageIndex)
     {
-        if (!EnsurePresentResources())
-        {
-            return false;
-        }
+        IntPtr pool = _barrierPools[imageIndex];
+        IntPtr buffer = _barrierBuffers[imageIndex];
 
         var resetPool = (delegate* unmanaged<IntPtr, IntPtr, uint, int>)_device.DeviceProc("vkResetCommandPool");
         var begin = (delegate* unmanaged<IntPtr, VkCommandBufferBeginInfo*, int>)_device.DeviceProc("vkBeginCommandBuffer");
         var end = (delegate* unmanaged<IntPtr, int>)_device.DeviceProc("vkEndCommandBuffer");
         var barrierFunc = (delegate* unmanaged<IntPtr, uint, uint, uint, uint, IntPtr, uint, IntPtr, uint, VkImageMemoryBarrier*, void>)_device.DeviceProc("vkCmdPipelineBarrier");
         var submitFunc = (delegate* unmanaged<IntPtr, uint, VkSubmitInfo*, IntPtr, int>)_device.DeviceProc("vkQueueSubmit");
-        var waitIdle = (delegate* unmanaged<IntPtr, int>)_device.DeviceProc("vkQueueWaitIdle");
 
-        if (resetPool == null || begin == null || end == null || barrierFunc == null || submitFunc == null || waitIdle == null)
+        if (resetPool == null || begin == null || end == null || barrierFunc == null || submitFunc == null)
         {
             return false;
         }
 
-        if (resetPool(_device.Device, _presentPool, 0) != 0)
+        if (resetPool(_device.Device, pool, 0) != 0)
         {
             return false;
         }
 
         var beginInfo = new VkCommandBufferBeginInfo { sType = StructureTypeCommandBufferBeginInfo, flags = 0x1 };
 
-        if (begin(_presentBuffer, &beginInfo) != 0)
+        if (begin(buffer, &beginInfo) != 0)
         {
             return false;
         }
@@ -807,35 +859,44 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
             subresourceRange = new VkImageSubresourceRange { aspectMask = 0x1, levelCount = 1, layerCount = 1 },
         };
 
-        barrierFunc(_presentBuffer, 0x400, 0x2000, 0, 0, IntPtr.Zero, 0, IntPtr.Zero, 1, &barrier);
+        barrierFunc(buffer, 0x400, 0x2000, 0, 0, IntPtr.Zero, 0, IntPtr.Zero, 1, &barrier);
 
-        if (end(_presentBuffer) != 0)
+        if (end(buffer) != 0)
         {
             return false;
         }
 
-        IntPtr buffer = _presentBuffer;
+        IntPtr command = buffer;
+        IntPtr semaphore = _device.RenderSemaphore;
         var submitInfo = new VkSubmitInfo
         {
             sType = StructureTypeSubmitInfo,
             commandBufferCount = 1,
-            pCommandBuffers = (IntPtr)(&buffer),
+            pCommandBuffers = (IntPtr)(&command),
+            signalSemaphoreCount = 1,
+            pSignalSemaphores = (IntPtr)(&semaphore),
         };
 
-        if (submitFunc(_device.Queue, 1, &submitInfo, IntPtr.Zero) != 0)
+        return submitFunc(_device.Queue, 1, &submitInfo, IntPtr.Zero) == 0;
+    }
+
+    /// <summary>
+    /// Builds one command pool and command buffer per swap chain image, so no frame ever has to
+    /// wait for an earlier frame's command buffer to be free before it can record its own.
+    /// </summary>
+    private bool EnsureBarrierRing(int imageCount)
+    {
+        if (imageCount <= 0)
         {
             return false;
         }
 
-        return waitIdle(_device.Queue) == 0;
-    }
-
-    private bool EnsurePresentResources()
-    {
-        if (_presentPool != IntPtr.Zero)
+        if (_barrierPools.Length == imageCount)
         {
             return true;
         }
+
+        ReleaseBarrierRing();
 
         var createPool = (delegate* unmanaged<IntPtr, VkCommandPoolCreateInfo*, IntPtr, IntPtr*, int>)_device.DeviceProc("vkCreateCommandPool");
         var allocate = (delegate* unmanaged<IntPtr, VkCommandBufferAllocateInfo*, IntPtr*, int>)_device.DeviceProc("vkAllocateCommandBuffers");
@@ -845,28 +906,69 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
             return false;
         }
 
-        var poolInfo = new VkCommandPoolCreateInfo { sType = StructureTypeCommandPoolCreateInfo, flags = 0x2, queueFamilyIndex = _device.Family };
-        IntPtr pool = IntPtr.Zero;
+        var pools = new IntPtr[imageCount];
+        var buffers = new IntPtr[imageCount];
 
-        if (createPool(_device.Device, &poolInfo, IntPtr.Zero, &pool) != 0 || pool == IntPtr.Zero)
+        for (int i = 0; i < imageCount; i++)
         {
-            return false;
+            var poolInfo = new VkCommandPoolCreateInfo { sType = StructureTypeCommandPoolCreateInfo, flags = 0x2, queueFamilyIndex = _device.Family };
+            IntPtr pool = IntPtr.Zero;
+
+            if (createPool(_device.Device, &poolInfo, IntPtr.Zero, &pool) != 0 || pool == IntPtr.Zero)
+            {
+                break;
+            }
+
+            pools[i] = pool;
+
+            var allocateInfo = new VkCommandBufferAllocateInfo { sType = StructureTypeCommandBufferAllocateInfo, commandPool = pool, level = 0, commandBufferCount = 1 };
+            IntPtr buffer = IntPtr.Zero;
+
+            if (allocate(_device.Device, &allocateInfo, &buffer) != 0 || buffer == IntPtr.Zero)
+            {
+                break;
+            }
+
+            buffers[i] = buffer;
         }
 
-        var allocateInfo = new VkCommandBufferAllocateInfo { sType = StructureTypeCommandBufferAllocateInfo, commandPool = pool, level = 0, commandBufferCount = 1 };
-        IntPtr buffer = IntPtr.Zero;
-
-        if (allocate(_device.Device, &allocateInfo, &buffer) != 0)
+        for (int i = 0; i < imageCount; i++)
         {
-            ((delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)_device.DeviceProc("vkDestroyCommandPool"))(_device.Device, pool, IntPtr.Zero);
-            return false;
+            if (pools[i] == IntPtr.Zero || buffers[i] == IntPtr.Zero)
+            {
+                // Half a ring presents nothing: try again cleanly on the next frame.
+                _barrierPools = pools;
+                _barrierBuffers = buffers;
+                ReleaseBarrierRing();
+                return false;
+            }
         }
 
-        _presentPool = pool;
-        _presentBuffer = buffer;
+        _barrierPools = pools;
+        _barrierBuffers = buffers;
         return true;
     }
 
+    private void ReleaseBarrierRing()
+    {
+        var destroyPool = (delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)_device.DeviceProc("vkDestroyCommandPool");
+
+        if (destroyPool == null)
+        {
+            return;
+        }
+
+        foreach (var pool in _barrierPools)
+        {
+            if (pool != IntPtr.Zero)
+            {
+                destroyPool(_device.Device, pool, IntPtr.Zero);
+            }
+        }
+
+        _barrierPools = [];
+        _barrierBuffers = [];
+    }
     public void Dispose()
     {
         _retained?.Dispose();
@@ -874,18 +976,7 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         _skia?.Dispose();
         _skia = null;
 
-        if (_presentPool != IntPtr.Zero)
-        {
-            var destroyPool = (delegate* unmanaged<IntPtr, IntPtr, IntPtr, void>)_device.DeviceProc("vkDestroyCommandPool");
-
-            if (destroyPool != null)
-            {
-                destroyPool(_device.Device, _presentPool, IntPtr.Zero);
-            }
-
-            _presentPool = IntPtr.Zero;
-            _presentBuffer = IntPtr.Zero;
-        }
+        ReleaseBarrierRing();
 
         if (_swapChain != IntPtr.Zero)
         {

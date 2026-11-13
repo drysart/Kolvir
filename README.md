@@ -4316,7 +4316,10 @@ The rules the implementation follows:
   render target - presents in `FIFO`, and wraps each acquired image as `UNDEFINED`, because every
   pixel is overwritten and Skia will not wrap an image it is told is in `PRESENT_SRC`. The frame is
   one blit from the retained buffer into that image, and the image is barriered to `PRESENT_SRC`
-  before `vkQueuePresentKHR`.
+  before `vkQueuePresentKHR`. Nothing on that path waits: the barrier is submitted behind Skia's own
+  work on the same queue and signals a semaphore the present waits on. An earlier version waited for
+  the GPU and then for the queue to go idle, twice per frame, which cost it animation frames - a
+  blocked UI thread is a frame the animation never gets to draw.
 - **Accelerated only when the option is true.** `Win32PopupWindow` and `Win32MenuWindow` stay on the
   DIB path, and the headless backend has no such seam. AppKit has its own Metal seam, described in
   [Hardware acceleration (macOS)](#hardware-acceleration-macos), and GTK4 its own GL seam,
