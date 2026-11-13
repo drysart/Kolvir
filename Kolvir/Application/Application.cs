@@ -109,6 +109,11 @@ public sealed partial class Application : IDisposable
         services.AddSingleton<IImageDataFactory>(provider =>
             new ImageDataFactory(provider.GetServices<IImageFormatProvider>()));
 
+        // The same arrangement for fonts, for the same reason: a format is registered once, while
+        // services are declared, and the loader an application resolves is composed from that list.
+        services.AddSingleton<IFontLoader>(provider =>
+            new FontLoader(provider.GetServices<IFontFormatProvider>()));
+
         _provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = ValidateScopes });
         Services = _provider;
 

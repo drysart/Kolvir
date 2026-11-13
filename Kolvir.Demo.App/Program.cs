@@ -6,6 +6,7 @@ using Kolvir.Badges;
 using Kolvir.Demo;
 using Kolvir.DragDrop;
 using Kolvir.Svg;
+using Kolvir.WoffFonts;
 
 #if WINDOWS
 using Kolvir.Backend.Win32;
@@ -138,7 +139,8 @@ internal static class Program
                 .AddAnimatedGifImages()
                 .AddAnimatedWebpImages()
                 .AddAppBadges()
-                .AddAudio(),
+                .AddAudio()
+                .AddWoffFonts(),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,

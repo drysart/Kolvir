@@ -101,6 +101,13 @@ the common controls, and it is what the project templates contain. Everything el
 the application adds, which is the opt-in in its packaging form: a feature that is not referenced
 cannot be used and cannot be in the deliverable.
 
+The rung is also taken by features that could have been trimmed and are simply rare. `Kolvir.Feature.WoffFonts`
+is the example: WOFF and WOFF 2 are containers that unwrap into the OpenType bytes `Font.FromBytes`
+already reads, so a provider could have been registered inside `Kolvir` and cost an application only
+the one line that never runs. It ships as a package because almost no desktop application loads a web
+font, and keeping it out of the base deliverable was worth more than the trimming it would have
+earned. That is the exception section 4 opens with, and it is recorded here rather than argued.
+
 A feature author writes one `<PackageReference>` with no `Condition`, on every platform. The package
 carries one assembly per platform, and NuGet selects the right platform's assembly at restore, from
 the consuming project's target framework. Nothing is dispatched at run time, and the platforms that
@@ -917,6 +924,14 @@ Two things in the seam are retained whether or not anything uses them, deliberat
 - `RunApplicationHooks` and `RunWindowHooks` (section 6.5) exist only to keep features out of the backends.
   Both are empty where nothing is registered, and both are what lets a platform feature be reachable
   from the opt-in alone. They stay.
+- The two format registries - `IImageDataFactory` and `IFontLoader` - are compositions over
+  provider interfaces rather than single implementations, and neither an image decoder nor a font
+  container can be written as an extension member on a media type it does not own. Both live in
+  `Kolvir`, both are composed from whatever providers the application registered, and both fall
+  through to the built-in path when nothing did. An application that registers no format pays for
+  two tiny interfaces and one list each, and gets a loader that still reads every PNG and every
+  `.ttf` without being told to. The same shape serves the next format for free, which is why it is
+  worth the two types rather than a `bool` per codec.
 
 ## 8. How we verify
 

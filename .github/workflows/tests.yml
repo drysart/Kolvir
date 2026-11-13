@@ -89,6 +89,7 @@ jobs:
           dotnet restore Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj --nologo -p:TargetFramework=net10.0
+          dotnet restore Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj --nologo -p:TargetFramework=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -197,6 +198,22 @@ jobs:
             -p:TargetFramework=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=badges.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The WOFF feature's suite. Same wiring and same narrowing. It unwraps real WOFF and WOFF 2
+      # files - IBM Plex Sans, OFL, the same release as the face the sample carries - and compares the
+      # glyphs they draw with the glyphs the plain .ttf draws, pixel for pixel through Skia. That is
+      # as headless as a test gets: no window, no display, and nothing the machine has installed can
+      # affect the answer.
+      - name: Test the WOFF feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj --no-restore --nologo \
+            -p:TargetFramework=net10.0 \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=woff.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 
