@@ -131,32 +131,34 @@ public sealed class WoffFontLoadingTests
     }
 
     [TestMethod]
-    public void TheBuiltInLoaderIsThePlatformsAndTheProviderDoesNotDependOnIt()
+    public void SkiaReadsSomeOfTheseContainersByItselfAndThatIsNotWhatThePackageIsFor()
     {
-        // SkiaSharp is built on FreeType on macOS and Linux, and FreeType reads WOFF 1.0, so on those
-        // platforms a loader with no provider loads the file by itself. On Windows SkiaSharp is built
-        // on DirectWrite, which reads neither container. That difference is Skia's, not Kolvir's, so
-        // this test records it rather than asserting one platform's answer on all three: a plain
-        // loader either refuses the container or reads the same font, and neither outcome is a bug.
+        // Which containers Skia's own font manager reads is Skia's business and it differs by platform:
+        // DirectWrite, which SkiaSharp uses on Windows, reads neither; the FreeType it uses on Linux
+        // reads WOFF 1.0; and the macOS build reads both, WOFF 2 included. So this test records the
+        // answer instead of asserting one platform's on all three - a plain loader either refuses the
+        // container or reads the same face from it, and neither outcome is a bug. What the package
+        // guarantees is that the answer is the same on all three, which is what the rest of the suite
+        // tests through the provider.
         var plain = new FontLoader();
 
-        try
+        AssertContainer(plain, Woff.Value);
+        AssertContainer(plain, Woff2.Value);
+
+        static void AssertContainer(FontLoader plain, byte[] data)
         {
-            using var font = plain.LoadFromBytes(Woff.Value);
+            try
+            {
+                using var font = plain.LoadFromBytes(data);
 
-            Assert.AreEqual("IBM Plex Sans", font.FamilyName, "and reads it as the same font");
+                Assert.AreEqual("IBM Plex Sans", font.FamilyName, "read by Skia itself, as the same font");
+            }
+            catch (FontFormatException exception)
+            {
+                Assert.AreEqual(
+                    string.Empty, exception.ProviderName, "no provider claimed it, so none is named");
+            }
         }
-        catch (FontFormatException exception)
-        {
-            Assert.AreEqual(string.Empty, exception.ProviderName, "no provider claimed it, so none is named");
-        }
-
-        // WOFF 2 is not among them: it needs the glyph reconstruction, and no FreeType Skia ships is
-        // built against Brotli. So the package is not redundant on any of the three platforms.
-        var refused = Assert.ThrowsExactly<FontFormatException>(
-            () => plain.LoadFromBytes(Woff2.Value));
-
-        Assert.AreEqual(string.Empty, refused.ProviderName);
     }
 
     [TestMethod]

@@ -2693,8 +2693,10 @@ application-wide path in one switch.
 ### Web fonts (WOFF)
 
 Skia reads TrueType and OpenType, and a `.ttf` or `.otf` is what `Font.FromFile` and its siblings take.
-It does not read **WOFF** or **WOFF 2** - the containers a web font is usually downloaded in - so this
-library reads neither on its own. `Kolvir.Feature.WoffFonts` adds them:
+What it does about **WOFF** and **WOFF 2** - the containers a web font is usually downloaded in - depends
+on the platform's font manager rather than on Skia: Windows reads neither, Linux reads WOFF 1.0, and the
+macOS build reads both. An application cannot rely on that, so `Kolvir.Feature.WoffFonts` makes the
+answer the same everywhere:
 
 ```csharp
 using var application = new Application(backend, new ApplicationOptions
@@ -2738,13 +2740,18 @@ What the two formats actually cost, as measured on a 200 KB face:
 |---|---|---|
 | the container | the same tables, each zlib-compressed | one Brotli stream, a variable-length directory |
 | the payload | nothing to undo | `glyf` re-encoded into contour, point, flag and coordinate streams; `loca` not stored at all |
-| this package | 90 lines, no dependency | 900 lines: the triplet decoder and the glyph-record writer |
+| this package | 95 lines, no dependency | 1,022 lines: the triplet decoder and the glyph-record writer |
 | decoding | decompression | Brotli (in the BCL) plus glyph reconstruction |
 | expected output | the same tables | the same outlines, a different `glyf` spelling |
 | verified | the decoded font draws pixel-identical glyphs | same |
 
 WOFF 2 is the one that matters in practice - a web font kit hands a modern client nothing else - and
-it is where the work is. The specification splits `glyf` into six substreams and re-encodes each point
+it is where the work is. That it happens to load on macOS without any of this is worth saying plainly
+rather than selling around: the package earns its place on Windows, where neither container loads at
+all, and by making the three platforms agree instead of leaving an application to discover that the
+same file works on the developer's Mac and throws on the user's PC.
+
+The specification splits `glyf` into six substreams and re-encodes each point
 as a *triplet*: one flag byte and a variable-length signed delta pair whose width and base come from a
 table of 128 cases. Rebuilding the font means undoing that glyph by glyph and writing standard TrueType
 records back out, including recomputing every bounding box the file chose not to store. `loca` follows

@@ -1,8 +1,14 @@
 # Web fonts
 
-A way to load the font a web font kit actually hands out. Skia reads OpenType - a `.ttf` or an `.otf` -
-and nothing else; WOFF and WOFF 2 are the two containers a downloaded font arrives in, and this package
-is what opens them.
+A way to load the font a web font kit actually hands out. Skia is handed OpenType - a `.ttf` or an
+`.otf` - and WOFF and WOFF 2 are the two containers a downloaded font arrives in, so this package opens
+them and gives Skia what it expects.
+
+What Skia's own font manager does with either container is not a fixed thing: DirectWrite, which
+SkiaSharp uses on Windows, reads neither; the FreeType it uses on Linux reads WOFF 1.0; and the macOS
+build reads both, WOFF 2 included. So the honest statement of why this exists is not "Skia cannot read
+web fonts" but **"no application can rely on which ones Skia reads"**, and the package makes the answer
+the same on all three platforms rather than leaving an application to find out on a user's machine.
 
 The scope is one question: **can these bytes become an OpenType font?** Not glyph rendering, which Skia
 already does, and not a second font engine beside it. That framing is what keeps the feature small
@@ -38,6 +44,18 @@ Measured on IBM Plex Sans Regular v6.4.1, the same face at the same version in a
 
 WOFF 1.0 is a compression choice and nothing more. It was implemented first, in a day, and it is not
 where the cost of this feature lives.
+
+Who reads what without this package, measured on SkiaSharp 4.154.0:
+
+| | Windows | Linux | macOS |
+|---|---|---|---|
+| `.ttf` / `.otf` | yes | yes | yes |
+| `.woff` | no | **yes** (FreeType) | **yes** |
+| `.woff2` | no | no (no Brotli in that FreeType) | **yes** |
+
+That column for macOS is the reason the package's justification is "the same answer everywhere" rather
+than "Skia cannot do this", and it is recorded here because it was found by a test failing on two of
+three platforms rather than by reading the documentation - which does not say it either.
 
 WOFF 2 is. Its payload is not a font with an excised section: `glyf` is replaced by a *transform* that
 stores each glyph's points in six substreams - the number of contours, the number of points per
@@ -148,8 +166,12 @@ answer:
 - the table directories are compared table for table: the same set, and `glyf`, `loca` and `head`
   allowed to differ for the reason above. `loca`'s entry count and `hmtx`'s length are checked exactly,
   and `glyf` may grow by no more than 5%.
-- `IFontLoader` reads all three containers through one call, a loader with no providers refuses a
-  `.woff` (proving the format is not built in), and a damaged file reports the provider's name.
+- `IFontLoader` reads all three containers through one call, and a damaged file reports the provider's
+  name.
+- one test records, rather than assumes, what Skia reads by itself: a loader with no provider either
+  refuses each container or reads the same face from it, and both answers are correct. This is the test
+  that found the platform split, by failing on macOS and Linux for the reason described above - which is
+  also why it asserts nothing about which platform does what.
 - the `hmtx` transform has six unit tests of its own, because no encoder in the wild emits it - the flag
   reads as absent in both fixtures - and a transform exercised only by synthetic streams deserves to be
   said out loud rather than implied.
@@ -169,10 +191,17 @@ later-registration-wins, declining, commitment after claiming, unreadable output
   `files/woff-findings.md` records the survey.
 - **`FontFormatException` derives from `ArgumentException`.** A breaking change to a thrown type is
   worse than a slightly odd base class.
+- **The provider is asked first even where Skia could read the file.** It is what makes the behaviour
+  identical on all three platforms, and it means a font loaded through this package is read by this
+  parser and not by whichever font manager the platform happened to build.
 - **Recalculate the checksums.** Being right costs arithmetic.
 
 ## 8. Risks
 
+- **Skia's own support makes the package partly redundant on macOS.** The macOS build reads WOFF 2
+  without any of this, so on that platform the provider costs the application a decode it did not need.
+  It is deterministic and fast, and being able to say which font manager decided a file was readable is
+  worth more than the bytes saved, but it is a real trade rather than a free win.
 - **The glyph reconstruction is the complex half.** 587 lines of bit-level parsing with a 128-case
   table, and it is the code most likely to be wrong on a font nobody has tried. The mitigation is the
   pixel comparison against a real face and the truncation sweep; the risk that remains is a
@@ -183,3 +212,7 @@ later-registration-wins, declining, commitment after claiming, unreadable output
   Nothing in the parser assumes IBM Plex's layout, but nothing here proves that.
 - **`.ttc` is unsupported**, and a font downloaded as a collection will fail by name. That is a
   deliberate refusal rather than a gap nobody noticed.
+- **The platform split is only tested at the level of "one of two acceptable outcomes".** If SkiaSharp's
+  next release starts reading WOFF on Windows, nothing here fails; the test simply takes its other
+  branch. That is intended - it is Skia's behaviour, not ours - but it does mean this document's table
+  can go stale without a red build.
