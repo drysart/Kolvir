@@ -17,6 +17,8 @@ internal static class NativeMethods
 
     internal const uint WmDestroy = 0x0002;
     internal const uint WmSize = 0x0005;
+    internal const uint WmEnterSizeMove = 0x0231;
+    internal const uint WmExitSizeMove = 0x0232;
     internal const uint WmSetFocus = 0x0007;
     internal const uint WmKillFocus = 0x0008;
     internal const uint WmPaint = 0x000F;

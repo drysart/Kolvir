@@ -120,6 +120,7 @@ public sealed class Win32WindowBackend : IWindowBackend
 
     private Win32GlSurface? _gl;
     private bool _glUnavailable;
+    private bool _inSizeMove;
     private string _gfxReason = "cpu (not started)";
 
     private bool _trackingLeave;
@@ -1523,6 +1524,22 @@ public sealed class Win32WindowBackend : IWindowBackend
                 OnSize(NativeMethods.LowWord(lParam), NativeMethods.HighWord(lParam), (uint)wParam);
                 return IntPtr.Zero;
 
+            case NativeMethods.WmEnterSizeMove:
+                // Only the GL tier defers: it is the one whose drawable costs the driver a fresh set
+                // of back buffers per size, and that is what a drag multiplies.
+                _inSizeMove = _gl is not null;
+
+                if (Win32GlTrace.IsEnabled && _inSizeMove)
+                {
+                    Win32GlTrace.Write("size move: deferring presentation until the drag ends");
+                }
+
+                return IntPtr.Zero;
+
+            case NativeMethods.WmExitSizeMove:
+                OnExitSizeMove();
+                return IntPtr.Zero;
+
             case NativeMethods.WmDpiChanged:
                 OnDpiChanged(hwnd, wParam, lParam);
                 return IntPtr.Zero;
@@ -1652,6 +1669,16 @@ public sealed class Win32WindowBackend : IWindowBackend
         var hdc = NativeMethods.BeginPaint(hwnd, out var paint);
         try
         {
+            if (_inSizeMove)
+            {
+                // A WGL drawable that changes size makes the driver allocate a new set of back
+                // buffers for the new size, and a drag reports tens of sizes before it settles: on a
+                // large window that is tens of megabytes apiece, and none of it comes back until the
+                // drag stops. Presenting nothing leaves the last frame for the window manager to
+                // stretch, which costs one allocation for the size the drag ends on.
+                return;
+            }
+
             if (_gl is not null)
             {
                 // The retained offscreen buffer is the frame. A damaged paint updates only the
@@ -1932,10 +1959,47 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
     }
 
+    /// <summary>
+    /// Finishes a live resize: one allocation for the size the drag settled on, then one frame.
+    /// </summary>
+    /// <remarks>
+    /// Nothing happened during the drag itself - see OnPaint - so this is where the work the resize
+    /// deferred is done, in one go rather than once per intermediate size.
+    /// </remarks>
+    private void OnExitSizeMove()
+    {
+        if (!_inSizeMove)
+        {
+            return;
+        }
+
+        _inSizeMove = false;
+
+        if (NativeMethods.GetClientRect(_hwnd, out var client) && client.Right > 0 && client.Bottom > 0)
+        {
+            EnsureBuffer(client.Right, client.Bottom);
+            UpdateHostSize();
+
+            if (Win32GlTrace.IsEnabled)
+            {
+                Win32GlTrace.Write($"size move: presenting {client.Right}x{client.Bottom}");
+            }
+        }
+
+        Invalidate();
+    }
+
     private void OnSize(int width, int height, uint sizeType)
     {
         if (width <= 0 || height <= 0)
         {
+            return;
+        }
+
+        if (_inSizeMove)
+        {
+            // The drag is reporting every intermediate size; WM_EXITSIZEMOVE allocates once for the
+            // size it actually ends on.
             return;
         }
 
