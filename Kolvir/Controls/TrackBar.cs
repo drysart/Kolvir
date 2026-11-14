@@ -204,7 +204,7 @@ public class TrackBar : Control
 
         if (IsFocused)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 1f, CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 1f, Border.CornerRadius);
         }
     }
 

@@ -24,6 +24,13 @@ public class ComboBox : Control
     private string _typeAhead = string.Empty;
     private long _typeAheadAt;
 
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin
+        .WithCornerRadius(6f)
+        .WithActiveColor(ThemeColor.Accent)
+        .WithFocusColor(ThemeColor.Accent)
+        .WithHoverColor(ThemeColor.SplitterHover)
+        .WithDisabledColor(ThemeColor.DisabledBackground);
+
     /// <summary>
     /// Creates an empty combo box 180 by 30, together with the <see cref="ListBox"/> it shows and
     /// the popup that holds it.
@@ -32,9 +39,8 @@ public class ComboBox : Control
     {
         TabStop = true;
         Cursor = Cursor.Hand;
-        BorderWidth = 1f;
-        CornerRadius = 6f;
-        Padding = new Thickness(8f, 6f, 26f, 6f);
+        Border = DefaultBorder;
+        Padding = new Thickness(7f, 5f, 25f, 5f);
         MinimumSize = new SKSize(64f, 30f);
         Size = new SKSize(180f, 30f);
 
@@ -122,6 +128,13 @@ public class ComboBox : Control
     /// <summary>Whether the list is open.</summary>
     public bool IsDropDownOpen => _dropDownOpen;
 
+    /// <summary>
+    /// Adds <see cref="ControlState.Active"/> while the list is open, so the frame takes the accent
+    /// colour. It is not quite the focused state: the pointer can move into the list and the focus
+    /// can follow it, and the field should still read as open.
+    /// </summary>
+    public override ControlState State => base.State | (_dropDownOpen ? ControlState.Active : ControlState.None);
+
     /// <summary>Raised when <see cref="SelectedIndex"/> changed.</summary>
     public IDisposable AddSelectedIndexChangedHandler(Action<object> handler)
     {
@@ -208,21 +221,13 @@ public class ComboBox : Control
     }
 
     /// <summary>
-    /// Fills the field and draws its border, which takes the accent colour while the list is open
-    /// or the combo box has the focus and the hover colour while the pointer is over it.
+    /// Fills the field. The frame is painted by <see cref="Control.OnPaintBorder"/>, which takes the
+    /// accent colour while the list is open and the hover colour while the pointer is over the field.
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
-        Painter.Fill(canvas, rect, fill, CornerRadius);
-
-        var border = !Enabled
-            ? Theme.DisabledBackground
-            : _dropDownOpen || IsFocused
-                ? Theme.Accent
-                : IsMouseOver ? Theme.SplitterHover : BorderColor;
-
-        Painter.DrawBorder(canvas, rect, border, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
+        Painter.Fill(canvas, rect, fill, Border.CornerRadius);
     }
 
     /// <summary>
@@ -231,7 +236,7 @@ public class ComboBox : Control
     /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
-        var content = Geometry.Deflate(rect, Padding);
+        var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
         if (content.Width <= 0f || content.Height <= 0f)
         {
             return;
@@ -248,15 +253,6 @@ public class ComboBox : Control
         canvas.Restore();
 
         PaintChevron(canvas, rect);
-    }
-
-    /// <summary>
-    /// Draws nothing: the border is painted in <see cref="OnPaintBackground"/> so that the text and
-    /// the chevron sit over it rather than under it.
-    /// </summary>
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        // The border is drawn in OnPaintBackground so it stays behind the text and the chevron.
     }
 
     /// <summary>
@@ -546,7 +542,7 @@ public class ComboBox : Control
     {
         // The list draws its own border inside its bounds, so the border and the padding are part
         // of the height the popup has to make room for.
-        float chrome = (_list.BorderWidth * 2f) + _list.Padding.Vertical;
+        float chrome = (_list.Border.Insets(_list).Top * 2f) + _list.Padding.Vertical;
         float rows = MathF.Max(1, _list.ItemCount) * _list.ItemHeight;
         float height = MathF.Min(rows + chrome, MathF.Max(MaxDropDownHeight, chrome));
 
@@ -555,7 +551,10 @@ public class ComboBox : Control
 
     private void PaintChevron(SKCanvas canvas, SKRect rect)
     {
-        float centerX = rect.Right - Padding.Right * 0.5f - 4f;
+        // Measured from the frame's inner edge, so the chevron keeps the same distance from the right
+        // whether the gutter is the frame's or the padding's.
+        float gutter = Border.Insets(this).Right + Padding.Right;
+        float centerX = rect.Right - (gutter * 0.5f) - 4f;
         float centerY = rect.MidY;
         float half = 4f;
 

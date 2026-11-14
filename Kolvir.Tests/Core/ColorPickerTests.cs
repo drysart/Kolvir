@@ -34,9 +34,9 @@ public sealed class ColorPickerTests : HeadlessTestBase
 
         Assert.IsFalse(picker.TabStop, "the square and the fields are the tab stops, not the container");
         Assert.IsFalse(picker.Focusable);
-        Assert.AreEqual(8f, picker.Padding.Left);
-        Assert.AreEqual(1f, picker.BorderWidth);
-        Assert.AreEqual(8f, picker.CornerRadius);
+        Assert.AreEqual(7f, picker.Padding.Left, "the frame takes the pixel the padding used to");
+        Assert.AreEqual(new Thickness(1f), picker.Border.Insets(picker));
+        Assert.AreEqual(8f, picker.Border.CornerRadius);
         Assert.AreEqual(150f, picker.MinimumSize.Width);
         Assert.AreEqual(270f, picker.MinimumSize.Height);
 
@@ -488,8 +488,6 @@ public sealed class ColorPickerTests : HeadlessTestBase
         {
             Dock = DockStyle.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -528,8 +526,6 @@ public sealed class ColorPickerTests : HeadlessTestBase
         {
             Dock = DockStyle.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -603,8 +599,6 @@ public sealed class ColorPickerTests : HeadlessTestBase
         {
             Dock = DockStyle.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 

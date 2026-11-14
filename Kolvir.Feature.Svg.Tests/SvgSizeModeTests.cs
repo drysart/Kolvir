@@ -90,7 +90,6 @@ public sealed class SvgSizeModeTests : SvgTestBase
         {
             Dock = DockStyle.Fill,
             SizeMode = sizeMode,
-            CornerRadius = 0f,
             ImageAlign = ContentAlignment.MiddleCenter,
         };
 

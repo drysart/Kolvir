@@ -568,16 +568,12 @@ public sealed class PanelScaleFactorTests : HeadlessTestBase
     private static Panel Group() => new()
     {
         BackColor = null,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = new Thickness(0f),
     };
 
     private static Control Solid(SKColor color) => new Control
     {
         BackColor = color,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
     };
 
     private sealed class FixedControl(SKSize size) : Control

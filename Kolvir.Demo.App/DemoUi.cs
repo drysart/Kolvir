@@ -505,8 +505,6 @@ public sealed class DemoUi
         var root = new Panel
         {
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -529,8 +527,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 100f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -639,8 +635,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Bottom,
             Height = 64f,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
+            Border = Border.None,
             Padding = new Thickness(0f),
         };
 
@@ -803,8 +798,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -814,7 +807,7 @@ public sealed class DemoUi
             SelectionMode = SelectionMode.One,
             VerticalScroll = ScrollStyle.Automatic,
             HorizontalScroll = ScrollStyle.None,
-            BorderWidth = 0f,
+            Border = SimpleBorder.Thin.WithCornerRadius(4f),
             ItemHeight = 32f,
         };
 
@@ -829,8 +822,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(20f, 16f, 12f, 16f),
         };
         nav.Controls.Add(_navList);
@@ -847,15 +838,11 @@ public sealed class DemoUi
             Panel2MinSize = 400f,
             TabStop = false,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
         };
 
         foreach (var panel in new[] { split.Panel1, split.Panel2 })
         {
             panel.BackColor = null;
-            panel.BorderWidth = 0f;
-            panel.CornerRadius = 0f;
             panel.Padding = new Thickness(0f);
         }
 
@@ -867,6 +854,14 @@ public sealed class DemoUi
     }
 
     /// <summary>
+    /// A frame of one pixel with rounded corners, which is the look the sample's cards and framed
+    /// panels share. It takes no room: the sample's gutters were chosen with the frame sharing them,
+    /// so reserving a pixel for the stroke would move the contents of every page by one.
+    /// </summary>
+    private static SimpleBorder Framed(float cornerRadius) =>
+        SimpleBorder.Thin.WithCornerRadius(cornerRadius).WithInsets(Thickness.Empty);
+
+    /// <summary>
     /// Wraps a page body in the inset every page shares, so a page is only ever its content and
     /// the space around it is decided in one place.
     /// </summary>
@@ -876,8 +871,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(20f, 16f, 20f, 16f),
         };
         page.Controls.Add(body);
@@ -916,8 +909,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 54f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -948,8 +939,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
         row.Controls.Add(Field("Name", nameBox, 320f));
@@ -969,8 +958,6 @@ public sealed class DemoUi
             Dock = fill ? XDock.Fill : XDock.Left,
             Width = fill ? 0f : width,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f, 0f, fill ? 0f : 16f, 0f),
         };
 
@@ -999,8 +986,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 44f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -1008,8 +993,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -1152,8 +1135,7 @@ public sealed class DemoUi
         var section = new SurfacePanel
         {
             Dock = XDock.Fill,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
+            Border = Border.None,
             Padding = new Thickness(0f),
         };
 
@@ -1235,8 +1217,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             CellPadding = new Thickness(8f),
             ColumnStyles =
@@ -1273,8 +1253,7 @@ public sealed class DemoUi
         var cell = new SurfacePanel
         {
             Dock = XDock.Fill,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(10f),
             TableColumn = column,
             TableRow = row,
@@ -1328,8 +1307,7 @@ public sealed class DemoUi
         Padding = new Thickness(8f),
         Spacing = 6f,
         Margin = new Thickness(0f, 0f, 0f, 10f),
-        BorderWidth = 1f,
-        CornerRadius = 8f,
+        Border = Framed(8f),
     };
 
     private StackPanel BuildVerticalStack()
@@ -1426,8 +1404,7 @@ public sealed class DemoUi
     private static Panel Card() => new SurfacePanel()
     {
         Dock = XDock.Fill,
-        BorderWidth = 1f,
-        CornerRadius = 10f,
+        Border = Framed(10f),
         Padding = new Thickness(16f),
     };
 
@@ -1578,7 +1555,7 @@ public sealed class DemoUi
             Font = Theme.CaptionFont,
             Padding = new Thickness(8f, 4f),
             MinimumSize = new SKSize(0f, 26f),
-            CornerRadius = 13f,
+            Border = SimpleBorder.Rounded(13f),
         };
         chip.AddClickHandler(_ => SetStatus($"Inline chip '{text}' clicked."));
         return chip;
@@ -1656,8 +1633,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -1820,8 +1795,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 32f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
         };
@@ -1964,8 +1937,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 34f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };
@@ -2037,8 +2008,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 150f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
         };
@@ -2125,8 +2094,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 96f,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
         };
 
@@ -2483,8 +2451,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 156f,
-            CornerRadius = 8f,
-            BorderWidth = 1f,
+            Border = Framed(8f),
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 20f),
         };
@@ -2539,8 +2506,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 92f,
-            CornerRadius = 8f,
-            BorderWidth = 1f,
+            Border = Framed(8f),
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 16f),
         };
@@ -2623,8 +2589,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -2633,8 +2597,6 @@ public sealed class DemoUi
             Dock = XDock.Left,
             Width = 320f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 16f, 0f),
         };
@@ -2692,8 +2654,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             VerticalScroll = ScrollStyle.Automatic,
             HorizontalScroll = ScrollStyle.None,
@@ -3192,7 +3152,7 @@ public sealed class DemoUi
             Width = 180f,
             Height = 180f,
             BackColor = new SKColor(0x2F, 0x6F, 0x8F),
-            CornerRadius = 8f,
+            Border = Framed(8f),
         };
 
         var swatchRow = Row(180f);
@@ -3319,8 +3279,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 36f,
-            BorderWidth = 1f,
-            CornerRadius = 6f,
+            Border = Framed(6f),
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };
         handle.Controls.Add(new Label("Press and drag here to move the window")
@@ -4199,7 +4158,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 76f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(8f),
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };
@@ -4845,8 +4804,7 @@ public sealed class DemoUi
             VerticalScroll = ScrollStyle.Automatic,
             HorizontalScroll = ScrollStyle.None,
             Spacing = ButtonPitch - ButtonHeight,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
         };
 
         return PerformanceCard(panel, "buttons", count =>
@@ -4997,8 +4955,7 @@ public sealed class DemoUi
         Dock = XDock.Top,
         Height = height,
         BackColor = null,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
+        Border = Border.None,
         Padding = new Thickness(0f),
         Margin = new Thickness(0f, 0f, 0f, 8f),
     };
@@ -5055,8 +5012,7 @@ public sealed class DemoUi
         Dock = XDock.Top,
         Height = 30f,
         BackColor = null,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
+        Border = Border.None,
         Padding = new Thickness(0f),
         Margin = new Thickness(0f, 0f, 0f, 6f),
     };
@@ -5184,8 +5140,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Opacity = 0.6f,
             Margin = new Thickness(0f, 0f, 0f, 8f),
@@ -5196,7 +5150,7 @@ public sealed class DemoUi
             Dock = XDock.Fill,
             SizeMode = SizeMode.Zoom,
             ImageAlign = ContentAlignment.MiddleCenter,
-            CornerRadius = 8f,
+            Border = SimpleBorder.Rounded(8f),
         };
         image.Source = Images.LoadFromStream(CreateGradientPng(320, 200));
         faded.Controls.Add(image);
@@ -5332,8 +5286,6 @@ public sealed class DemoUi
                 Dock = XDock.Left,
                 Width = 120f,
                 BackColor = null,
-                BorderWidth = 0f,
-                CornerRadius = 0f,
                 Padding = new Thickness(4f),
             };
 
@@ -5433,8 +5385,6 @@ public sealed class DemoUi
         Dock = XDock.Top,
         Height = height,
         BackColor = null,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = new Thickness(0f),
         Margin = new Thickness(0f, 0f, 0f, 4f),
     };
@@ -5447,8 +5397,6 @@ public sealed class DemoUi
             Dock = XDock.Left,
             Width = size + 20f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(6f),
         };
 
@@ -5477,8 +5425,6 @@ public sealed class DemoUi
             Dock = XDock.Left,
             Width = 120f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(4f),
         };
 
@@ -5512,8 +5458,6 @@ public sealed class DemoUi
             Dock = XDock.Left,
             Width = 200f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(4f),
         };
 
@@ -5604,8 +5548,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 206f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -5614,7 +5556,7 @@ public sealed class DemoUi
             AutoSize = false,
             SizeMode = SizeMode.Zoom,
             ImageAlign = ContentAlignment.MiddleCenter,
-            CornerRadius = 6f,
+            Border = SimpleBorder.Rounded(6f),
             Bounds = new SKRect(0f, 4f, 192f, 196f),
             Source = data,
         };
@@ -5755,8 +5697,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 206f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -5765,7 +5705,7 @@ public sealed class DemoUi
             AutoSize = false,
             SizeMode = SizeMode.Zoom,
             ImageAlign = ContentAlignment.MiddleCenter,
-            CornerRadius = 6f,
+            Border = SimpleBorder.Rounded(6f),
             Bounds = new SKRect(0f, 4f, 192f, 196f),
             Source = data,
         };
@@ -5847,8 +5787,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 150f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 6f),
         };
@@ -5859,8 +5797,7 @@ public sealed class DemoUi
             VerticalScroll = ScrollStyle.Automatic,
             Padding = new Thickness(4f),
             Spacing = 4f,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
         };
         viewportFrame.Controls.Add(viewport);
 
@@ -5870,7 +5807,7 @@ public sealed class DemoUi
             MinimumSize = new SKSize(120f, 120f),
             HorizontalAlignment = Alignment.Near,
             SizeMode = SizeMode.Zoom,
-            CornerRadius = 6f,
+            Border = SimpleBorder.Rounded(6f),
             Source = data,
         };
         viewport.Controls.Add(image);
@@ -5967,8 +5904,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 34f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 6f),
         };
@@ -6101,8 +6036,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 206f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -6111,7 +6044,7 @@ public sealed class DemoUi
             AutoSize = false,
             SizeMode = SizeMode.Zoom,
             ImageAlign = ContentAlignment.MiddleCenter,
-            CornerRadius = 6f,
+            Border = SimpleBorder.Rounded(6f),
             Bounds = new SKRect(0f, 4f, 192f, 196f),
             Source = data,
         };
@@ -6253,8 +6186,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 206f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -6263,7 +6194,7 @@ public sealed class DemoUi
             AutoSize = false,
             SizeMode = SizeMode.Zoom,
             ImageAlign = ContentAlignment.MiddleCenter,
-            CornerRadius = 6f,
+            Border = SimpleBorder.Rounded(6f),
             Bounds = new SKRect(0f, 4f, 192f, 196f),
             Source = data,
         };
@@ -7124,8 +7055,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 34f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };
@@ -7745,8 +7674,7 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 214f,
             Padding = new Thickness(12f, 8f),
-            CornerRadius = 8f,
-            BorderWidth = 1f,
+            Border = Framed(8f),
             Font = _appearanceSubtreeFont,
             Foreground = Theme.Accent,
             Background = Background.FromThemeColor(ThemeColor.Secondary),
@@ -7768,8 +7696,7 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 76f,
             Padding = new Thickness(8f, 6f),
-            CornerRadius = 6f,
-            BorderWidth = 1f,
+            Border = Framed(6f),
         };
         _appearanceNested = nested;
 
@@ -7925,8 +7852,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -8025,8 +7950,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 436f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
         form.Controls.Add(rows);
@@ -8055,8 +7978,7 @@ public sealed class DemoUi
         {
             TabIndex = 15,
             Bounds = new SKRect(0f, 136f, 628f, 232f),
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(8f),
         };
         rows.Controls.Add(addressPanel);
@@ -8133,8 +8055,7 @@ public sealed class DemoUi
             TabStop = true,
             Bounds = new SKRect(0f, 300f, 628f, 396f),
             VerticalScroll = ScrollStyle.Automatic,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(8f),
         };
         rows.Controls.Add(scroller);
@@ -8260,8 +8181,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -8272,7 +8191,7 @@ public sealed class DemoUi
         {
             Bounds = new SKRect(8f, 14f, 52f, 58f),
             BackColor = eastward,
-            CornerRadius = 8f,
+            Border = Framed(8f),
         };
         stage.Controls.Add(runner);
 
@@ -8280,14 +8199,14 @@ public sealed class DemoUi
         {
             Bounds = new SKRect(8f, 62f, 348f, 64f),
             BackColor = Theme.Border,
-            CornerRadius = 1f,
+            Border = Framed(1f),
         });
 
         var bar = new SurfacePanel
         {
             Bounds = new SKRect(8f, 82f, 348f, 102f),
             BackColor = eastward,
-            CornerRadius = 4f,
+            Border = SimpleBorder.Thin.WithCornerRadius(4f),
         };
         stage.Controls.Add(bar);
 
@@ -8307,7 +8226,7 @@ public sealed class DemoUi
             {
                 Bounds = new SKRect(8f + (index * 76f), 186f, 72f + (index * 76f), 250f),
                 BackColor = tileColors[index],
-                CornerRadius = 10f,
+                Border = Framed(10f),
                 Opacity = 0f,
             };
             tiles.Add(tile);
@@ -8458,8 +8377,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 318f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f),
         };
@@ -8480,8 +8397,6 @@ public sealed class DemoUi
             Dock = XDock.Left,
             Width = width,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 10f, 0f),
         };
@@ -8601,8 +8516,7 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 236f,
             Padding = new Thickness(14f, 10f),
-            CornerRadius = 8f,
-            BorderWidth = 1f,
+            Border = Framed(8f),
             Font = font,
             Background = Background.FromThemeColor(ThemeColor.Secondary),
         };
@@ -8624,8 +8538,7 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 72f,
             Padding = new Thickness(10f, 6f),
-            CornerRadius = 6f,
-            BorderWidth = 1f,
+            Border = Framed(6f),
         };
 
         nested.Controls.Add(new Label(
@@ -8783,8 +8696,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 110f,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             BackColor = _colorDialogColor,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };
@@ -9071,8 +8983,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Left,
             Width = 240f,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 2f, 4f, 0f),
         };
@@ -9087,8 +8998,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 170f,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(14f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
         };
@@ -9097,8 +9007,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -9136,8 +9044,7 @@ public sealed class DemoUi
         {
             AutoSize = false,
             Size = new SKSize(260f, 76f),
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(12f),
         };
         busyCard.Controls.Add(new BusyIndicator
@@ -9255,8 +9162,7 @@ public sealed class DemoUi
             Height = 96f,
             Spacing = 6f,
             Margin = new Thickness(0f, 0f, 0f, 14f),
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
         };
 
         foreach (string tag in new[]
@@ -9293,15 +9199,14 @@ public sealed class DemoUi
             Height = 56f,
             Spacing = 8f,
             Margin = new Thickness(0f, 0f, 0f, 14f),
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
         };
 
         var stretched = new SurfacePanel
         {
             AutoSize = false,
             Size = new SKSize(120f, 24f),
-            CornerRadius = 4f,
+            Border = SimpleBorder.Thin.WithCornerRadius(4f),
             BackColor = new SKColor(0x33, 0x66, 0x99),
         };
         heights.Controls.Add(stretched);
@@ -9310,7 +9215,7 @@ public sealed class DemoUi
         {
             AutoSize = false,
             Size = new SKSize(120f, 24f),
-            CornerRadius = 4f,
+            Border = SimpleBorder.Thin.WithCornerRadius(4f),
             BackColor = new SKColor(0x2A, 0x9D, 0x8F),
             VerticalAlignment = Alignment.Center,
         };
@@ -9321,7 +9226,7 @@ public sealed class DemoUi
         {
             AutoSize = false,
             Size = new SKSize(120f, 44f),
-            CornerRadius = 4f,
+            Border = SimpleBorder.Thin.WithCornerRadius(4f),
             BackColor = new SKColor(0xD9, 0x82, 0x2B),
         });
 
@@ -9344,8 +9249,7 @@ public sealed class DemoUi
             Orientation = StackOrientation.Vertical,
             Spacing = 4f,
             Margin = new Thickness(0f, 0f, 0f, 14f),
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
         };
 
         var palette = new[]
@@ -9362,8 +9266,7 @@ public sealed class DemoUi
             {
                 AutoSize = false,
                 Size = new SKSize(44f, 26f),
-                CornerRadius = 4f,
-                BorderWidth = 1f,
+                Border = Framed(4f),
                 BackColor = palette[index],
             };
             swatch.AddClickHandler(_ => SetStatus(
@@ -9418,8 +9321,6 @@ public sealed class DemoUi
             Dock = XDock.Top,
             Height = 340f,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -9736,8 +9637,7 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 170f,
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(14f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
         };
@@ -9746,8 +9646,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Fill,
             BackColor = null,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
             Padding = new Thickness(0f),
         };
 
@@ -9783,8 +9681,7 @@ public sealed class DemoUi
         {
             AutoSize = false,
             Size = new SKSize(260f, 76f),
-            BorderWidth = 1f,
-            CornerRadius = 8f,
+            Border = Framed(8f),
             Padding = new Thickness(12f),
         };
         busyCard.Controls.Add(new BusyIndicator
@@ -9874,7 +9771,7 @@ public sealed class DemoUi
 
             if (IsFocused)
             {
-                Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, CornerRadius);
+                Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.CornerRadius);
             }
         }
     }

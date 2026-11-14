@@ -40,8 +40,18 @@ public class TextBox : Control
     private bool _editingRange;
 
     /// <summary>
+    /// The frame a text box gives itself, which the subclasses that are still text boxes - the date
+    /// picker, the colour picker's fields - reuse, with their own corner radius where it differs.
+    /// </summary>
+    protected static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin
+        .WithCornerRadius(6f)
+        .WithFocusColor(ThemeColor.Accent)
+        .WithHoverColor(ThemeColor.SplitterHover)
+        .WithDisabledColor(ThemeColor.DisabledBackground);
+
+    /// <summary>
     /// Creates an empty single-line field: focusable, with an I-beam cursor and a caret, a one-pixel
-    /// rounded border, eight pixels of horizontal and six of vertical padding, and a minimum height
+    /// rounded border, seven pixels of horizontal and five of vertical padding, and a minimum height
     /// of 30 pixels.
     /// </summary>
     public TextBox()
@@ -49,9 +59,8 @@ public class TextBox : Control
         TabStop = true;
         Cursor = Cursor.IBeam;
         _caret = new Caret(this);
-        BorderWidth = 1f;
-        CornerRadius = 6f;
-        Padding = new Thickness(8f, 6f);
+        Border = DefaultBorder;
+        Padding = new Thickness(7f, 5f);
         MinimumSize = new SKSize(0f, 30f);
 
         // A text box is always part of a selection: its own caret and anchor answer for a drag
@@ -113,8 +122,22 @@ public class TextBox : Control
     /// <summary>True when the box edits several lines. Answers from the seam, so it costs one null check.</summary>
     internal bool IsMultiline => MultilineFeature is not null;
 
-    /// <summary>The client area and padding the multi-line feature lays text out against.</summary>
-    internal TextBoxViewport Viewport => new(ClientRect, ContentPadding);
+    /// <summary>
+    /// The client area and padding the multi-line feature lays text out against.
+    /// </summary>
+    /// <remarks>
+    /// The client is the area inside the frame, and the padding is the content's inset less the
+    /// frame's own: the text lands where <see cref="Control.ContentRect"/> puts it, and the scrollbars
+    /// sit inside the frame rather than under it.
+    /// </remarks>
+    internal TextBoxViewport Viewport
+    {
+        get
+        {
+            var insets = Border.Insets(this);
+            return new(Geometry.Deflate(ClientRect, insets), ContentPadding - insets);
+        }
+    }
 
     /// <summary>
     /// The text as a value. A multi-line box normalises what it is given: CRLF and a lone CR become
@@ -188,7 +211,8 @@ public class TextBox : Control
     /// their own chrome in the field, such as <see cref="NumericUpDown"/>'s spinner, widen
     /// it so the text stops short of what they draw instead of running underneath it.
     /// </summary>
-    protected virtual Thickness ContentPadding => Padding;
+    /// <summary>The area the text is laid out in: the client rect without <see cref="ContentPadding"/>.</summary>
+    protected virtual Thickness ContentPadding => Padding + Border.Insets(this);
 
     /// <summary>The area the text is laid out in: the client rect without <see cref="ContentPadding"/>.</summary>
     private protected SKRect TextRect => Geometry.Deflate(ClientRect, ContentPadding);
@@ -604,22 +628,14 @@ public class TextBox : Control
     }
 
     /// <summary>
-    /// Fills the field and draws its border: disabled, focused, hovered and resting states each have
-    /// their own colour, and the border is drawn here rather than in the border pass so the text and
-    /// the caret are painted over it.
+    /// Fills the field: disabled boxes get the disabled fill and everything else its own background.
+    /// The border is painted by <see cref="Control.OnPaintBorder"/> after the text, which is safe
+    /// because the text cannot reach it.
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
-        Painter.Fill(canvas, rect, fill, CornerRadius);
-
-        var border = !Enabled
-            ? Theme.DisabledBackground
-            : IsFocused
-                ? Theme.Accent
-                : IsMouseOver ? Theme.SplitterHover : BorderColor;
-
-        Painter.DrawBorder(canvas, rect, border, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
+        Painter.Fill(canvas, rect, fill, Border.CornerRadius);
     }
 
     /// <summary>
@@ -745,15 +761,6 @@ public class TextBox : Control
         canvas.ClipRect(area);
         _caret.Draw(canvas, CaretBounds);
         canvas.Restore();
-    }
-
-    /// <summary>
-    /// Nothing to draw: the border is painted in <see cref="OnPaintBackground"/> so that it stays
-    /// behind the text and the caret.
-    /// </summary>
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        // The border is drawn in OnPaintBackground so it stays behind the text and caret.
     }
 
     /// <summary>

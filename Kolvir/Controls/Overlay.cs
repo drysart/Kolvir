@@ -41,13 +41,11 @@ public class Overlay : Panel, IInputSink
     /// </summary>
     public Overlay()
     {
-        CornerRadius = 0f;
         Padding = Thickness.Empty;
         TabStop = false;
         Focusable = false;
         Cursor = Cursor.Default;
         BackColor = null;
-        BorderWidth = 0f;
 
         // A layer is meant to cover the region it is put in, so filling it is the default the way a
         // tool strip defaults to docking at the top.
@@ -121,7 +119,7 @@ public class Overlay : Panel, IInputSink
         if (_dim > 0f)
         {
             var shade = Theme.Background.WithAlpha((byte)MathF.Round(Math.Clamp(_dim, 0f, 1f) * 255f));
-            Painter.Fill(canvas, rect, shade, CornerRadius);
+            Painter.Fill(canvas, rect, shade, Border.CornerRadius);
         }
 
         base.OnPaintBackground(canvas, rect);

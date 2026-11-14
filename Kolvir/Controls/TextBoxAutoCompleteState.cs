@@ -674,7 +674,7 @@ internal sealed class TextBoxAutoCompleteState
 
         // The list draws its own border and padding inside its bounds, so both are part of the
         // height the popup has to make room for, as they are for a combo box.
-        float chrome = (_list.BorderWidth * 2f) + _list.Padding.Vertical;
+        float chrome = (_list.Border.Insets(_list).Top * 2f) + _list.Padding.Vertical;
         float rows = MathF.Max(1, _list.ItemCount) * _list.ItemHeight;
         float height = MathF.Min(rows + chrome, MathF.Min(MaxListHeight, room.Height));
 

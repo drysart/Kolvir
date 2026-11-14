@@ -305,7 +305,7 @@ public sealed class TextBoxTests : HeadlessTestBase
     {
         var backend = new TestApplicationBackend();
         var box = new TextBox("hello") { Dock = DockStyle.Fill };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(box);
 
         using var scene = HeadlessScene.Create(backend, panel, 320f, 120f);

@@ -69,15 +69,18 @@ public class Expander : Panel
     private double _progress = 1d;
     private float _expandedHeight;
 
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin
+        .WithCornerRadius(8f)
+        .WithInsets(new Thickness(1f, 0f, 1f, 1f));
+
     /// <summary>
     /// Creates an expanded section with no caption and the border, corner radius and padding the
     /// control is drawn with.
     /// </summary>
     public Expander()
     {
-        BorderWidth = 1f;
-        CornerRadius = 8f;
-        Padding = new Thickness(12f, 0f, 12f, 12f);
+        Border = DefaultBorder;
+        Padding = new Thickness(11f, 0f, 11f, 11f);
         TabStop = true;
         Cursor = Cursor.Hand;
     }
@@ -349,14 +352,21 @@ public class Expander : Panel
     {
         var color = Enabled ? ForeColor : Theme.DisabledForeground;
         float headerBottom = rect.Top + HeaderHeight;
-        var chevron = new SKRect(rect.Left + Padding.Left, rect.Top, rect.Left + Padding.Left + ChevronWidth, headerBottom);
+
+        // The frame takes its own inset on each side, so the caption and the chevron start inside
+        // the frame and the padding is the space between the two.
+        var insets = Border.Insets(this);
+        float left = rect.Left + insets.Left;
+        float right = rect.Right - insets.Right;
+
+        var chevron = new SKRect(left + Padding.Left, rect.Top, left + Padding.Left + ChevronWidth, headerBottom);
 
         PaintChevron(canvas, chevron, color);
 
         var caption = new SKRect(
             chevron.Right + 2f,
             rect.Top,
-            rect.Right - Padding.Right,
+            right - Padding.Right,
             headerBottom);
 
         if (!string.IsNullOrEmpty(Text) && caption.Width > 0f)
@@ -530,7 +540,7 @@ public class Expander : Panel
         if (IsFocused && Enabled)
         {
             var header = new SKRect(rect.Left, rect.Top, rect.Right, rect.Top + HeaderHeight);
-            Painter.DrawFocusRing(canvas, header, Theme.FocusRing, 2f, CornerRadius);
+            Painter.DrawFocusRing(canvas, header, Theme.FocusRing, 2f, Border.CornerRadius);
         }
     }
 

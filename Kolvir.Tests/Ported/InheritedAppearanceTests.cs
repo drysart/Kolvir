@@ -268,8 +268,6 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
     private static Panel NoChrome() => new()
     {
         Dock = DockStyle.Fill,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = new Thickness(0f),
     };
 

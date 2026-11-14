@@ -488,9 +488,8 @@ internal sealed class ToolTipView : Control
         _text = text;
         _maximumWidth = maximumWidth;
 
-        Padding = new Thickness(8f, 5f, 8f, 6f);
-        CornerRadius = 5f;
-        BorderWidth = 1f;
+        Padding = new Thickness(7f, 4f, 7f, 5f);
+        Border = SimpleBorder.Thin.WithCornerRadius(5f);
     }
 
     protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
@@ -510,7 +509,7 @@ internal sealed class ToolTipView : Control
             return;
         }
 
-        var content = Geometry.Deflate(rect, Padding);
+        var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
         TextRenderer.Draw(canvas, _text, Font, ForeColor, content, ContentAlignment.TopLeft, wrap: true);
     }
 }

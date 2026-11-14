@@ -34,7 +34,7 @@ public sealed class InputControlTests : HeadlessTestBase
     [TestMethod]
     public void AReleaseOutsideTheButtonDoesNotClick()
     {
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         var button = new Button("Go") { Dock = DockStyle.Top, Height = 40f };
         panel.Controls.Add(button);
         using var scene = HeadlessScene.Create(panel, 200f, 120f);
@@ -184,7 +184,7 @@ public sealed class InputControlTests : HeadlessTestBase
     {
         var first = new RadioButton("First") { Dock = DockStyle.Top };
         var second = new RadioButton("Second") { Dock = DockStyle.Top };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(first);
         panel.Controls.Add(second);
 
@@ -207,7 +207,7 @@ public sealed class InputControlTests : HeadlessTestBase
     {
         var first = new RadioButton("First") { Dock = DockStyle.Top, GroupName = "a" };
         var second = new RadioButton("Second") { Dock = DockStyle.Top, GroupName = "b" };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(first);
         panel.Controls.Add(second);
 
@@ -237,7 +237,7 @@ public sealed class InputControlTests : HeadlessTestBase
     {
         var first = new RadioButton("First") { Dock = DockStyle.Top };
         var second = new RadioButton("Second") { Dock = DockStyle.Top };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(first);
         panel.Controls.Add(second);
 
@@ -258,7 +258,7 @@ public sealed class InputControlTests : HeadlessTestBase
     {
         using (TestFont.Pin())
         {
-            var stage = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+            var stage = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
             using var scene = HeadlessScene.Create(stage, 400f, 200f);
 
             var shortLabel = new Label("short") { AutoSize = true };

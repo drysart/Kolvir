@@ -35,13 +35,16 @@ public class ProgressBar : Control
     private long _marqueeTimestamp;
     private Timer? _marquee;
 
+    /// <summary>The bar's shape: rounded, with no frame and nothing taken for one.</summary>
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin.WithWidth(0f).WithCornerRadius(4f);
+
     /// <summary>
     /// Creates an empty progress bar: no tab stop and no focus, a 4-pixel corner radius and a minimum
     /// height of 8 logical pixels.
     /// </summary>
     public ProgressBar()
     {
-        CornerRadius = 4f;
+        Border = DefaultBorder;
         Padding = new Thickness(0f);
         MinimumSize = new SKSize(0f, 8f);
         TabStop = false;
@@ -192,7 +195,7 @@ public class ProgressBar : Control
             return;
         }
 
-        Painter.Fill(canvas, rect, Enabled ? Theme.Secondary : Theme.DisabledBackground, CornerRadius);
+        Painter.Fill(canvas, rect, Enabled ? Theme.Secondary : Theme.DisabledBackground, Border.CornerRadius);
 
         var fill = Enabled ? Theme.Accent : Theme.DisabledForeground;
 
@@ -234,13 +237,13 @@ public class ProgressBar : Control
             return;
         }
 
-        Painter.Fill(canvas, new SKRect(track.Left, track.Top, track.Left + width, track.Bottom), color, CornerRadius);
+        Painter.Fill(canvas, new SKRect(track.Left, track.Top, track.Left + width, track.Bottom), color, Border.CornerRadius);
     }
 
     private void PaintBlocks(SKCanvas canvas, SKRect track, SKColor color)
     {
         float limit = track.Left + (track.Width * Percent);
-        float radius = MathF.Min(CornerRadius, (track.Height / 2f));
+        float radius = MathF.Min(Border.CornerRadius, (track.Height / 2f));
 
         for (float left = track.Left; left < limit; left += BlockWidth + BlockGap)
         {
@@ -270,7 +273,7 @@ public class ProgressBar : Control
             canvas,
             new SKRect(clippedLeft, track.Top, clippedRight, track.Bottom),
             color,
-            CornerRadius);
+            Border.CornerRadius);
     }
 
     /// <summary>

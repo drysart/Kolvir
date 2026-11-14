@@ -12,8 +12,6 @@ public class TabPage : Panel
     /// <summary>Creates an empty page with no frame and a 10-pixel gutter.</summary>
     public TabPage()
     {
-        BorderWidth = 0f;
-        CornerRadius = 0f;
         Padding = new Thickness(10f);
     }
 

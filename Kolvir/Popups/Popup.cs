@@ -472,8 +472,6 @@ internal sealed class ScaledPopupHost : Panel
         _content = content;
 
         BackColor = null;
-        BorderWidth = 0f;
-        CornerRadius = 0f;
         Padding = new Thickness(0f);
 
         Controls.Add(content);

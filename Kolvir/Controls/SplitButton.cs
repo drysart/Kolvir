@@ -78,6 +78,12 @@ public class SplitButton : Button
     public bool IsDropDownOpen => _dropDownOpen;
 
     /// <summary>
+    /// Adds <see cref="ControlState.Active"/> while the arrow's menu is showing, so a border can tell
+    /// the button apart from one that is merely focused or hovered.
+    /// </summary>
+    public override ControlState State => base.State | (_dropDownOpen ? ControlState.Active : ControlState.None);
+
+    /// <summary>
     /// True when the arrow is drawn with a divider between it and the main area. A drop-down button
     /// has one label rather than two halves, so it draws no divider.
     /// </summary>

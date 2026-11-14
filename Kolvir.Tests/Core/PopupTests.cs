@@ -176,7 +176,7 @@ public sealed class PopupTests : HeadlessTestBase
     {
         var backend = new TestApplicationBackend();
         var button = new Button("Go") { Dock = DockStyle.Top, Height = 40f };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(button);
 
         using var scene = HeadlessScene.Create(backend, panel, 300f, 200f);
@@ -216,7 +216,7 @@ public sealed class PopupTests : HeadlessTestBase
     {
         var backend = new TestApplicationBackend();
         var button = new Button("Go") { Dock = DockStyle.Fill };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(button);
 
         using var scene = HeadlessScene.Create(backend, panel, 300f, 120f);
@@ -242,7 +242,7 @@ public sealed class PopupTests : HeadlessTestBase
     {
         var backend = new TestApplicationBackend();
         var button = new Button("Go") { Dock = DockStyle.Fill };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(button);
 
         using var scene = HeadlessScene.Create(backend, panel, 300f, 120f);

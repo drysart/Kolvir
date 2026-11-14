@@ -144,7 +144,7 @@ public class Image : Control
 
         if (PlaceholderColor is { } placeholder && _image is null)
         {
-            Painter.Fill(canvas, rect, placeholder, CornerRadius);
+            Painter.Fill(canvas, rect, placeholder, Border.CornerRadius);
         }
     }
 

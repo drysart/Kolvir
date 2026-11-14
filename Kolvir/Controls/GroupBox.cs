@@ -15,6 +15,12 @@ namespace Kolvir;
 public class GroupBox : Panel
 {
     /// <summary>
+    /// The frame is drawn by the control, because the caption cuts a break in its top edge, so the
+    /// border carries the shape without taking room or painting a stroke of its own.
+    /// </summary>
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin.WithWidth(0f).WithCornerRadius(8f);
+
+    /// <summary>
     /// Creates a group box with no caption: a one-pixel frame, an 8-pixel corner radius, a 12-pixel
     /// gutter and no tab stop of its own.
     /// </summary>
@@ -22,8 +28,7 @@ public class GroupBox : Panel
     {
         // The panel draws no chrome of its own, and the caption needs a break in the top edge, so
         // the frame is drawn here instead.
-        BorderWidth = 1f;
-        CornerRadius = 8f;
+        Border = DefaultBorder;
         Padding = new Thickness(12f, 0f, 12f, 12f);
         ForeColorRole = ThemeColor.MutedForeground;
         TabStop = false;
@@ -72,11 +77,11 @@ public class GroupBox : Panel
             return;
         }
 
-        float width = BorderWidth <= 0f ? 1f : BorderWidth;
+        float width = 1f;
 
         if (band <= 0f)
         {
-            Painter.DrawBorder(canvas, frame, BorderColor, width, CornerRadius);
+            Painter.DrawBorder(canvas, frame, Theme.Border, width, Border.CornerRadius);
             return;
         }
 
@@ -91,7 +96,7 @@ public class GroupBox : Panel
             new SKRect(caption.Left - 4f, rect.Top - 1f, caption.Right + 4f, rect.Top + band),
             SKClipOperation.Difference,
             antialias: true);
-        Painter.DrawBorder(canvas, frame, BorderColor, width, CornerRadius);
+        Painter.DrawBorder(canvas, frame, Theme.Border, width, Border.CornerRadius);
         canvas.Restore();
 
         TextRenderer.Draw(

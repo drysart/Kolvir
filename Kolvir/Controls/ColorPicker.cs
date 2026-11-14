@@ -74,6 +74,8 @@ public class ColorPicker : Control
     private static readonly string[] HslLabels = ["H\u00B0", "S%", "L%"];
     private static readonly string[] HsvLabels = ["H\u00B0", "S%", "V%"];
 
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin.WithCornerRadius(8f);
+
     private readonly SKRect[] _labelRects = new SKRect[3];
     private readonly SpectrumView _spectrum;
     private readonly HueSlider _hueSlider;
@@ -100,10 +102,7 @@ public class ColorPicker : Control
         TabStop = false;
         Focusable = false;
         Cursor = Cursor.Default;
-        Padding = new Thickness(8f);
         MinimumSize = new SKSize(150f, 270f);
-        BorderWidth = 1f;
-        CornerRadius = 8f;
 
         _spectrum = new SpectrumView(this) { TabIndex = 0, Name = "Spectrum" };
         _hueSlider = new HueSlider(this) { TabIndex = 1, Name = "Hue" };
@@ -127,6 +126,11 @@ public class ColorPicker : Control
         }
 
         Controls.Add(_hex);
+
+        // The frame and the gutter are assigned last, because both lay the picker out and the layout
+        // arranges the views above.
+        Border = DefaultBorder;
+        Padding = new Thickness(7f);
 
         SyncFields();
     }
@@ -1309,9 +1313,8 @@ public class ColorPicker : Control
             _owner = owner;
             _index = index;
             TabStop = true;
-            BorderWidth = 1f;
-            CornerRadius = 5f;
-            Padding = new Thickness(4f, 4f);
+            Border = DefaultBorder.WithCornerRadius(5f);
+            Padding = new Thickness(3f, 3f);
             MinimumSize = new SKSize(0f, 28f);
 
             // One character more than a valid value holds, so an out-of-range paste is clamped
@@ -1434,9 +1437,8 @@ public class ColorPicker : Control
         {
             _owner = owner;
             TabStop = true;
-            BorderWidth = 1f;
-            CornerRadius = 5f;
-            Padding = new Thickness(4f, 4f);
+            Border = DefaultBorder.WithCornerRadius(5f);
+            Padding = new Thickness(3f, 3f);
             MinimumSize = new SKSize(0f, 28f);
 
             // One more than "#RRGGBB" holds, so a pasted alpha form reaches the parser and is

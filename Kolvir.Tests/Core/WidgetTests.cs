@@ -99,7 +99,7 @@ public sealed class WidgetTests : HeadlessTestBase
     {
         var backend = new TestApplicationBackend();
         var bar = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee };
-        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
         panel.Controls.Add(bar);
 
         using var scene = HeadlessScene.Create(backend, panel, 240f, 60f);
@@ -143,7 +143,7 @@ public sealed class WidgetTests : HeadlessTestBase
     {
         var backend = new TestApplicationBackend();
         var bar = new ProgressBar { Dock = DockStyle.Fill, Style = ProgressBarStyle.Marquee };
-        var host = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, BorderWidth = 0f };
+        var host = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
 
         using var scene = HeadlessScene.Create(backend, host, 240f, 60f);
         scene.Paint();
@@ -285,7 +285,6 @@ public sealed class WidgetTests : HeadlessTestBase
         {
             Dock = DockStyle.Fill,
             Padding = Thickness.Empty,
-            BorderWidth = 0f,
         };
         group.Controls.Add(content);
 

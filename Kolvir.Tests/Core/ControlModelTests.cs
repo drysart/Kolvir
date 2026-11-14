@@ -593,8 +593,6 @@ public sealed class ControlModelTests : HeadlessTestBase
     private static Panel PlainContainer() => new()
     {
         Dock = DockStyle.Fill,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
     };
 }

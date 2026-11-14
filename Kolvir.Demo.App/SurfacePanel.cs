@@ -14,8 +14,10 @@ internal sealed class SurfacePanel : Panel
 {
     public SurfacePanel()
     {
-        BorderWidth = 1f;
-        CornerRadius = 8f;
+        // The sample's cards were laid out with the frame sharing the gutter rather than reserving
+        // room for it, so the card declares a frame that takes none: reserving a pixel would have
+        // moved the contents of every page by one.
+        Border = SimpleBorder.Thin.WithCornerRadius(8f).WithInsets(Thickness.Empty);
     }
 
     protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
@@ -26,8 +28,7 @@ internal sealed class SurfaceStackPanel : StackPanel
 {
     public SurfaceStackPanel()
     {
-        BorderWidth = 1f;
-        CornerRadius = 8f;
+        Border = SimpleBorder.Thin.WithCornerRadius(8f).WithInsets(Thickness.Empty);
     }
 
     protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);

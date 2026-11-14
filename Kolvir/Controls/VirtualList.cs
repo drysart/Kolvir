@@ -58,10 +58,15 @@ public abstract class VirtualList : Control
     private Action<object>? _selectedIndexChanged;
     private Action<object>? _itemActivated;
 
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin
+        .WithCornerRadius(4f)
+        .WithFocusColor(ThemeColor.Accent)
+        .WithDisabledColor(ThemeColor.DisabledBackground);
+
     /// <summary>
     /// Creates the scroll helper and applies the defaults every list control shares: focusable, a tab
-    /// stop, one pixel of border, rounded corners, two pixels of padding, a minimum height of 32
-    /// pixels and an automatic vertical scrollbar.
+    /// stop, one pixel of border, rounded corners, one pixel of padding, a minimum height of 32 pixels
+    /// and an automatic vertical scrollbar.
     /// </summary>
     protected VirtualList()
     {
@@ -72,9 +77,8 @@ public abstract class VirtualList : Control
 
         Focusable = true;
         TabStop = true;
-        BorderWidth = 1f;
-        CornerRadius = 4f;
-        Padding = new Thickness(2f);
+        Border = DefaultBorder;
+        Padding = new Thickness(1f);
         MinimumSize = new SKSize(0f, 32f);
         _scroll.Vertical = ScrollStyle.Automatic;
     }
@@ -467,7 +471,11 @@ public abstract class VirtualList : Control
     protected virtual SKRect ScrollClient => ClientRect;
 
     /// <summary>The padding applied inside the viewport, which is <see cref="Control.Padding"/> unless a derived control says otherwise.</summary>
-    protected virtual Thickness ScrollPadding => Padding;
+    /// <summary>
+    /// The area the rows scroll in: the frame's insets and the padding, so the rows sit between the
+    /// two. A list whose frame it does not draw overrides this with its own gutters.
+    /// </summary>
+    protected virtual Thickness ScrollPadding => Padding + Border.Insets(this);
 
     /// <summary>Rows an auto-sized control shows when nothing constrains it.</summary>
     protected virtual int DefaultVisibleRows => 8;
@@ -631,7 +639,7 @@ public abstract class VirtualList : Control
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
-        Painter.Fill(canvas, rect, fill, CornerRadius);
+        Painter.Fill(canvas, rect, fill, Border.CornerRadius);
     }
 
     /// <inheritdoc />
@@ -663,17 +671,6 @@ public abstract class VirtualList : Control
         }
 
         canvas.Restore();
-    }
-
-    /// <inheritdoc />
-    /// <remarks>The border takes the accent colour while the control has the focus.</remarks>
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        var border = !Enabled
-            ? Theme.DisabledBackground
-            : IsFocused ? Theme.Accent : BorderColor;
-
-        Painter.DrawBorder(canvas, rect, border, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
     }
 
     /// <summary>

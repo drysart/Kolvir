@@ -61,7 +61,6 @@ public sealed class BusyOverlayTests : HeadlessTestBase
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
-            BorderWidth = 0f,
             Padding = Thickness.Empty,
         };
         panel.Controls.Add(spinner);
@@ -286,8 +285,6 @@ public sealed class BusyOverlayTests : HeadlessTestBase
     {
         Dock = DockStyle.Fill,
         BackColor = null,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
     };
 }

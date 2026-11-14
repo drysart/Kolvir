@@ -25,6 +25,12 @@ public class Button : Control
     private ButtonStyle _style = ButtonStyle.Primary;
 
     /// <summary>
+    /// The button's shape: rounded, and taking no room, because the only frame a button draws is the
+    /// secondary style's, which is chrome of that style rather than the button's own border.
+    /// </summary>
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin.WithWidth(0f).WithCornerRadius(6f);
+
+    /// <summary>
     /// Creates a button with no text: a tab stop with the hand cursor, the standard button padding
     /// and a minimum height of 32 logical pixels.
     /// </summary>
@@ -32,7 +38,7 @@ public class Button : Control
     {
         TabStop = true;
         Cursor = Cursor.Hand;
-        CornerRadius = 6f;
+        Border = DefaultBorder;
         Padding = new Thickness(14f, 8f);
         MinimumSize = new SKSize(0f, 32f);
     }
@@ -82,17 +88,17 @@ public class Button : Control
         var (fill, _) = ResolveColors();
         if (fill is { } color)
         {
-            Painter.Fill(canvas, rect, color, CornerRadius);
+            Painter.Fill(canvas, rect, color, Border.CornerRadius);
         }
 
         if (_style == ButtonStyle.Secondary && Enabled)
         {
-            Painter.DrawBorder(canvas, rect, Theme.Border, 1f, CornerRadius);
+            Painter.DrawBorder(canvas, rect, Theme.Border, 1f, Border.CornerRadius);
         }
 
         if (IsFocused && Enabled)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.CornerRadius);
         }
     }
 
@@ -109,15 +115,6 @@ public class Button : Control
         var (_, textColor) = ResolveColors();
         var content = Geometry.Deflate(rect, Padding);
         TextRenderer.Draw(canvas, Text, Font, textColor, content, ContentAlignment.MiddleCenter);
-    }
-
-    /// <summary>
-    /// Draws nothing: the fill, the border and the focus ring are painted in
-    /// <see cref="OnPaintBackground"/> so that they stay behind the text.
-    /// </summary>
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        // Borders and focus rings are drawn in OnPaintBackground so they stay behind the text.
     }
 
     /// <summary>Takes the mouse capture and marks the button pressed on a left-button press.</summary>

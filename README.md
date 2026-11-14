@@ -86,7 +86,7 @@ has to read `--classic-menus` before it can build a backend.
 | `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
 | `Background` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
-| `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `Background` and `BorderWidth` for a card |
+| `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `Background` and `Border` for a card |
 | `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
 | `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
@@ -498,9 +498,9 @@ var stack = new StackPanel
 {
     Dock = DockStyle.Fill,
     Spacing = 8f,
-    Padding = new Thickness(12f),
     Background = Background.FromThemeColor(ThemeColor.Surface),   // a stack draws no frame of its own by default
-    BorderWidth = 1f,
+    Padding = new Thickness(11f),                                 // eleven: the frame takes one more
+    Border = SimpleBorder.Thin,
 };
 
 stack.Controls.Add(new Button("Save"));
@@ -2470,6 +2470,58 @@ macOS the key equivalent on the `NSMenuItem` answers it first.
 `ShortcutText` still exists for a menu that wants to describe a key it does not dispatch itself;
 when it is set it wins over the shortcut's own text in the menu drawing.
 
+### Borders
+
+A control's frame is an object, not a pair of numbers: `Control.Border` holds a `Border`, and the
+border answers four questions - how much of the control it takes, what it clips, whether the control
+is still opaque, and what to paint. `Border.None` is the default and the singleton that means "no
+frame"; `SimpleBorder` is the straight-sided, one-colour frame a control class gives itself.
+
+```csharp
+var card = new Panel
+{
+    Dock = DockStyle.Fill,
+    Padding = new Thickness(11f),           // one less than the gutter, because the frame takes one
+    Background = Background.FromThemeColor(ThemeColor.Surface),
+    Border = SimpleBorder.Thin.WithCornerRadius(8f),
+};
+```
+
+| Member | Meaning |
+| --- | --- |
+| `Insets(control)` | The non-client area on each edge. It comes out of the bounds *before* the padding, so `ContentRect = ClientRect - Insets - Padding` |
+| `NarrowsClip` / `ClipTo` | Whether the frame clips the control to a shape narrower than its bounds - true for rounded corners, whose corners let what is behind show through |
+| `IsRectangular` | The border's share of `Control.Opaque`: a rounded frame that lets the corner through stops the control repainting what is behind it |
+| `CornerRadius` | The radius the control rounds its own background fill by, so the fill follows the frame |
+| `Paint(canvas, bounds, control)` | Draws the frame, inside the bounds and after the children, so it covers the edge of whatever the content ran into |
+
+A border is immutable, so a control class keeps one in a `private static readonly` field and assigns
+it in its constructor; a change is a different instance, the way `Padding` and `Background` work. The
+setter repaints, and lays out as well when the new border takes a different amount of room.
+
+`SimpleBorder` carries a thickness, a corner radius and a colour, and gives the frame a colour per
+state: `WithThemeColor` for the resting colour and `WithHoverColor`, `WithFocusColor`,
+`WithActiveColor`, `WithPressedColor` and `WithDisabledColor` for the rest. When several apply at
+once they are taken in that order - disabled, pressed, active, focused, hovered, then resting - which
+is the order the built-in controls hand-coded before borders were objects. `Rounded(radius)` is the
+shape without a stroke: it rounds the fill and clips the corners, and takes no room.
+`WithInsets(inset)` makes a frame take a different amount of room than the stroke is thick, which is
+what a control whose band is asymmetric needs.
+
+The state a colour is resolved for is `Control.State`, a `ControlState` flag set computed from
+`Enabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its own adds it
+to the base's:
+
+```csharp
+public override ControlState State => base.State | (_dropDownOpen ? ControlState.Active : ControlState.None);
+```
+
+That is how a combo box, a split button and a date picker keep their frame in the accent colour while
+the list or calendar they own is showing, even after the pointer has moved into it. A border that
+needs more than a colour - the caption band of a group box, a frame that is dashed, a shadow - is a
+subclass of `Border`; BORDERS.md holds the design record and the phase-2 plan for per-edge and
+per-corner settings.
+
 ### Appearance
 
 Every default colour in the library is a palette role, so the whole UI can switch between light and
@@ -2498,7 +2550,7 @@ when the control itself assigns nothing - so a palette change re-applies nothing
 | `BackColor` | The WinForms name for `Background`: the effective colour, or `null` when nothing is painted |
 | `DefaultBackground` | Override to return the palette role a control of this class paints - the base control paints nothing |
 | `ForeColorRole` | The role used while neither this control nor an ancestor assigns a `Foreground` |
-| `BorderColor` | An explicitly assigned colour, otherwise `Theme.Border` |
+| `Border` | The frame - see [Borders](#borders) |
 | `Opacity` | Fades the control and everything inside it as one group, 0 to 1 |
 | `TextSpan.ThemeColor` | A role for one span of a rich label; `AddLink` uses `Accent` |
 | `TextSpan.HoverBackColorRole` | The role tinted behind a span while it is hovered |
