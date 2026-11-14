@@ -1,0 +1,178 @@
+using System.Diagnostics;
+using XDock = Kolvir.DockStyle;
+
+namespace Kolvir.Demo;
+
+/// <summary>
+/// The performance page for a stack of controls rather than for rows.
+/// </summary>
+internal sealed class PerformanceControlsPage : DemoPage
+{
+    /// <summary>Builds the page, once, for the life of the window.</summary>
+    /// <param name="shell">The window the page is shown in.</param>
+    public PerformanceControlsPage(DemoUi shell) : base(shell) => Initialize(Build());
+
+    /// <summary>
+    /// The same measurement over real controls rather than rows: a stack panel holding one button
+    /// per entry, stacked down it and scrolled by the panel itself. Nothing here is virtualised, so
+    /// the panel arranges and walks every button it holds on every frame - which is the cost the
+    /// list page avoids, and the reason to have both.
+    /// </summary>
+    private Panel Build()
+    {
+        const float ButtonHeight = 32f;
+        const float ButtonPitch = 36f;
+
+        var panel = new StackPanel
+        {
+            Dock = XDock.Fill,
+            VerticalScroll = ScrollStyle.Automatic,
+            HorizontalScroll = ScrollStyle.None,
+            Spacing = ButtonPitch - ButtonHeight,
+            Border = Framed(8f),
+        };
+
+        return PerformanceCard(panel, "buttons", count =>
+        {
+            // Every child added lays the panel out again, so filling it one button at a time would
+            // cost a pass over a growing child list per button. Suspending layout turns that into
+            // the single pass ResumeLayout runs at the end.
+            panel.SuspendLayout();
+            try
+            {
+                var previous = panel.Controls.ToArray();
+                panel.Controls.Clear();
+                foreach (var child in previous)
+                {
+                    child.Dispose();
+                }
+
+                for (int index = 0; index < count; index++)
+                {
+                    // A fixed height with the stack's stretch keeps the button out of the measure
+                    // pass altogether: the stack only has to place it.
+                    panel.Controls.Add(new Button($"Button {index + 1:N0}")
+                    {
+                        AutoSize = false,
+                        Height = ButtonHeight,
+                    });
+                }
+            }
+            finally
+            {
+                panel.ResumeLayout();
+            }
+
+            panel.ScrollTo(0f, 0f);
+        });
+    }
+
+    /// <summary>
+    /// The chrome both performance pages share: a row of buttons that load a chosen number of
+    /// entries into <paramref name="content"/>, and a readout of what the last frame cost.
+    /// </summary>
+    /// <param name="content">The control the buttons fill, and the one the readout reports on.</param>
+    /// <param name="noun">What one entry is called, for the count and the status line.</param>
+    /// <param name="fill">Replaces everything in <paramref name="content"/> with the given count.</param>
+    private Panel PerformanceCard(Control content, string noun, Action<int> fill)
+    {
+        var card = Card();
+
+        var countLabel = new Label($"no {noun}")
+        {
+            Dock = XDock.Right,
+            AutoSize = false,
+            Width = 110f,
+            Font = Theme.CaptionFont,
+            ForeColorRole = ThemeColor.MutedForeground,
+            TextAlign = ContentAlignment.BottomRight,
+            Margin = new Thickness(0f),
+        };
+
+        var frameLabel = new Label("Last frame -")
+        {
+            Dock = XDock.Fill,
+            AutoSize = false,
+            Font = Theme.CaptionFont,
+            ForeColorRole = ThemeColor.MutedForeground,
+            TextAlign = ContentAlignment.BottomLeft,
+            Margin = new Thickness(0f),
+        };
+
+        // Docking is applied in declaration order, so the count takes the right edge before the
+        // frame time fills what is left of the row.
+        var readout = Row(20f);
+        readout.Controls.Add(countLabel);
+        readout.Controls.Add(frameLabel);
+
+        var buttons = Row(32f);
+        buttons.Controls.Add(LoadButton("Clear", () => Load(0)));
+
+        foreach (int size in new[] { 1, 10, 100, 1000, 10000, 100000 })
+        {
+            int count = size;
+            buttons.Controls.Add(LoadButton(size.ToString("N0"), () => Load(count)));
+        }
+
+        card.Controls.Add(buttons);
+        card.Controls.Add(readout);
+        card.Controls.Add(content);
+
+        // The readout is the one thing on the page that is not the content, and it is painted into
+        // the frame it reports on, so a naive update would measure itself: the text changes, the
+        // label repaints, that repaint is the next frame, and the page never goes idle. Only
+        // assigning a changed string and only reading the host every so often lets the loop die
+        // once the label is all that is left repainting.
+        const long ReadoutIntervalMs = 100;
+        long lastReadout = long.MinValue / 2;
+        string shownFrame = string.Empty;
+
+        OnHostAvailable(content, host => host.AddFramePaintedHandler(_ =>
+        {
+            long now = Environment.TickCount64;
+            if (now - lastReadout < ReadoutIntervalMs)
+            {
+                return;
+            }
+
+            lastReadout = now;
+
+            var area = host.LastFrameArea;
+            string text = $"Last frame {host.LastFrameTime.TotalMilliseconds:0.0} ms " +
+                          $"over {area.Width} x {area.Height} px";
+
+            if (text != shownFrame)
+            {
+                shownFrame = text;
+                frameLabel.Text = text;
+            }
+        }));
+
+        return card;
+
+        Button LoadButton(string text, Action onClick)
+        {
+            var button = new Button(text)
+            {
+                Dock = XDock.Left,
+                AutoSize = true,
+                Style = ButtonStyle.Secondary,
+                Margin = new Thickness(0f, 0f, 6f, 0f),
+            };
+            button.AddClickHandler(_ => onClick());
+            return button;
+        }
+
+        void Load(int count)
+        {
+            long started = Stopwatch.GetTimestamp();
+
+            fill(count);
+
+            countLabel.Text = count == 0 ? $"no {noun}" : $"{count:N0} {noun}";
+            SetStatus($"Loaded {count:N0} {noun} in {Stopwatch.GetElapsedTime(started).TotalMilliseconds:0.0} ms.");
+        }
+    }
+
+    /// <summary>An invisible full-width strip a page uses to lay a row of controls out in.</summary>
+}
