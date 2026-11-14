@@ -76,9 +76,9 @@ resting colours, and `ListView`, `TabControl`, `ComboBox` and `VirtualList` each
 Without the owner a control either allocates a `Border` per state change or mutates a shared one, and
 neither is acceptable.
 
-`Insets` needs it for a reason that only shows up in phase 2, and is worth recording now: a
-`GroupBoxBorder` takes its caption band out of the content area, and that band's height is the line
-height of **the control's font** — plus, for a border that draws its own text, the control's `Text`.
+`Insets` needs it for a reason that only shows up in phase 2, and is worth recording now: a frame that
+shows its control's caption takes the caption band out of the content area, and that band's height is the
+line height of **the control's font** — plus, for a border that draws the text, the control's `Text`.
 `Control.Text` and `Control.Font` are both public and virtual, so a border can read them from the
 owner with no downcast and no control-specific interface. An inset that depends on the font is
 therefore not a constant, and `Insets` without the owner could not express a group box.
@@ -220,10 +220,10 @@ after the base's and therefore wins — ordinary C# precedence rather than a rul
 
 The `relayout` comparison is between the *old* border's insets and the *new* one's, both measured
 against this control, which is what makes a state swap free when the geometry did not change and
-correct when it did (a `GroupBoxBorder` recomputes its caption band from the font, so the same screen
-position can want a layout when the font changed). It also means a `Border` must answer `Insets`
-honestly for the control it is on — it may be called with the old instance while the new one is being
-assigned.
+correct when it did (a frame that shows its control's caption recomputes its band from the font, so the
+same screen position can want a layout when the font changed). It also means a `Border` must answer
+`Insets` honestly for the control it is on — it may be called with the old instance while the new one is
+being assigned.
 
 **The declarative part is a convention, not an API.** A control class that draws a frame declares it
 once, as a shared instance, and assigns it:
@@ -353,7 +353,7 @@ one.** They are not the same set, and the difference is the interesting half of 
 | `ColorPicker` | 1px | 8 | inset 1, padding 7; the spectrum and hue views keep their strokes as inner chrome, because a stroke over a bitmap has nothing to inset |
 | `Expander` | 1px | 12, 0, 12, 12 | insets 1, 0, 1, 1 and padding 11, 0, 11, 11: the caption sits on the top edge, so the top takes no room |
 | `VirtualList` | 1px | 2 | inset 1, padding 1, and `ScrollPadding` is the two together, so the rows stay two pixels in |
-| `TabControl` | 1px | 0 | **shape only, no stroke**: the strip and the pages share the frame's edges, so reserving room would move both. It keeps drawing its frame in the background pass, and a `TabControlBorder` that owns the strip is phase-2 work |
+| `TabControl` | 1px | 0 | **shape only, no stroke**: the strip and the pages share the frame's edges, so reserving room would move both. It still draws its frame in the background pass; unifying it means a border that owns the strip, which is not obviously a win (section 10) |
 | `GroupBox` | 1px | 11, 0, 11, 11 | `WithControlText()`: the frame draws the caption in a break in its top edge and takes the band out of the content, so the control is now just a `Panel` with that border |
 | `Button` | none | 14, 8 | shape only, radius 6, no stroke: the only frame a button draws is the secondary style's, which is chrome of that style |
 
@@ -588,8 +588,14 @@ of every corner arc by a fraction of a pixel. Section 8 records what that cost.
 
 **Deliberately not here.** A dashed frame is a `Border` of its own that strokes a path: a dash belongs
 to a stroke, and a frame with a width per edge has to be filled to keep its mitres, so the two cannot be
-one object. `TabControlBorder` is the last one - the only control still drawing its own frame - and it
-has to own the tab strip rather than just the outline, which is why it did not come with this.
+one object. That is the one piece of the original plan still missing.
+
+`TabControl` is the one control still drawing its own frame, and after doing `GroupBox` the case for
+unifying it looks weak rather than obvious. What a tab control draws is not a frame: it is a frame plus a
+strip of tabs plus a rule across the bottom of the strip, with the selected tab's bottom edge broken out
+of that rule, and the strip's height depends on the tabs, which the control owns. A `TabControlBorder`
+would have to ask the control for the strip height, and the control would still draw the tabs - so the
+drawing code would move without the control learning less about its own chrome.
 
 **The caption, and why it is a flag rather than a type.** `GroupBox` drew its own frame: a caption band,
 a break cut out of the top edge, and the content pushed below it by a `ContentBounds` override. All of
