@@ -18,6 +18,7 @@ namespace Kolvir.Backend.Gtk4;
 /// CPU texture below is what a window falls back to, and what a window that did not ask for
 /// acceleration uses from the start.
 /// </para>
+/// <para>
 /// The frame is handed to GTK as a <see cref="Gdk.MemoryTexture"/> rather than painted into the
 /// Cairo context of a <see cref="Gtk.DrawingArea"/>. GTK4 gives a drawing area a Cairo recording
 /// surface, so compositing a bitmap into it means using the bitmap as a Cairo source, and Cairo
@@ -125,6 +126,10 @@ public sealed class Gtk4SkiaView : IDisposable
     private long _reportedAt;
     private long _reportedFrames;
 
+    /// <summary>
+    /// Creates the host widget on the CPU path, for a window that did not ask for acceleration.
+    /// </summary>
+    /// <param name="host">The control tree to paint.</param>
     public Gtk4SkiaView(UiHost host)
         : this(host, false)
     {
@@ -373,6 +378,10 @@ public sealed class Gtk4SkiaView : IDisposable
         _reportedFrames = _frames;
     }
 
+    /// <summary>
+    /// Drops the handlers the view registered with the host and the theme, then releases the frame
+    /// texture and the GL surface. Calling it again does nothing.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

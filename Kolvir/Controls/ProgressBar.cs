@@ -35,6 +35,10 @@ public class ProgressBar : Control
     private long _marqueeTimestamp;
     private Timer? _marquee;
 
+    /// <summary>
+    /// Creates an empty progress bar: no tab stop and no focus, a 4-pixel corner radius and a minimum
+    /// height of 8 logical pixels.
+    /// </summary>
     public ProgressBar()
     {
         CornerRadius = 4f;
@@ -175,6 +179,10 @@ public class ProgressBar : Control
     /// <summary>Moves <see cref="Value"/> on by <paramref name="delta"/>.</summary>
     public void Increment(float delta) => Value += delta;
 
+    /// <summary>
+    /// Draws the track and then the fill for the current <see cref="Style"/>, and starts or stops the
+    /// marquee clock on the way, so that a host which only ever paints still animates.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         UpdateMarquee();
@@ -204,12 +212,14 @@ public class ProgressBar : Control
         }
     }
 
+    /// <summary>Starts or stops the marquee clock as the bar comes on or goes off the screen.</summary>
     protected override void OnDisplayedChanged()
     {
         base.OnDisplayedChanged();
         UpdateMarquee();
     }
 
+    /// <summary>Starts or stops the marquee clock as the bar is enabled or disabled.</summary>
     protected override void OnEnabledChanged()
     {
         base.OnEnabledChanged();

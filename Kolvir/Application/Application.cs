@@ -17,7 +17,7 @@ namespace Kolvir;
 /// </para>
 /// <para>
 /// Disposing the application is the teardown path for one that never ran, such as a headless
-/// render. <see cref="Run"/> tears down on its own and calls it too, so disposing afterwards is
+/// render. <see cref="Run()"/> tears down on its own and calls it too, so disposing afterwards is
 /// harmless.
 /// </para>
 /// </remarks>
@@ -165,7 +165,7 @@ public sealed partial class Application : IDisposable
     /// <summary>The application-scoped service provider. One per process.</summary>
     public IServiceProvider Services { get; }
 
-    /// <summary>True from the moment <see cref="Run"/> enters until it has returned.</summary>
+    /// <summary>True from the moment <see cref="Run()"/> enters until it has returned.</summary>
     public bool IsRunning => _running;
 
     /// <summary>
@@ -173,12 +173,12 @@ public sealed partial class Application : IDisposable
     /// already owns the application, in which case this launch has been handed to that process.
     /// </summary>
     /// <remarks>
-    /// A forwarded launch does nothing: <see cref="Run"/> returns 0 without raising
+    /// A forwarded launch does nothing: <see cref="Run()"/> returns 0 without raising
     /// <see cref="AddStartupHandler"/> and without showing a window, so a second launch never flashes one.
     /// </remarks>
     public bool IsPrimaryInstance => _primaryInstance;
 
-    /// <summary>The exit code <see cref="Run"/> returns, or will return once it is called.</summary>
+    /// <summary>The exit code <see cref="Run()"/> returns, or will return once it is called.</summary>
     public int ExitCode => _exitCode;
 
     /// <summary>
@@ -206,7 +206,7 @@ public sealed partial class Application : IDisposable
             "The backend registered no IDialogService. Every backend must register one; " +
             "see IApplicationBackend.RegisterServices.");
 
-    /// <summary>Adds a handler that runs inside <see cref="Run"/>, before any window is shown.</summary>
+    /// <summary>Adds a handler that runs inside <see cref="Run()"/>, before any window is shown.</summary>
     public IDisposable AddStartupHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -353,7 +353,7 @@ public sealed partial class Application : IDisposable
     /// The exception is fatal unless a handler sets
     /// <see cref="UnhandledExceptionEventArgs.Handled"/>: the application then shuts down
     /// through the normal path - windows close, <see cref="AddExitingHandler"/> runs, services are
-    /// disposed - and <see cref="Run"/> rethrows it. A handled exception is swallowed and the loop
+    /// disposed - and <see cref="Run()"/> rethrows it. A handled exception is swallowed and the loop
     /// keeps running, unless the failure happened inside the platform's own loop, in which case
     /// there is nothing left to run and the application exits with code 1.
     /// </remarks>
@@ -444,7 +444,7 @@ public sealed partial class Application : IDisposable
     /// <summary>
     /// Asks the application to exit. Every open window is closed first and any of them may refuse,
     /// which aborts the exit; the handlers <see cref="AddExitingHandler"/> added run from
-    /// <see cref="Run"/> once the loop has ended.
+    /// <see cref="Run()"/> once the loop has ended.
     /// </summary>
     /// <param name="exitCode">The process exit code to return.</param>
     public void Exit(int exitCode)
@@ -523,7 +523,7 @@ public sealed partial class Application : IDisposable
 
     /// <summary>
     /// Queues <paramref name="action"/> on the UI thread and returns immediately. Queued work runs
-    /// when the loop runs, so queueing before <see cref="Run"/> is legal but does not run early.
+    /// when the loop runs, so queueing before <see cref="Run()"/> is legal but does not run early.
     /// </summary>
     /// <param name="action">The work to queue.</param>
     /// <remarks>
@@ -537,7 +537,7 @@ public sealed partial class Application : IDisposable
         Backend.Invoke(() => Guard(action), synchronous: false);
     }
 
-    /// <summary>Tears the application down. Idempotent, and safe to call after <see cref="Run"/>.</summary>
+    /// <summary>Tears the application down. Idempotent, and safe to call after <see cref="Run()"/>.</summary>
     public void Dispose() => TearDown();
 
     internal void RegisterWindow(Window window)
@@ -804,7 +804,7 @@ public sealed partial class Application : IDisposable
 
     /// <summary>
     /// Records an unhandled exception as fatal and asks the application to exit. The loop is still
-    /// alive here, so the shutdown is a normal one and <see cref="Run"/> rethrows afterwards.
+    /// alive here, so the shutdown is a normal one and <see cref="Run()"/> rethrows afterwards.
     /// </summary>
     private void Fault(Exception exception)
     {

@@ -14,10 +14,16 @@ public sealed class ListViewColumn
     private ContentAlignment _alignment = ContentAlignment.MiddleLeft;
     private Comparison<ListViewItem>? _comparer;
 
+    /// <summary>Creates a column with an empty header, a width of 120 and left-aligned cells.</summary>
     public ListViewColumn()
     {
     }
 
+    /// <summary>Creates a column.</summary>
+    /// <param name="text">The header text; <see langword="null"/> is read as an empty string.</param>
+    /// <param name="width">The width in logical pixels.</param>
+    /// <param name="alignment">How the header and the cells are aligned.</param>
+    /// <exception cref="ArgumentOutOfRangeException"><paramref name="width"/> is negative.</exception>
     public ListViewColumn(string text, float width, ContentAlignment alignment = ContentAlignment.MiddleLeft)
     {
         ArgumentOutOfRangeException.ThrowIfNegative(width);
@@ -119,11 +125,15 @@ public sealed class ListViewItem
 {
     private readonly List<string> _cells;
 
+    /// <summary>Creates a row with a single, empty cell.</summary>
     public ListViewItem()
         : this(string.Empty)
     {
     }
 
+    /// <summary>Creates a row whose first column reads <paramref name="text"/>.</summary>
+    /// <param name="text">The first column's text; null is read as an empty string.</param>
+    /// <param name="cells">The text for the later columns; a null entry is empty.</param>
     public ListViewItem(string text, params string[] cells)
     {
         _cells = new List<string>(1 + (cells?.Length ?? 0)) { text ?? string.Empty };
@@ -216,6 +226,9 @@ public sealed class ListViewItem
 /// <summary>What a <see cref="ListView"/> column-click handler is given.</summary>
 public class ListViewColumnClickEventArgs
 {
+    /// <summary>Creates the arguments for a click on a column's header.</summary>
+    /// <param name="column">The column whose header was clicked.</param>
+    /// <param name="columnIndex">The column's position in <see cref="ListView.Columns"/>.</param>
     public ListViewColumnClickEventArgs(ListViewColumn column, int columnIndex)
     {
         Column = column;
@@ -277,6 +290,7 @@ public class ListView : VirtualList
 
     private Action<object, ListViewColumnClickEventArgs>? _columnClick;
 
+    /// <summary>Creates a list in <see cref="View.Details"/> with no rows and no columns.</summary>
     public ListView()
     {
         _itemCollection = new ListViewItemCollection(this, _items);
@@ -611,15 +625,17 @@ public class ListView : VirtualList
         ReleaseMouseCapture();
     }
 
+    /// <inheritdoc />
     public override string GetItemText(int index) => _items[index].Text;
 
+    /// <inheritdoc />
     public override object? GetItem(int index) => _items[index];
 
     /// <summary>The area the columns are laid out in, which the header and the rows share.</summary>
     /// <remarks>
     /// Both have to agree on where a column starts, so neither works it out from its own rectangle:
-    /// the rows live inside the scroll padding and the header does not. <see cref="RowsRect"/> is
-    /// exactly the rows' area.
+    /// the rows live inside the scroll padding and the header does not.
+    /// <see cref="VirtualList.RowsRect"/> is exactly the rows' area.
     /// </remarks>
     private SKRect ColumnsRect => RowsRect;
 
@@ -657,7 +673,8 @@ public class ListView : VirtualList
     /// <summary>The header band is outside the scrolling area, so the rows start below it.</summary>
     /// <remarks>
     /// It is worked out from the client rectangle rather than from <see cref="HeaderBand"/>, because
-    /// the header takes its width from <see cref="RowsRect"/> and that is measured against this.
+    /// the header takes its width from <see cref="VirtualList.RowsRect"/> and that is measured
+    /// against this.
     /// </remarks>
     protected override SKRect ScrollClient
     {
@@ -677,6 +694,7 @@ public class ListView : VirtualList
     /// <summary>Rows are inset by the border so that they do not paint over it.</summary>
     protected override Thickness ScrollPadding => Inset > 0f ? new Thickness(Inset) : Thickness.Empty;
 
+    /// <inheritdoc />
     protected override float MeasureItemWidth()
     {
         if (_view == View.Details)
@@ -693,6 +711,8 @@ public class ListView : VirtualList
         return width + (TextInset * 2f);
     }
 
+    /// <inheritdoc />
+    /// <remarks>The header band is painted after the base has painted the rows.</remarks>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         base.OnPaint(canvas, rect);
@@ -703,6 +723,7 @@ public class ListView : VirtualList
         }
     }
 
+    /// <inheritdoc />
     protected override void OnDrawItem(SKCanvas canvas, int index, SKRect bounds, DrawItemState state, SKColor textColor)
     {
         var item = _items[index];
@@ -741,6 +762,10 @@ public class ListView : VirtualList
         }
     }
 
+    /// <summary>
+    /// Starts dragging a column's edge when the pointer is on one, and otherwise treats a click in
+    /// the header band as a click on that column.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -766,6 +791,10 @@ public class ListView : VirtualList
         OnColumnClick(column);
     }
 
+    /// <summary>
+    /// Widens or narrows the column being dragged, and otherwise tracks the column under the pointer
+    /// so that its header paints as hot.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -786,6 +815,7 @@ public class ListView : VirtualList
         Invalidate(HeaderBand);
     }
 
+    /// <summary>Ends a column drag when the left button is released.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -796,6 +826,7 @@ public class ListView : VirtualList
         }
     }
 
+    /// <summary>Clears the hot column when the pointer leaves the control.</summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
@@ -809,6 +840,7 @@ public class ListView : VirtualList
         Invalidate(HeaderBand);
     }
 
+    /// <summary>Ends a column drag, which also gives up the mouse capture.</summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
@@ -1032,6 +1064,11 @@ public class ListView : VirtualList
             _items = items;
         }
 
+        /// <summary>
+        /// Gets or sets the row at a position. Setting one detaches the row it replaces and puts
+        /// the new one in the list, then measures and repaints the rows.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
         public ListViewItem this[int index]
         {
             get => _items[index];
@@ -1052,10 +1089,13 @@ public class ListView : VirtualList
             }
         }
 
+        /// <summary>The number of rows.</summary>
         public int Count => _items.Count;
 
+        /// <summary>Always <see langword="false"/>; the collection can be changed.</summary>
         public bool IsReadOnly => false;
 
+        /// <summary>Adds a row at the end of the list, then measures and repaints the rows.</summary>
         public void Add(ListViewItem item)
         {
             ArgumentNullException.ThrowIfNull(item);
@@ -1085,6 +1125,7 @@ public class ListView : VirtualList
             }
         }
 
+        /// <summary>Inserts a row at a position, then measures and repaints the rows.</summary>
         public void Insert(int index, ListViewItem item)
         {
             ArgumentNullException.ThrowIfNull(item);
@@ -1093,6 +1134,7 @@ public class ListView : VirtualList
             _owner.NotifyItemsChanged();
         }
 
+        /// <summary>Removes a row, returning false when it is not in the list.</summary>
         public bool Remove(ListViewItem item)
         {
             int index = _items.IndexOf(item);
@@ -1105,6 +1147,7 @@ public class ListView : VirtualList
             return true;
         }
 
+        /// <summary>Removes the row at a position and detaches it from the list.</summary>
         public void RemoveAt(int index)
         {
             _items[index].Owner = null;
@@ -1112,6 +1155,7 @@ public class ListView : VirtualList
             _owner.NotifyItemsChanged();
         }
 
+        /// <summary>Removes every row and detaches them from the list.</summary>
         public void Clear()
         {
             if (_items.Count == 0)
@@ -1128,12 +1172,16 @@ public class ListView : VirtualList
             _owner.NotifyItemsChanged();
         }
 
+        /// <summary>True when the row is in the list.</summary>
         public bool Contains(ListViewItem item) => _items.Contains(item);
 
+        /// <summary>Copies the rows into an array, starting at an index.</summary>
         public void CopyTo(ListViewItem[] array, int arrayIndex) => _items.CopyTo(array, arrayIndex);
 
+        /// <summary>The position of a row, or -1 when it is not in the list.</summary>
         public int IndexOf(ListViewItem item) => _items.IndexOf(item);
 
+        /// <summary>Enumerates the rows in the order they are painted.</summary>
         public IEnumerator<ListViewItem> GetEnumerator() => _items.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
@@ -1151,6 +1199,11 @@ public class ListView : VirtualList
             _columns = columns;
         }
 
+        /// <summary>
+        /// Gets or sets the column at a position. Setting one detaches the column it replaces and puts
+        /// the new one in the list, then measures and repaints the rows.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
         public ListViewColumn this[int index]
         {
             get => _columns[index];
@@ -1171,10 +1224,13 @@ public class ListView : VirtualList
             }
         }
 
+        /// <summary>The number of columns.</summary>
         public int Count => _columns.Count;
 
+        /// <summary>Always <see langword="false"/>; the collection can be changed.</summary>
         public bool IsReadOnly => false;
 
+        /// <summary>Adds a column at the end, then measures and repaints the rows.</summary>
         public void Add(ListViewColumn column)
         {
             ArgumentNullException.ThrowIfNull(column);
@@ -1183,6 +1239,7 @@ public class ListView : VirtualList
             _owner.OnColumnChanged();
         }
 
+        /// <summary>Inserts a column at a position, then measures and repaints the rows.</summary>
         public void Insert(int index, ListViewColumn column)
         {
             ArgumentNullException.ThrowIfNull(column);
@@ -1191,6 +1248,7 @@ public class ListView : VirtualList
             _owner.OnColumnChanged();
         }
 
+        /// <summary>Removes a column, returning false when it is not in the list.</summary>
         public bool Remove(ListViewColumn column)
         {
             int index = _columns.IndexOf(column);
@@ -1203,6 +1261,7 @@ public class ListView : VirtualList
             return true;
         }
 
+        /// <summary>Removes the column at a position and detaches it from the list.</summary>
         public void RemoveAt(int index)
         {
             _columns[index].Owner = null;
@@ -1210,6 +1269,7 @@ public class ListView : VirtualList
             _owner.OnColumnChanged();
         }
 
+        /// <summary>Removes every column and detaches them from the list.</summary>
         public void Clear()
         {
             if (_columns.Count == 0)
@@ -1226,12 +1286,16 @@ public class ListView : VirtualList
             _owner.OnColumnChanged();
         }
 
+        /// <summary>True when the column is in the list.</summary>
         public bool Contains(ListViewColumn column) => _columns.Contains(column);
 
+        /// <summary>Copies the columns into an array, starting at an index.</summary>
         public void CopyTo(ListViewColumn[] array, int arrayIndex) => _columns.CopyTo(array, arrayIndex);
 
+        /// <summary>The position of a column, or -1 when it is not in the list.</summary>
         public int IndexOf(ListViewColumn column) => _columns.IndexOf(column);
 
+        /// <summary>Enumerates the columns in the order they are painted.</summary>
         public IEnumerator<ListViewColumn> GetEnumerator() => _columns.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

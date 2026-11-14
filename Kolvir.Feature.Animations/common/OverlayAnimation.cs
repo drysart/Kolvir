@@ -6,8 +6,8 @@ namespace Kolvir.Animations;
 /// <remarks>
 /// <para>
 /// An extension member rather than a property on the control, the same shape
-/// <see cref="ExpanderAnimationExtensions.ExpandDuration"/> and
-/// <see cref="ToastAnimationExtensions.ShowDuration"/> take: the state lives in a table keyed
+/// <c>ExpanderAnimationExtensions.ExpandDuration</c> and
+/// <c>ToastAnimationExtensions.ShowDuration</c> take: the state lives in a table keyed
 /// by the layer, so an application that never asks for the fade carries none of it.
 /// </para>
 /// <para>

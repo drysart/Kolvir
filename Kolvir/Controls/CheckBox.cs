@@ -8,16 +8,20 @@ namespace Kolvir;
 /// </summary>
 public class CheckBox : ToggleControl
 {
+    /// <summary>Creates an unchecked check box with no label.</summary>
     public CheckBox()
     {
     }
 
+    /// <summary>Creates an unchecked check box whose label is <paramref name="text"/>.</summary>
+    /// <param name="text">The label text.</param>
     public CheckBox(string text)
         : this()
     {
         Text = text;
     }
 
+    /// <inheritdoc />
     protected override void PaintGlyph(SKCanvas canvas, SKRect glyph)
     {
         const float Radius = 3f;

@@ -38,7 +38,7 @@ public static class DragDropControlExtensions
 
         /// <summary>
         /// Adds a handler that runs when a drag enters the control. It only runs when
-        /// <see cref="AllowDrop"/> is set.
+        /// <c>AllowDrop</c> is set.
         /// </summary>
         /// <param name="handler">The handler to add.</param>
         public IDisposable AddDragEnterHandler(Action<object, DragEventArgs> handler)
@@ -63,7 +63,7 @@ public static class DragDropControlExtensions
 
         /// <summary>
         /// Adds a handler that runs as a drag moves over the control. It only runs when
-        /// <see cref="AllowDrop"/> is set.
+        /// <c>AllowDrop</c> is set.
         /// </summary>
         /// <param name="handler">The handler to add.</param>
         public IDisposable AddDragOverHandler(Action<object, DragEventArgs> handler)
@@ -110,7 +110,7 @@ public static class DragDropControlExtensions
 
         /// <summary>
         /// Adds a handler that runs when the user releases a drag over the control. It only runs
-        /// when <see cref="AllowDrop"/> is set.
+        /// when <c>AllowDrop</c> is set.
         /// </summary>
         /// <param name="handler">The handler to add.</param>
         public IDisposable AddDragDropHandler(Action<object, DragEventArgs> handler)

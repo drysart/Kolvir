@@ -52,8 +52,9 @@ internal static class SvgDocument
     /// The root element can be preceded by a byte-order mark, whitespace, an XML declaration, a
     /// comment, a DOCTYPE and processing instructions, so the test is "the first element-looking
     /// thing in the first block is <c>svg</c>" rather than "the file starts with a magic number".
-    /// A prefix this short is enough: a provider's <see cref="Decode"/> is where a longer look
-    /// happens, and it reports a document that turns out not to be SVG as a decode failure.
+    /// A prefix this short is enough: a provider's <see cref="IImageFormatProvider.Create"/> is where
+    /// a longer look happens, and it reports a document that turns out not to be SVG as a decode
+    /// failure.
     /// </remarks>
     internal static bool LooksLikeSvg(ReadOnlySpan<byte> header)
     {

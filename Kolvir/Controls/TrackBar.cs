@@ -46,6 +46,10 @@ public class TrackBar : Control
     private SKRect _trackRect;
     private SKRect _knobRect;
 
+    /// <summary>
+    /// Creates a horizontal bar at 0 with a range of 0 to 10, one-unit steps, five-unit page steps
+    /// and a tick every unit, in the tab order.
+    /// </summary>
     public TrackBar()
     {
         TabStop = true;
@@ -168,6 +172,9 @@ public class TrackBar : Control
     /// <summary>Moves the value one <see cref="LargeChange"/> toward the end of the track.</summary>
     public void PerformLargeChange() => SetValue(_value + _largeChange);
 
+    /// <inheritdoc />
+    /// <remarks>160 units along the track and 28 across it, the long axis being the one
+    /// <see cref="TrackBar.Orientation"/> names.</remarks>
     protected override SKSize MeasureContent(SKSize availableSize) =>
         _orientation == Orientation.Vertical ? new SKSize(28f, 160f) : new SKSize(160f, 28f);
 
@@ -175,6 +182,10 @@ public class TrackBar : Control
     public override Cursor GetCursorAt(SKPoint pointInLocal) =>
         _orientation == Orientation.Vertical ? Cursor.SizeNS : Cursor.SizeWE;
 
+    /// <summary>
+    /// Paints the track, its tick marks, the part of the track filled up to the knob and the knob
+    /// itself, plus a focus ring while the bar has the focus.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         UpdateGeometry();
@@ -197,6 +208,11 @@ public class TrackBar : Control
         }
     }
 
+    /// <summary>
+    /// Starts a drag when the knob is pressed, remembering where inside the knob it was grabbed so
+    /// the knob does not jump to the pointer. A press on the track pages by
+    /// <see cref="LargeChange"/> toward the press instead of jumping there.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -228,6 +244,10 @@ public class TrackBar : Control
         }
     }
 
+    /// <summary>
+    /// Drags the knob to the value under the pointer, corrected by the grab offset taken when the
+    /// drag started, while a drag is running.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -241,6 +261,7 @@ public class TrackBar : Control
         SetValue(ValueAtAxis(AxisCoordinate(e.Location) + _grabOffset));
     }
 
+    /// <summary>Ends a drag when the button is released, so the knob stops following the pointer.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -253,6 +274,10 @@ public class TrackBar : Control
         }
     }
 
+    /// <summary>
+    /// Moves the value by <see cref="SmallChange"/> per wheel detent, and claims the turn only when
+    /// the value actually moved - a bar already at its end leaves the wheel to the panel above it.
+    /// </summary>
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
@@ -267,6 +292,10 @@ public class TrackBar : Control
         e.Handled = MathF.Abs(_value - before) > 0.0001f;
     }
 
+    /// <summary>
+    /// Home and End jump to the ends of the range, the arrow keys step by
+    /// <see cref="SmallChange"/> and Page Up and Page Down by <see cref="LargeChange"/>.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -310,12 +339,14 @@ public class TrackBar : Control
         e.Handled = true;
     }
 
+    /// <summary>Ends a drag in progress when the bar loses the focus.</summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
         EndDrag();
     }
 
+    /// <summary>Ends a drag in progress when the bar is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)

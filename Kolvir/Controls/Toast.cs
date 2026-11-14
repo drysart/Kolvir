@@ -89,6 +89,10 @@ public class Toast : Control
     private bool _tabStopBeforeDismiss = true;
     private bool _focusableBeforeDismiss = true;
 
+    /// <summary>
+    /// Creates a closed toast with no text. It starts hidden, so a message nobody has asked for yet
+    /// takes no room in the layout until <see cref="Show"/> is called.
+    /// </summary>
     public Toast()
     {
         TabStop = true;
@@ -385,12 +389,20 @@ public class Toast : Control
         }
     }
 
+    /// <summary>
+    /// The message measured against the available width less the horizontal padding and wrapped, so
+    /// that it grows downwards instead of off the edge.
+    /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var measured = TextRenderer.Measure(Text, Font, MathF.Max(0f, availableSize.Width - Padding.Horizontal), wrap: true);
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
 
+    /// <summary>
+    /// Draws everything the message sits on: the surface, the border, the focus ring, the accent bar
+    /// for <see cref="Severity"/> and the close glyph's hover or press fill.
+    /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         bool shifted = BeginSlide(canvas);
@@ -430,6 +442,7 @@ public class Toast : Control
         }
     }
 
+    /// <summary>Draws the message text, clipped to the content area, and the close glyph.</summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         bool shifted = BeginSlide(canvas);
@@ -460,15 +473,21 @@ public class Toast : Control
         }
     }
 
+    /// <summary>
+    /// Draws nothing: the surface, the border and the accent bar are painted in
+    /// <see cref="OnPaintBackground"/> so that they stay behind the message.
+    /// </summary>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         // The surface, the border and the accent bar are drawn in OnPaintBackground so they stay
         // behind the message.
     }
 
+    /// <summary>The hand cursor over the close glyph, and the arrow elsewhere on the message.</summary>
     public override Cursor GetCursorAt(SKPoint pointInLocal) =>
         Geometry.Contains(CloseBounds, pointInLocal) ? Cursor.Hand : Cursor.Default;
 
+    /// <summary>Starts a press on the close glyph when the left button goes down over it.</summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -488,6 +507,7 @@ public class Toast : Control
         }
     }
 
+    /// <summary>Dismisses the message when a press on the close glyph is released over it.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -509,6 +529,10 @@ public class Toast : Control
         }
     }
 
+    /// <summary>
+    /// Tracks whether the pointer is over the close glyph, and cancels a press that has been dragged
+    /// off it the way a button does.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         bool hot = Enabled && Geometry.Contains(CloseBounds, e.Location);
@@ -529,6 +553,7 @@ public class Toast : Control
         base.OnMouseMove(e);
     }
 
+    /// <summary>Clears the close glyph's hover and press states when the pointer leaves.</summary>
     protected override void OnMouseLeave()
     {
         if (_closeHot || _closePressed)
@@ -542,6 +567,7 @@ public class Toast : Control
         base.OnMouseLeave();
     }
 
+    /// <summary>Dismisses an open message on Escape, Enter or Space, and claims the key.</summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -558,24 +584,34 @@ public class Toast : Control
         }
     }
 
+    /// <inheritdoc />
     protected override void OnGotFocus()
     {
         base.OnGotFocus();
         Invalidate();
     }
 
+    /// <inheritdoc />
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
         Invalidate();
     }
 
+    /// <summary>
+    /// Starts the countdown when the message comes back on screen, since a message that was not
+    /// displayed was not counting down.
+    /// </summary>
     protected override void OnDisplayedChanged()
     {
         base.OnDisplayedChanged();
         UpdateTimer();
     }
 
+    /// <summary>
+    /// Clears the close glyph's states when the message becomes disabled, then starts or stops the
+    /// countdown, which a disabled toast does not run.
+    /// </summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)

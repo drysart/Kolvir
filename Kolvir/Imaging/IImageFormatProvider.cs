@@ -60,7 +60,7 @@ public interface IImageFormatProvider
     /// stream the provider is given back if it is asked to decode, never more, and it is short enough
     /// to read from a file without a pass over the whole thing. A provider whose format needs a
     /// longer look should recognise the container here and finish deciding inside
-    /// <see cref="Decode"/>.
+    /// <see cref="Create"/>.
     /// </param>
     /// <returns>True when the bytes are this format's.</returns>
     bool CanDecode(ReadOnlySpan<byte> header);

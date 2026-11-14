@@ -22,11 +22,20 @@ public sealed class MenuItem
         Mnemonic = mnemonic;
     }
 
+    /// <summary>
+    /// Creates an item that shows <paramref name="text"/> and does nothing when picked.
+    /// </summary>
+    /// <param name="text">The label, with <c>&amp;</c> marking the mnemonic.</param>
     public MenuItem(string text)
         : this(text, null, false)
     {
     }
 
+    /// <summary>
+    /// Creates an item that shows <paramref name="text"/> and runs <paramref name="command"/>.
+    /// </summary>
+    /// <param name="text">The label, with <c>&amp;</c> marking the mnemonic.</param>
+    /// <param name="command">What picking the item does, or null to leave it decorative.</param>
     public MenuItem(string text, Action? command)
         : this(text, command, false)
     {

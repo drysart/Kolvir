@@ -13,8 +13,8 @@ namespace Kolvir.Badges;
 /// is turned into <see cref="AppBadge.Urgent"/> rather than silently dropped.
 /// </para>
 /// <para>
-/// <see cref="Urgent"/> is not part of the kind because it is independent of the badge: a count and a
-/// flash of the taskbar button are both reasonable at once.
+/// <see cref="BadgeState.Urgent"/> is not part of the kind because it is independent of the badge:
+/// a count and a flash of the taskbar button are both reasonable at once.
 /// </para>
 /// </remarks>
 internal enum BadgeKind

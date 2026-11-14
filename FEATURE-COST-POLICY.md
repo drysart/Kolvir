@@ -1119,6 +1119,9 @@ member to a type in `Kolvir`. See [APP-BADGING.md](APP-BADGING.md).
 - [ ] If it ships as its own package, does the `net10.0` assembly carry the fallback guard (section 4), and
 	  is it in a platform folder with other code rather than alone?
 - [ ] If it needs per-control state, where does that state live, and what does each access cost?
+- [ ] Is every public type and member it adds documented, so the package's `.xml` carries a
+	  `<summary>` for it? `CS1591` reports the ones that are not, and the docs are what a consumer of
+	  the package sees (README, "Documentation inside the packages").
 
 ## 10. Non-goals
 

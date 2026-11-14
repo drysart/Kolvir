@@ -21,10 +21,12 @@ public class RadioButton : ToggleControl
 {
     private string _groupName = string.Empty;
 
+    /// <summary>Creates a radio button with no label, in the default group.</summary>
     public RadioButton()
     {
     }
 
+    /// <summary>Creates a radio button whose label is <paramref name="text"/>.</summary>
     public RadioButton(string text)
         : this()
     {
@@ -41,6 +43,10 @@ public class RadioButton : ToggleControl
         set => _groupName = value ?? string.Empty;
     }
 
+    /// <summary>
+    /// Draws the round glyph: filled when checked with a dot in the middle, tinted while the pointer
+    /// is over it, and outlined in both cases.
+    /// </summary>
     protected override void PaintGlyph(SKCanvas canvas, SKRect glyph)
     {
         float radius = glyph.Width / 2f;
@@ -72,6 +78,10 @@ public class RadioButton : ToggleControl
     /// <summary>A radio button is only ever checked, never toggled back to unchecked by a click.</summary>
     protected override CheckState NextCheckState() => CheckState.Checked;
 
+    /// <summary>
+    /// Clears the other radio buttons of its group before raising the change, so that only one member
+    /// of a group is ever checked.
+    /// </summary>
     protected override void OnCheckStateChanged()
     {
         if (CheckState == CheckState.Checked)
@@ -82,6 +92,10 @@ public class RadioButton : ToggleControl
         base.OnCheckStateChanged();
     }
 
+    /// <summary>
+    /// Moves the selection and the focus one member around the group for Left/Up and Right/Down,
+    /// wrapping at the ends, and claims the key when it did.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);

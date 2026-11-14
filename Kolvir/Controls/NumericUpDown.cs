@@ -47,11 +47,19 @@ public class NumericUpDown : TextBox
     private int _hotButton;
     private Timer? _repeat;
 
+    /// <summary>
+    /// Creates a field showing 0, with a range of 0 to 100, whole-number increments of 1 and no
+    /// decimal places.
+    /// </summary>
     public NumericUpDown()
     {
         SyncText();
     }
 
+    /// <summary>
+    /// Creates a field showing <paramref name="value"/>, clamped to the default range and rounded to
+    /// the default number of decimals the way any assignment to <see cref="Value"/> is.
+    /// </summary>
     public NumericUpDown(decimal value)
         : this()
     {
@@ -167,6 +175,9 @@ public class NumericUpDown : TextBox
     /// <summary>Raises <see cref="AddValueChangedHandler"/>.</summary>
     protected virtual void OnValueChanged() => _valueChanged?.Invoke(this);
 
+    /// <inheritdoc />
+    /// <remarks>The spinner's width is added to what the text box measures, since it sits beside
+    /// the text rather than over it.</remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var size = base.MeasureContent(availableSize);
@@ -177,12 +188,18 @@ public class NumericUpDown : TextBox
     public override Cursor GetCursorAt(SKPoint pointInLocal) =>
         ButtonFromPoint(pointInLocal) != 0 ? Cursor.Default : base.GetCursorAt(pointInLocal);
 
+    /// <summary>Paints the text field as a text box does, then the spinner over its right-hand edge.</summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         base.OnPaint(canvas, rect);
         PaintSpinner(canvas);
     }
 
+    /// <summary>
+    /// Steps the value once for a press on either spinner button and starts the repeat that keeps
+    /// stepping while the button is held. A press anywhere else is the text box's, so the caret and
+    /// the selection stay where they were.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         if (e.Button != MouseButtons.Left || !Enabled)
@@ -211,6 +228,10 @@ public class NumericUpDown : TextBox
         Invalidate();
     }
 
+    /// <summary>
+    /// Tracks which spinner button the pointer is over, and cancels a press that slides off the
+    /// button it started on, repeat included.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         int button = ButtonFromPoint(e.Location);
@@ -232,6 +253,7 @@ public class NumericUpDown : TextBox
         base.OnMouseMove(e);
     }
 
+    /// <summary>Releases a spinner press, which stops the repeat and the capture it took.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         if (_pressedButton != 0)
@@ -245,6 +267,7 @@ public class NumericUpDown : TextBox
         base.OnMouseUp(e);
     }
 
+    /// <summary>Clears the hot button and any press, stopping the repeat, when the pointer leaves.</summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
@@ -263,6 +286,10 @@ public class NumericUpDown : TextBox
         }
     }
 
+    /// <summary>
+    /// Steps the value one <see cref="Increment"/> per wheel detent - up for a turn away from the
+    /// user - and claims the turn so it does not also scroll a panel above the field.
+    /// </summary>
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
@@ -276,6 +303,10 @@ public class NumericUpDown : TextBox
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Up and Down step by one increment, Page Up and Page Down by ten, and Enter commits the text,
+    /// rewriting it from the value so an out-of-range entry or stray leading zeros come back tidy.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -330,6 +361,10 @@ public class NumericUpDown : TextBox
         base.OnTextInput(e);
     }
 
+    /// <summary>
+    /// Parses the text as it changes and moves <see cref="Value"/> with it, leaving the text exactly
+    /// as typed so a half-written number is never rewritten under the caret.
+    /// </summary>
     protected override void OnTextChanged()
     {
         base.OnTextChanged();
@@ -348,6 +383,8 @@ public class NumericUpDown : TextBox
         }
     }
 
+    /// <summary>Selects the whole number, since a field that holds one value is easier to replace
+    /// than to edit.</summary>
     protected override void OnGotFocus()
     {
         base.OnGotFocus();
@@ -356,6 +393,9 @@ public class NumericUpDown : TextBox
         SelectAll();
     }
 
+    /// <summary>
+    /// Ends a spinner press and commits the edit by rewriting the text from the value.
+    /// </summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
@@ -365,6 +405,7 @@ public class NumericUpDown : TextBox
         SyncText();
     }
 
+    /// <summary>Clears the spinner's hover and press state, and stops the repeat, when disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)

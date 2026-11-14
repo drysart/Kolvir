@@ -7,7 +7,7 @@ namespace Kolvir.Animations;
 /// <remarks>
 /// <para>
 /// Extension members rather than properties on the control, the way FEATURE-COST-POLICY.md §5 asks
-/// and the way <see cref="ExpanderAnimationExtensions.ExpandDuration"/> does it: the state lives
+/// and the way <c>ExpanderAnimationExtensions.ExpandDuration</c> does it: the state lives
 /// in a table keyed by the toast, so an application that never asks for the transition carries none
 /// of it, and a message that never animates is the same control it was.
 /// </para>

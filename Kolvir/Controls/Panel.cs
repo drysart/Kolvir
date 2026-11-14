@@ -44,17 +44,25 @@ public class Panel : Control
     /// </remarks>
     protected readonly struct DockedChild
     {
+        /// <summary>Remembers that <paramref name="control"/> was docked at <paramref name="order"/>.</summary>
+        /// <param name="control">The docked child.</param>
+        /// <param name="order">Its index in the container's child list at the time it was arranged.</param>
         public DockedChild(Control control, int order)
         {
             Control = control;
             Order = order;
         }
 
+        /// <summary>The docked child.</summary>
         public Control Control { get; }
 
+        /// <summary>Where the child sits in the declaration order the container's children are kept in.</summary>
         public int Order { get; }
     }
 
+    /// <summary>
+    /// Creates a panel with no children, no scrolling and an 8 pixel padding on every side.
+    /// </summary>
     public Panel()
     {
         _scroll = new ScrollBars(this);
@@ -182,6 +190,13 @@ public class Panel : Control
     /// <summary>The zoom this panel applies to its children. Not the device pixel ratio.</summary>
     protected internal override float ChildScaleMultiplier => _scaleFactor;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The children are measured in their own, zoomed space: the room they are offered is this
+    /// panel's content space divided by <see cref="ScaleFactor"/>, and what they ask for is turned
+    /// back into panel space on the way out. Dock-filling children are left out, and a scrollbar
+    /// that is always visible adds its unzoomed thickness on the axis it occupies.
+    /// </remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var scale = _scaleFactor;
@@ -399,6 +414,13 @@ public class Panel : Control
         return scaled;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The scrollbars are hit tested before the children, so a point in the gutter or in the square
+    /// where the two bars meet never reaches the content; a point inside the client area but outside
+    /// <see cref="ViewportRect"/> hits the panel itself. Those tests are in panel space, and the
+    /// point crosses into the zoomed content space last, after the viewport test.
+    /// </remarks>
     public override Control? HitTest(SKPoint pointInParent)
     {
         if (!Visible)
@@ -513,6 +535,8 @@ public class Panel : Control
     /// </remarks>
     protected virtual void RenderScrolledChildren(SKCanvas canvas) => base.RenderChildren(canvas);
 
+    /// <summary>Disposes the scrollbars the panel owns.</summary>
+    /// <param name="disposing">True when the control is being disposed rather than finalized.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

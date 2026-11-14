@@ -37,6 +37,10 @@ public class SplitContainer : Control
     private float _dragOriginDistance;
     private SKRect _splitterRect;
 
+    /// <summary>
+    /// Creates a vertical split with an empty <see cref="Panel1"/> and <see cref="Panel2"/> and the
+    /// splitter 200 units from the left.
+    /// </summary>
     public SplitContainer()
     {
         Panel1 = new Panel { Name = "Panel1" };
@@ -98,6 +102,11 @@ public class SplitContainer : Control
     /// <summary>The panel that fills the remaining space. It sits right (vertical) or bottom (horizontal).</summary>
     public Panel Panel2 { get; }
 
+    /// <summary>
+    /// Which way the splitter runs. Changing it turns <see cref="SplitterDistance"/> from a width
+    /// into a height or back, moves the panels to match and picks the resize cursor for the new
+    /// axis.
+    /// </summary>
     public Orientation Orientation
     {
         get => _orientation;
@@ -211,6 +220,7 @@ public class SplitContainer : Control
     /// <summary>The splitter band in the control's own coordinates.</summary>
     public SKRect SplitterRect => _splitterRect;
 
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var first = Panel1.Measure(availableSize);
@@ -221,6 +231,12 @@ public class SplitContainer : Control
             : new SKSize(MathF.Max(first.Width, second.Width), _splitterDistance + _splitterWidth + second.Height);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The distance is only clamped here when the available space could actually hold the whole
+    /// range, so a transient layout at a tiny size does not collapse a distance the caller asked
+    /// for.
+    /// </remarks>
     protected override void OnLayout()
     {
         var content = ContentRect;
@@ -250,6 +266,10 @@ public class SplitContainer : Control
         }
     }
 
+    /// <summary>
+    /// Paints the splitter band, and the grip in the middle of it when
+    /// <see cref="ShowSplitterGrip"/> is set. The panels paint themselves.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         if (_splitterRect.Width <= 0f || _splitterRect.Height <= 0f)
@@ -274,6 +294,10 @@ public class SplitContainer : Control
         }
     }
 
+    /// <summary>
+    /// Starts a drag when the left button goes down inside the splitter band, capturing the mouse
+    /// so the drag can leave the band. A fixed splitter, or a disabled container, ignores the press.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -295,6 +319,10 @@ public class SplitContainer : Control
         InvalidateSplitter();
     }
 
+    /// <summary>
+    /// Moves the splitter with the pointer while a drag is running, raising the splitter-moving
+    /// handlers after each move.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -308,6 +336,10 @@ public class SplitContainer : Control
         _splitterMoving?.Invoke(this);
     }
 
+    /// <summary>
+    /// Ends a drag and raises the splitter-moved handlers, which run once per drag rather than once
+    /// per move.
+    /// </summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -321,6 +353,10 @@ public class SplitContainer : Control
         _splitterMoved?.Invoke(this);
     }
 
+    /// <summary>
+    /// Moves the splitter by a fixed step with the arrow keys that match its orientation, and marks
+    /// the key handled.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -348,24 +384,28 @@ public class SplitContainer : Control
         e.Handled = true;
     }
 
+    /// <summary>Repaints the splitter band, whose colour follows whether the pointer is over it.</summary>
     protected override void OnMouseEnter()
     {
         base.OnMouseEnter();
         InvalidateSplitter();
     }
 
+    /// <summary>Repaints the splitter band, whose colour follows whether the pointer is over it.</summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
         InvalidateSplitter();
     }
 
+    /// <summary>Ends a drag in progress, so a splitter cannot be left following a lost capture.</summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
         EndDrag();
     }
 
+    /// <summary>Ends a drag in progress when the container is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)
@@ -376,6 +416,10 @@ public class SplitContainer : Control
         base.OnEnabledChanged();
     }
 
+    /// <summary>
+    /// Raises <see cref="AddSplitterDistanceChangedHandler"/>. Only reached when
+    /// <see cref="SplitterDistance"/> really moved, from the property or from a drag or key step.
+    /// </summary>
     protected virtual void OnSplitterDistanceChanged() => _splitterDistanceChanged?.Invoke(this);
 
     private void EndDrag()

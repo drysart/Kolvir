@@ -50,6 +50,10 @@ public sealed class UiHost
     // this one int compare asks for.
     private int _themeFontVersion = Theme.FontVersion;
 
+    /// <summary>
+    /// Creates a host with an empty tree, no window and no services. A backend fills those in as it
+    /// attaches the host to a window.
+    /// </summary>
     public UiHost() => _selection = new Selection(this);
 
     /// <summary>Adds a handler that runs when the UI needs to be repainted.</summary>
@@ -236,6 +240,7 @@ public sealed class UiHost
         set => _clearColor = value;
     }
 
+    /// <summary>The control that holds the keyboard focus, or null when no control does.</summary>
     public Control? FocusedControl => _focused;
 
     /// <summary>
@@ -244,6 +249,7 @@ public sealed class UiHost
     /// </summary>
     public Control? SelectionOwner => _selectionOwner;
 
+    /// <summary>The control the pointer is over, or null when it is over none.</summary>
     public Control? HoveredControl => _hovered;
 
     /// <summary>
@@ -253,8 +259,18 @@ public sealed class UiHost
     /// </summary>
     public SKPoint? MousePosition => _mousePosition;
 
+    /// <summary>
+    /// The control that took the pointer with <see cref="CaptureMouse"/>, or null when nothing has
+    /// it. While a control is captured, pointer moves, the button release and wheel turns go to it
+    /// wherever the pointer is.
+    /// </summary>
     public Control? CapturedControl => _captured;
 
+    /// <summary>The cursor the control under the pointer asked for.</summary>
+    /// <remarks>
+    /// A control reports the cursor for a point through <see cref="Control.GetCursorAt"/>, and the
+    /// backend sets the platform cursor from this when <see cref="AddCursorChangedHandler"/> fires.
+    /// </remarks>
     public Cursor Cursor => _cursor;
 
     /// <summary>
@@ -730,6 +746,17 @@ public sealed class UiHost
         return true;
     }
 
+    /// <summary>
+    /// Routes a pointer move: hover enter and leave, the move itself, the cursor the control asks
+    /// for, and the extension of a selection being dragged. A captured control receives the move
+    /// wherever the pointer is.
+    /// </summary>
+    /// <param name="location">The pointer position, in logical client pixels.</param>
+    /// <remarks>
+    /// A press only turns into a selection once the pointer has travelled
+    /// <see cref="SelectionDragThreshold"/> from where it was pressed, so a plain click still reaches
+    /// the control underneath.
+    /// </remarks>
     public void ProcessMouseMove(SKPoint location) => Guard(() =>
     {
         _mousePosition = location;
@@ -763,6 +790,19 @@ public sealed class UiHost
         }
     });
 
+    /// <summary>
+    /// Routes a press: captures the pointer, moves the focus when the control under it takes focus,
+    /// starts or clears a selection, and raises the press on the control.
+    /// </summary>
+    /// <param name="location">The pointer position, in logical client pixels.</param>
+    /// <param name="button">The button that was pressed.</param>
+    /// <param name="modifiers">The modifier keys held while the button was pressed.</param>
+    /// <param name="clickCount">How many clicks the platform counts this press as; 2 is a double click.</param>
+    /// <remarks>
+    /// A press that cannot take the focus - the scrollbar a panel owns for itself, a plain label -
+    /// leaves the selection and the caret of the focused text box alone, rather than clearing
+    /// something the user is still typing into.
+    /// </remarks>
     public void ProcessMouseDown(
         SKPoint location,
         MouseButtons button = MouseButtons.Left,
@@ -813,6 +853,13 @@ public sealed class UiHost
         hit.RaiseMouseDown(new MouseEventArgs(ToLocal(hit, location), button, modifiers, clickCount));
     });
 
+    /// <summary>
+    /// Routes a button release, ending any selection drag and raising the release on the captured
+    /// control, or on the control under the pointer when nothing was captured.
+    /// </summary>
+    /// <param name="location">The pointer position, in logical client pixels.</param>
+    /// <param name="button">The button that was released.</param>
+    /// <param name="modifiers">The modifier keys held while the button was released.</param>
     public void ProcessMouseUp(SKPoint location, MouseButtons button = MouseButtons.Left, Modifiers modifiers = Modifiers.None) => Guard(() =>
     {
         if (button == MouseButtons.Left)
@@ -960,9 +1007,16 @@ public sealed class UiHost
         return _focused?.RaiseKeyDown(new KeyEventArgs(key, modifiers)) ?? false;
     }, false);
 
+    /// <summary>Routes a key release to the focused control.</summary>
+    /// <param name="key">The key that was released.</param>
+    /// <param name="modifiers">The modifier keys held while it was released.</param>
     public void ProcessKeyUp(Key key, Modifiers modifiers = Modifiers.None) =>
         Guard(() => _focused?.RaiseKeyUp(new KeyEventArgs(key, modifiers)));
 
+    /// <summary>
+    /// Routes typed text to the focused control, after the input sinks have been offered it.
+    /// </summary>
+    /// <param name="text">The characters the platform produced for one input event.</param>
     public void ProcessTextInput(string text) =>
         Guard(() =>
         {
@@ -1074,12 +1128,24 @@ public sealed class UiHost
         Invalidate();
     }
 
+    /// <summary>
+    /// Sends every later pointer move, button release and wheel turn to <paramref name="control"/>
+    /// until it releases the capture, whether or not the pointer is over it. A press captures the
+    /// control it hit on its own; this is for a drag a control starts deliberately, so a scrollbar
+    /// thumb keeps tracking the pointer outside the bar.
+    /// </summary>
+    /// <param name="control">The control to capture the pointer for.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="control"/> is null.</exception>
     public void CaptureMouse(Control control)
     {
         ArgumentNullException.ThrowIfNull(control);
         _captured = control;
     }
 
+    /// <summary>Gives up a capture taken by <paramref name="control"/>, if it is the one holding it.</summary>
+    /// <param name="control">
+    /// The control releasing the pointer. A control that does not hold the capture changes nothing.
+    /// </param>
     public void ReleaseMouseCapture(Control control)
     {
         if (ReferenceEquals(_captured, control))
@@ -1516,12 +1582,16 @@ public sealed class UiHost
         private UiHost? _host;
         private readonly IInputSink _sink;
 
+        /// <summary>Remembers the host and the sink it will remove.</summary>
+        /// <param name="host">The host the sink was added to.</param>
+        /// <param name="sink">The sink to remove on disposal.</param>
         public InputSinkToken(UiHost host, IInputSink sink)
         {
             _host = host;
             _sink = sink;
         }
 
+        /// <summary>Removes the sink again. Disposing twice is harmless.</summary>
         public void Dispose()
         {
             _host?.RemoveInputSink(_sink);

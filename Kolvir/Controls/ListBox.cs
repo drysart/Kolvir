@@ -8,6 +8,14 @@ namespace Kolvir;
 /// </summary>
 public class ListBoxDrawItemEventArgs
 {
+    /// <summary>Creates the arguments for an owner-draw call.</summary>
+    /// <param name="canvas">The canvas to draw on.</param>
+    /// <param name="index">The item's position in <see cref="ListBox.Items"/>.</param>
+    /// <param name="item">The item itself.</param>
+    /// <param name="bounds">The whole row, in the list's coordinates.</param>
+    /// <param name="state">What the row is: selected, focused, hot or disabled.</param>
+    /// <param name="font">The font the list would have used.</param>
+    /// <param name="textColor">The colour the default drawing would have used.</param>
     public ListBoxDrawItemEventArgs(
         SKCanvas canvas,
         int index,
@@ -76,6 +84,7 @@ public class ListBox : VirtualList
 
     private Action<object, ListBoxDrawItemEventArgs>? _drawItem;
 
+    /// <summary>Creates an empty list.</summary>
     public ListBox()
     {
         _itemCollection = new ItemCollection(this, _items);
@@ -128,6 +137,7 @@ public class ListBox : VirtualList
     /// </remarks>
     protected virtual string GetItemTextOf(object? item) => item?.ToString() ?? string.Empty;
 
+    /// <inheritdoc />
     protected override float MeasureItemWidth()
     {
         float width = 0f;
@@ -139,6 +149,11 @@ public class ListBox : VirtualList
         return width + (TextInset * 2f);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// A handler added with <see cref="AddDrawItemHandler"/> paints the row instead; without one the
+    /// row is the item's text plus the focus rectangle.
+    /// </remarks>
     protected override void OnDrawItem(SKCanvas canvas, int index, SKRect bounds, DrawItemState state, SKColor textColor)
     {
         if (_drawItem is { } drawItem)
@@ -167,6 +182,9 @@ public class ListBox : VirtualList
             _items = items;
         }
 
+        /// <summary>
+        /// Gets or sets the item at a position. Setting one re-measures and repaints the rows.
+        /// </summary>
         public object? this[int index]
         {
             get => _items[index];
@@ -182,10 +200,13 @@ public class ListBox : VirtualList
             }
         }
 
+        /// <summary>The number of items.</summary>
         public int Count => _items.Count;
 
+        /// <summary>Always <see langword="false"/>; the collection can be changed.</summary>
         public bool IsReadOnly => false;
 
+        /// <summary>Adds an item at the end of the list, then measures and repaints the rows.</summary>
         public void Add(object? item)
         {
             _items.Add(item);
@@ -211,12 +232,14 @@ public class ListBox : VirtualList
             }
         }
 
+        /// <summary>Inserts an item at a position, then measures and repaints the rows.</summary>
         public void Insert(int index, object? item)
         {
             _items.Insert(index, item);
             _owner.NotifyItemsChanged();
         }
 
+        /// <summary>Removes the first occurrence of an item; false when absent.</summary>
         public bool Remove(object? item)
         {
             int index = _items.IndexOf(item);
@@ -229,12 +252,14 @@ public class ListBox : VirtualList
             return true;
         }
 
+        /// <summary>Removes the item at a position, then measures and repaints the rows.</summary>
         public void RemoveAt(int index)
         {
             _items.RemoveAt(index);
             _owner.NotifyItemsChanged();
         }
 
+        /// <summary>Removes every item, then measures and repaints the rows.</summary>
         public void Clear()
         {
             if (_items.Count == 0)
@@ -246,12 +271,16 @@ public class ListBox : VirtualList
             _owner.NotifyItemsChanged();
         }
 
+        /// <summary>True when the item is in the list.</summary>
         public bool Contains(object? item) => _items.Contains(item);
 
+        /// <summary>The position of the first occurrence of an item, or -1 when absent.</summary>
         public int IndexOf(object? item) => _items.IndexOf(item);
 
+        /// <summary>Copies the items into an array, starting at an index.</summary>
         public void CopyTo(object?[] array, int arrayIndex) => _items.CopyTo(array, arrayIndex);
 
+        /// <summary>Enumerates the items in the order they are painted.</summary>
         public IEnumerator<object?> GetEnumerator() => _items.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => _items.GetEnumerator();

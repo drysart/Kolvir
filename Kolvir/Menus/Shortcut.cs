@@ -82,14 +82,33 @@ public readonly struct Shortcut : IEquatable<Shortcut>
         }
     }
 
+    /// <summary>True when both shortcuts name the same key with the same modifiers.</summary>
+    /// <param name="other">The shortcut to compare with.</param>
+    /// <returns>True when they match.</returns>
     public bool Equals(Shortcut other) => Key == other.Key && Modifiers == other.Modifiers;
 
+    /// <summary>
+    /// True when <paramref name="obj"/> is a <see cref="Shortcut"/> naming the same key with the
+    /// same modifiers.
+    /// </summary>
+    /// <param name="obj">The object to compare with.</param>
+    /// <returns>True when it is an equal <see cref="Shortcut"/>.</returns>
     public override bool Equals(object? obj) => obj is Shortcut other && Equals(other);
 
+    /// <summary>A hash consistent with <see cref="Equals(Shortcut)"/>.</summary>
+    /// <returns>The hash code.</returns>
     public override int GetHashCode() => HashCode.Combine(Key, Modifiers);
 
+    /// <summary>True when the two shortcuts name the same key with the same modifiers.</summary>
+    /// <param name="left">The first shortcut.</param>
+    /// <param name="right">The second shortcut.</param>
+    /// <returns>The result of <see cref="Equals(Shortcut)"/>.</returns>
     public static bool operator ==(Shortcut left, Shortcut right) => left.Equals(right);
 
+    /// <summary>True when the two shortcuts differ in the key or in the modifiers.</summary>
+    /// <param name="left">The first shortcut.</param>
+    /// <param name="right">The second shortcut.</param>
+    /// <returns>The negation of <see cref="Equals(Shortcut)"/>.</returns>
     public static bool operator !=(Shortcut left, Shortcut right) => !left.Equals(right);
 
     /// <summary>The same text <see cref="DisplayText"/> returns.</summary>

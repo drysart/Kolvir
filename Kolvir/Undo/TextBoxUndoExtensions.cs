@@ -59,16 +59,16 @@ namespace Kolvir.Undo;
 /// <item>
 /// <description>
 /// <b>The context menu follows.</b> A box with the history leads the editing block it contributes to
-/// a right-click with <b>Undo</b> and <b>Redo</b>, enabled by <see cref="CanUndo"/> and
-/// <see cref="CanRedo"/> as the menu is built, and a row runs the same operation a key press does.
+/// a right-click with <b>Undo</b> and <b>Redo</b>, enabled by <c>CanUndo</c> and <c>CanRedo</c> as
+/// the menu is built, and a row runs the same operation a key press does.
 /// A box that never turned the history on contributes no rows for it: the history is opt-in, so a
 /// menu the application designed is not handed rows for a feature it never asked for.
 /// </description>
 /// </item>
 /// <item>
 /// <description>
-/// <b>Read-only.</b> A read-only field records nothing, <see cref="CanUndo"/> and
-/// <see cref="CanRedo"/> report false, and <see cref="Undo"/> and <see cref="Redo"/> do nothing.
+/// <b>Read-only.</b> A read-only field records nothing, <c>CanUndo</c> and <c>CanRedo</c> report
+/// false, and <see cref="Undo"/> and <see cref="Redo"/> do nothing.
 /// The history is kept rather than dropped, so a field that is locked for a while gets it back when
 /// it is unlocked again.
 /// </description>
@@ -178,21 +178,21 @@ public static class TextBoxUndoExtensions
         /// Drops the history, including everything undone, and leaves the value and the insertion
         /// point alone. This is the call to make after loading a document into a field whose history
         /// should not reach back past the load, and it is a no-op on a box that never turned
-        /// <see cref="UndoEnabled"/> on, so it allocates nothing for an application that does not
+        /// <c>UndoEnabled</c> on, so it allocates nothing for an application that does not
         /// use the feature.
         /// </summary>
         public void ClearUndoStack() => textBox.UndoFeature?.ClearHistory();
 
         /// <summary>
         /// Adds a handler that runs after an entry is recorded, undone, redone or dropped - which is
-        /// every moment <see cref="CanUndo"/> or <see cref="CanRedo"/> can change. Subscribe to it
+        /// every moment <c>CanUndo</c> or <c>CanRedo</c> can change. Subscribe to it
         /// to keep an Undo/Redo menu or a pair of buttons in step with the field:
         /// <code>
         /// using var subscription = field.AddUndoStateChangedHandler(_ => RefreshUndoCommands());
         /// </code>
         /// It runs on the UI thread, in subscription order, after the text and the insertion point
         /// have already been put back, so a handler may read the field. A box that has not turned
-        /// <see cref="UndoEnabled"/> on has no history to subscribe to, and the token is inert.
+        /// <c>UndoEnabled</c> on has no history to subscribe to, and the token is inert.
         /// </summary>
         public IDisposable AddUndoStateChangedHandler(Action<object> handler)
         {

@@ -35,6 +35,10 @@ public class Overlay : Panel, IInputSink
     private ContentAlignment _childAlignment = ContentAlignment.MiddleCenter;
     private IDisposable? _sink;
 
+    /// <summary>
+    /// Creates a layer that dims what is under it, takes every press and swallows every key.
+    /// It fills the container it is put in, keeps no chrome of its own and is not a tab stop.
+    /// </summary>
     public Overlay()
     {
         CornerRadius = 0f;
@@ -104,6 +108,12 @@ public class Overlay : Panel, IInputSink
     /// <summary>True while the layer is really able to hold the window still.</summary>
     private bool BlocksInput => IsDisplayed && Enabled;
 
+    /// <summary>
+    /// Paints the dimming: <see cref="Theme.Background"/> at <see cref="Dim"/> alpha, read from the
+    /// palette at paint time so a palette change recolours a live layer with no rebuild.
+    /// </summary>
+    /// <param name="canvas">Canvas to paint into, in this control's client space.</param>
+    /// <param name="rect">The area to paint.</param>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         // The panel's own surface is off, so the only fill is the dimming, and it is a palette role
@@ -117,11 +127,23 @@ public class Overlay : Panel, IInputSink
         base.OnPaintBackground(canvas, rect);
     }
 
+    /// <summary>
+    /// Draws nothing: a modal layer has no chrome of its own, because a border would read as a panel
+    /// sitting on top of the content it is meant to hold still.
+    /// </summary>
+    /// <param name="canvas">Canvas to paint into, in this control's client space.</param>
+    /// <param name="rect">The area the border would be drawn in.</param>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         // A modal layer has no chrome of its own; the border would read as a panel on top.
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Docked children keep their edge; every other visible child is sized to its content - or kept
+    /// at its own size - and placed by <see cref="ChildAlignment"/> in what the docked children left.
+    /// A layer that has no room yet arranges nothing, so the children keep the size they were given.
+    /// </remarks>
     protected override SKSize ArrangeChildren(SKRect area)
     {
         var remaining = LayoutDockedChildren(area);
@@ -150,18 +172,25 @@ public class Overlay : Panel, IInputSink
         return MeasureExtent(area);
     }
 
+    /// <summary>Takes the window's keyboard while the layer is on screen, and gives it back when it is not.</summary>
     protected override void OnDisplayedChanged()
     {
         base.OnDisplayedChanged();
         SyncInputSink();
     }
 
+    /// <summary>
+    /// Takes the window's keyboard when the layer is enabled and gives it back when it is not, so a
+    /// disabled layer leaves the focused control underneath answering the keys again.
+    /// </summary>
     protected override void OnEnabledChanged()
     {
         base.OnEnabledChanged();
         SyncInputSink();
     }
 
+    /// <summary>Removes the layer from the window's input sinks, if it had joined them.</summary>
+    /// <param name="disposing">True when the control is being disposed rather than finalized.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

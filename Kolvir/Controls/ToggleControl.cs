@@ -27,6 +27,10 @@ public abstract class ToggleControl : Control
     private float _glyphGap = 8f;
     private bool _threeState;
 
+    /// <summary>
+    /// Creates a toggle that takes focus, auto-sizes around its glyph and label, shows a hand cursor,
+    /// reserves padding for the focus ring and is at least 24 pixels tall.
+    /// </summary>
     protected ToggleControl()
     {
         TabStop = true;
@@ -207,6 +211,7 @@ public abstract class ToggleControl : Control
     /// <summary>The mark inside a filled glyph.</summary>
     protected SKColor GlyphMarkColor => Enabled ? Theme.AccentForeground : Theme.DisabledForeground;
 
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var text = TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
@@ -215,6 +220,10 @@ public abstract class ToggleControl : Control
             MathF.Ceiling(MathF.Max(_glyphSize, text.Height)));
     }
 
+    /// <summary>
+    /// Draws the glyph through <see cref="PaintGlyph"/> and then the label in the space the glyph
+    /// leaves, aligned by <see cref="TextAlign"/>.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var glyph = GlyphRect;
@@ -232,6 +241,10 @@ public abstract class ToggleControl : Control
         TextRenderer.Draw(canvas, Text, Font, TextColor, label, _textAlign);
     }
 
+    /// <summary>
+    /// The border slot is used for the focus ring, which is drawn last so it sits above the glyph and
+    /// the label it surrounds.
+    /// </summary>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         // The border slot is used for the focus ring, which is drawn last so it sits above the
@@ -273,6 +286,10 @@ public abstract class ToggleControl : Control
     /// <summary>Runs after <see cref="CheckState"/> has changed and this control has been invalidated.</summary>
     protected virtual void OnCheckStateChanged() => OnCheckedChanged();
 
+    /// <summary>
+    /// A left press on an enabled toggle puts it in its pressed state and captures the mouse, so a
+    /// release outside the control still ends the gesture.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -285,6 +302,10 @@ public abstract class ToggleControl : Control
         }
     }
 
+    /// <summary>
+    /// Ends a left-button gesture: the pressed state and the capture are cleared and, when the
+    /// release happened over the control, the toggle is applied.
+    /// </summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -305,12 +326,17 @@ public abstract class ToggleControl : Control
         }
     }
 
+    /// <summary>Repaints so the glyph picks up its hover colours.</summary>
     protected override void OnMouseEnter()
     {
         base.OnMouseEnter();
         Invalidate();
     }
 
+    /// <summary>
+    /// Abandons a press the pointer has left: the pressed state and the capture are cleared, so
+    /// releasing elsewhere cannot toggle the control, and the hover colours are repainted away.
+    /// </summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
@@ -324,6 +350,7 @@ public abstract class ToggleControl : Control
         Invalidate();
     }
 
+    /// <summary>Space presses the toggle, the keyboard's equivalent of a mouse-down.</summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -336,6 +363,7 @@ public abstract class ToggleControl : Control
         }
     }
 
+    /// <summary>Releasing Space while pressed applies the toggle, mirroring a mouse release.</summary>
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
@@ -349,12 +377,14 @@ public abstract class ToggleControl : Control
         }
     }
 
+    /// <summary>Repaints so the focus ring appears.</summary>
     protected override void OnGotFocus()
     {
         base.OnGotFocus();
         Invalidate();
     }
 
+    /// <summary>Clears the pressed state and repaints so the focus ring goes away.</summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
@@ -362,6 +392,10 @@ public abstract class ToggleControl : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// Abandons a press while the toggle is being disabled and releases the mouse capture, then lets
+    /// the base raise the enabled-changed event and repaint.
+    /// </summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)

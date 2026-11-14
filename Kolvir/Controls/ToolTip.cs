@@ -51,6 +51,7 @@ public sealed class ToolTip : IDisposable
     private bool _active = true;
     private bool _disposed;
 
+    /// <summary>Creates a tool tip that watches no control yet and shows nothing.</summary>
     public ToolTip()
     {
         _timer = new Timer();
@@ -177,6 +178,10 @@ public sealed class ToolTip : IDisposable
     /// <summary>Takes the bubble away, if it is up, and cancels a pending one.</summary>
     public void Hide() => ClosePopup();
 
+    /// <summary>
+    /// Stops watching every control it was given text for, takes down a bubble that is up and disposes
+    /// the delay timer. Calling it twice does nothing.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

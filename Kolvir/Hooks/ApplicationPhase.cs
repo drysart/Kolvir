@@ -8,7 +8,7 @@ namespace Kolvir;
 /// <para>
 /// The phases are split where they carry information rather than where it was convenient.
 /// <see cref="Creating"/> is the last moment before any window exists; <see cref="Created"/> is the
-/// first moment the windows shown before <see cref="Application.Run"/> are visible.
+/// first moment the windows shown before <see cref="Application.Run(Application)"/> are visible.
 /// <see cref="Stopping"/> is the first moment after the loop returns, with the whole application
 /// still intact; <see cref="Stopped"/> is the last moment a singleton service can be resolved;
 /// <see cref="Disposed"/> is after the container and the backend are gone, and exists so a hook can
@@ -16,9 +16,10 @@ namespace Kolvir;
 /// </para>
 /// <para>
 /// <b><see cref="Creating"/> pairs with <see cref="Disposed"/>, not with <see cref="Stopping"/>.</b>
-/// A launch that was forwarded to another instance returns from <see cref="Application.Run"/>
-/// without entering a loop, and a headless render never runs one, so neither sees anything between
-/// them. Work that has to happen for every application belongs in <see cref="Disposed"/>.
+/// A launch that was forwarded to another instance returns from
+/// <see cref="Application.Run(Application)"/> without entering a loop, and a headless render never
+/// runs one, so neither sees anything between them. Work that has to happen for every application
+/// belongs in <see cref="Disposed"/>.
 /// </para>
 /// </remarks>
 public enum ApplicationPhase
@@ -30,8 +31,8 @@ public enum ApplicationPhase
     Creating,
 
     /// <summary>
-    /// Every window shown before <see cref="Application.Run"/> is visible and the loop is
-    /// about to start.
+    /// Every window shown before <see cref="Application.Run(Application)"/> is visible and the loop
+    /// is about to start.
     /// </summary>
     Created,
 

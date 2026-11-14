@@ -19,7 +19,7 @@ namespace Kolvir.Backend.Gtk4;
 /// <para>
 /// The application holds a GLib application reference for as long as it runs
 /// (<see cref="Gio.Application.Hold"/>), because GTK would otherwise end the loop the moment the
-/// last window was destroyed, which would defeat <see cref="ShutdownMode.OnExplicitExit"/>.
+/// last window was destroyed, which would defeat <see cref="ShutdownMode.OnExplicitShutdown"/>.
 /// </para>
 /// </remarks>
 public sealed class Gtk4ApplicationBackend : IApplicationBackend

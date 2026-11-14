@@ -37,21 +37,80 @@ public sealed class Font : IDisposable
     private readonly bool _fixedFace;
     private bool _disposed;
 
+    /// <summary>
+    /// Creates a font at <paramref name="size"/> in the family the platform treats as its default.
+    /// </summary>
+    /// <param name="size">The size to draw at, in logical pixels.</param>
+    /// <param name="bold">True to ask for weight 700 instead of 400.</param>
+    /// <param name="italic">True to ask for an italic face.</param>
+    /// <remarks>
+    /// The family is left to the platform, so the same call can draw with a different face on each
+    /// desktop. Pass a family name, or load a file with <see cref="FromFile"/>, when text has to
+    /// look the same everywhere.
+    /// </remarks>
     public Font(float size, bool bold = false, bool italic = false)
         : this(null, size, bold, italic)
     {
     }
 
+    /// <summary>
+    /// Creates a font in a family the operating system provides, at <paramref name="size"/>.
+    /// </summary>
+    /// <param name="familyName">
+    /// The family to resolve. Null, or a family the platform does not have, falls back to the
+    /// platform's default face rather than failing.
+    /// </param>
+    /// <param name="size">The size to draw at, in logical pixels.</param>
+    /// <param name="bold">True to ask for weight 700 instead of 400.</param>
+    /// <param name="italic">True to ask for an italic face.</param>
+    /// <remarks>
+    /// Skia selects the nearest face the family has to the requested weight and slant, and it does
+    /// not synthesise one the family lacks: asking for bold in a family that only has a regular face
+    /// draws the regular face. <see cref="Weight"/> and <see cref="Italic"/> therefore report what
+    /// was asked for, not what the platform chose.
+    /// </remarks>
     public Font(string? familyName, float size, bool bold = false, bool italic = false)
         : this(familyName, size, bold ? 700 : 400, italic)
     {
     }
 
+    /// <summary>
+    /// Creates a font at <paramref name="size"/> in the platform's default family, at a numeric
+    /// weight.
+    /// </summary>
+    /// <param name="size">The size to draw at, in logical pixels.</param>
+    /// <param name="weight">
+    /// The weight to ask for, on the 1-1000 scale where 400 is regular and 700 is bold.
+    /// </param>
+    /// <param name="italic">True to ask for an italic face.</param>
+    /// <remarks>
+    /// As with the overload that takes a <c>bold</c> flag, the family is whatever the platform treats
+    /// as its default, so the face is not the same on every desktop.
+    /// </remarks>
     public Font(float size, int weight, bool italic = false)
         : this(null, size, weight, italic)
     {
     }
 
+    /// <summary>
+    /// Creates a font in a family the operating system provides, at <paramref name="size"/> and a
+    /// numeric weight.
+    /// </summary>
+    /// <param name="familyName">
+    /// The family to resolve, or null to use the platform's default family. A family the platform
+    /// does not have also falls back to the default face.
+    /// </param>
+    /// <param name="size">The size to draw at, in logical pixels.</param>
+    /// <param name="weight">
+    /// The weight to ask for, on the 1-1000 scale where 400 is regular and 700 is bold. Skia uses the
+    /// nearest weight the family has.
+    /// </param>
+    /// <param name="italic">True to ask for an italic face.</param>
+    /// <remarks>
+    /// Unlike a font loaded from data, a family can supply a face close to the requested weight or
+    /// slant; the choice is the platform's, because each platform resolves a family name to its own
+    /// files.
+    /// </remarks>
     public Font(string? familyName, float size, int weight, bool italic = false)
         : this(ResolveFamilyFace(familyName, weight, italic), size, weight, italic, fixedFace: false)
     {
@@ -179,12 +238,33 @@ public sealed class Font : IDisposable
         _lineHeight = -metrics.Ascent + metrics.Descent + metrics.Leading;
     }
 
+    /// <summary>The size this font draws at, in logical pixels.</summary>
     public float Size { get; }
 
+    /// <summary>
+    /// The weight of the face, on the 1-1000 scale where 400 is regular and 700 is bold.
+    /// </summary>
+    /// <remarks>
+    /// For a face loaded from data this is the weight recorded in the file, whatever was asked for,
+    /// because one file holds one face. For a face resolved by family name it is the weight that was
+    /// requested, which the platform may have had to substitute with the nearest face it has.
+    /// </remarks>
     public int Weight { get; }
 
+    /// <summary>Whether the face is italic.</summary>
+    /// <remarks>
+    /// For a face loaded from data this says whether the file is slanted, since no slant is
+    /// synthesised; for a face resolved by family name it is the slant that was requested.
+    /// </remarks>
     public bool Italic { get; }
 
+    /// <summary>
+    /// The family name of the face in use, or the empty string when the face reports none.
+    /// </summary>
+    /// <remarks>
+    /// A font created without a family still reports the family the platform selected, so this is a
+    /// report of the face rather than an echo of the constructor.
+    /// </remarks>
     public string FamilyName => _font.Typeface?.FamilyName ?? string.Empty;
 
     /// <summary>Distance between two baselines, in logical pixels.</summary>
@@ -195,9 +275,27 @@ public sealed class Font : IDisposable
 
     internal SKFont SkFont => _font;
 
+    /// <summary>The advance width of <paramref name="text"/> in this font, in logical pixels.</summary>
+    /// <param name="text">The text to measure. Null or an empty string measures zero.</param>
+    /// <returns>The width the text occupies when drawn at this font's size.</returns>
+    /// <remarks>
+    /// The width comes from the face's own advances, so a face loaded from data measures the same on
+    /// every platform; a face resolved by family name measures however that platform's file lays the
+    /// text out.
+    /// </remarks>
     public float MeasureWidth(string? text) =>
         string.IsNullOrEmpty(text) ? 0f : _font.MeasureText(text);
 
+    /// <summary>A font with the same face at another size.</summary>
+    /// <param name="size">The size for the new font, in logical pixels.</param>
+    /// <returns>
+    /// A new font; this one is unchanged, and both stay usable after either is disposed.
+    /// </returns>
+    /// <remarks>
+    /// The face, weight and italic are carried over, and for a face loaded from data the size is all
+    /// that can change: one file holds one face, so no weight or slant is selected from it. A
+    /// family-name font is looked up again at the new size.
+    /// </remarks>
     public Font WithSize(float size) => Derive(size, Weight, Italic);
 
     /// <summary>
@@ -218,6 +316,15 @@ public sealed class Font : IDisposable
         return new Font(FamilyName, size, weight, italic);
     }
 
+    /// <summary>
+    /// Releases the Skia objects behind the font, including the typeface when this font is the one
+    /// that owns it.
+    /// </summary>
+    /// <remarks>
+    /// Disposing twice does nothing, and fonts made from this one with <see cref="WithSize"/> stay
+    /// usable because each holds its own reference to the face. Controls never dispose a font they
+    /// did not create, so a font handed to a control is the application's to release.
+    /// </remarks>
     public void Dispose()
     {
         if (_disposed)

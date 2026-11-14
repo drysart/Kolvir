@@ -47,6 +47,7 @@ public class Image : Control
     private SizeMode _sizeMode = SizeMode.Zoom;
     private Timer? _frameTimer;
 
+    /// <summary>Creates an image control with no source that sizes itself to the picture it is given.</summary>
     public Image()
     {
         AutoSize = true;
@@ -85,6 +86,15 @@ public class Image : Control
         }
     }
 
+    /// <summary>
+    /// How the picture is fitted into the content area. Defaults to <see cref="SizeMode.Zoom"/>.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="SizeMode.Normal"/> and <see cref="SizeMode.CenterImage"/> draw at the picture's
+    /// own size, while <see cref="SizeMode.StretchImage"/> and <see cref="SizeMode.Zoom"/> use the
+    /// room available. Whatever the mode, the picture is placed in the content area according to
+    /// <see cref="ImageAlign"/>.
+    /// </remarks>
     public SizeMode SizeMode
     {
         get => _sizeMode;
@@ -100,11 +110,21 @@ public class Image : Control
         }
     }
 
+    /// <summary>
+    /// Where the picture sits inside the content area when it is smaller than it. Defaults to
+    /// <see cref="ContentAlignment.MiddleCenter"/>. Ignored by <see cref="SizeMode.StretchImage"/>,
+    /// which takes the whole area.
+    /// </summary>
     public ContentAlignment ImageAlign { get; set; } = ContentAlignment.MiddleCenter;
 
     /// <summary>Draws a solid color placeholder instead of an image.</summary>
     public SKColor? PlaceholderColor { get; set; }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The answer is the source's own size, never the current frame's, so an animation whose frames
+    /// differ by a pixel does not re-lay-out the window on every frame.
+    /// </remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         // The source's own size, never the current frame's: an animation whose frames differ by a
@@ -112,6 +132,12 @@ public class Image : Control
         return _image is null ? SKSize.Empty : _image.NaturalSize;
     }
 
+    /// <summary>
+    /// Fills the background with <see cref="PlaceholderColor"/> while there is no
+    /// <see cref="Source"/>, and leaves the background to the base class once there is one.
+    /// </summary>
+    /// <param name="canvas">Canvas to paint into, in this control's client space.</param>
+    /// <param name="rect">The area to paint.</param>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         base.OnPaintBackground(canvas, rect);
@@ -122,6 +148,13 @@ public class Image : Control
         }
     }
 
+    /// <summary>
+    /// Draws the source's current frame, fitted into the content area as <see cref="Image.SizeMode"/>
+    /// and <see cref="ImageAlign"/> ask. Also re-arms the frame timer, so a frame that is only painted
+    /// while the control is on screen keeps its countdown aimed at the next frame boundary.
+    /// </summary>
+    /// <param name="canvas">Canvas to paint into, in this control's client space.</param>
+    /// <param name="rect">The area to paint.</param>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         // A host may paint a tree it never showed, which is a frame rather than the user seeing it:
@@ -157,6 +190,12 @@ public class Image : Control
         canvas.Restore();
     }
 
+    /// <summary>
+    /// Starts or stops the frame timer for the new displayed state, so a control nobody can look at
+    /// holds no clock. A control that becomes displayed again asks for a repaint rather than resuming
+    /// where it left off: the position comes from the clock, so the next paint shows the frame time
+    /// has reached.
+    /// </summary>
     protected override void OnDisplayedChanged()
     {
         base.OnDisplayedChanged();
@@ -284,6 +323,11 @@ public class Image : Control
         StopFrames();
     }
 
+    /// <summary>
+    /// Stops listening to the source and disposes the frame timer. The source itself is left alone:
+    /// it belongs to whoever assigned it.
+    /// </summary>
+    /// <param name="disposing">True when the control is being disposed rather than finalized.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

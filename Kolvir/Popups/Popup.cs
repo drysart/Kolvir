@@ -43,6 +43,10 @@ public sealed class Popup : IDisposable
     private bool _open;
     private bool _disposed;
 
+    /// <summary>
+    /// Creates a popup anchored to <paramref name="owner"/>, which supplies the window it is shown
+    /// in and the service provider a platform popup window is resolved from.
+    /// </summary>
     /// <param name="owner">
     /// The control the popup belongs to. It supplies the host the popup is anchored to and the
     /// service provider a platform popup window is resolved from.
@@ -53,6 +57,10 @@ public sealed class Popup : IDisposable
         _owner = owner;
     }
 
+    /// <summary>
+    /// Creates a popup anchored to a window rather than to a control, which is what a menu opened
+    /// from the menu bar or the keyboard needs.
+    /// </summary>
     /// <param name="host">
     /// The window the popup is anchored to, for a popup that belongs to the window rather than to a
     /// control - which is what a menu opened from the menu bar or the keyboard is.
@@ -311,6 +319,10 @@ public sealed class Popup : IDisposable
         wrapper.Dispose();
     }
 
+    /// <summary>
+    /// Closes the popup if it is open, drops its closed handlers and marks it disposed. The content
+    /// is the caller's and is left in place.
+    /// </summary>
     public void Dispose()
     {
         if (_disposed)

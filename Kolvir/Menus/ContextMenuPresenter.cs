@@ -22,8 +22,12 @@ public sealed class ContextMenuRequest
         Location = location;
     }
 
+    /// <summary>The menu to show, as the control and the opening handlers left it.</summary>
     public ContextMenu Menu { get; }
 
+    /// <summary>
+    /// The window the menu is shown in, which is the coordinate space of <see cref="Location"/>.
+    /// </summary>
     public UiHost Host { get; }
 
     /// <summary>The control the pointer was over, or null when it was over empty surface.</summary>
@@ -61,8 +65,8 @@ public sealed class ContextMenuEventArgs
     /// The menu being composed. It starts as what the control under the pointer contributes - a
     /// text box starts with Cut, Copy, Paste and Select All, enabled for the current state - so a
     /// handler adds its own items to it, with <see cref="ContextMenu.Insert"/> to put them in
-    /// front or <see cref="ContextMenu.Add"/> to append them. Assigning a different menu, or
-    /// clearing this one, suppresses the control's contribution.
+    /// front or <see cref="ContextMenu.Add(string, Action?)"/> to append them. Assigning a different
+    /// menu, or clearing this one, suppresses the control's contribution.
     /// </summary>
     public ContextMenu? Menu { get; set; }
 

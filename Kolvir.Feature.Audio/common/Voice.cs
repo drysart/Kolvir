@@ -21,9 +21,10 @@ namespace Kolvir.Audio;
 /// </para>
 /// <para>
 /// <b>Nothing calls the application on the audio thread.</b> The platform half reports the end of a
-/// clip from whatever thread it processes on; <see cref="Finished"/> is posted through
-/// <see cref="Application.BeginInvoke"/>, so a handler may touch controls. Before an application
-/// exists - in a test, or before the loop starts - handlers run inline on the thread that noticed.
+/// clip from whatever thread it processes on; the handlers <see cref="AddFinishedHandler"/> adds
+/// are called through <see cref="Application.BeginInvoke"/>, so a handler may touch controls.
+/// Before an application exists - in a test, or before the loop starts - handlers run inline on the
+/// thread that noticed.
 /// </para>
 /// <para>
 /// A voice belongs to the device it was started on. If that device disappears the voice stops and

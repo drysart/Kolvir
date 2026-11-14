@@ -84,90 +84,122 @@ public static class Theme
     // The individual colours read and write the current palette: assigning one replaces the
     // palette with an edited copy. Prefer Palette when switching appearance.
 
+    /// <summary>
+    /// Window background, behind everything else. A host also clears the window with it when no
+    /// clear colour was given, so a window follows the theme on its own.
+    /// </summary>
+    /// <remarks>
+    /// Every individual colour on <see cref="Theme"/> behaves the same way: the getter reads the
+    /// current palette and the setter replaces the palette with an edited copy and notifies the
+    /// changed handlers. Assigning one colour therefore keeps the rest of the palette, but it also
+    /// discards any palette object that was assigned before; assign <see cref="Theme.Palette"/> when
+    /// switching appearance wholesale.
+    /// </remarks>
     public static SKColor Background
     {
         get => _palette.Background;
         set => Assign(_palette with { Background = value });
     }
 
+    /// <summary>Fill of raised surfaces such as panels, the menu bar and popup menus.</summary>
     public static SKColor Surface
     {
         get => _palette.Surface;
         set => Assign(_palette with { Surface = value });
     }
 
+    /// <summary>Default text colour.</summary>
     public static SKColor Foreground
     {
         get => _palette.Foreground;
         set => Assign(_palette with { Foreground = value });
     }
 
+    /// <summary>Text and glyphs for secondary content: captions, hints and unselected icons.</summary>
     public static SKColor MutedForeground
     {
         get => _palette.MutedForeground;
         set => Assign(_palette with { MutedForeground = value });
     }
 
+    /// <summary>Lines and outlines: control borders, separators and the track behind a value.</summary>
     public static SKColor Border
     {
         get => _palette.Border;
         set => Assign(_palette with { Border = value });
     }
 
+    /// <summary>
+    /// Fill of the primary action, and of whatever the user has turned on or selected.
+    /// </summary>
     public static SKColor Accent
     {
         get => _palette.Accent;
         set => Assign(_palette with { Accent = value });
     }
 
+    /// <summary><see cref="Accent"/> while the pointer is over it.</summary>
     public static SKColor AccentHover
     {
         get => _palette.AccentHover;
         set => Assign(_palette with { AccentHover = value });
     }
 
+    /// <summary><see cref="Accent"/> while a pointer button is held down on it.</summary>
     public static SKColor AccentPressed
     {
         get => _palette.AccentPressed;
         set => Assign(_palette with { AccentPressed = value });
     }
 
+    /// <summary>Text and glyphs drawn on top of an <see cref="Accent"/> fill.</summary>
     public static SKColor AccentForeground
     {
         get => _palette.AccentForeground;
         set => Assign(_palette with { AccentForeground = value });
     }
 
+    /// <summary>
+    /// Fill of the subdued chrome around the content: secondary buttons, header bands, and the
+    /// glyph of a check box or radio button.
+    /// </summary>
     public static SKColor Secondary
     {
         get => _palette.Secondary;
         set => Assign(_palette with { Secondary = value });
     }
 
+    /// <summary><see cref="Secondary"/> while the pointer is over it.</summary>
     public static SKColor SecondaryHover
     {
         get => _palette.SecondaryHover;
         set => Assign(_palette with { SecondaryHover = value });
     }
 
+    /// <summary><see cref="Secondary"/> while a pointer button is held down on it.</summary>
     public static SKColor SecondaryPressed
     {
         get => _palette.SecondaryPressed;
         set => Assign(_palette with { SecondaryPressed = value });
     }
 
+    /// <summary>Outline drawn around the control that has keyboard focus.</summary>
     public static SKColor FocusRing
     {
         get => _palette.FocusRing;
         set => Assign(_palette with { FocusRing = value });
     }
 
+    /// <summary>Fill of the splitter of a <see cref="SplitContainer"/>.</summary>
     public static SKColor Splitter
     {
         get => _palette.Splitter;
         set => Assign(_palette with { Splitter = value });
     }
 
+    /// <summary>
+    /// The splitter under the pointer, and the same subtle hover fill on a drop-down button.
+    /// </summary>
     public static SKColor SplitterHover
     {
         get => _palette.SplitterHover;
@@ -202,12 +234,14 @@ public static class Theme
         set => Assign(_palette with { Placeholder = value });
     }
 
+    /// <summary>Fill of a control that cannot be used.</summary>
     public static SKColor DisabledBackground
     {
         get => _palette.DisabledBackground;
         set => Assign(_palette with { DisabledBackground = value });
     }
 
+    /// <summary>Text and glyphs of a control that cannot be used.</summary>
     public static SKColor DisabledForeground
     {
         get => _palette.DisabledForeground;
@@ -293,14 +327,42 @@ public static class Theme
         _changed?.Invoke(null!);
     }
 
+    /// <summary>
+    /// The font a control draws with when it does not name one: 13 logical pixels in
+    /// <see cref="FontFamily"/>, or the face given to <see cref="UseFont"/> at that size.
+    /// </summary>
+    /// <remarks>
+    /// The theme fonts are rebuilt whenever <see cref="FontFamily"/> or <see cref="UseFont"/> changes,
+    /// so read the property when measuring or painting rather than holding on to the value.
+    /// </remarks>
     public static Font DefaultFont => _defaultFont;
 
+    /// <summary>Font for small print: 11.5 logical pixels at weight 400.</summary>
+    /// <remarks>
+    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
+    /// one file holds one face.
+    /// </remarks>
     public static Font CaptionFont => _captionFont;
 
+    /// <summary>Font for body text that has to stand out: 13 logical pixels at weight 600.</summary>
+    /// <remarks>
+    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
+    /// one file holds one face.
+    /// </remarks>
     public static Font EmphasizedFont => _emphasizedFont;
 
+    /// <summary>Font for a window or dialog title: 24 logical pixels at weight 700.</summary>
+    /// <remarks>
+    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
+    /// one file holds one face.
+    /// </remarks>
     public static Font TitleFont => _titleFont;
 
+    /// <summary>Font for a section heading: 15 logical pixels at weight 600.</summary>
+    /// <remarks>
+    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
+    /// one file holds one face.
+    /// </remarks>
     public static Font SectionFont => _sectionFont;
 
     /// <summary>

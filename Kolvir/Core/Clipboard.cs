@@ -43,8 +43,15 @@ public static class Clipboard
         set => _current = value ?? new InMemoryClipboard();
     }
 
+    /// <summary>Returns the clipboard's text, or null when it holds no text.</summary>
+    /// <returns>The text currently on the clipboard, from <see cref="Current"/>.</returns>
     public static string? GetText() => _current.GetText();
 
+    /// <summary>
+    /// Replaces the clipboard's contents with <paramref name="text"/>. A null or empty value
+    /// clears it, and the HTML flavour of whatever was there before goes with it.
+    /// </summary>
+    /// <param name="text">The text to place on the clipboard.</param>
     public static void SetText(string? text) => _current.SetText(text);
 
     /// <summary>Returns the HTML fragment on the clipboard, or null when there is none.</summary>

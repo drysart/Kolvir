@@ -8,7 +8,7 @@ namespace Kolvir;
 /// Without a handler the exception is fatal: the application shuts down through the normal path -
 /// windows close, <see cref="Application.AddExitingHandler"/> runs, services are disposed -
 /// and then
-/// <see cref="Application.Run"/> rethrows it, so the failure is neither swallowed nor left to
+/// <see cref="Application.Run()"/> rethrows it, so the failure is neither swallowed nor left to
 /// unwind through a native message pump.
 /// </remarks>
 public sealed class UnhandledExceptionEventArgs

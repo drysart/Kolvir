@@ -17,8 +17,6 @@ namespace Kolvir.Badges;
 /// trimmer removes it, which is what keeps the feature at rung 3 of `FEATURE-COST-POLICY.md`.
 /// </para>
 /// </remarks>
-/// <param name="services">The collection being built.</param>
-/// <returns>The same collection, so calls can be chained.</returns>
 public static class AppKitBadgeServiceCollectionExtensions
 {
     /// <summary>Registers the Dock tile badge.</summary>

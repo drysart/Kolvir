@@ -46,6 +46,7 @@ public class ScrollBar : Control, ISelectionBarrier
     private SKRect _incrementRect;
     private SKRect _thumbRect;
 
+    /// <summary>Creates a vertical bar at 0 with a range of 0 to 100, in the tab order.</summary>
     public ScrollBar()
     {
         TabStop = true;
@@ -192,14 +193,22 @@ public class ScrollBar : Control, ISelectionBarrier
     /// <summary>The rectangle the track is painted into, in control coordinates.</summary>
     public SKRect TrackRect => _trackRect;
 
+    /// <inheritdoc />
     protected override void OnLayout()
     {
         base.OnLayout();
         UpdateGeometry();
     }
 
+    /// <inheritdoc />
+    /// <remarks>A bar has no content of its own, so it measures a square of
+    /// <see cref="DefaultThickness"/> and leaves the real size to the layout.</remarks>
     protected override SKSize MeasureContent(SKSize availableSize) => new(DefaultThickness, DefaultThickness);
 
+    /// <summary>
+    /// Paints the surface, the two arrow buttons, their separators and the thumb, plus a focus ring
+    /// while the bar has the focus.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var surface = Enabled ? Theme.Secondary : Theme.DisabledBackground;
@@ -221,6 +230,10 @@ public class ScrollBar : Control, ISelectionBarrier
         }
     }
 
+    /// <summary>
+    /// Acts on whichever part of the bar was pressed: an arrow steps by <see cref="SmallChange"/>,
+    /// the track pages by <see cref="LargeChange"/> toward the press, and the thumb starts a drag.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -266,6 +279,10 @@ public class ScrollBar : Control, ISelectionBarrier
         Invalidate();
     }
 
+    /// <summary>
+    /// Drags the thumb with the pointer while a thumb press is running, and otherwise tracks which
+    /// part of the bar the pointer is over so it can be highlighted.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -296,18 +313,21 @@ public class ScrollBar : Control, ISelectionBarrier
         }
     }
 
+    /// <summary>Ends the thumb drag or button press the mouse-down started, release included.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
         EndInteraction();
     }
 
+    /// <summary>Repaints, because the part under the pointer is drawn highlighted.</summary>
     protected override void OnMouseEnter()
     {
         base.OnMouseEnter();
         Invalidate();
     }
 
+    /// <summary>Clears the hovered part when the pointer leaves, so nothing stays highlighted.</summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
@@ -319,6 +339,10 @@ public class ScrollBar : Control, ISelectionBarrier
         }
     }
 
+    /// <summary>
+    /// Home and End jump to the ends of the range, the arrow keys step by
+    /// <see cref="SmallChange"/> and Page Up and Page Down by <see cref="LargeChange"/>.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -390,12 +414,14 @@ public class ScrollBar : Control, ISelectionBarrier
         e.Handled = true;
     }
 
+    /// <summary>Ends a drag or press in progress when the bar loses the focus.</summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
         EndInteraction();
     }
 
+    /// <summary>Ends a drag or press in progress when the bar is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)

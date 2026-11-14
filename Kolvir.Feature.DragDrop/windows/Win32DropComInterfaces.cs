@@ -128,7 +128,7 @@ internal partial interface IComDataObject
 
     /// <summary>Asks for the canonical format of a rendering; not used by this backend.</summary>
     /// <param name="format">The representation to translate.</param>
-    /// <param name="direction">Whether to read from or write to the format; unused here.</param>
+    /// <param name="canonicalFormat">Receives the canonical form of the representation.</param>
     /// <returns>An HRESULT.</returns>
     [PreserveSig]
     int GetCanonicalFormatEtc(in FORMATETC format, out FORMATETC canonicalFormat);
@@ -151,6 +151,7 @@ internal partial interface IComDataObject
     /// <summary>Asks to be notified when the data changes; not used by this backend.</summary>
     /// <param name="format">The representation of interest.</param>
     /// <param name="advise">Whether to start or stop listening.</param>
+    /// <param name="sink">The caller's <c>IAdviseSink</c>; unused here.</param>
     /// <param name="connection">Receives the connection cookie when listening starts.</param>
     /// <returns>An HRESULT.</returns>
     [PreserveSig]

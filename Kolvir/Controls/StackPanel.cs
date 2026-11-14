@@ -47,6 +47,10 @@ public class StackPanel : Panel
     private readonly List<int> _run = [];
     private bool _runValid;
 
+    /// <summary>
+    /// Creates a vertical stack with no padding of its own, so that its bounds are exactly the run of
+    /// its children.
+    /// </summary>
     public StackPanel()
     {
         // A stack is a layout container: its bounds are exactly the run of its children.

@@ -39,6 +39,11 @@ public class TextBox : Control
     /// </summary>
     private bool _editingRange;
 
+    /// <summary>
+    /// Creates an empty single-line field: focusable, with an I-beam cursor and a caret, a one-pixel
+    /// rounded border, eight pixels of horizontal and six of vertical padding, and a minimum height
+    /// of 30 pixels.
+    /// </summary>
     public TextBox()
     {
         TabStop = true;
@@ -56,6 +61,8 @@ public class TextBox : Control
         SelectionStyle = SelectionStyle.Partial;
     }
 
+    /// <summary>Creates a field holding <paramref name="text"/>.</summary>
+    /// <param name="text">The initial text, normalised by the same rules typing follows.</param>
     public TextBox(string text)
         : this()
     {
@@ -232,8 +239,10 @@ public class TextBox : Control
     /// <summary>Lower bound of the selection; equals <see cref="CaretIndex"/> when nothing is selected.</summary>
     public int SelectionStart => Math.Min(_caretIndex, _anchor);
 
+    /// <summary>How many characters are selected; zero when the selection is collapsed.</summary>
     public int SelectionLength => Math.Abs(_caretIndex - _anchor);
 
+    /// <summary>True when more than a collapsed caret is selected.</summary>
     public bool HasSelection => _caretIndex != _anchor;
 
     /// <summary>
@@ -243,6 +252,7 @@ public class TextBox : Control
     /// </summary>
     internal int SelectionAnchor => _anchor;
 
+    /// <summary>The selected text, or the empty string when nothing is selected.</summary>
     public string SelectedText => HasSelection ? Text.Substring(SelectionStart, SelectionLength) : string.Empty;
 
     /// <summary>Maximum number of characters the user may type. 0 means unlimited.</summary>
@@ -334,6 +344,7 @@ public class TextBox : Control
         Invalidate();
     }
 
+    /// <summary>Selects the whole value, leaving the caret at its end.</summary>
     public void SelectAll() => Select(0, Text.Length);
 
     /// <summary>Collapses the selection, leaving the caret where it is.</summary>
@@ -417,6 +428,7 @@ public class TextBox : Control
         }
     }
 
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         if (MultilineFeature is { } multiline)
@@ -591,6 +603,11 @@ public class TextBox : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// Fills the field and draws its border: disabled, focused, hovered and resting states each have
+    /// their own colour, and the border is drawn here rather than in the border pass so the text and
+    /// the caret are painted over it.
+    /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
@@ -605,6 +622,11 @@ public class TextBox : Control
         Painter.DrawBorder(canvas, rect, border, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
     }
 
+    /// <summary>
+    /// Paints the selection, the text and the caret in that order - the placeholder while the value
+    /// is empty, the mask instead of the real characters when <see cref="IsPassword"/> is set, and
+    /// the multi-line feature's own layout when the box has one.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         if (MultilineFeature is { } multiline)
@@ -725,11 +747,20 @@ public class TextBox : Control
         canvas.Restore();
     }
 
+    /// <summary>
+    /// Nothing to draw: the border is painted in <see cref="OnPaintBackground"/> so that it stays
+    /// behind the text and the caret.
+    /// </summary>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         // The border is drawn in OnPaintBackground so it stays behind the text and caret.
     }
 
+    /// <summary>
+    /// A left press on an enabled box takes the focus and the caret, starts a drag selection and
+    /// captures the mouse. A double click selects the word under the pointer, a triple click the
+    /// whole value, and a single click collapses the caret to the pressed character.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -765,6 +796,10 @@ public class TextBox : Control
         }
     }
 
+    /// <summary>
+    /// While a drag selection is in progress, moves the caret to the character under the pointer and
+    /// extends the selection from its anchor.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -779,6 +814,7 @@ public class TextBox : Control
         }
     }
 
+    /// <summary>Ends the drag a press started, releasing the mouse capture and repainting.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -793,6 +829,13 @@ public class TextBox : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// Handles the editing and navigation keys: the arrows, Home and End move the caret and extend
+    /// the selection while Shift is held, Backspace and Delete edit, and Ctrl+A, C, X and V select
+    /// all, copy, cut and paste. The undo history and the multi-line feature see the key first, so
+    /// they can claim it before these decisions are made. Keys the box does not use are left
+    /// unhandled.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -898,6 +941,11 @@ public class TextBox : Control
         }
     }
 
+    /// <summary>
+    /// Inserts typed text at the caret, replacing the selection. The text is sanitised first, so a
+    /// single-line box drops control characters and a multi-line box normalises line breaks, and
+    /// nothing is inserted into a read-only box or when the text is empty.
+    /// </summary>
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
@@ -917,6 +965,11 @@ public class TextBox : Control
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Keeps the caret and the anchor inside the new value, lets the multi-line feature re-measure the
+    /// text, clamps the scroll offset to what the text now needs, and then raises the text-changed
+    /// event through the base.
+    /// </summary>
     protected override void OnTextChanged()
     {
         ClampSelectionToText();
@@ -928,6 +981,7 @@ public class TextBox : Control
         base.OnTextChanged();
     }
 
+    /// <summary>Starts the caret blinking and scrolls it into view.</summary>
     protected override void OnGotFocus()
     {
         base.OnGotFocus();
@@ -936,6 +990,10 @@ public class TextBox : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// Ends any drag in progress and repaints the now unfocused field, whose border and caret have
+    /// changed.
+    /// </summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
@@ -943,6 +1001,11 @@ public class TextBox : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// Collapses the selection to the caret when the host drops it. The caret keeps blinking while
+    /// the box still has the focus, so a press that never moved the focus cannot leave a focused box
+    /// looking as if it had lost it.
+    /// </summary>
     protected override void OnSelectionCleared(EventArgs e)
     {
         base.OnSelectionCleared(e);
@@ -957,6 +1020,9 @@ public class TextBox : Control
         }
     }
 
+    /// <summary>
+    /// Brings the caret back inside the new client area after the box has been resized.
+    /// </summary>
     protected override void OnBoundsChanged()
     {
         base.OnBoundsChanged();
@@ -1002,6 +1068,7 @@ public class TextBox : Control
         }
     }
 
+    /// <summary>Abandons a drag and releases the mouse capture when the box is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)
@@ -1013,6 +1080,11 @@ public class TextBox : Control
         base.OnEnabledChanged();
     }
 
+    /// <summary>
+    /// Releases the undo history, the span annotations and the multi-line feature the box opted
+    /// into, before the base control is disposed.
+    /// </summary>
+    /// <param name="disposing">True when the control is being disposed; false is never passed.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

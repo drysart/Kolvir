@@ -17,10 +17,10 @@ namespace Kolvir;
 /// looking.
 /// </para>
 /// <para>
-/// <see cref="DefaultBackground"/> is where a control class says what it does when nothing has been
-/// assigned to it: <see cref="None"/> for a control that draws no background, a theme role for one
-/// that paints a surface. A role rather than a colour, so a palette swap still recolours a live
-/// control with no rebuild.
+/// <see cref="Control.DefaultBackground"/> is where a control class says what it does when nothing
+/// has been assigned to it: <see cref="None"/> for a control that draws no background, a theme role
+/// for one that paints a surface. A role rather than a colour, so a palette swap still recolours a
+/// live control with no rebuild.
 /// </para>
 /// </remarks>
 public readonly struct Background : IEquatable<Background>
@@ -74,18 +74,45 @@ public readonly struct Background : IEquatable<Background>
     /// <summary>The palette role behind <see cref="Color"/>, or null for a fixed colour or no fill.</summary>
     public ThemeColor? ThemeColor => _kind == Kind.Theme ? _role : null;
 
+    /// <summary>
+    /// Compares what is painted: the kind, plus the colour or the palette role that kind carries.
+    /// The fields a kind does not use are ignored, so every <see cref="Inherit"/> equals every
+    /// other one.
+    /// </summary>
+    /// <param name="other">The value to compare with.</param>
+    /// <returns>True when the two paint the same thing.</returns>
     public bool Equals(Background other) => _kind == other._kind
         && (_kind != Kind.Color || _color == other._color)
         && (_kind != Kind.Theme || _role == other._role);
 
+    /// <summary>
+    /// True when <paramref name="obj"/> is a <see cref="Background"/> that paints the same thing.
+    /// </summary>
+    /// <param name="obj">The object to compare with.</param>
+    /// <returns>True when it is an equal <see cref="Background"/>.</returns>
     public override bool Equals(object? obj) => obj is Background other && Equals(other);
 
+    /// <summary>A hash consistent with <see cref="Equals(Background)"/>.</summary>
+    /// <returns>The hash code.</returns>
     public override int GetHashCode() => HashCode.Combine((int)_kind, _color.GetHashCode(), (int)_role);
 
+    /// <summary>True when the two values paint the same thing.</summary>
+    /// <param name="left">The first value.</param>
+    /// <param name="right">The second value.</param>
+    /// <returns>The result of <see cref="Equals(Background)"/>.</returns>
     public static bool operator ==(Background left, Background right) => left.Equals(right);
 
+    /// <summary>True when the two values do not paint the same thing.</summary>
+    /// <param name="left">The first value.</param>
+    /// <param name="right">The second value.</param>
+    /// <returns>The negation of <see cref="Equals(Background)"/>.</returns>
     public static bool operator !=(Background left, Background right) => !left.Equals(right);
 
+    /// <summary>
+    /// Describes the value for diagnostics: <c>None</c>, <c>Inherit</c>, a colour, or the name of
+    /// the palette role.
+    /// </summary>
+    /// <returns>A short description of what this value paints.</returns>
     public override string ToString() => _kind switch
     {
         Kind.None => "None",

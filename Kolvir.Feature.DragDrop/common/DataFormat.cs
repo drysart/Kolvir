@@ -37,8 +37,12 @@ public readonly struct DataFormat : IEquatable<DataFormat>
     /// <inheritdoc />
     public override string ToString() => Name;
 
+    /// <summary>
+    /// True when both describe the same format name, which is compared case-insensitively.
+    /// </summary>
     public static bool operator ==(DataFormat left, DataFormat right) => left.Equals(right);
 
+    /// <summary>True when the two do not describe the same format name.</summary>
     public static bool operator !=(DataFormat left, DataFormat right) => !left.Equals(right);
 }
 

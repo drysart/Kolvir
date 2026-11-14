@@ -11,6 +11,24 @@
     <RepositoryType>git</RepositoryType>
   </PropertyGroup>
 
+  <!-- The XML documentation file, which is what IntelliSense reads when an application consumes the
+       package. Without it `dotnet pack` writes the assembly and nothing beside it, so every
+       `<summary>` in this repository is invisible to a consumer - the compiler only emits the file
+       when it is asked to. The SDK packs it into lib/<tfm>/ next to the .dll by itself, so this one
+       property is the whole of it.
+
+       Only the projects that ship generate one. The sample, the measurement fixture and the test
+       projects are not packaged, so documenting them would be work no consumer can see, and the
+       warning below (CS1591, one per undocumented public member) would bury the ones that matter in
+       noise from test classes. -->
+  <PropertyGroup>
+    <ShipsToConsumers>true</ShipsToConsumers>
+    <ShipsToConsumers Condition="'$(MSBuildProjectName)' == 'Kolvir.Minimal'
+                               or '$(MSBuildProjectName)' == 'Kolvir.Demo.App'
+                               or $(MSBuildProjectName.Contains('.Tests'))">false</ShipsToConsumers>
+    <GenerateDocumentationFile>$(ShipsToConsumers)</GenerateDocumentationFile>
+  </PropertyGroup>
+
   <!-- A NuGet consumer imports buildTransitive/Kolvir.props from the package automatically. This
 	   repository's projects reference Kolvir by project instead, and a ProjectReference imports no
 	   build assets at all, so the same file is imported here. Keeping the two routes identical is
