@@ -64,9 +64,7 @@ public class DateTimePicker : TextBox
     {
         TabStop = true;
         Cursor = Cursor.IBeam;
-        BorderWidth = 1f;
-        CornerRadius = 6f;
-        Padding = new Thickness(8f, 6f, 8f, 6f);
+        Padding = new Thickness(7f, 5f, 7f, 5f);
         MinimumSize = new SKSize(120f, 30f);
         Size = new SKSize(180f, 30f);
 
@@ -184,6 +182,12 @@ public class DateTimePicker : TextBox
     /// <summary>Whether the calendar is open.</summary>
     public bool IsDropDownOpen => _dropDownOpen;
 
+    /// <summary>
+    /// Adds <see cref="ControlState.Active"/> while the calendar is open, so the frame takes the
+    /// accent colour even after the pointer has moved into the calendar.
+    /// </summary>
+    public override ControlState State => base.State | (_dropDownOpen ? ControlState.Active : ControlState.None);
+
     /// <summary>Adds a handler that runs after <see cref="Value"/> has changed.</summary>
     public IDisposable AddValueChangedHandler(Action<object> handler)
     {
@@ -252,8 +256,14 @@ public class DateTimePicker : TextBox
     }
 
     /// <summary>Reserves the calendar button's width at the right-hand end of the field.</summary>
-    protected override Thickness ContentPadding =>
-        new(Padding.Left, Padding.Top, Padding.Right + ButtonWidth + ButtonGap, Padding.Bottom);
+    protected override Thickness ContentPadding
+    {
+        get
+        {
+            var content = base.ContentPadding;
+            return new(content.Left, content.Top, content.Right + ButtonWidth + ButtonGap, content.Bottom);
+        }
+    }
 
     /// <summary>Raises <see cref="AddValueChangedHandler"/>.</summary>
     protected virtual void OnValueChanged() => _valueChanged?.Invoke(this);
@@ -281,7 +291,7 @@ public class DateTimePicker : TextBox
 
         if (IsFocused && Enabled)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 1.5f, CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 1.5f, Border.CornerRadius);
         }
     }
 
@@ -1181,7 +1191,7 @@ public class DateTimePicker : TextBox
             TabStop = false;
             Focusable = false;
             Cursor = Cursor.Default;
-            CornerRadius = 10f;
+            Border = SimpleBorder.Thin.WithWidth(0f).WithCornerRadius(10f);
         }
 
         internal Action<DateTime>? DateSelected { get; set; }
@@ -1228,8 +1238,11 @@ public class DateTimePicker : TextBox
 
         protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
         {
-            Painter.Fill(canvas, rect, Theme.Surface, CornerRadius);
-            Painter.DrawBorder(canvas, rect, Theme.Border, 1f, CornerRadius);
+            Painter.Fill(canvas, rect, Theme.Surface, Border.CornerRadius);
+
+            // The frame is drawn here rather than declared as the border so that the calendar does
+            // not lose a pixel of its cells to an inset; it is chrome inside the rounded fill.
+            Painter.DrawBorder(canvas, rect, Theme.Border, 1f, Border.CornerRadius);
         }
 
         protected override void OnPaint(SKCanvas canvas, SKRect rect)

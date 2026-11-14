@@ -169,8 +169,14 @@ public class NumericUpDown : TextBox
     /// Reserves the spinner's width at the right-hand end of the field, so the text and the caret
     /// stop short of the buttons instead of running underneath them.
     /// </summary>
-    protected override Thickness ContentPadding =>
-        new(Padding.Left, Padding.Top, Padding.Right + SpinnerWidth + SpinnerInset + SpinnerGap, Padding.Bottom);
+    protected override Thickness ContentPadding
+    {
+        get
+        {
+            var content = base.ContentPadding;
+            return new(content.Left, content.Top, content.Right + SpinnerWidth + SpinnerInset + SpinnerGap, content.Bottom);
+        }
+    }
 
     /// <summary>Raises <see cref="AddValueChangedHandler"/>.</summary>
     protected virtual void OnValueChanged() => _valueChanged?.Invoke(this);

@@ -78,7 +78,6 @@ public sealed class TableCellTests
         // One scene per test, so both tables are laid out in the same one, side by side.
         using var host = new Panel
         {
-            BorderWidth = 0f,
             Padding = Thickness.Empty,
         };
         using var early = Placed(0f);
@@ -219,8 +218,6 @@ public sealed class TableCellTests
     private static TableLayoutPanel Grid() => new()
     {
         Dock = DockStyle.Fill,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
         CellPadding = Thickness.Empty,
         ColumnStyles =
@@ -238,8 +235,6 @@ public sealed class TableCellTests
     private static TableLayoutPanel PlainGrid() => new()
     {
         Dock = DockStyle.Fill,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
         CellPadding = Thickness.Empty,
         ColumnStyles =
@@ -272,8 +267,6 @@ public sealed class TableCellTests
 
     private static Panel Filling(int column, int row, int columnSpan = 1, int rowSpan = 1) => new()
     {
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
         Dock = DockStyle.Fill,
         TableColumn = column,

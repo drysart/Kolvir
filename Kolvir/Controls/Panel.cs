@@ -11,10 +11,10 @@ namespace Kolvir;
 /// <remarks>
 /// <para>
 /// The panel brings no look of its own: it paints no background and draws no border unless
-/// <see cref="Control.Background"/>, <see cref="Control.BorderWidth"/> and
-/// <see cref="Control.CornerRadius"/> say otherwise. A card is those three set to
-/// <c>Background.FromThemeColor(ThemeColor.Surface)</c>, a width and a radius, which keeps the
-/// choice of how a container looks with the code that wants it.
+/// <see cref="Control.Background"/> and <see cref="Control.Border"/> say otherwise. A card is those
+/// two assigned - <c>Background.FromThemeColor(ThemeColor.Surface)</c> and
+/// <c>SimpleBorder.Thin.WithCornerRadius(8f)</c> - which keeps the choice of how a container looks
+/// with the code that wants it.
 /// </para>
 /// <para>
 /// Each axis can scroll independently through <see cref="HorizontalScroll"/> and
@@ -306,7 +306,13 @@ public class Panel : Control
         _scroll.IsBar(child) ? 1f : _scaleFactor;
 
     /// <summary>The area scrolled content is clipped to, in this panel's client coordinates.</summary>
-    protected SKRect ContentViewport => _scroll.EffectiveViewport(ContentBounds);
+    protected SKRect ContentViewport => _scroll.EffectiveViewport(FramedContentBounds);
+
+    /// <summary>
+    /// The area the content is laid out in and clipped to: <see cref="ContentBounds"/> inside the
+    /// frame, which is the control's own border rather than its padding.
+    /// </summary>
+    private SKRect FramedContentBounds => Geometry.Deflate(ContentBounds, Border.Insets(this));
 
     /// <summary>
     /// The same viewport, expressed in the content space the children are laid out in. A zoomed
@@ -370,13 +376,13 @@ public class Panel : Control
     {
         if (_scaleFactor == 1f || _scroll.IsBar(child))
         {
-            _scroll.ClipInvalidate(child, region, ContentBounds);
+            _scroll.ClipInvalidate(child, region, FramedContentBounds);
             base.ChildInvalidate(child, region);
             return;
         }
 
         using var scaled = ScaleRegion(region, _scaleFactor);
-        _scroll.ClipInvalidate(child, scaled, ContentBounds);
+        _scroll.ClipInvalidate(child, scaled, FramedContentBounds);
         base.ChildInvalidate(child, scaled);
     }
 
@@ -547,7 +553,7 @@ public class Panel : Control
         base.Dispose(disposing);
     }
 
-    private void LayoutCore() => _scroll.Layout(ContentBounds, Padding, ArrangeInPanelSpace);
+    private void LayoutCore() => _scroll.Layout(FramedContentBounds, Padding, ArrangeInPanelSpace);
 
     /// <summary>
     /// Converts the panel-space area the scrollbars hand over into the content space the children

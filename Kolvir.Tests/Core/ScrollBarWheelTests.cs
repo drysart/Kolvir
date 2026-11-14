@@ -164,8 +164,6 @@ public sealed class ScrollBarWheelTests : HeadlessTestBase
 
     private static Panel Plain() => new()
     {
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
     };
 }
