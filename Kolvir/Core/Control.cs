@@ -2540,7 +2540,7 @@ public class Control : IDisposable
     {
         if (BackColor is { } backColor)
         {
-            Painter.Fill(canvas, rect, backColor, Border.CornerRadius);
+            Painter.Fill(canvas, rect, backColor, Border.Corners);
         }
     }
 

@@ -119,7 +119,7 @@ public class Overlay : Panel, IInputSink
         if (_dim > 0f)
         {
             var shade = Theme.Background.WithAlpha((byte)MathF.Round(Math.Clamp(_dim, 0f, 1f) * 255f));
-            Painter.Fill(canvas, rect, shade, Border.CornerRadius);
+            Painter.Fill(canvas, rect, shade, Border.Corners);
         }
 
         base.OnPaintBackground(canvas, rect);

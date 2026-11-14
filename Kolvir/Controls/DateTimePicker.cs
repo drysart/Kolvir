@@ -291,7 +291,7 @@ public class DateTimePicker : TextBox
 
         if (IsFocused && Enabled)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 1.5f, Border.CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 1.5f, Border.Corners);
         }
     }
 

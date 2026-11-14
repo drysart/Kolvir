@@ -91,10 +91,21 @@ public abstract class Border
     public virtual bool IsRectangular => true;
 
     /// <summary>
-    /// The corner radius a control should round its own background fill by, so the fill follows the
-    /// same shape as the frame rather than a rectangle that the clip has to cut.
+    /// The radius of each corner a control should round its own background fill by, so the fill
+    /// follows the same shape as the frame rather than a rectangle that the clip has to cut.
     /// </summary>
-    public virtual float CornerRadius => 0f;
+    /// <remarks>
+    /// A frame with one corner radius is the common case; a frame that rounds only some of its
+    /// corners - a card with a square bottom, a sheet that opens from the bottom - reports the four
+    /// separately. A control that only has room for one number, such as a focus ring, uses
+    /// <see cref="CornerRadius"/>.
+    /// </remarks>
+    public virtual CornerRadii Corners => default;
+
+    /// <summary>
+    /// The largest of the corner radii, which is what a shape that takes one number needs.
+    /// </summary>
+    public float CornerRadius => Corners.Maximum;
 
     /// <summary>
     /// Paints the border, inside <paramref name="bounds"/>.

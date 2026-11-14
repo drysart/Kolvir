@@ -227,7 +227,7 @@ public class ComboBox : Control
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
-        Painter.Fill(canvas, rect, fill, Border.CornerRadius);
+        Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 
     /// <summary>

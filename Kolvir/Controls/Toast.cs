@@ -416,7 +416,7 @@ public class Toast : Control
 
         if (IsFocused && Enabled)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.Corners);
         }
 
         // The accent bar is inset inside the rounded corner rather than drawn over it, so it reads as

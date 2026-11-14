@@ -7,9 +7,11 @@ questions a frame has to answer — how much of the control it takes, how much i
 paints — so that a border can be a value a control class supplies, an application replaces, or a
 third party implements.
 
-Status: **phase 1 implemented** on `feature/borders`. Phase 2 (per-edge and per-corner settings) is
-scoped but not designed in detail. Section 8 records what was verified, including the two places
-where the new model deliberately differs from the old one.
+Status: **both phases implemented**. Phase 1 (`Border` on `Control`, `SimpleBorder`, `ControlState`)
+merged as PR #78; phase 2 (a width per edge, a colour per edge, a radius per corner) is on
+`feature/borders-phase2`. Section 8 records what was verified, including the places where the new
+model deliberately differs from the old one; section 10 records what phase 2 settled and what is
+deliberately still not here.
 
 ---
 
@@ -48,6 +50,9 @@ public abstract class Border
     /// <summary>Whether every pixel inside the bounds is still painted with the control's own
     /// background, i.e. whether this border lets the parent show through.</summary>
     public virtual bool IsRectangular => true;
+
+    /// <summary>The radius of each corner, which the control rounds its own fill by.</summary>
+    public virtual CornerRadii Corners => default;
 
     /// <summary>Paints the border, inside <paramref name="bounds"/>.</summary>
     public abstract void Paint(SKCanvas canvas, SKRect bounds, Control owner);
@@ -256,29 +261,41 @@ public sealed class SimpleBorder : Border
 {
     public static SimpleBorder Thin { get; }      // 1px, Theme.Border, square corners
     public static SimpleBorder Rounded(float r);  // no stroke: rounds the fill and clips, takes nothing
-    public float Width { get; }                   // 0 is a shape without a stroke, not a way to say "none"
-    public float CornerRadius { get; }
-    public SKColor Color { get; }                 // resting, resolved
+    public Thickness Widths { get; }              // one per edge; 0 on both is "no stroke", not "none"
+    public override CornerRadii Corners { get; }  // one per corner
+    public override Thickness Insets(Control owner) => _insets ?? _widths;
 
     public SimpleBorder(float width, float cornerRadius = 0f);
+    public SimpleBorder(Thickness widths, float cornerRadius = 0f);
+    public SimpleBorder(Thickness widths, CornerRadii corners);
     public SimpleBorder WithWidth(float width);
+    public SimpleBorder WithWidths(Thickness widths);
     public SimpleBorder WithCornerRadius(float radius);
+    public SimpleBorder WithCorners(CornerRadii corners);
     public SimpleBorder WithInsets(Thickness insets);          // take more room than the stroke is thick
-    public SimpleBorder WithColor(SKColor color);
-    public SimpleBorder WithThemeColor(ThemeColor role);
+    public SimpleBorder WithColor(SKColor color);              // every edge
+    public SimpleBorder WithColor(BorderSide side, SKColor color);
+    public SimpleBorder WithThemeColor(ThemeColor role);       // every edge
+    public SimpleBorder WithThemeColor(BorderSide side, ThemeColor role);
     public SimpleBorder WithHoverColor(ThemeColor role);       // ControlState.Hovered
     public SimpleBorder WithFocusColor(ThemeColor role);       // ControlState.Focused
     public SimpleBorder WithActiveColor(ThemeColor role);      // ControlState.Active
     public SimpleBorder WithDisabledColor(ThemeColor role);    // ControlState.Disabled
     public SimpleBorder WithPressedColor(ThemeColor role);     // ControlState.Pressed
 
-    public override Thickness Insets(Control owner) => _insets ?? new(Width);
-    public override bool NarrowsClip => CornerRadius > 0f;
-    public override bool IsRectangular => CornerRadius <= 0f;
+    public SKColor ColorFor(BorderSide side, ControlState state);
+    public override bool NarrowsClip => !Corners.IsNone;
+    public override bool IsRectangular => Corners.IsNone;
     public override void ClipTo(SKCanvas canvas, SKRect bounds);   // round rect, antialiased
     public override void Paint(SKCanvas canvas, SKRect bounds, Control owner);
 }
 ```
+
+`CornerRadii` (section 10) is a `readonly struct` of four radii in the order top-left, top-right,
+bottom-right, bottom-left, with an implicit conversion from `float` so `SimpleBorder.Thin.WithCornerRadius(6f)`
+still reads as one number. `Border.CornerRadius` survives as `Corners.Maximum` for the callers that
+genuinely need one number — a focus ring, `Painter.Fill` — and the per-corner overloads of those take
+`Corners`.
 
 Colour is a fixed `SKColor` or a `ThemeColor` role, mirroring `Background.FromColor` and
 `Background.FromThemeColor`; the role is resolved while painting, so a palette swap recolours live
@@ -297,8 +314,9 @@ This is what lets `TextBox` hold a `static readonly SimpleBorder _focused = Simp
 .SplitterHover).WithDisabledColor(ThemeColor.DisabledBackground)` and stop overriding
 `OnPaintBackground` to draw its own frame.
 
-Painting uses `Painter.DrawBorder` in phase 1 — a stroke on the inside of the bounds, which is exactly
-what ships today. Phase 2 needs a path-based implementation (section 10); the call sites do not change.
+Painting is path-based, as section 10 describes: four edges in one colour are filled as a single
+even-odd ring, so the mitres between them cannot show a seam; four edges in different colours are four
+mitred pieces. Phase 1 stroked the ring with `Painter.DrawBorder`; the call sites did not change.
 
 **Ten controls declare a border, in seventeen assignments, and thirteen `Painter.DrawBorder` calls paint
 one.** They are not the same set, and the difference is the interesting half of the migration.
@@ -377,14 +395,39 @@ and compared by SHA-256 digest. **78 of 82 are byte-identical.** The four that a
 Everything else — every control, in both themes, at three zoom levels — came out the same, which is
 the evidence that the padding reductions, the insets arithmetic and the clip changes agree.
 
-**The suite.** Ten new tests in `Kolvir.Tests/Core/BorderTests.cs`: a control starts on `Border.None`
+**Phase 2, the same 82 pages.** No page is byte-identical any more, and none of them should be: the
+frame stopped being a stroke and became a filled ring, so the antialiasing of every corner arc moves by
+a fraction of a pixel. The pixel comparison is the useful one:
+
+| Pages | Pixels differing | Largest channel delta | Where |
+| --- | --- | --- | --- |
+| 79 of 82 | 46 – 864 of 800 000 | 8 – 12 | the corner arcs of each frame, and nothing else |
+| `wrap-panel` | 752 | 48 | many small frames, so many corners |
+| `animated-gif` | 240 | 200 | the page whose two renders of the *same* build differ (see above) |
+
+`dialogs`, `group-boxes` and `split-container` differ on 46 pixels, the least; the mask of the whole
+page is corner arcs. Masking the differences rather than counting them is what makes this reviewable:
+a one-pixel layout shift would show as a straight line, and there is not one on any page.
+
+A new demo page, `borders`, shows the feature itself: an accent left edge on a four-pixel frame, a card
+rounded at the top with square feet, a frame with a different colour on its top and bottom edges, an
+eight-pixel band across the top, and a frame that answers the pointer through `WithHoverColor`. It
+renders in both themes and is part of the baseline.
+
+**The suite.** `Kolvir.Tests/Core/BorderTests.cs` covers the contract: a control starts on `Border.None`
 and takes no room; a one-pixel frame comes out of the content and back into the measurement, so the
 frame makes a control larger rather than shrinking its contents; a stroke-less shape reserves nothing
 but narrows the clip and stops the control reporting itself opaque; the state colours are taken in the
 documented order and a state colour that was never given falls back to the resting colour; `State`
 follows the control's own flags and an override keeps the base's bits; a frame paints its own pixel
 inside the bounds and paints over what a child drew; and a frame that takes more room lays out again.
-The rest of the suite — 908 tests — is unchanged and green.
+
+Phase 2 added ten more: an edge takes its own resting colour and a state colour still covers every
+edge; a width per side reserves exactly that much and the content lands inside it; an asymmetric frame
+paints the pixels it reserved and no others; a mitred corner has no gap in it; the four radii are held
+one by one and `CornerRadius` reports the largest; one square corner is still a corner; a radius too
+large for the control is given up rather than wrapped past it; and every `With...` returns a new border,
+leaving the shared `Thin` untouched. The rest of the suite — 918 tests — is unchanged and green.
 
 **What the migration found.** Four things the design did not anticipate:
 
@@ -449,18 +492,56 @@ Chosen while writing this down, and worth disagreeing with now rather than later
     `OnLayout` uses, so a layout pass there throws. `Font`'s setter already routes through
     `UpdateLayoutAfterAppearanceChange`, which is what a caption band measured from the font needs.
 
+Settled in phase 2:
+
+14. **Per-edge widths are a `Thickness`, per-corner radii are a `CornerRadii`.** Both are already how the
+    library spells four numbers, and neither needs a type of its own beyond the radii.
+15. **State colours stay uniform across the edges; the resting colour is per edge.** A frame whose edges
+    differ only while hovered is not a shape anything in this library needs, and per-edge state colours
+    would be four arrays instead of five fields.
+16. **The filled ring replaces the stroke for a control's own frame.** Four differently coloured edges
+    and four different radii cannot be one stroked rectangle, and a ring needs no mitre arithmetic in
+    the common case. The cost is a fraction of a pixel of antialiasing on every corner arc (section 8).
+17. **A dashed frame is not a `SimpleBorder`.** A dash belongs to a stroke; a frame with a width per
+    edge has to be filled, so a dashed border is a `Border` of its own that strokes a path.
+
 ## 10. Phase 2: per edge, per corner
 
-Deferred, but the phase-1 shape is chosen to make it additive:
+Landed. The phase-1 shape held: `Insets` was already a `Thickness` so layout needed no change, and
+painting became path-based inside `SimpleBorder` alone.
 
-- `SimpleBorder` gains per-side widths and colours and per-corner radii. `Insets` is already a
-  `Thickness`, so layout needs no change.
-- Painting becomes path-based — the bounds minus the insets as one path, filled — because four
-  differently coloured edges and four different radii cannot be a single stroked rectangle. That is a
-  rewrite of `SimpleBorder.Paint` alone.
-- `GroupBoxBorder` becomes possible, and `GroupBox` becomes a `Panel` with one.
-- Dashed edges are a `SKDashPathEffect` once the paint is path-based, so they are nearly free at that
-  point and expensive now.
+- **`CornerRadii`** — a `readonly struct` of the four radii in the order top-left, top-right,
+  bottom-right, bottom-left, with `(float)` and `(tl, tr, br, bl)` constructors, `None`, `IsNone`,
+  `IsUniform`, `Maximum`, `+`, `-`, `*` and an implicit conversion from `float`. `Border.CornerRadius`
+  became `Corners.Maximum` rather than disappearing, so the callers that genuinely need one number - a
+  focus ring, `Painter.Fill`, `Image`'s placeholder - did not move.
+- **`BorderSide`** — `Top`, `Right`, `Bottom`, `Left`, the index order the per-edge colour array uses.
+- **`SimpleBorder`** — `Widths` is a `Thickness`, `Corners` is a `CornerRadii`, and each edge has its
+  own resting colour (`WithColor(BorderSide, SKColor)` and `WithThemeColor(BorderSide, ThemeColor)`).
+  State colours stay *uniform across the edges*: nothing in this library needs a frame whose edges
+  differ only while hovered, and a per-edge state colour is four arrays instead of five fields.
+- **`RoundedRect`** — one internal helper holding the geometry the four renderers share (the outline
+  path, the corner ovals, the arc angles, the clamp that stops two arcs overlapping on a small
+  control), so a border's ring, a control's fill, a stroked frame and a focus ring all round the same
+  way. `Painter` gained `CornerRadii` overloads of `Fill`, `DrawBorder` and `DrawFocusRing`, and the
+  control-bound call sites in `Control`, `Button`, `ComboBox`, `TextBox`, `VirtualList`, `Image`,
+  `Overlay`, `TabControl`, `DateTimePicker`, `Toast`, `ToggleControl` and `TrackBar` now pass
+  `Border.Corners` instead of `Border.CornerRadius`.
+
+**How a frame with four widths is painted.** Four edges in one colour are a single even-odd ring -
+outer outline, inner outline - so the corners cannot show a seam. Four edges in different colours are
+four mitred pieces: the ring is cut at the 45° midpoint of each corner, and each piece runs along the
+outer outline, round the outer arc to the diagonal, across to the inner outline and back. The inner
+radius at a corner is the outer radius less the thicker of the two edges meeting there, clamped against
+the inner rectangle, so the inner outline stays parallel to the outer one.
+
+That replaced the stroked `Painter.DrawBorder` for a control's own frame, which moves the antialiasing
+of every corner arc by a fraction of a pixel. Section 8 records what that cost.
+
+**Deliberately not here.** A dashed frame is a `Border` of its own that strokes a path: a dash belongs
+to a stroke, and a frame with a width per edge has to be filled to keep its mitres, so the two cannot be
+one object. `GroupBoxBorder` and `TabControlBorder` remain the next two borders - the two controls still
+drawing their own frames - and `GroupBox` can become a `Panel` with one when that lands.
 
 ## 11. Risks
 

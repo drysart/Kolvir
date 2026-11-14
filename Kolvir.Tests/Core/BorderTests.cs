@@ -72,12 +72,12 @@ public sealed class BorderTests : HeadlessTestBase
             .WithPressedColor(ThemeColor.SecondaryPressed)
             .WithDisabledColor(ThemeColor.DisabledBackground);
 
-        Assert.AreEqual(Theme.Border, border.ColorFor(ControlState.None), "nothing happening is the resting colour");
-        Assert.AreEqual(Theme.SecondaryHover, border.ColorFor(ControlState.Hovered));
-        Assert.AreEqual(Theme.Accent, border.ColorFor(ControlState.Focused | ControlState.Hovered), "focus is stronger than hover");
-        Assert.AreEqual(Theme.AccentPressed, border.ColorFor(ControlState.Active | ControlState.Focused));
-        Assert.AreEqual(Theme.SecondaryPressed, border.ColorFor(ControlState.Pressed | ControlState.Active | ControlState.Focused));
-        Assert.AreEqual(Theme.DisabledBackground, border.ColorFor(ControlState.Disabled | ControlState.Pressed), "disabled wins outright");
+        Assert.AreEqual(Theme.Border, border.ColorFor(BorderSide.Top, ControlState.None), "nothing happening is the resting colour");
+        Assert.AreEqual(Theme.SecondaryHover, border.ColorFor(BorderSide.Top, ControlState.Hovered));
+        Assert.AreEqual(Theme.Accent, border.ColorFor(BorderSide.Top, ControlState.Focused | ControlState.Hovered), "focus is stronger than hover");
+        Assert.AreEqual(Theme.AccentPressed, border.ColorFor(BorderSide.Top, ControlState.Active | ControlState.Focused));
+        Assert.AreEqual(Theme.SecondaryPressed, border.ColorFor(BorderSide.Top, ControlState.Pressed | ControlState.Active | ControlState.Focused));
+        Assert.AreEqual(Theme.DisabledBackground, border.ColorFor(BorderSide.Top, ControlState.Disabled | ControlState.Pressed), "disabled wins outright");
     }
 
     [TestMethod]
@@ -85,8 +85,140 @@ public sealed class BorderTests : HeadlessTestBase
     {
         var border = SimpleBorder.Thin.WithFocusColor(ThemeColor.Accent);
 
-        Assert.AreEqual(Theme.Border, border.ColorFor(ControlState.Hovered), "the resting colour stands in for a missing one");
-        Assert.AreEqual(Theme.Accent, border.ColorFor(ControlState.Focused));
+        Assert.AreEqual(Theme.Border, border.ColorFor(BorderSide.Top, ControlState.Hovered), "the resting colour stands in for a missing one");
+        Assert.AreEqual(Theme.Accent, border.ColorFor(BorderSide.Top, ControlState.Focused));
+    }
+
+    [TestMethod]
+    public void AStateColourCoversEveryEdge()
+    {
+        var border = SimpleBorder.Thin
+            .WithThemeColor(BorderSide.Top, ThemeColor.Accent)
+            .WithFocusColor(ThemeColor.AccentPressed);
+
+        Assert.AreEqual(Theme.Accent, border.ColorFor(BorderSide.Top, ControlState.None));
+        Assert.AreEqual(
+            Theme.AccentPressed,
+            border.ColorFor(BorderSide.Bottom, ControlState.Focused),
+            "a state paints the whole frame, whatever the edges rest as");
+    }
+
+    [TestMethod]
+    public void AnEdgeTakesItsOwnRestingColour()
+    {
+        var accent = new SKColor(1, 2, 3);
+        var muted = new SKColor(4, 5, 6);
+        var border = SimpleBorder.Thin
+            .WithColor(BorderSide.Left, accent)
+            .WithColor(BorderSide.Bottom, muted);
+
+        Assert.AreEqual(accent, border.ColorFor(BorderSide.Left, ControlState.None));
+        Assert.AreEqual(muted, border.ColorFor(BorderSide.Bottom, ControlState.None));
+        Assert.AreEqual(Theme.Border, border.ColorFor(BorderSide.Right, ControlState.None), "an edge left alone keeps the palette role");
+        Assert.AreEqual(Theme.Border, border.ColorFor(BorderSide.Top, ControlState.None));
+    }
+
+    [TestMethod]
+    public void AWidthPerSideIsWhatTheContentGivesUp()
+    {
+        var border = new SimpleBorder(new Thickness(4f, 1f, 2f, 8f), 0f);
+        using var control = new Control { Padding = new Thickness(3f), Border = border };
+
+        Assert.AreEqual(new Thickness(4f, 1f, 2f, 8f), border.Insets(control), "the frame takes what each edge weighs");
+        Assert.AreEqual(
+            new SKRect(7f, 4f, 195f, 39f),
+            ContentRectOf(control, 200f, 50f),
+            "the padding sits inside the asymmetric frame");
+
+        var measured = control.Measure(new SKSize(1000f, 1000f));
+        Assert.AreEqual(12f, measured.Width, "left 8 and right 5 from the frame, six from the padding");
+        Assert.AreEqual(15f, measured.Height, "top 1 and bottom 8 from the frame, six from the padding");
+    }
+
+    [TestMethod]
+    public void AnAsymmetricFramePaintsThePixelsItReserved()
+    {
+        var control = new Control
+        {
+            Dock = DockStyle.Fill,
+            Border = new SimpleBorder(new Thickness(6f, 2f, 1f, 1f), 0f),
+        };
+        using var scene = HeadlessScene.Create(control, 60f, 40f);
+
+        Assert.AreEqual(Theme.Border, scene.PixelAt(0, 20), "the left edge's first pixel");
+        Assert.AreEqual(Theme.Border, scene.PixelAt(5, 20), "and its last");
+        Assert.AreNotEqual(Theme.Border, scene.PixelAt(6, 20), "the content starts at the inset");
+        Assert.AreEqual(Theme.Border, scene.PixelAt(30, 0), "the top edge's first pixel");
+        Assert.AreNotEqual(Theme.Border, scene.PixelAt(30, 2), "the top edge is only two pixels");
+        Assert.AreEqual(Theme.Border, scene.PixelAt(30, 39), "the bottom edge is the last pixel");
+    }
+
+    [TestMethod]
+    public void APerSideColourPaintsOnlyThatEdge()
+    {
+        var accent = new SKColor(200, 40, 90);
+        var control = new Control
+        {
+            Dock = DockStyle.Fill,
+            Border = SimpleBorder.Thin.WithColor(BorderSide.Top, accent),
+        };
+        using var scene = HeadlessScene.Create(control, 60f, 40f);
+
+        Assert.AreEqual(accent, scene.PixelAt(30, 0), "the top edge takes its own colour");
+        Assert.AreEqual(Theme.Border, scene.PixelAt(0, 20), "the others keep the palette role");
+    }
+
+    [TestMethod]
+    public void CornersAreHeldOneByOne()
+    {
+        var corners = new CornerRadii(1f, 2f, 3f, 4f);
+        var border = SimpleBorder.Thin.WithCorners(corners);
+
+        Assert.AreEqual(corners, border.Corners);
+        Assert.AreEqual(4f, border.CornerRadius, "the most rounded corner is the one a shorthand caller sees");
+        Assert.AreEqual(4f, border.Corners.Maximum);
+        Assert.IsFalse(border.Corners.IsUniform, "so the shape is not a plain rounded rect");
+        Assert.IsFalse(border.Corners.IsNone);
+
+        Assert.IsTrue(CornerRadii.None.IsNone);
+        Assert.IsTrue(new CornerRadii(3f).IsUniform);
+        Assert.AreEqual(new CornerRadii(3f), new CornerRadii(3f, 3f, 3f, 3f));
+        Assert.AreEqual(CornerRadii.None, default(CornerRadii));
+    }
+
+    [TestMethod]
+    public void OneSquareCornerIsStillACorner()
+    {
+        var control = new Control
+        {
+            Dock = DockStyle.Fill,
+            BackColor = SKColors.Red,
+            Border = SimpleBorder.Rounded(10f).WithCorners(new CornerRadii(0f, 10f, 0f, 10f)),
+        };
+        using var scene = HeadlessScene.Create(control, 60f, 40f);
+
+        Assert.IsTrue(control.Border.NarrowsClip, "the rounded corners clip");
+        Assert.IsFalse(control.Border.IsRectangular);
+        Assert.AreEqual(SKColors.Red, scene.PixelAt(0, 0), "the square corner is filled right into the corner");
+        Assert.AreNotEqual(SKColors.Red, scene.PixelAt(59, 0), "the rounded one is not");
+    }
+
+    [TestMethod]
+    public void AFrameTooSmallToRoundGivesUpItsRadius()
+    {
+        var control = new Control
+        {
+            Dock = DockStyle.Fill,
+            BackColor = SKColors.Red,
+            Border = SimpleBorder.Rounded(40f),
+        };
+        using var scene = HeadlessScene.Create(control, 30f, 20f);
+
+        Assert.AreEqual(SKColors.Red, scene.PixelAt(15, 10), "the middle is still filled");
+        Assert.AreNotEqual(
+            SKColors.Red,
+            scene.PixelAt(0, 0),
+            "the radius is clamped to what the control can hold, not wrapped past it");
     }
 
     [TestMethod]
@@ -155,6 +287,54 @@ public sealed class BorderTests : HeadlessTestBase
         panel.Border = new SimpleBorder(4f);
 
         Assert.AreEqual(before + 4f, child.Left, "a thicker frame moves the content in");
+    }
+
+    [TestMethod]
+    public void AMitredCornerLeavesNoGap()
+    {
+        var control = new Control
+        {
+            Dock = DockStyle.Fill,
+            BackColor = SKColors.Red,
+            Border = new SimpleBorder(new Thickness(6f, 2f, 1f, 1f), 8f),
+        };
+        using var scene = HeadlessScene.Create(control, 60f, 40f);
+
+        Assert.AreEqual(
+            Theme.Border,
+            scene.PixelAt(3, 3),
+            "the corner is mitred through the diagonal, so the two widths meet without a gap");
+        Assert.AreEqual(Theme.Border, scene.PixelAt(4, 4), "and the mitre carries on to the inner outline");
+        Assert.AreEqual(SKColors.Red, scene.PixelAt(20, 20), "the content is still inside it");
+    }
+
+    [TestMethod]
+    public void EveryVariationIsANewBorder()
+    {
+        var widths = new Thickness(1f, 2f, 3f, 4f);
+        var corners = new CornerRadii(1f, 2f, 3f, 4f);
+        var color = new SKColor(9, 8, 7);
+        var origin = SimpleBorder.Thin;
+
+        var wider = origin.WithWidths(widths);
+        var rounded = origin.WithCorners(corners);
+        var recoloured = origin.WithColor(BorderSide.Left, color);
+        var thickened = origin.WithWidth(3f);
+
+        Assert.AreNotSame(origin, wider);
+        Assert.AreNotSame(origin, rounded);
+        Assert.AreNotSame(origin, recoloured);
+        Assert.AreNotSame(origin, thickened);
+
+        Assert.AreEqual(new Thickness(1f), origin.Widths, "the shared default is untouched");
+        Assert.AreEqual(CornerRadii.None, origin.Corners);
+        Assert.AreEqual(Theme.Border, origin.ColorFor(BorderSide.Left, ControlState.None));
+
+        Assert.AreEqual(widths, wider.Widths);
+        Assert.AreEqual(corners, rounded.Corners);
+        Assert.AreEqual(color, recoloured.ColorFor(BorderSide.Left, ControlState.None));
+        Assert.AreEqual(new Thickness(3f), thickened.Widths);
+        Assert.AreEqual(corners, wider.WithCorners(corners).Corners, "variations compose");
     }
 
     private static SKRect ContentRectOf(Control control, float width, float height)

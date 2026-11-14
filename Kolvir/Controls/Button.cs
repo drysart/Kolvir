@@ -88,17 +88,17 @@ public class Button : Control
         var (fill, _) = ResolveColors();
         if (fill is { } color)
         {
-            Painter.Fill(canvas, rect, color, Border.CornerRadius);
+            Painter.Fill(canvas, rect, color, Border.Corners);
         }
 
         if (_style == ButtonStyle.Secondary && Enabled)
         {
-            Painter.DrawBorder(canvas, rect, Theme.Border, 1f, Border.CornerRadius);
+            Painter.DrawBorder(canvas, rect, Theme.Border, 1f, Border.Corners);
         }
 
         if (IsFocused && Enabled)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.Corners);
         }
     }
 
