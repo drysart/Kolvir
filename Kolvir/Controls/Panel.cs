@@ -11,10 +11,10 @@ namespace Kolvir;
 /// <remarks>
 /// <para>
 /// The panel brings no look of its own: it paints no background and draws no border unless
-/// <see cref="Control.Background"/>, <see cref="Control.BorderWidth"/> and
-/// <see cref="Control.CornerRadius"/> say otherwise. A card is those three set to
-/// <c>Background.FromThemeColor(ThemeColor.Surface)</c>, a width and a radius, which keeps the
-/// choice of how a container looks with the code that wants it.
+/// <see cref="Control.Background"/> and <see cref="Control.Border"/> say otherwise. A card is those
+/// two assigned - <c>Background.FromThemeColor(ThemeColor.Surface)</c> and
+/// <c>SimpleBorder.Thin.WithCornerRadius(8f)</c> - which keeps the choice of how a container looks
+/// with the code that wants it.
 /// </para>
 /// <para>
 /// Each axis can scroll independently through <see cref="HorizontalScroll"/> and

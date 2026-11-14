@@ -1839,7 +1839,8 @@ public class Control : IDisposable
 
     /// <summary>
     /// The transient conditions this control is in, as flags: enabled, hovered, focused and pressed,
-    /// plus whatever <see cref="Active"/> bit a control class adds for a state of its own.
+    /// plus whatever <see cref="ControlState.Active"/> bit a control class adds for a state of its
+    /// own.
     /// </summary>
     /// <remarks>
     /// It is what a <see cref="Kolvir.Border"/> reads to colour itself, and it is a value rather than a
