@@ -103,6 +103,27 @@ public readonly struct Thickness : IEquatable<Thickness>
     /// <returns>The negation of the equality operator: true when any side differs.</returns>
     public static bool operator !=(Thickness left, Thickness right) => !left.Equals(right);
 
+    /// <summary>The sum of two thicknesses, side by side.</summary>
+    /// <param name="left">The first thickness.</param>
+    /// <param name="right">The second thickness.</param>
+    /// <returns>
+    /// A thickness whose every side is the sum of that side in both, which is how a control adds its
+    /// border's insets to its padding to get the space between its edge and its content.
+    /// </returns>
+    public static Thickness operator +(Thickness left, Thickness right) =>
+        new(left.Left + right.Left, left.Top + right.Top, left.Right + right.Right, left.Bottom + right.Bottom);
+
+    /// <summary>The difference of two thicknesses, side by side.</summary>
+    /// <param name="left">The thickness being taken from.</param>
+    /// <param name="right">The thickness to take away.</param>
+    /// <returns>
+    /// A thickness whose every side is that side of <paramref name="left"/> less that side of
+    /// <paramref name="right"/> - how a control that folded its insets into a combined inset takes
+    /// them back out again.
+    /// </returns>
+    public static Thickness operator -(Thickness left, Thickness right) =>
+        new(left.Left - right.Left, left.Top - right.Top, left.Right - right.Right, left.Bottom - right.Bottom);
+
     /// <summary>The four sides as text, in the order left, top, right, bottom.</summary>
     /// <returns>A string such as <c>8,0,8,0</c>.</returns>
     public override string ToString() => $"{Left},{Top},{Right},{Bottom}";

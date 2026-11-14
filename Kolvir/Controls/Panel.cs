@@ -306,7 +306,13 @@ public class Panel : Control
         _scroll.IsBar(child) ? 1f : _scaleFactor;
 
     /// <summary>The area scrolled content is clipped to, in this panel's client coordinates.</summary>
-    protected SKRect ContentViewport => _scroll.EffectiveViewport(ContentBounds);
+    protected SKRect ContentViewport => _scroll.EffectiveViewport(FramedContentBounds);
+
+    /// <summary>
+    /// The area the content is laid out in and clipped to: <see cref="ContentBounds"/> inside the
+    /// frame, which is the control's own border rather than its padding.
+    /// </summary>
+    private SKRect FramedContentBounds => Geometry.Deflate(ContentBounds, Border.Insets(this));
 
     /// <summary>
     /// The same viewport, expressed in the content space the children are laid out in. A zoomed
@@ -370,13 +376,13 @@ public class Panel : Control
     {
         if (_scaleFactor == 1f || _scroll.IsBar(child))
         {
-            _scroll.ClipInvalidate(child, region, ContentBounds);
+            _scroll.ClipInvalidate(child, region, FramedContentBounds);
             base.ChildInvalidate(child, region);
             return;
         }
 
         using var scaled = ScaleRegion(region, _scaleFactor);
-        _scroll.ClipInvalidate(child, scaled, ContentBounds);
+        _scroll.ClipInvalidate(child, scaled, FramedContentBounds);
         base.ChildInvalidate(child, scaled);
     }
 
@@ -547,7 +553,7 @@ public class Panel : Control
         base.Dispose(disposing);
     }
 
-    private void LayoutCore() => _scroll.Layout(ContentBounds, Padding, ArrangeInPanelSpace);
+    private void LayoutCore() => _scroll.Layout(FramedContentBounds, Padding, ArrangeInPanelSpace);
 
     /// <summary>
     /// Converts the panel-space area the scrollbars hand over into the content space the children

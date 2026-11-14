@@ -89,6 +89,8 @@ public class Toast : Control
     private bool _tabStopBeforeDismiss = true;
     private bool _focusableBeforeDismiss = true;
 
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin.WithCornerRadius(8f);
+
     /// <summary>
     /// Creates a closed toast with no text. It starts hidden, so a message nobody has asked for yet
     /// takes no room in the layout until <see cref="Show"/> is called.
@@ -99,9 +101,8 @@ public class Toast : Control
         Focusable = true;
         AutoSize = true;
         Cursor = Cursor.Hand;
-        CornerRadius = 8f;
-        BorderWidth = 1f;
-        Padding = new Thickness(22f, 10f, 40f, 10f);
+        Border = DefaultBorder;
+        Padding = new Thickness(21f, 9f, 39f, 9f);
         MinimumSize = new SKSize(160f, 40f);
 
         // A message nobody has asked for yet takes no room in the layout; Show puts it up.
@@ -395,12 +396,16 @@ public class Toast : Control
     /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var measured = TextRenderer.Measure(Text, Font, MathF.Max(0f, availableSize.Width - Padding.Horizontal), wrap: true);
+        var measured = TextRenderer.Measure(
+            Text,
+            Font,
+            MathF.Max(0f, availableSize.Width - (Padding.Horizontal + Border.Insets(this).Horizontal)),
+            wrap: true);
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
 
     /// <summary>
-    /// Draws everything the message sits on: the surface, the border, the focus ring, the accent bar
+    /// Draws everything the message sits on: the surface, the focus ring, the accent bar
     /// for <see cref="Severity"/> and the close glyph's hover or press fill.
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
@@ -409,11 +414,9 @@ public class Toast : Control
 
         base.OnPaintBackground(canvas, rect);
 
-        Painter.DrawBorder(canvas, rect, BorderColor, BorderWidth <= 0f ? 1f : BorderWidth, CornerRadius);
-
         if (IsFocused && Enabled)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.CornerRadius);
         }
 
         // The accent bar is inset inside the rounded corner rather than drawn over it, so it reads as
@@ -448,7 +451,7 @@ public class Toast : Control
         bool shifted = BeginSlide(canvas);
 
         var color = Enabled ? ForeColor : Theme.DisabledForeground;
-        var content = Geometry.Deflate(rect, Padding);
+        var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
 
         if (content.Width > 0f && content.Height > 0f && !string.IsNullOrEmpty(Text))
         {
@@ -471,16 +474,6 @@ public class Toast : Control
         {
             canvas.Restore();
         }
-    }
-
-    /// <summary>
-    /// Draws nothing: the surface, the border and the accent bar are painted in
-    /// <see cref="OnPaintBackground"/> so that they stay behind the message.
-    /// </summary>
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        // The surface, the border and the accent bar are drawn in OnPaintBackground so they stay
-        // behind the message.
     }
 
     /// <summary>The hand cursor over the close glyph, and the arrow elsewhere on the message.</summary>

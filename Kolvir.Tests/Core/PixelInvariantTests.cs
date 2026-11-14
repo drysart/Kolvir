@@ -27,7 +27,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     [TestMethod]
     public void AButtonPaintsItsFillAcrossItsMiddle()
     {
-        var button = new Button("Go") { Dock = DockStyle.Fill, CornerRadius = 0f };
+        var button = new Button("Go") { Dock = DockStyle.Fill, Border = Border.None };
         using var scene = HeadlessScene.Create(button, 200f, 60f);
 
         var fill = scene.PixelAt(FillX(button), (int)button.Height / 2);
@@ -38,7 +38,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     [TestMethod]
     public void ADisabledButtonPaintsTheDisabledBackground()
     {
-        var button = new Button("Go") { Dock = DockStyle.Fill, CornerRadius = 0f };
+        var button = new Button("Go") { Dock = DockStyle.Fill, Border = Border.None };
         using var scene = HeadlessScene.Create(button, 200f, 60f);
         button.Enabled = false;
 
@@ -81,14 +81,12 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         {
             Dock = DockStyle.Fill,
             Padding = Thickness.Empty,
-            BorderWidth = 0f,
             Background = Background.FromColor(new SKColor(0xFF102030)),
         };
 
         var plain = new Panel
         {
             Dock = DockStyle.Fill,
-            BorderWidth = 0f,
             Padding = Thickness.Empty,
         };
         stage.Controls.Add(plain);
@@ -108,8 +106,6 @@ public sealed class PixelInvariantTests : HeadlessTestBase
             Dock = DockStyle.Fill,
             Background = Background.FromThemeColor(ThemeColor.Surface),
             Padding = Thickness.Empty,
-            BorderWidth = 0f,
-            CornerRadius = 0f,
         };
 
         using var scene = HeadlessScene.Create(panel, 100f, 80f);
@@ -155,7 +151,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     [TestMethod]
     public void AnImagesSizeModeAndAlignmentPlaceThePictureWhereTheyDid()
     {
-        var image = new Image { Dock = DockStyle.Fill, CornerRadius = 0f };
+        var image = new Image { Dock = DockStyle.Fill };
         using var scene = HeadlessScene.Create(image, 100f, 100f);
         image.Source = new ImageDataFactory().LoadFromStream(RedPng(4, 2));
 
@@ -223,7 +219,6 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         var image = new Image
         {
             Dock = DockStyle.Fill,
-            CornerRadius = 0f,
             PlaceholderColor = placeholder,
         };
 
@@ -241,7 +236,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         // A scene owns an application, so it is disposed before the next one is created.
         using var background = RenderBackground();
 
-        var image = new Image { Dock = DockStyle.Fill, CornerRadius = 0f };
+        var image = new Image { Dock = DockStyle.Fill };
         image.Source = new ImageDataFactory().LoadFromBytes(png);
         using var scene = HeadlessScene.Create(image, 101f, 67f);
 
@@ -303,7 +298,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     /// <summary>An empty image control's frame, which is what the image is drawn over.</summary>
     private static SKBitmap RenderBackground()
     {
-        var empty = new Image { Dock = DockStyle.Fill, CornerRadius = 0f };
+        var empty = new Image { Dock = DockStyle.Fill };
         using var scene = HeadlessScene.Create(empty, 101f, 67f);
         return scene.Render();
     }

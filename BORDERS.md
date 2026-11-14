@@ -7,8 +7,9 @@ questions a frame has to answer — how much of the control it takes, how much i
 paints — so that a border can be a value a control class supplies, an application replaces, or a
 third party implements.
 
-Status: phase 1 designed, not implemented. Phase 2 (per-edge and per-corner settings) is scoped but
-not designed in detail.
+Status: **phase 1 implemented** on `feature/borders`. Phase 2 (per-edge and per-corner settings) is
+scoped but not designed in detail. Section 8 records what was verified, including the two places
+where the new model deliberately differs from the old one.
 
 ---
 
@@ -254,20 +255,24 @@ hand-written resolution from four paint methods:
 public sealed class SimpleBorder : Border
 {
     public static SimpleBorder Thin { get; }      // 1px, Theme.Border, square corners
-    public float Width { get; }                   // 0 means none: use Border.None instead
+    public static SimpleBorder Rounded(float r);  // no stroke: rounds the fill and clips, takes nothing
+    public float Width { get; }                   // 0 is a shape without a stroke, not a way to say "none"
     public float CornerRadius { get; }
-    public SKColor? Color { get; }                // resting; null means Theme.Border
-    public ThemeColor? Role { get; }              // a palette role, so a swap recolours live borders
+    public SKColor Color { get; }                 // resting, resolved
 
+    public SimpleBorder(float width, float cornerRadius = 0f);
     public SimpleBorder WithWidth(float width);
     public SimpleBorder WithCornerRadius(float radius);
+    public SimpleBorder WithInsets(Thickness insets);          // take more room than the stroke is thick
     public SimpleBorder WithColor(SKColor color);
     public SimpleBorder WithThemeColor(ThemeColor role);
     public SimpleBorder WithHoverColor(ThemeColor role);       // ControlState.Hovered
-    public SimpleBorder WithFocusColor(ThemeColor role);        // ControlState.Focused
-    public SimpleBorder WithDisabledColor(ThemeColor role);     // ControlState.Disabled
+    public SimpleBorder WithFocusColor(ThemeColor role);       // ControlState.Focused
+    public SimpleBorder WithActiveColor(ThemeColor role);      // ControlState.Active
+    public SimpleBorder WithDisabledColor(ThemeColor role);    // ControlState.Disabled
+    public SimpleBorder WithPressedColor(ThemeColor role);     // ControlState.Pressed
 
-    public override Thickness Insets(Control owner) => new(Width);
+    public override Thickness Insets(Control owner) => _insets ?? new(Width);
     public override bool NarrowsClip => CornerRadius > 0f;
     public override bool IsRectangular => CornerRadius <= 0f;
     public override void ClipTo(SKCanvas canvas, SKRect bounds);   // round rect, antialiased
@@ -279,12 +284,13 @@ Colour is a fixed `SKColor` or a `ThemeColor` role, mirroring `Background.FromCo
 `Background.FromThemeColor`; the role is resolved while painting, so a palette swap recolours live
 controls with no rebuild.
 
-`Paint` resolves the state in one documented order — **disabled > pressed > focused > hovered >
-resting** — which is the order `TextBox` (`622`) and `ComboBox` (`219-223`) already implement by hand,
-differing only in that `ComboBox` also treats its open list as focused. That difference is now a bit
-rather than a special case: `ComboBox` overrides `State` to add `Active` and passes `WithFocusColor` the
-accent, and its paint method stops choosing colours at all. `VirtualList` sets no hover colour, so it
-keeps its pixels; `TabControl`, `Button` and `DateTimePicker` set none, and are unchanged.
+`Paint` resolves the state in one documented order — **disabled > pressed > active > focused >
+hovered > resting** — which is what the built-in controls already implement by hand, differing only in
+that `ComboBox` also treats its open list as focused. That difference is now a bit rather than a
+special case: `ComboBox` overrides `State` to add `Active` and gives its frame `WithActiveColor` and
+`WithFocusColor` the accent, and its paint method stops choosing colours at all. `VirtualList` sets no
+hover colour, so it keeps its pixels; `TabControl`, `Button` and `DateTimePicker` set none, and are
+unchanged.
 
 This is what lets `TextBox` hold a `static readonly SimpleBorder _focused = SimpleBorder.Thin
 .WithThemeColor(ThemeColor.Border).WithFocusColor(ThemeColor.Accent).WithHoverColor(ThemeColor
@@ -297,31 +303,26 @@ what ships today. Phase 2 needs a path-based implementation (section 10); the ca
 **Ten controls declare a border, in seventeen assignments, and thirteen `Painter.DrawBorder` calls paint
 one.** They are not the same set, and the difference is the interesting half of the migration.
 
-| control | border today | padding today | becomes |
+| control | border today | padding today | what it became |
 |---|---|---|---|
-| `TextBox` | 1px | 8, 6 | inset 1, padding 7, 5; frame no longer painted in `OnPaintBackground` |
-| `ComboBox` | 1px | 8, 6, 26, 6 | inset 1, padding 7, 5, 25, 5; same |
-| `DateTimePicker` | 1px | 8, 6 | inset 1, padding 7, 5; frame no longer painted in `OnPaintBackground` |
+| `TextBox` | 1px | 8, 6 | inset 1, padding 7, 5; the frame is no longer painted in `OnPaintBackground` |
+| `ComboBox` | 1px | 8, 6, 26, 6 | inset 1, padding 7, 5, 25, 5; same, and the chevron measures from the frame's inner edge |
+| `DateTimePicker` | 1px | 8, 6 | inset 1, padding 7, 5; it inherits `TextBox`'s frame and adds `Active` while the calendar is up |
 | `ToolTip` | 1px | 8, 5, 8, 6 | inset 1, padding 7, 4, 7, 5 |
-| `Toast` | 1px | 22, 10, 40, 10 | inset 1, padding 21, 9, 39, 9; frame no longer painted in `OnPaint` |
-| `ColorPicker` | 1px | 8 | inset 1, padding 7 |
-| `Expander` | 1px | 12, 0, 12, 12 | inset 1, padding 11, 0, 11, 11 — the zero top becomes a pixel of inset, so the header budget shrinks; verify the render |
-| `VirtualList` | 1px | 2 | `Inset` (`ListView.cs:643`) already compensates; verify the render |
-| `TabControl` | 1px | 0 | computes four content insets from `BorderWidth` by hand (`388-477`); those become `Border.Insets` |
-| `GroupBox` | 1px | 12, 0, 12, 12 | **unchanged in phase 1**; it draws its caption in the top border band |
+| `Toast` | 1px | 22, 10, 40, 10 | inset 1, padding 21, 9, 39, 9; its width measurement adds the insets back |
+| `ColorPicker` | 1px | 8 | inset 1, padding 7; the spectrum and hue views keep their strokes as inner chrome, because a stroke over a bitmap has nothing to inset |
+| `Expander` | 1px | 12, 0, 12, 12 | insets 1, 0, 1, 1 and padding 11, 0, 11, 11: the caption sits on the top edge, so the top takes no room |
+| `VirtualList` | 1px | 2 | inset 1, padding 1, and `ScrollPadding` is the two together, so the rows stay two pixels in |
+| `TabControl` | 1px | 0 | **shape only, no stroke**: the strip and the pages share the frame's edges, so reserving room would move both. It keeps drawing its frame in the background pass, and a `TabControlBorder` that owns the strip is phase-2 work |
+| `GroupBox` | 1px | 12, 0, 12, 12 | shape only, no stroke: it draws its captioned frame itself, as before |
+| `Button` | none | 14, 8 | shape only, radius 6, no stroke: the only frame a button draws is the secondary style's, which is chrome of that style |
 
-Of the thirteen frame-painting sites, eleven are a control's own outer frame and become a declared
-`DefaultBorder`:
-
-- the six above that already draw their frame by hand — `TextBox`, `ComboBox`, `TabControl`, `Toast`,
-  `VirtualList` (in `OnPaintBorder`), `DateTimePicker`;
-- five that paint a frame they never declared, which is a latent inconsistency this fixes rather than
-  migrates: `Button` draws a hardcoded `Theme.Border` at 1 pixel in `OnPaintBackground` while leaving
-  `BorderWidth` at zero, `DateTimePicker` does the same for its field, and the spectrum and hue views
-  inside `ColorPicker` each paint `Theme.Border` at 1 pixel in their own `OnPaint` regardless of any
-  setting.
-
-The remaining two are `GroupBox`'s, which stay.
+Of the thirteen frame-painting sites, six are a control's own outer frame and became a declared
+`DefaultBorder` — `TextBox`, `ComboBox`, `TabControl`, `Toast`, `VirtualList` and `DateTimePicker`. Five
+paint a frame they never declared, and the answer differs by what the frame *is*:
+`Button` draws the secondary style's hairline, so its border is the shape without a stroke;
+`DateTimePicker`'s field and the two spectrum views inside `ColorPicker` draw a stroke over content that
+fills the whole control, so they stay inner chrome. `GroupBox`'s captioned frame stays where it is.
 
 **Seven call sites are inner chrome and stay exactly as they are**, which is why `Painter.DrawBorder`
 remains public: `CheckBox` and `RadioButton` glyph boxes, `TreeView`'s item frame and item checkbox,
@@ -348,9 +349,10 @@ OnPaintBackground → PaintSelection → OnPaint → RenderChildren → OnPaintB
 
 The border pass stays **last**, so it draws over anything a child painted at the edge. That is what
 makes a border chrome rather than a background: geometrically a child may occupy the band, visually
-the border wins. Controls that want the frame *behind* their content — the text fields and the toast,
-whose text or caret would rather sit above a 1px line — draw it in the background pass instead; the
-object makes that a call to `Border.Paint` from two places rather than two implementations of a frame.
+the border wins. Two controls that used to draw their own frame in the background pass — `TextBox` and
+`ComboBox` — now let the border pass do it, because their content is inset by the frame's own pixel and
+so cannot reach it; and one that used to draw a no-op in the border pass because it drew the frame
+earlier now draws it there.
 
 **A border paints inside the control's bounds, and phase 1 keeps it that way.** Three places assume
 it: the clip at `Control.cs:2019-2027`, the `QuickReject(_bounds)` subtree skip at `2011` whose comment
@@ -361,28 +363,44 @@ widening when something needs it is cheaper than carrying an unused invariant no
 
 ## 8. What is verified
 
-Phase 1 claims to be a refactor, so it is held to that:
+Phase 1 claims to be a refactor, so it is held to that.
 
-- **The pixel-invariant suite** (`Kolvir.Tests/Core/PixelInvariantTests.cs`): a bordered control's
-  fill, its border colour at a sampled pixel, and the focus ring still painted.
-- **Headless renders before and after.** `--render` produces whole-page PNGs through the same
-  rasteriser on the same machine, so the fonts page, the controls page and the menus page are rendered
-  before the change and compared byte for byte after it. This is the check that catches an inset
-  applied twice or a padding rounded the wrong way. (The suite has no committed golden images, on
-  purpose — see that file's remarks — so this comparison is a manual step, run locally and quoted in
-  the pull request.)
-- **Geometry, not pixels**, for the layout half: a bordered control measures two pixels wider and
-  taller than the same control with `Border.None`, `ContentRect` is inset by exactly
-  `Insets(this) + Padding`, and `Border.None` changes nothing at all.
-- **The new unit tests**: `Control.Border` starts as `Border.None`; a control's constructor assignment
-  is what gives it a frame, and a derived class's constructor assignment overrides the base's; the
-  setter repaints without re-arranging when the insets are unchanged and does both when they differ; a
-  rounded border narrows the clip and reports not opaque; a square one does neither.
-- **A border can be tested without a scene**, which is a benefit of passing the owner rather than a
-  colour: `SimpleBorder` paints into a small bitmap with a bare `Control` in each of the four states,
-  and the pixel that matters is asserted directly rather than through a rendered window. `Control.State`
-  is computed from three booleans, so a test control that overrides it can stand in for focus and hover.
-- Full suite green, and the demo's pages still draw.
+**Headless renders, byte for byte.** 82 whole-page PNGs — 60 light pages, 16 dark ones and 6 zoomed
+ones — were rendered through the same rasteriser on the same machine before the change and after it,
+and compared by SHA-256 digest. **78 of 82 are byte-identical.** The four that are not:
+
+| Page | Difference | Why |
+| --- | --- | --- |
+| `animated-gif`, `animated-webp` | a 15×17 pixel block | The pages show an animation; two renders of the *same* build differ from each other, so they are not a stable baseline at all |
+| `multi-line-text`, `undo-and-redo` | one row of the inner scrollbar's track, x 948–963 | The frame is painted after the content, so it now wins the edge pixel the scrollbar used to paint over. This is exactly what §7 asks for, and it is the only visible consequence of the paint order changing |
+
+Everything else — every control, in both themes, at three zoom levels — came out the same, which is
+the evidence that the padding reductions, the insets arithmetic and the clip changes agree.
+
+**The suite.** Ten new tests in `Kolvir.Tests/Core/BorderTests.cs`: a control starts on `Border.None`
+and takes no room; a one-pixel frame comes out of the content and back into the measurement, so the
+frame makes a control larger rather than shrinking its contents; a stroke-less shape reserves nothing
+but narrows the clip and stops the control reporting itself opaque; the state colours are taken in the
+documented order and a state colour that was never given falls back to the resting colour; `State`
+follows the control's own flags and an override keeps the base's bits; a frame paints its own pixel
+inside the bounds and paints over what a child drew; and a frame that takes more room lays out again.
+The rest of the suite — 908 tests — is unchanged and green.
+
+**What the migration found.** Four things the design did not anticipate:
+
+- `Panel` arranged its children in `ContentBounds` less `Padding` and knew nothing about the border,
+  so every panel with an insetting frame would have put its children a pixel out. It now arranges in
+  `ContentBounds` less `Border.Insets(this)`, and clips and invalidates against the same rect.
+- `TextBox.ContentPadding`, `VirtualList.ScrollPadding`, `ComboBox`'s chevron and `Toast`'s width
+  measurement each worked from `Padding` alone and now add the insets, because every one of them is
+  "the space between the frame and the content".
+- The five controls that had a `BorderWidth > 0f ? BorderWidth : 1f` fallback painted a pixel at
+  width zero. They no longer do: a zero-width border paints nothing, which is what the contract says,
+  and the sample's navigation list — which relied on the accident — now declares the frame it was
+  actually showing.
+- Assigning geometry in a constructor runs layout immediately, and a control whose `OnLayout` reads
+  fields that the constructor has not assigned yet will throw. `ColorPicker` did exactly that, and now
+  assigns its frame and gutter after its views exist — the order `Border`'s remarks ask for.
 
 ## 9. Decisions
 
@@ -424,9 +442,12 @@ Settled after the first draft, which had a `protected virtual Border? DefaultBor
 Chosen while writing this down, and worth disagreeing with now rather than later:
 
 12. **The setter compares insets** before running a layout pass.
-13. **`Padding`'s setter is fixed** to lay out as well as repaint, and so is `Font`'s, for the same
-    reason a caption band makes it visible: an inset that is measured from the font has to be
-    recomputed when the font changes.
+13. **`Padding`'s setter is left alone.** It repaints and does not lay out, which was already the
+    case, and this change does not need it: the controls compensate their padding at construction, so
+    the content lands where it did. Making it lay out would be a fix in its own right, and it is not a
+    safe one — `Panel`'s constructor assigns `Padding` before it has created the scroll helper its
+    `OnLayout` uses, so a layout pass there throws. `Font`'s setter already routes through
+    `UpdateLayoutAfterAppearanceChange`, which is what a caption band measured from the font needs.
 
 ## 10. Phase 2: per edge, per corner
 
@@ -445,7 +466,8 @@ Deferred, but the phase-1 shape is chosen to make it additive:
 
 - **The migration's silent failure is a one-pixel shift somewhere nobody renders.** Nine of the ten
   controls are arithmetic; `TabControl`, `VirtualList`, `Expander` and `GroupBox` involve hand-placed
-  insets and need a render each, not a subtraction.
+  insets and need a render each, not a subtraction. The 82-page comparison in section 8 is what
+  closed this, and it only worked because the render is byte-stable on this machine.
 - **`Opaque` is load-bearing for repaint cost.** A border that wrongly claims to be rectangular stops
   a control from repainting what is behind its rounded corners, which shows up as a smear rather than
   an exception. The rounded case is covered by the pixel suite; a third-party border is on its honour.

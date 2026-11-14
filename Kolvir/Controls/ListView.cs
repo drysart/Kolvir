@@ -640,7 +640,7 @@ public class ListView : VirtualList
     private SKRect ColumnsRect => RowsRect;
 
     /// <summary>The gap between the border and the rows, so that rows never paint over the border.</summary>
-    private float Inset => BorderWidth > 0f || BorderColor.Alpha > 0 ? 1f : 0f;
+    private float Inset => Border.Insets(this).Left > 0f ? 1f : 0f;
 
     private float TotalColumnWidth
     {

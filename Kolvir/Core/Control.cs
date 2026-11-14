@@ -38,6 +38,7 @@ public class Control : IDisposable
     private SKSize _maximumSize = new(float.PositiveInfinity, float.PositiveInfinity);
     private Thickness _margin;
     private Thickness _padding;
+    private Border _border = Border.None;
     private string _text = string.Empty;
     private bool _visible = true;
     private bool _enabled = true;
@@ -61,7 +62,6 @@ public class Control : IDisposable
     private ControlCollection? _controls;
     private List<IDisposable>? _resources;
     private List<SKRect>? _selectionRects;
-    private SKColor? _borderColor;
     private ThemeColor _foreColorRole = ThemeColor.Foreground;
 
     // Appearance set on this control. Null (or, for the background, Inherit) means "not set here".
@@ -844,8 +844,16 @@ public class Control : IDisposable
     /// <summary>The control's own coordinate space: (0, 0, Width, Height).</summary>
     public SKRect ClientRect => new(0f, 0f, _bounds.Width, _bounds.Height);
 
-    /// <summary>The area available to content, i.e. <see cref="ClientRect"/> minus padding.</summary>
-    public SKRect ContentRect => Geometry.Deflate(ClientRect, Padding);
+    /// <summary>
+    /// The area available to content: <see cref="ClientRect"/> less the border's insets and the
+    /// padding.
+    /// </summary>
+    /// <remarks>
+    /// The border comes first, so padding is the space between the frame and the content. A control
+    /// whose border takes a band of its own - a group box caption - removes it here rather than in its
+    /// padding, which is why the insets are asked for <c>this</c>.
+    /// </remarks>
+    public SKRect ContentRect => Geometry.Deflate(ClientRect, Border.Insets(this) + Padding);
 
     /// <summary>
     /// Space the containers above this control leave around it, outside <see cref="Bounds"/>. A
@@ -869,10 +877,11 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// Space between the control's edge and its content: <see cref="ContentRect"/> is
-    /// <see cref="ClientRect"/> deflated by it, and <see cref="Measure"/> adds it back to the
-    /// measured content size, so padding enlarges the control without shrinking what it draws.
-    /// Assigning it repaints.
+    /// Space between the border and the control's content: <see cref="ContentRect"/> is
+    /// <see cref="ClientRect"/> deflated by the border's insets and then by this, and
+    /// <see cref="Measure"/> adds both back to the measured content size, so padding enlarges the
+    /// control without shrinking what it draws.
+    /// Assigning it repaints and lays out, because the space the content has just changed.
     /// </summary>
     public Thickness Padding
     {
@@ -1579,14 +1588,14 @@ public class Control : IDisposable
     /// </summary>
     /// <remarks>
     /// It is an observation about what the control paints, not a switch: it follows
-    /// <see cref="BackColor"/>, <see cref="CornerRadius"/> and <see cref="Opacity"/>, so a control
-    /// whose background is transparent, whose corners are rounded or which is faded is reported as
-    /// not opaque without anything having to be told. Override it when a control paints over its
+    /// <see cref="BackColor"/>, <see cref="Border"/> and <see cref="Opacity"/>, so a control
+    /// whose background is transparent, whose border rounds its corners or which is faded is reported
+    /// as not opaque without anything having to be told. Override it when a control paints over its
     /// whole bounds by other means - an <see cref="Image"/> showing an opaque picture - or
     /// when it punches a hole in a background that is otherwise solid.
     /// </remarks>
     public virtual bool Opaque =>
-        _opacity >= 1f && CornerRadius <= 0f && Background.Color is { Alpha: 255 };
+        _opacity >= 1f && Border.IsRectangular && Background.Color is { Alpha: 255 };
 
     /// <summary>
     /// Text colour, inherited the way <see cref="Font"/> is: a colour assigned to a container
@@ -1787,42 +1796,83 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// Border colour. While it has never been assigned the control paints
-    /// <see cref="Theme.Border"/>.
+    /// The frame drawn around this control, and the space it takes out of the control's content.
     /// </summary>
-    public SKColor BorderColor
+    /// <remarks>
+    /// <para>
+    /// Never null: <see cref="Border.None"/> is the absence, and it is the initial value, so a control
+    /// that assigns nothing draws nothing. Assigning <see cref="Border.None"/> is how an application
+    /// takes away a frame a control class gave itself.
+    /// </para>
+    /// <para>
+    /// <b>A control class declares its frame by assigning it in its constructor</b>, from a
+    /// <c>private static readonly</c> field so every instance shares the one instance. A derived class
+    /// that wants different chrome assigns in its own constructor, which runs after the base's and
+    /// therefore wins.
+    /// </para>
+    /// <para>
+    /// Assigning repaints, and lays out as well when the new border takes a different amount of room -
+    /// which is what makes swapping one border for another across a state change free when their
+    /// insets are the same, and correct when they are not.
+    /// </para>
+    /// </remarks>
+    public Border Border
     {
-        get => _borderColor ?? Theme.Border;
-        set => _borderColor = value;
+        get => _border;
+        set
+        {
+            if (ReferenceEquals(_border, value))
+            {
+                return;
+            }
+
+            var relayout = !_border.Insets(this).Equals(value.Insets(this));
+            _border = value;
+            Invalidate();
+
+            if (relayout)
+            {
+                PerformLayout();
+            }
+        }
     }
 
     /// <summary>
-    /// Thickness of the border drawn inside the control's bounds, in logical pixels. Zero, the
-    /// default, paints no border at all.
+    /// The transient conditions this control is in, as flags: enabled, hovered, focused and pressed,
+    /// plus whatever <see cref="Active"/> bit a control class adds for a state of its own.
     /// </summary>
-    public float BorderWidth { get; set; }
-
-    /// <summary>
-    /// Radius of the rounded corners of the control's background and border. Zero, the default,
-    /// draws square corners. The radius also clips the control: content and children are cut to the
-    /// rounded rectangle, so nothing it paints escapes those corners.
-    /// </summary>
-    public float CornerRadius { get; set; }
+    /// <remarks>
+    /// It is what a <see cref="Kolvir.Border"/> reads to colour itself, and it is a value rather than a
+    /// set of properties on <see cref="Control"/> so a border does not have to know which control it is
+    /// painting: a combo box's open list and a split button's are the same bit. Override it to add
+    /// <see cref="ControlState.Active"/> - and, if hover or press matters to the override, keep the
+    /// base's bits by calling it.
+    /// </remarks>
+    public virtual ControlState State =>
+        (Enabled ? ControlState.None : ControlState.Disabled)
+        | (IsFocused ? ControlState.Focused : ControlState.None)
+        | (IsMouseOver ? ControlState.Hovered : ControlState.None)
+        | (IsPressed ? ControlState.Pressed : ControlState.None);
 
     /// <summary>
     /// Computes the preferred size of the control for the given available space.
-    /// The result includes padding but excludes <see cref="Margin"/>.
+    /// The result includes the border's insets and the padding, and excludes <see cref="Margin"/>.
     /// </summary>
+    /// <remarks>
+    /// The insets are added back along with the padding, so a border makes a control larger rather
+    /// than shrinking the content inside it.
+    /// </remarks>
     public virtual SKSize Measure(SKSize availableSize)
     {
+        var chrome = Border.Insets(this) + Padding;
         var contentAvailable = new SKSize(
-            MathF.Max(0f, availableSize.Width - Padding.Horizontal),
-            MathF.Max(0f, availableSize.Height - Padding.Vertical));
+            MathF.Max(0f, availableSize.Width - chrome.Horizontal),
+            MathF.Max(0f, availableSize.Height - chrome.Vertical));
 
         var content = MeasureContent(contentAvailable);
         var size = new SKSize(
-            Clamp(content.Width + Padding.Horizontal, MinimumSize.Width, MaximumSize.Width),
-            Clamp(content.Height + Padding.Vertical, MinimumSize.Height, MaximumSize.Height));
+            Clamp(content.Width + chrome.Horizontal, MinimumSize.Width, MaximumSize.Width),
+            Clamp(content.Height + chrome.Vertical, MinimumSize.Height, MaximumSize.Height));
 
         DesiredSize = size;
         return size;
@@ -2017,9 +2067,9 @@ public class Control : IDisposable
         canvas.Translate(_bounds.Left, _bounds.Top);
 
         var local = ClientRect;
-        if (CornerRadius > 0f)
+        if (Border.NarrowsClip)
         {
-            canvas.ClipRoundRect(new SKRoundRect(local, CornerRadius), SKClipOperation.Intersect, antialias: true);
+            Border.ClipTo(canvas, local);
         }
         else
         {
@@ -2476,8 +2526,8 @@ public class Control : IDisposable
 
     /// <summary>
     /// Paints the control's background into <paramref name="rect"/>, the client area in the
-    /// control's own coordinates. The default fills it with <see cref="BackColor"/>, rounded by
-    /// <see cref="CornerRadius"/>, and paints nothing when no background is resolved.
+    /// control's own coordinates. The default fills it with <see cref="BackColor"/>, rounded by the
+    /// border's corner radius, and paints nothing when no background is resolved.
     /// </summary>
     /// <param name="canvas">The canvas, already translated to the control's origin and clipped.</param>
     /// <param name="rect">The area to paint, in the control's own coordinates.</param>
@@ -2489,7 +2539,7 @@ public class Control : IDisposable
     {
         if (BackColor is { } backColor)
         {
-            Painter.Fill(canvas, rect, backColor, CornerRadius);
+            Painter.Fill(canvas, rect, backColor, Border.CornerRadius);
         }
     }
 
@@ -2508,10 +2558,7 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// Paints the border on the inside of the control's bounds:
-    /// <see cref="BorderWidth"/> logical pixels of <see cref="BorderColor"/>, with the corners
-    /// rounded by <see cref="CornerRadius"/>. Nothing is painted while
-    /// <see cref="BorderWidth"/> is zero, which is the default.
+    /// Paints the control's border, by handing the canvas to <see cref="Border"/>.
     /// </summary>
     /// <param name="canvas">The canvas, already translated to the control's origin and clipped.</param>
     /// <param name="rect">The area to paint, in the control's own coordinates.</param>
@@ -2519,13 +2566,7 @@ public class Control : IDisposable
     /// It runs last in <see cref="Render"/>, after the children, so the border covers the edges of
     /// whatever the content ran into.
     /// </remarks>
-    protected virtual void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        if (BorderWidth > 0f)
-        {
-            Painter.DrawBorder(canvas, rect, BorderColor, BorderWidth, CornerRadius);
-        }
-    }
+    protected virtual void OnPaintBorder(SKCanvas canvas, SKRect rect) => Border.Paint(canvas, rect, this);
 
     /// <summary>
     /// Fills the part of the host selection that covers this control, between the background and

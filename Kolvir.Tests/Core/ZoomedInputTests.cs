@@ -149,8 +149,6 @@ public sealed class ZoomedInputTests : HeadlessTestBase
     private static Panel Group() => new()
     {
         BackColor = null,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = new Thickness(0f),
     };
 }

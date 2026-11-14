@@ -277,8 +277,6 @@ public sealed class ExpanderAnimationTests : AnimationsTestBase
             {
                 Dock = DockStyle.Fill,
                 BackColor = null,
-                BorderWidth = 0f,
-                CornerRadius = 0f,
                 Padding = Thickness.Empty,
             };
 

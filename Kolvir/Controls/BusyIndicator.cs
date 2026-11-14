@@ -50,7 +50,6 @@ public class BusyIndicator : Control
     {
         TabStop = false;
         Focusable = false;
-        CornerRadius = 0f;
         Padding = Kolvir.Thickness.Empty;
         MinimumSize = new SKSize(16f, 16f);
         Size = new SKSize(32f, 32f);

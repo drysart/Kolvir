@@ -21,6 +21,9 @@ public class TabControl : Control
     private const float StripHeight = 34f;
     private const float IndicatorHeight = 2f;
 
+    /// <summary>The frame is one pixel thick, and the control draws it rather than the border.</summary>
+    private const float FrameWidth = 1f;
+
     private readonly List<SKRect> _tabRects = [];
     private readonly List<IDisposable> _captionTokens = [];
     private readonly List<string> _captions = [];
@@ -31,6 +34,12 @@ public class TabControl : Control
     private bool _tabsDirty = true;
 
     /// <summary>
+    /// The frame is drawn by the control, because the strip and the pages share its edges, so the
+    /// border carries the shape without taking room or painting a stroke of its own.
+    /// </summary>
+    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin.WithWidth(0f).WithCornerRadius(8f);
+
+    /// <summary>
     /// Creates an empty tab control: a focusable tab stop on a surface background, with a one-pixel
     /// frame and a default size of 360 by 220.
     /// </summary>
@@ -38,8 +47,7 @@ public class TabControl : Control
     {
         Focusable = true;
         TabStop = true;
-        BorderWidth = 1f;
-        CornerRadius = 8f;
+        Border = DefaultBorder;
         Padding = new Thickness(0f);
         MinimumSize = new SKSize(160f, 90f);
         Size = new SKSize(360f, 220f);
@@ -132,8 +140,8 @@ public class TabControl : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        Painter.Fill(canvas, rect, Enabled ? BackColor ?? Theme.Surface : Theme.DisabledBackground, CornerRadius);
-        Painter.DrawBorder(canvas, rect, BorderColor, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
+        Painter.Fill(canvas, rect, Enabled ? BackColor ?? Theme.Surface : Theme.DisabledBackground, Border.CornerRadius);
+        Painter.DrawBorder(canvas, rect, Theme.Border, FrameWidth, Border.CornerRadius);
     }
 
     /// <summary>
@@ -150,7 +158,7 @@ public class TabControl : Control
         // surface rather than floating above it.
         Painter.Fill(
             canvas,
-            new SKRect(rect.Left + BorderWidth, content.Top - IndicatorHeight, rect.Right - BorderWidth, content.Top),
+            new SKRect(rect.Left + FrameWidth, content.Top - IndicatorHeight, rect.Right - FrameWidth, content.Top),
             Theme.Border);
 
         canvas.Save();
@@ -167,15 +175,6 @@ public class TabControl : Control
         {
             Painter.DrawFocusRing(canvas, _tabRects[_selectedIndex], Theme.FocusRing, 1f, 4f);
         }
-    }
-
-    /// <summary>
-    /// Draws nothing: the frame is painted in <see cref="OnPaintBackground"/> so it stays behind the
-    /// tabs.
-    /// </summary>
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        // The frame is drawn in OnPaintBackground so it stays behind the tabs.
     }
 
     /// <summary>Takes the focus and selects the tab under the pointer, when there is one.</summary>
@@ -385,7 +384,7 @@ public class TabControl : Control
     {
         get
         {
-            float inset = BorderWidth > 0f ? BorderWidth : 1f;
+            float inset = FrameWidth;
             var inner = Geometry.Deflate(ClientRect, new Thickness(inset));
 
             return new SKRect(
@@ -400,7 +399,7 @@ public class TabControl : Control
     {
         get
         {
-            float inset = BorderWidth > 0f ? BorderWidth : 1f;
+            float inset = FrameWidth;
             return new SKRect(inset, inset, ClientRect.Right - inset, inset + StripHeight);
         }
     }
@@ -430,7 +429,7 @@ public class TabControl : Control
         _tabRects.Clear();
         _captions.Clear();
 
-        float inset = BorderWidth > 0f ? BorderWidth : 1f;
+        float inset = FrameWidth;
         float stripWidth = ClientRect.Width - (inset * 2f);
         float total = 0f;
 
@@ -474,7 +473,7 @@ public class TabControl : Control
 
         if (total < 0f)
         {
-            float inset = BorderWidth > 0f ? BorderWidth : 1f;
+            float inset = FrameWidth;
             stripWidth = ClientRect.Width - (inset * 2f);
             total = 0f;
 

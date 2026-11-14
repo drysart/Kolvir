@@ -251,7 +251,7 @@ public abstract class ToggleControl : Control
         // glyph and the label it surrounds.
         if (IsFocused && Enabled)
         {
-            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, CornerRadius);
+            Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.CornerRadius);
         }
     }
 

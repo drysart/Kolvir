@@ -454,16 +454,12 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
 
     private static Panel Plain() => new()
     {
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
     };
 
     private static TableLayoutPanel PlainTable() => new()
     {
         Dock = DockStyle.Fill,
-        BorderWidth = 0f,
-        CornerRadius = 0f,
         Padding = Thickness.Empty,
         CellPadding = Thickness.Empty,
     };
