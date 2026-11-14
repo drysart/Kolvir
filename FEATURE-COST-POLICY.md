@@ -1120,8 +1120,8 @@ member to a type in `Kolvir`. See [APP-BADGING.md](APP-BADGING.md).
 	  is it in a platform folder with other code rather than alone?
 - [ ] If it needs per-control state, where does that state live, and what does each access cost?
 - [ ] Is every public type and member it adds documented, so the package's `.xml` carries a
-	  `<summary>` for it? `CS1591` reports the ones that are not, and the docs are what a consumer of
-	  the package sees (README, "Documentation inside the packages").
+	  `<summary>` for it? `CS1591` is an error in every project that ships, and the docs are what a
+	  consumer of the package sees (README, "Documentation inside the packages").
 
 ## 10. Non-goals
 
