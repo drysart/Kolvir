@@ -126,6 +126,18 @@ public abstract class Border
     public float CornerRadius => Corners.Maximum;
 
     /// <summary>
+    /// Whether <see cref="Paint"/> draws the owning control's <see cref="Control.Text"/> in the frame,
+    /// the way a group box draws its caption.
+    /// </summary>
+    /// <remarks>
+    /// A frame that shows the caption takes a band out of the top of the content for it, so
+    /// <see cref="Insets"/> answers differently once the control has text. Nothing in
+    /// <see cref="Control"/> depends on this; it is here so that a border can be asked what it is, and
+    /// so that a second implementation of the same idea has somewhere to start.
+    /// </remarks>
+    public virtual bool ShowsControlText => false;
+
+    /// <summary>
     /// Paints the border, inside <paramref name="bounds"/>.
     /// </summary>
     /// <param name="canvas">The canvas, already translated to the control's origin and clipped.</param>

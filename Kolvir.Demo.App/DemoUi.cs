@@ -5091,42 +5091,45 @@ public sealed class DemoUi
 
         body.Controls.Add(BorderRow(
             "An accent edge",
-            "Four pixels on the left, one on the other three. The content starts after the thicker "
-            + "edge, so the frame is the control's non-client area.",
+            "Four pixels on the left, one on the others: the content starts after the thicker edge.",
             new SimpleBorder(new Thickness(4f, 1f, 1f, 1f), 8f)
                 .WithThemeColor(BorderSide.Left, ThemeColor.Accent)));
 
         body.Controls.Add(BorderRow(
             "A radius per corner",
-            "Rounded at the top and square at the feet. The fill, the clip and the frame all follow "
-            + "the same four radii, so what is behind shows through the round corners and not the "
-            + "square ones.",
+            "Rounded at the top and square at the feet, and the fill and the clip follow the same radii.",
             SimpleBorder.Thin.WithCorners(new CornerRadii(14f, 14f, 0f, 0f))));
 
         body.Controls.Add(BorderRow(
             "A colour per edge",
-            "The top edge rests in the accent and the bottom in the pressed secondary; the two others "
-            + "keep the border role. Unequal widths meet in a mitre through the corner.",
+            "Accent on top, pressed secondary below, the border role elsewhere, mitred where they meet.",
             SimpleBorder.Thin
                 .WithThemeColor(BorderSide.Top, ThemeColor.Accent)
                 .WithThemeColor(BorderSide.Bottom, ThemeColor.SecondaryPressed)));
 
         body.Controls.Add(BorderRow(
             "A band along the top",
-            "Eight pixels across the top and one everywhere else, with the content moved down to "
-            + "clear the band.",
+            "Eight pixels across the top and one everywhere else, with the content clear of the band.",
             new SimpleBorder(new Thickness(1f, 8f, 1f, 1f), 0f)));
 
         body.Controls.Add(BorderRow(
             "A state colour",
-            "Point at this one: a border resolves its own colour from the control's state, so the "
-            + "frame answers the pointer without being reassigned. The row takes the hover for its "
-            + "whole area, captions included, because it sets HoverIncludesChildren.",
+            "Point at this row: the frame resolves its own colour from the control's state.",
             SimpleBorder.Thin
                 .WithHoverColor(ThemeColor.Accent)
                 .WithFocusColor(ThemeColor.Accent)
                 .WithCornerRadius(8f),
             hoverIncludesChildren: true));
+
+        var groupRow = BorderRow(
+            "A frame that shows the control's text",
+            "The top edge drops by half a band and is cut away behind the text. GroupBox is a panel "
+            + "with this border.",
+            SimpleBorder.Thin.WithCornerRadius(8f).WithControlText(),
+            height: 88f);
+        groupRow.Text = "Options";
+        groupRow.ForeColorRole = ThemeColor.MutedForeground;
+        body.Controls.Add(groupRow);
 
         return body;
     }
@@ -5136,13 +5139,14 @@ public sealed class DemoUi
         string title,
         string caption,
         SimpleBorder border,
+        float height = 74f,
         bool hoverIncludesChildren = false)
     {
         var row = new Panel
         {
             Dock = XDock.Top,
-            Height = 92f,
-            Margin = new Thickness(0f, 0f, 0f, 12f),
+            Height = height,
+            Margin = new Thickness(0f, 0f, 0f, 10f),
             Border = border,
             Padding = new Thickness(16f, 12f, 16f, 12f),
             HoverIncludesChildren = hoverIncludesChildren,

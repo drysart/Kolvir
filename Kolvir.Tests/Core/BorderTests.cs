@@ -389,6 +389,57 @@ public sealed class BorderTests : HeadlessTestBase
         Assert.AreEqual(Theme.Accent, scene.PixelAt(0, 40), "pointing at the caption lights the card's frame");
     }
 
+    [TestMethod]
+    public void AFrameThatShowsTheControlTextReservesItsCaptionBand()
+    {
+        var control = new Control { Padding = Thickness.Empty, Text = "Options" };
+        control.Border = SimpleBorder.Thin.WithControlText();
+        float band = MathF.Ceiling(control.Font.LineHeight) + 2f;
+
+        Assert.IsTrue(control.Border.ShowsControlText);
+        Assert.AreEqual(band, control.Border.Insets(control).Top, "the caption band comes out of the top");
+        Assert.AreEqual(1f, control.Border.Insets(control).Left, "and the frame's own pixel from the others");
+        Assert.AreEqual(
+            band,
+            ContentRectOf(control, 200f, 100f).Top,
+            "so the content starts below the caption rather than under it");
+    }
+
+    [TestMethod]
+    public void AFrameThatShowsTheControlTextDrawsItInABreakInTheTopEdge()
+    {
+        var control = new Control
+        {
+            Dock = DockStyle.Fill,
+            Text = "Options",
+            Border = SimpleBorder.Thin.WithControlText(),
+        };
+        using var scene = HeadlessScene.Create(control, 200f, 100f);
+        var edge = (int)MathF.Round((MathF.Ceiling(control.Font.LineHeight) + 2f) / 2f);
+
+        Assert.AreNotEqual(Theme.Border, scene.PixelAt(20, edge), "the edge is cut away behind the caption");
+        Assert.AreEqual(Theme.Border, scene.PixelAt(180, edge), "and painted where the caption does not reach");
+        Assert.AreEqual(
+            Theme.Border,
+            scene.PixelAt(0, 60),
+            "the rest of the frame is unmoved, so only the top edge drops");
+    }
+
+    [TestMethod]
+    public void AFrameThatShowsNoTextIsAPlainFrame()
+    {
+        var control = new Control { Padding = Thickness.Empty, Border = SimpleBorder.Thin.WithControlText() };
+
+        Assert.AreEqual(new Thickness(1f), control.Border.Insets(control), "with no text there is no band");
+        Assert.AreEqual(new SKRect(1f, 1f, 199f, 49f), ContentRectOf(control, 200f, 50f));
+
+        control.Text = "Now it has one";
+        Assert.AreEqual(
+            MathF.Ceiling(control.Font.LineHeight) + 2f,
+            control.Border.Insets(control).Top,
+            "and the band appears with the text");
+    }
+
     private static SKRect ContentRectOf(Control control, float width, float height)
     {
         control.Measure(SKSize.Empty);

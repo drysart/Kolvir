@@ -90,7 +90,7 @@ has to read `--classic-menus` before it can build a backend.
 | `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
 | `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
-| `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
+| `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it. It is a `Panel` whose border is `SimpleBorder.Thin.WithCornerRadius(8f).WithControlText()` |
 | `Expander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
 | `ScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
 | `Label` | `Label` | Nine-way alignment, optional word wrap |
@@ -2494,6 +2494,7 @@ var card = new Panel
 | `NarrowsClip` / `ClipTo` | Whether the frame clips the control to a shape narrower than its bounds - true for rounded corners, whose corners let what is behind show through |
 | `IsRectangular` | The border's share of `Control.Opaque`: a rounded frame that lets the corner through stops the control repainting what is behind it |
 | `Corners` / `CornerRadius` | The radius per corner the control rounds its own background fill by, so the fill follows the frame. `CornerRadius` is the largest of the four, for a shape that takes one number |
+| `ShowsControlText` | Whether the frame draws the control's `Text` in a break in its top edge, the way a group box draws its caption. It takes the caption's band out of the top of the content |
 | `Paint(canvas, bounds, control)` | Draws the frame, inside the bounds and after the children, so it covers the edge of whatever the content ran into |
 
 A border is immutable, so a control class keeps one in a `private static readonly` field and assigns
@@ -2541,6 +2542,11 @@ var card = new Panel
     HoverIncludesChildren = true,
 };
 ```
+
+A frame can also draw the control's own `Text`, which is the whole of a group box:
+`WithControlText()` moves the top edge down by half the caption's band and cuts it away behind the
+text, so the caption reads the same on any background, and the band comes out of the top of the
+content. `GroupBox` is a panel with that border and nothing else.
 
 The state a colour is resolved for is `Control.State`, a `ControlState` flag set computed from
 `Enabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its own adds it

@@ -54,6 +54,9 @@ public abstract class Border
     /// <summary>The radius of each corner, which the control rounds its own fill by.</summary>
     public virtual CornerRadii Corners => default;
 
+    /// <summary>Whether the frame draws the control's Text in a break in its top edge.</summary>
+    public virtual bool ShowsControlText => false;
+
     /// <summary>Paints the border, inside <paramref name="bounds"/>.</summary>
     public abstract void Paint(SKCanvas canvas, SKRect bounds, Control owner);
 
@@ -290,6 +293,7 @@ public sealed class SimpleBorder : Border
     public SimpleBorder WithCornerRadius(float radius);
     public SimpleBorder WithCorners(CornerRadii corners);
     public SimpleBorder WithInsets(Thickness insets);          // take more room than the stroke is thick
+    public SimpleBorder WithControlText(bool show = true);     // draw the owner's Text in the top edge
     public SimpleBorder WithColor(SKColor color);              // every edge
     public SimpleBorder WithColor(BorderSide side, SKColor color);
     public SimpleBorder WithThemeColor(ThemeColor role);       // every edge
@@ -303,6 +307,7 @@ public sealed class SimpleBorder : Border
     public SKColor ColorFor(BorderSide side, ControlState state);
     public override bool NarrowsClip => !Corners.IsNone;
     public override bool IsRectangular => Corners.IsNone;
+    public override bool ShowsControlText => _showsControlText;
     public override void ClipTo(SKCanvas canvas, SKRect bounds);   // round rect, antialiased
     public override void Paint(SKCanvas canvas, SKRect bounds, Control owner);
 }
@@ -349,7 +354,7 @@ one.** They are not the same set, and the difference is the interesting half of 
 | `Expander` | 1px | 12, 0, 12, 12 | insets 1, 0, 1, 1 and padding 11, 0, 11, 11: the caption sits on the top edge, so the top takes no room |
 | `VirtualList` | 1px | 2 | inset 1, padding 1, and `ScrollPadding` is the two together, so the rows stay two pixels in |
 | `TabControl` | 1px | 0 | **shape only, no stroke**: the strip and the pages share the frame's edges, so reserving room would move both. It keeps drawing its frame in the background pass, and a `TabControlBorder` that owns the strip is phase-2 work |
-| `GroupBox` | 1px | 12, 0, 12, 12 | shape only, no stroke: it draws its captioned frame itself, as before |
+| `GroupBox` | 1px | 11, 0, 11, 11 | `WithControlText()`: the frame draws the caption in a break in its top edge and takes the band out of the content, so the control is now just a `Panel` with that border |
 | `Button` | none | 14, 8 | shape only, radius 6, no stroke: the only frame a button draws is the secondary style's, which is chrome of that style |
 
 Of the thirteen frame-painting sites, six are a control's own outer frame and became a declared
@@ -428,9 +433,16 @@ a one-pixel layout shift would show as a straight line, and there is not one on 
 
 A new demo page, `borders`, shows the feature itself: an accent left edge on a four-pixel frame, a card
 rounded at the top with square feet, a frame with a different colour on its top and bottom edges, an
-eight-pixel band across the top, and a frame that answers the pointer through `WithHoverColor`. It
-renders in both themes and is part of the baseline, which is therefore 84 pages: 61 light, 17 dark and
-6 zoomed.
+eight-pixel band across the top, a frame that answers the pointer through `WithHoverColor`, and one that
+draws its control's text. It renders in both themes and is part of the baseline, which is therefore 84
+pages: 61 light, 17 dark and 6 zoomed.
+
+**The caption, re-rendered.** Moving `GroupBox` onto the border moved nothing: every page but
+`group-boxes` and `borders` came out byte-identical. On `group-boxes` the difference is the frame
+outline - 5 418 pixels in light, compared against the whole outline of three boxes, largest channel
+delta 18 - because the old stroke sat on a half-pixel offset and left two half-covered pixels where the
+ring leaves one. Content positions, captions and the disabled caption's colour are unchanged, which the
+mask shows by marking the outline and nothing else.
 
 **The suite.** `Kolvir.Tests/Core/BorderTests.cs` covers the contract: a control starts on `Border.None`
 and takes no room; a one-pixel frame comes out of the content and back into the measurement, so the
@@ -451,7 +463,12 @@ Then five for the two hover holes: a state-coloured border repaints when the poi
 plain one does not (both assert `UiHost.IsUpdatePending` across a full frame, so the first would fail on
 a missing invalidation rather than on a stale pixel); a pointer over a caption lights the card's frame;
 and `HoverIncludesChildren` is off by default, reaches every ancestor that asked for it, and still
-leaves an ancestor that did not. The rest of the suite — 933 tests — is unchanged and green.
+leaves an ancestor that did not.
+
+And three for the caption: a frame that shows the text reserves its band at the top and the content
+starts below it; the top edge is cut away behind the caption and painted where the caption does not
+reach, while the other three edges stay where they were; and a frame with no text is a plain frame, with
+the band appearing when the text does. The rest of the suite — 936 tests — is unchanged and green.
 
 **What the migration found.** Four things the design did not anticipate:
 
@@ -491,8 +508,9 @@ Settled in review:
    were also considered and rejected — the triple is short by `Disabled` and by the open list, and the
    extra two would have needed the null-or-sentinel state this design just removed.
 7. **Borders paint inside the bounds.** External focus rings are a later, cross-cutting change.
-8. **`GroupBox` is left alone.** A `GroupBoxBorder` may later delete the control entirely, since a
-   group box is a panel with a distinctive frame.
+8. **`GroupBox` is left alone as an API**, but not as an implementation. The caption became
+   `SimpleBorder.WithControlText()` rather than a `GroupBoxBorder` type, so a group box is a `Panel`
+   with a flag on its frame, and `GroupBox` itself is now four lines of constructor.
 9. **The old members are deleted** rather than kept as shims.
 
 Settled after the first draft, which had a `protected virtual Border? DefaultBorder` and then a
@@ -549,6 +567,7 @@ painting became path-based inside `SimpleBorder` alone.
   own resting colour (`WithColor(BorderSide, SKColor)` and `WithThemeColor(BorderSide, ThemeColor)`).
   State colours stay *uniform across the edges*: nothing in this library needs a frame whose edges
   differ only while hovered, and a per-edge state colour is four arrays instead of five fields.
+  `WithControlText()` adds the caption (section 10).
 - **`RoundedRect`** — one internal helper holding the geometry the four renderers share (the outline
   path, the corner ovals, the arc angles, the clamp that stops two arcs overlapping on a small
   control), so a border's ring, a control's fill, a stroked frame and a focus ring all round the same
@@ -569,8 +588,30 @@ of every corner arc by a fraction of a pixel. Section 8 records what that cost.
 
 **Deliberately not here.** A dashed frame is a `Border` of its own that strokes a path: a dash belongs
 to a stroke, and a frame with a width per edge has to be filled to keep its mitres, so the two cannot be
-one object. `GroupBoxBorder` and `TabControlBorder` remain the next two borders - the two controls still
-drawing their own frames - and `GroupBox` can become a `Panel` with one when that lands.
+one object. `TabControlBorder` is the last one - the only control still drawing its own frame - and it
+has to own the tab strip rather than just the outline, which is why it did not come with this.
+
+**The caption, and why it is a flag rather than a type.** `GroupBox` drew its own frame: a caption band,
+a break cut out of the top edge, and the content pushed below it by a `ContentBounds` override. All of
+that is a property of a frame rather than of a container, so it became `SimpleBorder.WithControlText()`:
+the border answers `Insets` with the band (so `ContentRect`, `Measure`, the clip and a panel's children
+all move together), drops the top edge by half the band, cuts the edge away behind the text, and draws
+`owner.Text` in the gap. `GroupBox` is now a `Panel` whose constructor assigns that border and an
+11-pixel gutter, with no overrides at all.
+
+A separate `GroupBoxBorder` type was the alternative, and it would have meant either a second copy of the
+per-edge, per-corner and state-colour machinery or an unsealed `SimpleBorder` with a virtual paint hook -
+both more code than one field and one `if`, for a shape that is a `SimpleBorder` in everything else.
+
+The visible cost is that the group box's frame became *crisper*: it used to stroke a half-pixel offset,
+which left a two-pixel antialiased smear, and a filled ring at a whole pixel is a single pixel of
+`Theme.Border`. Section 8's masks show it as an outline difference on the three group boxes in the demo
+and nothing else.
+
+**A caption needs neither a `MeasureContent` override nor a `ContentBounds` one.** `GroupBox` had both,
+and the first thing to check was that a border answering `Insets` covers them: it does, because
+`Control.Measure` adds the insets and `Panel.FramedContentBounds` deflates by them, so `Measure` grew the
+band and the children moved down with no code in the control at all.
 
 ## 11. Risks
 
@@ -596,9 +637,9 @@ drawing their own frames - and `GroupBox` can become a `Panel` with one when tha
   look at `IsMouseOver` and make its inset depend on the pointer, which would turn every hover into a
   layout pass. `SimpleBorder` does not, and the rule — geometry may depend on the control's
   configuration, never on its pointer or focus — is a convention the doc states and review enforces.
-- **A caption band costs a measurement per layout pass.** `GroupBoxBorder` measures its font to answer
-  `Insets`, and `Insets` is asked from `Measure`, from `ContentRect` and from the `Border` setter. That
-  is a text measurement per layout, not per paint, and it is the price of a border that knows what its
-  control says.
+- **A caption band costs a measurement per layout pass.** A frame that shows the control's text measures
+  it to answer `Insets`, and `Insets` is asked from `Measure`, from `ContentRect` and from the `Border`
+  setter. That is a text measurement per layout, not per paint, and it is the price of a border that
+  knows what its control says.
 - **Deleting the old members breaks every consumer.** Acceptable while the only feed is a pre-release
   test feed; it stops being acceptable the day something is published.

@@ -337,9 +337,10 @@ public class Panel : Control
     /// The part of the client area the content is laid out, clipped and hit-tested inside.
     /// </summary>
     /// <remarks>
-    /// A container that reserves some of its client area overrides this rather than its padding -
-    /// an <see cref="GroupBox"/> keeping the band its caption sits in - so the viewport, the
-    /// scrollbars and the clipping all move with the content instead of only the layout.
+        /// A container that reserves some of its client area overrides this rather than its padding, so
+        /// the viewport, the scrollbars and the clipping all move with the content instead of only the
+        /// layout. A caption band is no longer one of these: a frame that shows the control's text takes
+        /// it out of the content through <see cref="Border.Insets"/>, which every container gets for free.
     /// </remarks>
     protected virtual SKRect ContentBounds => ClientRect;
 

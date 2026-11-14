@@ -49,6 +49,12 @@ public sealed class SimpleBorder : Border
 
     private static readonly Edge DefaultEdge = new(Color: null, Role: ThemeColor.Border);
 
+    /// <summary>How far the caption's break reaches past the text, on each side.</summary>
+    private const float CaptionGap = 4f;
+
+    /// <summary>Room above and below the line the caption is drawn on.</summary>
+    private const float CaptionLeading = 2f;
+
     private readonly Thickness _widths;
     private readonly CornerRadii _corners;
     private readonly Thickness? _insets;
@@ -58,6 +64,7 @@ public sealed class SimpleBorder : Border
     private readonly ThemeColor? _activeRole;
     private readonly ThemeColor? _disabledRole;
     private readonly ThemeColor? _pressedRole;
+    private readonly bool _showsControlText;
 
     private SimpleBorder(
         Thickness widths,
@@ -68,7 +75,8 @@ public sealed class SimpleBorder : Border
         ThemeColor? focusRole,
         ThemeColor? activeRole,
         ThemeColor? disabledRole,
-        ThemeColor? pressedRole)
+        ThemeColor? pressedRole,
+        bool showsControlText)
     {
         _widths = widths;
         _corners = corners;
@@ -79,6 +87,7 @@ public sealed class SimpleBorder : Border
         _activeRole = activeRole;
         _disabledRole = disabledRole;
         _pressedRole = pressedRole;
+        _showsControlText = showsControlText;
     }
 
     /// <summary>
@@ -103,7 +112,7 @@ public sealed class SimpleBorder : Border
     /// <param name="widths">The thickness of each side, in logical pixels.</param>
     /// <param name="corners">The radius of each corner, in logical pixels.</param>
     public SimpleBorder(Thickness widths, CornerRadii corners)
-        : this(widths, corners, null, [DefaultEdge, DefaultEdge, DefaultEdge, DefaultEdge], null, null, null, null, null)
+        : this(widths, corners, null, [DefaultEdge, DefaultEdge, DefaultEdge, DefaultEdge], null, null, null, null, null, false)
     {
     }
 
@@ -121,8 +130,27 @@ public sealed class SimpleBorder : Border
     /// <summary>Radius of each corner, which also clips the control and rounds its fill.</summary>
     public override CornerRadii Corners => _corners;
 
+    /// <summary>
+    /// Whether the frame draws the owning control's <see cref="Control.Text"/> in a break in its top
+    /// edge, the way a group box does.
+    /// </summary>
+    public override bool ShowsControlText => _showsControlText;
+
     /// <inheritdoc />
-    public override Thickness Insets(Control owner) => _insets ?? _widths;
+    /// <remarks>
+    /// A frame that shows the control's text takes the caption's band out of the top, so the content
+    /// starts below it; the band is measured from the control's font, which is why this needs the
+    /// owner. A control with no text gets the plain frame's insets.
+    /// </remarks>
+    public override Thickness Insets(Control owner)
+    {
+        var insets = _insets ?? _widths;
+        float band = CaptionBand(owner);
+
+        return band > 0f
+            ? new Thickness(insets.Left, MathF.Max(insets.Top, band), insets.Right, insets.Bottom)
+            : insets;
+    }
 
     /// <inheritdoc />
     public override bool NarrowsClip => !_corners.IsNone;
@@ -202,6 +230,25 @@ public sealed class SimpleBorder : Border
     /// </remarks>
     public SimpleBorder WithInsets(Thickness insets) => With(insets: insets);
 
+    /// <summary>
+    /// This frame drawing the owning control's <see cref="Control.Text"/> in a break in its top edge,
+    /// the way a group box does.
+    /// </summary>
+    /// <param name="show">False to paint a plain frame again.</param>
+    /// <returns>A new border; this one is unchanged.</returns>
+    /// <remarks>
+    /// <para>
+    /// The top edge is moved down by half the caption band so the text sits centred on it, the edge is
+    /// cut away behind the text rather than painted over - so the caption reads the same on any
+    /// background - and the band comes out of the top of the content.
+    /// </para>
+    /// <para>
+    /// The band is measured from the control's font during layout, so a control that changes its text
+    /// from empty to something has to lay out again for the content to move.
+    /// </para>
+    /// </remarks>
+    public SimpleBorder WithControlText(bool show = true) => With(showsControlText: show);
+
     /// <summary>This frame with a fixed resting colour on every side.</summary>
     /// <param name="color">The colour, alpha included.</param>
     /// <returns>A new border; this one is unchanged.</returns>
@@ -264,22 +311,63 @@ public sealed class SimpleBorder : Border
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
     /// Four edges in one colour are filled as a single ring, so the mitres between them cannot show a
     /// seam. Four edges in different colours are filled as four mitred pieces instead, because a ring
     /// is one fill and cannot carry four colours.
+    /// </para>
+    /// <para>
+    /// When the frame shows the control's text, the whole frame is moved down by half the caption band
+    /// so the text is centred on its top edge, and the edge is cut away behind the text rather than
+    /// painted over.
+    /// </para>
     /// </remarks>
     public override void Paint(SKCanvas canvas, SKRect bounds, Control owner)
     {
-        if (_widths.Horizontal <= 0f && _widths.Vertical <= 0f)
-        {
-            return;
-        }
-
         if (bounds.Width <= 0f || bounds.Height <= 0f)
         {
             return;
         }
 
+        float band = CaptionBand(owner);
+        SKRect? caption = band > 0f ? CaptionRect(owner, bounds, band) : null;
+        var frame = caption is { } box
+            ? new SKRect(bounds.Left, bounds.Top + MathF.Round(band / 2f), bounds.Right, bounds.Bottom)
+            : bounds;
+
+        if (_widths.Horizontal > 0f || _widths.Vertical > 0f)
+        {
+            if (caption is { } cut)
+            {
+                canvas.Save();
+                canvas.ClipRect(
+                    new SKRect(cut.Left - CaptionGap, bounds.Top - 1f, cut.Right + CaptionGap, cut.Bottom),
+                    SKClipOperation.Difference,
+                    antialias: true);
+                PaintFrame(canvas, frame, owner);
+                canvas.Restore();
+            }
+            else
+            {
+                PaintFrame(canvas, frame, owner);
+            }
+        }
+
+        if (caption is { } shown)
+        {
+            TextRenderer.Draw(
+                canvas,
+                owner.Text,
+                owner.Font,
+                owner.Enabled ? owner.ForeColor : Theme.DisabledForeground,
+                shown,
+                ContentAlignment.MiddleLeft);
+        }
+    }
+
+    /// <summary>Paints the four edges into <paramref name="bounds"/>, which is the frame's own box.</summary>
+    private void PaintFrame(SKCanvas canvas, SKRect bounds, Control owner)
+    {
         var state = owner.State;
         var top = ColorFor(BorderSide.Top, state);
         var right = ColorFor(BorderSide.Right, state);
@@ -296,6 +384,21 @@ public sealed class SimpleBorder : Border
         PaintSide(canvas, bounds, BorderSide.Right, right);
         PaintSide(canvas, bounds, BorderSide.Bottom, bottom);
         PaintSide(canvas, bounds, BorderSide.Left, left);
+    }
+
+    /// <summary>The height of the band the control's text sits in, or zero when there is no text.</summary>
+    private float CaptionBand(Control owner) =>
+        _showsControlText && !string.IsNullOrEmpty(owner.Text)
+            ? MathF.Ceiling(owner.Font.LineHeight) + CaptionLeading
+            : 0f;
+
+    /// <summary>The box the caption is drawn in, lined up with the content under it.</summary>
+    private SKRect CaptionRect(Control owner, SKRect bounds, float band)
+    {
+        float left = bounds.Left + Insets(owner).Left + owner.Padding.Left;
+        float width = TextRenderer.Measure(owner.Text, owner.Font, float.PositiveInfinity, wrap: false).Width;
+
+        return new SKRect(left, bounds.Top, left + MathF.Ceiling(width), bounds.Top + band);
     }
 
     private ThemeColor? StateRoleFor(ControlState state) =>
@@ -425,7 +528,8 @@ public sealed class SimpleBorder : Border
         ThemeColor? focusRole = null,
         ThemeColor? activeRole = null,
         ThemeColor? disabledRole = null,
-        ThemeColor? pressedRole = null) =>
+        ThemeColor? pressedRole = null,
+        bool? showsControlText = null) =>
         new(
             widths ?? _widths,
             corners ?? _corners,
@@ -435,7 +539,8 @@ public sealed class SimpleBorder : Border
             focusRole ?? _focusRole,
             activeRole ?? _activeRole,
             disabledRole ?? _disabledRole,
-            pressedRole ?? _pressedRole);
+            pressedRole ?? _pressedRole,
+            showsControlText ?? _showsControlText);
 
     private SimpleBorder WithEdge(BorderSide side, Edge edge)
     {
@@ -451,7 +556,8 @@ public sealed class SimpleBorder : Border
             _focusRole,
             _activeRole,
             _disabledRole,
-            _pressedRole);
+            _pressedRole,
+            _showsControlText);
     }
 
     /// <summary>One side's resting colour: a fixed colour, a palette role, or neither for the default.</summary>
