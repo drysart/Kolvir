@@ -77,8 +77,9 @@ square but paint rounded. Collapsing them into one number would be wrong for all
 opaque when `CornerRadius > 0`, since the corners let the parent show through. That logic moves behind
 the border, and a rounded border keeps the answer it has today.
 
-`Border.None` is a singleton, so "no border" allocates nothing and compares by reference. It is what
-`Control.DefaultBorder` returns and what an application assigns to remove a border a class supplied.
+`Border.None` is a singleton, so "no border" allocates nothing and compares by reference. It is the
+default value of `Control.Border` and the way an application removes a border a control set for
+itself.
 
 ## 3. Immutability
 
@@ -87,7 +88,7 @@ a different instance to `Control.Border`. Mutability was rejected because a bord
 the controls that use it that it changed, and adding a notification channel means subscription
 tokens, unsubscription on reassign and dispose, and every control paying for a mechanism most never
 use. This also matches how `Thickness` and `Background` are used, and it is what makes a single shared
-instance safe for a class default (`SimpleBorder.Thin`, below).
+`static readonly` instance safe for a control class's own border.
 
 The cost is that a state change assigns rather than mutates, which is why `Control.Border`'s setter
 compares insets before it lays out (section 5).
@@ -122,15 +123,15 @@ Two consequences worth being explicit about:
 ## 5. The `Control` side
 
 ```csharp
-private Border? _border;
+private Border _border = Border.None;
 
 /// <summary>
-/// The frame drawn around this control and taken out of its content area. Never null:
-/// <see cref="Border.None"/> is the absence.
+/// The frame drawn around this control and taken out of its content area.
+/// <see cref="Border.None"/> draws nothing, which is the default.
 /// </summary>
 public Border Border
 {
-    get => _border ?? DefaultBorder;
+    get => _border;
     set
     {
         if (ReferenceEquals(_border, value))
@@ -138,7 +139,7 @@ public Border Border
             return;
         }
 
-        var relayout = !(_border?.Insets ?? Thickness.Empty).Equals(value.Insets);
+        var relayout = !_border.Insets.Equals(value.Insets);
         _border = value;
         Invalidate();
 
@@ -148,29 +149,42 @@ public Border Border
         }
     }
 }
-
-/// <summary>What this control class draws when the application assigns nothing.</summary>
-protected virtual Border DefaultBorder => Border.None;
 ```
 
-`DefaultBorder` is the reason the property is non-nullable. Once a class can have a default border,
-`null` cannot mean "none" — it would also mean "nothing assigned yet", which is the same trap
-`Background` documents at length with `Inherit` versus `None`. Rather than a third state, the absence
-gets a name: `Border.None`. `control.Border = Border.None` is how an application removes a border its
-control class supplied.
+That is the whole of it: one field, one property, no class default and no second place for a border to
+come from. A control that draws a frame assigns one in its constructor, the way it already assigns its
+padding, and a derived class that wants different chrome assigns in *its* constructor, which runs
+after the base's and therefore wins — ordinary C# precedence rather than a rule to remember.
 
-`DefaultBorder` also replaces seventeen constructor assignments (section 6) with one overridden
-property per class:
+**The declarative part is a convention, not an API.** A control class that draws a frame declares it
+once, as a shared instance, and assigns it:
 
 ```csharp
-// TextBox
-protected override Border DefaultBorder => SimpleBorder.Thin;
+public class TextBox : Control
+{
+    private static readonly Border DefaultBorder = SimpleBorder.Thin;
+
+    public TextBox()
+    {
+        Border = DefaultBorder;
+        Padding = new Thickness(7f, 5f);
+    }
+}
 ```
 
+`static readonly` and not a field per instance, both for the allocation and because the instance is
+what a state change swaps away from: a `TextBox` holds `_rest`, `_hover` and `_focus` borders and
+assigns among them, so the shared instance is only ever a *value*, never something mutated.
+
+`Border.None` still earns its name: it is the field's initial value, so a control that says nothing
+draws nothing, and `control.Border = Border.None` is how an application takes away a frame a control
+gave itself.
+
 The `relayout` check is what keeps a state-coloured border affordable: swapping `_rest` for `_hover`
-invalidate the pixel and skips the layout pass, because both take the same inset. That is also the
-recommended pattern for controls that colour their border by state — three static instances and an
+invalidates the pixel and skips the layout pass, because both take the same inset. That is also the
+recommended pattern for controls that colour their border by state — a few static instances and an
 assignment, rather than the hand-rolled painting described next.
+
 ## 6. `SimpleBorder`, and migrating today's borders
 
 `SimpleBorder` is the shape of everything that exists now, plus a decision about colour:
@@ -221,7 +235,7 @@ one.** They are not the same set, and the difference is the interesting half of 
 | `TabControl` | 1px | 0 | computes four content insets from `BorderWidth` by hand (`388-477`); those become `Border.Insets` |
 | `GroupBox` | 1px | 12, 0, 12, 12 | **unchanged in phase 1**; it draws its caption in the top border band |
 
-Of the thirteen frame-painting sites, eleven are a control's own outer frame and become a
+Of the thirteen frame-painting sites, eleven are a control's own outer frame and become a declared
 `DefaultBorder`:
 
 - the six above that already draw their frame by hand — `TextBox`, `ComboBox`, `TabControl`, `Toast`,
@@ -259,9 +273,9 @@ OnPaintBackground → PaintSelection → OnPaint → RenderChildren → OnPaintB
 
 The border pass stays **last**, so it draws over anything a child painted at the edge. That is what
 makes a border chrome rather than a background: geometrically a child may occupy the band, visually
-the border wins. Controls that want the frame *behind* their content (the six above, whose text or
-caret would rather sit above a 1px line) draw it in the background pass instead — the object makes
-that a call to `Border.Paint` from two places rather than two implementations of a frame.
+the border wins. Controls that want the frame *behind* their content — the text fields and the toast,
+whose text or caret would rather sit above a 1px line — draw it in the background pass instead; the
+object makes that a call to `Border.Paint` from two places rather than two implementations of a frame.
 
 **A border paints inside the control's bounds, and phase 1 keeps it that way.** Three places assume
 it: the clip at `Control.cs:2019-2027`, the `QuickReject(_bounds)` subtree skip at `2011` whose comment
@@ -285,10 +299,10 @@ Phase 1 claims to be a refactor, so it is held to that:
 - **Geometry, not pixels**, for the layout half: a bordered control measures two pixels wider and
   taller than the same control with `Border.None`, `ContentRect` is inset by exactly `Insets + Padding`,
   and `Border.None` changes nothing at all.
-- **The new unit tests**: `Control.Border` defaults to `DefaultBorder`; assigning `Border.None`
-  removes a class default; the setter repaints without re-arranging when the insets are unchanged and
-  does both when they differ; a rounded border narrows the clip and reports not opaque; a square one
-  does neither.
+- **The new unit tests**: `Control.Border` starts as `Border.None`; a control's constructor assignment
+  is what gives it a frame, and a derived class's constructor assignment overrides the base's; the
+  setter repaints without re-arranging when the insets are unchanged and does both when they differ; a
+  rounded border narrows the clip and reports not opaque; a square one does neither.
 - Full suite green, and the demo's pages still draw.
 
 ## 9. Decisions
@@ -300,19 +314,29 @@ Settled in review:
 2. **Insets are outside padding** (`ContentRect = ClientRect − Insets − Padding`) and `Measure` adds
    both; the existing controls shrink their padding to keep their pixels.
 3. **Immutable borders**, reassigned rather than mutated.
-4. **`Border.None`, not a nullable property.** A class default needs "unset" and "none" to be
-   different states.
+4. **`Border.None`, not a nullable property**: it is the field's initial value and the way an
+   application removes a frame.
 5. **`Paint` takes the owning control**, so state colours cost nothing per frame.
 6. **Borders paint inside the bounds.** External focus rings are a later, cross-cutting change.
 7. **`GroupBox` is left alone.** A `GroupBoxBorder` may later delete the control entirely, since a
    group box is a panel with a distinctive frame.
 8. **The old members are deleted** rather than kept as shims.
 
+Settled after the first draft, which had a `protected virtual Border? DefaultBorder` and then a
+`Border` subclass that deferred to it:
+
+9. **No class-default property.** A border comes from the field, which a constructor assigns, and from
+   nothing else. The draft's `DefaultBorder` could be silently outvoted by a base class's constructor
+   assignment, and the sentinel that was proposed to fix that would have needed the owning control
+   passed to `Insets` and the rest of the contract, only to resolve back to `_border ?? DefaultBorder`.
+   Removing the second source of truth removes the disagreement.
+10. **The declarative fact is a convention**: a control class declares its frame as a
+    `private static readonly Border DefaultBorder` and assigns it in its constructor.
+
 Chosen while writing this down, and worth disagreeing with now rather than later:
 
-9. **`DefaultBorder`**, mirroring `DefaultBackground`, so chrome is declared per class.
-10. **The setter compares insets** before running a layout pass.
-11. **`Padding`'s setter is fixed** to lay out as well as repaint.
+11. **The setter compares insets** before running a layout pass.
+12. **`Padding`'s setter is fixed** to lay out as well as repaint.
 
 ## 10. Phase 2: per edge, per corner
 
@@ -335,8 +359,11 @@ Deferred, but the phase-1 shape is chosen to make it additive:
 - **`Opaque` is load-bearing for repaint cost.** A border that wrongly claims to be rectangular stops
   a control from repainting what is behind its rounded corners, which shows up as a smear rather than
   an exception. The rounded case is covered by the pixel suite; a third-party border is on its honour.
-- **`DefaultBorder` plus subclassing is a sharp edge.** A control class that sets `Border` in its
-  constructor and a derived class that overrides `DefaultBorder` disagree silently, and the constructor
-  wins. The docs must say that a class declares chrome by overriding, never by assigning.
+- **The declarative convention is unenforced.** Nothing stops a control class from assigning a fresh
+  `new SimpleBorder(...)` per instance instead of a `static readonly` one, or from not assigning at
+  all and drawing its frame by hand as four controls do today. The first allocates a border per
+  control for no reason; the second reintroduces exactly the undeclared frame this change removes. The
+  compiler cannot see either, so the sweep in section 6 has to cover all ten in one pass and review has
+  to keep watching.
 - **Deleting the old members breaks every consumer.** Acceptable while the only feed is a pre-release
   test feed; it stops being acceptable the day something is published.
