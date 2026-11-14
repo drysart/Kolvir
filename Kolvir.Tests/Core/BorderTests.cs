@@ -337,6 +337,58 @@ public sealed class BorderTests : HeadlessTestBase
         Assert.AreEqual(corners, wider.WithCorners(corners).Corners, "variations compose");
     }
 
+    [TestMethod]
+    public void AFrameThatFollowsTheStateRepaintsWhenThePointerArrives()
+    {
+        var control = new Control
+        {
+            Dock = DockStyle.Fill,
+            Border = SimpleBorder.Thin.WithHoverColor(ThemeColor.Accent),
+        };
+        using var scene = HeadlessScene.Create(control, 60f, 40f);
+        scene.Paint();
+        Assert.IsFalse(scene.Host.IsUpdatePending, "nothing is pending after a full frame");
+
+        scene.MoveTo(control);
+
+        Assert.IsTrue(control.Border.VariesByState);
+        Assert.IsTrue(scene.Host.IsUpdatePending, "a hover colour is worth a repaint, and the border says so");
+        Assert.AreEqual(Theme.Accent, scene.PixelAt(0, 20), "the frame takes the hover colour");
+    }
+
+    [TestMethod]
+    public void AFrameThatDoesNotFollowTheStateLeavesTheHoverAlone()
+    {
+        var control = new Control { Dock = DockStyle.Fill, Border = SimpleBorder.Thin };
+        using var scene = HeadlessScene.Create(control, 60f, 40f);
+        scene.Paint();
+
+        scene.MoveTo(control);
+
+        Assert.IsFalse(control.Border.VariesByState);
+        Assert.IsFalse(scene.Host.IsUpdatePending, "a plain frame looks the same hovered and not");
+    }
+
+    [TestMethod]
+    public void AFrameWithAHoverColourAnswersAPointerOverItsChildren()
+    {
+        var label = new Label("inside") { Dock = DockStyle.Fill };
+        var card = new Panel
+        {
+            Dock = DockStyle.Fill,
+            Padding = new Thickness(20f),
+            Border = SimpleBorder.Thin.WithHoverColor(ThemeColor.Accent),
+            HoverIncludesChildren = true,
+        };
+        card.Controls.Add(label);
+        using var scene = HeadlessScene.Create(card, 100f, 80f);
+        Assert.AreEqual(Theme.Border, scene.PixelAt(0, 40), "resting to start with");
+
+        scene.MoveTo(label);
+
+        Assert.AreEqual(Theme.Accent, scene.PixelAt(0, 40), "pointing at the caption lights the card's frame");
+    }
+
     private static SKRect ContentRectOf(Control control, float width, float height)
     {
         control.Measure(SKSize.Empty);

@@ -30,6 +30,8 @@ public sealed class UiHost
     private List<IInputSink>? _inputSinks;
     private SKSize _clientSize;
     private Control? _hovered;
+    private readonly List<Control> _hoverChain = [];
+    private readonly List<Control> _previousHoverChain = [];
     private Control? _captured;
     private Control? _focused;
     private SKPoint? _mousePosition;
@@ -142,8 +144,7 @@ public sealed class UiHost
                 SetFocus(null);
             }
 
-            _hovered?.RaiseMouseLeave();
-            _hovered = null;
+            SetHovered(null);
             _captured = null;
             _selecting = false;
             _draggingSelection = false;
@@ -765,9 +766,7 @@ public sealed class UiHost
 
         if (!ReferenceEquals(hit, _hovered))
         {
-            _hovered?.RaiseMouseLeave();
-            _hovered = hit;
-            _hovered?.RaiseMouseEnter();
+            SetHovered(hit);
         }
 
         var target = _captured ?? hit;
@@ -877,10 +876,54 @@ public sealed class UiHost
     public void ProcessMouseLeave() => Guard(() =>
     {
         _mousePosition = null;
-        _hovered?.RaiseMouseLeave();
-        _hovered = null;
+        SetHovered(null);
         SetCursor(Cursor.Default);
     });
+
+    /// <summary>
+    /// Makes <paramref name="hit"/> the hovered control, raising the enter and leave events on every
+    /// control whose hover changed.
+    /// </summary>
+    /// <param name="hit">The control under the pointer, or null when the pointer left the surface.</param>
+    /// <remarks>
+    /// The pointer is over one control and over each of that control's ancestors that asked to be
+    /// told about their descendants (<see cref="Control.HoverIncludesChildren"/>), so that chain is
+    /// what the events travel along: a leave goes deepest first, so a container hears about it after
+    /// its child, and an enter goes shallowest first, so it hears before it.
+    /// </remarks>
+    private void SetHovered(Control? hit)
+    {
+        _previousHoverChain.Clear();
+        _previousHoverChain.AddRange(_hoverChain);
+
+        _hoverChain.Clear();
+        for (var control = hit; control is not null; control = control.Parent)
+        {
+            if (ReferenceEquals(control, hit) || control.HoverIncludesChildren)
+            {
+                _hoverChain.Add(control);
+            }
+        }
+
+        _hoverChain.Reverse();
+        _hovered = hit;
+
+        for (int i = _previousHoverChain.Count - 1; i >= 0; i--)
+        {
+            if (!_hoverChain.Contains(_previousHoverChain[i]))
+            {
+                _previousHoverChain[i].RaiseMouseLeave();
+            }
+        }
+
+        foreach (var control in _hoverChain)
+        {
+            if (!_previousHoverChain.Contains(control))
+            {
+                control.RaiseMouseEnter();
+            }
+        }
+    }
 
     /// <summary>
     /// Routes a wheel turn to the control under the pointer. Returns true when something consumed

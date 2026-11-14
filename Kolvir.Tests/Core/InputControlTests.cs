@@ -19,6 +19,52 @@ namespace Kolvir.Tests;
 public sealed class InputControlTests : HeadlessTestBase
 {
     [TestMethod]
+    public void AContainerIsHoveredOnlyByItsOwnAreaUnlessItAsksForMore()
+    {
+        var label = new Label("inside") { Dock = DockStyle.Fill };
+        var panel = new Panel { Dock = DockStyle.Fill, Padding = new Thickness(20f) };
+        panel.Controls.Add(label);
+        using var scene = HeadlessScene.Create(panel, 200f, 120f);
+
+        scene.MoveTo(label);
+        Assert.IsTrue(label.IsMouseOver, "the pointer is over the label");
+        Assert.IsFalse(panel.IsMouseOver, "and, by default, not over the panel that holds it");
+
+        panel.HoverIncludesChildren = true;
+        scene.MoveTo(new SKPoint(2f, 2f));
+        scene.MoveTo(label);
+
+        Assert.IsTrue(panel.IsMouseOver, "a container that asks for its children hears about the pointer");
+        Assert.IsTrue(label.IsMouseOver, "and the control under the pointer still does too");
+
+        scene.MoveTo(new SKPoint(2f, 2f));
+        Assert.IsFalse(label.IsMouseOver, "the label loses the pointer when it moves onto the gutter");
+        Assert.IsTrue(panel.IsMouseOver, "and the container keeps it, because the pointer is still inside it");
+
+        scene.Host.ProcessMouseLeave();
+        Assert.IsFalse(panel.IsMouseOver, "leaving the surface ends it");
+    }
+
+    [TestMethod]
+    public void AHoveredGrandchildHoversEveryAncestorThatAsked()
+    {
+        var label = new Label("deep") { Dock = DockStyle.Fill };
+        var inner = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, HoverIncludesChildren = true };
+        var outer = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, HoverIncludesChildren = true };
+        var indifferent = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
+        inner.Controls.Add(label);
+        outer.Controls.Add(inner);
+        indifferent.Controls.Add(outer);
+        using var scene = HeadlessScene.Create(indifferent, 200f, 120f);
+
+        scene.MoveTo(label);
+
+        Assert.IsTrue(inner.IsMouseOver, "each ancestor decides for itself");
+        Assert.IsTrue(outer.IsMouseOver, "including the one above a container that did not ask");
+        Assert.IsFalse(indifferent.IsMouseOver, "and one that did not ask is left alone");
+    }
+
+    [TestMethod]
     public void AButtonRaisesClickOnPressAndReleaseInside()
     {
         var button = new Button("Go") { Dock = DockStyle.Fill };

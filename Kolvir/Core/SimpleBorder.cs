@@ -131,6 +131,14 @@ public sealed class SimpleBorder : Border
     public override bool IsRectangular => _corners.IsNone;
 
     /// <inheritdoc />
+    public override bool VariesByState =>
+        _hoverRole is not null
+        || _focusRole is not null
+        || _activeRole is not null
+        || _disabledRole is not null
+        || _pressedRole is not null;
+
+    /// <inheritdoc />
     public override void ClipTo(SKCanvas canvas, SKRect bounds)
     {
         if (_corners.IsNone)

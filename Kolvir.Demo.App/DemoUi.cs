@@ -5120,17 +5120,23 @@ public sealed class DemoUi
         body.Controls.Add(BorderRow(
             "A state colour",
             "Point at this one: a border resolves its own colour from the control's state, so the "
-            + "frame answers the pointer without being reassigned.",
+            + "frame answers the pointer without being reassigned. The row takes the hover for its "
+            + "whole area, captions included, because it sets HoverIncludesChildren.",
             SimpleBorder.Thin
                 .WithHoverColor(ThemeColor.Accent)
                 .WithFocusColor(ThemeColor.Accent)
-                .WithCornerRadius(8f)));
+                .WithCornerRadius(8f),
+            hoverIncludesChildren: true));
 
         return body;
     }
 
     /// <summary>One border sample: a caption block inside an example frame.</summary>
-    private static Panel BorderRow(string title, string caption, SimpleBorder border)
+    private static Panel BorderRow(
+        string title,
+        string caption,
+        SimpleBorder border,
+        bool hoverIncludesChildren = false)
     {
         var row = new Panel
         {
@@ -5139,6 +5145,7 @@ public sealed class DemoUi
             Margin = new Thickness(0f, 0f, 0f, 12f),
             Border = border,
             Padding = new Thickness(16f, 12f, 16f, 12f),
+            HoverIncludesChildren = hoverIncludesChildren,
         };
 
         row.Controls.Add(new Label(title)

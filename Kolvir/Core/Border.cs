@@ -91,6 +91,24 @@ public abstract class Border
     public virtual bool IsRectangular => true;
 
     /// <summary>
+    /// Whether <see cref="Paint"/> draws something different for a different
+    /// <see cref="Control.State"/>.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A control repaints when its focus, press or enabled state changes, and not when the pointer
+    /// enters or leaves it, because most controls look the same either way and repainting one would
+    /// widen the next frame by its whole bounds. A border with a hover colour changes that without
+    /// the control overriding anything, so it says so here and the control repaints the frame for it.
+    /// </para>
+    /// <para>
+    /// False for a border that paints the same thing for every state, which is what a bare
+    /// <see cref="Border"/> and a colourless shape are.
+    /// </para>
+    /// </remarks>
+    public virtual bool VariesByState => false;
+
+    /// <summary>
     /// The radius of each corner a control should round its own background fill by, so the fill
     /// follows the same shape as the frame rather than a rectangle that the clip has to cut.
     /// </summary>

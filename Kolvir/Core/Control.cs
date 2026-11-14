@@ -1213,10 +1213,30 @@ public class Control : IDisposable
     public bool IsFocused { get; private set; }
 
     /// <summary>
-    /// True while the pointer is over this control, as last decided by the host's hit testing.
-    /// Maintained by the host along with the enter and leave events.
+    /// True while the pointer is over this control, as last decided by the host's hit testing. A
+    /// control that sets <see cref="HoverIncludesChildren"/> also counts a pointer over any of its
+    /// descendants.
     /// </summary>
+    /// <remarks>Maintained by the host along with the enter and leave events.</remarks>
     public bool IsMouseOver { get; private set; }
+
+    /// <summary>
+    /// Whether a pointer over a descendant of this control counts as a pointer over this control.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// False by default, which is the platform's own rule: the deepest enabled control under the
+    /// pointer is the one that is hovered, so moving onto a label inside a card leaves the card.
+    /// That is right for a control whose hover only means "the pointer is on me".
+    /// </para>
+    /// <para>
+    /// A container that paints itself by hover - a card whose border takes the accent colour while
+    /// the pointer is anywhere in it - wants the other meaning, and says so. The host then raises
+    /// <see cref="OnMouseEnter"/> and <see cref="OnMouseLeave"/> on the container too, so
+    /// <see cref="IsMouseOver"/> and <see cref="State"/> follow the whole of it.
+    /// </para>
+    /// </remarks>
+    public bool HoverIncludesChildren { get; set; }
 
     /// <summary>True while a mouse button is held down on the control.</summary>
     public bool IsPressed { get; internal set; }
@@ -2468,7 +2488,13 @@ public class Control : IDisposable
         // same whether or not the pointer is over it, and repainting one anyway widens the next
         // frame by its whole bounds - a title label invalidated on its way past would take in
         // everything between it and whatever else changed. Controls with a hover look override
-        // OnMouseEnter/OnMouseLeave and invalidate what they draw.
+        // OnMouseEnter/OnMouseLeave and invalidate what they draw; a border that has a hover colour
+        // has no override to do that in, so it declares itself on Border.VariesByState.
+        if (Border.VariesByState)
+        {
+            Invalidate();
+        }
+
         OnMouseEnter();
     }
 
@@ -2480,6 +2506,12 @@ public class Control : IDisposable
         }
 
         IsMouseOver = false;
+
+        if (Border.VariesByState)
+        {
+            Invalidate();
+        }
+
         OnMouseLeave();
     }
 

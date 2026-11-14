@@ -251,6 +251,23 @@ invalidates the pixel and skips the layout pass, because both take the same inse
 recommended pattern for controls that colour their border by state — a few static instances and an
 assignment, rather than the hand-rolled painting described next.
 
+**Two holes in that pattern, both found in phase 2 by pointing at a demo card and seeing nothing.**
+
+The first is that `Control` does not repaint when the pointer arrives: `RaiseMouseEnter` deliberately
+invalidates nothing, because a label or a table looks the same hovered and not, and repainting one
+widens the next frame by its whole bounds. A control that draws its own hover look makes up for it by
+overriding `OnMouseEnter` — but a border-coloured one has no override to add it in. So `Border` grew
+`VariesByState`, `SimpleBorder` reports it when it has any state role, and `Control.RaiseMouseEnter` /
+`RaiseMouseLeave` invalidate for a border that says so. A plain frame still costs nothing per hover.
+
+The second is that hover belongs to the deepest control under the pointer, on every platform, so a card
+full of labels is never hovered — only the labels are. A container that paints itself by hover has to
+be able to say "the pointer anywhere inside me counts", so `Control.HoverIncludesChildren` makes the
+host raise enter and leave along the ancestor chain as well, and `IsMouseOver` (and so
+`ControlState.Hovered`) mean the whole control. It is false by default and must stay that way: an
+`Expander` and a `TabControl` draw their own hot header and hot tab and clear them on `OnMouseLeave`,
+so a pointer moving from the header into the content has to keep raising that leave.
+
 ## 6. `SimpleBorder`, and migrating today's borders
 
 `SimpleBorder` is the shape of everything that exists now, plus state colours, which is what removes the
@@ -395,9 +412,9 @@ and compared by SHA-256 digest. **78 of 82 are byte-identical.** The four that a
 Everything else — every control, in both themes, at three zoom levels — came out the same, which is
 the evidence that the padding reductions, the insets arithmetic and the clip changes agree.
 
-**Phase 2, the same 82 pages.** No page is byte-identical any more, and none of them should be: the
-frame stopped being a stroke and became a filled ring, so the antialiasing of every corner arc moves by
-a fraction of a pixel. The pixel comparison is the useful one:
+**Phase 2, the same pages, plus one.** No page is byte-identical any more, and none of them should be:
+the frame stopped being a stroke and became a filled ring, so the antialiasing of every corner arc
+moves by a fraction of a pixel. The pixel comparison is the useful one:
 
 | Pages | Pixels differing | Largest channel delta | Where |
 | --- | --- | --- | --- |
@@ -412,7 +429,8 @@ a one-pixel layout shift would show as a straight line, and there is not one on 
 A new demo page, `borders`, shows the feature itself: an accent left edge on a four-pixel frame, a card
 rounded at the top with square feet, a frame with a different colour on its top and bottom edges, an
 eight-pixel band across the top, and a frame that answers the pointer through `WithHoverColor`. It
-renders in both themes and is part of the baseline.
+renders in both themes and is part of the baseline, which is therefore 84 pages: 61 light, 17 dark and
+6 zoomed.
 
 **The suite.** `Kolvir.Tests/Core/BorderTests.cs` covers the contract: a control starts on `Border.None`
 and takes no room; a one-pixel frame comes out of the content and back into the measurement, so the
@@ -427,7 +445,13 @@ edge; a width per side reserves exactly that much and the content lands inside i
 paints the pixels it reserved and no others; a mitred corner has no gap in it; the four radii are held
 one by one and `CornerRadius` reports the largest; one square corner is still a corner; a radius too
 large for the control is given up rather than wrapped past it; and every `With...` returns a new border,
-leaving the shared `Thin` untouched. The rest of the suite — 918 tests — is unchanged and green.
+leaving the shared `Thin` untouched.
+
+Then five for the two hover holes: a state-coloured border repaints when the pointer arrives and a
+plain one does not (both assert `UiHost.IsUpdatePending` across a full frame, so the first would fail on
+a missing invalidation rather than on a stale pixel); a pointer over a caption lights the card's frame;
+and `HoverIncludesChildren` is off by default, reaches every ancestor that asked for it, and still
+leaves an ancestor that did not. The rest of the suite — 933 tests — is unchanged and green.
 
 **What the migration found.** Four things the design did not anticipate:
 
@@ -504,6 +528,11 @@ Settled in phase 2:
     the common case. The cost is a fraction of a pixel of antialiasing on every corner arc (section 8).
 17. **A dashed frame is not a `SimpleBorder`.** A dash belongs to a stroke; a frame with a width per
     edge has to be filled, so a dashed border is a `Border` of its own that strokes a path.
+18. **A border that follows the state says so**, through `Border.VariesByState`, and `Control`
+    repaints on hover for it rather than every control repainting on every hover.
+19. **Container hover is opt-in** through `Control.HoverIncludesChildren`, because the platform rule
+    (the deepest control is the hovered one) is what transient chrome - a hot tab, a hot expander
+    header - already relies on to clear itself.
 
 ## 10. Phase 2: per edge, per corner
 

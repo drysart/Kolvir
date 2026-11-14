@@ -2527,6 +2527,21 @@ frame takes the width of each edge out of the content, so a four-pixel left edge
 pixels in. A state colour covers every edge: a frame whose edges differ only while hovered is not a
 shape anything in this library needs.
 
+A state-coloured border repaints itself when the pointer arrives, without the control overriding
+anything: a border that follows `ControlState` says so through `Border.VariesByState`, and `Control`
+repaints for it. A container that should answer the pointer over its content as well as its own
+gutter - a card whose frame lights up while the pointer is anywhere in it - sets
+`Control.HoverIncludesChildren`, because hover otherwise belongs to the deepest control under the
+pointer, as it does on every platform:
+
+```csharp
+var card = new Panel
+{
+    Border = SimpleBorder.Thin.WithHoverColor(ThemeColor.Accent).WithCornerRadius(8f),
+    HoverIncludesChildren = true,
+};
+```
+
 The state a colour is resolved for is `Control.State`, a `ControlState` flag set computed from
 `Enabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its own adds it
 to the base's:
