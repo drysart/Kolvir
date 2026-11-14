@@ -17,6 +17,9 @@ internal static class Gtk4MenuItemWidget
     /// Builds the body of a menu: one row per item, in a box <paramref name="width"/> wide. A
     /// submenu is the same box in its own popover, so the nesting is the model's.
     /// </summary>
+    /// <param name="items">The items to build rows for, in order.</param>
+    /// <param name="beforeInvoke">Runs before an item is invoked, such as to close the menu.</param>
+    /// <param name="width">The width each row is built in, in pixels.</param>
     /// <param name="maxHeight">
     /// The tallest the list may get before it scrolls, or 0 to let it grow as tall as its rows are.
     /// </param>

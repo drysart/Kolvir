@@ -56,6 +56,10 @@ public class DateTimePicker : TextBox
     private bool _dropDownOpen;
     private bool _hotButton;
 
+    /// <summary>
+    /// Creates an empty picker 180 by 30 that writes the culture's short date, together with the
+    /// calendar and the popup that holds it.
+    /// </summary>
     public DateTimePicker()
     {
         TabStop = true;
@@ -254,6 +258,9 @@ public class DateTimePicker : TextBox
     /// <summary>Raises <see cref="AddValueChangedHandler"/>.</summary>
     protected virtual void OnValueChanged() => _valueChanged?.Invoke(this);
 
+    /// <inheritdoc />
+    /// <remarks>The calendar button's width is added to what the text box measures, since it sits
+    /// beside the text rather than over it.</remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var size = base.MeasureContent(availableSize);
@@ -264,6 +271,10 @@ public class DateTimePicker : TextBox
     public override Cursor GetCursorAt(SKPoint pointInLocal) =>
         Geometry.Contains(ButtonBounds, pointInLocal) ? Cursor.Default : base.GetCursorAt(pointInLocal);
 
+    /// <summary>
+    /// Paints the field's background and, while the picker has the focus, a focus ring around the
+    /// whole field.
+    /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         base.OnPaintBackground(canvas, rect);
@@ -274,12 +285,20 @@ public class DateTimePicker : TextBox
         }
     }
 
+    /// <summary>
+    /// Paints the text as a text box does, then the calendar button over the right-hand end of the
+    /// field.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         base.OnPaint(canvas, rect);
         PaintDropButton(canvas);
     }
 
+    /// <summary>
+    /// Commits the typed text and toggles the calendar when its button is pressed; a press anywhere
+    /// else is the text box's, so the caret and the selection stay where they were.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left && Enabled && Geometry.Contains(ButtonBounds, e.Location))
@@ -305,6 +324,10 @@ public class DateTimePicker : TextBox
         base.OnMouseDown(e);
     }
 
+    /// <summary>
+    /// Tracks whether the pointer is over the calendar button, which is filled while it is and
+    /// while the calendar is open.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         bool hot = Enabled && Geometry.Contains(ButtonBounds, e.Location);
@@ -317,6 +340,7 @@ public class DateTimePicker : TextBox
         base.OnMouseMove(e);
     }
 
+    /// <summary>Clears the calendar button's hover state when the pointer leaves the field.</summary>
     protected override void OnMouseLeave()
     {
         if (_hotButton)
@@ -328,6 +352,13 @@ public class DateTimePicker : TextBox
         base.OnMouseLeave();
     }
 
+    /// <summary>
+    /// Handles the keys the picker owns before the text box sees them, so the text box's own
+    /// left/right character movement does not also run. Open, the arrows move the calendar's
+    /// highlight and Enter takes it; closed, left and right move between the date's segments, the
+    /// arrows step the segment, Page Up and Page Down step a month, Enter commits and Escape gives
+    /// the edit up.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         // Keys the picker owns are marked handled before the text box sees them, so its own
@@ -343,6 +374,8 @@ public class DateTimePicker : TextBox
         base.OnKeyDown(e);
     }
 
+    /// <summary>Closes an open calendar when the keystroke was accepted by the field, since typing is
+    /// the field's business.</summary>
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
@@ -354,6 +387,8 @@ public class DateTimePicker : TextBox
         }
     }
 
+    /// <summary>Selects the whole date, since a field that holds one value is easier to replace
+    /// than to edit.</summary>
     protected override void OnGotFocus()
     {
         base.OnGotFocus();
@@ -362,6 +397,10 @@ public class DateTimePicker : TextBox
         SelectAll();
     }
 
+    /// <summary>
+    /// Commits the typed text and closes the calendar, which is what the field does when the focus
+    /// moves on.
+    /// </summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
@@ -369,6 +408,7 @@ public class DateTimePicker : TextBox
         CloseDropDown();
     }
 
+    /// <summary>Clears the button's hover state and closes the calendar when the picker is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)
@@ -380,6 +420,8 @@ public class DateTimePicker : TextBox
         base.OnEnabledChanged();
     }
 
+    /// <summary>Closes the calendar when the picker is hidden, so a popup is not left behind on
+    /// screen.</summary>
     protected override void OnVisibleChanged()
     {
         if (!Visible)

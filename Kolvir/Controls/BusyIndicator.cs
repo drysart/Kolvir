@@ -42,6 +42,10 @@ public class BusyIndicator : Control
     private long _timestamp;
     private Timer? _timer;
 
+    /// <summary>
+    /// Creates a spinner that is busy already, with no tab stop and no focus, a 32 by 32 size and a
+    /// minimum of 16 by 16.
+    /// </summary>
     public BusyIndicator()
     {
         TabStop = false;
@@ -159,6 +163,10 @@ public class BusyIndicator : Control
             bounds.MidY + radius);
     }
 
+    /// <summary>
+    /// Draws the track ring and the rotating arc, and starts or stops the sweep timer on the way, so
+    /// that a host which only ever paints still animates.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         UpdateTimer();
@@ -207,12 +215,14 @@ public class BusyIndicator : Control
         }
     }
 
+    /// <summary>Starts or stops the sweep as the spinner comes on or goes off the screen.</summary>
     protected override void OnDisplayedChanged()
     {
         base.OnDisplayedChanged();
         UpdateTimer();
     }
 
+    /// <summary>Starts or stops the sweep as the spinner is enabled or disabled.</summary>
     protected override void OnEnabledChanged()
     {
         base.OnEnabledChanged();

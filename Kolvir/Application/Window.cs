@@ -325,7 +325,7 @@ public sealed partial class Window : IDisposable
     /// <remarks>
     /// <see cref="WindowChrome.Borderless"/> makes the application responsible for every visible
     /// pixel while the platform keeps the resize band and its window behaviours. Setting it may be
-    /// done before or after <see cref="Show"/>; before is cheaper, because the window is created with
+    /// done before or after <see cref="Show()"/>; before is cheaper, because the window is created with
     /// the mode rather than changed into it. Check <see cref="ChromeCapabilities"/> first - a backend
     /// that has not adopted the feature throws rather than silently staying decorated.
     /// </remarks>
@@ -556,7 +556,7 @@ public sealed partial class Window : IDisposable
 
     /// <summary>Shows the window, owned by <see cref="Owner"/> when it is set.</summary>
     /// <remarks>
-    /// Legal before <see cref="Application.Run"/>: the window is registered and becomes
+    /// Legal before <see cref="Application.Run()"/>: the window is registered and becomes
     /// visible once the loop starts, so <c>app.MainWindow = new Window(...)</c> works inside
     /// an object initialiser.
     /// </remarks>
@@ -639,7 +639,7 @@ public sealed partial class Window : IDisposable
         _scope.Dispose();
     }
 
-    /// <summary>Called by <see cref="Application.Run"/> for a window shown before the loop started.</summary>
+    /// <summary>Called by <see cref="Application.Run()"/> for a window shown before the loop started.</summary>
     internal void ShowNow()
     {
         if (_isShown || _isClosed)

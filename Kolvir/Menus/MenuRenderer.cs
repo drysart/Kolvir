@@ -67,6 +67,10 @@ public readonly record struct MenuMetrics
     /// </summary>
     public float ScrollIndicatorHeight { get; init; }
 
+    /// <summary>
+    /// The Windows 11 context menu measurements: 32 px rows, 8 px corners, 6 px padding, a 24 px
+    /// icon column and a 16 px chevron column that a menu reserves only when it needs them.
+    /// </summary>
     public static MenuMetrics Default => new()
     {
         ItemHeight = 32f,
@@ -474,7 +478,9 @@ public static class MenuRenderer
 
     /// <summary>Paints a measured menu onto <paramref name="canvas"/>.</summary>
     /// <param name="canvas">Target canvas, already scaled to the display's DPI.</param>
-    /// <param name="layout">Layout from <see cref="Measure"/>.</param>
+    /// <param name="layout">
+    /// Layout from <see cref="Measure(ContextMenu, MenuMetrics?, Font?, bool)"/>.
+    /// </param>
     /// <param name="hoveredIndex">Row to highlight, or -1.</param>
     /// <param name="surfaceAlpha">
     /// Opacity of the surface, 0 to 1. Below 1 the menu is translucent so a compositor-supplied

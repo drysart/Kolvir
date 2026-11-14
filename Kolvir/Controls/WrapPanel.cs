@@ -38,6 +38,10 @@ public class WrapPanel : Panel
     // first and then walked a line at a time.
     private readonly List<FlowItem> _items = [];
 
+    /// <summary>
+    /// Creates a horizontal flow with no padding of its own, so that its bounds are exactly the run of
+    /// its children.
+    /// </summary>
     public WrapPanel()
     {
         // A flow is a layout container: its bounds are exactly the run of its children.

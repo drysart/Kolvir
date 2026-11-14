@@ -13,7 +13,7 @@ namespace Kolvir.Backend.Win32;
 /// <para>
 /// Hooks are resolved from the window's own service scope, so a backend with no such hook
 /// registered resolves nothing and the loop costs an empty array. Register one with
-/// <see cref="ServiceCollectionExtensions.AddWin32WindowHook"/>.
+/// <see cref="Win32ServiceCollectionExtensions.AddWin32WindowHook{THook}"/>.
 /// </para>
 /// <para>
 /// The phases run in the same order as the portable ones, and after them. The native window does

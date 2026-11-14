@@ -58,6 +58,11 @@ public abstract class VirtualList : Control
     private Action<object>? _selectedIndexChanged;
     private Action<object>? _itemActivated;
 
+    /// <summary>
+    /// Creates the scroll helper and applies the defaults every list control shares: focusable, a tab
+    /// stop, one pixel of border, rounded corners, two pixels of padding, a minimum height of 32
+    /// pixels and an automatic vertical scrollbar.
+    /// </summary>
     protected VirtualList()
     {
         // The scroll helper has to exist before its own properties are assigned: setting one asks
@@ -528,6 +533,7 @@ public abstract class VirtualList : Control
         }
     }
 
+    /// <inheritdoc />
     protected override void OnLayout()
     {
         if (_layingOut)
@@ -546,6 +552,7 @@ public abstract class VirtualList : Control
         }
     }
 
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         EnsureContentMeasured();
@@ -560,6 +567,7 @@ public abstract class VirtualList : Control
         return new SKSize(width, height);
     }
 
+    /// <inheritdoc />
     public override Control? HitTest(SKPoint pointInParent)
     {
         if (!Visible)
@@ -597,12 +605,14 @@ public abstract class VirtualList : Control
     protected internal override SKPoint GetChildOffset(Control child) =>
         _scroll.IsBar(child) ? SKPoint.Empty : _scroll.ChildOffset;
 
+    /// <inheritdoc />
     protected override void RenderChildren(SKCanvas canvas)
     {
         base.RenderChildren(canvas);
         _scroll.RenderBars(canvas);
     }
 
+    /// <inheritdoc />
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -613,12 +623,22 @@ public abstract class VirtualList : Control
         base.Dispose(disposing);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The fill is the control's own background, the input colour of the theme while it has none, or
+    /// the disabled colour while the control is disabled.
+    /// </remarks>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, CornerRadius);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Only the rows inside the viewport are painted, and <see cref="EmptyText"/> is painted instead
+    /// when there are no rows at all.
+    /// </remarks>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var viewport = _scroll.EffectiveViewport(ScrollClient);
@@ -645,6 +665,8 @@ public abstract class VirtualList : Control
         canvas.Restore();
     }
 
+    /// <inheritdoc />
+    /// <remarks>The border takes the accent colour while the control has the focus.</remarks>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         var border = !Enabled
@@ -654,6 +676,10 @@ public abstract class VirtualList : Control
         Painter.DrawBorder(canvas, rect, border, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
     }
 
+    /// <summary>
+    /// Moves the selection to the row under the pointer and starts the drag that extends it; a second
+    /// click on a row activates it instead.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -682,6 +708,10 @@ public abstract class VirtualList : Control
         SelectFromPointer(index, e.Modifiers);
     }
 
+    /// <summary>
+    /// Extends the selection while a drag is going, and otherwise tracks the row under the pointer so
+    /// that it can paint as hot.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -704,6 +734,7 @@ public abstract class VirtualList : Control
         InvalidateRow(index);
     }
 
+    /// <summary>Ends a drag and releases the mouse capture.</summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -717,6 +748,7 @@ public abstract class VirtualList : Control
         ReleaseMouseCapture();
     }
 
+    /// <summary>Clears the hot row when the pointer leaves the control.</summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
@@ -759,6 +791,10 @@ public abstract class VirtualList : Control
         }
     }
 
+    /// <summary>
+    /// Handles the keys that move the focus rectangle and change the selection: the arrows, Page Up
+    /// and Page Down, Home and End, Space, Enter and Ctrl+A.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);

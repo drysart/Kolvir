@@ -14,18 +14,31 @@ public class TableLayoutPanel : Panel
     private readonly List<RowStyle> _rowStyles = new();
     private readonly List<ColumnStyle> _columnStyles = new();
 
+    /// <summary>Creates a table with no rows or columns and four pixels of space around each cell.</summary>
     public TableLayoutPanel()
     {
         Padding = new Thickness(0f);
         CellPadding = new Thickness(4f);
     }
 
+    /// <summary>The row definitions, in the order they were added.</summary>
+    /// <remarks>
+    /// This is the live list: adding to it directly adds a row but does not lay the table out
+    /// again. <see cref="AddRow(RowStyle)"/> does both.
+    /// </remarks>
     public IList<RowStyle> RowStyles => _rowStyles;
 
+    /// <summary>The column definitions, in the order they were added.</summary>
+    /// <remarks>
+    /// This is the live list: adding to it directly adds a column but does not lay the table out
+    /// again. <see cref="AddColumn(ColumnStyle)"/> does both.
+    /// </remarks>
     public IList<ColumnStyle> ColumnStyles => _columnStyles;
 
+    /// <summary>How many rows the table has, which is the number of row definitions.</summary>
     public int RowCount => _rowStyles.Count;
 
+    /// <summary>How many columns the table has, which is the number of column definitions.</summary>
     public int ColumnCount => _columnStyles.Count;
 
     /// <summary>Space inserted around every cell.</summary>
@@ -43,6 +56,9 @@ public class TableLayoutPanel : Panel
         TableLayoutPanelExtensions.SetCell(control, column, row);
     }
 
+    /// <summary>
+    /// The cell a child was given, or (0, 0) where it has never been given one.
+    /// </summary>
     public (int Column, int Row) GetCellPosition(Control control)
     {
         ArgumentNullException.ThrowIfNull(control);
@@ -62,6 +78,9 @@ public class TableLayoutPanel : Panel
         TableLayoutPanelExtensions.SetSpan(control, columnSpan, rowSpan);
     }
 
+    /// <summary>
+    /// The span a child was given, one track each way where it has never been given one.
+    /// </summary>
     public (int ColumnSpan, int RowSpan) GetCellSpan(Control control)
     {
         ArgumentNullException.ThrowIfNull(control);
@@ -79,10 +98,13 @@ public class TableLayoutPanel : Panel
         Controls.Add(control);
     }
 
+    /// <summary>Adds a column sized as <paramref name="sizeType"/> says and lays the table out again.</summary>
     public void AddColumn(SizeType sizeType, float value) => AddColumn(new ColumnStyle(sizeType, value));
 
+    /// <summary>Adds a row sized as <paramref name="sizeType"/> says and lays the table out again.</summary>
     public void AddRow(SizeType sizeType, float value) => AddRow(new RowStyle(sizeType, value));
 
+    /// <summary>Adds a column definition and lays the table out again.</summary>
     public void AddColumn(ColumnStyle style)
     {
         ArgumentNullException.ThrowIfNull(style);
@@ -91,6 +113,7 @@ public class TableLayoutPanel : Panel
         Invalidate();
     }
 
+    /// <summary>Adds a row definition and lays the table out again.</summary>
     public void AddRow(RowStyle style)
     {
         ArgumentNullException.ThrowIfNull(style);
@@ -99,6 +122,7 @@ public class TableLayoutPanel : Panel
         Invalidate();
     }
 
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var (columns, rows) = ComputeTrackSizes(availableSize);
@@ -118,6 +142,7 @@ public class TableLayoutPanel : Panel
         return new SKSize(width, height);
     }
 
+    /// <inheritdoc />
     protected override void OnLayout()
     {
         if (_columnStyles.Count == 0 || _rowStyles.Count == 0)

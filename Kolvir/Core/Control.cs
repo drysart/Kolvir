@@ -76,11 +76,20 @@ public class Control : IDisposable
     private Background? _inheritedBackground;
     private SKColor? _inheritedForeground;
 
+    /// <summary>
+    /// Creates a control named after its own type, which is what <see cref="Name"/> starts as.
+    /// </summary>
     public Control()
     {
         Name = GetType().Name;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when the control is activated, which for most controls is a click
+    /// and for a derived control is whatever it treats as one.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddClickHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -95,6 +104,9 @@ public class Control : IDisposable
         _click -= handler;
     }
 
+    /// <summary>Adds a handler that runs when a mouse button goes down on the control.</summary>
+    /// <param name="handler">The handler, which receives the control and the event data.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddMouseDownHandler(Action<object, MouseEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -109,6 +121,9 @@ public class Control : IDisposable
         _mouseDown -= handler;
     }
 
+    /// <summary>Adds a handler that runs when a mouse button is released over the control.</summary>
+    /// <param name="handler">The handler, which receives the control and the event data.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddMouseUpHandler(Action<object, MouseEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -123,6 +138,12 @@ public class Control : IDisposable
         _mouseUp -= handler;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when the pointer moves over the control, including while a button
+    /// is held and the control has captured the mouse.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control and the event data.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddMouseMoveHandler(Action<object, MouseEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -156,6 +177,9 @@ public class Control : IDisposable
         _mouseWheel -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the pointer enters the control.</summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddMouseEnterHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -170,6 +194,9 @@ public class Control : IDisposable
         _mouseEnter -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the pointer leaves the control.</summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddMouseLeaveHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -184,6 +211,14 @@ public class Control : IDisposable
         _mouseLeave -= handler;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when a key goes down while the control has the focus.
+    /// </summary>
+    /// <param name="handler">
+    /// The handler, which receives the control and the event data. Setting
+    /// <see cref="KeyEventArgs.Handled"/> marks the key consumed.
+    /// </param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddKeyDownHandler(Action<object, KeyEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -198,6 +233,11 @@ public class Control : IDisposable
         _keyDown -= handler;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when a key is released while the control has the focus.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control and the event data.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddKeyUpHandler(Action<object, KeyEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -212,6 +252,12 @@ public class Control : IDisposable
         _keyUp -= handler;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when text is typed into the focused control, after the key that
+    /// produced it has been pressed.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control and the typed text.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddTextInputHandler(Action<object, TextInputEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -226,6 +272,9 @@ public class Control : IDisposable
         _textInput -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the control receives the keyboard focus.</summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddGotFocusHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -240,6 +289,9 @@ public class Control : IDisposable
         _gotFocus -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the control loses the keyboard focus.</summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddLostFocusHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -254,6 +306,9 @@ public class Control : IDisposable
         _lostFocus -= handler;
     }
 
+    /// <summary>Adds a handler that runs when <see cref="Bounds"/> changes.</summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddBoundsChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -268,6 +323,9 @@ public class Control : IDisposable
         _boundsChanged -= handler;
     }
 
+    /// <summary>Adds a handler that runs when <see cref="Text"/> changes.</summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddTextChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -282,6 +340,13 @@ public class Control : IDisposable
         _textChanged -= handler;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when the control's own <see cref="Visible"/> flag changes. To hear
+    /// about a container above the control being hidden, use
+    /// <see cref="AddDisplayedChangedHandler"/>.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddVisibleChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -296,6 +361,12 @@ public class Control : IDisposable
         _visibleChanged -= handler;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when the control's effective <see cref="Enabled"/> state changes,
+    /// which includes a container above it being disabled or enabled.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
     public IDisposable AddEnabledChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -352,7 +423,8 @@ public class Control : IDisposable
     /// <para>
     /// The handler receives the menu the control contributed in
     /// <see cref="ContextMenuEventArgs.Menu"/> and adds to it - its own items in front with
-    /// <see cref="ContextMenu.Insert"/>, or after them with <see cref="ContextMenu.Add"/> -
+    /// <see cref="ContextMenu.Insert"/>, or after them with
+    /// <see cref="ContextMenu.Add(MenuItem)"/> -
     /// so a spell-checking menu sits beside a text box's Cut/Copy/Paste rather than replacing it.
     /// Assigning a different menu, or clearing the one it was given, is how a handler suppresses what
     /// the control would have offered. The host's own
@@ -568,6 +640,12 @@ public class Control : IDisposable
             : new SKPoint((point.X - origin.X) / scale, (point.Y - origin.Y) / scale);
     }
 
+    /// <summary>
+    /// The control this one is attached to, or null when this control is the root of a tree. It is
+    /// maintained by the parent's <see cref="Controls"/> collection: adding a control to a
+    /// container, or removing it, is what sets it, and the change re-reads the inherited enabled,
+    /// displayed and appearance state for the whole subtree.
+    /// </summary>
     public Control? Parent
     {
         get => _parent;
@@ -691,44 +769,76 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>
+    /// The top-left corner of <see cref="Bounds"/>, in the parent's client coordinates. Assigning
+    /// it moves the control and keeps its size.
+    /// </summary>
     public SKPoint Location
     {
         get => new(_bounds.Left, _bounds.Top);
         set => Bounds = new SKRect(value.X, value.Y, value.X + _bounds.Width, value.Y + _bounds.Height);
     }
 
+    /// <summary>
+    /// The size of <see cref="Bounds"/>. Assigning it goes through <see cref="Bounds"/>, which
+    /// normalizes the rectangle, so a negative extent ends up as a positive one rather than
+    /// flipping the control inside out.
+    /// </summary>
     public SKSize Size
     {
         get => new(_bounds.Width, _bounds.Height);
         set => Bounds = new SKRect(_bounds.Left, _bounds.Top, _bounds.Left + value.Width, _bounds.Top + value.Height);
     }
 
+    /// <summary>
+    /// Distance from the parent's left edge to this control's left edge. Assigning it moves the
+    /// control horizontally and keeps its size.
+    /// </summary>
     public float Left
     {
         get => _bounds.Left;
         set => Bounds = new SKRect(value, _bounds.Top, value + _bounds.Width, _bounds.Bottom);
     }
 
+    /// <summary>
+    /// Distance from the parent's top edge to this control's top edge. Assigning it moves the
+    /// control vertically and keeps its size.
+    /// </summary>
     public float Top
     {
         get => _bounds.Top;
         set => Bounds = new SKRect(_bounds.Left, value, _bounds.Right, value + _bounds.Height);
     }
 
+    /// <summary>
+    /// The width of the control. Assigning a negative value is read as zero, so a control can be
+    /// empty but never has a negative width.
+    /// </summary>
     public float Width
     {
         get => _bounds.Width;
         set => Bounds = new SKRect(_bounds.Left, _bounds.Top, _bounds.Left + MathF.Max(0f, value), _bounds.Bottom);
     }
 
+    /// <summary>
+    /// The height of the control. Assigning a negative value is read as zero.
+    /// </summary>
     public float Height
     {
         get => _bounds.Height;
         set => Bounds = new SKRect(_bounds.Left, _bounds.Top, _bounds.Right, _bounds.Top + MathF.Max(0f, value));
     }
 
+    /// <summary>
+    /// The right edge of the control, in the parent's coordinates. Read-only: assign
+    /// <see cref="Width"/> or <see cref="Bounds"/> to move it.
+    /// </summary>
     public float Right => _bounds.Right;
 
+    /// <summary>
+    /// The bottom edge of the control, in the parent's coordinates. Read-only: assign
+    /// <see cref="Height"/> or <see cref="Bounds"/> to move it.
+    /// </summary>
     public float Bottom => _bounds.Bottom;
 
     /// <summary>The control's own coordinate space: (0, 0, Width, Height).</summary>
@@ -737,6 +847,12 @@ public class Control : IDisposable
     /// <summary>The area available to content, i.e. <see cref="ClientRect"/> minus padding.</summary>
     public SKRect ContentRect => Geometry.Deflate(ClientRect, Padding);
 
+    /// <summary>
+    /// Space the containers above this control leave around it, outside <see cref="Bounds"/>. A
+    /// <see cref="Panel"/> or a <see cref="StackPanel"/> subtracts it from the room it gives the
+    /// control, and a container that scrolls includes it in what has to be scrolled into view.
+    /// Assigning it repaints, since what it affects is decided by the parent's next layout pass.
+    /// </summary>
     public Thickness Margin
     {
         get => _margin;
@@ -752,6 +868,12 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>
+    /// Space between the control's edge and its content: <see cref="ContentRect"/> is
+    /// <see cref="ClientRect"/> deflated by it, and <see cref="Measure"/> adds it back to the
+    /// measured content size, so padding enlarges the control without shrinking what it draws.
+    /// Assigning it repaints.
+    /// </summary>
     public Thickness Padding
     {
         get => _padding;
@@ -767,6 +889,11 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether this control is drawn. Hiding it also clears the keyboard focus if the control had
+    /// it, and hides everything inside it as far as <see cref="EffectiveVisible"/> is concerned.
+    /// Hiding does not re-run layout, so a container keeps the room it gave the control.
+    /// </summary>
     public bool Visible
     {
         get => _visible;
@@ -960,12 +1087,20 @@ public class Control : IDisposable
         protected set => _desiredSize = value;
     }
 
+    /// <summary>
+    /// The smallest size <see cref="Measure"/> will report. Negative values are read as zero, and
+    /// the default is empty, so there is no floor until one is assigned.
+    /// </summary>
     public SKSize MinimumSize
     {
         get => _minimumSize;
         set => _minimumSize = new SKSize(MathF.Max(0f, value.Width), MathF.Max(0f, value.Height));
     }
 
+    /// <summary>
+    /// The largest size <see cref="Measure"/> will report. A width or height of zero or less means
+    /// "no limit" rather than zero, which is why the default is an unlimited size.
+    /// </summary>
     public SKSize MaximumSize
     {
         get => _maximumSize;
@@ -974,6 +1109,12 @@ public class Control : IDisposable
             value.Height <= 0f ? float.PositiveInfinity : value.Height);
     }
 
+    /// <summary>
+    /// Which edge of its container the control is docked to. <see cref="DockStyle.None"/> - the
+    /// default - leaves the control to the container's ordinary arrangement, and
+    /// <see cref="DockStyle.Fill"/> makes it take whatever room is left over. Only containers that
+    /// implement docking read it; controls that lay their children out some other way ignore it.
+    /// </summary>
     public DockStyle Dock { get; set; }
 
     /// <summary>
@@ -991,6 +1132,11 @@ public class Control : IDisposable
     /// <inheritdoc cref="HorizontalAlignment"/>
     public Alignment VerticalAlignment { get; set; }
 
+    /// <summary>
+    /// The cursor shown while the pointer is over the control. <see cref="GetCursorAt"/> is what
+    /// decides it, so a control with sub-elements can vary it by position; the default returns this
+    /// value unchanged.
+    /// </summary>
     public Cursor Cursor { get; set; }
 
     /// <summary>
@@ -1051,8 +1197,16 @@ public class Control : IDisposable
     /// </remarks>
     public int TabIndex { get; set; }
 
+    /// <summary>
+    /// True while this control holds the keyboard focus. Maintained by the <see cref="UiHost"/>
+    /// that gives and takes the focus; there is no setter, because the host is the one authority.
+    /// </summary>
     public bool IsFocused { get; private set; }
 
+    /// <summary>
+    /// True while the pointer is over this control, as last decided by the host's hit testing.
+    /// Maintained by the host along with the enter and leave events.
+    /// </summary>
     public bool IsMouseOver { get; private set; }
 
     /// <summary>True while a mouse button is held down on the control.</summary>
@@ -1642,8 +1796,17 @@ public class Control : IDisposable
         set => _borderColor = value;
     }
 
+    /// <summary>
+    /// Thickness of the border drawn inside the control's bounds, in logical pixels. Zero, the
+    /// default, paints no border at all.
+    /// </summary>
     public float BorderWidth { get; set; }
 
+    /// <summary>
+    /// Radius of the rounded corners of the control's background and border. Zero, the default,
+    /// draws square corners. The radius also clips the control: content and children are cut to the
+    /// rounded rectangle, so nothing it paints escapes those corners.
+    /// </summary>
     public float CornerRadius { get; set; }
 
     /// <summary>
@@ -1900,6 +2063,10 @@ public class Control : IDisposable
     /// <summary>Routes all mouse input to this control until the capture is released.</summary>
     public void CaptureMouse() => Host?.CaptureMouse(this);
 
+    /// <summary>
+    /// Stops routing mouse input to this control, ending a capture taken with
+    /// <see cref="CaptureMouse"/>. Releasing a capture this control does not hold does nothing.
+    /// </summary>
     public void ReleaseMouseCapture() => Host?.ReleaseMouseCapture(this);
 
     /// <summary>
@@ -2307,6 +2474,17 @@ public class Control : IDisposable
         Invalidate();
     }
 
+    /// <summary>
+    /// Paints the control's background into <paramref name="rect"/>, the client area in the
+    /// control's own coordinates. The default fills it with <see cref="BackColor"/>, rounded by
+    /// <see cref="CornerRadius"/>, and paints nothing when no background is resolved.
+    /// </summary>
+    /// <param name="canvas">The canvas, already translated to the control's origin and clipped.</param>
+    /// <param name="rect">The area to paint, in the control's own coordinates.</param>
+    /// <remarks>
+    /// It runs first in <see cref="Render"/>, before the selection and the content, so a control
+    /// that paints a surface of its own overrides this rather than <see cref="OnPaint"/>.
+    /// </remarks>
     protected virtual void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         if (BackColor is { } backColor)
@@ -2315,10 +2493,32 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>
+    /// Paints the control's content into <paramref name="rect"/>, the client area in its own
+    /// coordinates. The base paints nothing, so every control that draws something overrides it.
+    /// </summary>
+    /// <param name="canvas">The canvas, already translated to the control's origin and clipped.</param>
+    /// <param name="rect">The area to paint, in the control's own coordinates.</param>
+    /// <remarks>
+    /// It runs after the background and the selection and before the children and the border, so
+    /// what it paints sits over its own background and under anything the control contains.
+    /// </remarks>
     protected virtual void OnPaint(SKCanvas canvas, SKRect rect)
     {
     }
 
+    /// <summary>
+    /// Paints the border on the inside of the control's bounds:
+    /// <see cref="BorderWidth"/> logical pixels of <see cref="BorderColor"/>, with the corners
+    /// rounded by <see cref="CornerRadius"/>. Nothing is painted while
+    /// <see cref="BorderWidth"/> is zero, which is the default.
+    /// </summary>
+    /// <param name="canvas">The canvas, already translated to the control's origin and clipped.</param>
+    /// <param name="rect">The area to paint, in the control's own coordinates.</param>
+    /// <remarks>
+    /// It runs last in <see cref="Render"/>, after the children, so the border covers the edges of
+    /// whatever the content ran into.
+    /// </remarks>
     protected virtual void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         if (BorderWidth > 0f)
@@ -2363,10 +2563,23 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>
+    /// Called when a mouse button goes down on the control, whether the host routed it because the
+    /// control is under the pointer or because the control captured the mouse. The default raises
+    /// <see cref="AddMouseDownHandler"/>.
+    /// </summary>
     protected virtual void OnMouseDown(MouseEventArgs e) => _mouseDown?.Invoke(this, e);
 
+    /// <summary>
+    /// Called when a mouse button is released, whether it was released over the control or the
+    /// control had captured the mouse. The default raises <see cref="AddMouseUpHandler"/>.
+    /// </summary>
     protected virtual void OnMouseUp(MouseEventArgs e) => _mouseUp?.Invoke(this, e);
 
+    /// <summary>
+    /// Called when the pointer moves over the control, or anywhere while the control has captured
+    /// the mouse. The default raises <see cref="AddMouseMoveHandler"/>.
+    /// </summary>
     protected virtual void OnMouseMove(MouseEventArgs e) => _mouseMove?.Invoke(this, e);
 
     /// <summary>
@@ -2377,22 +2590,65 @@ public class Control : IDisposable
     /// </summary>
     protected virtual void OnMouseWheel(MouseEventArgs e) => _mouseWheel?.Invoke(this, e);
 
+    /// <summary>
+    /// Called when the pointer enters the control. The default raises
+    /// <see cref="AddMouseEnterHandler"/> and does not repaint: hover is only worth a repaint for a
+    /// control whose appearance depends on it, so such a control overrides this and invalidates
+    /// what it draws.
+    /// </summary>
     protected virtual void OnMouseEnter() => _mouseEnter?.Invoke(this);
 
+    /// <summary>
+    /// Called when the pointer leaves the control. The default raises
+    /// <see cref="AddMouseLeaveHandler"/>; like <see cref="OnMouseEnter"/> it does not repaint, so a
+    /// control with a hover look invalidates what it draws itself.
+    /// </summary>
     protected virtual void OnMouseLeave() => _mouseLeave?.Invoke(this);
 
+    /// <summary>
+    /// Called when the control has been activated. The base raises the handlers added with
+    /// <see cref="AddClickHandler"/>; a control decides for itself when that happens - a
+    /// <see cref="Button"/> raises it on release - because the host does not raise it on its own.
+    /// </summary>
     protected virtual void OnClick() => _click?.Invoke(this);
 
+    /// <summary>
+    /// Called when a key goes down while the control has the focus. The default raises
+    /// <see cref="AddKeyDownHandler"/>; setting <see cref="KeyEventArgs.Handled"/> keeps the key
+    /// from travelling on.
+    /// </summary>
     protected virtual void OnKeyDown(KeyEventArgs e) => _keyDown?.Invoke(this, e);
 
+    /// <summary>
+    /// Called when a key is released while the control has the focus. The default raises
+    /// <see cref="AddKeyUpHandler"/>.
+    /// </summary>
     protected virtual void OnKeyUp(KeyEventArgs e) => _keyUp?.Invoke(this, e);
 
+    /// <summary>
+    /// Called when text is typed into the focused control. The default raises
+    /// <see cref="AddTextInputHandler"/>.
+    /// </summary>
     protected virtual void OnTextInput(TextInputEventArgs e) => _textInput?.Invoke(this, e);
 
+    /// <summary>
+    /// Called when the control receives the keyboard focus. The default raises
+    /// <see cref="AddGotFocusHandler"/>.
+    /// </summary>
     protected virtual void OnGotFocus() => _gotFocus?.Invoke(this);
 
+    /// <summary>
+    /// Called when the control loses the keyboard focus. The default raises
+    /// <see cref="AddLostFocusHandler"/>; the host also clears <see cref="IsPressed"/> with it, so a
+    /// control does not stay looking pressed when the focus is taken away mid-drag.
+    /// </summary>
     protected virtual void OnLostFocus() => _lostFocus?.Invoke(this);
 
+    /// <summary>
+    /// Called after <see cref="Text"/> changed. The default raises
+    /// <see cref="AddTextChangedHandler"/>, tells the host's selection to re-read its range and
+    /// re-runs layout, because text decides the size of a control that sizes itself to its content.
+    /// </summary>
     protected virtual void OnTextChanged()
     {
         _textChanged?.Invoke(this);
@@ -2400,6 +2656,11 @@ public class Control : IDisposable
         PerformLayout();
     }
 
+    /// <summary>
+    /// Called after <see cref="Visible"/> changed. The default raises
+    /// <see cref="AddVisibleChangedHandler"/>, tells the parent through
+    /// <see cref="OnChildVisibleChanged"/> and repaints the control.
+    /// </summary>
     protected virtual void OnVisibleChanged()
     {
         _visibleChanged?.Invoke(this);
@@ -2416,6 +2677,11 @@ public class Control : IDisposable
     {
     }
 
+    /// <summary>
+    /// Called when the control's effective <see cref="Enabled"/> state changed, which includes a
+    /// container above it being disabled while its own flag stayed as it was. The default raises
+    /// <see cref="AddEnabledChangedHandler"/> and repaints.
+    /// </summary>
     protected virtual void OnEnabledChanged()
     {
         _enabledChanged?.Invoke(this);
@@ -2521,6 +2787,11 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>
+    /// Called after <see cref="Bounds"/> changed, with the new rectangle already in place and before
+    /// the area the control used to cover is queued for repaint. The default raises
+    /// <see cref="AddBoundsChangedHandler"/>, re-runs layout and repaints.
+    /// </summary>
     protected virtual void OnBoundsChanged()
     {
         _boundsChanged?.Invoke(this);
@@ -2538,12 +2809,35 @@ public class Control : IDisposable
         return MathF.Min(MathF.Max(value, min), max);
     }
 
+    /// <summary>
+    /// Releases everything the control owns: the resources registered with <see cref="Own{T}"/>, in
+    /// reverse order of registration, and then each child, which is detached from this control and
+    /// disposed in turn.
+    /// </summary>
+    /// <remarks>
+    /// The control is not taken out of its own parent's <see cref="Controls"/>, so disposing part of
+    /// a tree leaves the parent holding a disposed child: remove it as well. Disposing twice does
+    /// nothing the second time, which is what makes it safe for a container to dispose a child that
+    /// the application also disposes.
+    /// </remarks>
     public void Dispose()
     {
         Dispose(true);
         GC.SuppressFinalize(this);
     }
 
+    /// <summary>
+    /// The extensible half of <see cref="Dispose()"/>: releases the control's children and owned
+    /// resources when <paramref name="disposing"/> is true, and marks it disposed either way.
+    /// </summary>
+    /// <param name="disposing">
+    /// True when called from <see cref="Dispose()"/>; false would be a finalizer, which this class
+    /// does not have.
+    /// </param>
+    /// <remarks>
+    /// A derived control that holds state of its own releases it here and calls the base
+    /// implementation, rather than overriding <see cref="Dispose()"/>.
+    /// </remarks>
     protected virtual void Dispose(bool disposing)
     {
         if (_disposed)

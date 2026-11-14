@@ -9,6 +9,7 @@ namespace Kolvir;
 /// </summary>
 public class TabPage : Panel
 {
+    /// <summary>Creates an empty page with no frame and a 10-pixel gutter.</summary>
     public TabPage()
     {
         BorderWidth = 0f;
@@ -16,6 +17,7 @@ public class TabPage : Panel
         Padding = new Thickness(10f);
     }
 
+    /// <summary>Creates a page whose tab caption is <paramref name="text"/>.</summary>
     public TabPage(string text)
         : this()
     {

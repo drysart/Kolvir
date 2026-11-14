@@ -35,6 +35,7 @@ public class SplitButton : Button
     private bool _dropDownOpen;
     private bool _disposed;
 
+    /// <summary>Creates a split button with no text and an empty <see cref="Menu"/>.</summary>
     public SplitButton()
     {
         Menu = new ContextMenu();
@@ -134,12 +135,20 @@ public class SplitButton : Button
     /// <summary>Closes the menu, if it is open.</summary>
     public void CloseDropDown() => _dropDown?.Close();
 
+    /// <summary>
+    /// The label on one line plus the arrow region: as wide as the text unwrapped and
+    /// <see cref="ArrowWidth"/> wider, rounded up to whole pixels.
+    /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var measured = TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
         return new SKSize(MathF.Ceiling(measured.Width) + _arrowWidth, MathF.Ceiling(measured.Height));
     }
 
+    /// <summary>
+    /// Fills the button as a <see cref="Button"/> does, then darkens the arrow region while the
+    /// pointer or a press is over that half.
+    /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         base.OnPaintBackground(canvas, rect);
@@ -164,6 +173,10 @@ public class SplitButton : Button
         }
     }
 
+    /// <summary>
+    /// Draws the divider, if <see cref="ShowsArrowDivider"/> asks for one, the label centred in the
+    /// text region and the chevron in the arrow region.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var (_, textColor) = ResolveColors();
@@ -192,6 +205,10 @@ public class SplitButton : Button
         PaintChevron(canvas, arrow, textColor);
     }
 
+    /// <summary>
+    /// Records whether the press began in the arrow region, then starts the press the way a button
+    /// does.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         _arrowPressed = e.Button == MouseButtons.Left &&
@@ -201,6 +218,10 @@ public class SplitButton : Button
         base.OnMouseDown(e);
     }
 
+    /// <summary>
+    /// Works out which half the press was for - arrow, main area, or neither when it moved between
+    /// the two - so that <see cref="OnClick"/> can act on it.
+    /// </summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         bool startedInArrow = _arrowPressed;
@@ -226,6 +247,10 @@ public class SplitButton : Button
         }
     }
 
+    /// <summary>
+    /// Opens the menu when the click came from the arrow region, swallows a click that started in
+    /// one half and ended in the other, and otherwise runs the default action.
+    /// </summary>
     protected override void OnClick()
     {
         bool opensMenu = _clickOpensMenu;
@@ -247,6 +272,7 @@ public class SplitButton : Button
         base.OnClick();
     }
 
+    /// <summary>Tracks whether the pointer is over the arrow, which highlights that half.</summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         bool hot = IsInArrow(e.Location);
@@ -259,6 +285,7 @@ public class SplitButton : Button
         base.OnMouseMove(e);
     }
 
+    /// <summary>Clears the arrow's hover and press states when the pointer leaves the button.</summary>
     protected override void OnMouseLeave()
     {
         if (_arrowHot)
@@ -270,6 +297,7 @@ public class SplitButton : Button
         base.OnMouseLeave();
     }
 
+    /// <summary>Opens the menu on Down, when the menu has items, and claims the key.</summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -286,6 +314,7 @@ public class SplitButton : Button
         }
     }
 
+    /// <summary>Clears the arrow's states and closes the menu when the button is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)
@@ -298,6 +327,7 @@ public class SplitButton : Button
         base.OnEnabledChanged();
     }
 
+    /// <summary>Closes the menu when the button stops being visible, so no popup outlives it.</summary>
     protected override void OnVisibleChanged()
     {
         if (!Visible)
@@ -308,6 +338,10 @@ public class SplitButton : Button
         base.OnVisibleChanged();
     }
 
+    /// <summary>
+    /// Closes and disposes the popup the menu was shown in, and marks the button disposed so that a
+    /// late close does not repaint it.
+    /// </summary>
     protected override void Dispose(bool disposing)
     {
         if (disposing)
@@ -377,6 +411,7 @@ public class SplitButton : Button
 /// </remarks>
 public class DropDownButton : SplitButton
 {
+    /// <summary>Creates a drop-down button with no text and an empty menu.</summary>
     public DropDownButton()
     {
     }
@@ -390,6 +425,7 @@ public class DropDownButton : SplitButton
     /// <summary>A drop-down button is one face, so no divider separates a half that does not exist.</summary>
     protected override bool ShowsArrowDivider => false;
 
+    /// <summary>Opens the menu, then raises <see cref="Control.AddClickHandler"/>.</summary>
     protected override void OnClick()
     {
         OpenDropDown();

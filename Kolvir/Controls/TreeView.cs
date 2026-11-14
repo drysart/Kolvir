@@ -8,9 +8,9 @@ namespace Kolvir;
 /// own expander and check box.
 /// </summary>
 /// <remarks>
-/// A node belongs to a tree only once it is put in a <see cref="TreeNodeCollection"/> that is
-/// itself reachable from <see cref="TreeView.Nodes"/>; a node that is in no tree can still be
-/// built and populated, it just cannot repaint anything.
+/// A node belongs to a tree only once it is put in a <see cref="TreeView.TreeNodeCollection"/>
+/// that is itself reachable from <see cref="TreeView.Nodes"/>; a node that is in no tree can
+/// still be built and populated, it just cannot repaint anything.
 /// </remarks>
 public class TreeNode
 {
@@ -21,11 +21,14 @@ public class TreeNode
     private bool _expanded;
     private CheckState _checkState;
 
+    /// <summary>Creates a node with an empty label and no children.</summary>
     public TreeNode()
     {
         _collection = new TreeView.TreeNodeCollection(this, _nodes);
     }
 
+    /// <summary>Creates a node with a label and no children.</summary>
+    /// <param name="text">The label; <see langword="null"/> is read as an empty string.</param>
     public TreeNode(string text)
         : this()
     {
@@ -306,6 +309,7 @@ public class TreeView : VirtualList
     private bool _checkBoxes;
     private Action<object>? _afterCheck;
 
+    /// <summary>Creates a tree with no root nodes.</summary>
     public TreeView()
     {
         _rootCollection = new TreeNodeCollection(this, _roots);
@@ -473,6 +477,7 @@ public class TreeView : VirtualList
         }
     }
 
+    /// <inheritdoc />
     protected override float MeasureItemWidth()
     {
         EnsureVisibleList();
@@ -489,6 +494,11 @@ public class TreeView : VirtualList
         return width;
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The row is indented by the node's level; the check box and then the expander are painted
+    /// before the label.
+    /// </remarks>
     protected override void OnDrawItem(SKCanvas canvas, int index, SKRect bounds, DrawItemState state, SKColor textColor)
     {
         EnsureVisibleList();
@@ -527,6 +537,8 @@ public class TreeView : VirtualList
         }
     }
 
+    /// <inheritdoc />
+    /// <remarks>A node that has children is expanded or collapsed before the handlers run.</remarks>
     protected override void OnItemActivated()
     {
         // A double click on a parent opens or closes it, the way the same click does in every other
@@ -539,6 +551,10 @@ public class TreeView : VirtualList
         base.OnItemActivated();
     }
 
+    /// <summary>
+    /// Opens or closes a branch, or toggles a node's check box, when the click lands on one of the
+    /// row's glyphs; the row is selected first, as any other click on it would select it.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         if (e.Button == MouseButtons.Left && e.ClickCount == 1 && ItemCount > 0)
@@ -564,6 +580,10 @@ public class TreeView : VirtualList
         base.OnMouseDown(e);
     }
 
+    /// <summary>
+    /// Checks the node the keyboard is on when the tree shows check boxes, and otherwise reads Left
+    /// and Right as collapse and expand - or as a move to the parent and to the first child.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         // Space checks a node rather than toggling its selection when the tree shows check boxes,
@@ -633,6 +653,10 @@ public class TreeView : VirtualList
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Reads <c>+</c>, <c>-</c> and <c>*</c> as expand, collapse and expand-all; anything else goes
+    /// on to type-ahead.
+    /// </summary>
     protected override void OnTextInput(TextInputEventArgs e)
     {
         // +, - and * are the WinForms shortcuts for expand, collapse and expand-all. They arrive as
@@ -894,6 +918,11 @@ public class TreeView : VirtualList
             _nodes = nodes;
         }
 
+        /// <summary>
+        /// Gets or sets the node at a position. Setting one detaches the node it replaces, with its
+        /// whole subtree, and attaches the new one to the same tree.
+        /// </summary>
+        /// <exception cref="ArgumentNullException">The value is <see langword="null"/>.</exception>
         public TreeNode this[int index]
         {
             get => _nodes[index];
@@ -918,12 +947,18 @@ public class TreeView : VirtualList
             }
         }
 
+        /// <summary>The number of nodes.</summary>
         public int Count => _nodes.Count;
 
+        /// <summary>Always <see langword="false"/>; the collection can be changed.</summary>
         public bool IsReadOnly => false;
 
         private TreeView? Tree => _parent is null ? _tree : _parent.Owner;
 
+        /// <summary>
+        /// Adds a node at the end and attaches it, with its subtree, to the tree the collection
+        /// belongs to.
+        /// </summary>
         public void Add(TreeNode node)
         {
             ArgumentNullException.ThrowIfNull(node);
@@ -970,6 +1005,7 @@ public class TreeView : VirtualList
             }
         }
 
+        /// <summary>Inserts a node at a position, attaching it and its subtree to the tree.</summary>
         public void Insert(int index, TreeNode node)
         {
             ArgumentNullException.ThrowIfNull(node);
@@ -980,6 +1016,7 @@ public class TreeView : VirtualList
             Notify();
         }
 
+        /// <summary>Removes a node, detaching it from the tree; false when it is not there.</summary>
         public bool Remove(TreeNode node)
         {
             int index = _nodes.IndexOf(node);
@@ -992,6 +1029,7 @@ public class TreeView : VirtualList
             return true;
         }
 
+        /// <summary>Removes the node at a position, detaching it with its subtree.</summary>
         public void RemoveAt(int index)
         {
             var node = _nodes[index];
@@ -1001,6 +1039,7 @@ public class TreeView : VirtualList
             Notify();
         }
 
+        /// <summary>Removes every node, detaching them and their subtrees from the tree.</summary>
         public void Clear()
         {
             if (_nodes.Count == 0)
@@ -1018,12 +1057,16 @@ public class TreeView : VirtualList
             Notify();
         }
 
+        /// <summary>True when the node is in the collection.</summary>
         public bool Contains(TreeNode node) => _nodes.Contains(node);
 
+        /// <summary>Copies the nodes into an array, starting at an index.</summary>
         public void CopyTo(TreeNode[] array, int arrayIndex) => _nodes.CopyTo(array, arrayIndex);
 
+        /// <summary>The position of a node, or -1 when it is not in the collection.</summary>
         public int IndexOf(TreeNode node) => _nodes.IndexOf(node);
 
+        /// <summary>Enumerates the nodes in the order they are painted.</summary>
         public IEnumerator<TreeNode> GetEnumerator() => _nodes.GetEnumerator();
 
         IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();

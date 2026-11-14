@@ -86,7 +86,7 @@ public static class TableLayoutPanelExtensions
         }
 
         /// <summary>
-        /// How many columns this control covers, counting the one its <see cref="TableColumn"/>
+        /// How many columns this control covers, counting the one its <c>TableColumn</c>
         /// names. One unless set; a span that would run past the last column stops at it.
         /// </summary>
         public int TableColumnSpan
@@ -96,7 +96,7 @@ public static class TableLayoutPanelExtensions
         }
 
         /// <summary>
-        /// How many rows this control covers, counting the one its <see cref="TableRow"/> names.
+        /// How many rows this control covers, counting the one its <c>TableRow</c> names.
         /// One unless set; a span that would run past the last row stops at it.
         /// </summary>
         public int TableRowSpan

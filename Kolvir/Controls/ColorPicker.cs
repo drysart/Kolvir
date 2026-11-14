@@ -90,6 +90,11 @@ public class ColorPicker : Control
 
     private SKRect _hexLabelRect;
 
+    /// <summary>
+    /// Creates a picker holding opaque red, with the square, the hue strip, the three component
+    /// fields and the hex field already added. The picker itself is not a tab stop, so Tab moves
+    /// between the fields it contains.
+    /// </summary>
     public ColorPicker()
     {
         TabStop = false;
@@ -236,12 +241,26 @@ public class ColorPicker : Control
     /// <summary>The label the three component fields show in the current mode.</summary>
     internal string ComponentLabelAt(int index) => LabelsFor(_mode)[index];
 
+    /// <summary>
+    /// The picker paints on the theme's surface colour, so it reads as a panel of its own rather
+    /// than as something written on the window.
+    /// </summary>
     protected override Background DefaultBackground =>
         Background.FromThemeColor(ThemeColor.Surface);
 
+    /// <summary>
+    /// Asks for the square at its preferred side, the hue strip beside it, the gap between them and
+    /// room for a label column, and for the square, the section gap and the two field rows in
+    /// height.
+    /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize) =>
         new(PreferredSquare + HueStripWidth + Gap + 50f, PreferredSquare + SectionGap + RowHeight + Gap + RowHeight);
 
+    /// <summary>
+    /// Places the square with the hue strip beside it and the fields below: the three component
+    /// fields in one row when the content is wide enough, and one per row, stacked, when it is
+    /// narrow.
+    /// </summary>
     protected override void OnLayout()
     {
         var content = ContentRect;
@@ -290,6 +309,10 @@ public class ColorPicker : Control
         }
     }
 
+    /// <summary>
+    /// Draws the three component labels and the <c>Hex</c> label; the square, the hue strip and the
+    /// fields paint themselves.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var labels = LabelsFor(_mode);

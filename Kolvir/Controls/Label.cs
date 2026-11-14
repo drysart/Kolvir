@@ -8,23 +8,31 @@ namespace Kolvir;
 /// </summary>
 public class Label : Control
 {
+    /// <summary>Creates a label with no text. It auto-sizes and uses partial selection.</summary>
     public Label()
     {
         AutoSize = true;
         SelectionStyle = SelectionStyle.Partial;
     }
 
+    /// <summary>Creates a label showing <paramref name="text"/>.</summary>
+    /// <param name="text">The text to display.</param>
     public Label(string text)
         : this()
     {
         Text = text;
     }
 
+    /// <summary>
+    /// Where the text sits inside the content area. Defaults to
+    /// <see cref="ContentAlignment.MiddleLeft"/>.
+    /// </summary>
     public ContentAlignment TextAlign { get; set; } = ContentAlignment.MiddleLeft;
 
     /// <summary>When true the text wraps at the control's width.</summary>
     public bool WrapText { get; set; }
 
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         float maxWidth = WrapText
@@ -35,6 +43,10 @@ public class Label : Control
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
 
+    /// <summary>
+    /// Draws the text inside the content area, aligned by <see cref="TextAlign"/> and wrapped at the
+    /// content width when <see cref="WrapText"/> is set.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         if (string.IsNullOrEmpty(Text))

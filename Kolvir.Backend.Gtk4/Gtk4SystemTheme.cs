@@ -16,6 +16,7 @@ public sealed class Gtk4SystemTheme : ISystemTheme
     private readonly Gio.Settings? _desktop;
     private Gtk.Settings? _gtkSettings;
 
+    /// <summary>Opens the desktop settings the colour-scheme preference is read from.</summary>
     public Gtk4SystemTheme()
     {
         _desktop = TryOpenDesktopSettings();
@@ -36,6 +37,7 @@ public sealed class Gtk4SystemTheme : ISystemTheme
         _changed -= handler;
     }
 
+    /// <inheritdoc />
     public bool IsDarkMode
     {
         get

@@ -8,6 +8,9 @@ namespace Kolvir;
 /// </summary>
 public sealed class LinkClickedEventArgs : EventArgs
 {
+    /// <summary>Creates event data for an activation of <paramref name="url"/>.</summary>
+    /// <param name="url">The URI the label carried when it was activated, or null.</param>
+    /// <param name="span">The span that was clicked, or null for a keyboard activation.</param>
     public LinkClickedEventArgs(string? url, TextSpan? span)
     {
         Url = url;
@@ -49,6 +52,10 @@ public class LinkLabel : RichLabel
     private TextSpan? _keyPressedSpan;
     private string? _url;
 
+    /// <summary>
+    /// Creates an empty link: focusable, with a hand cursor, four pixels of horizontal and two of
+    /// vertical padding, and no minimum size. Clicking one of its spans activates it.
+    /// </summary>
     public LinkLabel()
     {
         TabStop = true;
@@ -58,12 +65,19 @@ public class LinkLabel : RichLabel
         Own(AddSpanClickHandler(static (label, e) => ((LinkLabel)label).Activate(e.Span)));
     }
 
+    /// <summary>Creates a link showing <paramref name="text"/> and carrying no URI.</summary>
+    /// <param name="text">The text of the link.</param>
     public LinkLabel(string text)
         : this()
     {
         Text = text;
     }
 
+    /// <summary>
+    /// Creates a link showing <paramref name="text"/> that opens <paramref name="url"/>.
+    /// </summary>
+    /// <param name="text">The text of the link.</param>
+    /// <param name="url">The URI to open; null leaves a link that raises the click event.</param>
     public LinkLabel(string text, string? url)
         : this()
     {
@@ -133,6 +147,11 @@ public class LinkLabel : RichLabel
     /// <summary>Raises the link-clicked event. Override to react to activation without subscribing.</summary>
     protected virtual void OnLinkClicked(LinkClickedEventArgs e) => _linkClicked?.Invoke(this, e);
 
+    /// <summary>
+    /// Draws the background and then, while the link has focus and is enabled, a thin focus ring
+    /// inside the padding. A link paints no fill of its own, so the ring is the only thing marking it
+    /// as focused.
+    /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         base.OnPaintBackground(canvas, rect);
@@ -146,6 +165,10 @@ public class LinkLabel : RichLabel
         }
     }
 
+    /// <summary>
+    /// Enter and Space are claimed and press the link's first span, so a keyboard activation looks
+    /// like a mouse press. A label with no spans claims them without effect.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -164,6 +187,10 @@ public class LinkLabel : RichLabel
         }
     }
 
+    /// <summary>
+    /// Releasing Enter or Space after the press completes the activation, with a null span because a
+    /// key press belongs to the whole label rather than to one run of text.
+    /// </summary>
     protected override void OnKeyUp(KeyEventArgs e)
     {
         base.OnKeyUp(e);
@@ -180,12 +207,14 @@ public class LinkLabel : RichLabel
         Activate(null);
     }
 
+    /// <summary>Abandons a keyboard press that lost focus before its key came up.</summary>
     protected override void OnLostFocus()
     {
         ClearKeyPress();
         base.OnLostFocus();
     }
 
+    /// <summary>Abandons a keyboard press when the link is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         ClearKeyPress();

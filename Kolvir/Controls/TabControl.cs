@@ -30,6 +30,10 @@ public class TabControl : Control
     private float _stripOffset;
     private bool _tabsDirty = true;
 
+    /// <summary>
+    /// Creates an empty tab control: a focusable tab stop on a surface background, with a one-pixel
+    /// frame and a default size of 360 by 220.
+    /// </summary>
     public TabControl()
     {
         Focusable = true;
@@ -90,8 +94,13 @@ public class TabControl : Control
         _selectedIndexChanged -= handler;
     }
 
+    /// <summary>A tab control asks for its default 360 by 220 whatever its pages ask for.</summary>
     protected override SKSize MeasureContent(SKSize availableSize) => new(360f, 220f);
 
+    /// <summary>
+    /// Keeps the selected index inside the page list, shows only the selected page and gives every
+    /// page the content area below the strip.
+    /// </summary>
     protected override void OnLayout()
     {
         base.OnLayout();
@@ -117,12 +126,20 @@ public class TabControl : Control
         }
     }
 
+    /// <summary>
+    /// Fills the surface and draws the frame, both behind the strip and the pages, and greys the fill
+    /// out while the control is disabled.
+    /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         Painter.Fill(canvas, rect, Enabled ? BackColor ?? Theme.Surface : Theme.DisabledBackground, CornerRadius);
         Painter.DrawBorder(canvas, rect, BorderColor, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
     }
 
+    /// <summary>
+    /// Lays the tabs out if they are dirty, draws the rule under the strip, then paints the tabs
+    /// clipped to the strip and the focus ring around the selected one.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         EnsureTabs();
@@ -152,11 +169,16 @@ public class TabControl : Control
         }
     }
 
+    /// <summary>
+    /// Draws nothing: the frame is painted in <see cref="OnPaintBackground"/> so it stays behind the
+    /// tabs.
+    /// </summary>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         // The frame is drawn in OnPaintBackground so it stays behind the tabs.
     }
 
+    /// <summary>Takes the focus and selects the tab under the pointer, when there is one.</summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -175,6 +197,7 @@ public class TabControl : Control
         }
     }
 
+    /// <summary>Tracks the tab under the pointer so an unselected one can be painted hot.</summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         base.OnMouseMove(e);
@@ -189,6 +212,7 @@ public class TabControl : Control
         Invalidate();
     }
 
+    /// <summary>Clears the hot tab when the pointer leaves the control.</summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
@@ -202,6 +226,10 @@ public class TabControl : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// Scrolls the strip when the pointer is over it and the tabs overflow, and leaves the wheel alone
+    /// for the page below when they do not.
+    /// </summary>
     protected override void OnMouseWheel(MouseEventArgs e)
     {
         base.OnMouseWheel(e);
@@ -239,6 +267,10 @@ public class TabControl : Control
         e.Handled = true;
     }
 
+    /// <summary>
+    /// Moves the selection with Left, Right, Home and End, and steps it with Tab and Shift+Tab, which
+    /// stay inside the tab list rather than leaving the control.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -282,18 +314,21 @@ public class TabControl : Control
         }
     }
 
+    /// <inheritdoc />
     protected override void OnGotFocus()
     {
         base.OnGotFocus();
         Invalidate();
     }
 
+    /// <inheritdoc />
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
         Invalidate();
     }
 
+    /// <inheritdoc />
     protected override void OnEnabledChanged()
     {
         base.OnEnabledChanged();
@@ -330,6 +365,7 @@ public class TabControl : Control
         Invalidate();
     }
 
+    /// <summary>Releases the caption subscriptions it holds on the pages it added.</summary>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

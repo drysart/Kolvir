@@ -11,6 +11,7 @@ public sealed class ContextMenu
 {
     private readonly List<MenuItem> _items = new();
 
+    /// <summary>Creates an empty menu.</summary>
     public ContextMenu()
     {
     }
@@ -45,6 +46,12 @@ public sealed class ContextMenu
     /// <summary>Adds an item that runs <paramref name="command"/> when picked.</summary>
     public ContextMenu Add(string text, Action? command = null) => Add(new MenuItem(text, command));
 
+    /// <summary>
+    /// Appends an item the caller has already built, such as one with a submenu or an icon.
+    /// </summary>
+    /// <param name="item">The item to add to the end of <see cref="Items"/>.</param>
+    /// <returns>This menu, so calls can be chained.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="item"/> is null.</exception>
     public ContextMenu Add(MenuItem item)
     {
         ArgumentNullException.ThrowIfNull(item);
@@ -66,6 +73,11 @@ public sealed class ContextMenu
         return this;
     }
 
+    /// <summary>
+    /// Removes every item, including the separators, leaving a menu that <see cref="IsEmpty"/>
+    /// reports as empty.
+    /// </summary>
+    /// <returns>This menu, so calls can be chained.</returns>
     public ContextMenu Clear()
     {
         _items.Clear();

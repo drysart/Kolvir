@@ -24,6 +24,10 @@ public class ComboBox : Control
     private string _typeAhead = string.Empty;
     private long _typeAheadAt;
 
+    /// <summary>
+    /// Creates an empty combo box 180 by 30, together with the <see cref="ListBox"/> it shows and
+    /// the popup that holds it.
+    /// </summary>
     public ComboBox()
     {
         TabStop = true;
@@ -184,6 +188,11 @@ public class ComboBox : Control
         _popup.Close();
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The field is as wide as its widest item plus the padding, and one line of the inherited font
+    /// tall, but never smaller than <see cref="Control.MinimumSize"/>.
+    /// </remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         float widest = 0f;
@@ -198,6 +207,10 @@ public class ComboBox : Control
             MathF.Max(MinimumSize.Height, Font.LineHeight + Padding.Vertical));
     }
 
+    /// <summary>
+    /// Fills the field and draws its border, which takes the accent colour while the list is open
+    /// or the combo box has the focus and the hover colour while the pointer is over it.
+    /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
@@ -212,6 +225,10 @@ public class ComboBox : Control
         Painter.DrawBorder(canvas, rect, border, BorderWidth > 0f ? BorderWidth : 1f, CornerRadius);
     }
 
+    /// <summary>
+    /// Paints the selected text, or <see cref="EmptyText"/> in the placeholder colour when nothing
+    /// is selected, clipped to the content area, and then the chevron in the right-hand margin.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var content = Geometry.Deflate(rect, Padding);
@@ -233,11 +250,18 @@ public class ComboBox : Control
         PaintChevron(canvas, rect);
     }
 
+    /// <summary>
+    /// Draws nothing: the border is painted in <see cref="OnPaintBackground"/> so that the text and
+    /// the chevron sit over it rather than under it.
+    /// </summary>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         // The border is drawn in OnPaintBackground so it stays behind the text and the chevron.
     }
 
+    /// <summary>
+    /// Takes the focus and toggles the list: opens it when it is shut, closes it when it is open.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -259,18 +283,25 @@ public class ComboBox : Control
         }
     }
 
+    /// <summary>Repaints, because the field's border follows whether the pointer is over it.</summary>
     protected override void OnMouseEnter()
     {
         base.OnMouseEnter();
         Invalidate();
     }
 
+    /// <summary>Repaints, because the field's border follows whether the pointer is over it.</summary>
     protected override void OnMouseLeave()
     {
         base.OnMouseLeave();
         Invalidate();
     }
 
+    /// <summary>
+    /// Keeps the keyboard while the list is open: the arrows, Home, End, Page Up and Page Down move
+    /// the selection, and Enter, Escape or Tab close the list. Shut, Alt+Down, Enter or Space open
+    /// it and the arrows move the selection without opening it.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -290,6 +321,10 @@ public class ComboBox : Control
         }
     }
 
+    /// <summary>
+    /// Type-ahead: the characters typed so far are remembered for a moment and select the next item
+    /// whose text starts with them, starting from the current selection and wrapping round.
+    /// </summary>
     protected override void OnTextInput(TextInputEventArgs e)
     {
         base.OnTextInput(e);
@@ -316,12 +351,14 @@ public class ComboBox : Control
         e.Handled = true;
     }
 
+    /// <summary>Closes the list when the focus moves on, as a native combo box does.</summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
         CloseDropDown();
     }
 
+    /// <summary>Closes the list when the combo box is disabled, and repaints either way.</summary>
     protected override void OnEnabledChanged()
     {
         base.OnEnabledChanged();
@@ -334,6 +371,10 @@ public class ComboBox : Control
         Invalidate();
     }
 
+    /// <summary>
+    /// Drops the popup's close handler - so tearing the popup down cannot call back into this
+    /// control - and disposes the popup the combo box owns.
+    /// </summary>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

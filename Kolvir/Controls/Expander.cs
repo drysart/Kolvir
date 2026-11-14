@@ -69,6 +69,10 @@ public class Expander : Panel
     private double _progress = 1d;
     private float _expandedHeight;
 
+    /// <summary>
+    /// Creates an expanded section with no caption and the border, corner radius and padding the
+    /// control is drawn with.
+    /// </summary>
     public Expander()
     {
         BorderWidth = 1f;
@@ -258,6 +262,11 @@ public class Expander : Panel
     /// <summary>An expander's own header is emphasized until the theme or an ancestor says otherwise.</summary>
     protected override Font DefaultFont => Theme.EmphasizedFont;
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// The content is measured as a whole section and then scaled by <see cref="ExpandProgress"/>,
+    /// so an <see cref="Control.AutoSize"/> expander folds its height along with everything else.
+    /// </remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         float header = HeaderHeight;
@@ -278,6 +287,11 @@ public class Expander : Panel
             (content.Height * (float)_progress) + header);
     }
 
+    /// <inheritdoc />
+    /// <remarks>
+    /// Folded, the children are still arranged - to nothing, at the top of the content area - so
+    /// they keep a rectangle that shows again when the section opens.
+    /// </remarks>
     protected override SKSize ArrangeChildren(SKRect area)
     {
         if (_progress > 0d)
@@ -312,6 +326,7 @@ public class Expander : Panel
     protected override Control? HitTestChildren(SKPoint local) =>
         _progress > 0d ? base.HitTestChildren(local) : null;
 
+    /// <summary>Fills the header band while the pointer is over it or the header is held down.</summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
         base.OnPaintBackground(canvas, rect);
@@ -326,6 +341,10 @@ public class Expander : Panel
         Painter.Fill(canvas, header, fill);
     }
 
+    /// <summary>
+    /// Paints the chevron and the caption, and the hairline under the header while the section is
+    /// showing any of its content.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var color = Enabled ? ForeColor : Theme.DisabledForeground;
@@ -356,6 +375,9 @@ public class Expander : Panel
         }
     }
 
+    /// <summary>
+    /// Arms a press on the header, which the matching mouse-up turns into a toggle.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
@@ -370,6 +392,10 @@ public class Expander : Panel
         Invalidate();
     }
 
+    /// <summary>
+    /// Toggles <see cref="IsExpanded"/> when the press was armed on the header and the button is
+    /// released over it, the way a button takes a click.
+    /// </summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         base.OnMouseUp(e);
@@ -389,6 +415,9 @@ public class Expander : Panel
         }
     }
 
+    /// <summary>
+    /// Tracks whether the pointer is over the header, and cancels a header press that drags off it.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         bool hot = IsInHeader(e.Location);
@@ -409,6 +438,7 @@ public class Expander : Panel
         base.OnMouseMove(e);
     }
 
+    /// <summary>Clears the header's hover and press state when the pointer leaves the control.</summary>
     protected override void OnMouseLeave()
     {
         _headerHot = false;
@@ -422,6 +452,10 @@ public class Expander : Panel
         base.OnMouseLeave();
     }
 
+    /// <summary>
+    /// Enter and Space toggle the section, Right opens it when it is shut and Left shuts it when it
+    /// is open.
+    /// </summary>
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
@@ -451,12 +485,17 @@ public class Expander : Panel
         }
     }
 
+    /// <summary>Repaints, because the header draws a focus ring only while the section has focus.</summary>
     protected override void OnGotFocus()
     {
         base.OnGotFocus();
         Invalidate();
     }
 
+    /// <summary>
+    /// Drops a header press when the focus leaves, so coming back does not toggle the section, and
+    /// repaints the focus ring away.
+    /// </summary>
     protected override void OnLostFocus()
     {
         base.OnLostFocus();
@@ -470,6 +509,7 @@ public class Expander : Panel
         Invalidate();
     }
 
+    /// <summary>Clears the header's hover and press state when the control is disabled.</summary>
     protected override void OnEnabledChanged()
     {
         if (!Enabled)
@@ -482,6 +522,7 @@ public class Expander : Panel
         base.OnEnabledChanged();
     }
 
+    /// <summary>Draws the focus ring around the header band while the section has focus.</summary>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         base.OnPaintBorder(canvas, rect);

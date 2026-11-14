@@ -18,9 +18,9 @@ namespace Kolvir.Backend.AppKit;
 /// backing store per frame while the window is being resized, and a drag to near full screen on a
 /// Retina display then peaked at 1.8 GB of physical footprint - the same drag through a layer's
 /// <c>contents</c> stays near 150 MB, and a plain view that fills itself with a solid colour stays
-/// at 123 MB. So the view is layer backed and overrides <see cref="WantsUpdateLayer"/> rather than
-/// <see cref="DrawRect"/>: AppKit then asks for a layer update and never allocates a backing store
-/// of its own.
+/// at 123 MB. So the view is layer backed and overrides <see cref="WantsUpdateLayer"/> rather
+/// than <see cref="NSView.DrawRect(CGRect)"/>: AppKit then asks for a layer update and never
+/// allocates a backing store of its own.
 /// </para>
 /// </summary>
 internal sealed class AppKitSkiaView : NSView
@@ -211,8 +211,8 @@ internal sealed class AppKitSkiaView : NSView
 
     /// <summary>
     /// The view paints its layer's contents itself, so AppKit must call <see cref="UpdateLayer"/>
-    /// instead of <see cref="DrawRect"/>; drawing in <c>DrawRect</c> would give the view a backing
-    /// store of its own, which is the allocation this exists to avoid.
+    /// instead of <see cref="NSView.DrawRect(CGRect)"/>; drawing in <c>DrawRect</c> would give the
+    /// view a backing store of its own, which is the allocation this exists to avoid.
     /// </summary>
     public override bool WantsUpdateLayer => true;
 

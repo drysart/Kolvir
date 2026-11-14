@@ -920,10 +920,10 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
     }
 
     /// <summary>
-    /// Moves the caret to another visual line, keeping the column it wants. <paramref name="x"/> is
-    /// the column the caret asked for, in pixels from the start of its line; it is reused for as
-    /// long as the caret stays where the previous move put it, so Up and Down walk a short line out
-    /// and come back out to the column they started in.
+    /// Moves the caret to another visual line, keeping the column it wants. The column is measured
+    /// in pixels from the start of the caret's line and is reused for as long as the caret stays
+    /// where the previous move put it, so Up and Down walk a short line out and come back out to the
+    /// column they started in.
     /// </summary>
     private void MoveByLines(TextBox textBox, TextBoxViewport viewport, int delta, bool extend)
     {

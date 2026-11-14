@@ -5674,6 +5674,36 @@ The version is passed at pack time rather than written into `Directory.Build.pro
 release is a tag and nothing else: two tags can name two versions of the same commit, and a pull
 request's packages must never claim to be a real version.
 
+### Documentation inside the packages
+
+Every shipped assembly is packed with its XML documentation file beside it, so a package carries
+`lib/net10.0/Kolvir.dll` **and** `lib/net10.0/Kolvir.xml`. That second file is the whole of how an
+application's IDE knows what `ColumnHeaderStyle` means: without it a consumer sees signatures and
+guesses, and every `<summary>` in this repository is visible only to the people working in it.
+
+The SDK writes the file only when asked, so `Directory.Build.props` sets `GenerateDocumentationFile`
+for the projects that ship - `Kolvir`, every backend, every feature - and leaves it off for the sample,
+the measurement fixture and the test projects, which no consumer can see and which would otherwise
+bury the interesting warnings under their own. Nothing packs the file by hand: the SDK puts a
+project's documentation beside its assembly in `lib/<tfm>/` once the property is set.
+
+Turning the file on also turns on `CS1591`, one report per publicly visible member with no doc comment.
+That is an **error** in every project that ships, and it was a warning only while the backlog existed:
+the library started with 722 of them, and the rule became an error the day the count reached zero. A
+warning is the kind of thing that is read past, and the failure it hides is quiet - a member added
+without a `<summary>` ships an assembly whose documentation simply omits it, and nothing anywhere
+fails. The compiler raises it, so it costs nothing at build time and nothing at run time.
+
+The house style is the one the existing docs use - `<summary>` in prose, `<remarks>` for the rule that
+is not obvious from the signature, `<param>`/`<returns>`/`<exception>` where they add something,
+`<see cref="..."/>` for cross-links, and `<inheritdoc />` on an override whose base member already
+says it. A `cref` that cannot resolve is still a warning rather than an error; it is worth knowing that
+it ships as literal text in IntelliSense, which is why the pack job's checker exists.
+
+The pack job fails a package whose assembly has no `.xml` beside it. That is the one packaging
+failure that is invisible everywhere else: the package installs, compiles and runs, and simply gives
+up its IntelliSense, which nobody notices until someone files a bug about it.
+
 `Release` pushes with `GITHUB_TOKEN` and `permissions: packages: write`, and passes
 `--skip-duplicate` so a re-run of a partially failed publish only adds what is missing. nuget.org is
 deliberately not wired up yet - it needs an API key and a decision about who may publish, so the feed

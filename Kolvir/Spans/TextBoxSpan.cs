@@ -22,8 +22,8 @@ namespace Kolvir.Spans;
 /// <para>
 /// A span is a plain value holder that belongs to whoever created it, and it is <em>not</em> a
 /// control: it never paints by itself, it holds no state of its own beyond what is declared here,
-/// and the text box only ever reads it. See
-/// <see cref="TextBoxSpanExtensions.Spans"/> for the contract on what happens when the text
+/// and the text box only ever reads it. See the <c>Spans</c> member of
+/// <see cref="TextBoxSpanExtensions"/> for the contract on what happens when the text
 /// changes under a set of spans.
 /// </para>
 /// <para>

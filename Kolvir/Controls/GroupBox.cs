@@ -14,6 +14,10 @@ namespace Kolvir;
 /// </remarks>
 public class GroupBox : Panel
 {
+    /// <summary>
+    /// Creates a group box with no caption: a one-pixel frame, an 8-pixel corner radius, a 12-pixel
+    /// gutter and no tab stop of its own.
+    /// </summary>
     public GroupBox()
     {
         // The panel draws no chrome of its own, and the caption needs a break in the top edge, so
@@ -25,6 +29,7 @@ public class GroupBox : Panel
         TabStop = false;
     }
 
+    /// <summary>Creates a group box whose caption is <paramref name="caption"/>.</summary>
     public GroupBox(string caption)
         : this()
     {
@@ -37,9 +42,16 @@ public class GroupBox : Panel
     /// <summary>The height of the band the caption sits in, and the top of the content area.</summary>
     protected float CaptionBand => string.IsNullOrEmpty(Text) ? 0f : MathF.Ceiling(Font.LineHeight) + 2f;
 
+    /// <summary>
+    /// The client area below the caption band, which is the room the children are laid out in.
+    /// </summary>
     protected override SKRect ContentBounds =>
         new(ClientRect.Left, ClientRect.Top + CaptionBand, ClientRect.Right, ClientRect.Bottom);
 
+    /// <summary>
+    /// Measures the content in the room left under the caption band, then adds the band back on, so
+    /// that the caption never overlaps what it frames.
+    /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         float band = CaptionBand;
@@ -47,6 +59,10 @@ public class GroupBox : Panel
         return new SKSize(content.Width, content.Height + band);
     }
 
+    /// <summary>
+    /// Draws the frame and the caption: the top edge of the frame is cut away behind the caption
+    /// rather than painted over, so the caption reads the same on any background.
+    /// </summary>
     protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
     {
         float band = CaptionBand;

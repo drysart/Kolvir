@@ -48,7 +48,7 @@ public sealed class ApplicationOptions
     /// <para>
     /// The running instance learns about the launch through a handler added with
     /// <see cref="Application.AddSecondInstanceHandler"/> and comes to the
-    /// foreground. A second launch's <see cref="Application.Run"/> returns 0
+    /// foreground. A second launch's <see cref="Application.Run()"/> returns 0
     /// before any handler added with <see cref="Application.AddStartupHandler"/>
     /// runs, so nothing is ever shown by it.
     /// </para>

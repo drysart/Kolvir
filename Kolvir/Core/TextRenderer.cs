@@ -8,6 +8,18 @@ namespace Kolvir;
 /// </summary>
 public static class TextRenderer
 {
+    /// <summary>
+    /// Measures the space <paramref name="text"/> occupies: the width of its widest line and the
+    /// total height of the lines it lays out into, which is the line count times the font's line
+    /// height. It uses the same line breaking as <see cref="Draw"/>, so the two agree.
+    /// </summary>
+    /// <param name="text">
+    /// The text to measure. Null or empty measures <see cref="SKSize.Empty"/>.
+    /// </param>
+    /// <param name="font">The font it will be drawn with.</param>
+    /// <param name="maxWidth">The width available, which only matters when wrapping.</param>
+    /// <param name="wrap">True to break lines that do not fit into <paramref name="maxWidth"/>.</param>
+    /// <returns>The size of the laid-out text.</returns>
     public static SKSize Measure(string? text, Font font, float maxWidth, bool wrap)
     {
         if (string.IsNullOrEmpty(text))
@@ -25,6 +37,21 @@ public static class TextRenderer
         return new SKSize(width, lines.Count * font.LineHeight);
     }
 
+    /// <summary>
+    /// Draws <paramref name="text"/> inside <paramref name="bounds"/>, breaking it into lines and
+    /// aligning the resulting block both ways. Nothing is drawn when the text is empty or the
+    /// bounds have no area, so a caller does not have to guard the call.
+    /// </summary>
+    /// <param name="canvas">The canvas to draw into.</param>
+    /// <param name="text">The text to draw, which may contain CR, LF or CRLF line breaks.</param>
+    /// <param name="font">The font to draw with.</param>
+    /// <param name="color">The colour of the text.</param>
+    /// <param name="bounds">The box the text is laid out and aligned in.</param>
+    /// <param name="alignment">
+    /// Where the text sits in the box, both horizontally and vertically. The default puts it against
+    /// the middle of the left edge.
+    /// </param>
+    /// <param name="wrap">True to break lines that do not fit the width of the box.</param>
     public static void Draw(
         SKCanvas canvas,
         string? text,
@@ -247,6 +274,13 @@ public static class TextRenderer
 /// </summary>
 public readonly struct TextLine
 {
+    /// <summary>
+    /// Records one laid-out line: the slice of the source string it was taken from, and the text of
+    /// that slice.
+    /// </summary>
+    /// <param name="start">Offset of the line's first character in the source string.</param>
+    /// <param name="length">Number of characters in the line, excluding the line break.</param>
+    /// <param name="text">The text drawn for the line, which is that slice of the source.</param>
     public TextLine(int start, int length, string text)
     {
         Start = start;

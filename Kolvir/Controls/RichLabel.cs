@@ -52,6 +52,9 @@ public class RichLabel : Control
     private bool _wrapText = true;
     private float _lineSpacing;
 
+    /// <summary>
+    /// Creates an empty label: it auto-sizes, wraps at the control's width and selects partially.
+    /// </summary>
     public RichLabel()
     {
         _spans = new TextSpanCollection(this);
@@ -220,12 +223,14 @@ public class RichLabel : Control
     /// <summary>Removes every span (and the inline controls they contributed).</summary>
     public void ClearSpans() => _spans.Clear();
 
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var layout = BuildLayout(NormalizeWrapWidth(availableSize.Width));
         return new SKSize(MathF.Ceiling(layout.Width), MathF.Ceiling(layout.Height));
     }
 
+    /// <inheritdoc />
     protected override void OnLayout()
     {
         var content = ContentRect;
@@ -240,6 +245,7 @@ public class RichLabel : Control
         ApplyInlineBounds(layout);
     }
 
+    /// <inheritdoc />
     public override Cursor GetCursorAt(SKPoint pointInLocal)
     {
         var span = SpanAt(pointInLocal);
@@ -251,6 +257,10 @@ public class RichLabel : Control
         return base.GetCursorAt(pointInLocal);
     }
 
+    /// <summary>
+    /// Paints every line: the hover and press washes first, then the glyphs, then the underlines and
+    /// strike-throughs, all in the positions the layout gave them.
+    /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var content = Geometry.Deflate(rect, Padding);
@@ -290,6 +300,11 @@ public class RichLabel : Control
         }
     }
 
+    /// <summary>
+    /// Moves the hover state to the span under the pointer - telling the span it left to raise its
+    /// mouse-leave and the one it entered to raise its mouse-enter - and forwards the move to that
+    /// span.
+    /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
         var span = SpanAt(e.Location);
@@ -302,6 +317,11 @@ public class RichLabel : Control
         base.OnMouseMove(e);
     }
 
+    /// <summary>
+    /// Presses the span under the pointer, if there is one, so it paints as pressed and its own
+    /// mouse-down handlers run. Inline controls are excluded, because they receive the mouse
+    /// themselves.
+    /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
         var span = SpanAt(e.Location);
@@ -316,6 +336,10 @@ public class RichLabel : Control
         base.OnMouseDown(e);
     }
 
+    /// <summary>
+    /// Releases the span that was pressed and, when the release lands on that same span, raises a
+    /// click on it and then the label's own span-click event.
+    /// </summary>
     protected override void OnMouseUp(MouseEventArgs e)
     {
         var pressed = _pressedSpan;
@@ -339,12 +363,19 @@ public class RichLabel : Control
         base.OnMouseUp(e);
     }
 
+    /// <summary>
+    /// Clears the hovered span, so its highlight goes away and its mouse-leave handler runs.
+    /// </summary>
     protected override void OnMouseLeave()
     {
         SetHoverSpan(null);
         base.OnMouseLeave();
     }
 
+    /// <summary>
+    /// Clears the hovered and pressed spans when the label is disabled: a disabled control receives
+    /// no mouse-leave, so a span hovered at the time would otherwise keep its highlight.
+    /// </summary>
     protected override void OnEnabledChanged()
     {
         // Disabling a control does not send it a mouse-leave, so a span hovered or pressed at the
@@ -409,6 +440,11 @@ public class RichLabel : Control
         InvalidateLayout();
     }
 
+    /// <summary>
+    /// Removes every span and releases the fonts derived for them before the base control is
+    /// disposed.
+    /// </summary>
+    /// <param name="disposing">True when the control is being disposed; false is never passed.</param>
     protected override void Dispose(bool disposing)
     {
         if (disposing)

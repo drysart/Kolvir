@@ -21,6 +21,14 @@ public enum InlineAlignment
 /// <summary>Event data for the mouse events an <see cref="TextSpan"/> raises.</summary>
 public class SpanEventArgs : MouseEventArgs
 {
+    /// <summary>
+    /// Creates event data for <paramref name="span"/> at <paramref name="location"/>.
+    /// </summary>
+    /// <param name="span">The span the event belongs to.</param>
+    /// <param name="location">The pointer's position, in the event's own coordinates.</param>
+    /// <param name="button">The mouse button involved, if any.</param>
+    /// <param name="modifiers">The modifiers held at the time of the event.</param>
+    /// <param name="clickCount">How many clicks the press completes.</param>
     public SpanEventArgs(
         TextSpan span,
         SKPoint location,
@@ -69,10 +77,17 @@ public sealed class TextSpan
     private InlineAlignment _inlineAlignment = InlineAlignment.Bottom;
     private Cursor? _cursor;
 
+    /// <summary>
+    /// Creates an empty span. Assign <see cref="Text"/> or <see cref="Control"/> afterwards.
+    /// </summary>
     public TextSpan()
     {
     }
 
+    /// <summary>
+    /// Creates a span that carries <paramref name="text"/>; null is read as empty text.
+    /// </summary>
+    /// <param name="text">The text of the span.</param>
     public TextSpan(string? text) => _text = text ?? string.Empty;
 
     /// <summary>Adds a handler that runs on mouse release over the span, after a press that started on it.</summary>
@@ -90,6 +105,10 @@ public sealed class TextSpan
         _click -= handler;
     }
 
+    /// <summary>Adds a handler that runs when a mouse button is pressed over the span.</summary>
+    /// <param name="handler">The handler to add.</param>
+    /// <returns>A token that removes the handler when it is disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is null.</exception>
     public IDisposable AddMouseDownHandler(Action<object, SpanEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -104,6 +123,10 @@ public sealed class TextSpan
         _mouseDown -= handler;
     }
 
+    /// <summary>Adds a handler that runs when a mouse button is released over the span.</summary>
+    /// <param name="handler">The handler to add.</param>
+    /// <returns>A token that removes the handler when it is disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is null.</exception>
     public IDisposable AddMouseUpHandler(Action<object, SpanEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -118,6 +141,10 @@ public sealed class TextSpan
         _mouseUp -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the pointer moves while it is over the span.</summary>
+    /// <param name="handler">The handler to add.</param>
+    /// <returns>A token that removes the handler when it is disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is null.</exception>
     public IDisposable AddMouseMoveHandler(Action<object, SpanEventArgs> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -132,6 +159,10 @@ public sealed class TextSpan
         _mouseMove -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the pointer enters the span.</summary>
+    /// <param name="handler">The handler to add, called with the span as its argument.</param>
+    /// <returns>A token that removes the handler when it is disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is null.</exception>
     public IDisposable AddMouseEnterHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -146,6 +177,10 @@ public sealed class TextSpan
         _mouseEnter -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the pointer leaves the span.</summary>
+    /// <param name="handler">The handler to add, called with the span as its argument.</param>
+    /// <returns>A token that removes the handler when it is disposed.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="handler"/> is null.</exception>
     public IDisposable AddMouseLeaveHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -188,24 +223,40 @@ public sealed class TextSpan
         }
     }
 
+    /// <summary>
+    /// When true the span is painted in a bold face derived from the label's font. Ignored when
+    /// <see cref="Font"/> is set.
+    /// </summary>
     public bool Bold
     {
         get => _bold;
         set => Set(ref _bold, value);
     }
 
+    /// <summary>
+    /// When true the span is painted in an italic face derived from the label's font. Ignored when
+    /// <see cref="Font"/> is set.
+    /// </summary>
     public bool Italic
     {
         get => _italic;
         set => Set(ref _italic, value);
     }
 
+    /// <summary>
+    /// When true a line is drawn under the span's text, continuing across the spaces between its
+    /// words.
+    /// </summary>
     public bool Underline
     {
         get => _underline;
         set => Set(ref _underline, value);
     }
 
+    /// <summary>
+    /// When true a line is drawn through the span's text, continuing across the spaces between
+    /// its words.
+    /// </summary>
     public bool Strikethrough
     {
         get => _strikethrough;

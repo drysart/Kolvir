@@ -24,7 +24,7 @@ internal enum UndoEditKind
 /// <remarks>
 /// <para>
 /// A text box holds one nullable reference to this interface and nothing else. Every edit the
-/// control makes passes through <see cref="ReplaceRange"/>, and a programmatic
+/// control makes passes through its private <c>ReplaceRange</c>, and a programmatic
 /// <c>Text</c> assignment passes through the property's setter, so those two places are the only
 /// ones that have to ask the history what to record - and the keys that undo are the only other
 /// thing the control has to be able to ask. Everything else - the entries, the coalescing rule, the
