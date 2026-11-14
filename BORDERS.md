@@ -90,23 +90,37 @@ public enum ControlState
     Hovered = 1,
     Focused = 2,
     Disabled = 4,
-    Active = 8,      // a control-specific "on": an open combo box, a pressed button
+    Pressed = 8,     // a mouse button is down on the control
+    Active = 16,     // a control-specific "on": an open combo box
 }
 
 public virtual ControlState State =>
     (Enabled ? ControlState.None : ControlState.Disabled)
     | (IsFocused ? ControlState.Focused : ControlState.None)
-    | (IsMouseOver ? ControlState.Hovered : ControlState.None);
+    | (IsMouseOver ? ControlState.Hovered : ControlState.None)
+    | (IsPressed ? ControlState.Pressed : ControlState.None);
 ```
+
+Four of those five bits are `Control`'s own properties already — `Enabled`, `IsFocused`, `IsMouseOver`
+and `IsPressed` — so `State` is a reformatting of what the base type already exposes, and a border that
+reads `owner.State` is not seeing anything an application could not.
+
+`Active` is the one exception, and the reason the enumeration exists at all. **A popup being open is
+the only border-affecting state in the library that is not on `Control`**, and it is declared three
+times: `ComboBox.IsDropDownOpen`, `SplitButton.IsDropDownOpen` and `DateTimePicker.IsDropDownOpen`, all
+public, none of them on the base type. A border reading control properties directly would have to know
+all three concrete types and cast to each; with a bit, each control overrides `State` to add `Active`
+and one border understands all three. `ToggleControl.CheckState` and `Expander.IsExpanded` are the other
+control-specific states, and neither touches a border today — if one does, it is a bit, not a cast.
 
 The bits are the ones the library already uses — `Disabled` in `TextBox`, `ComboBox` and
 `VirtualList`, `Active` for `ComboBox`'s open list — and no others. A control whose own state is not on
-`Control` overrides `State` to add a bit (`ComboBox` does exactly this rather than storing a second
-border), and every border then understands it without knowing the control.
+`Control` overrides `State` to add a bit (`ComboBox`, `SplitButton` and `DateTimePicker` each do this
+rather than storing a second border), and every border then understands it without knowing the control.
 
-`SimpleBorder` reads `owner.State` and owns one documented precedence — **disabled > focused > hovered
-> resting** — which is the order `TextBox` and `ComboBox` already implement by hand. Today each control
-reinvents that order; after this, one place does.
+`SimpleBorder` reads `owner.State` and owns one documented precedence — **disabled > pressed > focused
+> hovered > resting** — which is the order `TextBox` and `ComboBox` already implement by hand, extended
+by the one bit they do not use yet. Today each control reinvents that order; after this, one place does.
 
 **Insets and clip are separate questions, and may disagree.** A 9-slice border insets without
 clipping; a rounded border clips the corners without insetting them; a future shadow border would clip
@@ -265,12 +279,12 @@ Colour is a fixed `SKColor` or a `ThemeColor` role, mirroring `Background.FromCo
 `Background.FromThemeColor`; the role is resolved while painting, so a palette swap recolours live
 controls with no rebuild.
 
-`Paint` resolves the state in one documented order — **disabled > focused > hovered > resting** — which
-is the order `TextBox` (`622`) and `ComboBox` (`219-223`) already implement by hand, differing only in
-that `ComboBox` also treats its open list as focused. That difference is now a bit rather than a
-special case: `ComboBox` overrides `State` to add `Active` and passes `WithFocusColor` the accent, and
-its paint method stops choosing colours at all. `VirtualList` sets no hover colour, so it keeps its
-pixels; `TabControl`, `Button` and `DateTimePicker` set none, and are unchanged.
+`Paint` resolves the state in one documented order — **disabled > pressed > focused > hovered >
+resting** — which is the order `TextBox` (`622`) and `ComboBox` (`219-223`) already implement by hand,
+differing only in that `ComboBox` also treats its open list as focused. That difference is now a bit
+rather than a special case: `ComboBox` overrides `State` to add `Active` and passes `WithFocusColor` the
+accent, and its paint method stops choosing colours at all. `VirtualList` sets no hover colour, so it
+keeps its pixels; `TabControl`, `Button` and `DateTimePicker` set none, and are unchanged.
 
 This is what lets `TextBox` hold a `static readonly SimpleBorder _focused = SimpleBorder.Thin
 .WithThemeColor(ThemeColor.Border).WithFocusColor(ThemeColor.Accent).WithHoverColor(ThemeColor
@@ -384,10 +398,13 @@ Settled in review:
 5. **`Paint` and `Insets` take the owning control**, so state colours cost nothing per frame and a
    caption band can measure a font. `NarrowsClip`, `ClipTo` and `IsRectangular` do not, because they
    describe the kind of shape rather than its measurements.
-6. **`Control.State` is a flags value the control computes**, and `ControlState` carries only the bits
-   the library already uses. A control with its own state overrides `State`; three border properties on
-   `Control` were considered and rejected — the triple is short by `Disabled` and by `ComboBox`'s open
-   list, and the extra two would have needed the null-or-sentinel state this design just removed.
+6. **`Control.State` is a flags value the control computes.** Four of its five bits are `Control`'s own
+   properties — `Enabled`, `IsFocused`, `IsMouseOver`, `IsPressed` — and the fifth, `Active`, exists
+   because a popup being open is the only border-affecting state not on `Control`, declared separately
+   on `ComboBox`, `SplitButton` and `DateTimePicker`. Each of those overrides `State`; a border reading
+   properties directly would have to know and cast to all three. Three border properties on `Control`
+   were also considered and rejected — the triple is short by `Disabled` and by the open list, and the
+   extra two would have needed the null-or-sentinel state this design just removed.
 7. **Borders paint inside the bounds.** External focus rings are a later, cross-cutting change.
 8. **`GroupBox` is left alone.** A `GroupBoxBorder` may later delete the control entirely, since a
    group box is a panel with a distinctive frame.
@@ -439,9 +456,10 @@ Deferred, but the phase-1 shape is chosen to make it additive:
   compiler cannot see either, so the sweep in section 6 has to cover all ten in one pass and review has
   to keep watching.
 - **`ControlState` is a magnet.** Every state anyone ever wants to express will want a bit, and by the
-  tenth one every border implementation is testing bits it does not care about. The guard is the one
-  that already worked: add a bit when a control in this library needs it — `Disabled` for three
-  controls, `Active` for `ComboBox` — not when one might.
+  tenth one every border implementation is testing bits it does not care about. The two guards that
+  make this cheap: four of the five bits are `Control`'s own properties, so most of the enumeration is a
+  reformatting of what already exists; and a bit is added when a control in this library needs one —
+  `Active` for the three popup owners — not when one might.
 - **`Insets` can read transient state, and nothing stops it.** Passing the control means a border can
   look at `IsMouseOver` and make its inset depend on the pointer, which would turn every hover into a
   layout pass. `SimpleBorder` does not, and the rule — geometry may depend on the control's
