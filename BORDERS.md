@@ -22,7 +22,7 @@ The price, stated plainly:
 
 - one reference field per `Control` (8 bytes), where the three members it replaces cost 12;
 - three virtual dispatches per paint (`ClipTo`, `Paint`, and the `IsRectangular` read that feeds
-  `Opaque`) and two per layout (the insets);
+  `Opaque`) and two per layout (the insets, once in `Measure` and once in `ContentRect`);
 - an `SKPath` allocation only when a border actually narrows the clip, never on the plain path.
 
 An abstract **class** rather than a `Background`-style struct, because polymorphism is the whole point:
@@ -36,7 +36,7 @@ words on it.
 public abstract class Border
 {
     /// <summary>How much of the control this border takes away from its content.</summary>
-    public virtual Thickness Insets => Thickness.Empty;
+    public virtual Thickness Insets(Control owner) => Thickness.Empty;
 
     /// <summary>Whether this border clips the control to something narrower than its bounds.</summary>
     public virtual bool NarrowsClip => false;
@@ -61,13 +61,52 @@ public abstract class Border
 }
 ```
 
-Three deliberate details:
+**The owner is passed to `Paint` and to `Insets`, and deliberately not to the rest.** `Paint` needs it
+because every border worth having is state-coloured: `TextBox` picks disabled, focused, hovered and
+resting colours, and `ListView`, `TabControl`, `ComboBox` and `VirtualList` each pick hover colours.
+Without the owner a control either allocates a `Border` per state change or mutates a shared one, and
+neither is acceptable.
 
-**`Paint` receives the owner.** Every border worth having here is state-coloured: `TextBox` picks
-disabled, focused, hovered and resting colours, and `ListView`, `TabControl`, `ComboBox` and
-`VirtualList` each pick hover colours. Without the owner, a control either allocates a `Border` per
-state change or mutates a shared one, and neither is acceptable. With it, a border can read
-`owner.IsFocused` and decide.
+`Insets` needs it for a reason that only shows up in phase 2, and is worth recording now: a
+`GroupBoxBorder` takes its caption band out of the content area, and that band's height is the line
+height of **the control's font** — plus, for a border that draws its own text, the control's `Text`.
+`Control.Text` and `Control.Font` are both public and virtual, so a border can read them from the
+owner with no downcast and no control-specific interface. An inset that depends on the font is
+therefore not a constant, and `Insets` without the owner could not express a group box.
+
+`NarrowsClip`, `ClipTo` and `IsRectangular` stay argument-less because they describe the *kind* of
+shape rather than its measurements: whether the corners let the parent through, and how to clip to
+them, are properties of the border, and `Opaque` asks them on a path where a virtual call with an
+argument buys nothing.
+
+**State is a value the control computes, not something a border digs for.** `Control` gains one flags
+enumeration and one virtual property:
+
+```csharp
+[Flags]
+public enum ControlState
+{
+    None = 0,
+    Hovered = 1,
+    Focused = 2,
+    Disabled = 4,
+    Active = 8,      // a control-specific "on": an open combo box, a pressed button
+}
+
+public virtual ControlState State =>
+    (Enabled ? ControlState.None : ControlState.Disabled)
+    | (IsFocused ? ControlState.Focused : ControlState.None)
+    | (IsMouseOver ? ControlState.Hovered : ControlState.None);
+```
+
+The bits are the ones the library already uses — `Disabled` in `TextBox`, `ComboBox` and
+`VirtualList`, `Active` for `ComboBox`'s open list — and no others. A control whose own state is not on
+`Control` overrides `State` to add a bit (`ComboBox` does exactly this rather than storing a second
+border), and every border then understands it without knowing the control.
+
+`SimpleBorder` reads `owner.State` and owns one documented precedence — **disabled > focused > hovered
+> resting** — which is the order `TextBox` and `ComboBox` already implement by hand. Today each control
+reinvents that order; after this, one place does.
 
 **Insets and clip are separate questions, and may disagree.** A 9-slice border insets without
 clipping; a rounded border clips the corners without insetting them; a future shadow border would clip
@@ -99,7 +138,7 @@ Decided: **the border is outside the padding**, the CSS and WinForms arrangement
 
 ```
 ClientRect   the whole control bounds        0,0,w,h
-ContentRect  ClientRect − Insets − Padding   what children and content get
+ContentRect  ClientRect − Insets(this) − Padding   what children and content get
 ```
 
 `Measure` adds **both**, so the border enlarges a control instead of eating its content — which is
@@ -139,7 +178,7 @@ public Border Border
             return;
         }
 
-        var relayout = !_border.Insets.Equals(value.Insets);
+        var relayout = !_border.Insets(this).Equals(value.Insets(this));
         _border = value;
         Invalidate();
 
@@ -155,6 +194,13 @@ That is the whole of it: one field, one property, no class default and no second
 come from. A control that draws a frame assigns one in its constructor, the way it already assigns its
 padding, and a derived class that wants different chrome assigns in *its* constructor, which runs
 after the base's and therefore wins — ordinary C# precedence rather than a rule to remember.
+
+The `relayout` comparison is between the *old* border's insets and the *new* one's, both measured
+against this control, which is what makes a state swap free when the geometry did not change and
+correct when it did (a `GroupBoxBorder` recomputes its caption band from the font, so the same screen
+position can want a layout when the font changed). It also means a `Border` must answer `Insets`
+honestly for the control it is on — it may be called with the old instance while the new one is being
+assigned.
 
 **The declarative part is a convention, not an API.** A control class that draws a frame declares it
 once, as a shared instance, and assigns it:
@@ -187,7 +233,8 @@ assignment, rather than the hand-rolled painting described next.
 
 ## 6. `SimpleBorder`, and migrating today's borders
 
-`SimpleBorder` is the shape of everything that exists now, plus a decision about colour:
+`SimpleBorder` is the shape of everything that exists now, plus state colours, which is what removes the
+hand-written resolution from four paint methods:
 
 ```csharp
 public sealed class SimpleBorder : Border
@@ -195,15 +242,18 @@ public sealed class SimpleBorder : Border
     public static SimpleBorder Thin { get; }      // 1px, Theme.Border, square corners
     public float Width { get; }                   // 0 means none: use Border.None instead
     public float CornerRadius { get; }
-    public SKColor? Color { get; }                // null means Theme.Border
+    public SKColor? Color { get; }                // resting; null means Theme.Border
     public ThemeColor? Role { get; }              // a palette role, so a swap recolours live borders
 
     public SimpleBorder WithWidth(float width);
+    public SimpleBorder WithCornerRadius(float radius);
     public SimpleBorder WithColor(SKColor color);
     public SimpleBorder WithThemeColor(ThemeColor role);
-    public SimpleBorder WithCornerRadius(float radius);
+    public SimpleBorder WithHoverColor(ThemeColor role);       // ControlState.Hovered
+    public SimpleBorder WithFocusColor(ThemeColor role);        // ControlState.Focused
+    public SimpleBorder WithDisabledColor(ThemeColor role);     // ControlState.Disabled
 
-    public override Thickness Insets => new(Width);
+    public override Thickness Insets(Control owner) => new(Width);
     public override bool NarrowsClip => CornerRadius > 0f;
     public override bool IsRectangular => CornerRadius <= 0f;
     public override void ClipTo(SKCanvas canvas, SKRect bounds);   // round rect, antialiased
@@ -212,9 +262,20 @@ public sealed class SimpleBorder : Border
 ```
 
 Colour is a fixed `SKColor` or a `ThemeColor` role, mirroring `Background.FromColor` and
-`Background.FromThemeColor`; the role is resolved while painting so a palette swap recolours live
-controls with no rebuild. That is what lets `TextBox` hold `_focus = SimpleBorder.Thin.WithThemeColor(
-ThemeColor.Accent)` and stop overriding `OnPaintBackground` to draw its own frame.
+`Background.FromThemeColor`; the role is resolved while painting, so a palette swap recolours live
+controls with no rebuild.
+
+`Paint` resolves the state in one documented order — **disabled > focused > hovered > resting** — which
+is the order `TextBox` (`622`) and `ComboBox` (`219-223`) already implement by hand, differing only in
+that `ComboBox` also treats its open list as focused. That difference is now a bit rather than a
+special case: `ComboBox` overrides `State` to add `Active` and passes `WithFocusColor` the accent, and
+its paint method stops choosing colours at all. `VirtualList` sets no hover colour, so it keeps its
+pixels; `TabControl`, `Button` and `DateTimePicker` set none, and are unchanged.
+
+This is what lets `TextBox` hold a `static readonly SimpleBorder _focused = SimpleBorder.Thin
+.WithThemeColor(ThemeColor.Border).WithFocusColor(ThemeColor.Accent).WithHoverColor(ThemeColor
+.SplitterHover).WithDisabledColor(ThemeColor.DisabledBackground)` and stop overriding
+`OnPaintBackground` to draw its own frame.
 
 Painting uses `Painter.DrawBorder` in phase 1 — a stroke on the inside of the bounds, which is exactly
 what ships today. Phase 2 needs a path-based implementation (section 10); the call sites do not change.
@@ -297,12 +358,16 @@ Phase 1 claims to be a refactor, so it is held to that:
   purpose — see that file's remarks — so this comparison is a manual step, run locally and quoted in
   the pull request.)
 - **Geometry, not pixels**, for the layout half: a bordered control measures two pixels wider and
-  taller than the same control with `Border.None`, `ContentRect` is inset by exactly `Insets + Padding`,
-  and `Border.None` changes nothing at all.
+  taller than the same control with `Border.None`, `ContentRect` is inset by exactly
+  `Insets(this) + Padding`, and `Border.None` changes nothing at all.
 - **The new unit tests**: `Control.Border` starts as `Border.None`; a control's constructor assignment
   is what gives it a frame, and a derived class's constructor assignment overrides the base's; the
   setter repaints without re-arranging when the insets are unchanged and does both when they differ; a
   rounded border narrows the clip and reports not opaque; a square one does neither.
+- **A border can be tested without a scene**, which is a benefit of passing the owner rather than a
+  colour: `SimpleBorder` paints into a small bitmap with a bare `Control` in each of the four states,
+  and the pixel that matters is asserted directly rather than through a rendered window. `Control.State`
+  is computed from three booleans, so a test control that overrides it can stand in for focus and hover.
 - Full suite green, and the demo's pages still draw.
 
 ## 9. Decisions
@@ -311,32 +376,40 @@ Settled in review:
 
 1. **One abstract `Border`, on `Control`**, with paint, clip and insets. No separate container control
    is needed, which is also why the name `Border` is free.
-2. **Insets are outside padding** (`ContentRect = ClientRect − Insets − Padding`) and `Measure` adds
-   both; the existing controls shrink their padding to keep their pixels.
+2. **Insets are outside padding** (`ContentRect = ClientRect − Border.Insets(this) − Padding`) and
+   `Measure` adds both; the existing controls shrink their padding to keep their pixels.
 3. **Immutable borders**, reassigned rather than mutated.
 4. **`Border.None`, not a nullable property**: it is the field's initial value and the way an
    application removes a frame.
-5. **`Paint` takes the owning control**, so state colours cost nothing per frame.
-6. **Borders paint inside the bounds.** External focus rings are a later, cross-cutting change.
-7. **`GroupBox` is left alone.** A `GroupBoxBorder` may later delete the control entirely, since a
+5. **`Paint` and `Insets` take the owning control**, so state colours cost nothing per frame and a
+   caption band can measure a font. `NarrowsClip`, `ClipTo` and `IsRectangular` do not, because they
+   describe the kind of shape rather than its measurements.
+6. **`Control.State` is a flags value the control computes**, and `ControlState` carries only the bits
+   the library already uses. A control with its own state overrides `State`; three border properties on
+   `Control` were considered and rejected — the triple is short by `Disabled` and by `ComboBox`'s open
+   list, and the extra two would have needed the null-or-sentinel state this design just removed.
+7. **Borders paint inside the bounds.** External focus rings are a later, cross-cutting change.
+8. **`GroupBox` is left alone.** A `GroupBoxBorder` may later delete the control entirely, since a
    group box is a panel with a distinctive frame.
-8. **The old members are deleted** rather than kept as shims.
+9. **The old members are deleted** rather than kept as shims.
 
 Settled after the first draft, which had a `protected virtual Border? DefaultBorder` and then a
 `Border` subclass that deferred to it:
 
-9. **No class-default property.** A border comes from the field, which a constructor assigns, and from
-   nothing else. The draft's `DefaultBorder` could be silently outvoted by a base class's constructor
-   assignment, and the sentinel that was proposed to fix that would have needed the owning control
-   passed to `Insets` and the rest of the contract, only to resolve back to `_border ?? DefaultBorder`.
-   Removing the second source of truth removes the disagreement.
-10. **The declarative fact is a convention**: a control class declares its frame as a
+10. **No class-default property.** A border comes from the field, which a constructor assigns, and from
+    nothing else. The draft's `DefaultBorder` could be silently outvoted by a base class's constructor
+    assignment, and the sentinel that was proposed to fix that would have needed the owning control
+    passed around the whole contract, only to resolve back to `_border ?? DefaultBorder`. Removing the
+    second source of truth removes the disagreement.
+11. **The declarative fact is a convention**: a control class declares its frame as a
     `private static readonly Border DefaultBorder` and assigns it in its constructor.
 
 Chosen while writing this down, and worth disagreeing with now rather than later:
 
-11. **The setter compares insets** before running a layout pass.
-12. **`Padding`'s setter is fixed** to lay out as well as repaint.
+12. **The setter compares insets** before running a layout pass.
+13. **`Padding`'s setter is fixed** to lay out as well as repaint, and so is `Font`'s, for the same
+    reason a caption band makes it visible: an inset that is measured from the font has to be
+    recomputed when the font changes.
 
 ## 10. Phase 2: per edge, per corner
 
@@ -365,5 +438,17 @@ Deferred, but the phase-1 shape is chosen to make it additive:
   control for no reason; the second reintroduces exactly the undeclared frame this change removes. The
   compiler cannot see either, so the sweep in section 6 has to cover all ten in one pass and review has
   to keep watching.
+- **`ControlState` is a magnet.** Every state anyone ever wants to express will want a bit, and by the
+  tenth one every border implementation is testing bits it does not care about. The guard is the one
+  that already worked: add a bit when a control in this library needs it — `Disabled` for three
+  controls, `Active` for `ComboBox` — not when one might.
+- **`Insets` can read transient state, and nothing stops it.** Passing the control means a border can
+  look at `IsMouseOver` and make its inset depend on the pointer, which would turn every hover into a
+  layout pass. `SimpleBorder` does not, and the rule — geometry may depend on the control's
+  configuration, never on its pointer or focus — is a convention the doc states and review enforces.
+- **A caption band costs a measurement per layout pass.** `GroupBoxBorder` measures its font to answer
+  `Insets`, and `Insets` is asked from `Measure`, from `ContentRect` and from the `Border` setter. That
+  is a text measurement per layout, not per paint, and it is the price of a border that knows what its
+  control says.
 - **Deleting the old members breaks every consumer.** Acceptable while the only feed is a pre-release
   test feed; it stops being acceptable the day something is published.
