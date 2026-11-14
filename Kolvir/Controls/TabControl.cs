@@ -140,8 +140,8 @@ public class TabControl : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        Painter.Fill(canvas, rect, Enabled ? BackColor ?? Theme.Surface : Theme.DisabledBackground, Border.CornerRadius);
-        Painter.DrawBorder(canvas, rect, Theme.Border, FrameWidth, Border.CornerRadius);
+        Painter.Fill(canvas, rect, Enabled ? BackColor ?? Theme.Surface : Theme.DisabledBackground, Border.Corners);
+        Painter.DrawBorder(canvas, rect, Theme.Border, FrameWidth, Border.Corners);
     }
 
     /// <summary>

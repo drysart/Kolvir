@@ -8,17 +8,16 @@ namespace Kolvir;
 /// and the children are laid out inside it.
 /// </summary>
 /// <remarks>
-/// The caption band is taken out of the content area rather than out of the padding, so a child can
-/// never be arranged under the caption, and content that scrolls is clipped below it. A group box
-/// with no text is just a plain bordered container.
+/// The frame is a <see cref="SimpleBorder"/> that shows the control's text, so the caption band is
+/// taken out of the content by the border rather than by the control: a child can never be arranged
+/// under the caption, and content that scrolls is clipped below it. A group box with no text is a
+/// plain bordered container.
 /// </remarks>
 public class GroupBox : Panel
 {
-    /// <summary>
-    /// The frame is drawn by the control, because the caption cuts a break in its top edge, so the
-    /// border carries the shape without taking room or painting a stroke of its own.
-    /// </summary>
-    private static readonly SimpleBorder DefaultBorder = SimpleBorder.Thin.WithWidth(0f).WithCornerRadius(8f);
+    /// <summary>One pixel, an 8-pixel corner radius, and the caption in a break in the top edge.</summary>
+    private static readonly SimpleBorder DefaultBorder =
+        SimpleBorder.Thin.WithCornerRadius(8f).WithControlText();
 
     /// <summary>
     /// Creates a group box with no caption: a one-pixel frame, an 8-pixel corner radius, a 12-pixel
@@ -26,15 +25,16 @@ public class GroupBox : Panel
     /// </summary>
     public GroupBox()
     {
-        // The panel draws no chrome of its own, and the caption needs a break in the top edge, so
-        // the frame is drawn here instead.
+        // The gutter is one less than the usual twelve because the frame's own pixel is the outer
+        // one of it, so the content lands where it always has.
         Border = DefaultBorder;
-        Padding = new Thickness(12f, 0f, 12f, 12f);
+        Padding = new Thickness(11f, 0f, 11f, 11f);
         ForeColorRole = ThemeColor.MutedForeground;
         TabStop = false;
     }
 
     /// <summary>Creates a group box whose caption is <paramref name="caption"/>.</summary>
+    /// <param name="caption">The caption, drawn in a break in the top edge.</param>
     public GroupBox(string caption)
         : this()
     {
@@ -43,68 +43,4 @@ public class GroupBox : Panel
 
     /// <summary>The caption is emphasized until the theme or an ancestor says otherwise.</summary>
     protected override Font DefaultFont => Theme.EmphasizedFont;
-
-    /// <summary>The height of the band the caption sits in, and the top of the content area.</summary>
-    protected float CaptionBand => string.IsNullOrEmpty(Text) ? 0f : MathF.Ceiling(Font.LineHeight) + 2f;
-
-    /// <summary>
-    /// The client area below the caption band, which is the room the children are laid out in.
-    /// </summary>
-    protected override SKRect ContentBounds =>
-        new(ClientRect.Left, ClientRect.Top + CaptionBand, ClientRect.Right, ClientRect.Bottom);
-
-    /// <summary>
-    /// Measures the content in the room left under the caption band, then adds the band back on, so
-    /// that the caption never overlaps what it frames.
-    /// </summary>
-    protected override SKSize MeasureContent(SKSize availableSize)
-    {
-        float band = CaptionBand;
-        var content = base.MeasureContent(new SKSize(availableSize.Width, MathF.Max(0f, availableSize.Height - band)));
-        return new SKSize(content.Width, content.Height + band);
-    }
-
-    /// <summary>
-    /// Draws the frame and the caption: the top edge of the frame is cut away behind the caption
-    /// rather than painted over, so the caption reads the same on any background.
-    /// </summary>
-    protected override void OnPaintBorder(SKCanvas canvas, SKRect rect)
-    {
-        float band = CaptionBand;
-        var frame = new SKRect(rect.Left + 0.5f, rect.Top + (band / 2f), rect.Right - 0.5f, rect.Bottom - 0.5f);
-        if (frame.Width <= 0f || frame.Height <= 0f)
-        {
-            return;
-        }
-
-        float width = 1f;
-
-        if (band <= 0f)
-        {
-            Painter.DrawBorder(canvas, frame, Theme.Border, width, Border.CornerRadius);
-            return;
-        }
-
-        var measured = TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
-        float left = rect.Left + Padding.Left;
-        var caption = new SKRect(left, rect.Top, left + MathF.Ceiling(measured.Width), rect.Top + band);
-
-        // The break in the top edge is cut out of the frame rather than painted over, so the
-        // caption reads the same on any background - there is no colour to match.
-        canvas.Save();
-        canvas.ClipRect(
-            new SKRect(caption.Left - 4f, rect.Top - 1f, caption.Right + 4f, rect.Top + band),
-            SKClipOperation.Difference,
-            antialias: true);
-        Painter.DrawBorder(canvas, frame, Theme.Border, width, Border.CornerRadius);
-        canvas.Restore();
-
-        TextRenderer.Draw(
-            canvas,
-            Text,
-            Font,
-            Enabled ? ForeColor : Theme.DisabledForeground,
-            caption,
-            ContentAlignment.MiddleLeft);
-    }
 }

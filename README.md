@@ -90,7 +90,7 @@ has to read `--classic-menus` before it can build a backend.
 | `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
 | `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
-| `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it |
+| `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it. It is a `Panel` whose border is `SimpleBorder.Thin.WithCornerRadius(8f).WithControlText()` |
 | `Expander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
 | `ScrollBar` | `ScrollBar` | Classic non-overlay bar: arrows, track paging, draggable thumb, keyboard |
 | `Label` | `Label` | Nine-way alignment, optional word wrap |
@@ -2475,7 +2475,8 @@ when it is set it wins over the shortcut's own text in the menu drawing.
 A control's frame is an object, not a pair of numbers: `Control.Border` holds a `Border`, and the
 border answers four questions - how much of the control it takes, what it clips, whether the control
 is still opaque, and what to paint. `Border.None` is the default and the singleton that means "no
-frame"; `SimpleBorder` is the straight-sided, one-colour frame a control class gives itself.
+frame"; `SimpleBorder` is the straight-sided frame a control class gives itself, with a width per edge
+and a radius per corner.
 
 ```csharp
 var card = new Panel
@@ -2492,14 +2493,15 @@ var card = new Panel
 | `Insets(control)` | The non-client area on each edge. It comes out of the bounds *before* the padding, so `ContentRect = ClientRect - Insets - Padding` |
 | `NarrowsClip` / `ClipTo` | Whether the frame clips the control to a shape narrower than its bounds - true for rounded corners, whose corners let what is behind show through |
 | `IsRectangular` | The border's share of `Control.Opaque`: a rounded frame that lets the corner through stops the control repainting what is behind it |
-| `CornerRadius` | The radius the control rounds its own background fill by, so the fill follows the frame |
+| `Corners` / `CornerRadius` | The radius per corner the control rounds its own background fill by, so the fill follows the frame. `CornerRadius` is the largest of the four, for a shape that takes one number |
+| `ShowsControlText` | Whether the frame draws the control's `Text` in a break in its top edge, the way a group box draws its caption. It takes the caption's band out of the top of the content |
 | `Paint(canvas, bounds, control)` | Draws the frame, inside the bounds and after the children, so it covers the edge of whatever the content ran into |
 
 A border is immutable, so a control class keeps one in a `private static readonly` field and assigns
 it in its constructor; a change is a different instance, the way `Padding` and `Background` work. The
 setter repaints, and lays out as well when the new border takes a different amount of room.
 
-`SimpleBorder` carries a thickness, a corner radius and a colour, and gives the frame a colour per
+`SimpleBorder` carries a thickness per edge and a radius per corner, and gives the frame a colour per
 state: `WithThemeColor` for the resting colour and `WithHoverColor`, `WithFocusColor`,
 `WithActiveColor`, `WithPressedColor` and `WithDisabledColor` for the rest. When several apply at
 once they are taken in that order - disabled, pressed, active, focused, hovered, then resting - which
@@ -2507,6 +2509,44 @@ is the order the built-in controls hand-coded before borders were objects. `Roun
 shape without a stroke: it rounds the fill and clips the corners, and takes no room.
 `WithInsets(inset)` makes a frame take a different amount of room than the stroke is thick, which is
 what a control whose band is asymmetric needs.
+
+The edges are a `Thickness`, and each of them can rest in its own colour, so an accent edge or a frame
+that is only partly drawn is one border rather than a border plus a decoration:
+
+```csharp
+// A card with an accent stripe down its left edge, its top corners rounded and its feet square.
+var card = new Panel
+{
+    Border = new SimpleBorder(new Thickness(4f, 1f, 1f, 1f), new CornerRadii(12f, 12f, 0f, 0f))
+        .WithThemeColor(BorderSide.Left, ThemeColor.Accent),
+};
+```
+
+Where two edges of different widths meet, the corner is mitred through the diagonal the way a browser
+draws it, and the inner corner radius shrinks so the inner outline stays parallel to the outer one. The
+frame takes the width of each edge out of the content, so a four-pixel left edge moves the content four
+pixels in. A state colour covers every edge: a frame whose edges differ only while hovered is not a
+shape anything in this library needs.
+
+A state-coloured border repaints itself when the pointer arrives, without the control overriding
+anything: a border that follows `ControlState` says so through `Border.VariesByState`, and `Control`
+repaints for it. A container that should answer the pointer over its content as well as its own
+gutter - a card whose frame lights up while the pointer is anywhere in it - sets
+`Control.HoverIncludesChildren`, because hover otherwise belongs to the deepest control under the
+pointer, as it does on every platform:
+
+```csharp
+var card = new Panel
+{
+    Border = SimpleBorder.Thin.WithHoverColor(ThemeColor.Accent).WithCornerRadius(8f),
+    HoverIncludesChildren = true,
+};
+```
+
+A frame can also draw the control's own `Text`, which is the whole of a group box:
+`WithControlText()` moves the top edge down by half the caption's band and cuts it away behind the
+text, so the caption reads the same on any background, and the band comes out of the top of the
+content. `GroupBox` is a panel with that border and nothing else.
 
 The state a colour is resolved for is `Control.State`, a `ControlState` flag set computed from
 `Enabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its own adds it
@@ -2518,9 +2558,10 @@ public override ControlState State => base.State | (_dropDownOpen ? ControlState
 
 That is how a combo box, a split button and a date picker keep their frame in the accent colour while
 the list or calendar they own is showing, even after the pointer has moved into it. A border that
-needs more than a colour - the caption band of a group box, a frame that is dashed, a shadow - is a
-subclass of `Border`; BORDERS.md holds the design record and the phase-2 plan for per-edge and
-per-corner settings.
+needs more than a straight-sided frame - the caption band of a group box, a shadow, a dashed line - is
+a subclass of `Border`; BORDERS.md holds the design record. A dashed frame is deliberately not a
+`SimpleBorder`: a dash belongs to a stroke, and a frame with a width per edge has to be filled to keep
+its mitres, so the two cannot be the same object.
 
 ### Appearance
 
