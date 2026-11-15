@@ -82,20 +82,22 @@ manifest is expected to be short and per application rather than a library-wide 
 | Project layout | The four-folder rung-3 layout, all code in `common/`, with empty `windows/`, `macos/`, `linux/` folders | Reconciling a tree is portable arithmetic over object graphs. The folders stay because the package's `lib/` folders and dependency groups come from those same inner builds; a single-target exception would fight `check-package-layout.py` for no gain. |
 | Generator packaging | A second assembly, `Kolvir.Feature.VirtualDom.Generators`, referenced `OutputItemType="Analyzer" ReferenceOutputAssembly="false"` | The generator is build-time only. It must not appear in the deliverable, and it targets `netstandard2.0` because analyzers do. |
 | How a control becomes useable from a tree | A **manifest**: a `partial` class carrying one `[VirtualDom(typeof(X))]` attribute per control | Compile-time, so the generator sees the exact type and can emit direct code. This is the whole reason the design is AOT-clean. Rejected: a runtime `Register<T>()` call, whose effects no generator can see and whose types the trimmer cannot learn about. |
-| Attribute shape | `[AttributeUsage(Class, AllowMultiple = true)]`, ctor takes the single `Type`, other options as settable properties (`Name`) | Follows `System.Text.Json`'s `[JsonSerializable]`: one attribute instance is a per-type configuration record, so future options (`Name`, `IgnoreProperties`, a custom binder) have somewhere to live without reshaping the API or adding overloads. |
-| Manifest is `partial` | Yes | It is the generator's write target. Today it holds only the factories and binders; later a generated runtime table or registration hook lands there without a base class or a second attribute. |
-| Where the generated factories live | A **`V` static class nested inside the manifest**, so `using static MyApp.V;` gives bare `Label(...)`, `Button(...)` | This is the syntax win (section 4). Nesting also solves the multi-assembly problem: `MyApp.V` and `Plugins.V` cannot collide, whereas a flat `class V` per assembly would make every cross-assembly reference ambiguous. |
-| What a factory does | Emits direct assignments into the node's property list - one per declared parameter - never reflection | The setters are rooted by the references themselves, so no annotation is needed anywhere on this path, and the trimmer's view is exactly the properties the developer actually registered. |
-| Binder | A generated per-control `Set(Control, string name, object? value) : bool` alongside the factory | The reconciler needs to patch an existing control from a changed node without knowing its type. A generated `switch` over names is the reflective binder's job done statically, and it doubles as the drift test hook (it returns `false` for an unknown name, so a test can assert every public settable property is handled). |
-| What is diffed | The **previous node against the next node**, never the node against the control | Halves the problem: the binder needs setters, because old values come from the tree we already hold. Nothing reads a control's current property state back out, which keeps `Control` free of any virtual-DOM awareness and avoids the hardest reflective cases (getter-only and private-setter properties, boxing on read of value types). The one exception is the pristine snapshot below, which is read once per type rather than per diff. |
-| Optional property arguments | Every factory parameter is a `Specified<T>` struct defaulting to `default`: `default` is "not in this node", an implicit conversion from `T` is "set to this", and `null` is a value when the property is declared nullable | A plain `T?` cannot express three states, and they are all needed: `Font`, `Color` and `ContextMenu` have a meaningful `null`, so "no font" has to be distinguishable from "this node says nothing about the font". The parameter must not be `Specified<T>?` - with the nullable wrapper, a standard nullable conversion beats the user-defined one and steals the `null` literal (section 6.1). The wrapper never reaches the node: the factory unwraps it and stores the plain `T`, so no `Specified<T>` is ever boxed. |
-| A `null` for a non-nullable property | An analyzer error (VD010), with the generated factory's `ArgumentNullException` as the backstop for values nothing can prove | C# only warns (CS8625/CS8604) and only where nullable is enabled, so in a `#nullable disable` file the call would silently store a null. An analyzer error is the only way to make it fail the build without changing the severity of warnings in an application's unrelated code. `null!` stays quiet on purpose: it is the caller overriding the analysis, so the backstop is the right thing to hear from. |
-| What "default" means | Not `default(T)`: the **pristine value**, snapshotted per property from a freshly constructed control | `Label.Text` starts at `""`, `Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared default is `None`. `default(T)` would be wrong for most properties, so each `NodeType` records what its control looked like before any node touched it - which needs a generated getter alongside the setter, read once when the first control of that type is created. |
-| Node type | One non-generic `VNode` class holding a generated `NodeType` (creator + binder + CLR type), a `VProp[]` of name/value pairs, and a `VNode[]` of children | Keeps the reconciler non-generic: no generic dispatch, no variance pain in child lists. Compile-time type safety lives entirely in the generated factory's signature, which is where a developer actually types the code. |
-| Property names | Interned string literals emitted by the generator, not an enum or an index | A literal is interned, so a name costs no allocation; the binder's string `switch` compiles to a hashed dispatch. An enum would put a build-time ordering into a public API for no measurable gain. |
+| Attribute shape | `[AttributeUsage(Class, AllowMultiple = true)]`, ctor takes the single `Type`, other options as settable properties (`Name`) | Follows `System.Text.Json`'s `[JsonSerializable]`: one attribute instance is a per-type configuration record, so future options (`Name`, `IgnoreProperties`, a custom node shape) have somewhere to live without reshaping the API or adding overloads. |
+| Manifest is `partial` | Yes | It is the generator's write target: it emits one node class per registered control into the manifest's namespace, and later a generated runtime table or registration hook lands on the manifest itself without a base class or a second attribute. |
+| Where the generated node types live | One `V<Control>` class per registered control, in the **manifest's own namespace**, named by the attribute's `Name` when given | Nodes are ordinary classes a developer constructs with an object initializer, so a plain `using MyApp;` is all a view file needs. Separate namespaces per manifest give the multi-assembly story for free. |
+| What a node holds | One **tracked property per settable control property**: a value plus a was-set flag, behind an ordinary `{ get; set; }`-shaped property | This is the whole point of switching from parameters to properties (section 6.1): calling the setter *is* the record that a property was specified, so "omitted", "set to a value" and "set to `null`" are all distinguishable without a wrapper type, a sentinel, or a nullable annotation trick. |
+| How a property is omitted | By not assigning it: `new VLabel { }` sets nothing, `new VLabel { Text = "hi" }` sets one thing, `new VLabel { Text = null }` sets it to null | Falls straight out of the setter being the signal, and it is what removes `Specified<T>` from the public surface entirely (section 9 records the parameter-based design this replaced). |
+| Children | `IReadOnlyList<VNode> Children { get; init; } = []` on the `VNode` base, so `Children = [ a, ..more ]` gets collection expressions and spread | `init` rather than a get-only `List` because a collection *initializer* cannot express spread (`..more`), which is what a message list needs. The reconciler ignores children on a node whose control is not a container, and VD011 warns when one is set. |
+| What applying a node does | Generated `ApplyTo(Control)` and `PatchFrom(previous, Control)` members: direct typed assignments, no names, no dictionary, no `switch` on strings | The reconciler must patch a control without knowing its type. Generating the assignments per node type does that statically, and since the previous node is typed too, the diff is a field-by-field comparison rather than a lookup. |
+| What is diffed | The **previous node against the next node**, never the node against the control | The old values come from the tree we already hold, so nothing reads a control's current property state back out. That keeps `Control` free of any virtual-DOM awareness and avoids the hardest reflective cases (getter-only and private-setter properties). The one exception is the pristine snapshot below, read once per type rather than per diff. |
+| A `null` for a non-nullable property | The generated property is typed non-nullable, so `Text = null` is CS8625 at the assignment, which an analyzer raises to an error (VD010); the generated setter keeps an `ArgumentNullException` as the backstop for values no analysis can prove | C# only warns and only where nullable is enabled, so in a `#nullable disable` file the assignment would silently store a null. An analyzer error is the only way to fail the build without changing the severity of warnings in an application's unrelated code. `null!` stays quiet on purpose: that is the caller overriding the analysis, so the backstop is the right thing to hear from. |
+| What "default" means | Not `default(T)`: the **pristine value**, snapshotted per property from a freshly constructed control | `Label.Text` starts at `""`, `Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared default is `None`. `default(T)` would be wrong for most properties, so each node type records what its control looked like before any node touched it - which needs a generated getter alongside the setter, read once when the first control of that type is created. |
+| Node type | One `VNode` base holding `Key` and `Children`, and a generated concrete class per control holding its own typed properties | The reconciler works against the base, so it stays non-generic; compile-time type safety is the node class's property types, which is where a developer actually types. |
+| Property names | **None exist.** A property is a field on a generated class, not a name in a dictionary | Removes the interned string, the `VProp[]` and the hashed string dispatch that the factory-based design needed, and makes the diff a comparison of typed values. |
 | `Key` | On the `VNode` base, so every element can be identified in a list | Requirement of keyed reconciliation (section 6). On the base type it needs no per-type support. |
-| Events | Generated parameters map to Kolvir's `AddXxxHandler`/`RemoveXxxHandler` method pairs, not to `+=` | Kolvir exposes handlers as method pairs rather than `event` members (`FEATURE-COST-POLICY.md` 5.4). The generator knows the pairs, so an event property is a named parameter with a delegate value; the reconciler keeps the attached delegate so it can detach the old one and attach the new one across renders. |
-| Control creation | Generated `Func<Control>` per type, emitted in the binder's `NodeType` | `Activator.CreateInstance` is the classic trimming trap. A generated `new Label()` also makes a missing parameterless constructor a build error rather than a run-time one. |
+| Events | Generated event properties map to Kolvir's `AddXxxHandler`/`RemoveXxxHandler` method pairs, not to `+=` | Kolvir exposes handlers as method pairs rather than `event` members (`FEATURE-COST-POLICY.md` 5.4). The generator knows the pairs, so an event is a delegate property; the reconciler keeps the attached delegate so it can detach the old one and attach the new one across renders. |
+| Control creation | A generated `Create()` on each node type returning a new control | `Activator.CreateInstance` is the classic trimming trap. A generated `new Label()` also makes a missing parameterless constructor a build error rather than a run-time one. |
+| Name collisions | A control property whose name matches a `VNode` member (`Key`, `Children`) is reported as VD012 and left out of the generated class | Flattening puts control properties in the same namespace as the node's own members, so a clash has to be diagnosed rather than silently shadowed. No built-in control declares either name today, so the diagnostic is insurance. |
 | Reordering children | `ControlCollection.Move`, added to core for this | Added to `Kolvir` on rung 1 rather than worked around: `Remove` + `Insert` detaches and re-attaches the child, which re-reads enabled/displayed/appearance state for its subtree and re-runs `OnControlAdded`, so a keyed reorder would disturb exactly the state it exists to preserve. A general reorder primitive is worth having on its own terms and costs nothing to an application that does not call it. |
 | Reflective escape hatch | Available, but explicitly not the default: an annotated `Type`-taking registration, and unannotated overloads marked `[RequiresUnreferencedCode]` | The only case that genuinely needs it is a type supplied at run time - a plugin, or a control set read from configuration. Marking the unannotated overloads means an AOT build gets a warning instead of a post-trim crash. |
 | Renders are event-driven | `SetState` renders synchronously; no per-frame rendering, no scheduled batching in the first cut | Batching is an optimisation for a problem that does not exist yet in a UI driven by clicks and messages, and it needs a scheduling seam (`FEATURE-COST-POLICY.md` 6.2) that this feature is not entitled to invent. Section 10 lists coalescing as the follow-up. |
@@ -118,7 +120,7 @@ partial class AppControls;
 A component:
 
 ```csharp
-using static AppControls.V;
+using MyApp;            // the manifest's namespace, where the generated node types live
 
 sealed class ChatPanel : Component
 {
@@ -131,75 +133,102 @@ sealed class ChatPanel : Component
         _messages = messages;
     }
 
-    public override VNode Render() => Column(
-        gap: 8,
-        children: [
-            RichText(text: _title, font: bold),
-            .._messages.Select(m => Label(key: m.Id, text: m.Text)),
-            Button(text: "Send", onClick: SendPressed),
-        ]);
+    public override VNode Render() => new VStack
+    {
+        Gap = 8,
+        Children =
+        [
+            new VRichText { Text = _title, Font = bold },
+            .._messages.Select(m => new VLabel { Key = m.Id, Text = m.Text }),
+            new VButton { Text = "Send", OnClick = SendPressed },
+        ],
+    };
 }
 ```
 
-Three things make that readable, and each is a decision rather than an accident:
+That is ordinary C# object and collection syntax, which is the point: the generator produces classes
+whose property names and types are the control's own, so everything the editor already does for a
+`Label` - completion, rename, "go to definition", compile-time type checking - works on a node without
+any of it being wired up.
 
-1. **Bare names.** `using static AppControls.V;` imports the generated factories, so elements read as
-   names rather than `V.Label(...)` or `VNode.Of<Label>(...)`. This is the closest plain C# gets to a
-   markup syntax, and it is what makes a large tree bearable.
-2. **Collection expressions for children.** `children: [a, b, ..more]` gives nesting without wrapping
-   calls, plus LINQ spread for lists. `params`-compatible overloads cover the common case.
-3. **Named arguments for properties.** The generator emits one parameter per public settable property,
-   so `text:`, `font:`, `onClick:` are checked at compile time, renamed with the property, and
-   completed by IntelliSense. Setting a property is a visible, named thing - nothing hidden in a
-   string.
-4. **Optional arguments that stay clean.** A parameter is `Specified<T>` with an implicit conversion
-   from `T`, so `Label(text: "hi")` reads exactly as it would with a plain `string?` parameter while
-   still distinguishing three cases: not passed at all, passed a value - including `null` for a
-   nullable property - and a deliberate reset (`Label(font: Specified<Font?>.Reset)`). The distinction
-   is needed because `Font`, `Color` and `ContextMenu` all have a meaningful `null`, so "no font" and
-   "says nothing about the font" are different statements (section 6.1).
+The three decisions that make it work:
 
-The trade-off this buys: the factories are a generated surface, so their shape follows the controls
-rather than being hand-designed. That is the same trade `System.Text.Json`'s source generator makes,
-and the same one `FEATURE-COST-POLICY.md` 5.1 argues for - generate the shape instead of reflecting
-at run time.
+1. **A node class per control, not a factory method.** `new VLabel { Text = "hi" }` is an object
+   initializer over a generated class, so every property is a real property with the control's type.
+   Setting a property is a visible, named assignment - nothing hidden in a string or a dictionary.
+2. **Collection expressions for children.** `Children = [a, b, ..more]` gives nesting without wrapping
+   calls, plus spread for any `IEnumerable<VNode>`, which is what turns a message list into one line.
+   This is why `Children` is `init`-only: a collection *initializer* (`Children = { ... }`) cannot
+   express spread.
+3. **Omitting a property is the absence of an assignment.** `new VLabel { }` says nothing about the
+   text; `new VLabel { Text = "" }` sets it to empty; `new VLabel { Text = null }` would be setting it
+   to null, which is only legal where the control property is nullable. All three are distinguishable
+   without a wrapper type, because the setter call is itself the record that the property was
+   specified (section 6.1).
 
+What this costs against the factory syntax considered earlier is verbosity: `new VLabel { Text = "hi" }`
+is longer than `Label(text: "hi")`. What it buys is unambiguous setters, no `Specified<T>` in the
+calling convention, no property-name strings anywhere, and a diff that compares typed fields. Section 9
+records the factory design this replaced.
+
+The generated surface follows the controls rather than being hand-designed, which is the same trade
+`System.Text.Json`'s source generator makes and the same one `FEATURE-COST-POLICY.md` 5.1 argues for -
+generate the shape instead of reflecting at run time.
 ## 5. What the generator emits
 
-For each manifest, three things, all in the manifest's own namespace, all `internal` except the
-factories:
+For each registered control, one node class, emitted into the manifest's namespace. It holds a tracked
+property per settable control property, and the three members the reconciler needs:
 
 ```csharp
-partial class AppControls
+public sealed class VLabel : VNode
 {
-    internal static class V
-    {
-        public static VNode Label(
-            Specified<string?> text = default,
-            Specified<Font?> font = default,
-            ...) => ...;
+    private Specified<string> _text;
+    public string Text { get => _text.Value!; set => _text = value; }
 
-        public static VNode Button(
-            Specified<string?> text = default,
-            Specified<Action<object>?> onClick = default,
-            ...) => ...;
+    private Specified<Font?> _font;
+    public Font? Font { get => _font.Value; set => _font = value; }
+
+    internal override NodeType NodeType => LabelType;
+
+    internal static readonly NodeType LabelType =
+        new(typeof(Label), static () => new Label(), pristine: () => new Label().Snapshot(...));
+
+    internal override void ApplyTo(Control control)
+    {
+        var label = (Label)control;
+        if (_text.IsSpecified) label.Text = _text.Value!;
+        if (_font.IsSpecified) label.Font = _font.Value;
+    }
+
+    internal override void PatchFrom(VNode previous, Control control)
+    {
+        var old = (VLabel)previous;
+        var label = (Label)control;
+        if (!_text.Equals(old._text)) label.Text = _text.IsSpecified ? _text.Value! : LabelType.PristineText;
+        if (!_font.Equals(old._font)) label.Font = _font.IsSpecified ? _font.Value : LabelType.PristineFont;
     }
 }
 ```
 
-- **`V` (public, nested)** - one factory per registered control. Each allocates a `VNode` with a
-  `VProp[]` sized to the number of specified arguments, so an unset property costs nothing. A
-  parameter is a non-nullable `Specified<T>`, and the factory stores the unwrapped `T`, so the wrapper
-  exists only at the call site.
-- **`NodeType` singletons (internal)** - one per control: the `Type`, a `Func<Control>` creator, the
-  binder, and the pristine values captured from a freshly constructed control. `VNode.NodeType` is
-  how the reconciler answers "can I reuse this control?" in one reference comparison.
-- **Binders (internal)** - `bool Set(Control c, string name, object? value)` with one `case` per
-  property, each a direct assignment inside a typed cast, plus a generated `object? Get(Control c,
-  string name)` used only to fill in the pristine snapshot.
+Three things to notice:
 
-The generated code is emitted with `#nullable enable`, fully qualified type names (so it compiles
-whatever `using`s the manifest's file has), and no dependencies on analyzer-only types.
+- **`Specified<T>` is internal machinery, not a calling convention.** It survives as the field type
+  behind a tracked property - a value plus a was-set flag - but it never appears in a signature a
+  developer writes, and its `Reset` member is gone, because absence already means "not assigned".
+  This is what removed the public wrapper, the implicit operator, the nullable-conversion trap and
+  the CS0411 generic-inference note from the design (section 9).
+- **No names, no `VProp[]`, no string `switch`.** `ApplyTo` and `PatchFrom` are generated typed
+  assignments over the node's own fields, and the diff compares `Specified<T>` values directly. The
+  metadata that used to be a property name is now the field.
+- **`NodeType` is the identity the reconciler uses** - CLR control type, a creator, and the pristine
+  values - and comparing two nodes' `NodeType` by reference answers "can I reuse this control?" in one
+  step. The pristine snapshot is a generated `Func<T>` per control, evaluated once when the first
+  control of that type is created (section 6.1).
+
+The `VNode` base itself is hand-written in `Kolvir.Feature.VirtualDom`: `Key`, `Children`, the abstract
+`ApplyTo`/`PatchFrom`/`NodeType` members, and the reconciler's entry points. The generated code is
+emitted with `#nullable enable`, fully qualified type names (so it compiles whatever `using`s the
+manifest's file has), and no dependencies on analyzer-only types.
 
 **Diagnostics the generator reports**, each on the offending attribute line:
 
@@ -207,31 +236,31 @@ whatever `using`s the manifest's file has), and no dependencies on analyzer-only
 | --- | --- |
 | VD001 | The attributed type is not a `Control`, or is abstract without a generated subclass. |
 | VD002 | No accessible parameterless constructor. |
-| VD003 | Two registrations produce the same factory name (`Name` on the attribute fixes it). |
+| VD003 | Two registrations produce the same node class name (`Name` on the attribute fixes it). |
 | VD004 | The same type is registered more than once across the compilation's manifests. |
 | VD005 | `Name` is not a valid C# identifier. |
-| VD006 | A public settable property is a delegate but matches neither an `AddXxxHandler`/`RemoveXxxHandler` pair nor a known event shape (it is then treated as an ordinary property, with a warning that the reconciler will assign it as a field). |
+| VD006 | A public settable property is a delegate but matches neither an `AddXxxHandler`/`RemoveXxxHandler` pair nor a known event shape (it is then treated as an ordinary property, with a warning that it will be assigned as a delegate field). |
 | VD007 | The manifest class is not `partial`. |
+| VD012 | A public settable property has the same name as a `VNode` member (`Key`, `Children`), so it cannot be flattened. Reported as an error, because silently dropping it would leave a property that cannot be set declaratively. Nothing in `Kolvir` declares either name today. |
 
-Plus one diagnostic from the analyzer half, reported as an **error** rather than a warning:
+Plus two from the analyzer half, both reported as **errors** rather than warnings:
 
 | Id | Condition |
 | --- | --- |
-| VD010 | A `null` constant is passed for a property whose type is non-nullable. C# catches this as CS8625 and CS8604, but as warnings, and not at all in a file with `#nullable disable` - where the call would silently put a null in the property. |
+| VD010 | A `null` is assigned to a generated property whose type is non-nullable. C# catches this as CS8625 and CS8604, but as warnings, and not at all in a file with `#nullable disable` - where the assignment would silently store a null. |
+| VD011 | `Children` is assigned on a node whose control is not a container. |
 
-The check needs no lookup table: the parameter's type is `Specified<X>`, and `X`'s nullable
-annotation *is* the property's declared nullability, which the generator wrote. Behaviour deliberately
-left to the compiler is the set of cases the compiler already handles better than an analyzer could -
-it has flow analysis, so a `string?` local that may hold null is CS8604 there whether or not we say
-anything.
+VD010 needs no lookup table: it reads the generated property's declared type, which the generator
+wrote. What it deliberately leaves to the compiler is the set of cases the compiler already handles
+better - it has flow analysis, so a `string?` local that may hold null is CS8604 there whether or not
+we say anything.
 
 The analyzer lives in the same assembly as the generator, which is referenced as an `Analyzer`, so
 both arrive together and neither reaches the deliverable.
 
-Diagnostics rather than silent omission is the entire point of the manifest: the alternative (a
-factory that is simply missing) turns into a confusing compile error at a call site that has nothing
-to do with the real mistake.
-
+Diagnostics rather than silent omission is the entire point of the manifest: the alternative (a node
+class that is simply missing, or silently short a property) turns into a confusing compile error at a
+call site that has nothing to do with the real mistake.
 ## 6. Reconciliation semantics
 
 The reconciler walks the previous and next trees together, and for each pair decides *reuse*,
@@ -247,83 +276,50 @@ authority on what the control currently looks like.
 
 ### 6.1 Omitted, set, or set to null
 
-A node lists the properties it says something about and omits the rest. Which of those an argument
-meant is decided once, at the call site, and what reaches the node is one bit plus a value:
+A node lists the properties it says something about, by assigning them, and says nothing about the
+rest by not assigning them:
 
-| Argument | In the node | On mount | On a patch from a node that had it |
+| Node | In the node | On mount | On a patch where the previous node set it |
 | --- | --- | --- | --- |
-| not passed | absent | control keeps what its constructor gave it | restored to the pristine value |
-| `Label(text: "hi")` | present, `"hi"` | set | set, if it differs from the old node |
-| `Label(font: null)` | present, `null` | set to `null` ("no font, inherit") | set to `null` |
-| `Label(text: Specified<string?>.Reset)` | absent | as omitted | as omitted |
+| `new VLabel { }` | absent | control keeps what its constructor gave it | restored to the pristine value |
+| `new VLabel { Text = "hi" }` | present, `"hi"` | set | set, if it differs from the previous node |
+| `new VLabel { Font = null }` | present, `null` | set to `null` ("no font, inherit") | set to `null` |
 
-`Specified<T>` is:
+There is no fourth spelling for "put it back": not assigning the property already means that, so an
+explicit reset would be an alias for absence. The factory-based design carried a `Reset` member for
+exactly this reason and this design does not need it.
 
-```csharp
-public readonly struct Specified<T>
-{
-    public Specified(T value)
-    {
-        Value = value;
-        IsSpecified = true;
-    }
+Nothing needs to be assigned for a node to be valid, so assigning a property is always a statement that
+the view wants that value there. If the previous render set one and this render does not, the previous
+value is wrong, and it is restored to the pristine value described below.
 
-    public T Value { get; }
+**This is why properties beat parameters.** A parameter cannot tell "argument omitted" from "argument
+passed as `null`" when both are representable, so the earlier design wrapped every parameter in a
+`Specified<T>` struct. It worked, but the wrapper leaked into every call site, needed a
+nullable-conversion workaround (a `(Font?)null` cast), and of its four parameter shapes two quietly
+did the wrong thing:
 
-    public bool IsSpecified { get; }
+| Parameter shape | `null` argument means | Diagnostic |
+| --- | --- | --- |
+| `Specified<string?>` | value `null` | none |
+| `Specified<string?>?` | absent | none |
+| `Specified<string>` (non-nullable) | value `null` | CS8625 warning |
+| `Specified<string>?` (non-nullable) | absent | none at all |
 
-    public static Specified<T> Reset => default;
+A setter has none of these problems: there is nothing to convert, nothing to infer, and no competing
+nullable conversion. `Text = null` on a nullable property is a value; on a non-nullable one it is CS8625
+at the assignment, which is where a developer can see it. `Specified<T>` survives only as the private
+field type behind a tracked property, where its `IsSpecified` flag is the record of the setter having
+run.
 
-    public static implicit operator Specified<T>(T value) => new(value);
-}
-```
-
-and a generated parameter is `Specified<T> text = default` - a struct, not a nullable struct. That one
-detail is what makes `null` usable as a value:
-
-- **The parameter must not be nullable.** With `Specified<T>?` the null literal bound to the nullable
-  *wrapper* rather than to the value inside it, because a nullable conversion is a standard conversion
-  and the compiler prefers it over a user-defined one - so `font: null` meant "absent" and setting a
-  nullable property to null needed a `(Font?)null` cast. Making the parameter a plain `Specified<T>`
-  removes the competing candidate, leaves the implicit operator as the only way for `null` to become
-  one, and "absent" moves to the parameter's default. `font: null` and `text: null` now both mean what
-  they read as.
-
-  The alternative of varying the shape per property - `Specified<X?>?` where the property accepts null,
-  `Specified<X>` where it does not - was measured and is worse on both branches: for a nullable
-  property the trailing `?` reintroduces the conversion that swallows `null`, so `font: null` becomes
-  "absent" again; for a non-nullable one it *removes* the CS8625 warning that a bare `Specified<X>`
-  produces, so `text: null` silently reads as "says nothing" instead of being flagged. The generator
-  does know the nullability and uses it - on the type argument, where it costs nothing and breaks
-  nothing.
-- **The zero value is the absent state.** `default(Specified<T>)` is what the omitted argument
-  produces, and it is also what an array element and an uninitialised local produce. Both fall out of
-  the same fact - struct field initialisers do not run for `default(T)` - so the flag has to be
-  inverted (`IsSpecified`, not `IsAbsent`) or those cases would read as "set to the type's default".
-- **`Reset` is `default`, so `Reset` is absence.** It stays because it reads better in a call than an
-  omission, but it is not a fourth state: an omitted property already means "restore the pristine
-  value", so there is nothing for a separately spelled reset to do differently.
-- **There is no generic form.** Method type inference does not flow through a user-defined conversion,
-  so a generic helper over `Specified<T>` (`Show(null)`, or a generic `Of<T>` factory) fails with
-  CS0411 before the conversion is ever considered. The generated factories are non-generic per control
-  precisely so this never comes up: `Label`'s parameter is `Specified<string?> text`, not some
-  `Specified<T>` the compiler has to infer.
-- **The property's declared nullability decides what `null` is allowed.** A property declared
-  nullable takes `Specified<Font?>` and accepts null. One declared non-nullable takes
-  `Specified<string>`, and `Label(text: null)` must not reach the control at all: C# catches it as
-  CS8625, but only as a *warning*, and only where the calling file has nullable enabled - in a
-  `#nullable disable` file the same call is silent. So the package ships an analyzer that reports
-  **VD010 as an error** on the argument (section 5), and the generated factory keeps a runtime
-  `ArgumentNullException` as the backstop for the values no analysis can prove - a `null!`, or one
-  that arrived from an `object` cast. `null!` is deliberately quiet in the analyzer: that is the
-  caller saying "trust me", so the backstop firing there is the right division rather than
-  double-reporting.
-
-That every one of those bindings behaves as described was checked against the compiler rather than
-assumed, including the `null`-versus-wrapper case that motivated the shape.
-
-The wrapper is a call-site device only. The factory unwraps it and stores the plain `T` in the node's
-`VProp`, so no `Specified<T>` is ever boxed and the node's shape is unchanged.
+**What "pristine" means, and where it comes from.** Not `default(T)`: `Label.Text` starts at `""`,
+`Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared
+default is `None`. So each node type carries a pristine snapshot read from a freshly constructed
+control - which needs a generated getter alongside the setter, read once per type when the first
+control of that type is created, not once per diff. A property whose initial value depends on
+something outside the control (a theme colour read lazily) gives a snapshot that is right when taken
+and may not stay right; the exposure is narrow, since the snapshot is only consulted when a property is
+dropped, and it is still more accurate than `default(T)`.
 Children, in order of preference:
 
 1. **Keyed matching** when both lists contain keys: children are matched by `Key`, so a reorder
@@ -358,9 +354,9 @@ The plan's surface, in the order a developer meets it:
 
 | Piece | Shape | Purpose |
 | --- | --- | --- |
-| `VirtualDomAttribute` | `[VirtualDom(typeof(Label), Name = "…")]`, `AllowMultiple` | The manifest entry (section 3). |
-| `VNode` | Non-generic node: `NodeType`, `VProp[]`, `VNode[]`, `Key` | The description (section 3). |
-| `Specified<T>` | `readonly struct`: `Value`, `IsSpecified`, `Reset`, implicit conversion from `T`; a factory parameter is a plain `Specified<T>` defaulting to `default`, never `Specified<T>?` | The optional-argument wrapper (section 6.1). Never stored in a node. |
+| `VirtualDomAttribute` | `[VirtualDom(typeof(Label), Name = "...")]`, `AllowMultiple` | The manifest entry (section 3). |
+| `VNode` | Abstract base: `Key`, `Children` (init-only `IReadOnlyList<VNode>`), and the abstract `NodeType`/`ApplyTo`/`PatchFrom` members the reconciler drives | The description (section 3). Everything a developer writes derives from a generated class over this. |
+| `V<Control>` (generated) | One class per registered control: a tracked property per settable control property, plus `Create`, `ApplyTo`, `PatchFrom` and a `NodeType` | What a view actually constructs (section 5). `Specified<T>` is a private field type inside it, never a public signature. |
 | `Component` | `abstract VNode Render();`, `void SetState()` | The view model base. `SetState` marks the component dirty and renders synchronously, then patches. |
 | `VirtualDom.Mount(Control parent, VNode root)` | Returns a `MountHandle` | Turns a tree into live controls under a container (typically the window's root panel). |
 | `MountHandle.Update(VNode root)` | Reconciles the new tree against what is mounted | What a component's render calls; also usable directly, without components, for a one-shot tree. |
@@ -376,22 +372,20 @@ can have it.
 
 | # | Step | Scope | Done when |
 | --- | --- | --- | --- |
-| 1 | Package skeleton and the node model | `Kolvir.Feature.VirtualDom` project in the rung-3 layout, `VNode`, `VProp`, `NodeType`, `Specified<T>`, hand-built trees | A tree can be constructed by hand and asserted on; the project packs with the same `lib/` folders as the other features |
-| 2 | Mount, and the first hand-written binder | `VirtualDom.Mount`, create-only reconciliation, `MountHandle`; a hand-written `Label` binder with generated-style `Set`/`Get` next to the contract it will later replace | Mounting a hand-built tree puts a real `Label` with the right text under a container |
-| 3 | Property diffing and reset | Old-vs-new prop diff, the pristine snapshot captured from a fresh control on first use, `Update` | A changed tree patches in place: the same control instance survives, a dropped prop returns to its pristine value (not `default(T)`), and `Specified<T>.Reset` behaves the same as dropping it |
+| 1 | Package skeleton and the node model | `Kolvir.Feature.VirtualDom` project in the rung-3 layout, `VNode`, `NodeType`, the internal `Specified<T>` field type, hand-written node classes for two controls | A tree can be built by hand with object initializers and asserted on; the project packs with the same `lib/` folders as the other features |
+| 2 | Mount, and applying a node | `VirtualDom.Mount`, create-only reconciliation, `MountHandle`, `ApplyTo` on the hand-written nodes | Mounting a hand-built tree puts a real `Label` with the right text under a container |
+| 3 | Patching and the pristine snapshot | `PatchFrom`, tracked properties, the pristine snapshot captured from a fresh control on first use, `Update` | A changed tree patches in place: the same control instance survives, a property that stops being set returns to its pristine value (not `default(T)`), and one that stays set to the same value is not re-assigned |
 | 4 | Structure: create, replace, unmount | `NodeType` mismatch handling, positional children, subtree unmount, event detach | Inserting, removing and retyping children mid-list leave a correct tree and no leaked handlers |
 | 5 | Keys and reordering | Keyed matching, mixed keyed/unkeyed lists, minimum move sequence over `ControlCollection.Move` | Reversing a keyed list moves controls instead of recreating them, proven by reference identity and by scroll position surviving |
 | 6 | Events | Generated `AddXxxHandler`/`RemoveXxxHandler` mapping, delegate identity tracking | Re-rendering with the same handler subscribes once; a new handler replaces the old one |
-| 7 | The source generator and its analyzer | Attribute, `ForAttributeWithMetadataName`, `V` factories, `NodeType`s, binders, diagnostics VD001-VD007, plus the analyzer half and VD010 (`null` for a non-nullable property, as an error) | The manifest in section 4 compiles, the drift test (section 11) passes for every built-in control, and a snippet passing `null` to a non-nullable property fails the build with VD010 even when it is compiled with `#nullable disable` |
+| 7 | The source generator and its analyzer | Attribute, `ForAttributeWithMetadataName`, node classes with tracked properties, `Create`/`ApplyTo`/`PatchFrom`, diagnostics VD001-VD007 and VD012, plus the analyzer half with VD010 and VD011 | The manifest in section 4 compiles, the drift test (section 11) passes for every built-in control, and snippets that assign `null` to a non-nullable property or children to a leaf node fail the build - VD010 also with `#nullable disable` |
 | 8 | The component layer | `Component`, `SetState`, dirty tracking, render-and-patch | A headless scene shows new controls after a `SetState`, and `Render` runs exactly once per change |
 | 9 | Reflective escape hatch | Annotated `Type` registration, `[RequiresUnreferencedCode]` unannotated overloads, the runtime table | A control registered by `typeof` at run time mounts through the reflective binder, and an AOT build warns on the unannotated overload |
 | 10 | Demo, docs and AOT verification | A virtual-DOM card in the demo app, `DEVELOPER-GUIDE.md` sections, single-file AOT publish | The published exe renders the card identically to the JIT build, and the trimmer's report shows only the registered controls |
 
-Steps 2-6 are deliberately written to work with a hand-written binder so the reconciler is complete
-and tested *before* the generator exists. The generator then replaces the hand-written surface
-without touching the reconciler, which is what keeps step 7 a packaging-and-codegen change rather than
-a redesign.
-
+Steps 1-6 are written against two hand-written node classes so the reconciler is complete and tested
+*before* the generator exists. The generator then replaces those classes without touching the
+reconciler, which is what keeps step 7 a codegen change rather than a redesign.
 ## 9. Options considered and rejected
 
 | Option | Why not |
@@ -399,6 +393,7 @@ a redesign.
 | Runtime registration: `VirtualDom.Register<Button>()` at startup | A generator cannot see the call's effect, and the trimmer cannot learn the type from it. Recovering safety means `[DynamicallyAccessedMembers]` plus a reflective binder - slower, and the reflective binder is the path with real AOT risk. Kept only as the escape hatch for types that genuinely arrive at run time (step 9). |
 | `[DynamicDependency]` on the registration method | Compile-time constants only. It cannot express "whatever the application passes to this call". |
 | String-named types and properties parsed at run time (a real DSL) | Property names as run-time strings need reflection the trimmer cannot see, are unverifiable until run time, and are slower. This is the one option that would make an AOT build genuinely unreliable. |
+| Factory methods with `Specified<T>` parameters - the design this replaced | AOT-clean and workable, but it put a wrapper in every call site to answer a question a setter answers for free, and it did not actually make `null` safe: three of its four parameter shapes were measured mishandling it (section 6.1). Switching to a class with tracked properties deleted the wrapper from the public surface, the property-name strings, the `VProp[]` and the hashed name dispatch, and made the diff a comparison of typed fields. Kept here because the wrapper's problems are the reason for the current shape, not an accident of it. |
 | Union types (C# 15 / .NET 11) as the three-state wrapper | Measured on SDK 11.0.100 against `net11.0`: a union with a non-nullable case, `union Prop(string, Absent, Reset)`, rejects `Take(null)` with **CS8625, still a warning**; with a nullable case (`string?`) `null` is silent, exactly as `Specified<string?>` is. The rule the compiler applies is "a null literal converted to a non-nullable reference type", which does not care whether the destination is a union case or an implicit operator, so a union changes the spelling and not the severity. Unions are otherwise a good fit - `union Prop<T>(T, Absent, Reset)` compiles, and "no case set" being the zero value is exactly the absent state with no inverted flag needed - but they need a `net11.0` leg in the package and buy nothing this design does not already have. Recorded as a revisit in section 10. |
 | Promoting CS8625/CS8604 to errors from the package's `buildTransitive` props | No code at all, and it covers more than a null-literal analyzer can, because the compiler's flow analysis already handles a possibly-null variable. Rejected because it would silently make every null-to-non-nullable in a referencing project an error - a policy an application should choose for itself, not inherit from adding a UI package. It stays a documented one-liner (section 10). |
 | `VNode.Of<T>(...)` generic factories, without a manifest or generator | AOT-safe (with an annotation on the type parameter) but verbose at every call site, and setting a property still needs a name/value pair. Acceptable as an internal primitive; rejected as the developer-facing syntax. |
@@ -439,9 +434,19 @@ a redesign.
   switching would cost a `net11.0` leg in the package for no behavioural gain. What it would buy is
   `union Specified<T>(T, Absent)` - "no case set" as the zero value, which is the absent state for
   free without the inverted flag. Revisit if and when the whole library moves to .NET 11.
-- **Name collisions are a per-manifest concern.** Two manifests imported into one file make shared
-  names ambiguous, which is a compile error at the call site rather than a wrong tree, so it is
-  annoying but safe. `Name` on the attribute is the escape.
+- **Flattening costs verbosity, and that is the accepted trade.** `new VLabel { Text = "hi" }` is longer
+  than a factory would be, and the difference compounds when nesting. It buys unambiguous setters and
+  the removal of the entire wrapper/name/dictionary layer, which is the reason it was chosen (section
+  9). If verbosity turns out to hurt, terse helpers can be added on top - a hand-written
+  `VLabel Text(string text) => new VLabel { Text = text };` for the two or three shapes a codebase uses
+  most costs nothing and changes no part of the design below section 4.
+- **`Children` on a leaf is diagnosed, not prevented.** The property lives on the `VNode` base so
+  collection expressions and spread work the same everywhere, which means a leaf node can accept
+  children the reconciler will ignore. VD011 makes it a build error rather than a silent no-op.
+- **Name collisions are a per-namespace concern.** Node classes are generated into the manifest's
+  namespace, so two manifests registering the same simple name in the same namespace collide as a
+  compile error rather than a wrong tree - annoying but safe. Within one manifest VD003 catches it, and
+  `Name` on the attribute is the escape.
 - **The reflective path is a real user-visible failure mode** if someone publishes AOT after ignoring
   an `IL2xxx` warning. Mitigated by `[RequiresUnreferencedCode]` on the unannotated overloads, not by
   documentation alone.
@@ -460,11 +465,11 @@ published application:
 
 | Claim | How it is proven |
 | --- | --- |
-| **No mirror drift** between a control and its generated factory | A test enumerates every public instance settable property of every control the test manifest registers and asserts the generated binder accepts each name. The binder returns `false` for an unknown name, so this is a direct check of the generated code's coverage - and it fails on the day a property is added to a control without regenerating. |
-| **Absence, a value, and reset stay distinct** | A render that drops a prop restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`). `Specified<T>.Reset` must produce the same node state as omitting the argument; `font: null` must arrive as the value `null` rather than as absence; and a null passed for a property declared non-nullable must be rejected by the factory, not stored. |
+| **No mirror drift** between a control and its generated node class | For every control the test manifest registers, a test enumerates the control's public instance settable properties and asserts the generated class exposes each one **with the same property type**. Types matter as much as names here: a node property typed `object` would compile and then fail at the assignment. The test fails on the day a property is added to a control without regenerating. |
+| **Omitted, set, and set to null stay distinct** | `new VLabel { Text = "" }` clears the text while `new VLabel { }` says nothing about it; a render that drops a property restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`); and `Font = null` arrives at the control as null rather than as absence. |
 | **Patches instead of rebuilds** | Assertions on reference identity: the control instance is the same object across a render, and keyed reorders preserve specific state (a `RichLabel`'s layout is not rebuilt, a `Panel`'s scroll position is unchanged). |
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
-| **A `null` for a non-nullable property does not build** | The analyzer is exercised with the compiler's own test harness (`Microsoft.CodeAnalysis.CSharp.Analyzer.Testing`): a snippet calling a generated factory with `null` must produce VD010 as an error, and the same snippet under `#nullable disable` must produce it too - that second case is the reason the analyzer exists at all. A `null!` must produce nothing. |
+| **A `null` for a non-nullable property does not build** | The analyzer is exercised with the compiler's own test harness (`Microsoft.CodeAnalysis.CSharp.Analyzer.Testing`): a snippet assigning `null` to a generated non-nullable property must produce VD010 as an error, and the same snippet under `#nullable disable` must produce it too - that second case is the reason the analyzer exists at all. A `null!` must produce nothing. |
 | **AOT- and trim-clean** | `dotnet publish` with `PublishTrimmed` and `PublishAot`, treating `IL2xxx` warnings as errors, plus the demo app's `--render <png>` compared byte-for-byte between the JIT and published builds. An application that does not reference the package must show no virtual-DOM assembly in its output at all. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
