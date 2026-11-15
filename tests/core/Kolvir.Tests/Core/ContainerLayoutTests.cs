@@ -985,6 +985,59 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         Assert.AreEqual(274f, split.Panel2.Width, 0.5f, "which is what the panel actually measures");
     }
 
+    /// <summary>
+    /// A table can be given children and no styles at all. Every cell a child asks for is a track,
+    /// and an undeclared track holds what is in it.
+    /// </summary>
+    [TestMethod]
+    public void ATableWithChildrenAndNoStylesLaysThemOut()
+    {
+        var child = Plain();
+        child.TableColumn = 0;
+        child.TableRow = 0;
+        child.Bounds = new SKRect(0f, 0f, 40f, 30f);
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = Thickness.Empty,
+            CellPadding = Thickness.Empty,
+            Controls = { child },
+        };
+
+        using var scene = HeadlessScene.Create(table, 300f, 200f);
+
+        Assert.AreEqual(new SKSize(40f, 30f), table.Measure(new SKSize(300f, 200f)), "measuring is what used to throw");
+        Assert.AreEqual(new SKRect(0f, 0f, 40f, 30f), child.Bounds, "the only cell starts at the content origin and fits the child");
+    }
+
+    [TestMethod]
+    public void ATableWithNoStylesGivesEachCellItsOwnTrack()
+    {
+        var first = Plain();
+        first.TableColumn = 0;
+        first.Bounds = new SKRect(0f, 0f, 40f, 30f);
+
+        var second = Plain();
+        second.TableColumn = 1;
+        second.Bounds = new SKRect(0f, 0f, 60f, 20f);
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = Thickness.Empty,
+            CellPadding = Thickness.Empty,
+            Controls = { first, second },
+        };
+
+        using var scene = HeadlessScene.Create(table, 300f, 200f);
+
+        Assert.AreEqual(0f, first.Bounds.Left, 0.5f, "the first column starts at the content origin");
+        Assert.AreEqual(40f, second.Bounds.Left, 0.5f, "and the second one starts where the first ends");
+        Assert.AreEqual(40f, first.Bounds.Width, 0.5f, "each column holds the child that is in it");
+        Assert.AreEqual(60f, second.Bounds.Width, 0.5f);
+    }
+
     private static Panel Plain() => new()
     {
         Padding = Thickness.Empty,
