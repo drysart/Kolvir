@@ -48,6 +48,7 @@ public class Control : IDisposable
     private Action<object>? _displayedChanged;
     private Control? _parent;
     private float _opacity = 1f;
+    private ControlFilter? _filter;
     private bool _autoSize;
     private bool _focusable = true;
     private bool _selectable;
@@ -1603,19 +1604,57 @@ public class Control : IDisposable
     }
 
     /// <summary>
+    /// The filter painted over this control and everything inside it, or null for none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The control paints into a layer of its own and the filter runs when that layer is composited,
+    /// so a blur takes the whole subtree as one picture and a child cannot escape it. It shares the
+    /// layer <see cref="Opacity"/> uses, so assigning both costs one offscreen surface, not two.
+    /// </para>
+    /// <para>
+    /// Whether the filter is free to repaint in small pieces is <see cref="ControlFilter.Margin"/>'s
+    /// answer. A filter that changes pixels in place - a tint, a colour matrix - leaves the control
+    /// repainting the same small areas as anything else. One that reaches past the pixels it is given
+    /// repaints the whole control whenever anything inside it changes, because a layer built over
+    /// only the damaged area has no real content around it for the blur to pull in.
+    /// </para>
+    /// <para>
+    /// The control does not own the filter: disposing it while it is still assigned leaves a control
+    /// that cannot paint.
+    /// </para>
+    /// </remarks>
+    public ControlFilter? Filter
+    {
+        get => _filter;
+        set
+        {
+            if (ReferenceEquals(value, _filter))
+            {
+                return;
+            }
+
+            _filter = value;
+            Invalidate();
+        }
+    }
+
+    /// <summary>
     /// Whether the control paints every pixel inside its own bounds, so that nothing behind it can
     /// show through and whatever it covers does not have to be repainted for its sake.
     /// </summary>
     /// <remarks>
     /// It is an observation about what the control paints, not a switch: it follows
-    /// <see cref="BackColor"/>, <see cref="Border"/> and <see cref="Opacity"/>, so a control
-    /// whose background is transparent, whose border rounds its corners or which is faded is reported
-    /// as not opaque without anything having to be told. Override it when a control paints over its
-    /// whole bounds by other means - an <see cref="Image"/> showing an opaque picture - or
-    /// when it punches a hole in a background that is otherwise solid.
+    /// <see cref="BackColor"/>, <see cref="Border"/>, <see cref="Opacity"/> and <see cref="Filter"/>,
+    /// so a control whose background is transparent, whose border rounds its corners, which is faded
+    /// or which is filtered is reported as not opaque without anything having to be told. A filter is
+    /// in that list because even one that only recolours can leave a pixel translucent, and a blur
+    /// certainly does. Override it when a control paints over its whole bounds by other means - an
+    /// <see cref="Image"/> showing an opaque picture - or when it punches a hole in a background that
+    /// is otherwise solid.
     /// </remarks>
     public virtual bool Opaque =>
-        _opacity >= 1f && Border.IsRectangular && Background.Color is { Alpha: 255 };
+        _filter is null && _opacity >= 1f && Border.IsRectangular && Background.Color is { Alpha: 255 };
 
     /// <summary>
     /// Text colour, inherited the way <see cref="Font"/> is: a colour assigned to a container
@@ -2099,13 +2138,19 @@ public class Control : IDisposable
 
         // A faded control paints into a layer so the whole subtree is composited once, at
         // Opacity, rather than every fill and every child blending with what is already under it.
-        using var fade = fadeAlpha < 255
-            ? new SKPaint { Color = SKColors.White.WithAlpha(fadeAlpha) }
+        // A filter needs the same layer for the same reason: its input is the subtree, not the
+        // surface beneath it, so the two share one layer and one offscreen.
+        using var layer = fadeAlpha < 255 || _filter?.ImageFilter is not null
+            ? new SKPaint
+            {
+                Color = SKColors.White.WithAlpha(fadeAlpha),
+                ImageFilter = _filter?.ImageFilter,
+            }
             : null;
 
-        if (fade is not null)
+        if (layer is not null)
         {
-            canvas.SaveLayer(fade);
+            canvas.SaveLayer(layer);
         }
 
         OnPaintBackground(canvas, local);
@@ -2114,7 +2159,7 @@ public class Control : IDisposable
         RenderChildren(canvas);
         OnPaintBorder(canvas, local);
 
-        if (fade is not null)
+        if (layer is not null)
         {
             canvas.Restore();
         }
@@ -2231,6 +2276,18 @@ public class Control : IDisposable
         // every level of the chain applies its own on the way up.
         using var area = new SKRegion(region);
         area.Op(ToRectI(ClientRect), SKRegionOperation.Intersect);
+
+        // A filter that reaches past the pixel it is given cannot be repainted in pieces. Its layer
+        // is built from whatever this paint draws, so a layer covering only the damaged area has no
+        // real content around it: the blur pulls its own transparent edge in and writes that over
+        // pixels that were right. Until the paint can hand a filter a wider input than the area it
+        // writes back, such a control repaints whole, and asks for its children with it because the
+        // layer is the subtree.
+        if (_filter is { HasMargin: true })
+        {
+            area.Op(ToRectI(ClientRect), SKRegionOperation.Replace);
+            invalidateChildren = true;
+        }
 
         // A hidden control is not painted, but the area it covers still belongs to the parent's
         // background, so it has to be repainted both when a control disappears and when one comes
