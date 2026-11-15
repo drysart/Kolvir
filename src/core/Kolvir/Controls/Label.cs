@@ -33,6 +33,9 @@ public class Label : Control
     public bool WrapText { get; set; }
 
     /// <inheritdoc />
+    protected override bool MeasureIgnoresHeight => true;
+
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         float maxWidth = WrapText

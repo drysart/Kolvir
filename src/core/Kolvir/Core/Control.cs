@@ -1956,6 +1956,7 @@ public class Control : IDisposable
     /// </remarks>
     internal void PerformLayoutTree()
     {
+        BeginLayoutEpoch();
         PerformLayout();
 
         if (_controls is { Count: > 0 } children)
@@ -2037,6 +2038,21 @@ public class Control : IDisposable
     /// </remarks>
     public virtual SKSize Measure(SKSize availableSize)
     {
+        // A pass asks the same question more than once: a table sizes its tracks twice, a row that an
+        // autosize track and a parent both want is measured twice, and on a control that lays text out
+        // every one of those is another layout of the same words. The answer cannot differ inside one
+        // pass, because nothing has been arranged differently yet, so it is remembered for that pass
+        // and dropped when the next one starts.
+        if (_measureEpoch == LayoutEpoch &&
+            _measureFontVersion == Theme.FontVersion &&
+            (MeasureIgnoresHeight
+                ? MathF.Abs(_measureAvailable.Width - availableSize.Width) < 0.01f
+                : _measureAvailable.Equals(availableSize)))
+        {
+            DesiredSize = _measureResult;
+            return _measureResult;
+        }
+
         var chrome = Border.Insets(this) + Padding;
         var contentAvailable = new SKSize(
             MathF.Max(0f, availableSize.Width - chrome.Horizontal),
@@ -2048,13 +2064,46 @@ public class Control : IDisposable
             Clamp(content.Height + chrome.Vertical, MinimumSize.Height, MaximumSize.Height));
 
         DesiredSize = size;
+        _measureEpoch = LayoutEpoch;
+        _measureFontVersion = Theme.FontVersion;
+        _measureAvailable = availableSize;
+        _measureResult = size;
         return size;
     }
+
+    /// <summary>
+    /// The pass whose measurements are being remembered, raised once per frame so a remembered size
+    /// cannot outlive the layout that produced it.
+    /// </summary>
+    internal static int LayoutEpoch { get; private set; }
+
+    /// <summary>Starts a new pass: every remembered measurement is dropped.</summary>
+    internal static void BeginLayoutEpoch() => LayoutEpoch++;
+
+    /// <summary>Forgets the size this control measured at, so the next question is answered afresh.</summary>
+    internal void InvalidateMeasure() => _measureEpoch = -1;
+
+    private int _measureEpoch = -1;
+    private int _measureFontVersion = -1;
+    private SKSize _measureAvailable;
+    private SKSize _measureResult;
 
     /// <summary>
     /// Measures the content area (padding already removed). Override in derived controls.
     /// </summary>
     protected virtual SKSize MeasureContent(SKSize availableSize) => SKSize.Empty;
+
+    /// <summary>
+    /// True when what this control measures does not depend on the height it is offered, only on the
+    /// width.
+    /// </summary>
+    /// <remarks>
+    /// A container that wraps and breaks its content is like this: text needs as many lines as the width
+    /// allows and the height it was offered changes nothing. Saying so lets a pass answer the same width
+    /// once however many heights it is asked with - and a pass asks a lot, because the table a row lives
+    /// in measures its tracks twice and arranges once.
+    /// </remarks>
+    protected virtual bool MeasureIgnoresHeight => false;
 
     /// <summary>Arranges this control's children, unless layout is suspended.</summary>
     /// <remarks>
@@ -2453,6 +2502,10 @@ public class Control : IDisposable
     /// <param name="invalidateChildren">True to repaint the controls inside the area as well.</param>
     public void Invalidate(SKRect rect, bool invalidateChildren)
     {
+        // Whatever changed might change how big this control wants to be, and a remembered
+        // measurement is only good until then.
+        InvalidateMeasure();
+
         // The region is only built once the request is known to be worth making. A control that
         // moves asks for a repaint from inside its parent's layout pass, and that request is
         // always answered by the repaint the pass ends with, so building one here first meant a
@@ -2477,6 +2530,7 @@ public class Control : IDisposable
     /// <param name="invalidateChildren">True to repaint the controls inside the area as well.</param>
     public void Invalidate(SKRegion region, bool invalidateChildren)
     {
+        InvalidateMeasure();
         ArgumentNullException.ThrowIfNull(region);
 
         if (region.IsEmpty || DeferToParent())

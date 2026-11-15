@@ -568,6 +568,89 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         Assert.AreEqual(40f, loose.Width, 0.5f, "and one that is not docked keeps its own size in it");
     }
 
+    /// <summary>
+    /// A row is as tall as the text it holds, so growing the window and then shrinking it again has to
+    /// bring the height back: a row sized from a wrap width wider than the cell it is drawn in comes out
+    /// too short, and the end of the text is cut off.
+    /// </summary>
+    [TestMethod]
+    public void ARowIsTallEnoughForItsTextAfterTheWindowGrowsAndShrinksAgain()
+    {
+        var message = new RichLabel
+        {
+            Text =
+                "the quick brown fox jumps over the lazy dog and keeps going until the line has to break, " +
+                "and then it keeps going some more so that the cell is narrower than the sentence",
+            TableColumn = 1,
+            TableRow = 1,
+        };
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            CellPadding = Thickness.Empty,
+
+            // A wide fixed column and a narrow text column, so measuring the text at the whole table is
+            // very different from measuring it at its cell.
+            ColumnStyles = { ColumnStyle.Absolute(280f), ColumnStyle.Percent(100f) },
+            RowStyles = { RowStyle.Absolute(32f), RowStyle.AutoSize() },
+            Controls = { message },
+        };
+
+        using var scene = HeadlessScene.Create(table, 400f, 300f);
+        scene.Paint();
+
+        float narrow = message.Height;
+        Assert.IsTrue(narrow > 40f, $"the text wrapped onto several lines, was {narrow}");
+
+        scene.Resize(900f, 300f);
+        float wide = message.Height;
+        Assert.IsTrue(wide < narrow, $"a wider cell wraps into fewer lines: {wide} against {narrow}");
+
+        scene.Resize(400f, 300f);
+
+        Assert.AreEqual(narrow, message.Height, 1f, "the row is as tall as it was before the window grew");
+
+        float needed = message.Measure(new SKSize(message.Width, 10000f)).Height;
+        Assert.AreEqual(
+            needed,
+            message.Height,
+            1f,
+            $"and tall enough for the text rather than cutting it off: needs {needed}");
+    }
+
+    /// <summary>Measuring a control twice in one pass asks it once: the answer cannot differ.</summary>
+    [TestMethod]
+    public void MeasuringTwiceInOnePassMeasuresOnce()
+    {
+        var counted = new CountingPanel();
+        using var scene = HeadlessScene.Create(counted, 400f, 200f);
+
+        counted.Measures = 0;
+        var size = new SKSize(300f, 150f);
+        var first = counted.Measure(size);
+        var second = counted.Measure(size);
+
+        Assert.AreEqual(1, counted.Measures, "the second question is answered from the first");
+        Assert.AreEqual(first, second);
+
+        // A different available size is a different question, and gets its own answer.
+        counted.Measure(new SKSize(200f, 150f));
+        Assert.AreEqual(2, counted.Measures, "a narrower question is answered afresh");
+    }
+
+    /// <summary>A panel that counts the times it is measured.</summary>
+    private sealed class CountingPanel : Panel
+    {
+        public int Measures;
+
+        protected override SKSize MeasureContent(SKSize availableSize)
+        {
+            Measures++;
+            return base.MeasureContent(availableSize);
+        }
+    }
+
     [TestMethod]
     public void WithNoFixedPanelBothPanelsTakePartInAResize()
     {
