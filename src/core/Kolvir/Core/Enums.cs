@@ -63,6 +63,30 @@ public enum Orientation
     Vertical = 1,
 }
 
+/// <summary>
+/// Which of a <see cref="SplitContainer"/>'s two panels keeps its size when the container is
+/// resized, and so which one takes the difference.
+/// </summary>
+public enum FixedPanel
+{
+    /// <summary>
+    /// Neither: the split keeps its proportion of the container, so both panels grow and shrink
+    /// with it.
+    /// </summary>
+    None = 0,
+
+    /// <summary>
+    /// The first panel keeps its size along the split axis and the second takes the difference.
+    /// The default, and what every split container did before there was a choice.
+    /// </summary>
+    Panel1 = 1,
+
+    /// <summary>
+    /// The second panel keeps its size along the split axis and the first takes the difference.
+    /// </summary>
+    Panel2 = 2,
+}
+
 /// <summary>The axis an <see cref="StackPanel"/> stacks its children along.</summary>
 public enum StackOrientation
 {

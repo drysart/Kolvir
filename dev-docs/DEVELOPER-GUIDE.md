@@ -110,7 +110,7 @@ has to read `--classic-menus` before it can build a backend.
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `Background` and `Border` for a card |
 | `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
-| `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, fixed/min/max sizes |
+| `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, min/max sizes, and which of them a resize keeps |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
 | `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it. It is a `Panel` whose border is `SimpleBorder.Thin.WithCornerRadius(8f).WithControlText()` |
 | `Expander` | - | Collapsible section: a header with a chevron and the content folded away under it; `IsExpanded` folds the section to its header and puts it back |
@@ -475,6 +475,21 @@ Orientation follows the WinForms convention:
 clamped to `Panel1MinSize` ... `Panel1MaxSize`, further limited by `Panel2MinSize` so the
 second panel never collapses.
 
+That is the default. `FixedPanel` chooses which of the two keeps its size when the *container* is
+resized, and so which one takes the difference:
+
+| `FixedPanel` | On a resize | `FixedPanelSize` |
+| --- | --- | --- |
+| `Panel1` (default) | `Panel1` keeps its width or height | `Panel1`'s size - the same number as `SplitterDistance` |
+| `Panel2` | `Panel2` keeps its width or height | `Panel2`'s size - the room left after the splitter |
+| `None` | the split keeps its proportion, so both panels take part | `Panel1`'s size, which is the panel it moves |
+
+A resize is the only thing it answers: dragging the splitter, changing `Orientation` or changing
+`SplitterWidth` sets the split and leaves both panels where they were put. `FixedPanelSize` reads and
+writes the fixed panel's measurement along the split axis - a width for a vertical split, a height
+for a horizontal one - and setting it moves the splitter, clamped by the panel minimums exactly as
+`SplitterDistance` is. With `FixedPanel.None` nothing is fixed, so it stands in for `Panel1`.
+
 ```csharp
 var split = new SplitContainer
 {
@@ -485,8 +500,10 @@ var split = new SplitContainer
     Panel1MinSize = 120f,
     Panel1MaxSize = 420f,
     Panel2MinSize = 180f,
+    FixedPanel = FixedPanel.Panel2,      // panel 2 keeps its width; panel 1 takes the difference
 };
 
+split.FixedPanelSize = 320f;             // and this is that width
 split.Panel1.Controls.Add(new Label("Navigation"));
 split.Panel2.Controls.Add(content);
 split.AddSplitterMovedHandler(_ => Console.WriteLine($"panel 1 is now {split.SplitterDistance:0} px"));

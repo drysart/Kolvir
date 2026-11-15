@@ -37,6 +37,15 @@ public class SplitContainer : Control
     private float _dragOriginDistance;
     private SKRect _splitterRect;
 
+    private FixedPanel _fixedPanel = FixedPanel.Panel1;
+
+    // The last layout this container ran, kept so a resize can tell which panel should keep the
+    // difference: a drag, a re-orientation or a new splitter width leaves the available length
+    // alone, only a resize changes it.
+    private float _lastAvailable;
+    private float _lastSplitterWidth;
+    private float _lastDistance;
+
     /// <summary>
     /// Creates a vertical split with an empty <see cref="Panel1"/> and <see cref="Panel2"/> and the
     /// splitter 200 units from the left.
@@ -118,9 +127,80 @@ public class SplitContainer : Control
             }
 
             _orientation = value;
+            // Widths and heights are not comparable, so the length recorded for the old axis is
+            // forgotten rather than carried into the new one: re-orienting keeps the distance it
+            // was given.
+            _lastAvailable = 0f;
             UpdateCursor();
             PerformLayout();
             Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Which panel keeps its size when the container is resized, and so which one takes the
+    /// difference. Defaults to <see cref="FixedPanel.Panel1"/>.
+    /// </summary>
+    /// <remarks>
+    /// A resize is the only thing this answers: dragging the splitter, changing
+    /// <see cref="Orientation"/> or changing <see cref="SplitterWidth"/> sets the split itself and
+    /// leaves both panels where they were put. Sizes are still held to the minimums, so a container
+    /// with no room for both panels takes the space from whichever one it can.
+    /// </remarks>
+    public FixedPanel FixedPanel
+    {
+        get => _fixedPanel;
+        set
+        {
+            if (_fixedPanel == value)
+            {
+                return;
+            }
+
+            _fixedPanel = value;
+        }
+    }
+
+    /// <summary>
+    /// The size of the fixed panel along the split axis - a width for
+    /// <see cref="Orientation.Vertical"/>, a height for <see cref="Orientation.Horizontal"/> - and
+    /// setting it moves the splitter so that panel measures the value given.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Which panel this is about follows <see cref="FixedPanel"/>, so switching the fixed panel
+    /// re-points the property at the other panel rather than changing the split. With
+    /// <see cref="FixedPanel.None"/> nothing is held fixed, and Panel 1 is the one this reads and
+    /// moves, the way it is when there is no choice at all.
+    /// </para>
+    /// <para>
+    /// It is the same measurement as <see cref="SplitterDistance"/> for Panel 1, and the room left
+    /// over for Panel 2. Setting either one is clamped to the panel minimums and raises the
+    /// splitter-distance handlers, because both describe the same splitter.
+    /// </para>
+    /// </remarks>
+    public float FixedPanelSize
+    {
+        get
+        {
+            var available = AxisLength(ContentRect);
+            var splitter = MathF.Min(MathF.Max(0f, _splitterWidth), available);
+            var distance = Math.Clamp(_splitterDistance, 0f, MathF.Max(0f, available - splitter));
+
+            return _fixedPanel == FixedPanel.Panel2
+                ? MathF.Max(0f, available - splitter - distance)
+                : distance;
+        }
+        set
+        {
+            var available = AxisLength(ContentRect);
+            var splitter = MathF.Min(MathF.Max(0f, _splitterWidth), available);
+
+            // The second panel grows from the far end, so asking it for a size is asking the
+            // splitter for the room that leaves.
+            SplitterDistance = _fixedPanel == FixedPanel.Panel2
+                ? available - splitter - value
+                : value;
         }
     }
 
@@ -242,6 +322,31 @@ public class SplitContainer : Control
         var content = ContentRect;
         var available = AxisLength(content);
 
+        // A container that changed size hands the difference to the panel that is meant to keep
+        // its size. Anything else that lands here - a drag, a new splitter width, a fresh layout
+        // pass at the same size - leaves the available length alone, so the distance somebody
+        // chose survives it.
+        if (_lastAvailable > 0.5f && MathF.Abs(available - _lastAvailable) > 0.5f)
+        {
+            var splitter = MathF.Min(MathF.Max(0f, _splitterWidth), available);
+            var track = MathF.Max(0f, available - splitter);
+            var previousTrack = MathF.Max(0f, _lastAvailable - _lastSplitterWidth);
+
+            if (_fixedPanel == FixedPanel.Panel2)
+            {
+                // The second panel measured this wide last time; it measures the same now and the
+                // first one moves.
+                var second = MathF.Max(0f, previousTrack - _lastDistance);
+                _splitterDistance = ClampDistance(track - second, available);
+            }
+            else if (_fixedPanel == FixedPanel.None && previousTrack > 0f)
+            {
+                // Neither is fixed, so the split keeps its share of the track and both panels take
+                // part of the difference.
+                _splitterDistance = ClampDistance(_lastDistance / previousTrack * track, available);
+            }
+        }
+
         // Only collapse the requested distance when there is genuinely no room for it;
         // this keeps the value intact through transient zero/small layout passes.
         if (available >= _splitterWidth + _panel1MinSize + _panel2MinSize)
@@ -264,6 +369,11 @@ public class SplitContainer : Control
             Panel1.Bounds = new SKRect(content.Left, content.Top, content.Right, _splitterRect.Top);
             Panel2.Bounds = new SKRect(content.Left, _splitterRect.Bottom, content.Right, content.Bottom);
         }
+
+        // What this frame settled on, for the next resize to measure the difference against.
+        _lastAvailable = available;
+        _lastSplitterWidth = splitterWidth;
+        _lastDistance = distance;
     }
 
     /// <summary>
