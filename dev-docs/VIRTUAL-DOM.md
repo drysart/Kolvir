@@ -91,7 +91,7 @@ manifest is expected to be short and per application rather than a library-wide 
 | What applying a node does | Generated `ApplyTo(Control)` and `PatchFrom(previous, Control)` members: direct typed assignments, no names, no dictionary, no `switch` on strings | The reconciler must patch a control without knowing its type. Generating the assignments per node type does that statically, and since the previous node is typed too, the diff is a field-by-field comparison rather than a lookup. |
 | What is diffed | The **previous node against the next node**, never the node against the control | The old values come from the tree we already hold, so nothing reads a control's current property state back out. That keeps `Control` free of any virtual-DOM awareness and avoids the hardest reflective cases (getter-only and private-setter properties). The one exception is the pristine snapshot below, read once per type rather than per diff. |
 | A `null` for a non-nullable property | The generated property is typed non-nullable, so `Text = null` is CS8625 at the assignment, which an analyzer raises to an error (VD010); the generated setter keeps an `ArgumentNullException` as the backstop for values no analysis can prove | C# only warns and only where nullable is enabled, so in a `#nullable disable` file the assignment would silently store a null. An analyzer error is the only way to fail the build without changing the severity of warnings in an application's unrelated code. `null!` stays quiet on purpose: that is the caller overriding the analysis, so the backstop is the right thing to hear from. |
-| What "default" means | Not `default(T)`: the **pristine value**, snapshotted per property from a freshly constructed control | `Label.Text` starts at `""`, `Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared default is `None`. `default(T)` would be wrong for most properties, so each node type records what its control looked like before any node touched it - which needs a generated getter alongside the setter, read once when the first control of that type is created. |
+| What "default" means | Not `default(T)`: the **pristine value**, snapshotted per property from a freshly constructed control | `Label.Text` starts at `""`, `Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared default is `None`. `default(T)` would be wrong for most properties, so each node class records what its control looked like before any node touched it, in static fields read once from a freshly constructed control through the control's own getters - nothing generated, nothing reflected. |
 | Node type | One `VNode` base holding `Key` and `Children`, and a generated concrete class per control holding its own typed properties | The reconciler works against the base, so it stays non-generic; compile-time type safety is the node class's property types, which is where a developer actually types. |
 | Property names | **None exist.** A property is a field on a generated class, not a name in a dictionary | Removes the interned string, the `VProp[]` and the hashed string dispatch that the factory-based design needed, and makes the diff a comparison of typed values. |
 | `Key` | On the `VNode` base, so every element can be identified in a list | Requirement of keyed reconciliation (section 6). On the base type it needs no per-type support. |
@@ -185,34 +185,43 @@ public sealed class VLabel : VNode
     private Specified<string> _text;
     public string Text { get => _text.Value!; set => _text = value; }
 
-    private Specified<Font?> _font;
-    public Font? Font { get => _font.Value; set => _font = value; }
+    private Specified<Font> _font;
+    public Font Font { get => _font.Value; set => _font = value; }
 
-    internal override NodeType NodeType => LabelType;
+    public override NodeType NodeType => LabelType;
 
-    internal static readonly NodeType LabelType =
-        new(typeof(Label), static () => new Label(), pristine: () => new Label().Snapshot(...));
+    private static readonly NodeType LabelType = new(typeof(Label), static () => new Label());
 
-    internal override void ApplyTo(Control control)
+    // What the constructor left, read once for the type rather than once per property dropped.
+    private static readonly string PristineText = new Label().Text;
+    private static readonly Font PristineFont = new Label().Font;
+
+    public override void ApplyTo(Control control)
     {
         var label = (Label)control;
         if (_text.IsSpecified) label.Text = _text.Value!;
         if (_font.IsSpecified) label.Font = _font.Value;
     }
 
-    internal override void PatchFrom(VNode previous, Control control)
+    public override void PatchFrom(VNode previous, Control control)
     {
         var old = (VLabel)previous;
         var label = (Label)control;
-        if (!_text.Equals(old._text)) label.Text = _text.IsSpecified ? _text.Value! : LabelType.PristineText;
-        if (!_font.Equals(old._font)) label.Font = _font.IsSpecified ? _font.Value : LabelType.PristineFont;
+        if (!_text.Equals(old._text)) label.Text = _text.IsSpecified ? _text.Value! : PristineText;
+        if (!_font.Equals(old._font)) label.Font = _font.IsSpecified ? _font.Value : PristineFont;
     }
 }
 ```
 
+The three members the reconciler drives are **public rather than internal**, because the generated
+class is emitted into the consuming assembly and an internal contract cannot be overridden from
+there. They carry `[EditorBrowsable(Never)]` so they stay out of IntelliSense for an author who is only
+writing trees: they are the generated-implementation contract, not the API an application writes
+against.
+
 Three things to notice:
 
-- **`Specified<T>` is internal machinery, not a calling convention.** It survives as the field type
+- **`Specified<T>` is machinery, not a calling convention.** It is public only because generated code in a consuming assembly has to name it (and is hidden from IntelliSense for that reason). It survives as the field type
   behind a tracked property - a value plus a was-set flag - but it never appears in a signature a
   developer writes, and its `Reset` member is gone, because absence already means "not assigned".
   This is what removed the public wrapper, the implicit operator, the nullable-conversion trap and
@@ -220,10 +229,9 @@ Three things to notice:
 - **No names, no `VProp[]`, no string `switch`.** `ApplyTo` and `PatchFrom` are generated typed
   assignments over the node's own fields, and the diff compares `Specified<T>` values directly. The
   metadata that used to be a property name is now the field.
-- **`NodeType` is the identity the reconciler uses** - CLR control type, a creator, and the pristine
-  values - and comparing two nodes' `NodeType` by reference answers "can I reuse this control?" in one
-  step. The pristine snapshot is a generated `Func<T>` per control, evaluated once when the first
-  control of that type is created (section 6.1).
+- **`NodeType` is the identity the reconciler uses** - one static instance per node class, compared by
+  reference, which is what answers "can I reuse this control?" in one step and what stops one node
+  class patching a control another node class made (its `PatchFrom` could not cast the previous node).
 
 The `VNode` base itself is hand-written in `Kolvir.Feature.VirtualDom`: `Key`, `Children`, the abstract
 `ApplyTo`/`PatchFrom`/`NodeType` members, and the reconciler's entry points. The generated code is
@@ -314,9 +322,9 @@ run.
 
 **What "pristine" means, and where it comes from.** Not `default(T)`: `Label.Text` starts at `""`,
 `Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared
-default is `None`. So each node type carries a pristine snapshot read from a freshly constructed
-control - which needs a generated getter alongside the setter, read once per type when the first
-control of that type is created, not once per diff. A property whose initial value depends on
+default is `None`. So each node class holds the pristine values as static fields, read from a freshly
+constructed control when the type is first used - the control's own public getters, no generated
+accessor and no reflection - and consulted only when a property is dropped, never per diff. A property whose initial value depends on
 something outside the control (a theme colour read lazily) gives a snapshot that is right when taken
 and may not stay right; the exposure is narrow, since the snapshot is only consulted when a property is
 dropped, and it is still more accurate than `default(T)`.
@@ -327,8 +335,10 @@ Children, in order of preference:
    position, selection, caret, focus).
 2. **Positional matching** otherwise, one index at a time, which is what handles the overwhelmingly
    common append/change case without any bookkeeping.
-3. **Mixing** is allowed: keyed children are matched by key and unkeyed children fill the remaining
-   slots positionally. A key change is a replacement, never an update.
+3. **The two never mix.** A keyed node with no matching key is a new element, and a keyed child the
+   new list no longer asks for is removed; an unkeyed node only takes an unkeyed leftover. Letting a
+   keyed child be claimed positionally would mean that swapping one key for another silently renamed
+   a control, which is exactly the identity the key exists to control.
 
 Ordering after matching: the reconciler emits the minimum set of `Insert`/`Remove`/`Move` operations to
 turn the old order into the new one. Moves go through `ControlCollection.Move`, which reorders the
@@ -358,7 +368,7 @@ The plan's surface, in the order a developer meets it:
 | `VNode` | Abstract base: `Key`, `Children` (init-only `IReadOnlyList<VNode>`), and the abstract `NodeType`/`ApplyTo`/`PatchFrom` members the reconciler drives | The description (section 3). Everything a developer writes derives from a generated class over this. |
 | `V<Control>` (generated) | One class per registered control: a tracked property per settable control property, plus `Create`, `ApplyTo`, `PatchFrom` and a `NodeType` | What a view actually constructs (section 5). `Specified<T>` is a private field type inside it, never a public signature. |
 | `Component` | `abstract VNode Render();`, `void SetState()` | The view model base. `SetState` marks the component dirty and renders synchronously, then patches. |
-| `VirtualDom.Mount(Control parent, VNode root)` | Returns a `MountHandle` | Turns a tree into live controls under a container (typically the window's root panel). |
+| `VirtualDomRuntime.Mount(Control parent, VNode root)` | Returns a `MountHandle` | Turns a tree into live controls under a container (typically the window's root panel). Named `VirtualDomRuntime` because a type called `VirtualDom` would sit in the `Kolvir.VirtualDom` namespace and shadow it at every call site. |
 | `MountHandle.Update(VNode root)` | Reconciles the new tree against what is mounted | What a component's render calls; also usable directly, without components, for a one-shot tree. |
 | `MountHandle.Unmount()` | Detaches everything and drops references | Window closing, or replacing a whole screen. |
 | `services.AddVirtualDom()` | `IServiceCollection` extension | Consistent with the other features and `APPLICATION-MODEL.md` section 5; registers the reconciler's services (currently none beyond the reflective table, when one exists). |
@@ -508,9 +518,9 @@ published-build render comparison covers the new code path automatically.
 
 | Step | State | Notes |
 | --- | --- | --- |
-| 1 | Not started | |
-| 2 | Not started | |
-| 3 | Not started | |
+| 1 | Done | `Kolvir.Feature.VirtualDom` in the rung-3 layout: `VNode`, `NodeType`, the public-but-hidden `Specified<T>`, `Mounted`, `Reconciler`, `MountHandle`, `VirtualDomRuntime`. Hand-written `VLabel`/`VNote`/`VButton`/`VPanel` stand in for the generator, so steps 2-6 test the reconciler before any codegen exists. 26 headless tests. |
+| 2 | Done | `Mount` creates the root and applies its properties; a control is reused when the new node is the same node class and replaced in place when it is not. Verified by reference identity across `Update`, plus a scene test that a mounted tree is laid out by the host. |
+| 3 | Done | Property diffing arrived with `PatchFrom`: a property that stops being set returns to the pristine value its constructor left (asserted against a control whose pristine value is not `default(T)`), an assigned `null` is a value rather than an absence, and an unchanged value is not re-assigned. |
 | 4 | Not started | |
 | 5 | Not started | |
 | 6 | Not started | |
