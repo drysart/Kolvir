@@ -452,7 +452,7 @@ internal sealed class ScrollBars
         var maximum = MathF.Max(0f, extentLength - viewportLength);
 
         bar.Visible = true;
-        bar.Bounds = bounds;
+        bar.SetArrangedBounds(bounds);
         bar.Minimum = 0f;
         bar.Maximum = maximum;
         bar.LargeChange = MathF.Max(1f, viewportLength);

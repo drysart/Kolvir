@@ -539,8 +539,8 @@ public sealed class WidgetTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(host, 200f, 100f);
 
-        Assert.AreEqual(30f, image.Width, "AutoSize is the image's natural width");
-        Assert.AreEqual(20f, image.Height, "and its height");
+        Assert.AreEqual(30f, (float)image.Width, "AutoSize is the image's natural width");
+        Assert.AreEqual(20f, (float)image.Height, "and its height");
     }
 
     [TestMethod]

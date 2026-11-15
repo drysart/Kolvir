@@ -492,8 +492,8 @@ public sealed class ControlModelTests : HeadlessTestBase
         control.Size = new SKSize(60f, 20f);
 
         Assert.AreEqual(new SKSize(60f, 20f), control.Size);
-        Assert.AreEqual(60f, control.Width);
-        Assert.AreEqual(20f, control.Height);
+        Assert.AreEqual(60f, (float)control.Width);
+        Assert.AreEqual(20f, (float)control.Height);
         Assert.AreEqual(60f, control.Right);
         Assert.AreEqual(20f, control.Bottom);
         Assert.AreEqual(1, changes);

@@ -229,7 +229,7 @@ public class StackPanel : Panel
 
             float mainPosition = main + (vertical ? margin.Top : margin.Left);
             var slot = Slot(mainPosition, mainLength, crossPosition, crossLength);
-            child.Bounds = slot;
+            child.SetArrangedBounds(slot);
             main = mainPosition + mainLength + (vertical ? margin.Bottom : margin.Right);
 
             _run.Add(i);

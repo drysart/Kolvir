@@ -310,7 +310,7 @@ public class Expander : Panel
         // the section was open. Painting and hit testing skip it separately, so nothing is walked.
         foreach (var child in Controls)
         {
-            child.Bounds = new SKRect(area.Left, area.Top, area.Right, area.Top);
+            child.SetArrangedBounds(new SKRect(area.Left, area.Top, area.Right, area.Top));
         }
 
         return SKSize.Empty;

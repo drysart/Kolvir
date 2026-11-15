@@ -910,7 +910,7 @@ public class RichLabel : Control
             {
                 if (fragment.Kind == FragmentKind.Control && fragment.Span.Control is { } control)
                 {
-                    control.Bounds = fragment.Bounds;
+                    control.SetArrangedBounds(fragment.Bounds);
                 }
             }
         }

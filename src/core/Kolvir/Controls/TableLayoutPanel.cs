@@ -187,15 +187,19 @@ public class TableLayoutPanel : Panel
                 content.Top + rowOffsets[lastRow + 1]);
 
             var inner = Geometry.Deflate(cell, CellPadding);
+            var childBounds = child.Bounds;
             if (child.AutoSize)
             {
                 var desired = child.Measure(new SKSize(inner.Width, inner.Height));
-                child.Size = new SKSize(
-                    MathF.Min(desired.Width, inner.Width),
-                    MathF.Min(desired.Height, inner.Height));
+                childBounds = new SKRect(
+                    childBounds.Left,
+                    childBounds.Top,
+                    childBounds.Left + MathF.Min(desired.Width, inner.Width),
+                    childBounds.Top + MathF.Min(desired.Height, inner.Height));
+                child.SetArrangedBounds(childBounds);
             }
 
-            var size = child.Size;
+            var size = childBounds.Size;
             var bounds = new SKRect(inner.Left, inner.Top, inner.Left + size.Width, inner.Top + size.Height);
             switch (child.Dock)
             {
@@ -210,7 +214,7 @@ public class TableLayoutPanel : Panel
                     break;
             }
 
-            child.Bounds = bounds;
+            child.SetArrangedBounds(bounds);
         }
     }
 

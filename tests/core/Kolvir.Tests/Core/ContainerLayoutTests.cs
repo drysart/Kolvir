@@ -132,8 +132,8 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         centred.Size = new SKSize(40f, 20f);
         stack.PerformLayout();
 
-        Assert.AreEqual(80f, centred.Left, "a centred child should be centred across the stack");
-        Assert.AreEqual(40f, centred.Width);
+        Assert.AreEqual(80f, (float)centred.Left, "a centred child should be centred across the stack");
+        Assert.AreEqual(40f, (float)centred.Width);
     }
 
     [TestMethod]
@@ -174,7 +174,7 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(table, 200f, 130f);
 
-        Assert.AreEqual(30f, header.Height, "an absolute row keeps its pixels");
+        Assert.AreEqual(30f, (float)header.Height, "an absolute row keeps its pixels");
         Assert.AreEqual(new SKRect(0f, 30f, 200f, 130f), body.Bounds, "the percent row takes the rest");
     }
 
@@ -222,7 +222,7 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         Assert.AreEqual(new SKRect(0f, 0f, 120f, 200f), split.Panel1.Bounds);
         Assert.AreEqual(120f, split.SplitterRect.Left);
         Assert.AreEqual(6f, split.SplitterRect.Width, "the default splitter is 6 px wide");
-        Assert.AreEqual(126f, split.Panel2.Left);
+        Assert.AreEqual(126f, (float)split.Panel2.Left);
         Assert.AreEqual(400f, split.Panel2.Right);
     }
 
@@ -434,7 +434,7 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
 
         panel.ScrollTo(0f, 50f);
 
-        Assert.AreEqual(0f, header.Top, "a docked child stays where it was laid out");
+        Assert.AreEqual(0f, (float)header.Top, "a docked child stays where it was laid out");
         Assert.IsTrue(panel.VerticalOffset > 0f);
     }
 

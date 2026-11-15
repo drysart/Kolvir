@@ -801,7 +801,7 @@ public sealed class MenuView : Control, IInputSink
 
         if (!control.Bounds.Equals(bounds))
         {
-            control.Bounds = bounds;
+            control.SetArrangedBounds(bounds);
         }
 
         control.PerformLayout();

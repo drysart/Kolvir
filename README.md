@@ -81,7 +81,7 @@ resolves from. Both are what an application used to have to arrange itself.
 
 ## The sample
 
-The repository's own application is the best tour of the library: sixty-two pages, one per control
+The repository's own application is the best tour of the library: sixty-three pages, one per control
 or feature, with the code beside each one.
 
 ```bash

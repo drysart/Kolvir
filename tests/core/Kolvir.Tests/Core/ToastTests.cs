@@ -183,10 +183,10 @@ public sealed class ToastTests : HeadlessTestBase
 
         toast.Show();
         Assert.IsTrue(content.Height < room, "the page makes room for the message");
-        Assert.AreEqual(content.Bounds.Bottom, toast.Top, "which is docked under it");
+        Assert.AreEqual(content.Bounds.Bottom, (float)toast.Top, "which is docked under it");
 
         toast.Dismiss();
-        Assert.AreEqual(room, content.Height, "and the room comes back when it goes");
+        Assert.AreEqual(room, (float)content.Height, "and the room comes back when it goes");
     }
 
     [TestMethod]
