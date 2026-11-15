@@ -5372,6 +5372,14 @@ demo at a time, so adding a demo is a class under `Kolvir.Demo.App/Pages/` and a
 `DemoUi.Demos` rather than another crowded card. Every page is built once and kept, and switching
 pages re-parents one control into the stage.
 
+Sixty-one pages is more than the eye can scan, so a **Find a page** box above the list narrows it to
+the pages whose title contains what is typed, as it is typed. Narrowing it does not change what the
+stage is showing: a filter is a way of finding a row rather than a way of choosing one, so the page
+being read stays on the stage (its row stays selected while the filter has it) and clearing the
+filter puts the whole list back. Down hands the keyboard to the list and Escape clears the box. A
+page the filter is hiding can still be reached - `--page`, the context menu's Next page, and the
+sample's own `SelectPage` all clear the filter rather than select nothing.
+
 `DemoUi` itself is the window shell: the header, the navigation list, the status line and the stage.
 Everything a page is - its cards, its readouts, its timers and the state behind them - lives in that
 page's own class, derived from `Pages/DemoPage.cs`, which is also where the layout helpers every page
