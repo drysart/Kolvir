@@ -44,6 +44,7 @@ public sealed class UiHost
     private SKRegion _dirty = new();
     private SKRegion _painting = new();
     private bool _dirtyAll = true;
+    private bool _layoutPending;
     private bool _debugHoldingContent;
     private System.Threading.Timer? _debugFrameTimer;
 
@@ -293,6 +294,13 @@ public sealed class UiHost
     public float SelectionDragThreshold { get; set; } = 3f;
 
     /// <summary>Updates the logical client size and re-runs layout when it changed.</summary>
+    /// <remarks>
+    /// The layout pass is deferred to the next frame rather than run here. A resize arrives as a
+    /// stream of sizes - a dragged edge sends one every few milliseconds - and each pass lays the
+    /// whole tree out again, so running one per size means the tree is laid out dozens of times for
+    /// frames nobody ever sees. Marking the frame dirty instead means every size that arrives before
+    /// the next paint costs a comparison, and the pass runs once, for the size that gets painted.
+    /// </remarks>
     public void SetClientSize(float width, float height)
     {
         width = MathF.Max(0f, width);
@@ -304,7 +312,7 @@ public sealed class UiHost
         }
 
         _clientSize = new SKSize(width, height);
-        PerformLayout();
+        _layoutPending = true;
         Invalidate();
     }
 
@@ -339,7 +347,7 @@ public sealed class UiHost
                 bar.AttachHost(this);
             }
 
-            PerformLayout();
+            _layoutPending = true;
             Invalidate();
         }
     }
@@ -347,6 +355,7 @@ public sealed class UiHost
     /// <summary>Arranges the menu bar across the top of the client area and the root below it.</summary>
     public void PerformLayout()
     {
+        _layoutPending = false;
         // A theme font assigned after the controls exist changes how much room their text needs. The
         // controls resolve the font themselves, so all the tree needs is to be told that caches
         // derived from the old one are stale; the pass below re-measures everything anyway.
@@ -510,6 +519,13 @@ public sealed class UiHost
     public SKRectI Paint(SKCanvas canvas, bool full = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
+
+        // Sizes and structure that arrived since the last frame are answered here: this is the one
+        // point where the tree has to be right, because it is about to be drawn.
+        if (_layoutPending)
+        {
+            PerformLayout();
+        }
 
         // A font assigned to the theme or to a control after the last frame moved text that is
         // already on screen, so the frame that shows it is laid out first. A repaint covers the
@@ -1271,6 +1287,14 @@ public sealed class UiHost
     /// </summary>
     private Control? HitTest(SKPoint location, bool hover = false)
     {
+        // Hit testing reads the rectangles layout produced, and a size that arrived since the last
+        // frame has not been laid out yet. Answering it here aims the pointer at the tree that is
+        // about to be on screen rather than the one it was in a frame ago.
+        if (_layoutPending)
+        {
+            PerformLayout();
+        }
+
         // A press on a title of the bar's own open menu belongs to the bar even while the dismiss
         // catcher covers it, so clicking another title switches menus and clicking the open one
         // closes it. Everywhere else, and over any other popup, the catcher keeps the press.

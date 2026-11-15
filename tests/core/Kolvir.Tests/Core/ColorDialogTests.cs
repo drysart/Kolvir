@@ -328,8 +328,14 @@ public sealed class ColorDialogTests : HeadlessTestBase
     }
 
     /// <summary>Clicks a button the way a pointer does, at the button's own position in the host.</summary>
+    /// <remarks>
+    /// The layout pass runs when a frame is painted, so this lays the window out first: a pointer
+    /// can only arrive after the frame that placed the button was drawn.
+    /// </remarks>
     private static void Click(Window window, Control control)
     {
+        window.Host.PerformLayout();
+
         var position = control.GetPositionInHost();
         var center = new SKPoint(
             position.X + (control.ClientRect.Width / 2f),

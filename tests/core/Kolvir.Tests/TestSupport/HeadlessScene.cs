@@ -227,7 +227,16 @@ internal sealed class HeadlessScene : IDisposable
     public void Type(string text) => Host.ProcessTextInput(text);
 
     /// <summary>Changes the client size, which is what a window manager does on a resize.</summary>
-    public void Resize(float width, float height) => Window.ClientSize = new SKSize(width, height);
+    /// <summary>
+    /// Resizes the window and paints the frame that follows, because the layout pass for a new size
+    /// now runs when the frame is painted rather than when the size arrives - which is what keeps a
+    /// dragged edge from laying the tree out for every size it passes through.
+    /// </summary>
+    public void Resize(float width, float height)
+    {
+        Window.ClientSize = new SKSize(width, height);
+        Paint();
+    }
 
     /// <summary>Closes the window and disposes the application, in that order.</summary>
     public void Dispose()
