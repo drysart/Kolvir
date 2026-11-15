@@ -241,6 +241,13 @@ public class TableLayoutPanel : Panel
             }
         }
 
+        // What each track would be if the table were laid out right now. A percentage column does not
+        // get the whole table, and a child that wraps text has to be measured at the width it will be
+        // given: measured any wider it reports too few lines, so its row ends up shorter than the text
+        // and the text is cut off.
+        var known = (float[])columns.Clone();
+        DistributePercent(_columnStyles, known, availableSize.Width);
+
         foreach (var child in Controls)
         {
             if (!child.Visible)
@@ -263,10 +270,14 @@ public class TableLayoutPanel : Panel
                 continue;
             }
 
-            var desired = child.Measure(availableSize);
+            var desired = child.Measure(MeasureBasis(availableSize, known, column, lastColumn));
             if (autoColumn)
             {
                 GrowSpannedTracks(columns, _columnStyles, column, lastColumn, desired.Width + CellPadding.Horizontal);
+
+                // The AutoSize column just grew, so the room the percentage columns share is smaller.
+                Array.Copy(columns, known, columns.Length);
+                DistributePercent(_columnStyles, known, availableSize.Width);
             }
 
             if (autoRow)
@@ -278,6 +289,29 @@ public class TableLayoutPanel : Panel
         DistributePercent(_columnStyles, columns, availableSize.Width);
         DistributePercent(_rowStyles, rows, availableSize.Height);
         return (columns, rows);
+    }
+
+    /// <summary>The size to measure a child at: the tracks it spans.</summary>
+    /// <remarks>
+    /// An AutoSize column is sized by the children in it, so measuring one of those against the column
+    /// would be a circle: they still see the whole table. Every other child is measured at the width it
+    /// is about to be given, which is what keeps its row's height honest and lets the control reuse the
+    /// layout its measurement built when it is arranged.
+    /// </remarks>
+    private SKSize MeasureBasis(SKSize availableSize, float[] known, int first, int last)
+    {
+        if (HasAutoSize(_columnStyles, first, last) || !float.IsFinite(availableSize.Width))
+        {
+            return availableSize;
+        }
+
+        float width = 0f;
+        for (int i = first; i <= last; i++)
+        {
+            width += known[i];
+        }
+
+        return new SKSize(MathF.Max(0f, width - CellPadding.Horizontal), availableSize.Height);
     }
 
     private static bool HasAutoSize<T>(IList<T> styles, int first, int last)

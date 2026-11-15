@@ -224,6 +224,9 @@ public class RichLabel : Control
     public void ClearSpans() => _spans.Clear();
 
     /// <inheritdoc />
+    protected override bool MeasureIgnoresHeight => true;
+
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         var layout = BuildLayout(NormalizeWrapWidth(availableSize.Width));

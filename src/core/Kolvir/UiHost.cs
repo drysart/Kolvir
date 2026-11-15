@@ -356,6 +356,10 @@ public sealed class UiHost
     public void PerformLayout()
     {
         _layoutPending = false;
+
+        // A pass remembers the sizes it measured, so it needs to know when it is a new one.
+        Control.BeginLayoutEpoch();
+
         // A theme font assigned after the controls exist changes how much room their text needs. The
         // controls resolve the font themselves, so all the tree needs is to be told that caches
         // derived from the old one are stale; the pass below re-measures everything anyway.
