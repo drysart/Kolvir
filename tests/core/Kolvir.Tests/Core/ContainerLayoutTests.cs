@@ -452,6 +452,270 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         Assert.AreEqual(200f, split.SplitterDistance);
     }
 
+    [TestMethod]
+    public void TheFirstPanelKeepsItsWidthWhenTheContainerGrows()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 120f };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        Assert.AreEqual(FixedPanel.Panel1, split.FixedPanel, "the first panel is fixed unless asked otherwise");
+
+        scene.Resize(500f, 200f);
+
+        Assert.AreEqual(120f, split.SplitterDistance, 0.5f, "the splitter should not have moved");
+        Assert.AreEqual(374f, split.Panel2.Width, 0.5f, "the second panel took the extra hundred pixels");
+    }
+
+    [TestMethod]
+    public void AFixedSecondPanelKeepsItsWidthAndTheFirstPanelTakesTheDifference()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.Panel2,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        float second = split.Panel2.Width;
+        Assert.AreEqual(274f, second, 0.5f, "400 less the 120 and the 6 px splitter");
+
+        scene.Resize(500f, 200f);
+
+        Assert.AreEqual(second, split.Panel2.Width, 0.5f, "the second panel kept the width it had");
+        Assert.AreEqual(220f, split.SplitterDistance, 0.5f, "so the first panel is what grew");
+
+        scene.Resize(320f, 200f);
+
+        Assert.AreEqual(second, split.Panel2.Width, 0.5f, "and it keeps it when the container shrinks too");
+        Assert.AreEqual(40f, split.SplitterDistance, 0.5f);
+    }
+
+    [TestMethod]
+    public void AFixedSecondPanelKeepsItsHeightInAHorizontalSplit()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            SplitterDistance = 80f,
+            FixedPanel = FixedPanel.Panel2,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 300f);
+
+        float second = split.Panel2.Height;
+        Assert.AreEqual(214f, second, 0.5f, "300 less the 80 and the 6 px splitter");
+
+        scene.Resize(400f, 400f);
+
+        Assert.AreEqual(second, split.Panel2.Height, 0.5f, "the height is the axis that matters");
+        Assert.AreEqual(180f, split.SplitterDistance, 0.5f);
+    }
+
+    [TestMethod]
+    public void WithNoFixedPanelBothPanelsTakePartInAResize()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.None,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        float ratio = split.SplitterDistance / (400f - 6f);
+
+        scene.Resize(800f, 200f);
+
+        float after = split.SplitterDistance / (800f - 6f);
+        Assert.AreEqual(ratio, after, 0.01f, "the split should keep its share of the container");
+        Assert.IsTrue(split.Panel1.Width > 400f * 0.5f, "which means the first panel grew as well");
+    }
+
+    [TestMethod]
+    public void AFixedSecondPanelGivesWayWhenThereIsNoRoomForBoth()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.Panel2,
+            Panel1MinSize = 100f,
+            Panel2MinSize = 60f,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        scene.Resize(180f, 200f);
+
+        Assert.AreEqual(100f, split.Panel1.Width, 0.5f, "the first panel keeps its minimum");
+        Assert.AreEqual(74f, split.Panel2.Width, 0.5f, "and the second takes what is left");
+    }
+
+    [TestMethod]
+    public void DraggingStillSetsTheSplitWhenTheSecondPanelIsFixed()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.Panel2,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        var origin = split.GetPositionInHost();
+        var start = new SKPoint(origin.X + split.SplitterRect.MidX, origin.Y + split.SplitterRect.MidY);
+
+        scene.Host.ProcessMouseMove(start);
+        scene.Host.ProcessMouseDown(start);
+        scene.Host.ProcessMouseMove(new SKPoint(start.X + 40f, start.Y));
+        scene.Host.ProcessMouseUp(new SKPoint(start.X + 40f, start.Y));
+
+        Assert.AreEqual(160f, split.SplitterDistance, 1f, "a drag decides the split whatever is fixed");
+        Assert.AreEqual(234f, split.Panel2.Width, 0.5f, "and the second panel took the difference");
+    }
+
+    [TestMethod]
+    public void ReorientingKeepsTheDistanceRatherThanCarryingTheOldAxisAcross()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.Panel2,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 300f);
+
+        split.Orientation = Orientation.Horizontal;
+
+        Assert.AreEqual(120f, split.SplitterDistance, 0.5f, "a width is not a height, so the distance stands");
+    }
+
+    [TestMethod]
+    public void FixedPanelSizeReadsThePanelThatIsFixed()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 120f };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        Assert.AreEqual(120f, split.FixedPanelSize, 0.5f, "with panel 1 fixed it is panel 1's width");
+
+        split.FixedPanel = FixedPanel.Panel2;
+
+        Assert.AreEqual(274f, split.FixedPanelSize, 0.5f, "and with panel 2 fixed it is panel 2's");
+    }
+
+    [TestMethod]
+    public void FixedPanelSizeIsAHeightInAHorizontalSplit()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Horizontal,
+            SplitterDistance = 80f,
+            FixedPanel = FixedPanel.Panel2,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 300f);
+
+        Assert.AreEqual(214f, split.FixedPanelSize, 0.5f, "the axis the splitter runs across, not the width");
+    }
+
+    [TestMethod]
+    public void SettingFixedPanelSizeMovesTheSplitter()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 120f };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        split.FixedPanelSize = 150f;
+
+        Assert.AreEqual(150f, split.SplitterDistance, 0.5f, "asking the first panel for a width moves the splitter");
+        Assert.AreEqual(150f, split.Panel1.Width, 0.5f);
+    }
+
+    [TestMethod]
+    public void SettingFixedPanelSizeOnTheSecondPanelMovesTheSplitterTheOtherWay()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.Panel2,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        int changed = 0;
+        split.AddSplitterDistanceChangedHandler(_ => changed++);
+
+        split.FixedPanelSize = 300f;
+
+        Assert.AreEqual(300f, split.Panel2.Width, 0.5f, "the second panel measured what was asked of it");
+        Assert.AreEqual(94f, split.SplitterDistance, 0.5f, "which left the splitter 94 px from the left");
+        Assert.AreEqual(1, changed, "it is still one splitter, so the distance change is the event raised");
+    }
+
+    [TestMethod]
+    public void FixedPanelSizeIsHeldToThePanelMinimums()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            Panel1MinSize = 100f,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        split.FixedPanelSize = 20f;
+
+        Assert.AreEqual(100f, split.FixedPanelSize, 0.5f, "the first panel cannot go under its minimum");
+    }
+
+    [TestMethod]
+    public void WithNoFixedPanelTheSizeIsPanel1s()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.None,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        Assert.AreEqual(120f, split.FixedPanelSize, 0.5f, "nothing is fixed, so this follows panel 1");
+
+        split.FixedPanelSize = 160f;
+
+        Assert.AreEqual(160f, split.SplitterDistance, 0.5f, "and setting it moves panel 1 the way it always can");
+    }
+
+    [TestMethod]
+    public void FixedPanelSizeFollowsAResizeOfTheContainer()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            SplitterDistance = 120f,
+            FixedPanel = FixedPanel.Panel2,
+        };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        scene.Resize(500f, 200f);
+
+        Assert.AreEqual(274f, split.FixedPanelSize, 0.5f, "the fixed panel kept its width through the resize");
+        Assert.AreEqual(274f, split.Panel2.Width, 0.5f, "which is what the panel actually measures");
+    }
+
     private static Panel Plain() => new()
     {
         Padding = Thickness.Empty,
