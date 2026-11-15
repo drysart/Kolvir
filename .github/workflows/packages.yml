@@ -19,9 +19,9 @@ on:
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
       - 'Kolvir.slnx'
-      - 'Kolvir/**'
-      - 'Kolvir.Backend*/**'
-      - 'Kolvir.Feature*/**'
+      - 'src/core/**'
+      - 'src/backends/**'
+      - 'src/features/**'
   workflow_dispatch:
 
 concurrency:
