@@ -9,7 +9,7 @@ namespace Kolvir.Demo;
 /// </summary>
 internal sealed class FiltersPage : DemoPage
 {
-    private ControlFilter? _blurred;
+    private readonly List<ControlFilter> _owned = new();
 
     /// <summary>Builds the page, once, for the life of the window.</summary>
     /// <param name="shell">The window the page is shown in.</param>
@@ -80,24 +80,34 @@ internal sealed class FiltersPage : DemoPage
 
         void Apply()
         {
-            var next = ControlFilter.Blur(sigma.Value);
+            var blur = ControlFilter.Blur(sigma.Value);
+            var over = sigma.Value > 0f
+                ? blur.Then(ControlFilter.Tint(new SKColor(0x20, 0x60, 0xC0, 0x66)))
+                : blur;
 
-            if (sigma.Value > 0f)
+            // The page owns the filters it hands out - a control never disposes one - so the old pair
+            // is released once nothing points at it any more. The track bar makes a new pair on every
+            // value, and at sigma 0 the two cards share one filter rather than making two.
+            var stale = _owned.ToArray();
+            _owned.Clear();
+
+            blurred.Frame.Filter = blur;
+            tinted.Frame.Filter = over;
+
+            _owned.Add(blur);
+
+            if (!ReferenceEquals(over, blur))
             {
-                next = next.Then(ControlFilter.Tint(new SKColor(0x20, 0x60, 0xC0, 0x66)));
+                _owned.Add(over);
             }
 
-            blurred.Frame.Filter = next;
-            tinted.Frame.Filter = next;
-
-            // The page owns the filters it hands out: a control never disposes one, and the track
-            // bar makes a new filter on every value.
-            var previous = _blurred;
-            _blurred = next;
-            previous?.Dispose();
+            foreach (var previous in stale)
+            {
+                previous.Dispose();
+            }
 
             readout.Text = sigma.Value > 0f
-                ? $"Blur sigma {sigma.Value:0}, which reaches {next.Margin:0} pixels past a changed one"
+                ? $"Blur sigma {sigma.Value:0}, which reaches {blur.Margin:0} pixels past a changed one"
                 : "No blur, so the cards are the same and nothing repaints whole";
         }
 
