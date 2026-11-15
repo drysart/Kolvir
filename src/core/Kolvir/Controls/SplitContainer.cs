@@ -229,8 +229,7 @@ public class SplitContainer : Control
 
             _splitterDistance = clamped;
             _fixedSize = float.NaN;
-            PerformLayout();
-            Invalidate();
+            RequestArrange();
             OnSplitterDistanceChanged();
         }
     }
@@ -595,6 +594,29 @@ public class SplitContainer : Control
             float y = _orientation == Orientation.Vertical ? center.Y + offset : center.Y;
             Painter.Fill(canvas, new SKRect(x - radius, y - radius, x + radius, y + radius), color, radius);
         }
+    }
+
+    /// <summary>
+    /// Asks for the two panels to be arranged again around the splitter.
+    /// </summary>
+    /// <remarks>
+    /// A drag asks this on every pointer move, and a pointer reports several times per frame.
+    /// Arranging here would lay the message-sized subtree in one of the panels out once per report,
+    /// for frames nobody sees, so the request is left to the frame that will be drawn. Reading the
+    /// panels' bounds before that frame answers with the arrangement they had, which is the same
+    /// bargain described on the host's request.
+    /// </remarks>
+    private void RequestArrange()
+    {
+        if (Host is { } host)
+        {
+            host.RequestLayout(this);
+            return;
+        }
+
+        // Nothing to defer to without a window to paint.
+        PerformLayout();
+        Invalidate();
     }
 
     private void SetRange(ref float field, float value)

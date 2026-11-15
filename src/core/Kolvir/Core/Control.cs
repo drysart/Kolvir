@@ -2148,6 +2148,15 @@ public class Control : IDisposable
     internal void InvalidateMeasure() => _measureEpoch = -1;
 
     /// <summary>
+    /// True while this control is waiting to lay its own children out again at the next frame.
+    /// </summary>
+    /// <remarks>
+    /// Only the host moves this, and only to keep the same control out of the queue twice: a drag
+    /// asks on every pointer move and each of those would otherwise be one more entry to arrange.
+    /// </remarks>
+    internal bool ArrangeRequested { get; set; }
+
+    /// <summary>
     /// The area this pass arranged its children in, when that is not the same as
     /// <see cref="ContentRect"/> - a scrolling panel arranges the viewport, which a scrollbar narrows.
     /// </summary>

@@ -44,7 +44,14 @@ public sealed class UiHost
     private SKRegion _dirty = new();
     private SKRegion _painting = new();
     private bool _dirtyAll = true;
+    /// <summary>
+    /// How many rounds of queued arrangements one frame runs before giving up on a container that
+    /// keeps asking for itself.
+    /// </summary>
+    private const int MaxArrangementPasses = 8;
+
     private bool _layoutPending;
+    private readonly List<Control> _arrangeQueue = new();
     private bool _debugHoldingContent;
     private System.Threading.Timer? _debugFrameTimer;
 
@@ -352,6 +359,74 @@ public sealed class UiHost
         }
     }
 
+    /// <summary>
+    /// Asks for one control's own layout to run again before the next frame is painted.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A splitter being dragged asks for this on every pointer move, and a pointer reports far more
+    /// often than a screen refreshes. Laying the container out inside the request would arrange the
+    /// subtree in the moving panel once per report, for frames nobody ever sees; queueing it folds
+    /// every request between two paints into the one pass that is actually drawn.
+    /// </para>
+    /// <para>
+    /// Only the control that asked is laid out, and only if it is still in this window when the
+    /// frame comes. Its own bounds did not change - nothing above it has to look at it again - so
+    /// this is not the whole-tree pass <see cref="SetClientSize"/> defers, which is why hit testing
+    /// does not wait for it either: the pointer is being captured by the control doing the asking.
+    /// </para>
+    /// </remarks>
+    /// <param name="control">The control that has to arrange its own children again.</param>
+    public void RequestLayout(Control control)
+    {
+        ArgumentNullException.ThrowIfNull(control);
+
+        if (!control.ArrangeRequested)
+        {
+            control.ArrangeRequested = true;
+            _arrangeQueue.Add(control);
+        }
+
+        Invalidate();
+    }
+
+    /// <summary>Runs the layouts that were asked for since the last frame.</summary>
+    /// <remarks>
+    /// Arranging a control can ask for another one - the panels inside a splitter, a list that
+    /// refilled itself - so this repeats until nothing is left asking. The bound is there because a
+    /// container that asked for itself on every pass would otherwise never let a frame happen.
+    /// </remarks>
+    private void FlushArrangements()
+    {
+        for (int pass = 0; pass < MaxArrangementPasses && _arrangeQueue.Count > 0; pass++)
+        {
+            // A pass remembers the sizes it measured, so it has to know it is a new one, exactly as
+            // a whole-tree pass does.
+            Control.BeginLayoutEpoch();
+
+            var queued = _arrangeQueue.ToArray();
+            _arrangeQueue.Clear();
+
+            foreach (var control in queued)
+            {
+                control.ArrangeRequested = false;
+
+                // The control may have left this window, or been disposed, since it asked.
+                if (ReferenceEquals(control.Host, this))
+                {
+                    control.PerformLayout();
+                }
+            }
+        }
+
+        foreach (var control in _arrangeQueue)
+        {
+            control.ArrangeRequested = false;
+        }
+
+        _arrangeQueue.Clear();
+    }
+
     /// <summary>Arranges the menu bar across the top of the client area and the root below it.</summary>
     public void PerformLayout()
     {
@@ -397,6 +472,10 @@ public sealed class UiHost
                 overlay.PerformLayout();
             }
         }
+
+        // Whoever asked for this pass expects the tree to be arranged when it returns, including the
+        // controls that asked for their own arrangement since the last frame.
+        FlushArrangements();
     }
 
     /// <summary>
@@ -530,6 +609,10 @@ public sealed class UiHost
         {
             PerformLayout();
         }
+
+        // Controls that rearranged their own subtree since the last frame, which the whole-tree
+        // pass above does not reach: their bounds are unchanged, so nothing arranged them again.
+        FlushArrangements();
 
         // A font assigned to the theme or to a control after the last frame moved text that is
         // already on screen, so the frame that shows it is laid out first. A repaint covers the
@@ -828,6 +911,10 @@ public sealed class UiHost
         Modifiers modifiers = Modifiers.None,
         int clickCount = 1) => Guard(() =>
     {
+        // A press is aimed at whatever is under it, so any arrangement the last frame's drags asked
+        // for runs first: one press per gesture can afford it, where the moves that queue it cannot.
+        FlushArrangements();
+
         var hit = HitTest(location);
         _captured = hit;
         var takesFocus = hit is null || (hit.TabStop && hit.Focusable);

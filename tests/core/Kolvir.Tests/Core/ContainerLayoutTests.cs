@@ -782,7 +782,71 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         scene.Host.ProcessMouseUp(new SKPoint(start.X + 40f, start.Y));
 
         Assert.AreEqual(160f, split.SplitterDistance, 1f, "a drag decides the split whatever is fixed");
+
+        // A drag leaves the arrangement to the frame that paints it, so the panels are only where
+        // the split puts them once that frame has been laid out.
+        scene.Paint();
+
         Assert.AreEqual(234f, split.Panel2.Width, 0.5f, "and the second panel took the difference");
+    }
+
+    [TestMethod]
+    public void ADraggedSpliterArrangesThePanelsAtTheFrameThatShowsThem()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 120f };
+        split.Panel1.Controls.Add(new Panel
+        {
+            Dock = DockStyle.Fill,
+            Padding = Thickness.Empty,
+            Height = 60f,
+        });
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        split.SplitterDistance = 200f;
+
+        Assert.AreEqual(
+            120f,
+            split.Panel1.Bounds.Width,
+            0.5f,
+            "a move waits for the frame that will show it, so a stream of them costs one arrangement");
+
+        scene.Paint();
+
+        Assert.AreEqual(200f, split.Panel1.Bounds.Width, 0.5f, "and that frame applies the move");
+    }
+
+    [TestMethod]
+    public void EveryMoveInABurstSurvivesToTheFrameThatFollowsIt()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 120f };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        for (int distance = 130; distance <= 200; distance += 10)
+        {
+            split.SplitterDistance = distance;
+        }
+
+        scene.Paint();
+
+        Assert.AreEqual(200f, split.Panel1.Bounds.Width, 0.5f, "the last move of the burst is the one the frame draws");
+    }
+
+    [TestMethod]
+    public void APressArrangesWhatTheLastFrameOwed()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 120f };
+
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        split.SplitterDistance = 200f;
+
+        // A press is aimed at whatever is under it, so it cannot wait for the frame the way a drag
+        // does - and one press per gesture can afford the arrangement a move cannot.
+        scene.Host.ProcessMouseDown(new SKPoint(10f, 10f));
+
+        Assert.AreEqual(200f, split.Panel1.Bounds.Width, 0.5f, "the press laid the move out before aiming at it");
     }
 
     [TestMethod]
