@@ -113,7 +113,7 @@ developer guide carries the design of every control, its rules and worked exampl
 The repository is laid out so a project's place says what it is:
 
 ```
-Kolvir.slnx      every project, at the top level
+Kolvir.slnx      every project, at the top level, in solution folders matching the directories
 src/core         Kolvir, and Kolvir.Backend which selects a backend
 src/backends     the Win32, AppKit, GTK4 and headless backends
 src/features     the separate feature packages

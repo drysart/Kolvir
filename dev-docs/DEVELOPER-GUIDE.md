@@ -11,7 +11,8 @@ supplies the window, the input, the clipboard, the dialogs and the system appear
 controls draw themselves on top of it. The same sample UI runs on all three platforms.
 
 ```
-Kolvir.slnx               every project, at the top level so the solution is the first thing you find
+Kolvir.slnx               every project, at the top level so the solution is the first thing you find,
+                          grouped into solution folders that mirror the directories below
 Directory.Build.props     package metadata and ShipsToConsumers, shared by every project
 Directory.Build.targets   the buildTransitive files a project reference needs (see section 5)
 README.md                 the short, user-facing overview
