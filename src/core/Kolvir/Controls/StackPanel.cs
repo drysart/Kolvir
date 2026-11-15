@@ -146,6 +146,7 @@ public class StackPanel : Panel
     {
         // Docked children take their edges first; the stack runs inside what is left of the panel.
         var content = area;
+        SetResolveArea(content);
         area = LayoutDockedChildren(area);
 
         _run.Clear();
@@ -202,15 +203,19 @@ public class StackPanel : Panel
                 : new SKSize(area.Width, crossBox);
 
             // Nothing across the stack has to be measured when the child fills it, and a child that
-            // keeps its own size does not have to be measured at all.
-            var desired = child.AutoSize || !stretch ? child.Measure(available) : default;
+            // keeps its own size does not have to be measured at all. A child that asked for its length
+            // along the stack does, though: the length it has was measured at the width of the last
+            // pass, and a narrower stack needs more lines, so without this the run is placed one line
+            // short and the extent the scrollbar ranges over comes up short with it.
+            bool measuresMain = child.AutoSize || child.LengthIsMeasured(vertical);
+            var desired = measuresMain || !stretch ? child.Measure(available) : default;
 
-            float mainLength = MathF.Max(0f, child.AutoSize ? MainOf(desired) : MainOf(child.Size));
+            float mainLength = MathF.Max(0f, measuresMain ? MainOf(desired) : MainOf(child.Size));
             float crossLength = crossBox;
 
             if (!stretch)
             {
-                var own = MathF.Max(0f, child.AutoSize ? CrossOf(desired) : CrossOf(child.Size));
+                var own = MathF.Max(0f, child.AutoSize || measuresMain ? CrossOf(desired) : CrossOf(child.Size));
                 crossLength = MathF.Min(own, crossBox);
                 crossPosition += alignment switch
                 {

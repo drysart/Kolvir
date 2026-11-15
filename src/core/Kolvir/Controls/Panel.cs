@@ -594,6 +594,7 @@ public class Panel : Control
     /// </param>
     protected virtual SKSize ArrangeChildren(SKRect area)
     {
+        SetResolveArea(area);
         LayoutDockedChildren(area);
         SizeFreeChildren(area);
         return MeasureExtent(area);

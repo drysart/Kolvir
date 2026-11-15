@@ -2080,8 +2080,31 @@ public class Control : IDisposable
     /// <summary>Starts a new pass: every remembered measurement is dropped.</summary>
     internal static void BeginLayoutEpoch() => LayoutEpoch++;
 
+    /// <summary>
+    /// True when the length along the given axis is <c>auto</c> - or an invalid value, which behaves as
+    /// one - so the control's content decides it and only a measurement can say how big it is.
+    /// </summary>
+    /// <param name="vertical">True to ask about the height, false about the width.</param>
+    internal bool LengthIsMeasured(bool vertical) =>
+        (vertical ? _heightRequest : _widthRequest)?.NeedsMeasure ?? false;
     /// <summary>Forgets the size this control measured at, so the next question is answered afresh.</summary>
     internal void InvalidateMeasure() => _measureEpoch = -1;
+
+    /// <summary>
+    /// The area this pass arranged its children in, when that is not the same as
+    /// <see cref="ContentRect"/> - a scrolling panel arranges the viewport, which a scrollbar narrows.
+    /// </summary>
+    private SKRect? _resolveArea;
+
+    /// <summary>Records the area the children of this container were arranged in this pass.</summary>
+    /// <param name="area">The area, in this control's content coordinates.</param>
+    /// <remarks>
+    /// Lengths this container did not settle are resolved against the same area it arranged them in, so
+    /// a percentage or an <c>auto</c> is answered on the width the child was actually given. It is
+    /// cleared at the start of every pass, so a pass that arranges nothing falls back to
+    /// <see cref="ContentRect"/> rather than reusing the last one's area.
+    /// </remarks>
+    protected void SetResolveArea(SKRect area) => _resolveArea = area;
 
     private int _measureEpoch = -1;
     private int _measureFontVersion = -1;
@@ -2140,6 +2163,9 @@ public class Control : IDisposable
         _layoutPasses++;
         try
         {
+            // A pass that arranges nothing resolves against the content area, not the last pass's.
+            _resolveArea = null;
+
             OnLayout();
 
             // The container has had its say about where its children go; what is left is the ones
@@ -2170,7 +2196,11 @@ public class Control : IDisposable
             return;
         }
 
-        var content = ContentRect;
+        // The area the container arranged its children in, which is not always its content area: a
+        // panel that scrolls arranges the viewport, which the scrollbar makes narrower. Resolving
+        // against the wider content area instead measures a wrapping child at a width it does not
+        // have, so it reports fewer lines than it draws and its height comes out short.
+        var content = _resolveArea ?? ContentRect;
         bool resolved = false;
 
         for (int i = 0; i < children.Count; i++)
