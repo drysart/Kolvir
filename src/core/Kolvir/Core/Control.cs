@@ -2155,7 +2155,10 @@ public class Control : IDisposable
         }
 
         // Only asked for when something actually needs it: measuring is the expensive half of a
-        // layout pass, and almost no control in a tree asks to be sized by it.
+        // layout pass, and only an auto length is answered by it. A pixel value or a percentage is
+        // settled by the parent alone, and a control that lays text out pays for a measurement with
+        // a full text layout, so asking for one it does not use is the difference between a resize
+        // that keeps up and one that does not.
         var measured = false;
         var desired = SKSize.Empty;
 
@@ -2181,11 +2184,15 @@ public class Control : IDisposable
             : bounds.Top;
 
         var width = _widthRequest is { } widthRequest
-            ? MathF.Max(0f, widthRequest.Resolve(parentContent.Width, Measured(true)))
+            ? MathF.Max(0f, widthRequest.Resolve(
+                parentContent.Width,
+                widthRequest.NeedsMeasure ? Measured(width: true) : 0f))
             : bounds.Width;
 
         var height = _heightRequest is { } heightRequest
-            ? MathF.Max(0f, heightRequest.Resolve(parentContent.Height, Measured(false)))
+            ? MathF.Max(0f, heightRequest.Resolve(
+                parentContent.Height,
+                heightRequest.NeedsMeasure ? Measured(width: false) : 0f))
             : bounds.Height;
 
         ApplyBounds(new SKRect(left, top, left + width, top + height));
