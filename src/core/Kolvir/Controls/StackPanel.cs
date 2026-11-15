@@ -216,7 +216,12 @@ public class StackPanel : Panel
             if (!stretch)
             {
                 var own = MathF.Max(0f, child.AutoSize || measuresMain ? CrossOf(desired) : CrossOf(child.Size));
-                crossLength = MathF.Min(own, crossBox);
+
+                // A child that wraps across the stack was measured against the full cross length, so
+                // that is the width it is drawn at. Anything else wraps again inside the narrower box
+                // and the height it asked for - the length along the run - was computed for another
+                // width, which comes up short by a line.
+                crossLength = vertical && child.WrapsToItsWidth ? crossBox : MathF.Min(own, crossBox);
                 crossPosition += alignment switch
                 {
                     Alignment.Center => (crossBox - crossLength) / 2f,

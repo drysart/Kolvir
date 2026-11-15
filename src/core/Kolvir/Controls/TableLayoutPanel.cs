@@ -190,11 +190,16 @@ public class TableLayoutPanel : Panel
             var childBounds = child.Bounds;
             if (child.AutoSize)
             {
+                // A child that wraps is arranged at the cell width it was measured at: drawing it
+                // narrower would wrap its content again, and the height it reported was computed for
+                // the wider box. One that does not wrap is given only as much of the cell as it asked
+                // for, which is what makes an AutoSize track hug its content.
                 var desired = child.Measure(new SKSize(inner.Width, inner.Height));
+                var width = child.WrapsToItsWidth ? inner.Width : MathF.Min(desired.Width, inner.Width);
                 childBounds = new SKRect(
                     childBounds.Left,
                     childBounds.Top,
-                    childBounds.Left + MathF.Min(desired.Width, inner.Width),
+                    childBounds.Left + width,
                     childBounds.Top + MathF.Min(desired.Height, inner.Height));
                 child.SetArrangedBounds(childBounds);
             }

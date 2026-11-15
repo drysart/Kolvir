@@ -2185,6 +2185,19 @@ public class Control : IDisposable
     /// </remarks>
     protected virtual bool MeasureIgnoresHeight => false;
 
+    /// <summary>
+    /// True when this control wraps its content to whatever width it is given, so its height depends
+    /// on that width and it has to be arranged at the width it was measured at.
+    /// </summary>
+    /// <remarks>
+    /// A container that offers a child a cell measures it at the cell's width and then decides how
+    /// much of that width the child occupies. For a control that does not wrap, the second step is
+    /// a choice about the box; for one that does, drawing the box narrower than it was measured at
+    /// wraps the content again and the height it reported was computed for a different width -
+    /// usually too short, cutting off the last line.
+    /// </remarks>
+    internal virtual bool WrapsToItsWidth => false;
+
     /// <summary>Arranges this control's children, unless layout is suspended.</summary>
     /// <remarks>
     /// Suspending is what makes adding many children at once affordable: every child added lays its
