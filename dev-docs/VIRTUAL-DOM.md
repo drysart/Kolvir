@@ -93,7 +93,7 @@ manifest is expected to be short and per application rather than a library-wide 
 | `Key` | On the `VNode` base, so every element can be identified in a list | Requirement of keyed reconciliation (section 6). On the base type it needs no per-type support. |
 | Events | Generated parameters map to Kolvir's `AddXxxHandler`/`RemoveXxxHandler` method pairs, not to `+=` | Kolvir exposes handlers as method pairs rather than `event` members (`FEATURE-COST-POLICY.md` 5.4). The generator knows the pairs, so an event property is a named parameter with a delegate value; the reconciler keeps the attached delegate so it can detach the old one and attach the new one across renders. |
 | Control creation | Generated `Func<Control>` per type, emitted in the binder's `NodeType` | `Activator.CreateInstance` is the classic trimming trap. A generated `new Label()` also makes a missing parameterless constructor a build error rather than a run-time one. |
-| Reordering children | `ControlCollection.Remove` then `Insert` (no core addition) | Rung 3 cannot add members to core types. A `Move` operation would be a `Kolvir` change (rung 1) and is out of scope here; section 10 records the cost of not having it. |
+| Reordering children | `ControlCollection.Move`, added to core for this | Added to `Kolvir` on rung 1 rather than worked around: `Remove` + `Insert` detaches and re-attaches the child, which re-reads enabled/displayed/appearance state for its subtree and re-runs `OnControlAdded`, so a keyed reorder would disturb exactly the state it exists to preserve. A general reorder primitive is worth having on its own terms and costs nothing to an application that does not call it. |
 | Reflective escape hatch | Available, but explicitly not the default: an annotated `Type`-taking registration, and unannotated overloads marked `[RequiresUnreferencedCode]` | The only case that genuinely needs it is a type supplied at run time - a plugin, or a control set read from configuration. Marking the unannotated overloads means an AOT build gets a warning instead of a post-trim crash. |
 | Renders are event-driven | `SetState` renders synchronously; no per-frame rendering, no scheduled batching in the first cut | Batching is an optimisation for a problem that does not exist yet in a UI driven by clicks and messages, and it needs a scheduling seam (`FEATURE-COST-POLICY.md` 6.2) that this feature is not entitled to invent. Section 10 lists coalescing as the follow-up. |
 | Markup front end | Not in this plan | See section 9. Deciding it early would constrain the node model for no benefit; the node model is the stable ABI, and a markup generator can be added later behind it. |
@@ -221,9 +221,12 @@ Children, in order of preference:
 3. **Mixing** is allowed: keyed children are matched by key and unkeyed children fill the remaining
    slots positionally. A key change is a replacement, never an update.
 
-Ordering after matching: the reconciler emits the minimum set of `Insert`/`Remove` operations to turn
-the old order into the new one, applied as `Remove` + `Insert` on `ControlCollection`. It does not
-clear and rebuild, because that would destroy state and re-run layout for the whole subtree.
+Ordering after matching: the reconciler emits the minimum set of `Insert`/`Remove`/`Move` operations to
+turn the old order into the new one. Moves go through `ControlCollection.Move`, which reorders the
+child in place and runs `OnChildMoved` rather than the attach/detach pair - so a reordered control
+keeps its own state (scroll position, caret, a label's built layout) and a container does not redo
+whatever it hangs off a child being added. It never clears and rebuilds a set of siblings, which
+would destroy state and re-run layout for the whole subtree.
 
 Events: the reconciler keeps the previously attached delegate per (control, event name). A changed
 delegate detaches the old one through the generated `RemoveXxxHandler` and attaches the new one; an
@@ -263,7 +266,7 @@ can have it.
 | 2 | Mount, and the first hand-written binder | `VirtualDom.Mount`, create-only reconciliation, `MountHandle`; a hand-written `Label` binder next to the generated contract it will later replace | Mounting a hand-built tree puts a real `Label` with the right text under a container |
 | 3 | Property diffing | Old-vs-new prop diff, per-property defaults recorded on `NodeType`, `Update` | A changed tree patches in place: the same control instance survives, a removed prop returns to its default |
 | 4 | Structure: create, replace, unmount | `NodeType` mismatch handling, positional children, subtree unmount, event detach | Inserting, removing and retyping children mid-list leave a correct tree and no leaked handlers |
-| 5 | Keys and reordering | Keyed matching, mixed keyed/unkeyed lists, minimum move sequence over `Remove`+`Insert` | Reversing a keyed list moves controls instead of recreating them, proven by reference identity and by scroll position surviving |
+| 5 | Keys and reordering | Keyed matching, mixed keyed/unkeyed lists, minimum move sequence over `ControlCollection.Move` | Reversing a keyed list moves controls instead of recreating them, proven by reference identity and by scroll position surviving |
 | 6 | Events | Generated `AddXxxHandler`/`RemoveXxxHandler` mapping, delegate identity tracking | Re-rendering with the same handler subscribes once; a new handler replaces the old one |
 | 7 | The source generator | Attribute, `ForAttributeWithMetadataName`, `V` factories, `NodeType`s, binders, diagnostics VD001-VD007 | The manifest in section 4 compiles, and the drift test (section 11) passes for every built-in control |
 | 8 | The component layer | `Component`, `SetState`, dirty tracking, render-and-patch | A headless scene shows new controls after a `SetState`, and `Render` runs exactly once per change |
@@ -289,12 +292,15 @@ a redesign.
 
 ## 10. Risks and open questions
 
-- **Reordering through `Remove` + `Insert` is not free.** Detaching a control runs its removal path,
-  and built-in controls do real work there (`RichLabel` drops its cached layout and tokenized text;
-  a `Panel` may reset state). A keyed reorder therefore costs a re-layout of the moved controls and
-  can lose per-control state that lives outside the control. A core `ControlCollection.Move` would
-  fix this properly; it is a `Kolvir` change on rung 1, so it is out of scope here and recorded here
-  because step 5's "done when" is the comfortable place to discover we want it.
+- **Reordering a `RichLabel`'s inline controls does not reorder its text.** Inline content order lives
+  in the label's span collection, not in `Controls`, so `ControlCollection.Move` on a `RichLabel`
+  changes z-order only and the text flow does not follow. A keyed reorder of inline controls
+  therefore needs the span moved, not the child - which means the reconciler cannot treat inline
+  children as ordinary children (see the next bullet). Either the span collection grows a move of its
+  own, or inline controls are ordered by a prop the label applies.
+- **Inline controls in a `RichLabel` sit between "children" and "props"** (section 6). Deciding that a
+  `RichLabel`'s children are inline controls, based on the parent rather than the child, is the
+  simplest rule available but the least obvious; step 4 is where it gets tested.
 - **A node tree per render is allocation.** A React-style `Render()` rebuilds everything it describes.
   That is fine for event-driven UI and unacceptable for anything rendering per frame, which is why
   section 3 rules out per-frame rendering. If someone needs per-frame animation, the answer is
@@ -308,9 +314,6 @@ a redesign.
 - **Name collisions are a per-manifest concern.** Two manifests imported into one file make shared
   names ambiguous, which is a compile error at the call site rather than a wrong tree, so it is
   annoying but safe. `Name` on the attribute is the escape.
-- **Inline controls in a `RichLabel` sit between "children" and "props"** (section 6). Deciding a
-  `RichLabel`'s children are inline controls, based on the parent rather than the child, is the
-  simplest rule available but the least obvious; step 4 is where it gets tested.
 - **The reflective path is a real user-visible failure mode** if someone publishes AOT after ignoring
   an `IL2xxx` warning. Mitigated by `[RequiresUnreferencedCode]` on the unannotated overloads, not by
   documentation alone.
