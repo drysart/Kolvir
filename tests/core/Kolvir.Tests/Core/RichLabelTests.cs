@@ -219,6 +219,117 @@ public sealed class RichLabelTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void WrappingAtANarrowerWidthAndBackGivesTheHeightItHad()
+    {
+        using (TestFont.Pin())
+        {
+            var label = new RichLabel
+            {
+                Text = "a sentence long enough to need several lines once the box it is in is narrow",
+                WrapText = true,
+                HorizontalAlignment = Alignment.Near,
+            };
+
+            using var scene = HeadlessScene.Create(InStack(label), 320f, 600f);
+
+            float wide = label.Bounds.Height;
+
+            scene.Resize(160f, 600f);
+            float narrow = label.Bounds.Height;
+
+            scene.Resize(320f, 600f);
+
+            Assert.IsTrue(narrow > wide, $"a narrower box needs more lines ({wide} -> {narrow})");
+            Assert.AreEqual(wide, label.Bounds.Height, 0.5f, "and going back to the wide box gives back the height it had");
+        }
+    }
+
+    [TestMethod]
+    public void ChangingTheTextLaysTheLabelOutAgain()
+    {
+        using (TestFont.Pin())
+        {
+            var label = new RichLabel { Text = "short", WrapText = true };
+
+            using var scene = HeadlessScene.Create(InStack(label), 240f, 400f);
+
+            float before = label.Bounds.Height;
+
+            label.Text = LongText;
+            scene.Host.PerformLayout();
+
+            Assert.IsTrue(
+                label.Bounds.Height > before,
+                $"the longer text needs more room, stayed at {label.Bounds.Height} from {before}");
+        }
+    }
+
+    [TestMethod]
+    public void ChangingTheFontLaysTheLabelOutAgain()
+    {
+        using (TestFont.Pin())
+        {
+            var label = new RichLabel
+            {
+                Text = LongText,
+                WrapText = true,
+                Font = TestFont.Create(13f),
+            };
+
+            using var scene = HeadlessScene.Create(InStack(label), 300f, 600f);
+
+            float before = label.Bounds.Height;
+
+            label.Font = TestFont.Create(40f);
+            scene.Host.PerformLayout();
+
+            Assert.IsTrue(
+                label.Bounds.Height > before,
+                $"a bigger face takes more room, stayed at {label.Bounds.Height} from {before}");
+        }
+    }
+
+    [TestMethod]
+    public void AnInlineControlIsMeasuredAgainWhenItChangesSize()
+    {
+        using (TestFont.Pin())
+        {
+            var inline = new Panel { Padding = Thickness.Empty, AutoSize = false };
+            inline.Bounds = new SKRect(0f, 0f, 40f, 20f);
+
+            var label = new RichLabel { WrapText = true };
+            label.AddText("before ");
+            label.AddInlineControl(inline);
+            label.AddText(" after");
+
+            using var scene = HeadlessScene.Create(InStack(label), 300f, 400f);
+
+            float before = label.Bounds.Height;
+
+            inline.Height = 80f;
+            scene.Host.PerformLayout();
+
+            Assert.IsTrue(
+                label.Bounds.Height > before,
+                $"the taller control makes the line taller, stayed at {label.Bounds.Height} from {before}");
+        }
+    }
+
+    /// <summary>A vertical stack holding one control across its width, so its height is its own.</summary>
+    private static StackPanel InStack(Control child) => new()
+    {
+        Dock = DockStyle.Fill,
+        Padding = Thickness.Empty,
+        Orientation = StackOrientation.Vertical,
+        Controls = { child },
+    };
+
+    /// <summary>Text that needs more than one line in any of the boxes these tests use.</summary>
+    private const string LongText =
+        "a sentence long enough to need more than one line at this width, with more words after it " +
+        "to be sure of that, and still more words so that a wider face needs more lines again";
+
+    [TestMethod]
     public void TheTextPropertyIsTheConcatenationOfItsRuns()
     {
         using var label = new RichLabel { Text = "plain text" };

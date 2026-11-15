@@ -47,6 +47,7 @@ public class RichLabel : Control
     private readonly TextSpanCollection _spans;
     private readonly Dictionary<string, Font> _derivedFonts = new(StringComparer.Ordinal);
     private Layout? _layout;
+    private List<Fragment>? _fragments;
     private TextSpan? _hoverSpan;
     private TextSpan? _pressedSpan;
     private bool _wrapText = true;
@@ -95,7 +96,7 @@ public class RichLabel : Control
     protected override void OnAppearanceChanged()
     {
         ClearDerivedFonts();
-        _layout = null;
+        ClearLayoutCache();
     }
 
     /// <summary>When true (the default) lines break at the control's width.</summary>
@@ -232,10 +233,14 @@ public class RichLabel : Control
     /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        // The layout this builds is kept: the arrange that follows, and the paint after that, ask
-        // for the same width, so building it once answers all three. EnsureLayout builds one when it
-        // has nothing to hand back, so the result is never null.
-        var layout = EnsureLayout(availableSize.Width)!;
+        // A layout is reused for a width because the only other thing it depends on is the text,
+        // and a change to that drops it. An inline control is the exception: it is measured as part
+        // of the text flow, so its own size at this moment is part of the answer, and a layout built
+        // before it changed is the wrong answer.
+        var layout = HasInlineControl
+            ? _layout = BuildLayout(NormalizeWrapWidth(availableSize.Width))
+            : EnsureLayout(availableSize.Width)!;
+
         return new SKSize(MathF.Ceiling(layout.Width), MathF.Ceiling(layout.Height));
     }
 
@@ -402,13 +407,13 @@ public class RichLabel : Control
 
     internal override void OnControlAdded(Control control)
     {
-        _layout = null;
+        ClearLayoutCache();
         base.OnControlAdded(control);
     }
 
     internal override void OnControlRemoved(Control control)
     {
-        _layout = null;
+        ClearLayoutCache();
         base.OnControlRemoved(control);
     }
 
@@ -462,7 +467,7 @@ public class RichLabel : Control
         {
             _spans.Clear();
             ClearDerivedFonts();
-            _layout = null;
+            ClearLayoutCache();
         }
 
         base.Dispose(disposing);
@@ -470,9 +475,23 @@ public class RichLabel : Control
 
     private void InvalidateLayout()
     {
-        _layout = null;
+        ClearLayoutCache();
         PerformLayout();
         Invalidate();
+    }
+
+    /// <summary>
+    /// Drops the built layout and the tokenized text it was built from.
+    /// </summary>
+    /// <remarks>
+    /// Everything that changes the words or the font they are drawn in lands here: the layout holds
+    /// both, so nothing about either survives a change to the text, a span, an inline control or the
+    /// face.
+    /// </remarks>
+    private void ClearLayoutCache()
+    {
+        _layout = null;
+        _fragments = null;
     }
 
     private float NormalizeWrapWidth(float width) =>
@@ -1157,7 +1176,7 @@ public class RichLabel : Control
             x = 0f;
         }
 
-        foreach (var fragment in BuildFragments(wrapWidth))
+        foreach (var fragment in FragmentsFor(wrapWidth))
         {
             switch (fragment.Kind)
             {
@@ -1265,6 +1284,41 @@ public class RichLabel : Control
 
         layout.Width = width;
         return layout;
+    }
+
+    /// <summary>
+    /// The text as fragments - one per word, space and break - for the width it is being wrapped at.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Tokenizing does not depend on the width the text is wrapped at: the same words come out of it
+    /// whatever room they have, and only where the lines break changes. So it is done once and every
+    /// wrap reuses it, which is what turns a resize from re-reading and re-measuring every word into
+    /// laying the same fragments out again.
+    /// </para>
+    /// <para>
+    /// An inline control is measured against the width it sits in, so its fragment does depend on
+    /// that width and a label holding one tokenizes per wrap instead. Those fragments are one per
+    /// control in the text, which is not the cost this avoids.
+    /// </para>
+    /// </remarks>
+    private List<Fragment> FragmentsFor(float wrapWidth) =>
+        HasInlineControl ? BuildFragments(wrapWidth) : _fragments ??= BuildFragments(wrapWidth);
+
+    private bool HasInlineControl
+    {
+        get
+        {
+            foreach (var span in _spans)
+            {
+                if (span.Control is not null)
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
     }
 
     private List<Fragment> BuildFragments(float wrapWidth)
