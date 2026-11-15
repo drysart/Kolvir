@@ -818,6 +818,15 @@ something changes that only it can resolve. `OnLayout` is the protected hook a c
 Neither of them is how a caller arranges children: set `Dock`, `Bounds` or `Location` and let the
 control do it.
 
+A window's own layout follows the frame that shows it, not the event that asked for it. A dragged
+edge delivers sizes faster than a frame can be painted, so `UiHost.SetClientSize` marks the surface
+dirty and the pass runs in `Paint`: forty sizes that arrive before the next frame cost one layout,
+for the size that is actually drawn. The consequence for a caller is that a size assigned to a
+`Window` is not laid out until a frame is painted - which matters only if something reads a control's
+`Bounds` in between. Anything that hit tests answers a pending pass first, so pointer input is always
+aimed at the tree that is about to be on screen, and `UiHost.PerformLayout` remains the way to ask
+for one immediately.
+
 ### List box
 
 `ListBox` is the WinForms list box: a vertical list of rows with a selection, keyboard
