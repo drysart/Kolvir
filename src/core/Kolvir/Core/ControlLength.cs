@@ -163,6 +163,17 @@ public readonly record struct ControlLength
     }
 
     /// <summary>
+    /// True when working out what this value means needs the control's own measurement:
+    /// <c>auto</c>, and an invalid value, which behaves as one.
+    /// </summary>
+    /// <remarks>
+    /// A number of pixels or a percentage is decided by the parent alone. Measuring to answer those
+    /// is wasted work, and on a control that lays text out it is the expensive kind of wasted work,
+    /// so the parents check this before asking.
+    /// </remarks>
+    public bool NeedsMeasure => Kind is ControlLengthKind.Auto or ControlLengthKind.Invalid;
+
+    /// <summary>
     /// The number of pixels this value means when the parent gives <paramref name="basis"/> and the
     /// control measures at <paramref name="auto"/>.
     /// </summary>

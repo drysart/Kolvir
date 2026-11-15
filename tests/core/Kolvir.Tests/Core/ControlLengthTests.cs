@@ -234,6 +234,45 @@ public sealed class ControlLengthTests : HeadlessTestBase
         Assert.AreEqual(400f, child.Bounds.Width, 0.5f, "a docked child is arranged by its container, which wins");
     }
 
+    /// <summary>
+    /// A pixel length or a percentage is settled by the parent, so the control is never measured to
+    /// answer one: a measurement is the expensive half of a layout pass, and a control that lays text
+    /// out pays for it with a full text layout.
+    /// </summary>
+    [TestMethod]
+    public void ALengthTheParentCanAnswerAloneDoesNotMeasureTheControl()
+    {
+        var child = new CountingPanel { Bounds = new SKRect(0f, 0f, 10f, 10f) };
+        var stage = Stage(child, 400f, 200f);
+        using var scene = HeadlessScene.Create(stage, 400f, 200f);
+
+        child.Width = "50%";
+        child.Height = 40f;
+        child.Measures = 0;
+
+        stage.PerformLayout();
+
+        Assert.AreEqual(0, child.Measures, "a percentage and a pixel count are answered without measuring");
+        Assert.AreEqual(200f, child.Bounds.Width, 0.5f, "and the percentage is still a share of the parent");
+        Assert.AreEqual(40f, child.Bounds.Height, 0.5f, "and the height is still the number given");
+    }
+
+    /// <summary>An <c>auto</c> length is the one thing a measurement is for, so it is still asked for.</summary>
+    [TestMethod]
+    public void AnAutoLengthMeasuresTheControl()
+    {
+        var child = new CountingPanel { Bounds = new SKRect(0f, 0f, 10f, 10f) };
+        var stage = Stage(child, 400f, 200f);
+        using var scene = HeadlessScene.Create(stage, 400f, 200f);
+
+        child.Height = "auto";
+        child.Measures = 0;
+
+        stage.PerformLayout();
+
+        Assert.IsTrue(child.Measures > 0, "auto is answered by measuring");
+    }
+
     /// <summary>A plain panel of the given size with one freely positioned child in it.</summary>
     private static Panel Stage(Control child, float width, float height)
     {
@@ -246,5 +285,17 @@ public sealed class ControlLengthTests : HeadlessTestBase
 
         stage.Controls.Add(child);
         return stage;
+    }
+
+    /// <summary>A panel that counts the times a layout pass asks it to measure itself.</summary>
+    private sealed class CountingPanel : Panel
+    {
+        public int Measures;
+
+        protected override SKSize MeasureContent(SKSize availableSize)
+        {
+            Measures++;
+            return base.MeasureContent(availableSize);
+        }
     }
 }

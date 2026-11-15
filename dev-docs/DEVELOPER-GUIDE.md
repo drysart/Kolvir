@@ -466,6 +466,12 @@ child.Width.Kind                     // ControlLengthKind.Percent
 child.Bounds.Width                   // 400 in a 800 px parent, and 300 after it shrinks
 ```
 
+Only `auto` is answered by measuring. A percentage or a pixel count is settled from the parent's
+own size, so a control sized that way is not measured on its account - which is what
+`ControlLength.NeedsMeasure` reports, and it matters because a measurement on a control that lays
+text out costs a whole text layout. `DesiredSize` is written by a measurement, so a control whose
+lengths the parent settles alone keeps the last size it measured at.
+
 Reading a `ControlLength` as a number gives the number for an absolute value and `NaN` for the rest,
 so a share can never be mistaken for a pixel count by arithmetic. `Kind` and the `IsAbsolute`/
 `IsPercent`/`IsAuto`/`IsValid` predicates are how a parent decides what to do with one - a control
@@ -811,6 +817,15 @@ container itself - but still repaints.
 something changes that only it can resolve. `OnLayout` is the protected hook a container overrides.
 Neither of them is how a caller arranges children: set `Dock`, `Bounds` or `Location` and let the
 control do it.
+
+A window's own layout follows the frame that shows it, not the event that asked for it. A dragged
+edge delivers sizes faster than a frame can be painted, so `UiHost.SetClientSize` marks the surface
+dirty and the pass runs in `Paint`: forty sizes that arrive before the next frame cost one layout,
+for the size that is actually drawn. The consequence for a caller is that a size assigned to a
+`Window` is not laid out until a frame is painted - which matters only if something reads a control's
+`Bounds` in between. Anything that hit tests answers a pending pass first, so pointer input is always
+aimed at the tree that is about to be on screen, and `UiHost.PerformLayout` remains the way to ask
+for one immediately.
 
 ### List box
 
