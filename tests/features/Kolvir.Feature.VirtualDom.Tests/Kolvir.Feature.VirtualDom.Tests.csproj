@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The virtual DOM feature's own suite. The feature is a rung-3 package, so its tests are not part
+       of the core suite: they reference the feature the way an application does.
+
+       The feature multi-targets for packaging, but these tests only touch `common/`, so the project
+       takes one portable target framework and the reference resolves the `net10.0` inner build on
+       every machine - the same reasoning (and the same `-p:TargetFramework=net10.0` restore) as the
+       other feature suites. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.VirtualDom.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- SkiaSharp's main package carries the Win32 native library only, so the other two platforms need
+       their own. These tests create a window, and a window creates a surface. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
+    <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.VirtualDom\Kolvir.Feature.VirtualDom.csproj" />
+    <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4, and rung 3
+       because a virtual DOM is a way of building an application rather than a control: an
+       application that does not adopt it should not carry it. Everything here is portable object
+       graph work, so `common/` holds all of it and the platform folders stay empty - they exist
+       because the `lib/` folders and dependency groups come from these same inner builds. -->
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <RootNamespace>Kolvir</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- AOT compatible for the same reason the library is: an application that opts in publishes the
+         same way whether it did or not. Reconciling a tree is comparison and assignment over objects
+         that were created by generated code, so there is nothing here for the trimmer to give up on
+         and nothing that needs an interpreter. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Virtual DOM for Kolvir: view model components whose Render() returns a tree of nodes that a reconciler diffs into the real control tree.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>
