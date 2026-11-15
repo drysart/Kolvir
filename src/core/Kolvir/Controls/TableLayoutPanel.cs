@@ -145,11 +145,6 @@ public class TableLayoutPanel : Panel
     /// <inheritdoc />
     protected override void OnLayout()
     {
-        if (_columnStyles.Count == 0 || _rowStyles.Count == 0)
-        {
-            return;
-        }
-
         var content = ContentRect;
         var (columns, rows) = ComputeTrackSizes(new SKSize(content.Width, content.Height));
 
@@ -225,21 +220,28 @@ public class TableLayoutPanel : Panel
 
     private (float[] Columns, float[] Rows) ComputeTrackSizes(SKSize availableSize)
     {
-        var columns = new float[_columnStyles.Count];
-        var rows = new float[_rowStyles.Count];
+        // A table can be given children and no styles at all, which is a table whose cells have not
+        // been described rather than a table with no cells. Every cell a child asks for gets a track;
+        // an undeclared track is AutoSize, the same answer everything else about a cell is given when
+        // nobody said otherwise - it is as big as what is in it.
+        IList<ColumnStyle> columnStyles = _columnStyles.Count > 0 ? _columnStyles : ImplicitColumns();
+        IList<RowStyle> rowStyles = _rowStyles.Count > 0 ? _rowStyles : ImplicitRows();
 
-        for (int i = 0; i < _columnStyles.Count; i++)
+        var columns = new float[columnStyles.Count];
+        var rows = new float[rowStyles.Count];
+
+        for (int i = 0; i < columnStyles.Count; i++)
         {
-            var style = _columnStyles[i];
+            var style = columnStyles[i];
             if (style.SizeType == SizeType.Absolute)
             {
                 columns[i] = style.Value;
             }
         }
 
-        for (int i = 0; i < _rowStyles.Count; i++)
+        for (int i = 0; i < rowStyles.Count; i++)
         {
-            var style = _rowStyles[i];
+            var style = rowStyles[i];
             if (style.SizeType == SizeType.Absolute)
             {
                 rows[i] = style.Value;
@@ -251,7 +253,7 @@ public class TableLayoutPanel : Panel
         // given: measured any wider it reports too few lines, so its row ends up shorter than the text
         // and the text is cut off.
         var known = (float[])columns.Clone();
-        DistributePercent(_columnStyles, known, availableSize.Width);
+        DistributePercent(columnStyles, known, availableSize.Width);
 
         foreach (var child in Controls)
         {
@@ -268,14 +270,14 @@ public class TableLayoutPanel : Panel
             int lastColumn = Math.Min(column + columnSpan, columns.Length) - 1;
             int lastRow = Math.Min(row + rowSpan, rows.Length) - 1;
 
-            bool autoColumn = HasAutoSize(_columnStyles, column, lastColumn);
-            bool autoRow = HasAutoSize(_rowStyles, row, lastRow);
+            bool autoColumn = HasAutoSize(columnStyles, column, lastColumn);
+            bool autoRow = HasAutoSize(rowStyles, row, lastRow);
             if (!autoColumn && !autoRow)
             {
                 continue;
             }
 
-            var desired = child.Measure(MeasureBasis(availableSize, known, column, lastColumn));
+            var desired = child.Measure(MeasureBasis(availableSize, known, columnStyles, column, lastColumn));
 
             // A child that decided its own size cannot be made smaller by the track it is in: it draws at
             // the size it chose, so a track sized to the child's content alone comes out narrower than the
@@ -294,30 +296,80 @@ public class TableLayoutPanel : Panel
             {
                 GrowSpannedTracks(
                     columns,
-                    _columnStyles,
+                    columnStyles,
                     column,
                     lastColumn,
                     wantedWidth + margin.Horizontal + CellPadding.Horizontal);
 
                 // The AutoSize column just grew, so the room the percentage columns share is smaller.
                 Array.Copy(columns, known, columns.Length);
-                DistributePercent(_columnStyles, known, availableSize.Width);
+                DistributePercent(columnStyles, known, availableSize.Width);
             }
 
             if (autoRow)
             {
                 GrowSpannedTracks(
                     rows,
-                    _rowStyles,
+                    rowStyles,
                     row,
                     lastRow,
                     wantedHeight + margin.Vertical + CellPadding.Vertical);
             }
         }
 
-        DistributePercent(_columnStyles, columns, availableSize.Width);
-        DistributePercent(_rowStyles, rows, availableSize.Height);
+        DistributePercent(columnStyles, columns, availableSize.Width);
+        DistributePercent(rowStyles, rows, availableSize.Height);
         return (columns, rows);
+    }
+
+    /// <summary>A track for every column a visible child asks for, when the table declares none.</summary>
+    private ColumnStyle[] ImplicitColumns()
+    {
+        int count = 0;
+
+        foreach (var child in Controls)
+        {
+            if (child.Visible)
+            {
+                var (column, _) = GetCellPosition(child);
+                var (columnSpan, _) = GetCellSpan(child);
+                count = Math.Max(count, column + columnSpan);
+            }
+        }
+
+        var tracks = new ColumnStyle[Math.Max(1, count)];
+
+        for (int i = 0; i < tracks.Length; i++)
+        {
+            tracks[i] = ColumnStyle.AutoSize();
+        }
+
+        return tracks;
+    }
+
+    /// <summary>A track for every row a visible child asks for, when the table declares none.</summary>
+    private RowStyle[] ImplicitRows()
+    {
+        int count = 0;
+
+        foreach (var child in Controls)
+        {
+            if (child.Visible)
+            {
+                var (_, row) = GetCellPosition(child);
+                var (_, rowSpan) = GetCellSpan(child);
+                count = Math.Max(count, row + rowSpan);
+            }
+        }
+
+        var tracks = new RowStyle[Math.Max(1, count)];
+
+        for (int i = 0; i < tracks.Length; i++)
+        {
+            tracks[i] = RowStyle.AutoSize();
+        }
+
+        return tracks;
     }
 
     /// <summary>The size to measure a child at: the tracks it spans.</summary>
@@ -327,9 +379,14 @@ public class TableLayoutPanel : Panel
     /// is about to be given, which is what keeps its row's height honest and lets the control reuse the
     /// layout its measurement built when it is arranged.
     /// </remarks>
-    private SKSize MeasureBasis(SKSize availableSize, float[] known, int first, int last)
+    private SKSize MeasureBasis(
+        SKSize availableSize,
+        float[] known,
+        IList<ColumnStyle> columnStyles,
+        int first,
+        int last)
     {
-        if (HasAutoSize(_columnStyles, first, last) || !float.IsFinite(availableSize.Width))
+        if (HasAutoSize(columnStyles, first, last) || !float.IsFinite(availableSize.Width))
         {
             return availableSize;
         }
