@@ -5,11 +5,11 @@
 	   build assets at all, so the same file is imported here once. Every target in it is conditioned
 	   on publishing with AOT, which makes it inert for the library, the backends and the demo. -->
 
-  <Import Project="$(MSBuildThisFileDirectory)Kolvir\buildTransitive\Kolvir.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)src\core\Kolvir\buildTransitive\Kolvir.targets" />
 
   <!-- The same arrangement for the SVG feature's own native library. Both files are inert unless an
 	   application publishes with AOT, so importing them here changes nothing about the library, the
 	   backends, the tests or a normal demo run. -->
-  <Import Project="$(MSBuildThisFileDirectory)Kolvir.Feature.Svg\buildTransitive\Kolvir.Feature.Svg.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)src\features\Kolvir.Feature.Svg\buildTransitive\Kolvir.Feature.Svg.targets" />
 
 </Project>

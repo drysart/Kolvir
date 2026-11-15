@@ -42,6 +42,6 @@
 	   build assets at all, so the same file is imported here. Keeping the two routes identical is
 	   what makes the demo app a valid stand-in for an application that installs the package. -->
 
-  <Import Project="$(MSBuildThisFileDirectory)Kolvir\buildTransitive\Kolvir.props" />
+  <Import Project="$(MSBuildThisFileDirectory)src\core\Kolvir\buildTransitive\Kolvir.props" />
 
 </Project>
