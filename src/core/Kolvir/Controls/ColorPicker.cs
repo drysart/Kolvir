@@ -282,12 +282,12 @@ public class ColorPicker : Control
         float side = MathF.Max(0f, MathF.Min(squareWidth, squareHeight));
 
         var square = new SKRect(content.Left, content.Top, content.Left + side, content.Top + side);
-        _spectrum.Bounds = square;
-        _hueSlider.Bounds = new SKRect(
+        _spectrum.SetArrangedBounds(square);
+        _hueSlider.SetArrangedBounds(new SKRect(
             square.Right + Gap,
             content.Top,
             square.Right + Gap + HueStripWidth,
-            content.Top + side);
+            content.Top + side));
 
         float top = square.Bottom + SectionGap;
         if (stacked)
@@ -352,21 +352,21 @@ public class ColorPicker : Control
     private void PlaceRow(int index, float left, float right, float top)
     {
         _labelRects[index] = new SKRect(left, top, left + LabelWidth, top + RowHeight);
-        _components[index].Bounds = new SKRect(
+        _components[index].SetArrangedBounds(new SKRect(
             left + LabelWidth,
             top,
             MathF.Max(left + LabelWidth, right),
-            top + RowHeight);
+            top + RowHeight));
     }
 
     private void PlaceHexRow(float left, float right, float top)
     {
         _hexLabelRect = new SKRect(left, top, left + LabelWidth, top + RowHeight);
-        _hex.Bounds = new SKRect(
+        _hex.SetArrangedBounds(new SKRect(
             left + LabelWidth,
             top,
             MathF.Max(left + LabelWidth, right),
-            top + RowHeight);
+            top + RowHeight));
     }
 
     private void SetFromSquare(float saturation, float axis)

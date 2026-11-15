@@ -286,7 +286,7 @@ public sealed class BorderTests : HeadlessTestBase
         float before = child.Left;
         panel.Border = new SimpleBorder(4f);
 
-        Assert.AreEqual(before + 4f, child.Left, "a thicker frame moves the content in");
+        Assert.AreEqual(before + 4f, (float)child.Left, "a thicker frame moves the content in");
     }
 
     [TestMethod]

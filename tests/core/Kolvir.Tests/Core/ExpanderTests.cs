@@ -39,7 +39,7 @@ public sealed class ExpanderTests : HeadlessTestBase
         scene.ClickAt(HeaderPoint(expander));
 
         Assert.IsTrue(expander.IsExpanded);
-        Assert.AreEqual(expanded, expander.Height, "expanding puts back the height the section had");
+        Assert.AreEqual(expanded, (float)expander.Height, "expanding puts back the height the section had");
         Assert.IsTrue(child.Bounds.Height > 0f, "and the content is laid out again");
     }
 
@@ -179,7 +179,7 @@ public sealed class ExpanderTests : HeadlessTestBase
         first.IsExpanded = false;
 
         Assert.IsTrue(second.Top < before, "the section below belongs where the collapsed one ended");
-        Assert.AreEqual(first.Bounds.Bottom, second.Top, "which is immediately under its header");
+        Assert.AreEqual(first.Bounds.Bottom, (float)second.Top, "which is immediately under its header");
     }
 
     [TestMethod]
@@ -219,7 +219,7 @@ public sealed class ExpanderTests : HeadlessTestBase
 
         Assert.AreEqual(1d, expander.ExpandProgress, 0.0001d);
         Assert.AreEqual(90d, expander.ArrowRotationDegrees, 0.0001d, "the arrow points down");
-        Assert.AreEqual(open, expander.Height, "and the height came back");
+        Assert.AreEqual(open, (float)expander.Height, "and the height came back");
         Assert.IsTrue(child.Bounds.Height > 0f);
     }
 
@@ -366,7 +366,7 @@ public sealed class ExpanderTests : HeadlessTestBase
 
         Assert.IsTrue(half < open, "a fold in progress takes the section below with it");
         Assert.IsTrue(second.Top < half, "and so does a fold that finished");
-        Assert.AreEqual(first.Bounds.Bottom, second.Top, "which always sits immediately under the fold");
+        Assert.AreEqual(first.Bounds.Bottom, (float)second.Top, "which always sits immediately under the fold");
     }
 
     [TestMethod]

@@ -524,6 +524,7 @@ public sealed class DemoUi
         ("filters", "Filters", demo => new FiltersPage(demo)),
         ("rich-text", "Rich text", demo => new RichTextPage(demo)),
         ("images-and-layout", "Images and layout", demo => new ImagesAndLayoutPage(demo)),
+        ("relative-sizing", "Relative sizing", demo => new RelativeSizingPage(demo)),
         ("selection-and-clipboard", "Selection and clipboard", demo => new SelectionAndClipboardPage(demo)),
         ("scrolling", "Scrolling", demo => new ScrollingPage(demo)),
         ("lists", "Lists", demo => new ListsPage(demo)),

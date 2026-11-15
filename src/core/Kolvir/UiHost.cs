@@ -365,7 +365,7 @@ public sealed class UiHost
         {
             var size = menuBar.Measure(new SKSize(_clientSize.Width, _clientSize.Height));
             top = MathF.Min(size.Height, _clientSize.Height);
-            menuBar.Bounds = new SKRect(0f, 0f, _clientSize.Width, top);
+            menuBar.SetArrangedBounds(new SKRect(0f, 0f, _clientSize.Width, top));
             menuBar.PerformLayout();
         }
 
@@ -374,7 +374,7 @@ public sealed class UiHost
             return;
         }
 
-        _root.Bounds = new SKRect(0f, top, _clientSize.Width, _clientSize.Height);
+        _root.SetArrangedBounds(new SKRect(0f, top, _clientSize.Width, _clientSize.Height));
         _root.PerformLayout();
 
         if (_overlays is not null)

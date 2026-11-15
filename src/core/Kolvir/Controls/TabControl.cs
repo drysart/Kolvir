@@ -130,7 +130,7 @@ public class TabControl : Control
 
         for (int i = 0; i < Controls.Count; i++)
         {
-            Controls[i].Bounds = content;
+            Controls[i].SetArrangedBounds(content);
         }
     }
 

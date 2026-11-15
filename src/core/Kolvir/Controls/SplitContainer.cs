@@ -360,14 +360,14 @@ public class SplitContainer : Control
         if (_orientation == Orientation.Vertical)
         {
             _splitterRect = new SKRect(content.Left + distance, content.Top, content.Left + distance + splitterWidth, content.Bottom);
-            Panel1.Bounds = new SKRect(content.Left, content.Top, _splitterRect.Left, content.Bottom);
-            Panel2.Bounds = new SKRect(_splitterRect.Right, content.Top, content.Right, content.Bottom);
+            Panel1.SetArrangedBounds(new SKRect(content.Left, content.Top, _splitterRect.Left, content.Bottom));
+            Panel2.SetArrangedBounds(new SKRect(_splitterRect.Right, content.Top, content.Right, content.Bottom));
         }
         else
         {
             _splitterRect = new SKRect(content.Left, content.Top + distance, content.Right, content.Top + distance + splitterWidth);
-            Panel1.Bounds = new SKRect(content.Left, content.Top, content.Right, _splitterRect.Top);
-            Panel2.Bounds = new SKRect(content.Left, _splitterRect.Bottom, content.Right, content.Bottom);
+            Panel1.SetArrangedBounds(new SKRect(content.Left, content.Top, content.Right, _splitterRect.Top));
+            Panel2.SetArrangedBounds(new SKRect(content.Left, _splitterRect.Bottom, content.Right, content.Bottom));
         }
 
         // What this frame settled on, for the next resize to measure the difference against.

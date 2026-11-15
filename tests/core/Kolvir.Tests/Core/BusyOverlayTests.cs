@@ -172,7 +172,7 @@ public sealed class BusyOverlayTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(overlay, 300f, 200f);
 
-        Assert.AreEqual(32f, spinner.Width);
+        Assert.AreEqual(32f, (float)spinner.Width);
         Assert.AreEqual(150f, spinner.Left + (spinner.Width / 2f), "centred across the layer");
         Assert.AreEqual(100f, spinner.Top + (spinner.Height / 2f), "and down it");
     }
@@ -189,8 +189,8 @@ public sealed class BusyOverlayTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(overlay, 300f, 200f);
 
-        Assert.AreEqual(0f, message.Top, "a docked child stays at its edge");
-        Assert.AreEqual(300f, message.Width);
+        Assert.AreEqual(0f, (float)message.Top, "a docked child stays at its edge");
+        Assert.AreEqual(300f, (float)message.Width);
         Assert.AreEqual(
             24f + ((200f - 24f) / 2f),
             spinner.Top + (spinner.Height / 2f),

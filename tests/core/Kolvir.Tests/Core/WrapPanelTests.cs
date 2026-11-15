@@ -56,9 +56,9 @@ public sealed class WrapPanelTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(flow, 200f, 300f);
 
-        Assert.AreEqual(50f, shortItem.Height, "Stretch is the default across a row");
-        Assert.AreEqual(50f, tallItem.Height);
-        Assert.AreEqual(50f, next.Top, "and the next row starts below the tallest item");
+        Assert.AreEqual(50f, (float)shortItem.Height, "Stretch is the default across a row");
+        Assert.AreEqual(50f, (float)tallItem.Height);
+        Assert.AreEqual(50f, (float)next.Top, "and the next row starts below the tallest item");
     }
 
     [TestMethod]
@@ -73,11 +73,11 @@ public sealed class WrapPanelTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(flow, 400f, 300f);
 
-        Assert.AreEqual(0f, near.Top);
-        Assert.AreEqual(10f, center.Top, "centre leaves half the leftover above");
-        Assert.AreEqual(20f, far.Top, "and Far puts it at the bottom edge");
+        Assert.AreEqual(0f, (float)near.Top);
+        Assert.AreEqual(10f, (float)center.Top, "centre leaves half the leftover above");
+        Assert.AreEqual(20f, (float)far.Top, "and Far puts it at the bottom edge");
 
-        Assert.AreEqual(20f, near.Height, "an aligned item keeps its own size across the row");
+        Assert.AreEqual(20f, (float)near.Height, "an aligned item keeps its own size across the row");
     }
 
     [TestMethod]
@@ -88,10 +88,10 @@ public sealed class WrapPanelTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(flow, 300f, 100f);
 
-        Assert.AreEqual(0f, items[0].Top);
-        Assert.AreEqual(60f, items[2].Top, "three items fit down the 100-tall panel");
-        Assert.AreEqual(40f, items[3].Left, "and the fourth starts a new column one item wide");
-        Assert.AreEqual(0f, items[3].Top, "at the top of it");
+        Assert.AreEqual(0f, (float)items[0].Top);
+        Assert.AreEqual(60f, (float)items[2].Top, "three items fit down the 100-tall panel");
+        Assert.AreEqual(40f, (float)items[3].Left, "and the fourth starts a new column one item wide");
+        Assert.AreEqual(0f, (float)items[3].Top, "at the top of it");
     }
 
     [TestMethod]
@@ -103,9 +103,9 @@ public sealed class WrapPanelTests : HeadlessTestBase
 
         using var scene = HeadlessScene.Create(flow, 200f, 300f);
 
-        Assert.AreEqual(0f, wide.Left);
-        Assert.AreEqual(300f, wide.Width, "the item keeps its own width");
-        Assert.AreEqual(30f, next.Top, "and the next item starts a new row instead of overlapping it");
+        Assert.AreEqual(0f, (float)wide.Left);
+        Assert.AreEqual(300f, (float)wide.Width, "the item keeps its own width");
+        Assert.AreEqual(30f, (float)next.Top, "and the next item starts a new row instead of overlapping it");
         Assert.IsTrue(flow.ScrollExtent.Width >= 300f, "so the panel scrolls to reach the rest of it");
     }
 
@@ -138,7 +138,7 @@ public sealed class WrapPanelTests : HeadlessTestBase
         using var scene = HeadlessScene.Create(flow, 200f, 300f);
 
         Assert.AreEqual(20f, header.Bounds.Bottom, "the docked child keeps its band");
-        Assert.AreEqual(20f, items[0].Top, "and the run starts below it");
+        Assert.AreEqual(20f, (float)items[0].Top, "and the run starts below it");
     }
 
     private static Control AddItem(WrapPanel flow, SKSize size, Alignment alignment = Alignment.Stretch)

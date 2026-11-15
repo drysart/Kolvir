@@ -640,7 +640,7 @@ public class Panel : Control
             foreach (var index in fillChildren)
             {
                 var child = Controls[index];
-                child.Bounds = Geometry.Deflate(remaining, child.Margin);
+                child.SetArrangedBounds(Geometry.Deflate(remaining, child.Margin));
             }
         }
 
@@ -664,7 +664,8 @@ public class Panel : Control
             }
 
             var desired = child.Measure(new SKSize(area.Width, area.Height));
-            child.Size = new SKSize(desired.Width, desired.Height);
+            var bounds = child.Bounds;
+            child.SetArrangedBounds(new SKRect(bounds.Left, bounds.Top, bounds.Left + desired.Width, bounds.Top + desired.Height));
         }
     }
 
@@ -715,7 +716,7 @@ public class Panel : Control
                     remaining.Top + margin.Top,
                     remaining.Right - margin.Right,
                     remaining.Top + margin.Top + height);
-                child.Bounds = bounds;
+                child.SetArrangedBounds(bounds);
                 return new SKRect(remaining.Left, bounds.Bottom + margin.Bottom, remaining.Right, remaining.Bottom);
             }
 
@@ -727,7 +728,7 @@ public class Panel : Control
                     remaining.Bottom - margin.Bottom - height,
                     remaining.Right - margin.Right,
                     remaining.Bottom - margin.Bottom);
-                child.Bounds = bounds;
+                child.SetArrangedBounds(bounds);
                 return new SKRect(remaining.Left, remaining.Top, remaining.Right, bounds.Top - margin.Top);
             }
 
@@ -739,7 +740,7 @@ public class Panel : Control
                     remaining.Top + margin.Top,
                     remaining.Left + margin.Left + width,
                     remaining.Bottom - margin.Bottom);
-                child.Bounds = bounds;
+                child.SetArrangedBounds(bounds);
                 return new SKRect(bounds.Right + margin.Right, remaining.Top, remaining.Right, remaining.Bottom);
             }
 
@@ -751,16 +752,16 @@ public class Panel : Control
                     remaining.Top + margin.Top,
                     remaining.Right - margin.Right,
                     remaining.Bottom - margin.Bottom);
-                child.Bounds = bounds;
+                child.SetArrangedBounds(bounds);
                 return new SKRect(remaining.Left, remaining.Top, bounds.Left - margin.Left, remaining.Bottom);
             }
 
             case DockStyle.Fill:
-                child.Bounds = new SKRect(
+                child.SetArrangedBounds(new SKRect(
                     remaining.Left + margin.Left,
                     remaining.Top + margin.Top,
                     remaining.Right - margin.Right,
-                    remaining.Bottom - margin.Bottom);
+                    remaining.Bottom - margin.Bottom));
                 return SKRect.Empty;
 
             default:

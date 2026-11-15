@@ -409,7 +409,7 @@ public sealed class Popup : IDisposable
     private void PlaceOverlay(Control content, SKPoint location)
     {
         var size = MeasureContent();
-        content.Bounds = new SKRect(location.X, location.Y, location.X + size.Width, location.Y + size.Height);
+        content.SetArrangedBounds(new SKRect(location.X, location.Y, location.X + size.Width, location.Y + size.Height));
         content.PerformLayout();
         SyncCatcherBounds();
     }
@@ -418,7 +418,7 @@ public sealed class Popup : IDisposable
     {
         if (_catcher is { } catcher && catcher.Host is { } host)
         {
-            catcher.Bounds = new SKRect(0f, 0f, host.ClientSize.Width, host.ClientSize.Height);
+            catcher.SetArrangedBounds(new SKRect(0f, 0f, host.ClientSize.Width, host.ClientSize.Height));
         }
     }
 
@@ -481,7 +481,7 @@ internal sealed class ScaledPopupHost : Panel
     /// <summary>Gives the content the whole content space and claims no more than it occupies.</summary>
     protected override SKSize ArrangeChildren(SKRect area)
     {
-        _content.Bounds = area;
+        _content.SetArrangedBounds(area);
         return new SKSize(MathF.Max(0f, area.Width), MathF.Max(0f, area.Height));
     }
 }

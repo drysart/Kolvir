@@ -213,9 +213,9 @@ public class WrapPanel : Panel
                     float mainStart = position + (horizontal ? margin.Left : margin.Top);
                     float crossStart = cross + (horizontal ? margin.Top : margin.Left) + acrossOffset;
 
-                    item.Control.Bounds = horizontal
+                    item.Control.SetArrangedBounds(horizontal
                         ? new SKRect(mainStart, crossStart, mainStart + own, crossStart + across)
-                        : new SKRect(crossStart, mainStart, crossStart + across, mainStart + own);
+                        : new SKRect(crossStart, mainStart, crossStart + across, mainStart + own));
                 }
 
                 position += MainOf(item.Size) + MainMarginOf(margin);

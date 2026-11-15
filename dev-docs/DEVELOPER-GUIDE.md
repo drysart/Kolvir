@@ -433,6 +433,53 @@ ones after it and reaches the `AddUnhandledExceptionHandler` handlers.
 a subscription without storing the callback. A caller that already holds the callback can pass it to
 `Remove` and skip the token.
 
+### Sizes and positions
+
+`Width`, `Height`, `Left` and `Top` take a `ControlLength`: a number of pixels, a percentage of the
+parent's content area, or `auto`. A number behaves exactly as it always did, so nothing that already
+writes one changes:
+
+```csharp
+strip.Width = 120;          // 120 px, applied immediately
+strip.Width = "120px";      // the same, spelled out
+strip.Width = "50%";        // half of the parent's content width
+strip.Height = "auto";      // the height the control measures at
+strip.Left = "25%";         // a quarter of the way across the parent
+```
+
+| Text | Kind | Means |
+| --- | --- | --- |
+| `120`, `"120px"` | `Absolute` | That many logical pixels |
+| `"50%"` | `Percent` | A share of the parent's content area along the same axis |
+| `"auto"` | `Auto` | The size the control measures at; for a position, the start of the content area |
+| anything else | `Invalid` | Laid out exactly as `auto`, and still reported as invalid |
+
+A number is applied to the control straight away, with or without a parent. Everything else is a
+**request**: the parent answers it on its next layout pass, measuring percentages against its
+`ContentRect` - so they exclude its border and padding and follow it as it resizes. The request is
+what the property reads back (`child.Width` is `50%`, and `Kind` says so); `Bounds` is what the
+layout made of it, and is always in pixels:
+
+```csharp
+child.Width = "50%";
+child.Width.Kind                     // ControlLengthKind.Percent
+child.Bounds.Width                   // 400 in a 800 px parent, and 300 after it shrinks
+```
+
+Reading a `ControlLength` as a number gives the number for an absolute value and `NaN` for the rest,
+so a share can never be mistaken for a pixel count by arithmetic. `Kind` and the `IsAbsolute`/
+`IsPercent`/`IsAuto`/`IsValid` predicates are how a parent decides what to do with one - a control
+that arranges its own children is free to read them and answer them however it likes.
+
+An invalid value is a state rather than an exception: `"half of the room"` lays out as `auto` and
+`Width.Kind` stays `Invalid`, so a typo is visible to whoever looks rather than silently becoming a
+number. Assigning `Bounds`, `Location` or `Size` is an answer as well, so it clears the requests it
+covers - the same way assigning an absolute `Width` replaces a percentage one.
+
+A container that decides a child's rectangle itself wins, the way an explicit width already did:
+a `Dock`ed child, a `SplitContainer` panel, a table cell and a `StackPanel` or `WrapPanel` child are
+all arranged by their parent, and a percentage on one of them is not consulted.
+
 ### Wrap panel
 
 `WrapPanel` lays its children out along one axis and starts a new line whenever the next one
@@ -5462,7 +5509,7 @@ demo at a time, so adding a demo is a class under `../src/demo/Kolvir.Demo.App/P
 `DemoUi.Demos` rather than another crowded card. Every page is built once and kept, and switching
 pages re-parents one control into the stage.
 
-Sixty-two pages is more than the eye can scan, so a **Find a page** box above the list narrows it to
+Sixty-three pages is more than the eye can scan, so a **Find a page** box above the list narrows it to
 the pages whose title contains what is typed, as it is typed. Narrowing it does not change what the
 stage is showing: a filter is a way of finding a row rather than a way of choosing one, so the page
 being read stays on the stage (its row stays selected while the filter has it) and clearing the

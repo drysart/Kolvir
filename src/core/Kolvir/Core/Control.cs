@@ -49,6 +49,14 @@ public class Control : IDisposable
     private Control? _parent;
     private float _opacity = 1f;
     private ControlFilter? _filter;
+
+    // What was asked for, when it was not a number of pixels: a percentage or "auto" can only be
+    // resolved by a parent, so it is kept until the parent's next layout pass answers it. Null is
+    // the ordinary case - a control with no request follows its bounds.
+    private ControlLength? _leftRequest;
+    private ControlLength? _topRequest;
+    private ControlLength? _widthRequest;
+    private ControlLength? _heightRequest;
     private bool _autoSize;
     private bool _focusable = true;
     private bool _selectable;
@@ -749,24 +757,13 @@ public class Control : IDisposable
         get => _bounds;
         set
         {
-            var normalized = Geometry.Normalize(value);
-            if (_bounds.Equals(normalized))
-            {
-                return;
-            }
-
-            // A control paints nothing outside its own bounds, so whatever it covers now is not
-            // what it covered a moment ago: the area it is leaving has to be repainted as well, or
-            // a control that moved or shrank leaves a copy of itself behind. The area is worked out
-            // in the parent's coordinates and handed to the parent like any other repaint request,
-            // so that a container which clips its children clips this too. Asking the host for it
-            // directly would reach past a scrolling container, and the area a control scrolled out
-            // of sight left behind is the whole content extent - far larger than the surface.
-            var previous = ClientRectInParent(_bounds);
-
-            _bounds = normalized;
-            OnBoundsChanged();
-            InvalidateAreaInParent(previous);
+            // A rectangle says where and how big in pixels, so it answers all four requests at once
+            // and no percentage or auto is left behind to fight it at the next layout.
+            _leftRequest = null;
+            _topRequest = null;
+            _widthRequest = null;
+            _heightRequest = null;
+            ApplyBounds(value);
         }
     }
 
@@ -777,57 +774,174 @@ public class Control : IDisposable
     public SKPoint Location
     {
         get => new(_bounds.Left, _bounds.Top);
-        set => Bounds = new SKRect(value.X, value.Y, value.X + _bounds.Width, value.Y + _bounds.Height);
+        set
+        {
+            _leftRequest = null;
+            _topRequest = null;
+            ApplyBounds(new SKRect(value.X, value.Y, value.X + _bounds.Width, value.Y + _bounds.Height));
+        }
     }
 
     /// <summary>
-    /// The size of <see cref="Bounds"/>. Assigning it goes through <see cref="Bounds"/>, which
-    /// normalizes the rectangle, so a negative extent ends up as a positive one rather than
-    /// flipping the control inside out.
+    /// The size of <see cref="Bounds"/>. Assigning it goes through the bounds, which normalizes the
+    /// rectangle, so a negative extent ends up as a positive one rather than flipping the control
+    /// inside out.
     /// </summary>
     public SKSize Size
     {
         get => new(_bounds.Width, _bounds.Height);
-        set => Bounds = new SKRect(_bounds.Left, _bounds.Top, _bounds.Left + value.Width, _bounds.Top + value.Height);
+        set
+        {
+            _widthRequest = null;
+            _heightRequest = null;
+            ApplyBounds(new SKRect(_bounds.Left, _bounds.Top, _bounds.Left + value.Width, _bounds.Top + value.Height));
+        }
     }
 
     /// <summary>
-    /// Distance from the parent's left edge to this control's left edge. Assigning it moves the
-    /// control horizontally and keeps its size.
+    /// Distance from the parent's left edge to this control's left edge: a number of pixels, a
+    /// percentage of the parent's content width, or <c>auto</c>.
     /// </summary>
-    public float Left
+    /// <remarks>
+    /// A percentage is resolved by the parent's next layout pass, against its content area, so it
+    /// follows the parent as it resizes; <c>auto</c> - and an invalid value, which behaves as
+    /// <c>auto</c> - puts the control at the start of that area, because a position has no size of
+    /// its own to measure. A parent that arranges its children itself is free to read
+    /// <see cref="Left"/> and decide otherwise; nothing here enforces it.
+    /// </remarks>
+    public ControlLength Left
     {
-        get => _bounds.Left;
-        set => Bounds = new SKRect(value, _bounds.Top, value + _bounds.Width, _bounds.Bottom);
+        get => _leftRequest ?? ControlLength.Absolute(_bounds.Left);
+        set => RequestOffset(ref _leftRequest, value, horizontal: true);
     }
 
     /// <summary>
-    /// Distance from the parent's top edge to this control's top edge. Assigning it moves the
-    /// control vertically and keeps its size.
+    /// Distance from the parent's top edge to this control's top edge: a number of pixels, a
+    /// percentage of the parent's content height, or <c>auto</c>.
     /// </summary>
-    public float Top
+    public ControlLength Top
     {
-        get => _bounds.Top;
-        set => Bounds = new SKRect(_bounds.Left, value, _bounds.Right, value + _bounds.Height);
+        get => _topRequest ?? ControlLength.Absolute(_bounds.Top);
+        set => RequestOffset(ref _topRequest, value, horizontal: false);
     }
 
     /// <summary>
-    /// The width of the control. Assigning a negative value is read as zero, so a control can be
-    /// empty but never has a negative width.
+    /// The width of the control: a number of pixels, a percentage of the parent's content width, or
+    /// <c>auto</c> for the width it measures at.
     /// </summary>
-    public float Width
+    /// <remarks>
+    /// A number is applied straight away, exactly as it always was. A percentage or <c>auto</c> is a
+    /// request: it is resolved by the parent's next layout pass, against the parent's content area,
+    /// so it keeps its share as the parent resizes. A container that decides a child's rectangle
+    /// itself - <see cref="Dock"/> on a <see cref="Panel"/>, a table cell, a splitter panel - wins,
+    /// the way an explicit width already did. Negative values are read as zero.
+    /// </remarks>
+    public ControlLength Width
     {
-        get => _bounds.Width;
-        set => Bounds = new SKRect(_bounds.Left, _bounds.Top, _bounds.Left + MathF.Max(0f, value), _bounds.Bottom);
+        get => _widthRequest ?? ControlLength.Absolute(_bounds.Width);
+        set => RequestLength(ref _widthRequest, value, horizontal: true);
     }
 
     /// <summary>
-    /// The height of the control. Assigning a negative value is read as zero.
+    /// The height of the control: a number of pixels, a percentage of the parent's content height,
+    /// or <c>auto</c> for the height it measures at. Negative values are read as zero.
     /// </summary>
-    public float Height
+    public ControlLength Height
     {
-        get => _bounds.Height;
-        set => Bounds = new SKRect(_bounds.Left, _bounds.Top, _bounds.Right, _bounds.Top + MathF.Max(0f, value));
+        get => _heightRequest ?? ControlLength.Absolute(_bounds.Height);
+        set => RequestLength(ref _heightRequest, value, horizontal: false);
+    }
+
+    /// <summary>
+    /// Applies a rectangle somebody decided on - a layout pass, or a caller assigning
+    /// <see cref="Bounds"/> - and leaves the requests exactly as they are.
+    /// </summary>
+    private void ApplyBounds(SKRect value)
+    {
+        var normalized = Geometry.Normalize(value);
+        if (_bounds.Equals(normalized))
+        {
+            return;
+        }
+
+        // A control paints nothing outside its own bounds, so whatever it covers now is not
+        // what it covered a moment ago: the area it is leaving has to be repainted as well, or
+        // a control that moved or shrank leaves a copy of itself behind. The area is worked out
+        // in the parent's coordinates and handed to the parent like any other repaint request,
+        // so that a container which clips its children clips this too. Asking the host for it
+        // directly would reach past a scrolling container, and the area a control scrolled out
+        // of sight left behind is the whole content extent - far larger than the surface.
+        var previous = ClientRectInParent(_bounds);
+
+        _bounds = normalized;
+        OnBoundsChanged();
+        InvalidateAreaInParent(previous);
+    }
+
+    /// <summary>
+    /// Sets the rectangle a container arranged this control into. Unlike <see cref="Bounds"/> it
+    /// leaves the requests alone: arranging a child answers what it asked for rather than replacing
+    /// the request with the answer.
+    /// </summary>
+    /// <param name="value">The rectangle, in the parent's client coordinates.</param>
+    internal void SetArrangedBounds(SKRect value) => ApplyBounds(value);
+
+    /// <summary>
+    /// A distance from the parent's edge: applied now when it is a number of pixels, and kept as a
+    /// request for the parent's next layout pass when it is a percentage or <c>auto</c>.
+    /// </summary>
+    private void RequestOffset(ref ControlLength? request, ControlLength value, bool horizontal)
+    {
+        if (value.Kind != ControlLengthKind.Absolute)
+        {
+            Request(ref request, value);
+            return;
+        }
+
+        request = null;
+
+        var bounds = _bounds;
+        ApplyBounds(horizontal
+            ? new SKRect(value.Value, bounds.Top, value.Value + bounds.Width, bounds.Bottom)
+            : new SKRect(bounds.Left, value.Value, bounds.Right, value.Value + bounds.Height));
+    }
+
+    /// <summary>
+    /// A length along one axis: applied now when it is a number of pixels, and kept as a request for
+    /// the parent's next layout pass when it is a percentage or <c>auto</c>.
+    /// </summary>
+    private void RequestLength(ref ControlLength? request, ControlLength value, bool horizontal)
+    {
+        if (value.Kind != ControlLengthKind.Absolute)
+        {
+            Request(ref request, value);
+            return;
+        }
+
+        request = null;
+
+        var length = MathF.Max(0f, value.Value);
+        var bounds = _bounds;
+        ApplyBounds(horizontal
+            ? new SKRect(bounds.Left, bounds.Top, bounds.Left + length, bounds.Bottom)
+            : new SKRect(bounds.Left, bounds.Top, bounds.Right, bounds.Top + length));
+    }
+
+    /// <summary>Keeps a request and asks the parent to answer it.</summary>
+    private void Request(ref ControlLength? request, ControlLength value)
+    {
+        if (request == value)
+        {
+            return;
+        }
+
+        request = value;
+
+        // The parent's layout pass is where a percentage is resolved, so the request does not take
+        // effect until it has run one. Without a parent there is nothing to measure against yet;
+        // the request stands and is answered when the control is attached.
+        Parent?.PerformLayout();
+        Invalidate();
     }
 
     /// <summary>
@@ -844,7 +958,6 @@ public class Control : IDisposable
 
     /// <summary>The control's own coordinate space: (0, 0, Width, Height).</summary>
     public SKRect ClientRect => new(0f, 0f, _bounds.Width, _bounds.Height);
-
     /// <summary>
     /// The area available to content: <see cref="ClientRect"/> less the border's insets and the
     /// padding.
@@ -1979,6 +2092,11 @@ public class Control : IDisposable
         try
         {
             OnLayout();
+
+            // The container has had its say about where its children go; what is left is the ones
+            // that asked for a share of it - a percentage, or auto. A docked child was decided by
+            // the container's own arrangement, which wins, the way an explicit width already did.
+            ResolveRequests();
         }
         finally
         {
@@ -1991,6 +2109,94 @@ public class Control : IDisposable
             }
         }
     }
+
+    /// <summary>
+    /// Answers the percentage and <c>auto</c> requests of this control's children against its
+    /// content area.
+    /// </summary>
+    private void ResolveRequests()
+    {
+        if (_controls is not { Count: > 0 } children)
+        {
+            return;
+        }
+
+        var content = ContentRect;
+        bool resolved = false;
+
+        for (int i = 0; i < children.Count; i++)
+        {
+            var child = children[i];
+
+            if (!child.Visible || child.Dock != DockStyle.None)
+            {
+                continue;
+            }
+
+            resolved |= child.ResolveRequest(content);
+        }
+
+        if (resolved)
+        {
+            Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// Resolves this control's own requests against the parent's content area, if it has any.
+    /// </summary>
+    /// <param name="parentContent">The parent's content area, in the parent's coordinates.</param>
+    /// <returns>True when the bounds changed.</returns>
+    private bool ResolveRequest(SKRect parentContent)
+    {
+        if (_leftRequest is null && _topRequest is null && _widthRequest is null && _heightRequest is null)
+        {
+            return false;
+        }
+
+        // Only asked for when something actually needs it: measuring is the expensive half of a
+        // layout pass, and almost no control in a tree asks to be sized by it.
+        var measured = false;
+        var desired = SKSize.Empty;
+
+        float Measured(bool width)
+        {
+            if (!measured)
+            {
+                desired = Measure(new SKSize(parentContent.Width, parentContent.Height));
+                measured = true;
+            }
+
+            return width ? desired.Width : desired.Height;
+        }
+
+        var bounds = _bounds;
+
+        var left = _leftRequest is { } leftRequest
+            ? ResolveOffset(leftRequest, parentContent.Left, parentContent.Width)
+            : bounds.Left;
+
+        var top = _topRequest is { } topRequest
+            ? ResolveOffset(topRequest, parentContent.Top, parentContent.Height)
+            : bounds.Top;
+
+        var width = _widthRequest is { } widthRequest
+            ? MathF.Max(0f, widthRequest.Resolve(parentContent.Width, Measured(true)))
+            : bounds.Width;
+
+        var height = _heightRequest is { } heightRequest
+            ? MathF.Max(0f, heightRequest.Resolve(parentContent.Height, Measured(false)))
+            : bounds.Height;
+
+        ApplyBounds(new SKRect(left, top, left + width, top + height));
+        return true;
+    }
+
+    /// <summary>What <c>auto</c> means for a distance: the start of the parent's content area.</summary>
+    private static float ResolveOffset(ControlLength request, float origin, float basis) =>
+        request.Kind == ControlLengthKind.Percent
+            ? origin + (basis * request.Value / 100f)
+            : origin;
 
     /// <summary>Arranges this control's children. Containers override this.</summary>
     protected virtual void OnLayout()

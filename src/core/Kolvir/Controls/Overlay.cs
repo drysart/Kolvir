@@ -164,7 +164,7 @@ public class Overlay : Panel, IInputSink
             var room = Geometry.Deflate(remaining, child.Margin);
             var size = child.AutoSize ? child.Measure(new SKSize(room.Width, room.Height)) : child.Size;
 
-            child.Bounds = Geometry.Align(size, room, _childAlignment);
+            child.SetArrangedBounds(Geometry.Align(size, room, _childAlignment));
         }
 
         return MeasureExtent(area);
