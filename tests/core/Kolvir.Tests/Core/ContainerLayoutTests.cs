@@ -651,6 +651,75 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         }
     }
 
+    /// <summary>
+    /// The scrollable extent of a stack is as tall as the rows it arranged: when a resize makes a row
+    /// wrap one more line, the row has to get taller in the same pass, or the scrollbar ranges over a
+    /// content height that no longer exists and cannot reach the bottom.
+    /// </summary>
+    [TestMethod]
+    public void AResizeThatAddsALineToARowGrowsTheScrollableExtentWithIt()
+    {
+        var rows = new StackPanel
+        {
+            Dock = DockStyle.Fill,
+            Padding = Thickness.Empty,
+            VerticalScroll = ScrollStyle.Automatic,
+            Orientation = StackOrientation.Vertical,
+            Spacing = 0f,
+        };
+
+        for (int i = 0; i < 6; i++)
+        {
+            var body = new RichLabel
+            {
+                Text =
+                    "the quick brown fox jumps over the lazy dog and keeps going until the line has to " +
+                    "break, and then it keeps going some more so that the words have to wrap again",
+                TableColumn = 1,
+                TableRow = 1,
+            };
+
+            rows.Controls.Add(new TableLayoutPanel
+            {
+                Height = ControlLength.Auto,
+                CellPadding = Thickness.Empty,
+                ColumnStyles = { ColumnStyle.Absolute(55f), ColumnStyle.Percent(100f) },
+                RowStyles = { RowStyle.Absolute(32f), RowStyle.AutoSize() },
+                Controls = { new Panel { Bounds = new SKRect(0f, 0f, 48f, 48f), TableColumn = 0, TableRow = 0, TableRowSpan = 2 }, body },
+            });
+        }
+
+        using var scene = HeadlessScene.Create(rows, 520f, 260f);
+        scene.Paint();
+
+        // Walking the width one pixel at a time is what lands on the boundary the report describes: the
+        // width where a row's last word no longer fits and the row needs another line. The extent has to
+        // grow with it in the same pass, because nothing comes back for it afterwards.
+        for (float width = 520f; width >= 300f; width -= 1f)
+        {
+            scene.Resize(width, 260f);
+
+            float tallest = rows.Controls.Sum(row => row.Bounds.Height);
+            Assert.AreEqual(
+                tallest,
+                rows.ScrollExtent.Height,
+                1f,
+                $"the extent at {width} px is as tall as the rows it holds, not one line short");
+
+            // And every row is tall enough for the text at the width it was given, or its last line is
+            // drawn outside it and cut off.
+            foreach (var row in rows.Controls)
+            {
+                float needed = row.Measure(new SKSize(row.Bounds.Width, 10000f)).Height;
+                Assert.AreEqual(
+                    needed,
+                    row.Bounds.Height,
+                    1f,
+                    $"a row at {row.Bounds.Width} px wide is tall enough for its text at {width} px");
+            }
+        }
+    }
+
     [TestMethod]
     public void WithNoFixedPanelBothPanelsTakePartInAResize()
     {
