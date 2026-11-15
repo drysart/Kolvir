@@ -142,7 +142,11 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         ImmutableArray<DiagnosticInfo>.Builder diagnostics)
     {
         var properties = ImmutableArray.CreateBuilder<PropertyModel>();
-        var taken = new List<string>(ReservedNames);
+
+        // Whatever a name was taken by, so that a name met twice can be told apart from a name taken by
+        // something else: a hidden base property and an inherited handler pair are both the same member
+        // reached twice, while a property and an event with one name is a collision.
+        var taken = new Dictionary<string, bool>(StringComparer.Ordinal);
 
         foreach (var property in SettableProperties(control))
         {
@@ -155,12 +159,12 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             // A name already taken is a derived property hiding a base one, which is the property a
             // caller sees and which the walk reached first, so the base declaration is dropped in
             // silence: hiding is a normal thing for a control to do, not a mistake to report.
-            if (taken.Contains(property.Name))
+            if (taken.ContainsKey(property.Name))
             {
                 continue;
             }
 
-            taken.Add(property.Name);
+            taken.Add(property.Name, false);
             properties.Add(new PropertyModel(
                 property.Name,
                 property.Type.ToDisplayString(TypeFormat),
@@ -172,13 +176,26 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
 
         foreach (var (name, add, remove, handlerType) in HandlerPairs(control))
         {
-            if (taken.Contains(name))
+            if (ReservedNames.Contains(name))
             {
-                diagnostics.Add(Info(Diagnostics.MemberNameCollides, location, control.Name + "." + name, "another generated member"));
+                diagnostics.Add(Info(Diagnostics.MemberNameCollides, location, control.Name + "." + name, "the base node class"));
                 continue;
             }
 
-            taken.Add(name);
+            if (taken.TryGetValue(name, out var isEvent))
+            {
+                // An inherited or hidden handler pair is the same event reached twice; a property that
+                // already owns the name is a real collision, and losing the event silently would be
+                // worse than an error.
+                if (!isEvent)
+                {
+                    diagnostics.Add(Info(Diagnostics.MemberNameCollides, location, control.Name + "." + name, "another generated member"));
+                }
+
+                continue;
+            }
+
+            taken.Add(name, true);
             properties.Add(new PropertyModel(
                 name,
                 handlerType,

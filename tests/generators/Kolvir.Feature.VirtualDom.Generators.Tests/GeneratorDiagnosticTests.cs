@@ -203,6 +203,43 @@ public sealed class GeneratorDiagnosticTests
     }
 
     [TestMethod]
+    public void AHandlerPairReachedTwiceIsOneEvent()
+    {
+        // An inherited handler pair is found on both the base and the derived type. That is one event,
+        // not a collision: reporting it would fail the build for a control that did nothing wrong.
+        var generated = VirtualDomCompiler.Build("""
+            using System;
+            using Kolvir;
+            using Kolvir.VirtualDom;
+
+            namespace TestApp;
+
+            public class BaseControl : Kolvir.Control
+            {
+                public void AddClickedHandler(Action handler) { }
+
+                public void RemoveClickedHandler(Action handler) { }
+            }
+
+            public sealed class HostControl : BaseControl
+            {
+                public new void AddClickedHandler(Action handler) { }
+
+                public new void RemoveClickedHandler(Action handler) { }
+            }
+
+            [VirtualDom(typeof(HostControl))]
+            internal partial class App;
+            """);
+
+        Assert.IsEmpty(generated.Ids, string.Join("\n", generated.Ids));
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+
+        var occurrences = generated.Source.Split("public global::System.Action? Clicked").Length - 1;
+        Assert.AreEqual(1, occurrences);
+    }
+
+    [TestMethod]
     public void AGenericAndNullablePropertyKeepsItsExactType()
     {
         // The emitter writes the property's fully-qualified type with its nullable annotation, which
