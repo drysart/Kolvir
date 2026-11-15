@@ -710,11 +710,51 @@ public class Control : IDisposable
     /// </remarks>
     public SKPoint GetPositionInHost()
     {
+        WalkTo(null, out var position);
+        return position;
+    }
+
+    /// <summary>
+    /// The top-left corner of this control in <paramref name="ancestor"/>'s client coordinates,
+    /// including the scroll offsets and zoom of the containers in between.
+    /// </summary>
+    /// <remarks>
+    /// <see cref="GetPositionInHost"/> with the walk stopped early, which is how a container
+    /// answers "where is this child on screen" without needing a host. The ancestor's own scroll
+    /// offset is applied, so the result is the place the ancestor draws the control in, and a
+    /// difference taken either side of an arrange says how far it moved.
+    /// </remarks>
+    /// <param name="ancestor">A container above this control, or this control itself.</param>
+    /// <exception cref="ArgumentException">
+    /// <paramref name="ancestor"/> is neither this control nor one of its parents.
+    /// </exception>
+    public SKPoint GetPositionIn(Control ancestor)
+    {
+        ArgumentNullException.ThrowIfNull(ancestor);
+
+        return WalkTo(ancestor, out var position)
+            ? position
+            : throw new ArgumentException($"{nameof(ancestor)} is not an ancestor of this control.", nameof(ancestor));
+    }
+
+    /// <summary>
+    /// Accumulates up the parent chain until <paramref name="ancestor"/> is reached, or the chain
+    /// runs out when that is null.
+    /// </summary>
+    /// <returns>False when <paramref name="ancestor"/> was never reached.</returns>
+    private bool WalkTo(Control? ancestor, out SKPoint position)
+    {
         float x = 0f;
         float y = 0f;
 
         for (Control? current = this; current is not null; current = current.Parent)
         {
+            if (ReferenceEquals(current, ancestor))
+            {
+                position = new SKPoint(x, y);
+                return true;
+            }
+
             x += current.Left;
             y += current.Top;
 
@@ -730,7 +770,8 @@ public class Control : IDisposable
             }
         }
 
-        return new SKPoint(x, y);
+        position = new SKPoint(x, y);
+        return ancestor is null;
     }
 
     /// <summary>Text shown by the control. Simple controls use it directly.</summary>

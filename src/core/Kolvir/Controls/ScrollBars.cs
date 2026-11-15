@@ -158,7 +158,14 @@ internal sealed class ScrollBars
     /// Called with the content area; positions whatever the container scrolls and returns the
     /// total size of that content. Called once per visibility pass, so it must be idempotent.
     /// </param>
-    public void Layout(SKRect client, Thickness padding, Func<SKRect, SKSize> arrange)
+    /// <param name="settled">
+    /// Called once, after the content has been arranged and the extent, viewport and bars describe
+    /// it, and before the offsets are clamped to the new range. That is the only point at which a
+    /// container knows both what the content became and what it was, which is what anchoring a
+    /// scroll position needs. Not called for a control that has no size to scroll in, because that
+    /// pass arranges nothing a later layout would agree with.
+    /// </param>
+    public void Layout(SKRect client, Thickness padding, Func<SKRect, SKSize> arrange, Action? settled = null)
     {
         ArgumentNullException.ThrowIfNull(arrange);
 
@@ -241,6 +248,11 @@ internal sealed class ScrollBars
             _showVertical = showVertical;
             _showHorizontal = showHorizontal;
             _hasLayout = true;
+
+            // The offsets are still the ones the user was looking at, and the extent they are
+            // clamped against is now the new one: handing over here is what lets a container pin
+            // to the end or hold a child still instead of keeping its distance from the top.
+            settled?.Invoke();
 
             _horizontalOffset = Math.Clamp(_horizontalOffset, 0f, MaxHorizontalOffset);
             _verticalOffset = Math.Clamp(_verticalOffset, 0f, MaxVerticalOffset);
