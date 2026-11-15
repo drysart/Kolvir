@@ -87,7 +87,9 @@ manifest is expected to be short and per application rather than a library-wide 
 | Where the generated factories live | A **`V` static class nested inside the manifest**, so `using static MyApp.V;` gives bare `Label(...)`, `Button(...)` | This is the syntax win (section 4). Nesting also solves the multi-assembly problem: `MyApp.V` and `Plugins.V` cannot collide, whereas a flat `class V` per assembly would make every cross-assembly reference ambiguous. |
 | What a factory does | Emits direct assignments into the node's property list - one per declared parameter - never reflection | The setters are rooted by the references themselves, so no annotation is needed anywhere on this path, and the trimmer's view is exactly the properties the developer actually registered. |
 | Binder | A generated per-control `Set(Control, string name, object? value) : bool` alongside the factory | The reconciler needs to patch an existing control from a changed node without knowing its type. A generated `switch` over names is the reflective binder's job done statically, and it doubles as the drift test hook (it returns `false` for an unknown name, so a test can assert every public settable property is handled). |
-| What is diffed | The **previous node against the next node**, never the node against the control | Halves the problem: the binder only ever needs setters, because old values come from the tree we already hold. Nothing reads a control's current property state back out, which removes the hardest reflective cases (getter-only and private-setter properties, boxing on read of value types) and keeps `Control` free of any virtual-DOM awareness. |
+| What is diffed | The **previous node against the next node**, never the node against the control | Halves the problem: the binder needs setters, because old values come from the tree we already hold. Nothing reads a control's current property state back out, which keeps `Control` free of any virtual-DOM awareness and avoids the hardest reflective cases (getter-only and private-setter properties, boxing on read of value types). The one exception is the pristine snapshot below, which is read once per type rather than per diff. |
+| Optional property arguments | Every factory parameter is a `Specified<T>?`: `null` is "not in this node", an implicit conversion from `T` is "set to this", and `Specified<T>.Reset` is an explicit "put it back" | A plain `T?` cannot express three states, and two of them are needed: `Font`, `Color` and `ContextMenu` all have a meaningful `null`, so "no font" has to be distinguishable from "this node says nothing about the font". The wrapper never reaches the node - the factory unwraps it and stores the plain `T`, so no `Specified<T>` is ever boxed. |
+| What "default" means | Not `default(T)`: the **pristine value**, snapshotted per property from a freshly constructed control | `Label.Text` starts at `""`, `Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared default is `None`. `default(T)` would be wrong for most properties, so each `NodeType` records what its control looked like before any node touched it - which needs a generated getter alongside the setter, read once when the first control of that type is created. |
 | Node type | One non-generic `VNode` class holding a generated `NodeType` (creator + binder + CLR type), a `VProp[]` of name/value pairs, and a `VNode[]` of children | Keeps the reconciler non-generic: no generic dispatch, no variance pain in child lists. Compile-time type safety lives entirely in the generated factory's signature, which is where a developer actually types the code. |
 | Property names | Interned string literals emitted by the generator, not an enum or an index | A literal is interned, so a name costs no allocation; the binder's string `switch` compiles to a hashed dispatch. An enum would put a build-time ordering into a public API for no measurable gain. |
 | `Key` | On the `VNode` base, so every element can be identified in a list | Requirement of keyed reconciliation (section 6). On the base type it needs no per-type support. |
@@ -149,6 +151,12 @@ Three things make that readable, and each is a decision rather than an accident:
    so `text:`, `font:`, `onClick:` are checked at compile time, renamed with the property, and
    completed by IntelliSense. Setting a property is a visible, named thing - nothing hidden in a
    string.
+4. **Optional arguments that stay clean.** A parameter is `Specified<T>?` with an implicit conversion
+   from `T`, so `Label(text: "hi")` reads exactly as it would with a plain `string?` parameter while
+   still distinguishing three cases: not passed at all, passed a value, and deliberately reset
+   (`Label(font: Specified<Font?>.Reset)`). The last is needed because `Font`, `Color` and
+   `ContextMenu` all have a meaningful `null`, so "no font" and "says nothing about the font" are
+   different statements (section 6).
 
 The trade-off this buys: the factories are a generated surface, so their shape follows the controls
 rather than being hand-designed. That is the same trade `System.Text.Json`'s source generator makes,
@@ -165,19 +173,29 @@ partial class AppControls
 {
     internal static class V
     {
-        public static VNode Label(string? text = null, Font? font = null, ...) => ...;
-        public static VNode Button(string? text = null, Action<object>? onClick = null, ...) => ...;
+        public static VNode Label(
+            Specified<string>? text = null,
+            Specified<Font?>? font = null,
+            ...) => ...;
+
+        public static VNode Button(
+            Specified<string>? text = null,
+            Specified<Action<object>?>? onClick = null,
+            ...) => ...;
     }
 }
 ```
 
 - **`V` (public, nested)** - one factory per registered control. Each allocates a `VNode` with a
-  `VProp[]` sized to the number of non-default arguments, so an unset property costs nothing.
-- **`NodeType` singletons (internal)** - one per control: the `Type`, a `Func<Control>` creator, and
-  the binder. `VNode.NodeType` is how the reconciler answers "can I reuse this control?" in one
-  reference comparison.
+  `VProp[]` sized to the number of specified arguments, so an unset property costs nothing. A
+  parameter is `Specified<T>?`, and the factory stores the unwrapped `T`, so the wrapper exists only
+  at the call site.
+- **`NodeType` singletons (internal)** - one per control: the `Type`, a `Func<Control>` creator, the
+  binder, and the pristine values captured from a freshly constructed control. `VNode.NodeType` is
+  how the reconciler answers "can I reuse this control?" in one reference comparison.
 - **Binders (internal)** - `bool Set(Control c, string name, object? value)` with one `case` per
-  property, each a direct assignment inside a typed cast.
+  property, each a direct assignment inside a typed cast, plus a generated `object? Get(Control c,
+  string name)` used only to fill in the pristine snapshot.
 
 The generated code is emitted with `#nullable enable`, fully qualified type names (so it compiles
 whatever `using`s the manifest's file has), and no dependencies on analyzer-only types.
@@ -206,10 +224,77 @@ authority on what the control currently looks like.
 
 | Case | Action |
 | --- | --- |
-| Same `NodeType` at the same position | Reuse the control. Diff props: for each named prop in the new node, set it only if the value differs from the old node's; for each prop present in the old node and absent from the new one, set the property's default (a `NodeType` records each property's default so "absent" is well-defined rather than "leave whatever was there"). |
+| Same `NodeType` at the same position | Reuse the control. Diff props: for each named prop in the new node, set it only if the value differs from the old node's; for each prop present in the old node and absent from the new one, restore its pristine value from the `NodeType`'s snapshot, so "absent" is well defined rather than "leave whatever was there". |
 | Different `NodeType` | Create the new control, set all its props, insert it in place of the old one, unmount the old subtree. |
 | No previous node | Create, set all props, mount. |
 | No next node | Unmount the subtree: detach events, `Controls.Remove`, drop references. |
+
+### 6.1 A property is present, set, or reset
+
+A node lists the properties it says something about and omits the rest. Which of the three things an
+argument meant is decided once, at the call site, and what reaches the node is one bit plus a value:
+
+| Argument | In the node | On mount | On a patch from a node that had it |
+| --- | --- | --- | --- |
+| not passed (`null`) | absent | control keeps what its constructor gave it | restored to the pristine value |
+| `Label(text: "hi")` | present, `"hi"` | set | set, if it differs from the old node |
+| `Label(font: Specified<Font?>.Reset)` | absent | as above | as above |
+
+`Specified<T>` is:
+
+```csharp
+public readonly struct Specified<T>
+{
+    public Specified(T value)
+    {
+        Value = value;
+        IsSpecified = true;
+    }
+
+    public T Value { get; }
+
+    public bool IsSpecified { get; }
+
+    public static Specified<T> Reset => default;
+
+    public static Specified<T> From(T value) => new(value);
+
+    public static implicit operator Specified<T>(T value) => new(value);
+}
+```
+
+Four properties of that shape are deliberate:
+
+- **The zero value is the safe one.** `IsSpecified` is false when a `Specified<T>` has been
+  zero-initialised, which is what `default`, an array element, and an uninitialised local all give.
+  A flag whose *zero* value meant "explicitly set" would be wrong for exactly those cases, because
+  struct field initialisers do not run for `default(T)` - so the absent state has to be the one you
+  get for free.
+- **No constructor for the absent state.** `Reset` is `default`, so the struct needs no parameterless
+  constructor at all (C# requires those to be `public`, and one would be pointless here).
+- **`Reset` and "not passed" agree on purpose.** Absence means "restore the pristine value" on a
+  patch, so the explicit spelling produces the same node state as the implicit one. It exists for
+  legibility and for the case where a caller wants to say it out loud.
+- **There is no generic form.** Method type inference does not flow through a user-defined conversion,
+  so a generic helper over `Specified<T>` (`Show(null)`, or a generic `Of<T>` factory) fails with
+  CS0411 before the conversion is ever considered. The generated factories are non-generic per control
+  precisely so this never comes up: `Label`'s parameter is `Specified<string>? text`, not some
+  `Specified<T>` the compiler has to infer.
+
+What is *not* the same is `null` as a value. `font: null` binds to the nullable struct - the compiler
+prefers the nullable conversion over the implicit operator - so it means "absent". Setting a nullable
+property to `null` ("no font, inherit") is spelled `font: (Font?)null`, or through an explicit
+`Specified<Font?>.From(null)` if that reads better. That distinction is the reason the wrapper exists:
+with a plain `Font? font = null` parameter, "no font" and "says nothing about the font" are the same
+call.
+
+The third state is genuinely a third state, not a hole in the first two: `Label(text: "")` is a
+*specified* empty string and will clear the text, while `Label()` says nothing about it at all. Every
+one of those bindings was checked against the compiler rather than assumed, including the surprise
+that `(Font?)null` is required for "set it to null".
+
+The wrapper is a call-site device only. The factory unwraps it and stores the plain `T` in the node's
+`VProp`, so no `Specified<T>` is ever boxed and the node's shape is unchanged.
 
 Children, in order of preference:
 
@@ -247,6 +332,7 @@ The plan's surface, in the order a developer meets it:
 | --- | --- | --- |
 | `VirtualDomAttribute` | `[VirtualDom(typeof(Label), Name = "…")]`, `AllowMultiple` | The manifest entry (section 3). |
 | `VNode` | Non-generic node: `NodeType`, `VProp[]`, `VNode[]`, `Key` | The description (section 3). |
+| `Specified<T>` | `readonly struct`: `Value`, `IsSpecified`, `Reset`, implicit conversion from `T` | The optional-argument wrapper (section 6.1). Never stored in a node. |
 | `Component` | `abstract VNode Render();`, `void SetState()` | The view model base. `SetState` marks the component dirty and renders synchronously, then patches. |
 | `VirtualDom.Mount(Control parent, VNode root)` | Returns a `MountHandle` | Turns a tree into live controls under a container (typically the window's root panel). |
 | `MountHandle.Update(VNode root)` | Reconciles the new tree against what is mounted | What a component's render calls; also usable directly, without components, for a one-shot tree. |
@@ -262,9 +348,9 @@ can have it.
 
 | # | Step | Scope | Done when |
 | --- | --- | --- | --- |
-| 1 | Package skeleton and the node model | `Kolvir.Feature.VirtualDom` project in the rung-3 layout, `VNode`, `VProp`, `NodeType`, hand-built trees | A tree can be constructed by hand and asserted on; the project packs with the same `lib/` folders as the other features |
-| 2 | Mount, and the first hand-written binder | `VirtualDom.Mount`, create-only reconciliation, `MountHandle`; a hand-written `Label` binder next to the generated contract it will later replace | Mounting a hand-built tree puts a real `Label` with the right text under a container |
-| 3 | Property diffing | Old-vs-new prop diff, per-property defaults recorded on `NodeType`, `Update` | A changed tree patches in place: the same control instance survives, a removed prop returns to its default |
+| 1 | Package skeleton and the node model | `Kolvir.Feature.VirtualDom` project in the rung-3 layout, `VNode`, `VProp`, `NodeType`, `Specified<T>`, hand-built trees | A tree can be constructed by hand and asserted on; the project packs with the same `lib/` folders as the other features |
+| 2 | Mount, and the first hand-written binder | `VirtualDom.Mount`, create-only reconciliation, `MountHandle`; a hand-written `Label` binder with generated-style `Set`/`Get` next to the contract it will later replace | Mounting a hand-built tree puts a real `Label` with the right text under a container |
+| 3 | Property diffing and reset | Old-vs-new prop diff, the pristine snapshot captured from a fresh control on first use, `Update` | A changed tree patches in place: the same control instance survives, a dropped prop returns to its pristine value (not `default(T)`), and `Specified<T>.Reset` behaves the same as dropping it |
 | 4 | Structure: create, replace, unmount | `NodeType` mismatch handling, positional children, subtree unmount, event detach | Inserting, removing and retyping children mid-list leave a correct tree and no leaked handlers |
 | 5 | Keys and reordering | Keyed matching, mixed keyed/unkeyed lists, minimum move sequence over `ControlCollection.Move` | Reversing a keyed list moves controls instead of recreating them, proven by reference identity and by scroll position surviving |
 | 6 | Events | Generated `AddXxxHandler`/`RemoveXxxHandler` mapping, delegate identity tracking | Re-rendering with the same handler subscribes once; a new handler replaces the old one |
@@ -306,11 +392,12 @@ a redesign.
   section 3 rules out per-frame rendering. If someone needs per-frame animation, the answer is
   animating props of existing controls, not re-rendering a tree; a `ShouldUpdate` subtree skip is the
   follow-up if it turns out to be needed.
-- **Factory parameters cannot express "set to this type's default"** for a value type, because
-  "absent" and "set to `default`" must be distinguishable. Plan: value-type properties take a
-  `Nullable<T>` parameter, `null` means "not set", and setting a property *to* its default is done
-  through the reconciler (a later `with`-style override, or a direct control property write). Worth
-  revisiting if it turns out to be a common need.
+- **The pristine snapshot is read from a real control, so it can only describe properties the
+  constructor leaves stable.** A property whose initial value depends on something outside the control
+  (a theme colour read lazily, a computed size) gives a snapshot that is right at the moment it is
+  taken and may not be later. The mitigation is that the snapshot is taken per `NodeType` on first
+  use and only consulted when a prop is dropped, so the exposure is narrow; the alternative, matching
+  `default(T)`, is wrong far more often.
 - **Name collisions are a per-manifest concern.** Two manifests imported into one file make shared
   names ambiguous, which is a compile error at the call site rather than a wrong tree, so it is
   annoying but safe. `Name` on the attribute is the escape.
@@ -327,12 +414,13 @@ Every step is checked with headless tests in `tests/features/Kolvir.Feature.Virt
 build a tree, mount it into a `HeadlessScene`, and inspect the resulting `Control` tree - the same
 approach the selection and layout work uses, and the reason none of this needs a window.
 
-Four claims get special treatment, because they are the ones that would otherwise only fail in a
+Five claims get special treatment, because they are the ones that would otherwise only fail in a
 published application:
 
 | Claim | How it is proven |
 | --- | --- |
 | **No mirror drift** between a control and its generated factory | A test enumerates every public instance settable property of every control the test manifest registers and asserts the generated binder accepts each name. The binder returns `false` for an unknown name, so this is a direct check of the generated code's coverage - and it fails on the day a property is added to a control without regenerating. |
+| **Absence, a value, and reset stay three different things** | A render that drops a prop restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`). `Specified<T>.Reset` must produce the same node state as omitting the argument, and `font: null` must mean "absent" rather than "set to null". |
 | **Patches instead of rebuilds** | Assertions on reference identity: the control instance is the same object across a render, and keyed reorders preserve specific state (a `RichLabel`'s layout is not rebuilt, a `Panel`'s scroll position is unchanged). |
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
 | **AOT- and trim-clean** | `dotnet publish` with `PublishTrimmed` and `PublishAot`, treating `IL2xxx` warnings as errors, plus the demo app's `--render <png>` compared byte-for-byte between the JIT and published builds. An application that does not reference the package must show no virtual-DOM assembly in its output at all. |
