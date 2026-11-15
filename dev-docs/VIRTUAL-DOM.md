@@ -386,6 +386,35 @@ can have it.
 Steps 1-6 are written against two hand-written node classes so the reconciler is complete and tested
 *before* the generator exists. The generator then replaces those classes without touching the
 reconciler, which is what keeps step 7 a codegen change rather than a redesign.
+### 8.1 Where the pieces live, and what else has to change
+
+Three projects:
+
+| Path | What it is |
+| --- | --- |
+| `src/features/Kolvir.Feature.VirtualDom/` | The runtime: `VNode`, `NodeType`, the internal `Specified<T>`, the reconciler (`MountHandle`), `Component`, `VirtualDom.Mount`/`Update`, `VirtualDomAttribute`. Four-folder rung-3 layout with all the code in `common/` and empty platform folders. |
+| `src/generators/Kolvir.Feature.VirtualDom.Generators/` | `netstandard2.0`: the incremental generator and the `DiagnosticAnalyzer`. Deliberately **outside** `src/features/*/`, because the pack job globs that tree and would otherwise publish it as a package of its own. |
+| `tests/features/Kolvir.Feature.VirtualDom.Tests/` | Headless tests, plus the hand-written node classes that steps 1-6 use. |
+
+Five things outside the new code that the feature cannot land without:
+
+1. **`Kolvir.slnx`** gets all three projects, under `/src/features/`, `/src/generators/` and
+   `/tests/features/`. The solution is hand-listed, not globbed.
+2. **`.github/workflows/tests.yml`** enumerates test projects one at a time - a `restore` step
+   (`-p:TargetFramework=net10.0`, for the reason the other feature suites give) and a `test` step.
+   Two added blocks; nothing is discovered automatically.
+3. **XML documentation is mandatory and enforced.** `Directory.Build.props` sets
+   `GenerateDocumentationFile` on anything that ships and raises **CS1591 as an error**, so every
+   public member of the runtime assembly needs a `<summary>`. The test project is exempt by the
+   `.Tests` naming rule.
+4. **The analyzer has to be packed, not just referenced.** In this repository a `ProjectReference`
+   with `OutputItemType="Analyzer"` is enough; a consumer gets neither generator nor analyzer that
+   way. Both ship inside the feature package under `analyzers/dotnet/cs/`, which is how
+   `System.Text.Json`'s generator travels, and the per-TFM inner builds have to add them exactly once
+   rather than three times.
+5. **`pack-nuget` needs no change** - it globs `src/features/*/*.csproj` - but the package-layout
+   check will then report a `Kolvir.Feature.VirtualDom` row, which is the point at which the net11
+   question in section 10 becomes visible if it ever matters.
 ## 9. Options considered and rejected
 
 | Option | Why not |
