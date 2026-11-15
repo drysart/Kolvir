@@ -288,6 +288,14 @@ detail is what makes `null` usable as a value:
   removes the competing candidate, leaves the implicit operator as the only way for `null` to become
   one, and "absent" moves to the parameter's default. `font: null` and `text: null` now both mean what
   they read as.
+
+  The alternative of varying the shape per property - `Specified<X?>?` where the property accepts null,
+  `Specified<X>` where it does not - was measured and is worse on both branches: for a nullable
+  property the trailing `?` reintroduces the conversion that swallows `null`, so `font: null` becomes
+  "absent" again; for a non-nullable one it *removes* the CS8625 warning that a bare `Specified<X>`
+  produces, so `text: null` silently reads as "says nothing" instead of being flagged. The generator
+  does know the nullability and uses it - on the type argument, where it costs nothing and breaks
+  nothing.
 - **The zero value is the absent state.** `default(Specified<T>)` is what the omitted argument
   produces, and it is also what an array element and an uninitialised local produce. Both fall out of
   the same fact - struct field initialisers do not run for `default(T)` - so the flag has to be
