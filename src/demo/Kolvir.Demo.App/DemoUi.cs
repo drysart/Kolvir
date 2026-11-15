@@ -521,6 +521,7 @@ public sealed class DemoUi
         ("progress-bars", "Progress bars", demo => new ProgressBarsPage(demo)),
         ("group-boxes", "Group boxes", demo => new GroupBoxesPage(demo)),
         ("borders", "Borders", demo => new BordersPage(demo)),
+        ("filters", "Filters", demo => new FiltersPage(demo)),
         ("rich-text", "Rich text", demo => new RichTextPage(demo)),
         ("images-and-layout", "Images and layout", demo => new ImagesAndLayoutPage(demo)),
         ("selection-and-clipboard", "Selection and clipboard", demo => new SelectionAndClipboardPage(demo)),

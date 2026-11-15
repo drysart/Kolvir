@@ -1652,9 +1652,9 @@ caret.Invalidate(Geometry.Inflate(bounds, 1f), invalidateChildren: false);
 A child is only left out when it is `Opaque`, because one that is not lets the background show
 through, and a repaint that skipped it would leave a hole where its own paint should have been.
 The property is computed rather than set - it is false for a transparent or translucent
-`BackColor`, for rounded corners and for any `Opacity` below 1 - so nothing has to remember to keep
-a flag in step with what the control paints. Override it when a control covers its bounds by other
-means, or when it punches a hole in an otherwise solid background.
+`BackColor`, for rounded corners, for any `Opacity` below 1 and for any `Filter` - so nothing has
+to remember to keep a flag in step with what the control paints. Override it when a control covers
+its bounds by other means, or when it punches a hole in an otherwise solid background.
 
 A control never talks to the host. It clips the area to its own client area, maps what is left into
 its parent's coordinates and calls the parent's `ChildInvalidate`; the default implementation of
@@ -2615,6 +2615,7 @@ when the control itself assigns nothing - so a palette change re-applies nothing
 | `ForeColorRole` | The role used while neither this control nor an ancestor assigns a `Foreground` |
 | `Border` | The frame - see [Borders](#borders) |
 | `Opacity` | Fades the control and everything inside it as one group, 0 to 1 |
+| `Filter` | A blur, a tint or a chain of them, painted over the control and its subtree - see [Filters](#filters) |
 | `TextSpan.ThemeColor` | A role for one span of a rich label; `AddLink` uses `Accent` |
 | `TextSpan.HoverBackColorRole` | The role tinted behind a span while it is hovered |
 | `UiHost.ClearColor` | Follows `Theme.Background` until assigned |
@@ -3085,6 +3086,57 @@ so a sibling that overlaps it does not show through it; hit testing still belong
 control whose bounds contain the point, so a transparent panel over a button swallows clicks meant
 for the button. Both are what WinForms does, and both are the price of not keeping a compositor in
 the library.
+
+### Filters
+
+`Filter` paints the control and everything inside it through a Skia filter. It uses the same layer
+as `Opacity`, so a control with both pays for one surface, and the filter sees the whole subtree as
+one picture - a child cannot escape it, and two children that meet are blurred as one:
+
+```csharp
+var card = new SurfacePanel { Dock = XDock.Fill, Filter = ControlFilter.Blur(6f) };
+card.Controls.Add(picture);    // blurred with the card, not on its own
+card.Controls.Add(caption);
+
+// Several stages, in the order they run: the blur first, then a tint over the result.
+card.Filter = ControlFilter.Blur(6f)
+    .Then(ControlFilter.Tint(new SKColor(0x20, 0x60, 0xC0, 0x66)));
+```
+
+The factories are `Blur`, `DropShadow`, `Tint`, `FromColorFilter` for any Skia colour filter, and
+`Custom` for a raw `SKImageFilter`. A chain is built with `Then` - the receiver runs first - or with
+`Merge`, which runs every branch over the same input and adds the results.
+
+**A filter repaints the whole control, or it does not, and `Margin` decides which.** A control paints
+a filtered subtree into a layer, and that layer is built from whatever the current paint draws. A
+filter that reads only the pixel it writes - a tint, a colour matrix, a blend - is happy with a
+layer covering just the damaged area, so such a control keeps the small partial repaints it would
+have had anyway; `Margin` is 0 and nothing changes. A filter that reaches past its input - a blur,
+a drop shadow - needs real content around the damaged area, or it pulls the layer's transparent edge
+in and writes that over pixels that were right. So its `Margin` is positive, and a control wearing
+one repaints entirely, children included, whenever anything inside it changes:
+
+| Filter | Margin |
+| --- | --- |
+| `Tint`, `FromColorFilter` | 0 - changes pixels in place |
+| `Blur(σ)` | 3σ - Skia clips the blur kernel there |
+| `DropShadow(dx, dy, σ, c)` | 3σ plus the larger offset |
+| `a.Then(b)` | The two margins added |
+| `Merge(a, b)` | The larger of the two |
+
+A cheaper partial repaint for the positive-margin case is possible - hand the filter an input region
+one margin wider than the region it writes back - but it needs an explicit offscreen rather than
+`SaveLayer`, which cannot paint a wider area than it composites. Until then, the rule is the whole
+control, and it is a bounded cost: a blur inside one panel never repaints anything outside it.
+
+Two smaller consequences. A filtered control is never `Opaque`, because even a colour filter can
+leave a pixel translucent, so whatever is behind it is repainted with it. And the control's own clip
+still cuts the filter off at its edges: a blur softens against the control's bounds rather than
+painting outside them, which is what a drop shadow needs padding for. An ancestor's clip does the
+same - a blurred control inside a scrolling viewport is blurred over the part that is showing, in a
+whole frame and a partial one alike - so the two never disagree. Everything runs where the pixels
+are drawn - the GPU tiers of all three backends filter in shaders, and the raster tiers do it on the
+CPU - so nothing here is backend-specific.
 
 ### Window icons
 
@@ -5393,7 +5445,7 @@ demo at a time, so adding a demo is a class under `../src/demo/Kolvir.Demo.App/P
 `DemoUi.Demos` rather than another crowded card. Every page is built once and kept, and switching
 pages re-parents one control into the stage.
 
-Sixty-one pages is more than the eye can scan, so a **Find a page** box above the list narrows it to
+Sixty-two pages is more than the eye can scan, so a **Find a page** box above the list narrows it to
 the pages whose title contains what is typed, as it is typed. Narrowing it does not change what the
 stage is showing: a filter is a way of finding a row rather than a way of choosing one, so the page
 being read stays on the stage (its row stays selected while the filter has it) and clearing the
