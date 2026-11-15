@@ -46,6 +46,9 @@ public class SplitContainer : Control
     private float _lastSplitterWidth;
     private float _lastDistance;
 
+    /// <summary>The size the fixed panel keeps; NaN until one is asked for or measured.</summary>
+    private float _fixedSize = float.NaN;
+
     /// <summary>
     /// Creates a vertical split with an empty <see cref="Panel1"/> and <see cref="Panel2"/> and the
     /// splitter 200 units from the left.
@@ -131,6 +134,7 @@ public class SplitContainer : Control
             // forgotten rather than carried into the new one: re-orienting keeps the distance it
             // was given.
             _lastAvailable = 0f;
+            _fixedSize = float.NaN;
             UpdateCursor();
             PerformLayout();
             Invalidate();
@@ -158,6 +162,7 @@ public class SplitContainer : Control
             }
 
             _fixedPanel = value;
+            _fixedSize = float.NaN;
         }
     }
 
@@ -193,14 +198,16 @@ public class SplitContainer : Control
         }
         set
         {
-            var available = AxisLength(ContentRect);
-            var splitter = MathF.Min(MathF.Max(0f, _splitterWidth), available);
+            _fixedSize = MathF.Max(0f, value);
+            float previous = _splitterDistance;
+            PerformLayout();
+            Invalidate();
 
-            // The second panel grows from the far end, so asking it for a size is asking the
-            // splitter for the room that leaves.
-            SplitterDistance = _fixedPanel == FixedPanel.Panel2
-                ? available - splitter - value
-                : value;
+            // It is still one splitter, so moving it this way raises the same event a drag does.
+            if (MathF.Abs(_splitterDistance - previous) >= 0.01f)
+            {
+                OnSplitterDistanceChanged();
+            }
         }
     }
 
@@ -221,6 +228,7 @@ public class SplitContainer : Control
             }
 
             _splitterDistance = clamped;
+            _fixedSize = float.NaN;
             PerformLayout();
             Invalidate();
             OnSplitterDistanceChanged();
@@ -321,41 +329,57 @@ public class SplitContainer : Control
     {
         var content = ContentRect;
         var available = AxisLength(content);
+        var splitterWidth = MathF.Min(MathF.Max(0f, _splitterWidth), available);
+        var track = MathF.Max(0f, available - splitterWidth);
+        bool room = available >= splitterWidth + _panel1MinSize + _panel2MinSize;
 
-        // A container that changed size hands the difference to the panel that is meant to keep
-        // its size. Anything else that lands here - a drag, a new splitter width, a fresh layout
-        // pass at the same size - leaves the available length alone, so the distance somebody
-        // chose survives it.
-        if (_lastAvailable > 0.5f && MathF.Abs(available - _lastAvailable) > 0.5f)
+        // The fixed panel keeps the size it was given, and failing that the size the last split gave
+        // it. A request made while the container was too small to honour it waits for a frame that
+        // has the room, instead of being clamped into place and then kept at the clamped size.
+        float fixedSize = float.IsNaN(_fixedSize)
+            ? MathF.Max(0f, _fixedPanel == FixedPanel.Panel2 ? track - _splitterDistance : _splitterDistance)
+            : _fixedSize;
+
+        if (room && _fixedPanel == FixedPanel.None && !float.IsNaN(_fixedSize))
         {
-            var splitter = MathF.Min(MathF.Max(0f, _splitterWidth), available);
-            var track = MathF.Max(0f, available - splitter);
+            // Nothing is held fixed, so the request places the splitter once and the split's share of
+            // the track is what survives the next resize.
+            _splitterDistance = Math.Clamp(
+                _fixedSize,
+                _panel1MinSize,
+                MathF.Max(_panel1MinSize, track - _panel2MinSize));
+            _fixedSize = float.NaN;
+        }
+        else if (room && _fixedPanel == FixedPanel.Panel1)
+        {
+            fixedSize = Math.Clamp(fixedSize, _panel1MinSize, MathF.Max(_panel1MinSize, track - _panel2MinSize));
+            _splitterDistance = fixedSize;
+            _fixedSize = fixedSize;
+        }
+        else if (room && _fixedPanel == FixedPanel.Panel2)
+        {
+            fixedSize = Math.Clamp(fixedSize, _panel2MinSize, MathF.Max(_panel2MinSize, track - _panel1MinSize));
+            _splitterDistance = track - fixedSize;
+            _fixedSize = fixedSize;
+        }
+        else if (room)
+        {
+            // Neither panel is fixed, so the split keeps its share of the track and both panels take
+            // part in the difference.
             var previousTrack = MathF.Max(0f, _lastAvailable - _lastSplitterWidth);
-
-            if (_fixedPanel == FixedPanel.Panel2)
+            if (previousTrack > 0f && MathF.Abs(available - _lastAvailable) > 0.5f)
             {
-                // The second panel measured this wide last time; it measures the same now and the
-                // first one moves.
-                var second = MathF.Max(0f, previousTrack - _lastDistance);
-                _splitterDistance = ClampDistance(track - second, available);
-            }
-            else if (_fixedPanel == FixedPanel.None && previousTrack > 0f)
-            {
-                // Neither is fixed, so the split keeps its share of the track and both panels take
-                // part of the difference.
                 _splitterDistance = ClampDistance(_lastDistance / previousTrack * track, available);
             }
         }
-
-        // Only collapse the requested distance when there is genuinely no room for it;
-        // this keeps the value intact through transient zero/small layout passes.
-        if (available >= _splitterWidth + _panel1MinSize + _panel2MinSize)
+        else
         {
+            // Not enough room for both: fit the split to what there is without touching the request,
+            // so the panels go back to the size that was asked for when the room comes back.
             _splitterDistance = ClampDistance(_splitterDistance, available);
         }
 
-        var splitterWidth = MathF.Min(MathF.Max(0f, _splitterWidth), available);
-        var distance = Math.Clamp(_splitterDistance, 0f, MathF.Max(0f, available - splitterWidth));
+        var distance = Math.Clamp(_splitterDistance, 0f, track);
 
         if (_orientation == Orientation.Vertical)
         {
