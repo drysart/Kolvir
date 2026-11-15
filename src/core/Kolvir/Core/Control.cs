@@ -763,6 +763,7 @@ public class Control : IDisposable
             _topRequest = null;
             _widthRequest = null;
             _heightRequest = null;
+            HasOwnSize = true;
             ApplyBounds(value);
         }
     }
@@ -794,6 +795,7 @@ public class Control : IDisposable
         {
             _widthRequest = null;
             _heightRequest = null;
+            HasOwnSize = true;
             ApplyBounds(new SKRect(_bounds.Left, _bounds.Top, _bounds.Left + value.Width, _bounds.Top + value.Height));
         }
     }
@@ -851,6 +853,16 @@ public class Control : IDisposable
         get => _heightRequest ?? ControlLength.Absolute(_bounds.Height);
         set => RequestLength(ref _heightRequest, value, horizontal: false);
     }
+
+    /// <summary>
+    /// True once a caller has decided how big this control is, by assigning <see cref="Bounds"/>,
+    /// <see cref="Size"/>, <see cref="Width"/> or <see cref="Height"/>.
+    /// </summary>
+    /// <remarks>
+    /// A container that hands a child a rectangle can tell the two cases apart with this: a child that
+    /// chose a size keeps it, and one that never did is free to be fitted to the room it is given.
+    /// </remarks>
+    internal bool HasOwnSize { get; private set; }
 
     /// <summary>
     /// Applies a rectangle somebody decided on - a layout pass, or a caller assigning
@@ -912,6 +924,10 @@ public class Control : IDisposable
     /// </summary>
     private void RequestLength(ref ControlLength? request, ControlLength value, bool horizontal)
     {
+        // Asking for a size of your own - a number, a share or auto - is a decision about how this
+        // control is sized, so a container that would otherwise fit it to the room it has leaves it be.
+        HasOwnSize = true;
+
         if (value.Kind != ControlLengthKind.Absolute)
         {
             Request(ref request, value);

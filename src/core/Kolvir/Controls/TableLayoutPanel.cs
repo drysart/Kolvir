@@ -271,9 +271,28 @@ public class TableLayoutPanel : Panel
             }
 
             var desired = child.Measure(MeasureBasis(availableSize, known, column, lastColumn));
+
+            // A child that decided its own size cannot be made smaller by the track it is in: it draws at
+            // the size it chose, so a track sized to the child's content alone comes out narrower than the
+            // child and lets it draw over the next track.
+            float wantedWidth = child.HasOwnSize
+                ? MathF.Max(desired.Width, child.Bounds.Width)
+                : desired.Width;
+
+            float wantedHeight = child.HasOwnSize
+                ? MathF.Max(desired.Height, child.Bounds.Height)
+                : desired.Height;
+
+            var margin = child.Margin;
+
             if (autoColumn)
             {
-                GrowSpannedTracks(columns, _columnStyles, column, lastColumn, desired.Width + CellPadding.Horizontal);
+                GrowSpannedTracks(
+                    columns,
+                    _columnStyles,
+                    column,
+                    lastColumn,
+                    wantedWidth + margin.Horizontal + CellPadding.Horizontal);
 
                 // The AutoSize column just grew, so the room the percentage columns share is smaller.
                 Array.Copy(columns, known, columns.Length);
@@ -282,7 +301,12 @@ public class TableLayoutPanel : Panel
 
             if (autoRow)
             {
-                GrowSpannedTracks(rows, _rowStyles, row, lastRow, desired.Height + CellPadding.Vertical);
+                GrowSpannedTracks(
+                    rows,
+                    _rowStyles,
+                    row,
+                    lastRow,
+                    wantedHeight + margin.Vertical + CellPadding.Vertical);
             }
         }
 
