@@ -23,6 +23,45 @@ namespace Kolvir.Tests;
 [TestCategory("Core")]
 public sealed class FontLoadingTests : HeadlessTestBase
 {
+    /// <summary>
+    /// The width a font reports for a word is the same however often it is asked, and stays right after
+    /// the cache that answers it has started over: the remembering is an optimisation, not a source of
+    /// different answers.
+    /// </summary>
+    [TestMethod]
+    public void AMeasuredWidthIsTheSameEveryTimeAndAcrossACacheOverflow()
+    {
+        var font = new Font("Verdana", 12f);
+        string[] words = ["resize", "message", "the", "quick"];
+
+        var first = words.ToDictionary(w => w, w => font.MeasureWidth(w));
+
+        for (int i = 0; i < 200; i++)
+        {
+            foreach (var word in words)
+            {
+                Assert.AreEqual(first[word], font.MeasureWidth(word), 0.001f, $"the width of '{word}'");
+            }
+        }
+
+        // Far more distinct strings than the cache holds, so it starts over while they are being asked.
+        for (int i = 0; i < 12000; i++)
+        {
+            font.MeasureWidth("word" + i.ToString(CultureInfo.InvariantCulture));
+        }
+
+        foreach (var word in words)
+        {
+            Assert.AreEqual(first[word], font.MeasureWidth(word), 0.001f, $"'{word}' after the cache filled");
+        }
+
+        // And the answers are still the font's own, not something the cache invented.
+        var sameFace = new Font("Verdana", 12f);
+        foreach (var word in words)
+        {
+            Assert.AreEqual(sameFace.MeasureWidth(word), font.MeasureWidth(word), 0.001f, $"'{word}' matches a fresh font");
+        }
+    }
     private const string SampleText = "The quick brown fox jumps over the lazy dog";
     private const float SampleSize = 13f;
 
