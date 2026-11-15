@@ -515,6 +515,59 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         Assert.AreEqual(180f, split.SplitterDistance, 0.5f);
     }
 
+    /// <summary>
+    /// A split built while the window is small, with the second panel sized explicitly, still gives
+    /// the second panel that size when the window grows.
+    /// </summary>
+    [TestMethod]
+    public void AFixedPanelSizeSurvivesBeingSetBeforeTheWindowIsBig()
+    {
+        var split = new SplitContainer
+        {
+            Dock = DockStyle.Fill,
+            Orientation = Orientation.Vertical,
+            Panel1MinSize = 100f,
+            Panel2MinSize = 100f,
+            FixedPanel = FixedPanel.Panel2,
+            FixedPanelSize = 300f,
+        };
+
+        using var scene = HeadlessScene.Create(split, 200f, 200f);
+
+        scene.Resize(1010f, 200f);
+
+        Assert.AreEqual(300f, split.Panel2.Width, 0.5f, "the fixed panel keeps the size it was given");
+        Assert.AreEqual(704f, split.Panel1.Width, 0.5f, "and the first panel took everything else");
+        Assert.AreEqual(300f, split.FixedPanelSize, 0.5f, "which is what the property reads back");
+    }
+
+    /// <summary>
+    /// A cell gives its whole area to a child that docks into it, and leaves a child that does not
+    /// at the size it has - which is what makes <c>Dock</c> the way to fill a cell, and what a
+    /// wrapping label in a cell needs if it is not to fill its own lines into a narrow column.
+    /// </summary>
+    [TestMethod]
+    public void ATableCellGivesItsWholeAreaToADockedChildAndNoMoreToTheRest()
+    {
+        var docked = new Panel { Dock = DockStyle.Fill, TableColumn = 0, TableRow = 0 };
+        var loose = new Panel { Bounds = new SKRect(0f, 0f, 40f, 20f), TableColumn = 1, TableRow = 0 };
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            CellPadding = Thickness.Empty,
+            ColumnStyles = { ColumnStyle.Percent(50f), ColumnStyle.Percent(50f) },
+            RowStyles = { RowStyle.Percent(100f) },
+            Controls = { docked, loose },
+        };
+
+        using var scene = HeadlessScene.Create(table, 400f, 200f);
+
+        Assert.AreEqual(200f, docked.Width, 0.5f, "a docked child gets the whole cell");
+        Assert.AreEqual(200f, docked.Height, 0.5f);
+        Assert.AreEqual(40f, loose.Width, 0.5f, "and one that is not docked keeps its own size in it");
+    }
+
     [TestMethod]
     public void WithNoFixedPanelBothPanelsTakePartInAResize()
     {
