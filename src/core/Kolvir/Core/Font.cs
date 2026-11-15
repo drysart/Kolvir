@@ -283,8 +283,40 @@ public sealed class Font : IDisposable
     /// every platform; a face resolved by family name measures however that platform's file lays the
     /// text out.
     /// </remarks>
-    public float MeasureWidth(string? text) =>
-        string.IsNullOrEmpty(text) ? 0f : _font.MeasureText(text);
+    public float MeasureWidth(string? text)
+    {
+        if (string.IsNullOrEmpty(text))
+        {
+            return 0f;
+        }
+
+        // Laying text out asks for the width of a word, and asks again on every pass: a window that
+        // is being resized measures the same words thousands of times, and measuring them is the whole
+        // cost of the pass. A word's width cannot change while the text and this font are the same, so
+        // it is worth remembering - a resize then spends its time building lines rather than shaping
+        // glyphs it has already shaped.
+        if (_widths.TryGetValue(text, out float known))
+        {
+            return known;
+        }
+
+        float width = _font.MeasureText(text);
+
+        // Text that is mostly unique - a log, a chat that never repeats a word - would grow this
+        // without bound, and a miss only costs a measurement, so it starts over instead.
+        if (_widths.Count >= WidthCacheLimit)
+        {
+            _widths.Clear();
+        }
+
+        _widths[text] = width;
+        return width;
+    }
+
+    /// <summary>How many word widths are remembered before the cache starts over.</summary>
+    private const int WidthCacheLimit = 8192;
+
+    private readonly Dictionary<string, float> _widths = new(StringComparer.Ordinal);
 
     /// <summary>A font with the same face at another size.</summary>
     /// <param name="size">The size for the new font, in logical pixels.</param>
