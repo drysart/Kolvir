@@ -38,6 +38,21 @@ public sealed class DemoUi
     private DemoPage[] _pages = null!;
     private Control? _shownPage;
 
+    /// <summary>The navigation's filter box: what the user types to narrow the list.</summary>
+    private TextBox? _navFilter;
+
+    /// <summary>
+    /// The page each row of the navigation stands for. The list shows what the filter matched, so a
+    /// row is not a page position and the two are only the same while the filter is empty.
+    /// </summary>
+    private int[] _navRows = [];
+
+    /// <summary>The page on the stage, which survives filtering even when no row stands for it.</summary>
+    private int _shownIndex = -1;
+
+    /// <summary>Set while the list is being rebuilt, so replacing its rows does not change the page.</summary>
+    private bool _rebuildingNav;
+
     // The click counter, which the footer's Reset clears, the labels page shows and the buttons page
     // advances: it belongs to the window rather than to any one of them.
     private int _clicks;
@@ -108,7 +123,7 @@ public sealed class DemoUi
                 continue;
             }
 
-            _navList.SelectedIndex = index;
+            SelectPage(index);
             box.Focus();
             return;
         }
@@ -138,12 +153,23 @@ public sealed class DemoUi
 
     /// <summary>Switches the stage to the page at <paramref name="index"/>; an index outside the pages is ignored.</summary>
     /// <param name="index">The page to show, in the order the navigation lists them.</param>
+    /// <remarks>
+    /// A page the filter is hiding cannot be selected in the list, so the filter is cleared first:
+    /// asking for a page is a request to see it rather than to see nothing.
+    /// </remarks>
     public void SelectPage(int index)
     {
-        if (index >= 0 && index < _pages.Length)
+        if (index < 0 || index >= _pages.Length)
         {
-            _navList.SelectedIndex = index;
+            return;
         }
+
+        if (Array.IndexOf(_navRows, index) < 0)
+        {
+            _navFilter!.Text = string.Empty;
+        }
+
+        _navList.SelectedIndex = Array.IndexOf(_navRows, index);
     }
 
     /// <summary>
@@ -185,13 +211,13 @@ public sealed class DemoUi
     /// </summary>
     private ContextMenu BuildPageContextMenu()
     {
-        int index = _navList.SelectedIndex;
+        int index = _shownIndex;
 
         return new ContextMenu()
             .Add(new MenuItem("&Previous page", () => SelectPage(index - 1)) { Enabled = index > 0 })
             .Add(new MenuItem("&Next page", () => SelectPage(index + 1))
             {
-                Enabled = index < _pages.Length - 1,
+                Enabled = index >= 0 && index < _pages.Length - 1,
             })
             .AddSeparator()
             .Add(new MenuItem("&About this sample", () => SetStatus(
@@ -578,14 +604,45 @@ public sealed class DemoUi
             HorizontalScroll = ScrollStyle.None,
             Border = SimpleBorder.Thin.WithCornerRadius(4f),
             ItemHeight = 32f,
+            EmptyText = "No page matches that.",
         };
 
-        foreach (var demo in Demos)
-        {
-            _navList.Items.Add(demo.Title);
-        }
+        _navList.AddSelectedIndexChangedHandler(_ => ShowNavRow(_navList.SelectedIndex));
 
-        _navList.AddSelectedIndexChangedHandler(_ => ShowPage(_navList.SelectedIndex));
+        // Sixty-one pages is more than the eye can scan, so the list is what the filter leaves of it.
+        // The box takes a tab stop of its own - it is the one part of the navigation a keyboard user
+        // has to be able to reach - and hands the keyboard back to the list on Down.
+        _navFilter = new TextBox
+        {
+            Dock = XDock.Top,
+            PlaceholderText = "Find a page",
+            Height = 30f,
+            Margin = new Thickness(0f, 0f, 0f, 8f),
+        };
+
+        _navFilter.AddTextChangedHandler(_ => ApplyNavFilter());
+        _navFilter.AddKeyDownHandler((_, e) =>
+        {
+            if (e.Handled)
+            {
+                return;
+            }
+
+            switch (e.Key)
+            {
+                case Key.Down when _navRows.Length > 0:
+                    _navList.Focus();
+                    e.Handled = true;
+                    break;
+
+                case Key.Escape when _navFilter.Text.Length > 0:
+                    _navFilter.Text = string.Empty;
+                    e.Handled = true;
+                    break;
+            }
+        });
+
+        ApplyNavFilter();
 
         var nav = new Panel
         {
@@ -593,6 +650,7 @@ public sealed class DemoUi
             BackColor = null,
             Padding = new Thickness(20f, 16f, 12f, 16f),
         };
+        nav.Controls.Add(_navFilter);
         nav.Controls.Add(_navList);
 
         // The navigation is window chrome rather than a demo, so it keeps no tab stop of its own:
@@ -622,6 +680,60 @@ public sealed class DemoUi
         return split;
     }
 
+    /// <summary>
+    /// Rebuilds the navigation from what the filter box holds: every page while it is empty, the
+    /// pages whose title contains it otherwise.
+    /// </summary>
+    /// <remarks>
+    /// The page on the stage does not change. Filtering is a way of finding a row, not a way of
+    /// choosing one, so a filter that hides the page being read leaves it where it is - and keeps its
+    /// row selected when the filter is cleared again.
+    /// </remarks>
+    private void ApplyNavFilter()
+    {
+        string filter = _navFilter?.Text.Trim() ?? string.Empty;
+        var rows = new List<int>(Demos.Length);
+
+        for (int index = 0; index < Demos.Length; index++)
+        {
+            if (filter.Length == 0 || Demos[index].Title.Contains(filter, StringComparison.OrdinalIgnoreCase))
+            {
+                rows.Add(index);
+            }
+        }
+
+        _navRows = [.. rows];
+
+        // Replacing the rows resets the selection, which would otherwise be read as a page change.
+        _rebuildingNav = true;
+        try
+        {
+            _navList.Items.Clear();
+            foreach (var row in _navRows)
+            {
+                _navList.Items.Add(Demos[row].Title);
+            }
+
+            _navList.SelectedIndex = Array.IndexOf(_navRows, _shownIndex);
+        }
+        finally
+        {
+            _rebuildingNav = false;
+        }
+    }
+
+    /// <summary>Shows the page the navigation's row <paramref name="row"/> stands for.</summary>
+    /// <param name="row">The row, or -1 when the selection was cleared.</param>
+    private void ShowNavRow(int row)
+    {
+        if (_rebuildingNav || row < 0 || row >= _navRows.Length)
+        {
+            return;
+        }
+
+        ShowPage(_navRows[row]);
+    }
+
     /// <summary>Swaps the page on the stage. Every page is built once and kept, so returning to one costs a re-parent.</summary>
     private void ShowPage(int index)
     {
@@ -642,6 +754,7 @@ public sealed class DemoUi
         }
 
         _shownPage = page;
+        _shownIndex = index;
         _stage.Controls.Add(page);
     }
 
