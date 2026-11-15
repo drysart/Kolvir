@@ -932,4 +932,74 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         Padding = Thickness.Empty,
         CellPadding = Thickness.Empty,
     };
+
+    /// <summary>
+    /// An AutoSize column is wide enough for a child that chose its own size, so the child cannot draw
+    /// over the column beside it.
+    /// </summary>
+    [TestMethod]
+    public void AnAutoSizeColumnFitsAChildThatChoseItsSize()
+    {
+        var avatar = new Panel
+        {
+            Width = 48f,
+            Height = 48f,
+            TableColumn = 0,
+            TableRow = 0,
+            TableRowSpan = 2,
+        };
+
+        var body = new Panel { TableColumn = 1, TableRow = 1 };
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            CellPadding = Thickness.Empty,
+            ColumnStyles = { ColumnStyle.AutoSize(), ColumnStyle.Percent(100f) },
+            RowStyles = { RowStyle.Absolute(32f), RowStyle.AutoSize() },
+            Controls = { avatar, body },
+        };
+
+        using var scene = HeadlessScene.Create(table, 400f, 200f);
+
+        Assert.AreEqual(48f, avatar.Bounds.Width, 0.5f, "a child that chose a width keeps it");
+        Assert.IsTrue(
+            body.Bounds.Left >= avatar.Bounds.Right - 0.5f,
+            $"the second column starts at {body.Bounds.Left}, clear of the {avatar.Bounds.Right} the first one ends at");
+    }
+
+    /// <summary>
+    /// A margin is room the child needs outside itself, so an AutoSize track leaves it too: a 48 px child
+    /// with a 7 px right margin wants a 55 px column.
+    /// </summary>
+    [TestMethod]
+    public void AnAutoSizeColumnLeavesRoomForAChildsMargin()
+    {
+        var avatar = new Panel
+        {
+            Width = 48f,
+            Height = 48f,
+            Margin = new Thickness(0f, 0f, 7f, 0f),
+            TableColumn = 0,
+            TableRow = 0,
+            TableRowSpan = 2,
+        };
+
+        var body = new Panel { TableColumn = 1, TableRow = 1 };
+
+        var table = new TableLayoutPanel
+        {
+            Dock = DockStyle.Fill,
+            CellPadding = Thickness.Empty,
+            ColumnStyles = { ColumnStyle.AutoSize(), ColumnStyle.Percent(100f) },
+            RowStyles = { RowStyle.Absolute(32f), RowStyle.AutoSize() },
+            Controls = { avatar, body },
+        };
+
+        using var scene = HeadlessScene.Create(table, 400f, 200f);
+
+        Assert.IsTrue(
+            body.Bounds.Left >= 55f - 0.5f,
+            $"the column leaves 48 and the margin, so the second one starts at 55 rather than {body.Bounds.Left}");
+    }
 }
