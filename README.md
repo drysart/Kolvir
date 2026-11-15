@@ -22,7 +22,8 @@ Kolvir/                   net10.0 class library (no OS-specific code, IsAotCompa
   UiHost.cs               platform-neutral host: layout, painting, input routing, focus
 Kolvir.Demo.App/          the one application: net10.0-windows, net10.0-macos or net10.0
   Program.cs              pick a backend, describe a window, run
-  DemoUi.cs               the sample layout, plus RenderToPng for headless renders
+  DemoUi.cs               the window shell, and the page table that names what the stage shows
+  Pages/                  one class per demo page, plus DemoPage, the shell's own page contract
   DemoIcon.cs             the sample icon, drawn in code so no binary asset is needed
   app.manifest            per-monitor v2 DPI awareness (Windows)
   Info.plist              the bundle identity (macOS)
@@ -5367,8 +5368,16 @@ blits it on `WM_PAINT` (or swaps the GL surface), and forwards mouse/keyboard me
 `UiHost`.
 
 The sample is organised as a navigation list down the left and a stage on the right that shows one
-demo at a time, so adding a demo is a row in `DemoUi.Demos` rather than another crowded card. Every
-page is built once and kept, and switching pages re-parents one control into the stage.
+demo at a time, so adding a demo is a class under `Kolvir.Demo.App/Pages/` and a row in
+`DemoUi.Demos` rather than another crowded card. Every page is built once and kept, and switching
+pages re-parents one control into the stage.
+
+`DemoUi` itself is the window shell: the header, the navigation list, the status line and the stage.
+Everything a page is - its cards, its readouts, its timers and the state behind them - lives in that
+page's own class, derived from `Pages/DemoPage.cs`, which is also where the layout helpers every page
+shares (`Card`, `Heading`, `Row`, and the inset a page is wrapped in) are defined. A page reaches the
+shell for what belongs to the whole window: the status line it reports in, the owned window, the
+palette, the audio engine, and the click counter the footer resets and two pages share.
 
 To render the same sample UI headlessly (useful for visual checks in CI):
 
