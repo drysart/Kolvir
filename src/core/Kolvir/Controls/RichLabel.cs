@@ -227,9 +227,15 @@ public class RichLabel : Control
     protected override bool MeasureIgnoresHeight => true;
 
     /// <inheritdoc />
+    internal override bool WrapsToItsWidth => _wrapText;
+
+    /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var layout = BuildLayout(NormalizeWrapWidth(availableSize.Width));
+        // The layout this builds is kept: the arrange that follows, and the paint after that, ask
+        // for the same width, so building it once answers all three. EnsureLayout builds one when it
+        // has nothing to hand back, so the result is never null.
+        var layout = EnsureLayout(availableSize.Width)!;
         return new SKSize(MathF.Ceiling(layout.Width), MathF.Ceiling(layout.Height));
     }
 
@@ -243,7 +249,9 @@ public class RichLabel : Control
             return;
         }
 
-        var layout = BuildLayout(NormalizeWrapWidth(content.Width));
+        // The measure that decided this control's height already built the layout for this width in
+        // most cases; a width that arrived another way rebuilds it here instead.
+        var layout = EnsureLayout(content.Width)!;
         Place(layout, content);
         ApplyInlineBounds(layout);
     }

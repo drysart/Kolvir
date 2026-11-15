@@ -124,6 +124,101 @@ public sealed class RichLabelTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AWrappingChildInATableIsDrawnAtTheWidthItWasMeasuredAt()
+    {
+        using (TestFont.Pin())
+        {
+            var label = new RichLabel
+            {
+                Text = "a sentence long enough to need more than one line at this width",
+                WrapText = true,
+                TableColumn = 0,
+                TableRow = 0,
+            };
+
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = Thickness.Empty,
+                CellPadding = Thickness.Empty,
+                ColumnStyles = { ColumnStyle.Percent(100f) },
+                RowStyles = { RowStyle.AutoSize() },
+                Controls = { label },
+            };
+
+            using var scene = HeadlessScene.Create(table, 300f, 400f);
+
+            Assert.AreEqual(
+                300f,
+                label.Bounds.Width,
+                0.5f,
+                "a wrapping child draws in the cell width it was measured against, not the width of its longest line");
+
+            Assert.AreEqual(
+                label.Measure(new SKSize(label.Bounds.Width, 10_000f)).Height,
+                label.Bounds.Height,
+                0.5f,
+                "and the height it takes is the height its own text needs at that width, so no line is cut off");
+        }
+    }
+
+    [TestMethod]
+    public void AChildThatDoesNotWrapStillHugsItsContentInsideATableCell()
+    {
+        using (TestFont.Pin())
+        {
+            var label = new Label { Text = "abc", TableColumn = 0, TableRow = 0, AutoSize = true };
+
+            var table = new TableLayoutPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = Thickness.Empty,
+                CellPadding = Thickness.Empty,
+                ColumnStyles = { ColumnStyle.Percent(100f) },
+                RowStyles = { RowStyle.AutoSize() },
+                Controls = { label },
+            };
+
+            using var scene = HeadlessScene.Create(table, 300f, 400f);
+
+            Assert.IsTrue(
+                label.Bounds.Width < 100f,
+                $"a label that does not wrap keeps its own size rather than the cell's, got {label.Bounds.Width}");
+        }
+    }
+
+    [TestMethod]
+    public void AWrappingChildInAStackIsDrawnAtTheWidthItWasMeasuredAt()
+    {
+        using (TestFont.Pin())
+        {
+            var label = new RichLabel
+            {
+                Text = "a sentence long enough to need more than one line at this width",
+                WrapText = true,
+                HorizontalAlignment = Alignment.Near,
+            };
+
+            var stack = new StackPanel
+            {
+                Dock = DockStyle.Fill,
+                Padding = Thickness.Empty,
+                Orientation = StackOrientation.Vertical,
+                Controls = { label },
+            };
+
+            using var scene = HeadlessScene.Create(stack, 300f, 400f);
+
+            Assert.AreEqual(300f, label.Bounds.Width, 0.5f, "the stack width is what it wrapped against and what it is drawn at");
+            Assert.AreEqual(
+                label.Measure(new SKSize(label.Bounds.Width, 10_000f)).Height,
+                label.Bounds.Height,
+                0.5f,
+                "and its height comes from that same width");
+        }
+    }
+
+    [TestMethod]
     public void TheTextPropertyIsTheConcatenationOfItsRuns()
     {
         using var label = new RichLabel { Text = "plain text" };
