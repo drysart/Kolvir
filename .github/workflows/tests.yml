@@ -89,8 +89,8 @@ jobs:
           dotnet restore tests/features/Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore tests/features/Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj --nologo -p:TargetFramework=net10.0
-          dotnet restore tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj --nologo -p:TargetFramework=net10.0
-          dotnet restore tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --nologo
+          dotnet restore tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj --nologo -p:KolvirVirtualDomFrameworks=net10.0
+          dotnet restore tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --nologo -p:KolvirVirtualDomFrameworks=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -221,13 +221,18 @@ jobs:
       # Reconciling a tree is comparison and assignment over controls, driven entirely through the
       # headless backend: no native window, no display, so this is as portable as the core suite.
       # The generator is wired in as an analyzer, so this leg also builds the emitted node classes and
-      # runs the analyzer over them, which is what makes it the end-to-end check of both halves.
+      # runs the analyzer over them, which makes it the end-to-end check of both halves.
+      #
+      # -p:KolvirVirtualDomFrameworks=net10.0 rather than -p:TargetFramework=net10.0: a global
+      # TargetFramework would also reach the generator underneath, which is netstandard2.0, and leave it
+      # restored for one framework and built for another. The property narrows only the feature project,
+      # which is the one that lists the three platforms for `dotnet pack`.
       - name: Test the virtual DOM feature
         shell: bash
         run: |
           set -o pipefail
           dotnet test tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj --no-restore --nologo \
-            -p:TargetFramework=net10.0 \
+            -p:KolvirVirtualDomFrameworks=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=virtualdom.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
@@ -235,14 +240,15 @@ jobs:
 
       # The generator's own suite. It builds no windows at all - it compiles a source string, runs the
       # generator over it and then runs the analyzer over the result - so it is the cheapest leg here
-      # and also the one that pins what a manifest becomes and what a broken one reports. No
-      # -p:TargetFramework= narrowing: neither the generator (netstandard2.0) nor this suite
-      # (net10.0) multi-targets.
+      # and also the one that pins what a manifest becomes and what a broken one reports. Same
+      # narrowing property, for the same reason: it references the feature project for the metadata a
+      # test compilation is compiled against.
       - name: Test the virtual DOM generator
         shell: bash
         run: |
           set -o pipefail
           dotnet test tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --no-restore --nologo \
+            -p:KolvirVirtualDomFrameworks=net10.0 \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=virtualdom-generator.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \

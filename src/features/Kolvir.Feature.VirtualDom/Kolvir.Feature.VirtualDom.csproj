@@ -7,6 +7,14 @@
        because the `lib/` folders and dependency groups come from these same inner builds. -->
   <PropertyGroup>
     <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <!-- A test project that wants one platform narrows the list here instead:
+         `-p:KolvirVirtualDomFrameworks=net10.0`. That is what keeps its restore from evaluating the
+         macOS inner build on a machine without the macOS workload, which fails as NETSDK1147 from
+         Kolvir.Backend.AppKit before anything is compiled. `-p:TargetFramework=` cannot do it here:
+         a global TargetFramework also overrides the single-framework projects underneath - this
+         package's own generator, which is netstandard2.0, would be restored for net10.0 and then
+         built for netstandard2.0. Same shape and same reason as KolvirBadgeFrameworks. -->
+    <TargetFrameworks Condition="'$(KolvirVirtualDomFrameworks)' != ''">$(KolvirVirtualDomFrameworks)</TargetFrameworks>
     <RootNamespace>Kolvir</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

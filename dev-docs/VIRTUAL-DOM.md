@@ -452,10 +452,13 @@ Five things outside the new code that the feature cannot land without:
    `/tests/features/` and `/tests/generators/`. The solution is hand-listed, not globbed, and the
    folders are named by path because the SDK silently drops a nested `<Folder>`.
 2. **`.github/workflows/tests.yml`** enumerates test projects one at a time - a `restore` step and a
-   `test` step - so each suite is two added blocks; nothing is discovered automatically. The feature
-   suite takes `-p:TargetFramework=net10.0`, for the reason the other feature suites give; the
-   generator suite takes no narrowing because neither it nor the generator multi-targets. The workflow's
-   path filter needs `src/generators/**` as well, and so does `packages.yml`.
+   `test` step - so each suite is two added blocks; nothing is discovered automatically. Both virtual
+   DOM suites pin the feature project with `-p:KolvirVirtualDomFrameworks=net10.0`, the property the
+   feature csproj reads, and **not** `-p:TargetFramework=net10.0` like the other feature suites: a
+   global `TargetFramework` also reaches the generator underneath, which is netstandard2.0, and leaves
+   it restored for one framework and built for another (measured: NETSDK1005). Same shape as
+   `-p:KolvirBadgeFrameworks=`. The workflow's path filter needs `src/generators/**` as well, and so
+   does `packages.yml`.
 3. **XML documentation is mandatory and enforced.** `Directory.Build.props` sets
    `GenerateDocumentationFile` on anything that ships and raises **CS1591 as an error**, so every
    public member of the runtime assembly needs a `<summary>`. The two test projects are exempt by the
