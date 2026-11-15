@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The virtual DOM's build-time half: the incremental generator that turns a manifest into node
+       classes, and the analyzer that reports the mistakes the compiler cannot.
+
+       It is a project of its own, and it lives outside `src/features/*` on purpose: the pack job
+       globs that tree and would otherwise publish this as a package of its own, and the runtime
+       package is the only thing an application should have to reference. Its output is packed into
+       that package under `analyzers/dotnet/cs`, which is how a generator reaches a consumer.
+
+       netstandard2.0 because that is what the compiler loads analyzers from; the language features
+       are still modern (the compiler does not care) but the BCL is 2.0, so nothing here can use the
+       runtime's types. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <!-- netstandard2.0 still defaults to C# 7.3; the generator is compiled by a modern SDK, so it
+         gets the modern language. What it cannot have is the modern BCL. -->
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Kolvir.VirtualDom.Generators</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <!-- Build-time only: it runs inside the compiler's own host, so AOT analysis does not apply. -->
+    <IsAotCompatible>false</IsAotCompatible>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- An analyzer must not ship its own copy of the compiler: it loads into the one the SDK is
+         running, so these are compile-time only. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The release-tracking analyzer that comes with Microsoft.CodeAnalysis.CSharp wants these two,
+         found by file name, so that a rule's identifier stops being editable once it has shipped.
+         `EnforceExtendedAnalyzerRules` is what turns that requirement into a build warning. -->
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+</Project>

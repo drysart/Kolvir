@@ -22,6 +22,30 @@
     <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
   </ItemGroup>
 
+  <!-- The build-time half. It is referenced as an analyzer so that the projects in this repository
+       get the generator and the diagnostics from the build, and it is packed into this package under
+       `analyzers/dotnet/cs`, which is the folder NuGet and the compiler look in - how
+       System.Text.Json's generator travels. A `ProjectReference` alone would reach this repository and
+       nobody else. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- Packed from the generator's own output rather than from the resolved analyzer item: a
+       `ProjectReference` does not hand its output path to the referencing project, and MSBuild has no
+       target in the pack graph that exposes it. The path is stable because the generator's target
+       framework is fixed at netstandard2.0, and a missing file fails the pack rather than shipping a
+       package with no generator in it. Added once rather than per target framework: pack runs once, and
+       the analyzer is one assembly whichever framework a consumer ends up binding. -->
+  <ItemGroup>
+    <None Include="..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
+  </ItemGroup>
+
   <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
        and each platform folder only into the one framework that can use it. -->
   <ItemGroup>

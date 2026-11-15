@@ -117,6 +117,7 @@ Kolvir.slnx      every project, at the top level, in solution folders matching t
 src/core         Kolvir, and Kolvir.Backend which selects a backend
 src/backends     the Win32, AppKit, GTK4 and headless backends
 src/features     the separate feature packages
+src/generators   the build-time halves that ship inside a feature package
 src/demo         the sample application, and the minimal measurement fixture
 tests            a test project per project, in the same folders src/ uses
 dev-docs         the design and rationale documents

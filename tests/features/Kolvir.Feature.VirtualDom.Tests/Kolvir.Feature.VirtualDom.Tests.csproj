@@ -43,6 +43,10 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
     <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.VirtualDom\Kolvir.Feature.VirtualDom.csproj" />
+    <!-- The generator as a consumer gets it: an analyzer reference, so the manifest in this assembly
+         is turned into node classes by the build rather than by a checked-in copy. -->
+    <ProjectReference Include="..\..\..\src\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj"
+                      OutputItemType="Analyzer" ReferenceOutputAssembly="false" />
     <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
   </ItemGroup>
 
