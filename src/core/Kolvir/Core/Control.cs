@@ -2872,6 +2872,21 @@ public class Control : IDisposable
         Invalidate();
     }
 
+    /// <summary>
+    /// Called after a child moves within this control's collection. Re-runs layout and repaints.
+    /// </summary>
+    /// <remarks>
+    /// Deliberately separate from <see cref="OnControlAdded"/> and <see cref="OnControlRemoved"/>:
+    /// the child was neither attached nor detached, so a container that hangs work off those two
+    /// must not run it again here. A container whose arrangement depends on the order of its
+    /// children only has to drop whatever it cached against that order.
+    /// </remarks>
+    internal virtual void OnChildMoved(Control control)
+    {
+        PerformLayout();
+        Invalidate();
+    }
+
     internal void RaiseMouseDown(MouseEventArgs e)
     {
         if (Enabled)

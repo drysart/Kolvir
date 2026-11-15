@@ -4,7 +4,8 @@ namespace Kolvir;
 
 /// <summary>
 /// Ordered child control collection. Adding or removing a control updates the parent
-/// link and triggers layout on the owning control.
+/// link and triggers layout on the owning control; moving one reorders it without
+/// detaching it.
 /// </summary>
 public sealed class ControlCollection : IList<Control>
 {
@@ -91,6 +92,41 @@ public sealed class ControlCollection : IList<Control>
         _items.Insert(index, item);
         item.Parent = _owner;
         _owner.OnControlAdded(item);
+    }
+
+    /// <summary>
+    /// Moves the child at <paramref name="fromIndex"/> to <paramref name="toIndex"/>, which
+    /// reorders the z-order without detaching it.
+    /// </summary>
+    /// <param name="fromIndex">Position of the child to move.</param>
+    /// <param name="toIndex">Position it occupies afterwards, in the collection as it stands after
+    /// the move.</param>
+    /// <remarks>
+    /// The child keeps this collection's control as its parent throughout, so the path that
+    /// <see cref="Remove"/> and <see cref="Add"/> take is not run: nothing that hangs off attaching
+    /// or detaching happens, and a container that keeps state per child keeps it. Both indices
+    /// address the collection as it is now, so moving the first of three children to the end is
+    /// <c>Move(0, 2)</c>. A move to the index it already occupies does nothing at all.
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">
+    /// Either index is outside the collection.
+    /// </exception>
+    public void Move(int fromIndex, int toIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(fromIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(fromIndex, _items.Count);
+        ArgumentOutOfRangeException.ThrowIfNegative(toIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(toIndex, _items.Count);
+
+        if (fromIndex == toIndex)
+        {
+            return;
+        }
+
+        var item = _items[fromIndex];
+        _items.RemoveAt(fromIndex);
+        _items.Insert(toIndex, item);
+        _owner.OnChildMoved(item);
     }
 
     /// <summary>
