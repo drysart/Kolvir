@@ -89,6 +89,7 @@ manifest is expected to be short and per application rather than a library-wide 
 | Binder | A generated per-control `Set(Control, string name, object? value) : bool` alongside the factory | The reconciler needs to patch an existing control from a changed node without knowing its type. A generated `switch` over names is the reflective binder's job done statically, and it doubles as the drift test hook (it returns `false` for an unknown name, so a test can assert every public settable property is handled). |
 | What is diffed | The **previous node against the next node**, never the node against the control | Halves the problem: the binder needs setters, because old values come from the tree we already hold. Nothing reads a control's current property state back out, which keeps `Control` free of any virtual-DOM awareness and avoids the hardest reflective cases (getter-only and private-setter properties, boxing on read of value types). The one exception is the pristine snapshot below, which is read once per type rather than per diff. |
 | Optional property arguments | Every factory parameter is a `Specified<T>` struct defaulting to `default`: `default` is "not in this node", an implicit conversion from `T` is "set to this", and `null` is a value when the property is declared nullable | A plain `T?` cannot express three states, and they are all needed: `Font`, `Color` and `ContextMenu` have a meaningful `null`, so "no font" has to be distinguishable from "this node says nothing about the font". The parameter must not be `Specified<T>?` - with the nullable wrapper, a standard nullable conversion beats the user-defined one and steals the `null` literal (section 6.1). The wrapper never reaches the node: the factory unwraps it and stores the plain `T`, so no `Specified<T>` is ever boxed. |
+| A `null` for a non-nullable property | An analyzer error (VD010), with the generated factory's `ArgumentNullException` as the backstop for values nothing can prove | C# only warns (CS8625/CS8604) and only where nullable is enabled, so in a `#nullable disable` file the call would silently store a null. An analyzer error is the only way to make it fail the build without changing the severity of warnings in an application's unrelated code. `null!` stays quiet on purpose: it is the caller overriding the analysis, so the backstop is the right thing to hear from. |
 | What "default" means | Not `default(T)`: the **pristine value**, snapshotted per property from a freshly constructed control | `Label.Text` starts at `""`, `Control.Name` at the type name, and a control's constructor may set `Dock = Fill` while the declared default is `None`. `default(T)` would be wrong for most properties, so each `NodeType` records what its control looked like before any node touched it - which needs a generated getter alongside the setter, read once when the first control of that type is created. |
 | Node type | One non-generic `VNode` class holding a generated `NodeType` (creator + binder + CLR type), a `VProp[]` of name/value pairs, and a `VNode[]` of children | Keeps the reconciler non-generic: no generic dispatch, no variance pain in child lists. Compile-time type safety lives entirely in the generated factory's signature, which is where a developer actually types the code. |
 | Property names | Interned string literals emitted by the generator, not an enum or an index | A literal is interned, so a name costs no allocation; the binder's string `switch` compiles to a hashed dispatch. An enum would put a build-time ordering into a public API for no measurable gain. |
@@ -212,6 +213,21 @@ whatever `using`s the manifest's file has), and no dependencies on analyzer-only
 | VD006 | A public settable property is a delegate but matches neither an `AddXxxHandler`/`RemoveXxxHandler` pair nor a known event shape (it is then treated as an ordinary property, with a warning that the reconciler will assign it as a field). |
 | VD007 | The manifest class is not `partial`. |
 
+Plus one diagnostic from the analyzer half, reported as an **error** rather than a warning:
+
+| Id | Condition |
+| --- | --- |
+| VD010 | A `null` constant is passed for a property whose type is non-nullable. C# catches this as CS8625 and CS8604, but as warnings, and not at all in a file with `#nullable disable` - where the call would silently put a null in the property. |
+
+The check needs no lookup table: the parameter's type is `Specified<X>`, and `X`'s nullable
+annotation *is* the property's declared nullability, which the generator wrote. Behaviour deliberately
+left to the compiler is the set of cases the compiler already handles better than an analyzer could -
+it has flow analysis, so a `string?` local that may hold null is CS8604 there whether or not we say
+anything.
+
+The analyzer lives in the same assembly as the generator, which is referenced as an `Analyzer`, so
+both arrive together and neither reaches the deliverable.
+
 Diagnostics rather than silent omission is the entire point of the manifest: the alternative (a
 factory that is simply missing) turns into a confusing compile error at a call site that has nothing
 to do with the real mistake.
@@ -286,10 +302,14 @@ detail is what makes `null` usable as a value:
   `Specified<T>` the compiler has to infer.
 - **The property's declared nullability decides what `null` is allowed.** A property declared
   nullable takes `Specified<Font?>` and accepts null. One declared non-nullable takes
-  `Specified<string>`, where `Label(text: null)` still compiles - with a CS8625 warning - and would
-  put a null in a non-nullable property, so the generated factory rejects a null value for those with
-  an `ArgumentNullException` naming the property. Cheap, and it fires at the call site rather than
-  somewhere in the binder.
+  `Specified<string>`, and `Label(text: null)` must not reach the control at all: C# catches it as
+  CS8625, but only as a *warning*, and only where the calling file has nullable enabled - in a
+  `#nullable disable` file the same call is silent. So the package ships an analyzer that reports
+  **VD010 as an error** on the argument (section 5), and the generated factory keeps a runtime
+  `ArgumentNullException` as the backstop for the values no analysis can prove - a `null!`, or one
+  that arrived from an `object` cast. `null!` is deliberately quiet in the analyzer: that is the
+  caller saying "trust me", so the backstop firing there is the right division rather than
+  double-reporting.
 
 That every one of those bindings behaves as described was checked against the compiler rather than
 assumed, including the `null`-versus-wrapper case that motivated the shape.
@@ -354,7 +374,7 @@ can have it.
 | 4 | Structure: create, replace, unmount | `NodeType` mismatch handling, positional children, subtree unmount, event detach | Inserting, removing and retyping children mid-list leave a correct tree and no leaked handlers |
 | 5 | Keys and reordering | Keyed matching, mixed keyed/unkeyed lists, minimum move sequence over `ControlCollection.Move` | Reversing a keyed list moves controls instead of recreating them, proven by reference identity and by scroll position surviving |
 | 6 | Events | Generated `AddXxxHandler`/`RemoveXxxHandler` mapping, delegate identity tracking | Re-rendering with the same handler subscribes once; a new handler replaces the old one |
-| 7 | The source generator | Attribute, `ForAttributeWithMetadataName`, `V` factories, `NodeType`s, binders, diagnostics VD001-VD007 | The manifest in section 4 compiles, and the drift test (section 11) passes for every built-in control |
+| 7 | The source generator and its analyzer | Attribute, `ForAttributeWithMetadataName`, `V` factories, `NodeType`s, binders, diagnostics VD001-VD007, plus the analyzer half and VD010 (`null` for a non-nullable property, as an error) | The manifest in section 4 compiles, the drift test (section 11) passes for every built-in control, and a snippet passing `null` to a non-nullable property fails the build with VD010 even when it is compiled with `#nullable disable` |
 | 8 | The component layer | `Component`, `SetState`, dirty tracking, render-and-patch | A headless scene shows new controls after a `SetState`, and `Render` runs exactly once per change |
 | 9 | Reflective escape hatch | Annotated `Type` registration, `[RequiresUnreferencedCode]` unannotated overloads, the runtime table | A control registered by `typeof` at run time mounts through the reflective binder, and an AOT build warns on the unannotated overload |
 | 10 | Demo, docs and AOT verification | A virtual-DOM card in the demo app, `DEVELOPER-GUIDE.md` sections, single-file AOT publish | The published exe renders the card identically to the JIT build, and the trimmer's report shows only the registered controls |
@@ -371,6 +391,8 @@ a redesign.
 | Runtime registration: `VirtualDom.Register<Button>()` at startup | A generator cannot see the call's effect, and the trimmer cannot learn the type from it. Recovering safety means `[DynamicallyAccessedMembers]` plus a reflective binder - slower, and the reflective binder is the path with real AOT risk. Kept only as the escape hatch for types that genuinely arrive at run time (step 9). |
 | `[DynamicDependency]` on the registration method | Compile-time constants only. It cannot express "whatever the application passes to this call". |
 | String-named types and properties parsed at run time (a real DSL) | Property names as run-time strings need reflection the trimmer cannot see, are unverifiable until run time, and are slower. This is the one option that would make an AOT build genuinely unreliable. |
+| Union types (C# 15 / .NET 11) as the three-state wrapper | Measured on SDK 11.0.100 against `net11.0`: a union with a non-nullable case, `union Prop(string, Absent, Reset)`, rejects `Take(null)` with **CS8625, still a warning**; with a nullable case (`string?`) `null` is silent, exactly as `Specified<string?>` is. The rule the compiler applies is "a null literal converted to a non-nullable reference type", which does not care whether the destination is a union case or an implicit operator, so a union changes the spelling and not the severity. Unions are otherwise a good fit - `union Prop<T>(T, Absent, Reset)` compiles, and "no case set" being the zero value is exactly the absent state with no inverted flag needed - but they need a `net11.0` leg in the package and buy nothing this design does not already have. Recorded as a revisit in section 10. |
+| Promoting CS8625/CS8604 to errors from the package's `buildTransitive` props | No code at all, and it covers more than a null-literal analyzer can, because the compiler's flow analysis already handles a possibly-null variable. Rejected because it would silently make every null-to-non-nullable in a referencing project an error - a policy an application should choose for itself, not inherit from adding a UI package. It stays a documented one-liner (section 10). |
 | `VNode.Of<T>(...)` generic factories, without a manifest or generator | AOT-safe (with an annotation on the type parameter) but verbose at every call site, and setting a property still needs a name/value pair. Acceptable as an internal primitive; rejected as the developer-facing syntax. |
 | Hand-written static factories (`V.Label(...)` written by a person) | Perfect AOT story, but every control's surface is maintained by hand and drifts from the control. Only worth it for types the generator cannot see. |
 | Lambda/builder closures (`V.Column(c => { c.Gap(8); })`) | Poor inference, awkward with LINQ, and it reads as imperative code rather than a description. |
@@ -398,6 +420,17 @@ a redesign.
   taken and may not be later. The mitigation is that the snapshot is taken per `NodeType` on first
   use and only consulted when a prop is dropped, so the exposure is narrow; the alternative, matching
   `default(T)`, is wrong far more often.
+- **`null` for a non-nullable property is an error only because we make it one.** The compiler reports
+  it as CS8625/CS8604 and says nothing at all in a `#nullable disable` file, so VD010 is the load
+  bearing part. An application that would rather treat every null-to-non-nullable as an error can say
+  `<WarningsAsErrors>CS8625;CS8604</WarningsAsErrors>` and get more coverage than VD010 has; that is
+  the documented alternative rather than the default, because it changes the severity of warnings in
+  code that has nothing to do with the virtual DOM.
+- **Unions are worth revisiting on .NET 11, but not for this.** Measured on SDK 11.0.100, a union
+  rejects `null` for a non-nullable case with the same CS8625 warning and nothing stronger, so
+  switching would cost a `net11.0` leg in the package for no behavioural gain. What it would buy is
+  `union Specified<T>(T, Absent)` - "no case set" as the zero value, which is the absent state for
+  free without the inverted flag. Revisit if and when the whole library moves to .NET 11.
 - **Name collisions are a per-manifest concern.** Two manifests imported into one file make shared
   names ambiguous, which is a compile error at the call site rather than a wrong tree, so it is
   annoying but safe. `Name` on the attribute is the escape.
@@ -414,7 +447,7 @@ Every step is checked with headless tests in `tests/features/Kolvir.Feature.Virt
 build a tree, mount it into a `HeadlessScene`, and inspect the resulting `Control` tree - the same
 approach the selection and layout work uses, and the reason none of this needs a window.
 
-Five claims get special treatment, because they are the ones that would otherwise only fail in a
+Six claims get special treatment, because they are the ones that would otherwise only fail in a
 published application:
 
 | Claim | How it is proven |
@@ -423,6 +456,7 @@ published application:
 | **Absence, a value, and reset stay distinct** | A render that drops a prop restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`). `Specified<T>.Reset` must produce the same node state as omitting the argument; `font: null` must arrive as the value `null` rather than as absence; and a null passed for a property declared non-nullable must be rejected by the factory, not stored. |
 | **Patches instead of rebuilds** | Assertions on reference identity: the control instance is the same object across a render, and keyed reorders preserve specific state (a `RichLabel`'s layout is not rebuilt, a `Panel`'s scroll position is unchanged). |
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
+| **A `null` for a non-nullable property does not build** | The analyzer is exercised with the compiler's own test harness (`Microsoft.CodeAnalysis.CSharp.Analyzer.Testing`): a snippet calling a generated factory with `null` must produce VD010 as an error, and the same snippet under `#nullable disable` must produce it too - that second case is the reason the analyzer exists at all. A `null!` must produce nothing. |
 | **AOT- and trim-clean** | `dotnet publish` with `PublishTrimmed` and `PublishAot`, treating `IL2xxx` warnings as errors, plus the demo app's `--render <png>` compared byte-for-byte between the JIT and published builds. An application that does not reference the package must show no virtual-DOM assembly in its output at all. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
