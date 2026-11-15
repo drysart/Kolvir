@@ -175,6 +175,37 @@ public class Panel : Control
     /// <summary>The client area left over once the visible scrollbars are accounted for.</summary>
     public SKRect ViewportRect => _scroll.Viewport;
 
+    /// <summary>
+    /// The size of the area the scrolled content is shown through: the client area with the padding
+    /// and any visible scrollbar taken out, in the same content space the children are laid out in.
+    /// </summary>
+    /// <remarks>
+    /// This is what <see cref="ScrollExtent"/> is compared against. The scrollable range on an axis
+    /// is the extent less this, never less than zero, which is how an anchor finds the end to pin
+    /// to: <c>MathF.Max(0f, ScrollExtent.Height - ClientSize.Height)</c>.
+    /// </remarks>
+    public SKSize ClientSize
+    {
+        get
+        {
+            var area = _scroll.ContentArea;
+            return _scaleFactor == 1f
+                ? area.Size
+                : new SKSize(area.Width / _scaleFactor, area.Height / _scaleFactor);
+        }
+    }
+
+    /// <summary>
+    /// What holds the scroll position still when the content is arranged again. Null, the default,
+    /// keeps the offset the panel already had and clamps it into the new range.
+    /// </summary>
+    /// <remarks>
+    /// The anchor is asked on every layout, not only when the panel's own size changed, which is
+    /// what makes a panel that is pinned to its end stay there as content arrives. Assigning it
+    /// takes effect at the next layout; nothing re-arranges on the assignment.
+    /// </remarks>
+    public ScrollAnchor? ScrollAnchor { get; set; }
+
     /// <summary>True when there is more content below the viewport.</summary>
     public bool CanScrollVertically => _scroll.CanScrollVertically;
 
@@ -554,7 +585,20 @@ public class Panel : Control
         base.Dispose(disposing);
     }
 
-    private void LayoutCore() => _scroll.Layout(FramedContentBounds, Padding, ArrangeInPanelSpace);
+    private void LayoutCore()
+    {
+        // The anchor sees the offsets the user was looking at, then hears back once the content has
+        // been arranged and the new extent is known, which is the only moment both halves of its
+        // job are available.
+        var anchor = ScrollAnchor;
+        var state = anchor?.Capture(this);
+
+        _scroll.Layout(
+            FramedContentBounds,
+            Padding,
+            ArrangeInPanelSpace,
+            anchor is null ? null : () => anchor.Restore(this, state));
+    }
 
     /// <summary>
     /// Converts the panel-space area the scrollbars hand over into the content space the children
