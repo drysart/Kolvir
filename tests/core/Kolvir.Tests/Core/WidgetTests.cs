@@ -377,6 +377,31 @@ public sealed class WidgetTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void MovingATabPageMovesTheTabAndKeepsThePositionSelected()
+    {
+        var tabs = new TabControl { Dock = DockStyle.Fill };
+        var first = new TabPage("One");
+        var second = new TabPage("Two");
+        var third = new TabPage("Three");
+        tabs.TabPages.Add(first);
+        tabs.TabPages.Add(second);
+        tabs.TabPages.Add(third);
+
+        using var scene = HeadlessScene.Create(tabs, 320f, 200f);
+
+        tabs.SelectedIndex = 1;
+
+        tabs.TabPages.Move(2, 0);
+
+        CollectionAssert.AreEqual(new Control[] { third, first, second }, tabs.TabPages.ToArray());
+        Assert.AreEqual(1, tabs.SelectedIndex, "the selected position is unchanged");
+        Assert.AreSame(first, tabs.SelectedTab, "and the page that moved into it is the one showing");
+        Assert.IsTrue(first.Visible);
+        Assert.IsFalse(second.Visible);
+        Assert.IsFalse(third.Visible);
+    }
+
+    [TestMethod]
     public void ATabSelectionIsClampedToThePagesThatExist()
     {
         var tabs = new TabControl();

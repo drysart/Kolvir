@@ -77,6 +77,99 @@ public sealed class ControlModelTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void MovingAChildReordersItWithoutDetachingIt()
+    {
+        using var parent = new CountingPanel();
+        using var a = new Button("a");
+        using var b = new Button("b");
+        using var c = new Button("c");
+
+        parent.Controls.Add(a);
+        parent.Controls.Add(b);
+        parent.Controls.Add(c);
+
+        parent.Controls.Move(0, 2);
+
+        CollectionAssert.AreEqual(new[] { b, c, a }, parent.Controls.ToArray());
+        Assert.AreSame(parent, a.Parent, "a moved child keeps its parent");
+        Assert.AreEqual(3, parent.Added, "moving must not re-add the child");
+        Assert.AreEqual(0, parent.Removed, "moving must not remove it either");
+        Assert.AreEqual(1, parent.Moved, "and the container is told it moved");
+    }
+
+    [TestMethod]
+    public void MovingTheLastChildToTheFrontPutsItFirst()
+    {
+        using var parent = new Panel();
+        using var a = new Button("a");
+        using var b = new Button("b");
+        using var c = new Button("c");
+
+        parent.Controls.Add(a);
+        parent.Controls.Add(b);
+        parent.Controls.Add(c);
+
+        parent.Controls.Move(2, 0);
+
+        CollectionAssert.AreEqual(new[] { c, a, b }, parent.Controls.ToArray());
+    }
+
+    [TestMethod]
+    public void MovingAChildToWhereItAlreadyIsDoesNothing()
+    {
+        using var parent = new CountingPanel();
+        using var a = new Button("a");
+        using var b = new Button("b");
+
+        parent.Controls.Add(a);
+        parent.Controls.Add(b);
+
+        parent.Controls.Move(1, 1);
+
+        CollectionAssert.AreEqual(new[] { a, b }, parent.Controls.ToArray());
+        Assert.AreEqual(0, parent.Moved, "a move to the same position is not a move");
+    }
+
+    [TestMethod]
+    public void MovingAChildOutOfRangeIsAnError()
+    {
+        using var parent = new Panel();
+        using var a = new Button("a");
+        using var b = new Button("b");
+
+        parent.Controls.Add(a);
+        parent.Controls.Add(b);
+
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => parent.Controls.Move(-1, 0));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => parent.Controls.Move(0, -1));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => parent.Controls.Move(2, 0));
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => parent.Controls.Move(0, 2));
+        CollectionAssert.AreEqual(new[] { a, b }, parent.Controls.ToArray(), "and the collection is untouched");
+    }
+
+    [TestMethod]
+    public void MovingAChildLaysTheContainerOutAgain()
+    {
+        var stack = new StackPanel { Dock = DockStyle.Fill };
+        var first = new Panel { Height = 20f };
+        var second = new Panel { Height = 30f };
+        var third = new Panel { Height = 10f };
+        stack.Controls.Add(first);
+        stack.Controls.Add(second);
+        stack.Controls.Add(third);
+
+        using var scene = HeadlessScene.Create(stack, 200f, 200f);
+
+        Assert.AreEqual(new SKRect(0f, 0f, 200f, 20f), first.Bounds);
+
+        stack.Controls.Move(0, 2);
+
+        Assert.AreEqual(new SKRect(0f, 0f, 200f, 30f), second.Bounds, "the child that moved up takes the first place");
+        Assert.AreEqual(new SKRect(0f, 30f, 200f, 40f), third.Bounds);
+        Assert.AreEqual(new SKRect(0f, 40f, 200f, 60f), first.Bounds, "the moved child is laid out where it now sits");
+    }
+
+    [TestMethod]
     public void DisablingAnAncestorStopsInputReachingAChild()
     {
         var panel = PlainContainer();
@@ -595,4 +688,32 @@ public sealed class ControlModelTests : HeadlessTestBase
         Dock = DockStyle.Fill,
         Padding = Thickness.Empty,
     };
+
+    /// <summary>A container that counts what it is told about its children's comings and goings.</summary>
+    private sealed class CountingPanel : Panel
+    {
+        public int Added;
+
+        public int Removed;
+
+        public int Moved;
+
+        internal override void OnControlAdded(Control control)
+        {
+            Added++;
+            base.OnControlAdded(control);
+        }
+
+        internal override void OnControlRemoved(Control control)
+        {
+            Removed++;
+            base.OnControlRemoved(control);
+        }
+
+        internal override void OnChildMoved(Control control)
+        {
+            Moved++;
+            base.OnChildMoved(control);
+        }
+    }
 }
