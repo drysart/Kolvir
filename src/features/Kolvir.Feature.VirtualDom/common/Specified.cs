@@ -20,6 +20,14 @@ namespace Kolvir.VirtualDom;
 /// meant "assigned" would misread every one of them. Since <see cref="Value"/> is meaningless until
 /// the property has been assigned, <see cref="IsSpecified"/> is what a reader checks first.
 /// </para>
+/// <para>
+/// Assignment goes through the constructor, not through an implicit conversion. A conversion operator
+/// taking <c>T</c> is only applicable where the source converts to its parameter by a <em>standard</em>
+/// conversion, and for a nullable reference type argument - <c>Specified&lt;string?&gt;</c> from a
+/// <c>string?</c> - it does not, so the operator would compile for some properties and fail for
+/// exactly the ones whose whole point is that <c>null</c> is a value. Measured on the shipping
+/// compiler rather than assumed; the constructor call has no such rule to satisfy.
+/// </para>
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]
 public readonly struct Specified<T> : IEquatable<Specified<T>>
@@ -57,10 +65,6 @@ public readonly struct Specified<T> : IEquatable<Specified<T>>
     /// <inheritdoc />
     public override int GetHashCode() =>
         IsSpecified ? HashCode.Combine(true, _value) : 0;
-
-    /// <summary>Records that a property was assigned, so a generated setter stays one assignment.</summary>
-    /// <param name="value">The value being assigned, which may be <c>null</c> where the property allows it.</param>
-    public static implicit operator Specified<T>(T value) => new(value);
 
     /// <summary>Compares two tracked properties.</summary>
     /// <param name="left">The first.</param>

@@ -7,6 +7,14 @@
        because the `lib/` folders and dependency groups come from these same inner builds. -->
   <PropertyGroup>
     <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <!-- A test project that wants one platform narrows the list here instead:
+         `-p:KolvirVirtualDomFrameworks=net10.0`. That is what keeps its restore from evaluating the
+         macOS inner build on a machine without the macOS workload, which fails as NETSDK1147 from
+         Kolvir.Backend.AppKit before anything is compiled. `-p:TargetFramework=` cannot do it here:
+         a global TargetFramework also overrides the single-framework projects underneath - this
+         package's own generator, which is netstandard2.0, would be restored for net10.0 and then
+         built for netstandard2.0. Same shape and same reason as KolvirBadgeFrameworks. -->
+    <TargetFrameworks Condition="'$(KolvirVirtualDomFrameworks)' != ''">$(KolvirVirtualDomFrameworks)</TargetFrameworks>
     <RootNamespace>Kolvir</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
@@ -20,6 +28,30 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- The build-time half. It is referenced as an analyzer so that the projects in this repository
+       get the generator and the diagnostics from the build, and it is packed into this package under
+       `analyzers/dotnet/cs`, which is the folder NuGet and the compiler look in - how
+       System.Text.Json's generator travels. A `ProjectReference` alone would reach this repository and
+       nobody else. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false" />
+  </ItemGroup>
+
+  <!-- Packed from the generator's own output rather than from the resolved analyzer item: a
+       `ProjectReference` does not hand its output path to the referencing project, and MSBuild has no
+       target in the pack graph that exposes it. The path is stable because the generator's target
+       framework is fixed at netstandard2.0, and a missing file fails the pack rather than shipping a
+       package with no generator in it. Added once rather than per target framework: pack runs once, and
+       the analyzer is one assembly whichever framework a consumer ends up binding. -->
+  <ItemGroup>
+    <None Include="..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
   </ItemGroup>
 
   <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,

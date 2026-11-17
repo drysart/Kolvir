@@ -1,0 +1,46 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The build-time half's own suite. It references the generator as a plain assembly rather than as
+       an analyzer, because these tests run the generator and the analyzer by hand over a compilation
+       they build: that is the only way to assert on what a manifest becomes, and on the diagnostics a
+       broken one produces.
+
+       It is a separate project from the feature's suite for that reason: that one consumes the
+       emitted classes through the build, which is the thing worth testing about them, so it cannot
+       also hold a reference to the assembly that emitted them. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.VirtualDom.Generators.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- The compiler the generator is written against, so the test can host it. The same version as
+         the generator's own reference, so a test never measures a different Roslyn from the one the
+         generator ships against. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- As an assembly, so the tests can construct the generator and the analyzer themselves. -->
+    <ProjectReference Include="..\..\..\src\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj" />
+    <!-- For the metadata references a test compilation needs: the node contract, the attribute and
+         the controls a manifest registers. -->
+    <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
+    <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.VirtualDom\Kolvir.Feature.VirtualDom.csproj" />
+  </ItemGroup>
+
+</Project>

@@ -180,35 +180,46 @@ For each registered control, one node class, emitted into the manifest's namespa
 property per settable control property, and the three members the reconciler needs:
 
 ```csharp
+[LeafNode]                                                  // the control never arranges children
 public sealed class VLabel : VNode
 {
+    private static readonly NodeType Kind =
+        new NodeType(typeof(Label), () => new Label());
+
+    // One control answers for every pristine value this node type needs.
+    private static readonly Label Pristine = new Label();
+    private static readonly string PristineText = Pristine.Text;
+
     private Specified<string> _text;
-    public string Text { get => _text.Value!; set => _text = value; }
+    public string Text
+    {
+        get => _text.Value;
+        set => _text = new Specified<string>(value);
+    }
 
     private Specified<Font> _font;
-    public Font Font { get => _font.Value; set => _font = value; }
+    public Font Font
+    {
+        get => _font.Value;
+        set => _font = new Specified<Font>(value);
+    }
 
-    public override NodeType NodeType => LabelType;
-
-    private static readonly NodeType LabelType = new(typeof(Label), static () => new Label());
-
-    // What the constructor left, read once for the type rather than once per property dropped.
-    private static readonly string PristineText = new Label().Text;
-    private static readonly Font PristineFont = new Label().Font;
+    public override NodeType NodeType => Kind;
 
     public override void ApplyTo(Control control)
     {
-        var label = (Label)control;
-        if (_text.IsSpecified) label.Text = _text.Value!;
-        if (_font.IsSpecified) label.Font = _font.Value;
+        var target = (Label)control;
+        if (_text.IsSpecified) target.Text = _text.Value;
+        if (_font.IsSpecified) target.Font = _font.Value;
     }
 
     public override void PatchFrom(VNode previous, Control control)
     {
         var old = (VLabel)previous;
-        var label = (Label)control;
-        if (!_text.Equals(old._text)) label.Text = _text.IsSpecified ? _text.Value! : PristineText;
-        if (!_font.Equals(old._font)) label.Font = _font.IsSpecified ? _font.Value : PristineFont;
+        var target = (Label)control;
+
+        if (!_text.Equals(old._text)) target.Text = _text.IsSpecified ? _text.Value : PristineText;
+        if (!_font.Equals(old._font)) target.Font = _font.IsSpecified ? _font.Value : PristineFont;
     }
 }
 ```
@@ -219,16 +230,28 @@ there. They carry `[EditorBrowsable(Never)]` so they stay out of IntelliSense fo
 writing trees: they are the generated-implementation contract, not the API an application writes
 against.
 
-Three things to notice:
+Five things to notice:
 
 - **`Specified<T>` is machinery, not a calling convention.** It is public only because generated code in a consuming assembly has to name it (and is hidden from IntelliSense for that reason). It survives as the field type
   behind a tracked property - a value plus a was-set flag - but it never appears in a signature a
   developer writes, and its `Reset` member is gone, because absence already means "not assigned".
   This is what removed the public wrapper, the implicit operator, the nullable-conversion trap and
   the CS0411 generic-inference note from the design (section 9).
-- **No names, no `VProp[]`, no string `switch`.** `ApplyTo` and `PatchFrom` are generated typed
-  assignments over the node's own fields, and the diff compares `Specified<T>` values directly. The
-  metadata that used to be a property name is now the field.
+- **The setter constructs a `Specified<T>` rather than relying on an implicit conversion, and there is
+  no implicit conversion to rely on.** An assignment operator taking `T` is only applicable where the
+  source converts to its parameter by a *standard* conversion, and for a nullable reference type
+  argument - `Specified<string?>` from a `string?`, the very case whose point is that null is a value -
+  it does not. Measured on the shipping compiler: `_text = value;` is CS0029 for `Specified<string?>`
+  and compiles for `Specified<string>`, so the operator would have worked for most properties and
+  failed for the interesting ones. The constructor call has no such rule to satisfy, so the operator
+  was deleted rather than documented.
+- **One control is constructed per node type, not per property.** `Pristine` is what "restore the
+  value the constructor left" reads from, and reading it off a fresh `new Label()` per property would
+  construct a control for every property a control has - dozens - the first time the node type is
+  touched.
+- **`[LeafNode]` is generated, not written.** It marks a node whose control never overrides `OnLayout`,
+  which is where a container decides where its children go; the analyzer uses it for VD011
+  (section 6). A hand-written node can carry it too.
 - **`NodeType` is the identity the reconciler uses** - one static instance per node class, compared by
   reference, which is what answers "can I reuse this control?" in one step and what stops one node
   class patching a control another node class made (its `PatchFrom` could not cast the previous node).
@@ -242,29 +265,45 @@ manifest's file has), and no dependencies on analyzer-only types.
 
 | Id | Condition |
 | --- | --- |
-| VD001 | The attributed type is not a `Control`, or is abstract without a generated subclass. |
+| VD001 | The attributed type is not a `Control`. |
 | VD002 | No accessible parameterless constructor. |
 | VD003 | Two registrations produce the same node class name (`Name` on the attribute fixes it). |
-| VD004 | The same type is registered more than once across the compilation's manifests. |
+| VD004 | The same type is registered more than once, in one manifest or across several. |
 | VD005 | `Name` is not a valid C# identifier. |
-| VD006 | A public settable property is a delegate but matches neither an `AddXxxHandler`/`RemoveXxxHandler` pair nor a known event shape (it is then treated as an ordinary property, with a warning that it will be assigned as a delegate field). |
 | VD007 | The manifest class is not `partial`. |
-| VD012 | A public settable property has the same name as a `VNode` member (`Key`, `Children`), so it cannot be flattened. Reported as an error, because silently dropping it would leave a property that cannot be set declaratively. Nothing in `Kolvir` declares either name today. |
+| VD012 | A public settable property has the same name as a member the node class already has - the `VNode` base's `Key`/`Children`/`NodeType`/`ApplyTo`/`PatchFrom`, or a static field the emitter writes (`Kind`, `Pristine`). Reported as an error, because silently dropping it would leave a property that cannot be set declaratively. A *hidden* base property is not this case: the derived declaration is the one a caller sees and the one the node keeps, silently - `TextBox` and `RichLabel` both hide properties and both have to work. |
 
 Plus two from the analyzer half, both reported as **errors** rather than warnings:
 
 | Id | Condition |
 | --- | --- |
-| VD010 | A `null` is assigned to a generated property whose type is non-nullable. C# catches this as CS8625 and CS8604, but as warnings, and not at all in a file with `#nullable disable` - where the assignment would silently store a null. |
-| VD011 | `Children` is assigned on a node whose control is not a container. |
+| VD010 | A `null` is assigned to a node property whose type is non-nullable. C# catches this as CS8625 and CS8604, but as warnings, and not at all in a file with `#nullable disable` - where the assignment would silently store a null and throw from the control's own setter. |
+| VD011 | `Children` is assigned on a node marked `[LeafNode]`, that is, one whose control does not arrange children. |
 
-VD010 needs no lookup table: it reads the generated property's declared type, which the generator
-wrote. What it deliberately leaves to the compiler is the set of cases the compiler already handles
-better - it has flow analysis, so a `string?` local that may hold null is CS8604 there whether or not
-we say anything.
+VD010 needs no lookup table: it reads the assigned property's declared type, which is the control's own
+type because the node flattened it. It works from ordinary C# - any assignment to a property of a
+`VNode`, in an object initializer or written out as a statement - and treats three cases as the caller's
+business:
+
+- **`null!`** is the caller overruling the analysis, so it stays quiet and the run-time backstop is
+  what speaks. The postfix `!` is recognised in the syntax, because a null-forgiving operator is not
+  visible in the operation tree.
+- **A nullable property** is a property where null is a value, so `Token = null` is a real instruction.
+  This is the case the three-state design exists for (section 6.1).
+- **The constant, not just the flow state.** A null literal is recognised by its constant value, which
+  the semantic model reports whether or not the nullable context is enabled - which is the whole
+  reason VD010 exists, since in a `#nullable disable` file the flow state says nothing at all. A
+  possibly-null *value* is reported from the flow state, which is exactly the CS8604 case.
+
+VD011 leans on the `[LeafNode]` attribute rather than on a table of leaf controls: every `Control` has a
+`Controls` collection, so children assigned to a `Label` are accepted and then painted by nobody, and
+`OnLayout` is where a type answers whether it arranges them. `Children = []` says what not assigning it
+says, so it is allowed.
 
 The analyzer lives in the same assembly as the generator, which is referenced as an `Analyzer`, so
-both arrive together and neither reaches the deliverable.
+both arrive together and neither reaches the deliverable. It analyses user code only
+(`GeneratedCodeAnalysisFlags.None`), and the generated trees are recognised as generated by their
+`<auto-generated/>` header.
 
 Diagnostics rather than silent omission is the entire point of the manifest: the alternative (a node
 class that is simply missing, or silently short a property) turns into a confusing compile error at a
@@ -388,7 +427,7 @@ can have it.
 | 4 | Structure: create, replace, unmount | `NodeType` mismatch handling, positional children, subtree unmount, event detach | Inserting, removing and retyping children mid-list leave a correct tree and no leaked handlers |
 | 5 | Keys and reordering | Keyed matching, mixed keyed/unkeyed lists, minimum move sequence over `ControlCollection.Move` | Reversing a keyed list moves controls instead of recreating them, proven by reference identity and by scroll position surviving |
 | 6 | Events | Generated `AddXxxHandler`/`RemoveXxxHandler` mapping, delegate identity tracking | Re-rendering with the same handler subscribes once; a new handler replaces the old one |
-| 7 | The source generator and its analyzer | Attribute, `ForAttributeWithMetadataName`, node classes with tracked properties, `Create`/`ApplyTo`/`PatchFrom`, diagnostics VD001-VD007 and VD012, plus the analyzer half with VD010 and VD011 | The manifest in section 4 compiles, the drift test (section 11) passes for every built-in control, and snippets that assign `null` to a non-nullable property or children to a leaf node fail the build - VD010 also with `#nullable disable` |
+| 7 | The source generator and its analyzer | Attribute, `ForAttributeWithMetadataName`, node classes with tracked properties, `ApplyTo`/`PatchFrom`, diagnostics VD001-VD005, VD007 and VD012, plus the analyzer half with VD010 and VD011 | The manifest in section 4 compiles, the generated classes pass the whole existing suite unchanged, and snippets that assign `null` to a non-nullable property or children to a leaf node fail the build - VD010 also with `#nullable disable` |
 | 8 | The component layer | `Component`, `SetState`, dirty tracking, render-and-patch | A headless scene shows new controls after a `SetState`, and `Render` runs exactly once per change |
 | 9 | Reflective escape hatch | Annotated `Type` registration, `[RequiresUnreferencedCode]` unannotated overloads, the runtime table | A control registered by `typeof` at run time mounts through the reflective binder, and an AOT build warns on the unannotated overload |
 | 10 | Demo, docs and AOT verification | A virtual-DOM card in the demo app, `DEVELOPER-GUIDE.md` sections, single-file AOT publish | The published exe renders the card identically to the JIT build, and the trimmer's report shows only the registered controls |
@@ -398,33 +437,44 @@ Steps 1-6 are written against two hand-written node classes so the reconciler is
 reconciler, which is what keeps step 7 a codegen change rather than a redesign.
 ### 8.1 Where the pieces live, and what else has to change
 
-Three projects:
+Four projects:
 
 | Path | What it is |
 | --- | --- |
 | `src/features/Kolvir.Feature.VirtualDom/` | The runtime: `VNode`, `NodeType`, the internal `Specified<T>`, the reconciler (`MountHandle`), `Component`, `VirtualDom.Mount`/`Update`, `VirtualDomAttribute`. Four-folder rung-3 layout with all the code in `common/` and empty platform folders. |
 | `src/generators/Kolvir.Feature.VirtualDom.Generators/` | `netstandard2.0`: the incremental generator and the `DiagnosticAnalyzer`. Deliberately **outside** `src/features/*/`, because the pack job globs that tree and would otherwise publish it as a package of its own. |
-| `tests/features/Kolvir.Feature.VirtualDom.Tests/` | Headless tests, plus the hand-written node classes that steps 1-6 use. |
+| `tests/features/Kolvir.Feature.VirtualDom.Tests/` | Headless tests, which consume the generated node classes through an analyzer reference - the thing a consumer does - so a codegen change is tested by the same suite that tested the hand-written classes. |
+| `tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/` | The build-time half's own suite: it compiles a source string, runs the generator over it, then runs the analyzer over the result. That is the only way to assert what a manifest becomes and what a broken one reports. |
 
 Five things outside the new code that the feature cannot land without:
 
-1. **`Kolvir.slnx`** gets all three projects, under `/src/features/`, `/src/generators/` and
-   `/tests/features/`. The solution is hand-listed, not globbed.
-2. **`.github/workflows/tests.yml`** enumerates test projects one at a time - a `restore` step
-   (`-p:TargetFramework=net10.0`, for the reason the other feature suites give) and a `test` step.
-   Two added blocks; nothing is discovered automatically.
+1. **`Kolvir.slnx`** gets all four projects, under `/src/features/`, `/src/generators/`,
+   `/tests/features/` and `/tests/generators/`. The solution is hand-listed, not globbed, and the
+   folders are named by path because the SDK silently drops a nested `<Folder>`.
+2. **`.github/workflows/tests.yml`** enumerates test projects one at a time - a `restore` step and a
+   `test` step - so each suite is two added blocks; nothing is discovered automatically. Both virtual
+   DOM suites pin the feature project with `-p:KolvirVirtualDomFrameworks=net10.0`, the property the
+   feature csproj reads, and **not** `-p:TargetFramework=net10.0` like the other feature suites: a
+   global `TargetFramework` also reaches the generator underneath, which is netstandard2.0, and leaves
+   it restored for one framework and built for another (measured: NETSDK1005). Same shape as
+   `-p:KolvirBadgeFrameworks=`. The workflow's path filter needs `src/generators/**` as well, and so
+   does `packages.yml`.
 3. **XML documentation is mandatory and enforced.** `Directory.Build.props` sets
    `GenerateDocumentationFile` on anything that ships and raises **CS1591 as an error**, so every
-   public member of the runtime assembly needs a `<summary>`. The test project is exempt by the
-   `.Tests` naming rule.
+   public member of the runtime assembly needs a `<summary>`. The two test projects are exempt by the
+   `.Tests` naming rule. The analyzer's `EnforceExtendedAnalyzerRules` adds its own requirement:
+   `AnalyzerReleases.Shipped.md` and `.Unshipped.md`, because a rule's identifier becomes part of the
+   package's interface the moment it ships.
 4. **The analyzer has to be packed, not just referenced.** In this repository a `ProjectReference`
    with `OutputItemType="Analyzer"` is enough; a consumer gets neither generator nor analyzer that
    way. Both ship inside the feature package under `analyzers/dotnet/cs/`, which is how
-   `System.Text.Json`'s generator travels, and the per-TFM inner builds have to add them exactly once
-   rather than three times.
-5. **`pack-nuget` needs no change** - it globs `src/features/*/*.csproj` - but the package-layout
-   check will then report a `Kolvir.Feature.VirtualDom` row, which is the point at which the net11
-   question in section 10 becomes visible if it ever matters.
+   `System.Text.Json`'s generator travels, and it is added once rather than per target framework
+   because pack runs once. A `ProjectReference` does not hand its output path to the referencing
+   project's pack, so the `None` names the generator's own `bin/$(Configuration)/netstandard2.0`
+   output - stable, because that project's target framework is fixed.
+5. **`pack-nuget` needs no change** - it globs `src/features/*/*.csproj`, and the layout checker only
+   opens `lib/` and the dependency groups, so an extra `analyzers/` folder neither needs nor trips it.
+   Verified by packing the feature locally and listing the `.nupkg`.
 ## 9. Options considered and rejected
 
 | Option | Why not |
@@ -508,7 +558,7 @@ published application:
 | **Omitted, set, and set to null stay distinct** | `new VLabel { Text = "" }` clears the text while `new VLabel { }` says nothing about it; a render that drops a property restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`); and `Font = null` arrives at the control as null rather than as absence. |
 | **Patches instead of rebuilds** | Assertions on reference identity: the control instance is the same object across a render, and keyed reorders preserve specific state (a `RichLabel`'s layout is not rebuilt, a `Panel`'s scroll position is unchanged). |
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
-| **A `null` for a non-nullable property does not build** | The analyzer is exercised with the compiler's own test harness (`Microsoft.CodeAnalysis.CSharp.Analyzer.Testing`): a snippet assigning `null` to a generated non-nullable property must produce VD010 as an error, and the same snippet under `#nullable disable` must produce it too - that second case is the reason the analyzer exists at all. A `null!` must produce nothing. |
+| **A `null` for a non-nullable property does not build** | `tests/generators/...Generators.Tests` runs the analyzer over a real compilation and asserts VD010 for a null literal, for a possibly-null variable, and for both under `#nullable disable`; and asserts nothing for a value, for a nullable property, and for `null!`. The end-to-end wiring - an analyzer arriving from the package and failing a build - was checked by hand: a `Children = [child]` on a `VLabel` in the feature suite stops its build with VD011. |
 | **AOT- and trim-clean** | `dotnet publish` with `PublishTrimmed` and `PublishAot`, treating `IL2xxx` warnings as errors, plus the demo app's `--render <png>` compared byte-for-byte between the JIT and published builds. An application that does not reference the package must show no virtual-DOM assembly in its output at all. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
@@ -524,7 +574,7 @@ published-build render comparison covers the new code path automatically.
 | 4 | Not started | |
 | 5 | Not started | |
 | 6 | Not started | |
-| 7 | Not started | |
+| 7 | Done | `src/generators/Kolvir.Feature.VirtualDom.Generators`: the incremental generator, `LeafNodeAttribute`, and `NullAndLeafAnalyzer` (VD010, VD011). The hand-written `VLabel`/`VNote`/`VButton`/`VPanel` are gone: the feature suite now consumes generated classes through an analyzer reference and its 26 tests pass unchanged, which is the point of step 7 having been deferred. A second suite, `tests/generators/...Generators.Tests`, holds 29 tests: the emission shape, VD001-VD005/VD007/VD012, VD010/VD011 with their false-positive cases, and the mirror-drift check over 14 real controls. The analyzer was also seen failing a real build (a `Children` on a `VLabel` in the feature suite stops it with VD011). Found and fixed on the way: an implicit conversion does not apply to a nullable reference type argument (section 5), and a file name derived from the namespace alone collided when one namespace held two manifests. |
 | 8 | Not started | |
 | 9 | Not started | |
 | 10 | Not started | |

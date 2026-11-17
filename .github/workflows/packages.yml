@@ -22,6 +22,7 @@ on:
       - 'src/core/**'
       - 'src/backends/**'
       - 'src/features/**'
+      - 'src/generators/**'
   workflow_dispatch:
 
 concurrency:
