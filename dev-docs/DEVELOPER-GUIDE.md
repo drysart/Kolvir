@@ -4801,11 +4801,13 @@ arrive from `analyzers/dotnet/cs` inside it, and their node classes appear the m
 
 A project that references the feature as a **project** - this repository's own sample, and the tests -
 does not get the analyzer that way, so it references the generator explicitly. The sample takes it as
-a dll with `<Analyzer Include="..." />` and builds it through a target of its own, and that is not
+a dll with `<Analyzer Include="..." />` and builds it as part of its own build, and that is not
 ceremony: `dotnet publish -p:PublishAot=true` passes `PublishAot` as a *global* property, which reaches
 every project in the build graph, and a `netstandard2.0` project cannot satisfy it - the publish stops
 with NETSDK1207 on the generator, in an application that never asked for one. A `ProjectReference`
-cannot remove an inherited global property, so the sample does not use one for the generator.
+cannot remove an inherited global property, and neither can the `MSBuild` task, so the sample shells
+out to `dotnet build` for the generator, where the properties are the environment's and not the
+publish's.
 
 ## Hardware acceleration (Windows)
 

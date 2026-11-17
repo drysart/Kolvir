@@ -68,29 +68,18 @@
     <VirtualDomGeneratorDll>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll</VirtualDomGeneratorDll>
   </PropertyGroup>
 
-  <!-- Restored only when it has never been, because it is no longer in this project's graph. -->
-  <Target Name="RestoreVirtualDomGenerator"
-          Condition="!Exists('$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\obj\project.assets.json')">
-    <MSBuild Projects="$(VirtualDomGeneratorProject)"
-             Targets="Restore"
-             RemoveProperties="PublishAot;PublishTrimmed;PublishSingleFile;SelfContained;RuntimeIdentifier;TargetFramework" />
-  </Target>
-
   <!-- Built before the compiler runs, because the manifest in this assembly is what turns into node
        classes: without the dll there is no analyzer and the page would not compile.
 
-       The MSBuild task rather than a ProjectReference, because a project reference inherits global
-       properties and cannot remove them - and `dotnet publish -p:PublishAot=true` passes PublishAot
-       globally, which a netstandard2.0 project then fails to satisfy (NETSDK1207). `RemoveProperties`
-       is the one mechanism for that here. It also matches what a consumer of the package gets: the
-       analyzer as a dll, from `analyzers/dotnet/cs`. -->
-  <Target Name="BuildVirtualDomGenerator"
-          BeforeTargets="CoreCompile"
-          DependsOnTargets="RestoreVirtualDomGenerator">
-    <MSBuild Projects="$(VirtualDomGeneratorProject)"
-             Targets="Build"
-             Properties="Configuration=$(Configuration)"
-             RemoveProperties="PublishAot;PublishTrimmed;PublishSingleFile;SelfContained;RuntimeIdentifier;TargetFramework" />
+       A separate `dotnet build` process rather than a project reference or the `MSBuild` task. A
+       project reference inherits global properties and cannot remove them, and `dotnet publish
+       -p:PublishAot=true` passes PublishAot globally, which a netstandard2.0 project cannot satisfy
+       (NETSDK1207). The `MSBuild` task inherits them too, which is not obvious until a nested build
+       comes out with no references at all. A new process starts from the environment, which is what a
+       generator project needs, and it matches what a consumer of the package gets: the analyzer as a
+       dll, from `analyzers/dotnet/cs`. -->
+  <Target Name="BuildVirtualDomGenerator" BeforeTargets="CoreCompile">
+    <Exec Command="dotnet build &quot;$(VirtualDomGeneratorProject)&quot; -c $(Configuration) --nologo" />
   </Target>
 
   <ItemGroup>

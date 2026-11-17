@@ -508,11 +508,18 @@ Five things outside the new code that the feature cannot land without:
    reaches every project in the graph, and a `netstandard2.0` project cannot satisfy it - the publish
    stops with **NETSDK1207 on the generator itself**, in an application that never asked for one.
    Neither `UndefineProperties` nor `GlobalPropertiesToRemove` on the reference helps, because the
-   check is made inside the referenced build. Measured, not assumed: the same publish succeeded on the
-   commit that replaced the reference with a pack-time `MSBuild` target, and again when the sample
-   took the analyzer as a plain `<Analyzer>` dll with `RemoveProperties` on its own build of it.
-   The two test projects still take it as an analyzer reference, because a test project is never
-   published.
+   check is made inside the referenced build.
+
+   The generator is therefore built by a **separate `dotnet build` process** at pack time, and the
+   sample takes it as a plain `<Analyzer>` dll built the same way. The first attempt used the
+   `MSBuild` task with `RemoveProperties`, and it built the generator with **no reference assemblies
+   at all** on a clean machine (CS0518 for `System.String`): the task inherits the calling build's
+   global properties, and under `dotnet pack` there is no reliable way to un-inherit all of them. A
+   new process starts from the environment, which is what a generator project needs, and `dotnet
+   build` restores first, so a fresh checkout works. Measured: with `bin/` and `obj/` of the
+   generator deleted, `dotnet pack` produces the package with the analyzer inside, and `dotnet
+   publish -p:PublishAot=true` of the sample succeeds. The two test projects still take the generator
+   as an analyzer reference, because a test project is never published.
 5. **`pack-nuget` needs no change** - it globs `src/features/*/*.csproj`, and the layout checker only
    opens `lib/` and the dependency groups, so an extra `analyzers/` folder neither needs nor trips it.
    Verified by packing the feature locally and listing the `.nupkg`.
@@ -601,7 +608,7 @@ published application:
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
 | **A `null` for a non-nullable property does not build** | `tests/generators/...Generators.Tests` runs the analyzer over a real compilation and asserts VD010 for a null literal, for a possibly-null variable, and for both under `#nullable disable`; and asserts nothing for a value, for a nullable property, and for `null!`. The end-to-end wiring - an analyzer arriving from the package and failing a build - was checked by hand: a `Children = [child]` on a `VLabel` in the feature suite stops its build with VD011. |
 | **AOT- and trim-clean** | Measured on Windows, `win-x64`: `dotnet publish -c Release -r win-x64 -p:PublishAot=true` of the sample succeeds and its `--render virtual-dom` output is **byte-for-byte identical** to the JIT build's (50,387 bytes, compared with `SequenceEqual`), so the generated node classes, the reconciler and the component layer all survive native compilation unchanged. `Kolvir.Minimal`, which does not use the feature, publishes with **no virtual-DOM artifact at all** in its output. What this does *not* cover: the other two platforms, and a publish from the release workflow rather than a developer machine. |
-| **The generator does not get in a publish's way** | `PublishAot` is a global property and a `netstandard2.0` project cannot satisfy it, so a project reference to the generator fails an AOT publish with NETSDK1207 (section 8.1, item 4). The feature carries no such reference and the sample takes the analyzer as a dll. |
+| **The generator does not get in a publish's way** | `PublishAot` is a global property and a `netstandard2.0` project cannot satisfy it, so a project reference to the generator fails an AOT publish with NETSDK1207 (section 8.1, item 4). The feature carries no such reference, and both the sample and the pack build the generator in a `dotnet build` child process, where the inheritance that causes it does not exist. Verified from a deleted generator `bin/` and `obj/`, because the first attempt - the `MSBuild` task with `RemoveProperties` - passed locally and then built the generator with no references at all on a clean machine. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
 published-build render comparison covers the new code path automatically.
