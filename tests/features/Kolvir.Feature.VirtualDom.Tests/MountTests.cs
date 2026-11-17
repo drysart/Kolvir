@@ -184,7 +184,7 @@ public sealed class MountTests
         using var panel = new Panel();
 
         Assert.ThrowsExactly<ArgumentNullException>(() => VirtualDomRuntime.Mount(null!, new VPanel()));
-        Assert.ThrowsExactly<ArgumentNullException>(() => VirtualDomRuntime.Mount(panel, null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => VirtualDomRuntime.Mount(panel, (VNode)null!));
 
         using var mount = VirtualDomRuntime.Mount(panel, new VPanel());
         Assert.ThrowsExactly<ArgumentNullException>(() => mount.Update(null!));

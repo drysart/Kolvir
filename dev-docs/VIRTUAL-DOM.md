@@ -406,16 +406,49 @@ The plan's surface, in the order a developer meets it:
 | `VirtualDomAttribute` | `[VirtualDom(typeof(Label), Name = "...")]`, `AllowMultiple` | The manifest entry (section 3). |
 | `VNode` | Abstract base: `Key`, `Children` (init-only `IReadOnlyList<VNode>`), and the abstract `NodeType`/`ApplyTo`/`PatchFrom` members the reconciler drives | The description (section 3). Everything a developer writes derives from a generated class over this. |
 | `V<Control>` (generated) | One class per registered control: a tracked property per settable control property, plus `Create`, `ApplyTo`, `PatchFrom` and a `NodeType` | What a view actually constructs (section 5). `Specified<T>` is a private field type inside it, never a public signature. |
-| `Component` | `abstract VNode Render();`, `void SetState()` | The view model base. `SetState` marks the component dirty and renders synchronously, then patches. |
+| `Component` | `abstract VNode Render();`, `void SetState()` | The view model base. `SetState` renders synchronously through the mount that owns the tree, then patches. |
+| `ComponentMount` | `Component`, `Root`, `IsMounted`, `Dispose` | What `Mount` returns for a component: the handle a window owns, which is also how a `SetState` finds something to patch. |
+| `VirtualDomRuntime.Mount(Control parent, Component component)` | Returns a `ComponentMount` | The same entry point with the scheduling wrapped up (section 7.1). |
 | `VirtualDomRuntime.Mount(Control parent, VNode root)` | Returns a `MountHandle` | Turns a tree into live controls under a container (typically the window's root panel). Named `VirtualDomRuntime` because a type called `VirtualDom` would sit in the `Kolvir.VirtualDom` namespace and shadow it at every call site. |
 | `MountHandle.Update(VNode root)` | Reconciles the new tree against what is mounted | What a component's render calls; also usable directly, without components, for a one-shot tree. |
 | `MountHandle.Unmount()` | Detaches everything and drops references | Window closing, or replacing a whole screen. |
-| `services.AddVirtualDom()` | `IServiceCollection` extension | Consistent with the other features and `APPLICATION-MODEL.md` section 5; registers the reconciler's services (currently none beyond the reflective table, when one exists). |
+| `services.AddVirtualDom()` | `IServiceCollection` extension | **Not in step 8.** This feature runs no code of its own: there is no timer, no hook and no process-wide state, so there is nothing for a container to hold, and an empty registration would be ceremony that lies about being the opt-in. The opt-in is the `Mount` call, and an application that references the package without ever calling it keeps nothing, because none of the code is reachable. The row stays for step 9, which does have something to register - the reflective table - and that is when a `ConfigureServices` call becomes worth writing. |
+
+A component is the whole of the state machinery: there is no observable, no binding, no notification
+and no scheduler. That is a decision rather than a gap - see section 7.1.
 
 A component can be used without the component layer at all (`Mount` + `Update` by hand), and the
 component layer is a thin wrapper over that. Keeping the two apart is deliberate: it means the
 reconciler is testable without any state machinery, and an application that wants its own scheduling
 can have it.
+
+### 7.1 What `SetState` means
+
+The loop is one line at the call site and entirely synchronous:
+
+```csharp
+private void OnAddClick(object sender)
+{
+    _count++;
+    SetState();          // renders now; when this returns the screen is correct
+}
+```
+
+Four decisions follow from that, each of them the opposite of a React-shaped framework somewhere:
+
+| Decision | Why |
+| --- | --- |
+| **Synchronous, on the calling thread.** No batching, no scheduler, no `await`. | Kolvir is single-threaded by design, and a synchronous render is what lets a test and a developer reason about the screen without a frame clock. Deferring renders is a scheduling feature with its own seam; section 10 records it as deliberately absent. |
+| **`SetState` without a mount throws.** | A view model whose state changes and whose screen does not is the worst class of bug here, and silence is what makes it hard. The message names the component and the call that mounts one. |
+| **`SetState` after `Dispose` is a no-op.** | An event that arrives after its window closed is ordinary. Throwing there would make every teardown order-dependendent, which is worse than the bug it prevents. |
+| **`SetState` during a render folds into the same pass.** | Re-entering the reconciler mid-diff is undefined, so the request is recorded and the pass repeats. A render that sets state *every* time never settles, so the hundredth pass throws and names the component rather than hanging the window. |
+
+A component owns its whole tree: the child of a render is a `VNode`, not another component. A parent
+that wants a child view model's output calls its `Render()` for the data it returns, but that child is
+not mounted, so its `SetState` throws rather than updating part of a screen. Composing components into
+a tree - where a component appears *in* another's output and its `SetState` re-renders only its own
+subtree - is a later step's problem: it changes the node model (a node whose control comes from another
+node's render, rather than from a `NodeType`) and it is not needed to prove the loop.
 
 ## 8. Steps
 
@@ -571,10 +604,10 @@ published-build render comparison covers the new code path automatically.
 | 1 | Done | `Kolvir.Feature.VirtualDom` in the rung-3 layout: `VNode`, `NodeType`, the public-but-hidden `Specified<T>`, `Mounted`, `Reconciler`, `MountHandle`, `VirtualDomRuntime`. Hand-written `VLabel`/`VNote`/`VButton`/`VPanel` stand in for the generator, so steps 2-6 test the reconciler before any codegen exists. 26 headless tests. |
 | 2 | Done | `Mount` creates the root and applies its properties; a control is reused when the new node is the same node class and replaced in place when it is not. Verified by reference identity across `Update`, plus a scene test that a mounted tree is laid out by the host. |
 | 3 | Done | Property diffing arrived with `PatchFrom`: a property that stops being set returns to the pristine value its constructor left (asserted against a control whose pristine value is not `default(T)`), an assigned `null` is a value rather than an absence, and an unchanged value is not re-assigned. |
-| 4 | Not started | |
-| 5 | Not started | |
-| 6 | Not started | |
-| 7 | Done | `src/generators/Kolvir.Feature.VirtualDom.Generators`: the incremental generator, `LeafNodeAttribute`, and `NullAndLeafAnalyzer` (VD010, VD011). The hand-written `VLabel`/`VNote`/`VButton`/`VPanel` are gone: the feature suite now consumes generated classes through an analyzer reference and its 26 tests pass unchanged, which is the point of step 7 having been deferred. A second suite, `tests/generators/...Generators.Tests`, holds 29 tests: the emission shape, VD001-VD005/VD007/VD012, VD010/VD011 with their false-positive cases, and the mirror-drift check over 14 real controls. The analyzer was also seen failing a real build (a `Children` on a `VLabel` in the feature suite stops it with VD011). Found and fixed on the way: an implicit conversion does not apply to a nullable reference type argument (section 5), and a file name derived from the namespace alone collided when one namespace held two manifests. |
-| 8 | Not started | |
+| 4 | Done | Structure arrived with the reconciler in [#100](https://github.com/drysart/Kolvir/pull/100): a child added, removed or retyped mid-list leaves a correct tree, and a removed subtree is unmounted with its handlers. `ChildrenTests` holds the cases. This row said "Not started" for a while - the work was in the code and the table was stale. |
+| 5 | Done | Keyed matching plus `ControlCollection.Move`, from [#99](https://github.com/drysart/Kolvir/pull/99) and [#100](https://github.com/drysart/Kolvir/pull/100). Reversing a keyed list moves the controls instead of rebuilding them, proven by reference identity; keyed and unkeyed children mix without a keyed node ever being claimed positionally. |
+| 6 | Done | Generated `Click`-style event properties over the `AddXxxHandler`/`RemoveXxxHandler` pairs, with the attached delegate tracked so a changed handler detaches the old one. Same render subscribes once, and a handler the node stops setting is removed. `EventTests` holds the cases. |
+| 7 | Done | `src/generators/Kolvir.Feature.VirtualDom.Generators`: the incremental generator, `LeafNodeAttribute`, and `NullAndLeafAnalyzer` (VD010, VD011). The hand-written `VLabel`/`VNote`/`VButton`/`VPanel` are gone: the feature suite now consumes generated classes through an analyzer reference and its 26 tests pass unchanged, which is the point of step 7 having been deferred. A second suite, `tests/generators/...Generators.Tests`, holds 30 tests: the emission shape, VD001-VD005/VD007/VD012, VD010/VD011 with their false-positive cases, and the mirror-drift check over 14 real controls. The analyzer was also seen failing a real build (a `Children` on a `VLabel` in the feature suite stops it with VD011). Found and fixed on the way: an implicit conversion does not apply to a nullable reference type argument (section 5), and a file name derived from the namespace alone collided when one namespace held two manifests. |
+| 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, re-entrancy folded into one pass with a cap so a render that never settles fails instead of hanging, an error when an unmounted component sets state, and a no-op after dispose. 10 tests in `ComponentTests`, including one that clicks a real control through the headless host. Section 7.1 records the four decisions. `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
 | 9 | Not started | |
 | 10 | Not started | |

@@ -1,7 +1,7 @@
 namespace Kolvir.VirtualDom;
 
 /// <summary>
-/// A mounted node tree: what <see cref="VirtualDomRuntime.Mount"/> hands back, and what a render updates.
+/// A mounted node tree: what <see cref="VirtualDomRuntime.Mount(Control, VNode)"/> hands back, and what a render updates.
 /// </summary>
 /// <remarks>
 /// The handle owns the record of what is on screen, so it is the thing that knows which control a

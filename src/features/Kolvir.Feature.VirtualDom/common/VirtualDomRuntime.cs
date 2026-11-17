@@ -5,14 +5,16 @@ namespace Kolvir.VirtualDom;
 /// </summary>
 /// <remarks>
 /// <para>
-/// <see cref="Mount"/> is the whole entry point: give it a control to fill and the tree to put there,
-/// and it returns a handle whose <see cref="MountHandle.Update"/> is what a render calls. That is
-/// deliberately the entire API, because a virtual DOM is a way of owning a subtree, not a control.
+/// There are two entry points and nothing else. <see cref="Mount(Control, VNode)"/> takes a tree that
+/// the application rebuilds and compares itself, and hands back a handle whose
+/// <see cref="MountHandle.Update"/> is what a render calls. <see cref="Mount(Control, Component)"/>
+/// takes a view model that renders itself, which is the same thing with the comparison and the
+/// scheduling wrapped up. That is deliberately the entire API, because a virtual DOM is a way of
+/// owning a subtree, not a control.
 /// </para>
 /// <para>
-/// The component layer (view models whose <c>Render</c> returns a <see cref="VNode"/>) is built on top
-/// of this and is usable without it, which is what keeps the reconciler testable with no state
-/// machinery in the way.
+/// The component layer is built on top of the tree API and the tree API does not know about it, which
+/// is what keeps the reconciler testable with no state machinery in the way.
 /// </para>
 /// </remarks>
 public static class VirtualDomRuntime
@@ -30,5 +32,30 @@ public static class VirtualDomRuntime
         ArgumentNullException.ThrowIfNull(root);
 
         return new MountHandle(parent, root);
+    }
+
+    /// <summary>Mounts <paramref name="component"/>'s tree under <paramref name="parent"/>.</summary>
+    /// <param name="parent">The control whose children the tree owns. Typically a window's root panel.</param>
+    /// <param name="component">The component to render and keep in step.</param>
+    /// <returns>
+    /// A handle that re-renders the component whenever <see cref="Component.SetState"/> is called, which
+    /// also detaches the tree when it is disposed.
+    /// </returns>
+    /// <exception cref="ArgumentNullException">
+    /// <paramref name="parent"/> or <paramref name="component"/> is null.
+    /// </exception>
+    /// <example>
+    /// <code>
+    /// private ComponentMount? _screen;
+    ///
+    /// void Show() => _screen = VirtualDomRuntime.Mount(Root, new MainScreen());
+    /// </code>
+    /// </example>
+    public static ComponentMount Mount(Control parent, Component component)
+    {
+        ArgumentNullException.ThrowIfNull(parent);
+        ArgumentNullException.ThrowIfNull(component);
+
+        return new ComponentMount(parent, component);
     }
 }
