@@ -32,7 +32,6 @@ public sealed class DemoUi
 {
     private Label _statusLabel = null!;
     private Label? _counterLabel;
-    private Button _primaryButton = null!;
     private ListBox _navList = null!;
     private Panel _stage = null!;
     private DemoPage[] _pages = null!;
@@ -457,18 +456,22 @@ public sealed class DemoUi
             ResetClicks();
         });
 
-        var toggleButton = new Button("Disable primary")
+        // A collect on demand, so what a page is holding can be compared before and after without
+        // waiting for the runtime to choose a moment. The second collect reclaims what the finalizers
+        // the first one ran had released.
+        var gcButton = new Button("Run GC")
         {
             Dock = XDock.Right,
             Style = ButtonStyle.Secondary,
             AutoSize = true,
             Margin = new Thickness(8f, 16f, 0f, 16f),
         };
-        toggleButton.AddClickHandler(_ =>
+        gcButton.AddClickHandler(_ =>
         {
-            _primaryButton.Enabled = !_primaryButton.Enabled;
-            toggleButton.Text = _primaryButton.Enabled ? "Disable primary" : "Enable primary";
-            SetStatus(_primaryButton.Enabled ? "Primary action enabled." : "Primary action disabled.");
+            GC.Collect();
+            GC.WaitForPendingFinalizers();
+            GC.Collect();
+            SetStatus($"Collected - {GC.GetTotalMemory(false) / 1024:N0} KB of managed heap in use.");
         });
 
         // Always visible, not a transient status: a screenshot of this window has to say which
@@ -491,7 +494,7 @@ public sealed class DemoUi
         footer.Controls.Add(_statusLabel);
         footer.Controls.Add(_gfxLabel);
         footer.Controls.Add(resetButton);
-        footer.Controls.Add(toggleButton);
+        footer.Controls.Add(gcButton);
         return footer;
     }
 
@@ -907,10 +910,6 @@ public sealed class DemoUi
         _counterLabel = label;
         UpdateClickCount();
     }
-
-    /// <summary>Publishes the primary action button, which the footer disables and enables.</summary>
-    /// <param name="button">The button.</param>
-    internal void UsePrimaryButton(Button button) => _primaryButton = button;
 
     /// <summary>Counts one click of the primary action.</summary>
     /// <returns>The count after this click.</returns>
