@@ -573,6 +573,7 @@ public sealed class DemoUi
         ("chromeless-window", "Chromeless window", demo => new ChromelessWindowPage(demo)),
         ("app-badge", "App badge", demo => new AppBadgePage(demo)),
         ("audio", "Audio", demo => new AudioPage(demo)),
+        ("virtual-dom", "Virtual DOM", demo => new VirtualDomPage(demo)),
     };
 
     /// <summary>

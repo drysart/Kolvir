@@ -132,6 +132,11 @@ internal static class Program
             // and audio for its audio page.
             // Each Add call is the whole opt-in; leaving one out keeps that feature's code out of
             // an application that does not want it.
+            //
+            // The virtual DOM is the eighth and needs no line here: it runs no code of its own -
+            // no timer, no hook, no process-wide state - so the opt-in is the Mount call on its
+            // page, and an application that references the package without mounting anything
+            // keeps none of it.
             ConfigureServices = services => services
                 .AddDragDrop()
                 .AddAnimations()

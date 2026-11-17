@@ -498,13 +498,21 @@ Five things outside the new code that the feature cannot land without:
    `.Tests` naming rule. The analyzer's `EnforceExtendedAnalyzerRules` adds its own requirement:
    `AnalyzerReleases.Shipped.md` and `.Unshipped.md`, because a rule's identifier becomes part of the
    package's interface the moment it ships.
-4. **The analyzer has to be packed, not just referenced.** In this repository a `ProjectReference`
-   with `OutputItemType="Analyzer"` is enough; a consumer gets neither generator nor analyzer that
-   way. Both ship inside the feature package under `analyzers/dotnet/cs/`, which is how
-   `System.Text.Json`'s generator travels, and it is added once rather than per target framework
-   because pack runs once. A `ProjectReference` does not hand its output path to the referencing
-   project's pack, so the `None` names the generator's own `bin/$(Configuration)/netstandard2.0`
-   output - stable, because that project's target framework is fixed.
+4. **The analyzer has to be packed, not just referenced.** A consumer of the package gets the
+   generator and the analyzer from `analyzers/dotnet/cs/`, which is how `System.Text.Json`'s
+   generator travels, added once rather than per target framework because pack runs once. In this
+   repository the feature project does **not** reference the generator as an analyzer: it has no
+   manifest of its own, so all it needs is the dll at pack time, and a project reference would put a
+   `netstandard2.0` project into the graph of everything that references the feature. That matters
+   because `dotnet publish -p:PublishAot=true` passes `PublishAot` as a *global* property, which
+   reaches every project in the graph, and a `netstandard2.0` project cannot satisfy it - the publish
+   stops with **NETSDK1207 on the generator itself**, in an application that never asked for one.
+   Neither `UndefineProperties` nor `GlobalPropertiesToRemove` on the reference helps, because the
+   check is made inside the referenced build. Measured, not assumed: the same publish succeeded on the
+   commit that replaced the reference with a pack-time `MSBuild` target, and again when the sample
+   took the analyzer as a plain `<Analyzer>` dll with `RemoveProperties` on its own build of it.
+   The two test projects still take it as an analyzer reference, because a test project is never
+   published.
 5. **`pack-nuget` needs no change** - it globs `src/features/*/*.csproj`, and the layout checker only
    opens `lib/` and the dependency groups, so an extra `analyzers/` folder neither needs nor trips it.
    Verified by packing the feature locally and listing the `.nupkg`.
@@ -592,7 +600,8 @@ published application:
 | **Patches instead of rebuilds** | Assertions on reference identity: the control instance is the same object across a render, and keyed reorders preserve specific state (a `RichLabel`'s layout is not rebuilt, a `Panel`'s scroll position is unchanged). |
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
 | **A `null` for a non-nullable property does not build** | `tests/generators/...Generators.Tests` runs the analyzer over a real compilation and asserts VD010 for a null literal, for a possibly-null variable, and for both under `#nullable disable`; and asserts nothing for a value, for a nullable property, and for `null!`. The end-to-end wiring - an analyzer arriving from the package and failing a build - was checked by hand: a `Children = [child]` on a `VLabel` in the feature suite stops its build with VD011. |
-| **AOT- and trim-clean** | `dotnet publish` with `PublishTrimmed` and `PublishAot`, treating `IL2xxx` warnings as errors, plus the demo app's `--render <png>` compared byte-for-byte between the JIT and published builds. An application that does not reference the package must show no virtual-DOM assembly in its output at all. |
+| **AOT- and trim-clean** | Measured on Windows, `win-x64`: `dotnet publish -c Release -r win-x64 -p:PublishAot=true` of the sample succeeds and its `--render virtual-dom` output is **byte-for-byte identical** to the JIT build's (50,387 bytes, compared with `SequenceEqual`), so the generated node classes, the reconciler and the component layer all survive native compilation unchanged. `Kolvir.Minimal`, which does not use the feature, publishes with **no virtual-DOM artifact at all** in its output. What this does *not* cover: the other two platforms, and a publish from the release workflow rather than a developer machine. |
+| **The generator does not get in a publish's way** | `PublishAot` is a global property and a `netstandard2.0` project cannot satisfy it, so a project reference to the generator fails an AOT publish with NETSDK1207 (section 8.1, item 4). The feature carries no such reference and the sample takes the analyzer as a dll. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
 published-build render comparison covers the new code path automatically.
@@ -610,4 +619,4 @@ published-build render comparison covers the new code path automatically.
 | 7 | Done | `src/generators/Kolvir.Feature.VirtualDom.Generators`: the incremental generator, `LeafNodeAttribute`, and `NullAndLeafAnalyzer` (VD010, VD011). The hand-written `VLabel`/`VNote`/`VButton`/`VPanel` are gone: the feature suite now consumes generated classes through an analyzer reference and its 26 tests pass unchanged, which is the point of step 7 having been deferred. A second suite, `tests/generators/...Generators.Tests`, holds 30 tests: the emission shape, VD001-VD005/VD007/VD012, VD010/VD011 with their false-positive cases, and the mirror-drift check over 14 real controls. The analyzer was also seen failing a real build (a `Children` on a `VLabel` in the feature suite stops it with VD011). Found and fixed on the way: an implicit conversion does not apply to a nullable reference type argument (section 5), and a file name derived from the namespace alone collided when one namespace held two manifests. |
 | 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, re-entrancy folded into one pass with a cap so a render that never settles fails instead of hanging, an error when an unmounted component sets state, and a no-op after dispose. 10 tests in `ComponentTests`, including one that clicks a real control through the headless host. Section 7.1 records the four decisions. `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
 | 9 | Not started | |
-| 10 | Not started | |
+| 10 | Done | A **Virtual DOM** card in the sample (`--page virtual-dom`), the `DEVELOPER-GUIDE.md` section, and the AOT verification measured rather than asserted: the `win-x64` published build renders the card byte-for-byte identically to the JIT build, and `Kolvir.Minimal` publishes with no virtual-DOM artifact. The work also found a real publish failure - `PublishAot` is global, a `netstandard2.0` generator cannot satisfy it, and a project reference therefore breaks `dotnet publish` for applications that never asked for a generator (section 8.1, item 4). |

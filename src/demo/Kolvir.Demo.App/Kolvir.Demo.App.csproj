@@ -59,7 +59,42 @@
     <ProjectReference Include="..\..\features\Kolvir.Feature.AnimatedGif\Kolvir.Feature.AnimatedGif.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.AnimatedWebp\Kolvir.Feature.AnimatedWebp.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.Svg\Kolvir.Feature.Svg.csproj" />
+    <ProjectReference Include="..\..\features\Kolvir.Feature.VirtualDom\Kolvir.Feature.VirtualDom.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.WoffFonts\Kolvir.Feature.WoffFonts.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <VirtualDomGeneratorProject>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj</VirtualDomGeneratorProject>
+    <VirtualDomGeneratorDll>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll</VirtualDomGeneratorDll>
+  </PropertyGroup>
+
+  <!-- Restored only when it has never been, because it is no longer in this project's graph. -->
+  <Target Name="RestoreVirtualDomGenerator"
+          Condition="!Exists('$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\obj\project.assets.json')">
+    <MSBuild Projects="$(VirtualDomGeneratorProject)"
+             Targets="Restore"
+             RemoveProperties="PublishAot;PublishTrimmed;PublishSingleFile;SelfContained;RuntimeIdentifier;TargetFramework" />
+  </Target>
+
+  <!-- Built before the compiler runs, because the manifest in this assembly is what turns into node
+       classes: without the dll there is no analyzer and the page would not compile.
+
+       The MSBuild task rather than a ProjectReference, because a project reference inherits global
+       properties and cannot remove them - and `dotnet publish -p:PublishAot=true` passes PublishAot
+       globally, which a netstandard2.0 project then fails to satisfy (NETSDK1207). `RemoveProperties`
+       is the one mechanism for that here. It also matches what a consumer of the package gets: the
+       analyzer as a dll, from `analyzers/dotnet/cs`. -->
+  <Target Name="BuildVirtualDomGenerator"
+          BeforeTargets="CoreCompile"
+          DependsOnTargets="RestoreVirtualDomGenerator">
+    <MSBuild Projects="$(VirtualDomGeneratorProject)"
+             Targets="Build"
+             Properties="Configuration=$(Configuration)"
+             RemoveProperties="PublishAot;PublishTrimmed;PublishSingleFile;SelfContained;RuntimeIdentifier;TargetFramework" />
+  </Target>
+
+  <ItemGroup>
+    <Analyzer Include="$(VirtualDomGeneratorDll)" />
   </ItemGroup>
 
   <!-- The demo's bundled face. It travels inside the assembly rather than beside the executable,

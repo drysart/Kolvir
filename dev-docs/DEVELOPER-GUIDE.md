@@ -59,6 +59,12 @@ src/
     Kolvir.Feature.WoffFonts/ web fonts, as a separate package: same layout, all portable
       common/                 the format provider, the WOFF unwrap, the WOFF 2 glyph reconstruction
       windows/ macos/ linux/  empty: a container is zlib, Brotli and arithmetic over bytes
+    Kolvir.Feature.VirtualDom/ a virtual DOM, as a separate package: same layout, all portable
+      common/                 the node model, the reconciler, the component layer, the mount handles
+      windows/ macos/ linux/  empty: reconciling a tree is comparison over objects that already exist
+  generators/
+    Kolvir.Feature.VirtualDom.Generators/ the virtual DOM's build-time half: the source generator that
+      turns a manifest into node classes, and the analyzer that ships inside the feature package
   demo/
     Kolvir.Demo.App/      the one application: net10.0-windows, net10.0-macos or net10.0
       Program.cs          pick a backend, describe a window, run
@@ -4612,6 +4618,194 @@ readout; **WebP frames** steps it through the timeline's own boundaries. There i
 WebP copy of the **GIF out of view** page: that page makes a claim about the timeline - time passes
 while the picture is hidden - and the timeline is not per-format. A second copy would exercise the
 same core code with a different byte stream and would not test anything WebP-specific.
+
+### Virtual DOM
+
+`Kolvir.Feature.VirtualDom` lets an application describe its controls instead of building them: a
+view model returns a *tree of descriptions*, and a reconciler turns that into the real control tree
+and keeps it in step as the descriptions change. Most applications never want this - a control tree
+that is built once and mutated by handlers is shorter and easier to read - so it is a package of its
+own, and an application that does not call it carries none of it.
+
+The design, the rejected alternatives and the plan are in
+[`VIRTUAL-DOM.md`](VIRTUAL-DOM.md); this section is how to use what exists.
+
+#### Registering the controls a view describes
+
+The nodes a view can build are generated, so the controls have to be named at compile time. That is
+one partial class with an attribute per control - a **manifest**:
+
+```csharp
+using Kolvir.VirtualDom;
+
+[VirtualDom(typeof(Label))]
+[VirtualDom(typeof(Button))]
+[VirtualDom(typeof(Panel))]
+internal partial class DemoControls;
+```
+
+The generator reads those attributes and emits `VLabel`, `VButton` and `VPanel` into that namespace,
+each with a property for every settable property its control has, plus `Key` and `Children`. Nothing
+reflects at run time and no registration list survives into the build, which is why this publishes
+under NativeAOT with no annotations and no warnings; a control that is not in a manifest simply has
+no node class, and using one is a compile error rather than a run-time surprise.
+
+Constructing a tree is then plain C# object and collection syntax:
+
+```csharp
+VNode content = new VPanel
+{
+    Dock = DockStyle.Fill,
+    Children =
+    [
+        new VLabel { Text = "Ready" },
+        new VButton { Text = "Go", Click = _ => Go() },
+    ],
+};
+```
+
+`Children` takes a collection expression, so spread works: `[header, ..rows, footer]`.
+
+#### Omitted, set, and set to null
+
+A property a node does not assign is one it says nothing about. That is not the same as assigning
+`null`, and the difference is the reason the generated properties are tracked rather than plain:
+
+| The node says | The control gets |
+| --- | --- |
+| `new VLabel { }` | whatever its constructor gave it |
+| `new VLabel { Text = "a" }` | `"a"` |
+| `new VLabel { Font = null }` | `null` - only where the control's property is nullable |
+
+Dropping a property between renders restores it to what the control's constructor left, not to
+`default(T)`, because those differ: a `Label`'s text starts as an empty string and its `Name` starts
+as the type name.
+
+Two mistakes the compiler alone would only warn about are errors, because the package ships an
+analyzer with the generator:
+
+| Id | What it refuses |
+| --- | --- |
+| VD010 | A `null` assigned to a node property that cannot hold one - including in a file with `#nullable disable`, where the compiler says nothing at all. |
+| VD011 | `Children` assigned to a node whose control does not arrange children. Every `Control` has a `Controls` collection, so children given to a `Label` would be accepted and then painted by nobody. |
+
+`null!` is left alone: that is the caller overruling the analysis, and the control's own setter is
+the backstop.
+
+#### A view model
+
+A `Component` is a view model whose `Render` returns the tree for its current state:
+
+```csharp
+using Kolvir.VirtualDom;
+
+internal sealed class Counter : Component
+{
+    private int _count;
+
+    public override VNode Render() => new VPanel
+    {
+        Dock = DockStyle.Fill,
+        Children =
+        [
+            new VButton { Text = $"{_count} clicks", Click = _ => Count() },
+            new VButton { Text = "Clear", Click = _ => Clear() },
+        ],
+    };
+
+    private void Count()
+    {
+        _count++;
+        SetState();
+    }
+
+    private void Clear()
+    {
+        _count = 0;
+        SetState();
+    }
+}
+```
+
+Mounting it is what starts the loop, and the handle is what the window owns:
+
+```csharp
+private ComponentMount? _screen;
+
+void Show() => _screen = VirtualDomRuntime.Mount(root, new Counter());
+void Hide() => _screen?.Dispose();
+```
+
+`SetState` re-renders immediately, on the calling thread, and patches what is mounted: when it
+returns, the controls on screen are correct. There is no observable, no binding, no notification and
+no frame clock, and a control the new tree still describes is patched rather than rebuilt, so scroll
+position, selection, caret and focus survive a render that only changed a value.
+
+Four rules follow from that, and they are the whole of the state model:
+
+- **Synchronous.** No batching and no scheduling. Deferring renders is a feature with a seam of its
+  own, and it is not in this one.
+- **`SetState` without a mount throws.** A view model whose state changes and whose screen does not
+  is the hardest kind of bug to find, so the message names the component and the call that mounts
+  one.
+- **`SetState` after `Dispose` does nothing.** An event that arrives after its window closed is
+  ordinary, and throwing there would make teardown order-dependent.
+- **`SetState` during a render folds into the same pass.** Re-entering the reconciler mid-diff is
+  undefined, so the request is recorded and the pass repeats; a render that sets state every time
+  never settles, so the hundredth pass throws and names the component instead of hanging the window.
+
+A component owns its whole tree. Its children in a render are nodes, not other components; a parent
+that wants a child view model's output can call its `Render()` for the value it returns, but that
+child is not mounted, so its `SetState` throws rather than updating part of a screen.
+
+#### Keys, and what they buy
+
+A node's `Key` identifies it among its siblings. Without one, children are matched by position, so
+reordering a list rebuilds every control that moved. With one, a reorder **moves** the controls
+instead:
+
+```csharp
+Children = [.. rows.Select(row => new VLabel
+{
+    Key = row.Id,
+    Dock = DockStyle.Top,
+    Text = row.Name,
+})],
+```
+
+That is what keeps a typed-in text box's caret, a list's selection and a panel's scroll position
+across a sort. Keyed and unkeyed children never mix within one list - a keyed node with no matching
+key is new, and a keyed child nobody asks for is removed - because claiming a keyed control by
+position would silently rename it.
+
+#### Using it without components
+
+The tree layer stands on its own, which is what makes the reconciler testable with no state
+machinery in the way:
+
+```csharp
+using var mount = VirtualDomRuntime.Mount(root, BuildTree());
+
+// later, from wherever the application decides a redraw is due
+mount.Update(BuildTree());
+```
+
+The **Virtual DOM** page in the sample is the whole thing running: a card whose controls are
+described rather than built, two buttons that change the component's state, a render count that
+rises on every click, and a keyed row list that reverses by moving rather than rebuilding.
+
+#### Getting the generator into a build
+
+An application that references the **package** needs nothing else: the generator and the analyzer
+arrive from `analyzers/dotnet/cs` inside it, and their node classes appear the moment a manifest does.
+
+A project that references the feature as a **project** - this repository's own sample, and the tests -
+does not get the analyzer that way, so it references the generator explicitly. The sample takes it as
+a dll with `<Analyzer Include="..." />` and builds it through a target of its own, and that is not
+ceremony: `dotnet publish -p:PublishAot=true` passes `PublishAot` as a *global* property, which reaches
+every project in the build graph, and a `netstandard2.0` project cannot satisfy it - the publish stops
+with NETSDK1207 on the generator, in an application that never asked for one. A `ProjectReference`
+cannot remove an inherited global property, so the sample does not use one for the generator.
 
 ## Hardware acceleration (Windows)
 
