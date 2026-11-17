@@ -63,6 +63,7 @@ public sealed class ComponentMount : IDisposable
     {
         _disposed = true;
         _handle.Dispose();
+        Component.Detach(this);
     }
 
     /// <summary>Re-renders and patches, or notes that the pass in progress has to run again.</summary>

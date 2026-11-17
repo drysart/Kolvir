@@ -14,6 +14,8 @@ public sealed class MountHandle : IDisposable
 
     internal MountHandle(Control parent, VNode root)
     {
+        RejectComponentRoot(root);
+
         _parent = parent;
         _root = MountParent(root);
     }
@@ -37,6 +39,7 @@ public sealed class MountHandle : IDisposable
     public void Update(VNode root)
     {
         ArgumentNullException.ThrowIfNull(root);
+        RejectComponentRoot(root);
 
         if (_root is null)
         {
@@ -76,9 +79,30 @@ public sealed class MountHandle : IDisposable
     /// <inheritdoc />
     public void Dispose() => Unmount();
 
+    /// <summary>
+    /// Refuses a component node as the root of a handle.
+    /// </summary>
+    /// <param name="root">The tree being mounted.</param>
+    /// <remarks>
+    /// A handle owns one root control and patches it node by node, which a component node does not have:
+    /// the component's render supplies the control and the component's own mount keeps it in step. A
+    /// root component is therefore mounted as a component, and the message says so rather than leaving
+    /// the caller to work out why a control did not appear.
+    /// </remarks>
+    /// <exception cref="ArgumentException"><paramref name="root"/> is a <see cref="VComponent"/>.</exception>
+    private static void RejectComponentRoot(VNode root)
+    {
+        if (root is VComponent)
+        {
+            throw new ArgumentException(
+                "A VComponent cannot be the root of a MountHandle. Mount the component itself with VirtualDomRuntime.Mount(parent, component), which returns the ComponentMount that keeps it in step; a VComponent is for a child of another component's render.",
+                nameof(root));
+        }
+    }
+
     private Mounted MountParent(VNode root, int index = -1)
     {
-        var mounted = Reconciler.Create(root);
+        var mounted = Reconciler.Create(_parent, root);
 
         if (index < 0 || index > _parent.Controls.Count)
         {

@@ -4754,11 +4754,38 @@ Three rules follow from that, and they are the whole of the state model:
   undefined, so the request is recorded and the pass repeats; a render that sets state every time
   never settles, so the hundredth pass throws and names the component instead of hanging the window.
 
-A component owns its whole tree. Its children in a render are nodes, not other components. A parent
-that calls a child view model's `Render()` for the value it returns gets a snapshot: the child has no
-mount of its own, so its `SetState` has nothing to patch and only the parent can re-render. That makes
-hand composition a data dependency rather than a live binding, and it is not a stand-in for the
-composition step.
+A component owns its whole tree, and the tree can hold other components. A child component is a node,
+so the rules are the reconciler's rules plus one: a slot is matched by component *instance* (section
+7.2 of `VIRTUAL-DOM.md`).
+
+```csharp
+// In the list's Render: the rows are components, and the list owns only their presence and order.
+new VPanel
+{
+    Dock = XDock.Fill,
+    Children = [.. _rows.Select(row => new VComponent(row) { Key = row })],
+}
+```
+
+What that buys, and what to know:
+
+- **The parent owns the place, the child owns the content.** Adding, removing or moving a row is the
+  list's state; typing in a row is that row's state. Neither render count moves the other, which is the
+  whole point of the boundary.
+- **The same component instance keeps its mount**, so a parent's render neither re-renders the child
+  nor rebuilds its controls: a caret, a scroll position and a focus survive. A *different* instance in
+  the same slot is a different component, so the old mount is disposed and the new one rendered fresh.
+- **A child that can move needs a `Key`**, or children are matched by position and a reorder rebuilds
+  the two rows that swapped instead of moving them. Key it on the component itself.
+- **One component is one mount.** Emitting the same instance in two places throws rather than mounting
+  it twice: give each place its own instance.
+- **A `VComponent` is a slot, not a control.** It cannot be the root of `Mount`, and it cannot be given
+  `Children` - the child's own `Render` says what the child contains.
+
+The demo's **Virtual DOM** page is this in miniature: a list component holds three row components, each
+with its own text box, its own Up/Down/Remove buttons and its own render count. Typing in a row raises
+that row's count and leaves the list's alone; adding or moving raises the list's and leaves the
+untouched rows alone.
 
 #### Keys, and what they buy
 
@@ -4792,9 +4819,9 @@ using var mount = VirtualDomRuntime.Mount(root, BuildTree());
 mount.Update(BuildTree());
 ```
 
-The **Virtual DOM** page in the sample is the whole thing running: a card whose controls are
-described rather than built, two buttons that change the component's state, a render count that
-rises on every click, and a keyed row list that reverses by moving rather than rebuilding.
+The **Virtual DOM** page in the sample is the whole thing running: a card whose controls are described
+rather than built, a list component holding row components, and two render counts - one for the list and
+one per row - that move independently as you type in a row or move one up and down.
 
 #### Getting the generator into a build
 

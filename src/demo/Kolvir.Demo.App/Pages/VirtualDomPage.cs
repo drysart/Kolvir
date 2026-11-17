@@ -4,8 +4,8 @@ using XDock = Kolvir.DockStyle;
 namespace Kolvir.Demo;
 
 /// <summary>
-/// The virtual DOM page: a view model that renders a description of its controls, and the reconciler
-/// that turns the description into the control tree under the card.
+/// The virtual DOM page: a view model that renders a description of its controls, a reconciler that
+/// turns the description into the control tree under the card, and child components of its own.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -15,16 +15,16 @@ namespace Kolvir.Demo;
 /// controls inside the card, and the component never holds one.
 /// </para>
 /// <para>
-/// The numbers on the card are there to make the loop visible. Every click re-renders and the render
-/// count goes up, while the buttons the click came from keep their identity: the reconciler patched
-/// them rather than rebuilding them, which is why the counter's own focus and the button's pressed
-/// state are not lost. Reversing the list is the sharper demonstration - the rows are keyed, so their
-/// controls are <em>moved</em> rather than recreated.
+/// The rows are components too. The list decides that a row is there and where it sits; the row decides
+/// what it looks like and re-renders itself when someone types in it. So the two render counts on the
+/// card move independently: typing in a row raises that row's count and leaves the list's alone, and
+/// the list's count rises for an add, a move or a remove without any row rendering. A moved row's
+/// controls are <em>moved</em> rather than rebuilt, which is why the caret stays in the box that moved.
 /// </para>
 /// </remarks>
 internal sealed class VirtualDomPage : DemoPage
 {
-    private readonly CounterCard _card = new();
+    private readonly RowListCard _card = new();
 
     /// <summary>Builds the page, once, for the life of the window.</summary>
     /// <param name="shell">The window the page is shown in.</param>
@@ -35,11 +35,12 @@ internal sealed class VirtualDomPage : DemoPage
         var card = Card();
 
         card.Controls.Add(Heading("Virtual DOM"));
+
         card.Controls.Add(Note(
             "The card below is a view model: its Render() returns a description of the controls it "
-            + "wants, and the reconciler diffs that into the tree underneath. Not one control inside "
-            + "the card was built by the page. Click to change its state, and watch the render count "
-            + "rise while the same buttons stay on screen."));
+            + "wants, and the reconciler diffs that into the tree underneath. The rows are components "
+            + "as well, each with its own state and its own mount: type in a row and watch that row's "
+            + "render count rise while the list's stays put."));
 
         var stage = new Panel
         {
@@ -60,21 +61,26 @@ internal sealed class VirtualDomPage : DemoPage
     }
 
     /// <summary>
-    /// A card whose controls are described, not built: a counter, two buttons and a keyed row list.
+    /// A component whose state is a list of rows: it decides which rows exist and in what order, and
+    /// none of it is a row's own state.
     /// </summary>
-    private sealed class CounterCard : Component
+    private sealed class RowListCard : Component
     {
-        private static readonly (int Id, string Name)[] Rows =
-        [
-            (1, "First row"),
-            (2, "Second row"),
-            (3, "Third row"),
-            (4, "Fourth row"),
-        ];
-
-        private int _clicks;
+        private readonly List<RowCard> _rows = [];
+        private int _nextId = 1;
         private int _renders;
-        private bool _reversed;
+
+        internal RowListCard()
+        {
+            // Three rows to start with, so the page says something before anyone clicks. Their
+            // SetState calls find no mount yet, which is a no-op: the first render reads the state.
+            for (int i = 0; i < 3; i++)
+            {
+                _rows.Add(new RowCard(this, _nextId++));
+            }
+
+            SyncPositions();
+        }
 
         public override VNode Render()
         {
@@ -92,19 +98,10 @@ internal sealed class VirtualDomPage : DemoPage
                     {
                         Dock = XDock.Top,
                         AutoSize = true,
-                        Text = "Add one",
+                        Text = "Add a row",
                         Style = ButtonStyle.Primary,
                         Margin = new Thickness(0f, 0f, 0f, 8f),
-                        Click = _ => Count(),
-                    },
-                    new VButton
-                    {
-                        Dock = XDock.Top,
-                        AutoSize = true,
-                        Text = "Reverse the list",
-                        Style = ButtonStyle.Secondary,
-                        Margin = new Thickness(0f, 0f, 0f, 8f),
-                        Click = _ => Reverse(),
+                        Click = _ => Add(),
                     },
                     new VLabel
                     {
@@ -113,54 +110,179 @@ internal sealed class VirtualDomPage : DemoPage
                         Height = 20f,
                         Font = Theme.CaptionFont,
                         ForeColorRole = ThemeColor.MutedForeground,
-                        Text = $"{_clicks} click(s), {_renders} render(s)",
+                        Text = $"{_rows.Count} row(s) - {_renders} render(s) of the list",
                         Margin = new Thickness(0f, 0f, 0f, 8f),
                     },
+
+                    // A component is a node like any other, so the list's children are its rows. The
+                    // key is the row itself: that is what lets the reconciler move a row's controls
+                    // instead of rebuilding them when the order changes.
                     new VPanel
                     {
-                        Key = "rows",
                         Dock = XDock.Fill,
                         BackColor = null,
                         Border = Border.None,
                         Padding = new Thickness(0f),
-                        Children = [.. RowsInOrder()],
+                        Children = [.. _rows.Select(row => new VComponent(row) { Key = row })],
                     },
                 ],
             };
         }
 
-        private void Count()
+        private void Add()
         {
-            _clicks++;
+            _rows.Add(new RowCard(this, _nextId++));
+            SyncPositions();
             SetState();
         }
 
-        private void Reverse()
+        internal void Remove(RowCard row)
         {
-            _reversed = !_reversed;
+            if (!_rows.Remove(row))
+            {
+                return;
+            }
+
+            SyncPositions();
+            SetState();
+        }
+
+        internal void Move(RowCard row, int by)
+        {
+            var from = _rows.IndexOf(row);
+            var to = from + by;
+
+            if (from < 0 || to < 0 || to >= _rows.Count)
+            {
+                return;
+            }
+
+            _rows.RemoveAt(from);
+            _rows.Insert(to, row);
+            SyncPositions();
             SetState();
         }
 
         /// <summary>
-        /// The rows, in the order the current state asks for. Each is keyed by its id, so reversing the
-        /// list moves the controls that are already there instead of building new ones.
+        /// Tells each row where it now sits, which re-renders only the rows whose answer changed.
         /// </summary>
-        private IEnumerable<VNode> RowsInOrder()
+        /// <remarks>
+        /// The parent owns the order, so it is the parent that tells a row it has become the first or
+        /// the last. A row answers with its own <see cref="Component.SetState"/>, so the edge rows
+        /// disable their own arrows without the list or its other rows rendering for it.
+        /// </remarks>
+        private void SyncPositions()
         {
-            var order = _reversed ? Rows.Reverse() : Rows;
-
-            foreach (var row in order)
+            for (int i = 0; i < _rows.Count; i++)
             {
-                yield return new VLabel
-                {
-                    Key = row.Id,
-                    Dock = XDock.Top,
-                    AutoSize = false,
-                    Height = 22f,
-                    Text = row.Name,
-                    Margin = new Thickness(0f, 0f, 0f, 2f),
-                };
+                _rows[i].SetPosition(canMoveUp: i > 0, canMoveDown: i < _rows.Count - 1);
             }
         }
+    }
+
+    /// <summary>
+    /// One row: its own text, its own three buttons, its own render count. It asks the list to move or
+    /// remove it, because the order of the list is the list's state and not the row's.
+    /// </summary>
+    private sealed class RowCard : Component
+    {
+        private readonly RowListCard _list;
+        private bool _canMoveUp;
+        private bool _canMoveDown;
+
+        internal RowCard(RowListCard list, int id)
+        {
+            _list = list;
+            Id = id;
+            Text = $"Row {id}";
+        }
+
+        internal int Id { get; }
+
+        /// <summary>The row's string, which is the only state a click or a keystroke changes.</summary>
+        internal string Text { get; private set; }
+
+        internal int Renders { get; private set; }
+
+        public override VNode Render()
+        {
+            Renders++;
+
+            return new VPanel
+            {
+                Dock = XDock.Top,
+                Height = 30f,
+                BackColor = null,
+                Border = Border.None,
+                Padding = new Thickness(0f),
+                Margin = new Thickness(0f, 0f, 0f, 6f),
+                Children =
+                [
+                    // Docked right to left in this order, so the readout is outermost and the three
+                    // buttons sit between it and the box. The box is the only Fill child.
+                    new VLabel
+                    {
+                        Dock = XDock.Right,
+                        AutoSize = false,
+                        Width = 104f,
+                        Font = Theme.CaptionFont,
+                        ForeColorRole = ThemeColor.MutedForeground,
+                        TextAlign = ContentAlignment.MiddleRight,
+                        Text = $"#{Id} - {Renders} render(s)",
+                    },
+                    RowButton("Remove", () => _list.Remove(this), enabled: true),
+                    RowButton("Down", () => _list.Move(this, +1), _canMoveDown),
+                    RowButton("Up", () => _list.Move(this, -1), _canMoveUp),
+
+                    // The row's state as the user sees and edits it. Echoing the box back into the node
+                    // is safe: assigning the text a box already holds is not a change, so this does not
+                    // fight the caret and does not re-enter the handler.
+                    new VTextBox
+                    {
+                        Dock = XDock.Fill,
+                        Text = Text,
+                        Margin = new Thickness(0f, 0f, 8f, 0f),
+                        TextChanged = sender => Edit(sender),
+                    },
+                ],
+            };
+        }
+
+        /// <summary>Takes the position the list reports, re-rendering only if it changed.</summary>
+        /// <param name="canMoveUp">Whether there is a row above this one.</param>
+        /// <param name="canMoveDown">Whether there is a row below this one.</param>
+        internal void SetPosition(bool canMoveUp, bool canMoveDown)
+        {
+            if (_canMoveUp == canMoveUp && _canMoveDown == canMoveDown)
+            {
+                return;
+            }
+
+            _canMoveUp = canMoveUp;
+            _canMoveDown = canMoveDown;
+            SetState();
+        }
+
+        private void Edit(object sender)
+        {
+            if (sender is not TextBox box || string.Equals(box.Text, Text, StringComparison.Ordinal))
+            {
+                return;
+            }
+
+            Text = box.Text;
+            SetState();
+        }
+
+        private static VButton RowButton(string text, Action pressed, bool enabled) => new()
+        {
+            Dock = XDock.Right,
+            AutoSize = true,
+            Enabled = enabled,
+            Text = text,
+            Style = ButtonStyle.Secondary,
+            Margin = new Thickness(4f, 0f, 0f, 0f),
+            Click = _ => pressed(),
+        };
     }
 }

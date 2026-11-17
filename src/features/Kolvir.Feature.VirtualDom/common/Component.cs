@@ -26,6 +26,11 @@ namespace Kolvir.VirtualDom;
 /// that arrives after a window closes is not a mistake.
 /// </para>
 /// <para>
+/// A component can also be a child of another component's render, by being wrapped in a
+/// <see cref="VComponent"/> node. The child keeps a mount of its own, so its state changes patch its own
+/// subtree and a render of its parent leaves it alone.
+/// </para>
+/// <para>
 /// Rendering is synchronous on the calling thread, which is the UI thread. There is no batching, no
 /// scheduler and no background render: a <see cref="SetState"/> finishes with the controls on screen
 /// already correct, which is what makes a test - and a developer - able to reason about it without a
@@ -83,5 +88,28 @@ public abstract class Component
 
     /// <summary>Records the mount that owns this component's tree.</summary>
     /// <param name="mount">The mount that is about to render it.</param>
-    internal void Attach(ComponentMount mount) => _mount = mount;
+    /// <exception cref="InvalidOperationException">
+    /// The component is already mounted. One component is one subtree, so a second mount would leave the
+    /// first one rendering a component that no longer points at it.
+    /// </exception>
+    internal void Attach(ComponentMount mount)
+    {
+        if (_mount is { IsMounted: true } existing && !ReferenceEquals(existing, mount))
+        {
+            throw new InvalidOperationException(
+                $"{GetType().Name} is already mounted. One component is one subtree, so it cannot appear twice in a tree; give each place its own component instance.");
+        }
+
+        _mount = mount;
+    }
+
+    /// <summary>Forgets <paramref name="mount"/> if it is the one this component renders through.</summary>
+    /// <param name="mount">The mount being disposed.</param>
+    internal void Detach(ComponentMount mount)
+    {
+        if (ReferenceEquals(_mount, mount))
+        {
+            _mount = null;
+        }
+    }
 }

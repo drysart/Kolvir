@@ -15,4 +15,5 @@ namespace Kolvir.Demo;
 [VirtualDom(typeof(Label))]
 [VirtualDom(typeof(Button))]
 [VirtualDom(typeof(Panel))]
+[VirtualDom(typeof(TextBox))]
 internal partial class DemoControls;
