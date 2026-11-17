@@ -18,11 +18,12 @@ namespace Kolvir.VirtualDom;
 /// </para>
 /// <para>
 /// A component is re-rendered through the mount that owns its tree, which is what
-/// <see cref="VirtualDomRuntime.Mount(Control, Component)"/> creates. A component that nothing has
-/// mounted has no tree to patch, so <see cref="SetState"/> reports that rather than silently doing
-/// nothing: a view model whose state changes and whose screen does not is the hardest kind of bug to
-/// find. Once the mount is disposed, <see cref="SetState"/> is a no-op, because there is nothing left
-/// to show and an event handler that arrives after a window closes is not a mistake.
+/// <see cref="VirtualDomRuntime.Mount(Control, Component)"/> creates. Until something mounts it there is
+/// no tree to patch, so <see cref="SetState"/> does nothing - and nothing is lost, because the first
+/// render reads whatever the state is by then. A component that is never mounted shows no controls at
+/// all, which is what tells its author that the mount call is missing. Once the mount is disposed,
+/// <see cref="SetState"/> does nothing too, because there is nothing left to show and an event handler
+/// that arrives after a window closes is not a mistake.
 /// </para>
 /// <para>
 /// Rendering is synchronous on the calling thread, which is the UI thread. There is no batching, no
@@ -67,23 +68,18 @@ public abstract class Component
 
     /// <summary>Re-renders and patches the mounted tree, because this component's state changed.</summary>
     /// <remarks>
+    /// <para>
     /// Synchronous: when this returns, the controls on screen reflect the new state. It is what an
     /// event handler calls after assigning the field the render reads, and that is the whole protocol -
     /// there is no observable, no notification and no binding to keep in step.
+    /// </para>
+    /// <para>
+    /// It does nothing when the component has no live tree - before the first mount, or after the mount
+    /// was disposed. Nothing is lost in the first case, because the first render reads the state as it
+    /// is by then; in the second there is no screen left to correct.
+    /// </para>
     /// </remarks>
-    /// <exception cref="InvalidOperationException">
-    /// Nothing has mounted this component, so it has no tree to patch. Message says what to do about it.
-    /// </exception>
-    public void SetState()
-    {
-        if (_mount is not { } mount)
-        {
-            throw new InvalidOperationException(
-                $"This {GetType().Name} is not mounted. A component renders and patches the tree its mount owns, so it has to be handed to VirtualDomRuntime.Mount(parent, component) before its state changes.");
-        }
-
-        mount.Invalidate();
-    }
+    public void SetState() => _mount?.Invalidate();
 
     /// <summary>Records the mount that owns this component's tree.</summary>
     /// <param name="mount">The mount that is about to render it.</param>

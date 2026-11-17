@@ -3,8 +3,8 @@ using Kolvir;
 namespace Kolvir.VirtualDom.Tests;
 
 /// <summary>
-/// The component layer: a view model renders a tree, patches it when its state changes, and does not
-/// quietly do nothing when it has no tree to patch.
+/// The component layer: a view model renders a tree, patches it when its state changes, and does
+/// nothing - while losing nothing - when it has no tree to patch.
 /// </summary>
 [TestClass]
 [TestCategory("VirtualDom")]
@@ -104,16 +104,24 @@ public sealed class ComponentTests
     }
 
     [TestMethod]
-    public void SetStateWithoutAMountSaysWhatToDo()
+    public void StateSetBeforeTheMountIsPickedUpByTheFirstRender()
     {
-        // A view model whose state changes and whose screen does not is the worst bug to find, so this
-        // is loud rather than silent.
-        var orphan = new Counter();
+        // A component with no tree does nothing, and loses nothing: the first render reads the state as
+        // it is by then. A component that is never mounted shows no controls at all, which is what
+        // tells its author that the mount call went missing.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var counter = new Counter();
 
-        var exception = Assert.ThrowsExactly<InvalidOperationException>(orphan.Add);
+        counter.Add();
+        counter.Add();
 
-        StringAssert.Contains(exception.Message, "not mounted");
-        StringAssert.Contains(exception.Message, nameof(VirtualDomRuntime.Mount));
+        Assert.AreEqual(0, counter.Renders, "a component with no tree renders nothing");
+
+        using var mount = VirtualDomRuntime.Mount(host, counter);
+
+        Assert.AreEqual(1, counter.Renders, "the mount's own render is the only one");
+        Assert.AreEqual("2 clicks", Text(mount), "the state set against no tree was not lost");
     }
 
     [TestMethod]

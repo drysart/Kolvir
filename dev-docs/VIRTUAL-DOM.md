@@ -434,21 +434,22 @@ private void OnAddClick(object sender)
 }
 ```
 
-Four decisions follow from that, each of them the opposite of a React-shaped framework somewhere:
+Three decisions follow from that, each of them the opposite of a React-shaped framework somewhere:
 
 | Decision | Why |
 | --- | --- |
 | **Synchronous, on the calling thread.** No batching, no scheduler, no `await`. | Kolvir is single-threaded by design, and a synchronous render is what lets a test and a developer reason about the screen without a frame clock. Deferring renders is a scheduling feature with its own seam; section 10 records it as deliberately absent. |
-| **`SetState` without a mount throws.** | A view model whose state changes and whose screen does not is the worst class of bug here, and silence is what makes it hard. The message names the component and the call that mounts one. |
-| **`SetState` after `Dispose` is a no-op.** | An event that arrives after its window closed is ordinary. Throwing there would make every teardown order-dependendent, which is worse than the bug it prevents. |
+| **No live tree, nothing to do.** A `SetState` before the first mount and a `SetState` after the mount was disposed are both no-ops. | The two states with no tree to patch get one rule rather than two. Before a mount nothing is lost, because the first render reads the state as it is by then - so storing state first and mounting second is a legal order. After one there is no screen left to correct, and an event that arrives after its window closed is ordinary. A component that is *never* mounted shows no controls at all, and that absence is the diagnosis; an exception at the first state change would say less, and would make construction order matter. |
 | **`SetState` during a render folds into the same pass.** | Re-entering the reconciler mid-diff is undefined, so the request is recorded and the pass repeats. A render that sets state *every* time never settles, so the hundredth pass throws and names the component rather than hanging the window. |
 
-A component owns its whole tree: the child of a render is a `VNode`, not another component. A parent
-that wants a child view model's output calls its `Render()` for the data it returns, but that child is
-not mounted, so its `SetState` throws rather than updating part of a screen. Composing components into
-a tree - where a component appears *in* another's output and its `SetState` re-renders only its own
-subtree - is a later step's problem: it changes the node model (a node whose control comes from another
-node's render, rather than from a `NodeType`) and it is not needed to prove the loop.
+A component owns its whole tree: the child of a render is a `VNode`, not another component. Composing
+components into a tree - where a component appears *in* another's output and its `SetState` re-renders
+only its own subtree - is a later step's problem: it changes the node model (a node whose control comes
+from another node's render, rather than from a `NodeType`) and it is not needed to prove the loop.
+Until then a parent that calls a child view model's `Render()` for the value it returns gets a
+snapshot: the child has no mount of its own, so its `SetState` has nothing to patch and the parent is
+the only thing that can re-render. Composing by hand is therefore a data dependency, not a live
+binding, and it is not a stand-in for the composition step.
 
 ## 8. Steps
 
@@ -624,6 +625,6 @@ published-build render comparison covers the new code path automatically.
 | 5 | Done | Keyed matching plus `ControlCollection.Move`, from [#99](https://github.com/drysart/Kolvir/pull/99) and [#100](https://github.com/drysart/Kolvir/pull/100). Reversing a keyed list moves the controls instead of rebuilding them, proven by reference identity; keyed and unkeyed children mix without a keyed node ever being claimed positionally. |
 | 6 | Done | Generated `Click`-style event properties over the `AddXxxHandler`/`RemoveXxxHandler` pairs, with the attached delegate tracked so a changed handler detaches the old one. Same render subscribes once, and a handler the node stops setting is removed. `EventTests` holds the cases. |
 | 7 | Done | `src/generators/Kolvir.Feature.VirtualDom.Generators`: the incremental generator, `LeafNodeAttribute`, and `NullAndLeafAnalyzer` (VD010, VD011). The hand-written `VLabel`/`VNote`/`VButton`/`VPanel` are gone: the feature suite now consumes generated classes through an analyzer reference and its 26 tests pass unchanged, which is the point of step 7 having been deferred. A second suite, `tests/generators/...Generators.Tests`, holds 30 tests: the emission shape, VD001-VD005/VD007/VD012, VD010/VD011 with their false-positive cases, and the mirror-drift check over 14 real controls. The analyzer was also seen failing a real build (a `Children` on a `VLabel` in the feature suite stops it with VD011). Found and fixed on the way: an implicit conversion does not apply to a nullable reference type argument (section 5), and a file name derived from the namespace alone collided when one namespace held two manifests. |
-| 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, re-entrancy folded into one pass with a cap so a render that never settles fails instead of hanging, an error when an unmounted component sets state, and a no-op after dispose. 10 tests in `ComponentTests`, including one that clicks a real control through the headless host. Section 7.1 records the four decisions. `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
+| 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, re-entrancy folded into one pass with a cap so a render that never settles fails instead of hanging, and one rule for the two states that have no tree to patch - a state change before the first mount or after `Dispose` does nothing, and the first render picks up what was stored in the meantime. 10 tests in `ComponentTests`, including one that clicks a real control through the headless host and one that sets state twice before mounting. Section 7.1 records the three decisions. `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
 | 9 | Not started | |
 | 10 | Done | A **Virtual DOM** card in the sample (`--page virtual-dom`), the `DEVELOPER-GUIDE.md` section, and the AOT verification measured rather than asserted: the `win-x64` published build renders the card byte-for-byte identically to the JIT build, and `Kolvir.Minimal` publishes with no virtual-DOM artifact. The work also found a real publish failure - `PublishAot` is global, a `netstandard2.0` generator cannot satisfy it, and a project reference therefore breaks `dotnet publish` for applications that never asked for a generator (section 8.1, item 4). |

@@ -4741,22 +4741,24 @@ returns, the controls on screen are correct. There is no observable, no binding,
 no frame clock, and a control the new tree still describes is patched rather than rebuilt, so scroll
 position, selection, caret and focus survive a render that only changed a value.
 
-Four rules follow from that, and they are the whole of the state model:
+Three rules follow from that, and they are the whole of the state model:
 
 - **Synchronous.** No batching and no scheduling. Deferring renders is a feature with a seam of its
   own, and it is not in this one.
-- **`SetState` without a mount throws.** A view model whose state changes and whose screen does not
-  is the hardest kind of bug to find, so the message names the component and the call that mounts
-  one.
-- **`SetState` after `Dispose` does nothing.** An event that arrives after its window closed is
-  ordinary, and throwing there would make teardown order-dependent.
+- **No live tree does nothing.** Before the first mount and after `Dispose`, a `SetState` is a no-op.
+  Nothing is lost in the first case - the first render reads the state as it is by then, so storing
+  state before mounting is legal - and there is no screen left to correct in the second. A component
+  that is never mounted shows no controls at all, and that absence is what says the mount call is
+  missing.
 - **`SetState` during a render folds into the same pass.** Re-entering the reconciler mid-diff is
   undefined, so the request is recorded and the pass repeats; a render that sets state every time
   never settles, so the hundredth pass throws and names the component instead of hanging the window.
 
-A component owns its whole tree. Its children in a render are nodes, not other components; a parent
-that wants a child view model's output can call its `Render()` for the value it returns, but that
-child is not mounted, so its `SetState` throws rather than updating part of a screen.
+A component owns its whole tree. Its children in a render are nodes, not other components. A parent
+that calls a child view model's `Render()` for the value it returns gets a snapshot: the child has no
+mount of its own, so its `SetState` has nothing to patch and only the parent can re-render. That makes
+hand composition a data dependency rather than a live binding, and it is not a stand-in for the
+composition step.
 
 #### Keys, and what they buy
 
