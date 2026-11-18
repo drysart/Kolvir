@@ -28,6 +28,10 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+    <!-- The seam in section 9 of dev-docs/OBSERVABLES.md: a component that renders from observable
+         model state needs the collectors. The reference runs one way only - observables knows nothing
+         about components, and must not, because it is usable without a UI at all. -->
+    <ProjectReference Include="..\Kolvir.Feature.Observables\Kolvir.Feature.Observables.csproj" />
   </ItemGroup>
 
   <!-- The build-time half. It is packed into this package under `analyzers/dotnet/cs`, which is the

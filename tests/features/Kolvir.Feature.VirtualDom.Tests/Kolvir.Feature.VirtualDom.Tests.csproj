@@ -43,6 +43,8 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
     <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.VirtualDom\Kolvir.Feature.VirtualDom.csproj" />
+    <!-- The seam's tests read real observable models, which is what the seam is for. -->
+    <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.Observables\Kolvir.Feature.Observables.csproj" />
     <!-- The generator as a consumer gets it: an analyzer reference, so the manifest in this assembly
          is turned into node classes by the build rather than by a checked-in copy. -->
     <ProjectReference Include="..\..\..\src\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj"

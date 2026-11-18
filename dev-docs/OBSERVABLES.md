@@ -481,11 +481,12 @@ The pattern those share is that the caller of the change is the outermost frame 
 useful - so the library leaves the decision to it rather than shipping a policy it would have to call
 back into an application to apply.
 
-## 9. The component seam (a later step, in the Virtual DOM feature)
+## 9. The component seam, in the Virtual DOM feature
 
 `VIRTUAL-DOM.md` section 7.3 split the mount's protocol out so a base class could be replaced. This is
-the replacement: a base class in `Kolvir.Feature.VirtualDom` that holds a data model, renders from it
-inside a collection scope, and listens to exactly what that render read.
+the replacement: `ObservableComponent<TDataModel>`, in `common/ObservableComponent.cs` of
+`Kolvir.Feature.VirtualDom`, holding a data model, rendering from it inside a collection scope, and
+listening to exactly what that render read.
 
 ```csharp
 public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
@@ -493,8 +494,8 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
 {
     private ComponentMount? _mount;
     private TDataModel? _dataModel;
-    private List<IDisposable>? _deps;
-    private List<IDisposable>? _attachDeps;
+    private List<IDisposable>? _renderTokens;
+    private List<IDisposable>? _attachTokens;
     private bool _isDisposed;
 
     public TDataModel? DataModel
@@ -529,8 +530,8 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
         // expression's follows its function. The run subscribes itself as the render reads, so there
         // is no pass over the set afterwards - and a render that throws is still subscribed to what it
         // reached, which is what stops a component that failed once from being stranded.
-        CleanupDependencies();
-        var deps = _deps = new List<IDisposable>();
+        CleanupRenderTokens();
+        var deps = _renderTokens = new List<IDisposable>();
 
         var run = _dataModel is null
             ? Observable.CollectDependencies(
@@ -564,8 +565,8 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
         if (_mount is not null) { throw new InvalidOperationException("Already mounted."); }
 
         _mount = mount;
-        CleanupAttachDependencies();
-        var attachDeps = _attachDeps = new List<IDisposable>();
+        CleanupAttachTokens();
+        var attachDeps = _attachTokens = new List<IDisposable>();
         OnAttached(new AttachedArgs(attachDeps.Add));
     }
 
@@ -576,8 +577,8 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
 
         _mount = null;
         OnDetached();
-        CleanupDependencies();
-        CleanupAttachDependencies();
+        CleanupRenderTokens();
+        CleanupAttachTokens();
     }
 
     public void Dispose()
@@ -594,23 +595,23 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
         }
 
         _dataModel = null;
-        CleanupDependencies();
-        CleanupAttachDependencies();
+        CleanupRenderTokens();
+        CleanupAttachTokens();
     }
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-    private void CleanupDependencies()
+    private void CleanupRenderTokens()
     {
-        var tokens = _deps;
-        _deps = null;
+        var tokens = _renderTokens;
+        _renderTokens = null;
         DisposeAll(tokens);
     }
 
-    private void CleanupAttachDependencies()
+    private void CleanupAttachTokens()
     {
-        var tokens = _attachDeps;
-        _attachDeps = null;
+        var tokens = _attachTokens;
+        _attachTokens = null;
         DisposeAll(tokens);
     }
 
@@ -627,8 +628,8 @@ a base class:
 
 | List | Lifetime | What belongs in it |
 | --- | --- | --- |
-| `_deps` | one render | the run itself, which is the subscription to everything that render read, plus anything the render registered through `RenderArgs.AddDisposable` - a subscription set up behind a condition, a one-shot listener |
-| `_attachDeps` | one mount | whatever `OnAttached` registered through `AttachedArgs.AddDisposable` - a timer, a keyboard hook, a subscription that should outlive every render |
+| `_renderTokens` | one render | the run itself, which is the subscription to everything that render read, plus anything the render registered through `RenderArgs.AddDisposable` - a subscription set up behind a condition, a one-shot listener |
+| `_attachTokens` | one mount | whatever `OnAttached` registered through `AttachedArgs.AddDisposable` - a timer, a keyboard hook, a subscription that should outlive every render |
 
 Clearing the render list at the top of a render, and both on detach, is what makes re-collecting work: a
 render that stops reading a value stops listening to it, and one that starts reading it starts. Both
@@ -773,6 +774,9 @@ Five things outside the new code, in the shape `VIRTUAL-DOM.md` section 8.1 reco
 4. **`.github/workflows/tests.yml`** gets a restore step and a test step for the new suite. The
    workflow's `src/features/**` and `tests/**` filters already cover both trees, so only the two
    steps are new.
+5. **`Kolvir.Feature.VirtualDom`** gains a package reference to this one, for section 9's base class and
+   nothing else, and its test suite gains a project reference so its components can read a real model.
+   The reference runs one way: nothing here knows a component exists.
 
 XML documentation is mandatory and CS1591 is an error for anything that ships
 (`Directory.Build.props`), so every public member in this design needs a `<summary>` - the interface
@@ -807,5 +811,5 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | 3 | Done | `CreateExpression` in both forms, `ObservableExpression<T>` with the cold/hot states, release-run-resubscribe, cached exceptions, the value comparer and the exception comparer. Twenty-five tests, including conditional re-collection, the comparer suppressing a repeat without suppressing the update, an outer expression turning a cold inner one hot by reading it, and a run that writes what it read ending at the depth limit |
 | 4 | Done | `GetNamed`/`RaiseNamedEvent` over a table that holds a key's handlers only while something is subscribed, with handles that are names - equal by key and free of any lifetime. Eleven tests, including one dependency for a key read through two handles, every handle hearing a raise made through another, a handle that outlives the key, a self-removing handler that does not disturb the rest of the raise, and a raised key counting against the evaluation depth |
 | 5 | Done | `Observable.MaxEventStackSize`, fifty by default, counted per step in one depth: an event raise (through the dispatch every value and expression notifies by) and a cold read (through the expression itself). The step past it is refused, the rest of the chain stays refused until the outermost step unwinds, and nothing outlives the call that started it. Nine tests in their own suite. Naming a loop's chain is not done and is a non-goal (3.8) |
-| 6 | Not started | |
+| 6 | Done | `ObservableComponent<TDataModel>` in `Kolvir.Feature.VirtualDom`, over a package reference to this one, rendering inside a collection scope with the run as the listener. Thirteen tests in the Virtual DOM suite: a value the render read asks for one render per frame, a value it stopped reading stops asking, detaching releases everything, render-scoped and attach-scoped tokens die at their own times, and a render that fails later keeps listening while a first render that fails leaves the component unmounted and mountable again |
 | 7 | Not started | |
