@@ -646,7 +646,7 @@ public sealed class UiHost
         // work that has been deferred to "the next frame" - a virtual-DOM render, for instance.
         if (_frameStarting is { } frameStarting)
         {
-            Guard(() => frameStarting(this));
+            Guard(frameStarting, this);
         }
 
         // Sizes and structure that arrived since the last frame are answered here: this is the one
@@ -755,7 +755,7 @@ public sealed class UiHost
 
         if (_framePainted is { } framePainted)
         {
-            Guard(() => framePainted(this));
+            Guard(framePainted, this);
         }
 
         return area;
@@ -1495,6 +1495,28 @@ public sealed class UiHost
         {
             Application.HandleNativeBoundary(ex);
             return fallback;
+        }
+    }
+
+    /// <summary>
+    /// Guarded invocation of a handler list, without the closure <see cref="Guard(Action)"/> would need.
+    /// </summary>
+    /// <param name="action">The handlers to run; may be null or multicast.</param>
+    /// <param name="state">What to pass them.</param>
+    /// <remarks>
+    /// A frame runs these on every paint, so the lambda a <c>Guard(() => action(state))</c> would capture
+    /// is one allocation per frame per handler list. The lambda is what makes that allocation, not the
+    /// call: an existing delegate is passed straight through.
+    /// </remarks>
+    private static void Guard<T>(Action<T> action, T state)
+    {
+        try
+        {
+            action(state);
+        }
+        catch (Exception ex)
+        {
+            Application.HandleNativeBoundary(ex);
         }
     }
 

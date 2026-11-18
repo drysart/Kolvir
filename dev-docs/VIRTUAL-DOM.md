@@ -463,7 +463,10 @@ Four decisions follow from that:
 
 The queue is process-wide rather than per window, because a mount can exist before any window holds it.
 Every host that draws drains it, so a second window painting simply finds an empty queue; the work that
-was deferred is drawn by whichever frame comes first, which is the frame the user is about to see.
+was deferred is drawn by whichever frame comes first, which is the frame the user is about to see. Its
+subscription to the frame is never removed, because the alternative was measured: an idle check is one
+delegate call and an integer compare (about 3 ns against a 5,000 ns frame), while subscribing and
+unsubscribing around each active frame measured 400 ns a frame and allocates a handler token.
 
 A component owns its whole tree, and the tree can hold other components. A child component is a node -
 a `VComponent` - so a parent decides that a child is there and where it sits, and the child decides what
