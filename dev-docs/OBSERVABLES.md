@@ -14,7 +14,7 @@ component to re-render - and the render still goes through the frame queue, so a
 changes is still one render (see section 9).
 
 Status of this document: **living plan, no code yet.** Section 3 records the decisions and the
-reasons; section 12 is the order of work; section 11 lists what is still open, including five things
+reasons; section 12 is the order of work; section 11 lists what is still open, including four things
 decided here for the first time that should be confirmed before the code exists.
 
 This file is deliberately ASCII-only: write "section 7.1" rather than a section sign, and "<-"
@@ -243,8 +243,7 @@ two states:
 var total = Observable.CreateExpression(
     () => _service.Total(),
     exceptionComparer: EqualityComparer<Exception>.Create(
-        (a, b) => a.GetType() == b.GetType() && a.Message == b.Message),
-    name: "service total");
+        (a, b) => a.GetType() == b.GetType() && a.Message == b.Message));
 ```
 
 - **The report happens once, at the point of evaluation,** through
@@ -257,7 +256,7 @@ var total = Observable.CreateExpression(
 
 | Decision | Why |
 | --- | --- |
-| **A thread-static evaluation stack detects cycles.** Before running, an expression checks whether it is already on the stack; if it is, it throws naming the chain (`A -> B -> A`). | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. Naming the chain turns a crash into a message. The stack also gives expressions diagnostic names, so `CreateExpression` takes an optional `string? name` used only in messages. |
+| **A thread-static evaluation stack detects cycles.** Before running, an expression checks whether it is already on the stack; if it is, it throws naming the chain (`A -> B -> A`). | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. Naming the chain turns a crash into a message. The stack also carries a name per expression, which is what makes the chain readable. The name comes from `[CallerArgumentExpression(nameof(function))]` - the compiler passes the lambda's own source text, so `CreateExpression(() => _service.Total())` is already called `() => _service.Total()` - and an explicit `name:` overrides it when that text is unwieldy. Nothing is reflected or looked up: it is a string constant the compiler supplies at the call site, and it is used only in messages. |
 | **Mutating an observable while a collection scope is active throws.** | An expression is a pure function of what it read. A write inside one raises into other expressions while the collector is mid-run, so the set being collected no longer describes what happened. `Observable` carries a collection depth for this, and `set`/`RaiseEvent` refuse while it is non-zero. Cheap - one static compare on a write - and it names the expression. |
 | **A mutation from inside a *handler*** is ordinary and allowed. | Handlers run with no collection active: they may write other values, and those changes cascade. That is the event-driven style the layer is for. |
 
@@ -320,8 +319,7 @@ internal sealed class DocumentModel
 
 // A derived value: no registration, no strings, and it hooks nothing until someone listens.
 var wordCount = Observable.CreateExpression(
-    () => document.Text.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length,
-    name: "word count");
+    () => document.Text.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
 ```
 
 ## 6. API surface, in full
@@ -329,7 +327,7 @@ var wordCount = Observable.CreateExpression(
 | Member | Returns | Notes |
 | --- | --- | --- |
 | `Observable.CreateValue<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
-| `Observable.CreateExpression<T>(Func<T>, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null, string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). The first comparer decides when two `T` results are the same and the second when two exceptions are (3.7); null means `EqualityComparer<T>.Default` and, for exceptions, never equal. |
+| `Observable.CreateExpression<T>(Func<T>, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null, [CallerArgumentExpression(nameof(function))] string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). The first comparer decides when two `T` results are the same and the second when two exceptions are (3.7); null means `EqualityComparer<T>.Default` and, for exceptions, never equal. `name` is diagnostics only (3.8): the compiler fills it from the call site, so it costs the caller nothing. |
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
@@ -452,8 +450,8 @@ Two things this gets for free, and one it must respect:
 - **`IsDisposed` and the final raise are additions this design makes to the spec** (section 3.10,
   section 10) and are the likeliest thing to be reconsidered.
 - **To confirm before the code exists:** `IsDisposed`; the final
-  raise on disposal; `CollectDependencies` as public API; refusing mutation inside a collection
-  scope; and the optional `name` on `CreateExpression`.
+  raise on disposal; `CollectDependencies` as public API; and refusing mutation inside a collection
+  scope.
 
 ## 12. Steps
 
