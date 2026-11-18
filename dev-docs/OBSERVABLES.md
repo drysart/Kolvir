@@ -437,50 +437,194 @@ back into an application to apply.
 
 ## 9. The component seam (a later step, in the Virtual DOM feature)
 
-`VIRTUAL-DOM.md` section 7.3 split the mount's protocol out so a base class could be replaced.
-This is the replacement's core:
+`VIRTUAL-DOM.md` section 7.3 split the mount's protocol out so a base class could be replaced. This is
+the replacement: a base class in `Kolvir.Feature.VirtualDom` that holds a data model, renders from it
+inside a collection scope, and listens to exactly what that render read.
 
 ```csharp
-internal sealed class ObservableComponent : IComponent
+public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
+    where TDataModel : class
 {
     private ComponentMount? _mount;
-    private List<IDisposable> _tokens = [];
+    private TDataModel? _dataModel;
+    private List<IDisposable>? _deps;
+    private List<IDisposable>? _attachDeps;
+    private bool _isDisposed;
+
+    public TDataModel? DataModel
+    {
+        get
+        {
+            ThrowIfDisposed();
+            return _dataModel;
+        }
+        set
+        {
+            ThrowIfDisposed();
+
+            // The same rule as section 3.1: equality decides "changed", so a model that wants
+            // identity rather than value semantics simply does not override Equals.
+            if (EqualityComparer<TDataModel?>.Default.Equals(value, _dataModel)) { return; }
+
+            _dataModel = value;
+            _mount?.Invalidate();   // all of "a data change asks for a render"
+        }
+    }
+
+    public readonly record struct RenderArgs(Action<IDisposable> AddDisposable);
+    public readonly record struct RenderArgs<T>(T DataModel, Action<IDisposable> AddDisposable);
+    public readonly record struct AttachedArgs(Action<IDisposable> AddDisposable);
 
     public VNode Render()
     {
+        ThrowIfDisposed();
+
         // Re-rendering re-collects: the dependency set follows the render, exactly as an
         // expression's follows its function.
-        foreach (var token in _tokens) { token.Dispose(); }
-        _tokens.Clear();
+        CleanupDependencies();
+        var deps = _deps = new List<IDisposable>();
 
-        var run = Observable.CollectDependencies(Build);
+        var run = _dataModel is null
+            ? Observable.CollectDependencies(() => RenderWithNullModel(new RenderArgs(deps.Add)))
+            : Observable.CollectDependencies(
+                () => RenderWithDataModel(new RenderArgs<TDataModel>(_dataModel, deps.Add)));
 
         // Hooking before reading the result is the point: a render that threw still leaves the
         // component listening to what it read, so the next change to one of those values asks for
-        // another render instead of leaving the component stranded (4, and 3.6.1 for the rule).
+        // another render instead of leaving the component stranded (section 3.6.1).
         foreach (var dep in run.Dependencies)
         {
-            _tokens.Add(dep.AddObservableEventRaisedHandler(_ => _mount?.Invalidate()));
+            deps.Add(dep.AddObservableEventRaisedHandler(_ => _mount?.Invalidate()));
         }
 
         return run.Value;   // throws into the frame boundary if the render failed
     }
 
-    public void Attach(ComponentMount mount) => _mount = mount;
-    public void Detach(ComponentMount mount) { /* unhook every token */ }
+    protected abstract VNode RenderWithDataModel(RenderArgs<TDataModel> args);
+
+    // TODO: the intended default is "a node that produces no control", which needs an empty node type
+    // this feature does not have yet (section 11). Until then, not overriding it is worth being loud
+    // about, rather than quietly rendering nothing - which looks exactly like a broken binding.
+    protected virtual VNode RenderWithNullModel(RenderArgs args) =>
+        throw new NotSupportedException(
+            $"{GetType().Name} has no data model and does not override RenderWithNullModel.");
+
+    protected virtual void OnAttached(AttachedArgs args) { }
+    protected virtual void OnDetached() { }
+
+    void IComponent.Attach(ComponentMount mount)
+    {
+        ThrowIfDisposed();
+        if (_mount is not null) { throw new InvalidOperationException("Already mounted."); }
+
+        _mount = mount;
+        CleanupAttachDependencies();
+        var attachDeps = _attachDeps = new List<IDisposable>();
+        OnAttached(new AttachedArgs(attachDeps.Add));
+    }
+
+    void IComponent.Detach(ComponentMount mount)
+    {
+        // A stale mount, or the undo of a first render that threw, is not this component's mount.
+        if (!ReferenceEquals(_mount, mount)) { return; }
+
+        _mount = null;
+        OnDetached();
+        CleanupDependencies();
+        CleanupAttachDependencies();
+    }
+
+    public void Dispose()
+    {
+        if (_isDisposed) { return; }
+        _isDisposed = true;
+
+        // Disposed while still mounted: detach here rather than wait for a Detach that may never
+        // come, so a derived class is told once and the mount's later Detach finds nothing to do.
+        if (_mount is not null)
+        {
+            _mount = null;
+            OnDetached();
+        }
+
+        _dataModel = null;
+        CleanupDependencies();
+        CleanupAttachDependencies();
+    }
+
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_isDisposed, this);
+
+    private void CleanupDependencies()
+    {
+        var tokens = _deps;
+        _deps = null;
+        DisposeAll(tokens);
+    }
+
+    private void CleanupAttachDependencies()
+    {
+        var tokens = _attachDeps;
+        _attachDeps = null;
+        DisposeAll(tokens);
+    }
+
+    private static void DisposeAll(List<IDisposable>? tokens)
+    {
+        if (tokens is null) { return; }
+        foreach (var token in tokens) { token.Dispose(); }
+    }
 }
 ```
 
-Two things this gets for free, and one it must respect:
+**Two token lists with two lifetimes** is the part an example does not have, and it is what makes this
+a base class:
+
+| List | Lifetime | What belongs in it |
+| --- | --- | --- |
+| `_deps` | one render | the handlers on the observables that render read, plus anything the render itself registered through `RenderArgs.AddDisposable` - a subscription set up behind a condition, a one-shot listener |
+| `_attachDeps` | one mount | whatever `OnAttached` registered through `AttachedArgs.AddDisposable` - a timer, a keyboard hook, a subscription that should outlive every render |
+
+Clearing the render list at the top of a render, and both on detach, is what makes re-collecting work: a
+render that stops reading a value stops listening to it, and one that starts reading it starts. Both
+lists are cleared before their tokens are disposed, so a token's `Dispose` that raises a change back
+through the model cannot re-enter the list being walked.
+
+Three things this gets for free:
 
 - **A data change is a re-render on the next frame, not inside the raise.** The handler calls
   `ComponentMount.Invalidate`, which marks the component and asks for a frame; the render happens at
-  the top of the next frame (`VIRTUAL-DOM.md` section 7.1). So the glitches in section 3.5 cannot
-  reach the screen, and a handler that changes five model values still costs one render.
-- **The dependency set is re-collected per render**, so a render that stops reading a value stops
-  listening to it.
-- **`Detach` must unhook**, or a component that lost its mount keeps its handlers and every model
-  change calls a dead mount's `Invalidate` (a no-op, but the closures stay alive).
+  the top of the next frame (`VIRTUAL-DOM.md` section 7.1). So the glitches in section 3.5 cannot reach
+  the screen, and a handler that changes five model values still costs one render.
+- **A write during the render cannot loop.** `Invalidate` is refused from inside a render, which
+  `IComponent.Render` already states and which is the same rule as a write inside a collection scope
+  (section 3.8).
+- **A render that fails *later* keeps its dependencies, and a first render that fails keeps none.**
+  Hooking before `run.Value` is what leaves a failing render listening, so the next change to one of
+  the values it did read asks for another render instead of stranding it. On a *first* render the mount
+  undoes the attach instead, so `Detach` releases those hooks again immediately - correct, because a
+  component that never produced a tree has nothing to patch.
+
+Three things it must respect:
+
+- **`Detach` cannot trust its caller.** The mount calls it both on dispose and as the undo of a
+  throwing first render, and a component can be mounted again elsewhere, so it is a reset rather than a
+  tombstone - hence the `ReferenceEquals` guard, and hence `Attach` refusing a second live mount
+  instead of overwriting `_mount`.
+- **`OnDetached` runs exactly once**, from whichever of `Detach` and `Dispose` happens first, because
+  both clear `_mount` before calling it. A derived class that releases attach-scoped resources in
+  either place gets one call, not two.
+- **`Dispose` is ordered like the sources are** (section 3.10): mark dead first, so a `DataModel` read
+  or a `Render` from inside a token's `Dispose` throws rather than half-working, and drop the
+  references last.
+
+`where TDataModel : class` is not an accident. A struct model would want `Nullable<TDataModel>` for
+"no model yet", which is a different field shape and a different base class over the same core; it is
+not designed here. A class model also gets the right default equality for free - identity unless the
+model says otherwise - which is what "the model was replaced" means.
+
+The one consequence outside this section: `Kolvir.Feature.VirtualDom` gains a package reference to
+`Kolvir.Feature.Observables`. The dependency runs one way only - observables still know nothing about
+components (section 8.1).
 
 ## 10. Options considered and rejected
 
@@ -520,21 +664,27 @@ Two things this gets for free, and one it must respect:
   caller attributes, so nothing is emitted), render only `Path.GetFileName(file)` plus the line and
   never display the whole path, and set `PathMap` when reproducible or path-free output matters, since
   the compiler applies it to these constants too.
-- **Equality is the trap for object results.** An expression returning a freshly built object that
-  does not override `Equals` raises on every run. For `VNode` trees that is why the component seam
-  measuring before it is called cheap.
-- **Object keys box value types on a miss.** A dictionary keyed by `int` pays a box per `GetNamed`
-  call that misses its cache. Collections will cache handles per key; a caller that reads in a hot
-  path should hold the handle.
-- **The named table is process-wide, and only as large as what is watched.** Names are opaque
-  `object` keys,
-  so the growth is bounded by the keys that someone is actually listening to - but a long-lived
+- **Equality is the trap for object results.** An expression returning a freshly built object that does
+  not override `Equals` raises on every run. That is why the component seam does not compare the trees
+  it renders: a render that returns a fresh tree would raise on every re-run, and the frame queue is
+  what collapses those into one render.
+- **Object keys box value types on a miss.** A dictionary keyed by `int` pays a box per `GetNamed` call
+  that misses its cache. Collections will cache handles per key; a caller that reads in a hot path
+  should hold the handle.
+- **The named table is process-wide, and only as large as what is watched.** Names are opaque `object`
+  keys, so the growth is bounded by the keys that someone is actually listening to - but a long-lived
   scope with churning keys relies on eviction, which only happens when the last handler goes.
 - **`IsDisposed` and the final raise are additions this design makes to the spec** (section 3.10,
   section 10) and are the likeliest thing to be reconsidered.
+- **The component seam has no way to render nothing yet** (section 9). `RenderWithNullModel` wants to
+  default to a node that produces no control, and the Virtual DOM feature has no such node type - every
+  node describes one control, and an empty `Children` list on a container is not the same thing. So the
+  default throws for now, and either an empty node type is added or the local model in
+  `ObservableComponent` becomes `TDataModel` plus a flag.
 - **To confirm before the code exists:** `IsDisposed`; the final
-  raise on disposal; `CollectDependencies` as public API; and refusing mutation inside a collection
-  scope.
+  raise on disposal; `CollectDependencies` as public API; refusing mutation inside a collection
+  scope; and `ObservableComponent` living in the Virtual DOM feature rather than in a third package
+  over both (the reference runs one way, so the placement is a choice, not a necessity).
 
 ## 12. Steps
 
@@ -545,7 +695,7 @@ Two things this gets for free, and one it must respect:
 | 3 | Expressions: cold/hot, caching, re-collection, equality, the exception comparer | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
 | 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
 | 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value |
-| 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, and stops listening to a value its render stopped reading |
+| 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, stops listening to a value its render stopped reading, and releases render-scoped and attach-scoped tokens independently (section 9) |
 | 7 | A demo page, the developer-guide section, and the AOT measurement | The published sample renders the page byte-for-byte identically to the JIT build, and a minimal app publishes with no observables artifact |
 
 Step 6 is the reason for the other six, and it is deliberately last: the primitives are testable
@@ -586,7 +736,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | **Equality keeps the graph quiet, except for exceptions** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. A re-run that fails again raises by default, because the replacement exception is a changed result, and does not raise when the expression was given an `IEqualityComparer<Exception>` that calls the two equivalent - while a read after that still throws the newer exception (3.7). |
 | **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression raising (a new exception is a changed result) and throwing on every read, with nothing thrown at anybody during the run itself; a cycle throws with the chain named; a write inside a scope throws; and every use after `Dispose` throws `ObjectDisposedException` - read, write, raise, or register. Nothing is reported anywhere, which is asserted by the absence of an application dependency in the package (section 8.1). |
 | **Disposal is ordered, and the order is observable** | A handler registered on a value source sees `IsDisposed` true and gets `ObjectDisposedException` if it reads `Value` during the final notification, while a handler that only counts the notification sees it exactly once - so "dead first, then one raise, then the list is cleared" is asserted rather than assumed. An expression whose dependency is disposed raises in turn, with the `ObjectDisposedException` as its cached result. Afterwards, `Value`, `RaiseEvent` and registration all throw while removing a handler and disposing again stay safe. |
-| **The seam re-renders on the frame after a change** | In the Virtual DOM suite: a component reading two model values renders once per frame however many of them changed, stops listening to a value its render stopped reading, and unhooks everything when detached. |
+| **The seam re-renders on the frame after a change** | In the Virtual DOM suite: a component reading two model values renders once per frame however many of them changed, stops listening to a value its render stopped reading, and unhooks everything when detached. A token registered through `RenderArgs.AddDisposable` dies on the next render while one registered through `AttachedArgs.AddDisposable` survives it and dies on detach, and `OnDetached` runs exactly once across dispose-then-detach. |
 | **AOT- and trim-clean** | The sample's published render is byte-identical to the JIT build's, and `Kolvir.Minimal` publishes with no observables artifact. The feature has no reflection, no `dynamic`, and no serializers, so this is expected rather than arranged. |
 
 ## 14. Progress
