@@ -67,6 +67,11 @@ public static partial class Observable
             }
         }
 
+        // A run that stopped watching a named key may have been the last thing that did. The table is only
+        // asked once the collection is over, so a body that released an entry and then re-subscribed to it
+        // - which is what every re-run of an expression does - keeps the same handle (section 3.2).
+        NamedDependencies.Drain();
+
         return new Collected(scope.Dependencies, scope.Tokens, fault);
     }
 
@@ -106,6 +111,8 @@ public static partial class Observable
                 fault = exception;
             }
         }
+
+        NamedDependencies.Drain();
 
         return new Collected<T>(scope.Dependencies, scope.Tokens, fault, value!);
     }

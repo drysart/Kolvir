@@ -29,6 +29,13 @@ internal static class ReadScope
     /// <summary>Records a read, or does nothing when no run is in progress.</summary>
     internal static void Publish(IObservableEventSource source) => _current?.Add(source);
 
+    /// <summary>Whether a run is collecting, which is the other half of "nothing is in progress".</summary>
+    /// <remarks>
+    /// The named table asks this before evicting: a run that has just released an entry is the run most
+    /// likely to be about to depend on it again (see <see cref="NamedDependencies"/>).
+    /// </remarks>
+    internal static bool IsInCollection => _current is not null;
+
     /// <summary>Makes <paramref name="scope"/> the innermost scope until the token is disposed.</summary>
     internal static ScopeToken Begin(CollectionScope scope)
     {
