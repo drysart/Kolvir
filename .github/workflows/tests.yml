@@ -228,6 +228,11 @@ jobs:
       # TargetFramework would also reach the generator underneath, which is netstandard2.0, and leave it
       # restored for one framework and built for another. The property narrows only the feature project,
       # which is the one that lists the three platforms for `dotnet pack`.
+      #
+      # That one property is enough for the whole graph: the virtual DOM feature references the
+      # observables one, and Directory.Build.props derives KolvirObservablesFrameworks from it, so the
+      # referenced package narrows too. Without that derivation this leg stops in *restore* with
+      # NETSDK1147 on the observables net10.0-macos inner build, on all three runners.
       - name: Test the virtual DOM feature
         shell: bash
         run: |
