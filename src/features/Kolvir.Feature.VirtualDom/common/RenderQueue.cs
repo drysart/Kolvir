@@ -80,8 +80,9 @@ internal static class RenderQueue
     /// Unsubscribing when the queue empties costs far more than that saves. One subscription and one
     /// removal per frame - which is what a component that changes state on most frames would cause -
     /// measured four hundred nanoseconds a frame, an order of magnitude more than the whole idle check,
-    /// and allocates a handler token each time. Frames also only happen when something invalidates, so
-    /// an application with nothing to do is not paying anything at all.
+    /// and allocates a handler token each time. A frame also only happens when something invalidated, so
+    /// a window that is not drawing anything pays nothing at all - and one that is drawing a blinking
+    /// caret pays about three nanoseconds for it.
     /// </para>
     /// </remarks>
     private static void Subscribe()
