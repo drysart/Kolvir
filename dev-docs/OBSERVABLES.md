@@ -1,11 +1,11 @@
 # Observables - design and implementation plan
 
 A small, non-threaded change-notification layer for data models, in its own package
-(`Kolvir.Feature.Observables`, rung 3 of `FEATURE-COST-POLICY.md`). A model holds `IObservableValue<T>`
-for its state; anything that wants to know when a value changes registers a handler; and an
-*expression* observable recomputes itself from the values it read the last time it ran, which is the
-piece that makes "re-render when anything the render depended on changes" answerable without
-`INotifyPropertyChanged`, strings, or reflection.
+(`Kolvir.Feature.Observables`, rung 3 of `FEATURE-COST-POLICY.md`). A model keeps an observable as a
+private backing field and exposes plain properties over it (section 5). An expression observable
+recomputes itself from the values it read the last time it ran, which is the piece that makes
+"re-render when anything the render depended on changes" answerable without `INotifyPropertyChanged`,
+strings, or reflection.
 
 The immediate purpose is the other half of the component layer: `VIRTUAL-DOM.md` section 7.3 left
 `IComponent` as a seam, and this is what plugs into it. A component whose `Render()` runs inside a
@@ -26,7 +26,8 @@ habit is not worth keeping, and nothing in the document needs them.
 Goals:
 
 - **Values that can be watched.** `Observable.CreateValue<T>(initial)` returns an
-  `IObservableMutableValue<T>`, so the creator can write and everyone else can only read.
+  `IObservableMutableValue<T>`, which the model keeps private and exposes as an ordinary property - so the
+  creator can write, readers read, and nobody outside sees an observable to hold on to.
 - **Dependencies that are discovered, not declared.** An expression observable runs its function,
   notes which observables that run read, and subscribes to exactly those. No strings, no attributes,
   no registration lists, and no reflection - so it stays AOT-clean.
@@ -332,20 +333,30 @@ trees to decide nothing.
 ## 5. Reading and writing, in one place
 
 ```csharp
-// A model: the creator keeps the mutable handle, everything else sees the read-only one.
+// A model. The observable is a backing field with a change notification, not something the
+// model hands out: its own surface is ordinary properties.
 internal sealed class DocumentModel
 {
     private readonly IObservableMutableValue<string> _text = Observable.CreateValue(string.Empty);
 
-    public IObservableValue<string> Text => _text;
-
-    public void Type(string text) => _text.Value = text;      // raises only if it differs
+    public string Text
+    {
+        get => _text.Value;
+        set => _text.Value = value;      // raises only if it differs
+    }
 }
 
 // A derived value: no registration, no strings, and it hooks nothing until someone listens.
 var wordCount = Observable.CreateExpression(
-    () => document.Text.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
+    () => document.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
 ```
+
+A read-only model is the same with the setter left off: `public string Text => _text.Value;`.
+
+| Decision | Why |
+| --- | --- |
+| **The model exposes plain properties, not the observable.** | Dependency tracking happens at the *read*, not at the handle: the getter reads `Value`, and that read publishes into whatever collection scope is running - so an expression that uses `document.Text` is tracked exactly as one that used `document.Text.Value` would be. Handing out the observable instead would invite callers to hook the model's internals, which puts a registration where the model did not agree to keep one, and it makes every property name a two-name thing (`Text` and `TextObservable`). It is a backing field with a notification; the field stays private. |
+| **A consumer that needs the dependency can still get it.** | Not by holding the observable - by reading the property inside an expression or inside `CollectDependencies`. That is the only way a consumer legitimately "cares that it is observable", and it is the same read either way. |
 
 ## 6. API surface, in full
 
