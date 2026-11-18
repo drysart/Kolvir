@@ -6,18 +6,11 @@
        graph work, so `common/` holds all of it and the platform folders stay empty - they exist
        because the `lib/` folders and dependency groups come from these same inner builds. -->
   <PropertyGroup>
-    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
-    <!-- A test project that wants one platform narrows the list here instead:
-         `-p:KolvirVirtualDomFrameworks=net10.0`. That is what keeps its restore from evaluating the
-         macOS inner build on a machine without the macOS workload, which fails as NETSDK1147 from
-         Kolvir.Backend.AppKit before anything is compiled. `-p:TargetFramework=` cannot do it here:
-         a global TargetFramework also overrides the single-framework projects underneath - this
-         package's own generator, which is netstandard2.0, would be restored for net10.0 and then
-         built for netstandard2.0. Same shape and same reason as KolvirBadgeFrameworks.
-         The observables package this one references narrows with it, through the derivation in
-         Directory.Build.props, because otherwise a narrowed restore would still evaluate that
-         package's macOS inner build. -->
-    <TargetFrameworks Condition="'$(KolvirVirtualDomFrameworks)' != ''">$(KolvirVirtualDomFrameworks)</TargetFrameworks>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
     <RootNamespace>Kolvir</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

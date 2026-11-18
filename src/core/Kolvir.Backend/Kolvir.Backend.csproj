@@ -1,17 +1,11 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <!-- Every platform the selector can resolve, unconditionally. Its whole job is to turn a target
-         framework into a backend, so it has to offer one for each platform the library supports; a
-         list that named only the host's would be a build that cannot produce the others, which is
-         how a package ends up missing a `lib/` folder. An application still compiles and publishes
-         only the inner build its own framework can use. Restore does evaluate all three, though, so
-         anything that references this project needs the macOS workload and the Windows reference
-         pack, the same requirement the development solution and Kolvir.Feature.DragDrop carry.
-         Narrow one inner build for local work with `-p:TargetFramework=net10.0`; the plural
-         `-p:TargetFrameworks=...` does not work as a switch, because the list arrives as a single
-         target framework and the build stops with NETSDK1046. -->
-    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <Description>The Kolvir backend selector: whichever platform backend matches the target framework the application builds for.</Description>

@@ -37,18 +37,33 @@
     <WarningsAsErrors Condition="'$(ShipsToConsumers)' == 'true'">$(WarningsAsErrors);CS1591</WarningsAsErrors>
   </PropertyGroup>
 
-  <!-- The feature packages list their platform frameworks so that one `dotnet pack` produces every
-       `lib/` folder, and each has a property a test project narrows instead of the framework list:
-       KolvirVirtualDomFrameworks, KolvirObservablesFrameworks, KolvirBadgeFrameworks. Two of them have
-       to travel together, because the virtual DOM feature references the observables one: restoring
-       `-p:KolvirVirtualDomFrameworks=net10.0` narrows the package that was named and leaves the package
-       it references listing all three, which evaluates the observables net10.0-macos inner build and
-       stops a CI runner - or a developer machine - with NETSDK1147 on a workload it deliberately does
-       not install. Deriving one from the other is what keeps the documented one-property narrowing
-       working through the reference graph. An explicit -p:KolvirObservablesFrameworks still wins,
-       because the derivation only fills an empty value. -->
-  <PropertyGroup Condition="'$(KolvirObservablesFrameworks)' == '' and '$(KolvirVirtualDomFrameworks)' != ''">
-    <KolvirObservablesFrameworks>$(KolvirVirtualDomFrameworks)</KolvirObservablesFrameworks>
+  <!-- The frameworks a package ships for. Every multi-targeting project takes its TargetFrameworks
+       from here instead of listing the three platforms itself, because the list has to agree across
+       the whole reference graph: a feature that lists net10.0-macos references Kolvir.Backend.AppKit
+       from that inner build, so restore evaluates it and stops with NETSDK1147 on any machine that
+       has not installed the macOS workload.
+
+       So the default is the platform this build is running on, plus the portable framework - the
+       suites are portable net10.0 assemblies and a net10.0 project cannot bind a platform-only asset
+       (NU1201), so the portable framework has to stay in the list. Linux has no platform framework of
+       its own, so its list *is* net10.0.
+
+       Packaging is the one thing that needs every platform, and only packaging asks for it:
+       `-p:KolvirAllPlatforms=true`. A switch rather than the list itself, because MSBuild cannot take
+       one on the command line - a `-p:` value is split on semicolons and commas, so a list there is
+       MSB1006, and passing it escaped as `%3B` leaves the escapes in TargetFrameworks and fails the
+       inner-build dispatch with NETSDK1046. Both were measured; the list stays inside this file,
+       where nothing has to escape anything. -->
+  <PropertyGroup>
+    <!-- Every platform a package ships for: what the switch below selects, and what the pack guard in
+         Directory.Build.targets checks for. It has to be defined before it is used - MSBuild reads a
+         PropertyGroup top to bottom, so a property referenced above its assignment is empty. -->
+    <KolvirShipTargetFrameworks>net10.0-windows;net10.0-macos;net10.0</KolvirShipTargetFrameworks>
+    <KolvirPlatformFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows</KolvirPlatformFramework>
+    <KolvirPlatformFramework Condition="$([MSBuild]::IsOSPlatform('OSX'))">net10.0-macos</KolvirPlatformFramework>
+    <KolvirTargetFrameworks>net10.0</KolvirTargetFrameworks>
+    <KolvirTargetFrameworks Condition="'$(KolvirAllPlatforms)' == 'true'">$(KolvirShipTargetFrameworks)</KolvirTargetFrameworks>
+    <KolvirTargetFrameworks Condition="'$(KolvirAllPlatforms)' != 'true' and '$(KolvirPlatformFramework)' != ''">$(KolvirPlatformFramework);net10.0</KolvirTargetFrameworks>
   </PropertyGroup>
 
   <!-- A NuGet consumer imports buildTransitive/Kolvir.props from the package automatically. This

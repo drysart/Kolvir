@@ -5,8 +5,8 @@
 
        The feature multi-targets for packaging, but these tests only touch `common/`, so the project
        takes one portable target framework and the reference resolves the `net10.0` inner build on
-       every machine - the same reasoning (and the same `-p:TargetFramework=net10.0` restore) as the
-       other feature suites. -->
+       every machine - the same reasoning as the other feature suites, and no narrowing to do it
+       with: the feature builds for the host plus the portable framework. -->
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
