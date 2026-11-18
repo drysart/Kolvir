@@ -208,44 +208,43 @@ public sealed class CollectDependenciesTests
     }
 
     [TestMethod]
+    public void ALargeReadSetStillDeDuplicatesAndKeepsItsOrder()
+    {
+        // Past the scope's scan limit it hashes instead of scanning. The two have to agree: no
+        // duplicates, and first-read order either way.
+        var values = Enumerable.Range(0, 40).Select(index => Observable.CreateValue(index)).ToArray();
+
+        var run = Observable.CollectDependencies(() =>
+        {
+            foreach (var value in values)
+            {
+                _ = value.Value;
+            }
+
+            foreach (var value in values)
+            {
+                _ = value.Value;
+            }
+        });
+
+        Assert.AreEqual(values.Length, run.Dependencies.Count, "read twice, collected once each");
+
+        for (var index = 0; index < values.Length; index++)
+        {
+            Assert.AreSame(values[index], run.Dependencies[index], "first-read order survives the switch to hashing");
+        }
+    }
+
+    [TestMethod]
     public void CollectingDoesNotSubscribe()
     {
         // The collector reports; hooking is the caller's decision and the caller's token. The component
         // seam depends on that split, because it hooks only after it knows the whole set.
-        var probe = new ProbeSource();
+        var probe = new CountingSource();
 
         var run = Observable.CollectDependencies(() => ((IObservableEventSource)probe).DependUpon());
 
         Assert.AreEqual(1, run.Dependencies.Count, "the read was collected");
         Assert.AreEqual(0, probe.Registrations, "and the collector registered nothing");
-    }
-
-    /// <summary>A hand-written source, which is what an application with its own dependency would write.</summary>
-    private sealed class ProbeSource : IObservableEventSource
-    {
-        public int Registrations { get; private set; }
-
-        public bool IsDisposed => false;
-
-        public IDisposable AddObservableEventRaisedHandler(Action<IObservableEventSource> handler)
-        {
-            Registrations++;
-            return new Release();
-        }
-
-        public void RemoveObservableEventRaisedHandler(Action<IObservableEventSource> handler)
-        {
-        }
-
-        public void RaiseEvent()
-        {
-        }
-
-        private sealed class Release : IDisposable
-        {
-            public void Dispose()
-            {
-            }
-        }
     }
 }
