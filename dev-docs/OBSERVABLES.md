@@ -251,7 +251,6 @@ var total = Observable.CreateExpression(
   change raises the event on the expression. A subscriber that reads `Value` in response gets
   the exception thrown into it, and that throw propagates out of `RaiseEvent` like any other
   (section 3.4), which is where a use case that cares has to catch it.
-  where a use case that cares has to catch it.
 
 ### 3.8 Cycles, and expressions that mutate
 
@@ -748,7 +747,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | --- | --- | --- |
 | 1 | Done | The package, the four interfaces, `CreateValue`/`ObservableValue<T>` and snapshot dispatch, plus the read scope the collectors will use. Sixteen tests, no reference to Kolvir, and the package packs three `lib/` folders with an empty dependency group each |
 | 2 | Done | `Collected`/`Collected<T>` and the two `CollectDependencies` overloads over the scope stack. Twelve tests, including nested isolation, reference-identity de-duplication, and the scope being restored when a body throws |
-| 3 | Not started | |
+| 3 | Done | `CreateExpression` in both forms, `ObservableExpression<T>` with the cold/hot states, unhook-run-hook, cached exceptions, the value comparer and the exception comparer. Fifteen tests, including conditional re-collection and the comparer suppressing a repeat without suppressing the update |
 | 4 | Not started | |
 | 5 | Not started | |
 | 6 | Not started | |
