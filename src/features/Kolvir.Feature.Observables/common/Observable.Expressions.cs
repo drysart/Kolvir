@@ -27,8 +27,8 @@ public static partial class Observable
     /// <typeparam name="T">What the function returns.</typeparam>
     /// <param name="function">The function to evaluate. It is not run here.</param>
     /// <param name="name">
-    /// How this expression is described in a diagnostic message - a cycle chain, or a write from inside a
-    /// run. Nothing looks it up; it is a label.
+    /// How this expression is described in a diagnostic message - the name a refused raise in a chain
+    /// names as its source. Nothing looks it up; it is a label.
     /// </param>
     /// <param name="valueComparer">
     /// How two results are compared to decide whether the result <em>changed</em>. Null means
@@ -100,7 +100,8 @@ public static partial class Observable
     /// <summary>The label an expression carries into a diagnostic message.</summary>
     /// <remarks>
     /// A given name, or the creation site as <c>File.cs:88</c>. Only the file name is kept, never the
-    /// directory: the path a build machine had is of no use to anyone reading a cycle chain.
+    /// directory: the path a build machine had is of no use to anyone reading a diagnostic that names
+    /// the creation site.
     /// </remarks>
     private static string Describe(string? name, string? file, int line)
     {

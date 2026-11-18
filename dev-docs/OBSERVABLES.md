@@ -159,9 +159,12 @@ outer run never sees what the inner run read.
   run that is thrown away and immediately recomputed.
 - **A cold read collects nothing**, because it happens with no run in progress - if one were, the read
   would have subscribed this expression and made it hot before the question was asked.
-- **Being in a scope forbids a change.** A write or a raise from inside a run would re-enter it with a
-  set that no longer describes what happened, so `ReadScope` refuses both and names the run that was
-  going on (section 3.8). Handlers run with no scope active, so a change from inside one is ordinary.
+- **A change from inside a run is allowed.** A function may write a value it did not read - scratch
+  state, a last-evaluated stamp - and any other expression that value feeds re-evaluates nested,
+  inside this run, exactly as it would from a handler. A write to something *this expression* read is
+  allowed too, and is where a loop comes from: the run is subscribed to what it read, so the raise
+  comes straight back into a run that is still going, and it does so again at every level until the
+  raise depth refuses one (section 3.8). Nothing about collection forbids a write.
 
 ### 3.4 Dispatch: snapshot, isolate, never re-enter the list
 
@@ -169,6 +172,7 @@ outer run never sees what the inner run read.
 | --- | --- |
 | **A raise iterates a snapshot of the handler list, and the snapshot is free.** | The handlers are an `ImmutableArray<Action<IObservableEventSource>>`, so subscribing or unsubscribing *replaces* the array rather than editing it: the raise that is running keeps walking the array it began with, and no copy is made to get there. Registering copies, which happens once per subscription; raising copies nothing, which happens on every change. That is what lets a handler subscribe and unsubscribe freely - including itself - without disturbing the dispatch that is running: mutations apply to the next raise, and a handler that disposes the source mid-dispatch does not stop the walk either, because the remaining handlers are already in the array being read. |
 | **Nothing is caught: an exception from a handler propagates.** | A raise is a synchronous callback and behaves like one: as with a multicast delegate, the first handler that throws ends the notification and the exception travels out of `RaiseEvent` to whoever caused the change. This library has no reporting channel to hand it to and no policy to impose, and each alternative was worse - swallowing it silently, inventing a target for it, or rethrowing after the loop, which would assume that the remaining handlers must still be told even though nothing can vouch for the state after a bug. A use case that needs more (a render that must survive its own failure, say) is where that judgement belongs (section 8.1). The consequence to be aware of: handlers after the throwing one do not run for that change. |
+| **A raise counts how deep it is nested, and refuses to go past `Observable.MaxEventStackSize`.** | Dispatch is where a runaway graph actually happens: a handler runs inside the raise that called it, so a chain that comes back around is a stack of raises, one frame per turn. Counting there needs to know nothing about what the chain runs through, which is what makes it cheap enough to do on every raise and complete enough to catch a loop that wanders through several values and expressions without ever closing on the same one (section 3.8). |
 | **`RaiseEvent` is on the interface and is public.** | A source that owns a change raises it: a dictionary raising a key's dependency, a hand-written source raising on a timer tick. It is not something a consumer calls - a consumer changes the model and the model raises. Documented rather than restricted, because restricting it would need a second type for "the raiser". |
 | **`RaiseEvent` on a disposed source throws `ObjectDisposedException`.** | A dead source is a lifetime bug in whoever still holds it, and a silent no-op makes that bug invisible: the call looks like it announced something. The case that *is* ordinary - a dictionary raising for a key that nobody is watching - is not this one: `RaiseNamedEvent` resolves the entry and does nothing when there is none (section 3.2), because an absent entry is "no listener", not "dead source". |
 
@@ -266,9 +270,16 @@ var total = Observable.CreateExpression(
 
 | Decision | Why |
 | --- | --- |
-| **An expression that reads itself while running is refused.** The read throws, naming the expression, instead of recursing. | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. The read is the one place the loop can be closed, and refusing there turns a crash into a message. Shipped as a per-expression flag; the chain across several expressions (`Model.cs:88 -> Model.cs:214 -> Model.cs:88`) needs an evaluation stack and is still to come. |
-| **Mutating an observable while a collection scope is active throws.** | An expression is a pure function of what it read. A write inside one raises into a run that is still collecting, and because reads now subscribe as they happen that raise would re-enter the very run that is mid-collection, interleaving two sets. `ReadScope` refuses both a `set` and a `RaiseEvent` while a run is in progress, naming the run. Cheap - one static field load and a null test on a write. |
-| **A mutation from inside a *handler*** is ordinary and allowed. | Handlers run with no collection active: they may write other values, and those changes cascade. That is the event-driven style the layer is for. |
+| **Every raise counts how deep it is nested, and the raise that would nest deeper than `Observable.MaxEventStackSize` (fifty) is refused** with an `InvalidOperationException` naming the source and the limit; the rest of the chain is abandoned. | A push graph can loop, and every loop ends in the same place: a handler called inside the raise that called the last one. Counting raises therefore catches one wherever it is, without knowing which values or expressions it runs through, and it costs a field read and a compare at dispatch - nothing per read and nothing per run. Tried and rejected: a per-expression "am I running" flag catches only the expression that closes the loop, costs a store on every run, and cannot see a loop that passes through three objects and never returns to the same one; a blanket ban on writing during a run refuses a real pattern - a function keeping its own scratch state - to prevent a bug. A number rather than a proof, because depth is all the dispatch can see, and because legitimate chains do nest: one change settling a handful of dependent expressions is a chain of three or four. Fifty sits far above any real depth, and the property exists for the application that genuinely needs more. |
+| **The refusal is sticky until the outermost raise unwinds.** Every raise attempted by anything still unwinding through that chain is refused too. | One `catch` between the raise and the original change is enough to restart the descent from one level up and run the same number of levels again - and something does catch: a collector turns a throwing run into a cached failure, which is the documented behaviour for every other exception (section 3.7). Sticky turns "stops eventually, after burning an unpredictable amount of work" into "stops once, where the limit is", and leaves the failure in the collector's cache like any other, so a read afterwards throws it. |
+| **A mutation from inside a handler is ordinary and allowed.** | Handlers exist to write: that is the event-driven style the layer is for, and it is how a change to one model settles another. A cascade is not a loop merely because it nests. |
+| **Not caught, deliberately: a loop that never raises.** An expression that reads itself with nothing subscribing recurses through plain function calls, and .NET kills the process on that. | The check is at dispatch because that is where the recursion is real and the count is nearly free. A self-read with no subscriber never reaches a raise - it is one function calling one function - so catching it means a per-expression flag and a store on every read: exactly the cost this design declined to pay for a mistake that one reading of the code shows and a stack trace names. Documented as a non-goal rather than half-guarded. |
+
+A chain that ends is not evidence the graph is sound, and a chain that does not end is not evidence it
+is broken: the limit knows only how deep it got, and the message names the source of the raise that was
+refused, which is the end of the chain rather than its cause. What it buys is that the depth is bounded
+by a number the application chose - so a loop arrives as an exception in a caller that can log it,
+instead of as a `StackOverflowException` that kills the process with no report at all.
 
 #### 3.8.1 How an expression is named
 
@@ -280,8 +291,8 @@ Two overloads, and the split exists to keep a path out of an application that di
 | `CreateExpression(f, ...)` | the creation site: a `[CallerFilePath]` constant and a `[CallerLineNumber]` integer |
 
 An application that names the expressions it cares about therefore pays nothing at all, and one that
-does not still gets `Model.cs:88` in the cycle chain and in the "changed state from inside its own
-function" message. A name is *required* on the named overload and absent from the located one, which is
+does not still gets `Model.cs:88` as the source named by a refused raise (section 3.8). A name is
+*required* on the named overload and absent from the located one, which is
 what makes the call site choose instead of the binder guessing - `CreateExpression(f, "total")` and
 `CreateExpression(f, "total", comparer)` bind to the named one, `CreateExpression(f)` and
 `CreateExpression(f, comparer)` to the located one. Nothing is reflected or looked up either way, and
@@ -290,9 +301,10 @@ the path is reduced to a file name only when a message is built (section 11 reco
 ### 3.9 Single-threaded, with no locks
 
 Every observable is UI-thread state. Reads are a static field check and a `bool`; writes and raises
-are list operations. No locks, no `Interlocked`, no `volatile`. Debug builds assert the thread that
-created the first source, so a mistake is a message in development rather than a heisenbug in
-production. A background thread that changes state marshals, exactly as it does to touch a control.
+are list operations; the raise depth is a plain `int` on the same thread. No locks, no `Interlocked`,
+no `volatile`. Debug builds assert the thread that created the first source, so a mistake is a message
+in development rather than a heisenbug in production. A background thread that changes state marshals,
+exactly as it does to touch a control.
 
 ### 3.10 Dropping a reference is free; `Dispose` is the escape hatch
 
@@ -390,6 +402,7 @@ A read-only model is the same with the setter left off: `public string Text => _
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
+| `Observable.MaxEventStackSize` | `int` | How many raises may be in flight at once: fifty by default, and the raise past it is refused (3.8). Read on every raise, so it is a field rather than a lookup; setting it below one throws. |
 | `Observable.CollectDependencies(Action, Action<IObservableEventSource>)` | `Collected` | Runs the body once, subscribing `onChanged` to every source it reads **as it reads it**. Carries `IsFaulted`/`Fault`, and `Throw()` for the form that has no `Value`. Dispose the result to stop listening. |
 | `Observable.CollectDependencies<T>(Func<T>, Action<IObservableEventSource>)` | `Collected<T>` | The same plus `Value` - the body's result, or the exception thrown through it. This is the component seam (section 9). |
 | `Collected` | `Dependencies`, `IsFaulted`, `Fault`, `Throw()`, `Dispose()` | The first collector's result: distinct sources in first-read order by reference identity, each already subscribed, the exception the body threw, and a way to rethrow it that a `Value`-less caller can use. Disposing it releases the subscriptions. |
@@ -425,8 +438,8 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 | Expression function throws on a dependency-started re-run | cached as the result, raised (a new exception is a changed result), and every read throws it. The raise is the only notification the library gives - there is no report channel (section 8.1) |
 | A handler throws during a raise | nothing is caught: it propagates out of `RaiseEvent`, and the handlers after it in that dispatch do not run |
 | A collector body throws | the exception is returned in `Fault`, `Value` throws it, and the set the body reached comes back with it |
-| A dependency cycle is read | `InvalidOperationException` naming the chain, before any recursion |
-| A write inside a running expression | `InvalidOperationException` naming the expression |
+| A chain of raises nests deeper than `Observable.MaxEventStackSize` | `InvalidOperationException` naming the source and the limit, thrown from the raise instead of recursing further; the rest of the chain is abandoned, and a collector that was running turns it into that run's cached failure like any other exception |
+| A write from inside a running expression | allowed, and delivered like any other change; a write to something the run had already read raises back into the run, and that loop is what the depth limit stops |
 | Using a disposed source: reading `Value` or writing it, `RaiseEvent`, or registering a handler | `ObjectDisposedException` |
 | Registering on an evicted named dependency | the handle is dead: `IsDisposed` is true and every use throws `ObjectDisposedException`, registering included. That is deliberate - a cached handle that quietly stops working is the one way a dependency can go silent, so it is made loud. A later `GetNamed` for the same key returns a fresh handle, and the situation cannot arise while an entry is still watched, since a handler is what keeps the entry alive |
 
@@ -614,13 +627,15 @@ Three things this gets for free:
   the top of the next frame (`VIRTUAL-DOM.md` section 7.1). So the glitches in section 3.5 cannot reach
   the screen, and a handler that changes five model values still costs one render.
 - **A write during the render cannot loop.** `Invalidate` is refused from inside a render, which
-  `IComponent.Render` already states and which is the same rule as a write inside a collection scope
-  (section 3.8).
-- **A render that fails *later* keeps its dependencies, and a first render that fails keeps none.**
-  Subscribing during the read is what leaves a failing render listening, so the next change to one of
-  the values it did read asks for another render instead of stranding it. On a *first* render the mount
-  undoes the attach instead, so `Detach` releases that run again immediately - correct, because a
-  component that never produced a tree has nothing to patch.
+  `IComponent.Render` already states: a render that changed the state has described a tree that is
+  already out of date. Changing a *model* from inside a render is not refused by the observables layer
+  - the layer stops a loop by depth, not by forbidding writes (section 3.8) - so the rule belongs here,
+  where the render is.
+- **A render that fails *later* keeps its dependencies, and a first render that fails keeps
+  none.** Subscribing during the read is what leaves a failing render listening, so the next
+  change to one of the values it did read asks for another render instead of stranding it. On a
+  *first* render the mount undoes the attach instead, so `Detach` releases that run again
+  immediately - correct, because a component that never produced a tree has nothing to patch.
 
 Three things it must respect:
 
@@ -656,6 +671,7 @@ components (section 8.1).
 | Named dependencies that carry a value | A value that lives in an evictable entry resets when the last listener leaves - and eviction happens in the middle of a re-evaluation that unhooks before re-hooking (section 3.2). The event-only form has no such state to lose. |
 | Disposal that clears handlers silently, with no final raise | Simpler, and the alternative chosen is a judgement call: a final raise makes a dependency's death visible to whoever was watching instead of quietly freezing a derived value. Worth confirming (section 11). |
 | Lazy, pull-on-read evaluation for all expressions | Glitch-free and no wasted runs, but every read becomes a recursive walk and every value needs a dirty flag. Section 3.6's cold/hot split gets the useful half of it (no work when nobody watches) without that cost. |
+| Detecting a cycle rather than bounding the depth: a per-expression "am I running" flag, or an evaluation stack that names the chain | A flag catches only the expression that closes the loop, costs a store on every run, and misses a loop that passes through three objects and never comes back to the same one. Naming the chain means an evaluation stack - an entry pushed per run and searched per raise - which is per-operation cost on the hot path for a diagnostic. A depth counted at dispatch is a field read and a compare, catches every loop that raises at all, and names the source whose raise was refused; what it cannot catch is a self-read with nothing subscribing, which is plain infinite recursion that one reading of the code shows (section 3.8). |
 | A lock, or `Interlocked` guards, to allow cross-thread use | The graph's invariants are per-dispatch-list, and a correct thread-safe version is a different design (queued delivery, or per-thread graphs). The library is single-threaded everywhere else. |
 | Ordering dispatch by dependency depth | Would remove most of section 3.5's re-entrancy. Additive later if a use appears; nothing outside the package depends on delivery order. |
 | An async collection, `CollectDependenciesAsync(Func<Task>)` | A scope has to be active while the body runs, and an async body suspends: everything the UI thread does in the meantime would publish into whichever scope the thread happened to hold, so the set would describe someone else's reads. Making it correct needs the scope in an `AsyncLocal` rather than the static slot, which is a second collector, a slower read on the fast path (or a two-tier check), and a value that cannot be an expression anyway - a value has to be current when it is read. Left out rather than half-built; a loader that needs to re-run can collect around its synchronous part and `await` between collections. |
@@ -690,6 +706,11 @@ components (section 8.1).
 - **Object keys box value types on a miss.** A dictionary keyed by `int` pays a box per `GetNamed` call
   that misses its cache. Collections will cache handles per key; a caller that reads in a hot path
   should hold the handle.
+- **The depth limit bounds a loop, it does not explain one.** The message names the source of the
+  raise that was refused, which is the end of the chain and not its cause, so it points at a place in
+  the graph to start looking. Fifty is also a guess at a legitimate maximum: a page with a long enough
+  chain inside one raise would have to raise the property, and nothing warns before it does. Both are
+  the price of not tracking an evaluation stack, which is what naming a chain would need (section 3.8).
 - **The named table is process-wide, and only as large as what is watched.** Names are opaque `object`
   keys, so the growth is bounded by the keys that someone is actually listening to - but a long-lived
   scope with churning keys relies on eviction, which only happens when the last handler goes.
@@ -700,10 +721,10 @@ components (section 8.1).
   node describes one control, and an empty `Children` list on a container is not the same thing. So the
   default throws for now, and either an empty node type is added or the local model in
   `ObservableComponent` becomes `TDataModel` plus a flag.
-- **To confirm before the code exists:** `IsDisposed`; the final
-  raise on disposal; `CollectDependencies` as public API; refusing mutation inside a collection
-  scope; and `ObservableComponent` living in the Virtual DOM feature rather than in a third package
-  over both (the reference runs one way, so the placement is a choice, not a necessity).
+- **To confirm before the code exists:** `IsDisposed`; the final raise on disposal;
+  `CollectDependencies` as public API and `Collected` as the thing that holds the listening; and
+  `ObservableComponent` living in the Virtual DOM feature rather than in a third package over both
+  (the reference runs one way, so the placement is a choice, not a necessity).
 
 ## 12. Steps
 
@@ -713,7 +734,7 @@ components (section 8.1).
 | 2 | The collector stack, `CollectDependencies` and `CollectDependencies<T>` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope and still arrives with the set the body read |
 | 3 | Expressions: cold/hot, caching, re-collection, equality, the exception comparer | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
 | 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
-| 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value. Disposed reads and the mutation guard shipped with steps 1 and 3, and so did refusing a self-read; what is left is the chain across several expressions |
+| 5 | Guards: a loop in the raise chain, disposed reads | A loop is refused with an `InvalidOperationException` that names the source and the limit, instead of recursing until the stack dies, and the next change is unaffected. Disposed reads shipped with step 1; the depth limit shipped with step 3 |
 | 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, stops listening to a value its render stopped reading, and releases render-scoped and attach-scoped tokens independently (section 9) |
 | 7 | A demo page, the developer-guide section, and the AOT measurement | The published sample renders the page byte-for-byte identically to the JIT build, and a minimal app publishes with no observables artifact |
 
@@ -747,13 +768,14 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | Claim | How it is proven |
 | --- | --- |
 | **A raise dispatches over a snapshot** | A handler that removes itself, and one that adds another, both leave the current dispatch's remaining handlers running and the next dispatch reflecting the change. |
+| **A loop in the raise chain is refused, once** | A value whose own handler writes it loops; the write throws `InvalidOperationException` naming the limit, the value is one write past it, an ordinary raise afterwards still works (so the depth was restored rather than left poisoned), and the same chain at a lower `MaxEventStackSize` stops sooner - the property is read on every raise rather than captured. An expression whose function writes what it read ends the same way, with the refusal in its cache and thrown by a read. A raise with no handlers is not counted at all. |
 | **One entry, one identity** | Two `GetNamed` calls for one key return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). `RaiseNamedEvent` reaches the handler of a watched key and does nothing at all for an unwatched one. The cost claim - one lookup, no entry, no allocation - is a measurement on the same day the read costs are measured, not a test, because "no entry was created" is not observable through the public API. |
 | **Cold work costs nothing** | `CreateExpression` runs the function zero times; an expression with no handlers has zero subscriptions (asserted on a counting source) and re-runs on every read - a cold read being a read with no run in progress, so there is nothing to collect; attaching the first handler runs it once more, subscribes that run, and stops the re-running. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
 | **A read subscribes as it reads** | A counting source read inside a `CollectDependencies` body reports one handler **from inside the body**, before the read returns; a raise afterwards reaches the caller's handler, and disposing the run leaves zero handlers. Reading a cold expression from inside somebody else's run runs it once, not twice, and the next read of it is a field. |
 | **A failed run still yields its dependencies** | `CollectDependencies(() => { read; throw new ...; })` returns the sources it read before the throw, `IsFaulted` true, and still subscribed to them; `Throw()` rethrows that exact instance, and the `Func<T>` form adds a `Value` that throws the same instance with its original stack. That is what lets a render fail and still be listening to what could revive it. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
-| **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression raising (a new exception is a changed result) and throwing on every read, with nothing thrown at anybody during the run itself; a cycle throws with the chain named; a write inside a scope throws; and every use after `Dispose` throws `ObjectDisposedException` - read, write, raise, or register. Nothing is reported anywhere, which is asserted by the absence of an application dependency in the package (section 8.1). |
+| **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression raising (a new exception is a changed result) and throwing on every read, with nothing thrown at anybody during the run itself; a chain of raises that loops is refused at `MaxEventStackSize` with the source and the limit named, and the raise is what changes, not the values; and every use after `Dispose` throws `ObjectDisposedException` - read, write, raise, or register. Nothing is reported anywhere, which is asserted by the absence of an application dependency in the package (section 8.1). |
 | **Disposal is ordered, and the order is observable** | A handler registered on a value source sees `IsDisposed` true and gets `ObjectDisposedException` if it reads `Value` during the final notification, while a handler that only counts the notification sees it exactly once - so "dead first, then one raise, then the list is cleared" is asserted rather than assumed. An expression whose dependency is disposed raises in turn, with the `ObjectDisposedException` as its cached result. Afterwards, `Value`, `RaiseEvent` and registration all throw while removing a handler and disposing again stay safe. |
 | **The seam re-renders on the frame after a change** | In the Virtual DOM suite: a component reading two model values renders once per frame however many of them changed, stops listening to a value its render stopped reading, and unhooks everything when detached. A token registered through `RenderArgs.AddDisposable` dies on the next render while one registered through `AttachedArgs.AddDisposable` survives it and dies on detach, and `OnDetached` runs exactly once across dispose-then-detach. |
 | **AOT- and trim-clean** | The sample's published render is byte-identical to the JIT build's, and `Kolvir.Minimal` publishes with no observables artifact. The feature has no reflection, no `dynamic`, and no serializers, so this is expected rather than arranged. |
@@ -763,9 +785,9 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | Step | State | Notes |
 | --- | --- | --- |
 | 1 | Done | The package, the four interfaces, `CreateValue`/`ObservableValue<T>` and snapshot dispatch, plus the read scope the collectors will use. Sixteen tests, no reference to Kolvir, and the package packs three `lib/` folders with an empty dependency group each |
-| 2 | Done | `Collected`/`Collected<T>` and the two `CollectDependencies` overloads over the scope stack, subscribing as the body reads and disposed to stop listening. Fourteen tests, including nested isolation, reference-identity de-duplication, the scope being restored when a body throws, and the mutation guard |
-| 3 | Done | `CreateExpression` in both forms, `ObservableExpression<T>` with the cold/hot states, release-run-resubscribe, cached exceptions, the value comparer, the exception comparer and the self-read refusal. Twenty-four tests, including conditional re-collection, the comparer suppressing a repeat without suppressing the update, and an outer expression turning a cold inner one hot by reading it |
+| 2 | Done | `Collected`/`Collected<T>` and the two `CollectDependencies` overloads over the scope stack, subscribing as the body reads and disposed to stop listening. Fifteen tests, including nested isolation, reference-identity de-duplication, the scope being restored when a body throws, and a write from inside the body being delivered rather than refused |
+| 3 | Done | `CreateExpression` in both forms, `ObservableExpression<T>` with the cold/hot states, release-run-resubscribe, cached exceptions, the value comparer and the exception comparer. Twenty-five tests, including conditional re-collection, the comparer suppressing a repeat without suppressing the update, an outer expression turning a cold inner one hot by reading it, and a run that writes what it read ending at the depth limit |
 | 4 | Not started | |
-| 5 | In progress | The mutation guard and the self-read refusal are in, because subscribing at read time made both load-bearing. The multi-expression cycle chain is not |
+| 5 | Done | `Observable.MaxEventStackSize`, fifty by default, counted in the one dispatch every value and expression raises through: the raise past it is refused, the rest of the chain stays refused until the outermost raise unwinds, and nothing outlives the change that started it. Five tests in their own suite. Naming a cycle's chain is not done and is now a non-goal (3.8) |
 | 6 | Not started | |
 | 7 | Not started | |

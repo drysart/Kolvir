@@ -11,10 +11,10 @@ namespace Kolvir.Observables;
 /// (dev-docs/OBSERVABLES.md section 3.9).
 /// </para>
 /// <para>
-/// Being in a scope is also what makes a change to an observable illegal. A function has to be a pure
-/// function of what it read, and a change raised into a run that is still collecting would re-enter it
-/// with a set that no longer describes what happened. That is checked here, once, for every write and
-/// every raise.
+/// Being in a scope says nothing about what a change may do. A body is free to write, and a write it
+/// made to something it had already read raises straight back into the run through the subscription
+/// that read took - a loop, stopped by the raise depth and not here (see
+/// <see cref="Observable.MaxEventStackSize"/>). The scope only collects.
 /// </para>
 /// <para>
 /// The token restores the previous scope in <c>finally</c>, so an exception from a body cannot leave
@@ -35,27 +35,6 @@ internal static class ReadScope
         var previous = _current;
         _current = scope;
         return new ScopeToken(previous);
-    }
-
-    /// <summary>Refuses a change made from inside a run.</summary>
-    /// <param name="operation">What was attempted, for the message.</param>
-    /// <exception cref="InvalidOperationException">A run is in progress.</exception>
-    /// <remarks>
-    /// A write or a raise from inside a function is not a subtlety to be tolerated: the run would
-    /// re-enter itself, and its two collections would interleave their sets. Refused rather than
-    /// deferred, because a function that changes something has already computed a result from a state
-    /// that is out of date. A change from inside a handler is ordinary and allowed - handlers run with
-    /// no run in progress.
-    /// </remarks>
-    internal static void EnsureNotCollecting(string operation)
-    {
-        if (_current is { } scope)
-        {
-            throw new InvalidOperationException(
-                $"{operation} while {scope.Description} is collecting its dependencies. A function must be "
-                + "a pure function of what it read, so a change made from inside one is refused rather "
-                + "than recorded into a set that no longer describes the run.");
-        }
     }
 
     /// <summary>Puts the scope that was current before <see cref="Begin"/> back.</summary>

@@ -23,9 +23,9 @@ namespace Kolvir.Observables;
 /// dependencies.
 /// </para>
 /// <para>
-/// The order is the first read of each, which is what makes a cycle message read like the path that
-/// closed it, so the list is kept whatever else happens. While the set is small its de-duplication is a
-/// scan, because a handful of items is cheaper to scan than to hash; past
+/// The order is the first read of each, which is the order the body reached them - the useful report of
+/// a run's inputs, so the list is kept whatever else happens. While the set is small its de-duplication
+/// is a scan, because a handful of items is cheaper to scan than to hash; past
 /// <see cref="LinearScanLimit"/> a hash set is built from what the list already holds and every later
 /// read is a hash lookup. A scope only ever grows, so the two never drift apart.
 /// </para>
@@ -40,14 +40,7 @@ internal sealed class CollectionScope
     private readonly List<IDisposable> _tokens = [];
     private HashSet<IObservableEventSource>? _seen;
 
-    internal CollectionScope(Action<IObservableEventSource> onChanged, string description)
-    {
-        _onChanged = onChanged;
-        Description = description;
-    }
-
-    /// <summary>What this run is, for the message that refuses a change made from inside it.</summary>
-    internal string Description { get; }
+    internal CollectionScope(Action<IObservableEventSource> onChanged) => _onChanged = onChanged;
 
     /// <summary>The distinct sources this run read, in first-read order.</summary>
     internal IReadOnlyList<IObservableEventSource> Dependencies => _dependencies;

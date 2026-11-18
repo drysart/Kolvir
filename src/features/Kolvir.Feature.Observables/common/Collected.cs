@@ -48,8 +48,9 @@ public class Collected : IDisposable
     /// <summary>The distinct sources the body read, in the order it first read them.</summary>
     /// <remarks>
     /// Distinct by reference identity, so a body that reads <c>Count</c> in a loop reports one source.
-    /// The order is the first read of each, which is what makes a dependency cycle report the path that
-    /// closed it rather than an arbitrary pair. Every source here is already subscribed.
+    /// The order is the first read of each, which is the order the body reached them - the useful order
+    /// to report a run's inputs in, and the order a test asserts against. Every source here is already
+    /// subscribed.
     /// </remarks>
     public IReadOnlyList<IObservableEventSource> Dependencies { get; }
 

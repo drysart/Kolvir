@@ -40,7 +40,6 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
     private T _value = default!;
     private Exception? _fault;
     private bool _hasResult;
-    private bool _isRunning;
     private bool _isDisposed;
 
     internal ObservableExpression(
@@ -70,7 +69,6 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
         get
         {
             ObjectDisposedException.ThrowIf(_isDisposed, this);
-            EnsureNotRunning();
 
             Observable.PublishRead(this);
 
@@ -79,7 +77,7 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
             // there were, the read above would have made this expression hot - so nothing is collected.
             if (_handlers.IsEmpty)
             {
-                return RunFunction();
+                return _function();
             }
 
             return CachedOrThrow();
@@ -139,9 +137,8 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
     public void RaiseEvent()
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
-        ReadScope.EnsureNotCollecting($"{_name} was raised");
 
-        RaiseToHandlers();
+        Observable.RaiseToHandlers(this, _handlers);
     }
 
     /// <inheritdoc/>
@@ -164,7 +161,7 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
 
         try
         {
-            RaiseToHandlers();
+            Observable.RaiseToHandlers(this, _handlers);
         }
         finally
         {
@@ -172,27 +169,8 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
         }
     }
 
-    /// <summary>Named for the diagnostic messages that describe a cycle or a write inside a run.</summary>
+    /// <summary>Named for the diagnostic messages that describe how a chain came back to an expression.</summary>
     public override string ToString() => _name;
-
-    /// <summary>Runs the function for a read with nothing listening, throwing whatever it throws.</summary>
-    /// <remarks>
-    /// A plain call: the result is not cached and nothing is subscribed, because a cold expression is not
-    /// listening to anything - which is also why there is no set to collect.
-    /// </remarks>
-    private T RunFunction()
-    {
-        _isRunning = true;
-
-        try
-        {
-            return _function();
-        }
-        finally
-        {
-            _isRunning = false;
-        }
-    }
 
     /// <summary>The cached result, or the exception standing in for it.</summary>
     private T CachedOrThrow()
@@ -225,26 +203,13 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
     /// </remarks>
     private void Recompute(bool raiseIfChanged)
     {
-        EnsureNotRunning();
-
         var previousValue = _value;
         var previousFault = _fault;
         var hadResult = _hasResult;
 
         UnhookAll();
 
-        Collected<T> run;
-
-        _isRunning = true;
-
-        try
-        {
-            run = Observable.CollectDependencies(_function, OnDependencyRaised);
-        }
-        finally
-        {
-            _isRunning = false;
-        }
+        var run = Observable.CollectDependencies(_function, OnDependencyRaised);
 
         var changed = !hadResult || ChangedFrom(previousValue, previousFault, run);
 
@@ -274,7 +239,7 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
 
         if (raiseIfChanged && changed)
         {
-            RaiseToHandlers();
+            Observable.RaiseToHandlers(this, _handlers);
         }
     }
 
@@ -310,35 +275,10 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
     }
 
     /// <summary>What a subscribed dependency calls when it changes.</summary>
-    private void OnDependencyRaised(IObservableEventSource dependency) => Recompute(raiseIfChanged: true);
-
-    /// <summary>Refuses a read of an expression that is already running, which is a cycle.</summary>
-    /// <exception cref="InvalidOperationException">The expression is on its own evaluation path.</exception>
     /// <remarks>
-    /// Without this, an expression that reads itself either recurses until the stack dies (when nothing is
-    /// listening) or hands back the default it has not computed yet (when it is already hot). Neither is
-    /// something a caller can act on, and the second is worse than the first: a wrong value that looks
-    /// computed. The full chain is a later step; this names the expression that closed the loop.
+    /// A change that comes back here while this expression is still running its own function is a loop,
+    /// and it is the raise chain - not this method - that stops it: each turn of the loop is another
+    /// raise, nested inside the last, until <see cref="Observable.MaxEventStackSize"/> refuses one.
     /// </remarks>
-    private void EnsureNotRunning()
-    {
-        if (_isRunning)
-        {
-            throw new InvalidOperationException(
-                $"{_name} was read while it was running, so it depends on itself. A dependency cycle "
-                + "evaluates forever, so it is refused where it is detected rather than left to exhaust "
-                + "the stack.");
-        }
-    }
-
-    /// <summary>Calls every handler the array held when this raise began.</summary>
-    private void RaiseToHandlers()
-    {
-        var handlers = _handlers;
-
-        foreach (var handler in handlers)
-        {
-            handler(this);
-        }
-    }
+    private void OnDependencyRaised(IObservableEventSource dependency) => Recompute(raiseIfChanged: true);
 }

@@ -39,15 +39,17 @@ public static partial class Observable
     /// <exception cref="ArgumentNullException"><paramref name="body"/> or <paramref name="onChanged"/> is null.</exception>
     /// <remarks>
     /// The subscription is taken during the body, not after it, so a source read on the first line is
-    /// already being watched by the second. A change made from inside the body is refused rather than
-    /// delivered: see <see cref="ReadScope"/>.
+    /// already being watched by the second. A change made from inside the body is therefore delivered
+    /// like any other, and can reach <paramref name="onChanged"/> before the body has finished - the
+    /// caller's handler is not protected from that, and a body that changes something it read re-enters
+    /// itself until <see cref="MaxEventStackSize"/> stops the chain.
     /// </remarks>
     public static Collected CollectDependencies(Action body, Action<IObservableEventSource> onChanged)
     {
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(onChanged);
 
-        var scope = new CollectionScope(onChanged, "a CollectDependencies body");
+        var scope = new CollectionScope(onChanged);
         Exception? fault = null;
 
         // The scope is restored on the way out even when the body throws, so a failed run cannot leave
@@ -89,7 +91,7 @@ public static partial class Observable
         ArgumentNullException.ThrowIfNull(body);
         ArgumentNullException.ThrowIfNull(onChanged);
 
-        var scope = new CollectionScope(onChanged, "a CollectDependencies body");
+        var scope = new CollectionScope(onChanged);
         var value = default(T);
         Exception? fault = null;
 

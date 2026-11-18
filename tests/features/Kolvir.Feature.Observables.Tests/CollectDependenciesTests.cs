@@ -175,24 +175,30 @@ public sealed class CollectDependenciesTests
     }
 
     [TestMethod]
-    public void AChangeMadeInsideTheBodyIsRefused()
+    public void AWriteFromInsideTheBodyIsDeliveredLikeAnyOther()
     {
-        // A function has to be a pure function of what it read. The write would re-enter the run that is
-        // collecting, so it is refused rather than recorded into a set that no longer describes it.
+        // Collecting forbids nothing. A write the body makes to something it already read reaches the
+        // run's own subscription, so the caller's handler is called from inside the body - and a handler
+        // that writes back is a loop stopped by the raise depth, not by the collector (section 3.8).
         var value = Observable.CreateValue(1);
+        var raised = 0;
+        var raisedWhileTheBodyWasStillRunning = false;
 
-        using var written = Observable.CollectDependencies(() => value.Value = 2, _ => { });
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = value.Value;
 
-        Assert.IsTrue(written.IsFaulted, "the write was refused");
-        Assert.IsInstanceOfType<InvalidOperationException>(written.Fault, "with a message about why");
-        Assert.AreEqual(1, value.Value, "and the value was left alone");
-        Assert.AreEqual(0, written.Dependencies.Count, "and nothing was read, so nothing was subscribed");
+                value.Value = 2;
 
-        using var raised = Observable.CollectDependencies(
-            () => ((IObservableEventSource)value).RaiseEvent(),
-            _ => { });
+                raisedWhileTheBodyWasStillRunning = raised == 1;
+            },
+            _ => raised++);
 
-        Assert.IsInstanceOfType<InvalidOperationException>(raised.Fault, "a raise from inside a run is refused too");
+        Assert.IsFalse(run.IsFaulted, "the body ran to completion");
+        Assert.IsTrue(raisedWhileTheBodyWasStillRunning, "the handler was called from inside the body");
+        Assert.AreEqual(1, raised, "once, for the one write");
+        Assert.AreEqual(2, value.Value, "and the write landed");
     }
 
     [TestMethod]

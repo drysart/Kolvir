@@ -52,11 +52,6 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
         {
             ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-            // A write from inside a function is refused rather than raised: it would re-enter the run
-            // that is collecting, and the set that run is halfway through would no longer describe what
-            // happened.
-            ReadScope.EnsureNotCollecting("An observable value was assigned");
-
             // An event means something a listener cares about is different, so a write that changes
             // nothing is not one.
             if (EqualityComparer<T>.Default.Equals(_value, value))
@@ -107,10 +102,12 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
     public void RaiseEvent()
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
-        ReadScope.EnsureNotCollecting("An observable event was raised");
 
-        RaiseToHandlers();
+        Observable.RaiseToHandlers(this, _handlers);
     }
+
+    /// <summary>How a value is named in a diagnostic, since it has no name of its own.</summary>
+    public override string ToString() => $"an observable value of {typeof(T).Name}";
 
     /// <inheritdoc/>
     /// <remarks>
@@ -137,29 +134,11 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
 
         try
         {
-            RaiseToHandlers();
+            Observable.RaiseToHandlers(this, _handlers);
         }
         finally
         {
             _handlers = [];
-        }
-    }
-
-    /// <summary>Calls every handler the array held when this raise began.</summary>
-    /// <remarks>
-    /// The local is the snapshot, and reading it is all the snapshot costs: because the array is
-    /// immutable, a handler that subscribes or unsubscribes - itself, another handler, or everything by
-    /// disposing the value - replaces the field rather than changing what this walk is reading. So
-    /// mutations apply to the next raise, and a handler that disposes the value mid-dispatch does not
-    /// shorten this one; the remaining handlers are already in the array being walked.
-    /// </remarks>
-    private void RaiseToHandlers()
-    {
-        var handlers = _handlers;
-
-        foreach (var handler in handlers)
-        {
-            handler(this);
         }
     }
 }

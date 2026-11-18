@@ -426,27 +426,79 @@ public sealed class ExpressionTests
     }
 
     [TestMethod]
-    public void AnExpressionThatDependsOnItselfIsRefused()
+    public void AWriteToSomethingTheRunReadEndsAtTheDepthLimit()
     {
-        // A cycle would evaluate forever. Refused where it is detected, with the expression named, rather
-        // than left to exhaust the stack - and on the hot path it lands in the cache like any other
-        // failure, so a read throws it instead of returning a value that was never computed.
-        IObservableValue<int>? self = null;
-        self = Observable.CreateExpression(() => self!.Value + 1);
+        // The run is subscribed to the value it read, so writing it raises straight back into the
+        // expression that is still running - a loop. It is the raise chain that ends it: each turn is
+        // another raise nested inside the last, until one is refused. Every run that completed along the
+        // way caches its result, so what is left is the outermost run's answer, not a wedged expression.
+        var limit = Observable.MaxEventStackSize;
+        var value = Observable.CreateValue(1);
+        var expression = Observable.CreateExpression(() =>
+        {
+            var current = value.Value;
+            value.Value = current + 1;
+            return current;
+        });
 
-        var cold = Assert.ThrowsExactly<InvalidOperationException>(
-            () => _ = self!.Value,
-            "a cold read of a cycle is refused");
+        try
+        {
+            Observable.MaxEventStackSize = 4;
 
-        StringAssert.Contains(cold.Message, "depends on itself", "and says what the problem is");
+            expression.AddObservableEventRaisedHandler(_ => { });
 
-        self.AddObservableEventRaisedHandler(_ => { });
+            var thrown = Assert.ThrowsExactly<InvalidOperationException>(
+                () => _ = expression.Value,
+                "the loop's failure is the cached result, thrown by the read like any other");
 
-        var hot = Assert.ThrowsExactly<InvalidOperationException>(
-            () => _ = self.Value,
-            "and once it is hot the same failure is the cached result");
+            StringAssert.Contains(thrown.Message, "MaxEventStackSize", "and it names the limit");
+            Assert.AreEqual(6, value.Value, "the chain stopped at the limit");
+        }
+        finally
+        {
+            Observable.MaxEventStackSize = limit;
+        }
+    }
+    [TestMethod]
+    public void AWriteToSomethingTheRunDoesNotReadIsAllowed()
+    {
+        // A blanket ban would be wrong. A function may keep its own scratch state - a last-evaluated
+        // stamp, a cached intermediate, a diagnostic counter - and none of that is a dependency.
+        var scratch = Observable.CreateValue(0);
+        var source = Observable.CreateValue(1);
+        var expression = Observable.CreateExpression(() =>
+        {
+            scratch.Value = 99;
+            return source.Value * 2;
+        });
 
-        StringAssert.Contains(hot.Message, "depends on itself", "with the same message");
+        expression.AddObservableEventRaisedHandler(_ => { });
+
+        Assert.AreEqual(2, expression.Value, "the run finished");
+        Assert.AreEqual(99, scratch.Value, "and the write landed");
+    }
+
+    [TestMethod]
+    public void ChangingAValueAnotherExpressionReadsFromInsideARunIsAllowed()
+    {
+        // A cascade that cannot come back to this expression is ordinary, exactly as it would be from a
+        // handler: the other expression re-evaluates nested, inside this run, and this run is unaffected.
+        var flag = Observable.CreateValue(0);
+        var other = Observable.CreateExpression(() => flag.Value * 10);
+        var otherRaised = 0;
+        other.AddObservableEventRaisedHandler(_ => otherRaised++);
+
+        var mine = Observable.CreateExpression(() =>
+        {
+            flag.Value = 3;
+            return 1;
+        });
+
+        mine.AddObservableEventRaisedHandler(_ => { });
+
+        Assert.AreEqual(1, mine.Value, "the run finished");
+        Assert.AreEqual(1, otherRaised, "and the expression the value feeds was told");
+        Assert.AreEqual(30, other.Value, "with its cache up to date");
     }
 
     [TestMethod]
