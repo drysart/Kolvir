@@ -110,7 +110,7 @@ in another assembly needs it.
 | --- | --- |
 | **A write of an equal value raises nothing.** | The whole point of an event is that something a listener cares about is different. A model that recomputes and assigns 42 over 42 should not wake anything up, and a setter that always raises would make every "changed" handler an "assigned" handler. |
 | **Equality is `EqualityComparer<T>.Default`.** | The best comparer available is the type's own: `IEquatable<T>`, `override Equals`, or the operator-free default for structs. It is also what every other equality decision in the library uses, so a record's value semantics work with no ceremony. An optional `IEqualityComparer<T>` overload covers the rest (a case-insensitive string, a key rather than a whole object). |
-| **An expression compares its result the same way, and updates its dependency set either way.** | The dependencies that produced the value are still the dependencies that produce it, and they can change without the *result* changing (section 3.6). Only the raise is conditional. |
+| **An expression compares its result the same way - except for exceptions.** | The dependencies that produced the value are still the dependencies that produce it, and they can change without the *result* changing (section 3.6). Only the raise is conditional. An exception result is the one case where a "result" is not comparable: it is never equal to a value, and never equal to another exception, because a reader may branch on its details (section 3.7). |
 
 ### 3.2 Named dependencies are event sources, not values
 
@@ -222,10 +222,14 @@ two states:
   started by the first handler registers without raising to the handler that caused it (becoming hot
   raises nothing, 3.6). Whoever needs the value finds out when it reads it, which is where the
   exception belongs anyway.
-- **Success to failure and failure to success are both changes.** Failure to failure is **not**: the
-  expression is still broken, subscribers already know, and re-raising on every dependency change
-  would turn one bug into a storm. The cached exception is replaced, so a later read reports the
-  newest message.
+- **Every difference in the result is a change, including one exception replacing another.** A reader
+  can branch on the exception it finds - its type, its message, an inner exception, a data entry - so
+  "still failing, differently" is not the same result and subscribing to it must say so. Two
+  exceptions are therefore never equal to each other: the comparison is identity by construction (a
+  run that throws builds a new exception), so a broken expression raises on each re-run that fails, and
+  a value and an exception are never equal either. The alternative - comparing type and message to
+  suppress repeats - is a guess about which details a reader cares about, and it is wrong exactly when
+  the detail that changed is the one that mattered.
 - **The report happens once, at the point of evaluation,** through
   `Application.HandleNativeBoundary` - the same place a render's failure goes. Not when a *read*
   started the run: that caller is already getting the exception, and reporting it as well would
@@ -340,7 +344,7 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 | Situation | Behaviour |
 | --- | --- |
 | Expression's function throws on its first run (first read or first handler) | cached as the result, the dependencies it reached are hooked, and every read throws it; the report goes to `Application.HandleNativeBoundary` unless the run was triggered by a read, which throws to its caller |
-| Expression's function throws on a dependency-started re-run | cached as the result, reported to `Application.HandleNativeBoundary`, raised or not by the usual change rule, and every read throws it |
+| Expression's function throws on a dependency-started re-run | cached as the result, reported to `Application.HandleNativeBoundary`, raised (a new exception is a changed result), and every read throws it |
 | A handler throws during a raise | isolated per handler, reported to `Application.HandleNativeBoundary`, the rest of the snapshot still runs (unless the application lets it rethrow) |
 | A dependency cycle is read | `InvalidOperationException` naming the chain, before any recursion |
 | A write inside a running expression | `InvalidOperationException` naming the expression |
@@ -397,6 +401,7 @@ Two things this gets for free, and one it must respect:
 | `INotifyPropertyChanged` and string property names | The failure this layer exists to avoid: a typo is a compile error here and silence there, and a handler cannot know what a caller actually read. |
 | `System.IObservable<T>` / `IObserver<T>` and `Subscribe` | The name collides outright with the BCL's generic interface in any file that has `using System;` (measured: CS0104), and Rx's contract - a sequence with completion and errors on a subscription - describes a stream, not a mutable value and its readers. `IsDisposed` plus a final raise borrows the useful part of the completion story without the subscription type. |
 | Weak references between a source and its handlers | Every read of the graph would test and resurrect, and the semantics of "the handler went away" would have to be invented. Explicit tokens and disposal (section 3.10) put the cost where the mistake is. |
+| Comparing exceptions by type and message, to suppress "still failing" notifications | A reader may branch on any detail of the exception it finds, so suppressing a differing one would tell a subscriber "no change" about a result that changed. The rule chosen is identity - a run that throws builds a new exception, so a failing re-run is always a change (section 3.7). |
 | Named dependencies that carry a value | A value that lives in an evictable entry resets when the last listener leaves - and eviction happens in the middle of a re-evaluation that unhooks before re-hooking (section 3.2). The event-only form has no such state to lose. |
 | Disposal that clears handlers silently, with no final raise | Simpler, and the alternative chosen is a judgement call: a final raise makes a dependency's death visible to whoever was watching instead of quietly freezing a derived value. Worth confirming (section 11). |
 | Lazy, pull-on-read evaluation for all expressions | Glitch-free and no wasted runs, but every read becomes a recursive walk and every value needs a dirty flag. Section 3.6's cold/hot split gets the useful half of it (no work when nobody watches) without that cost. |
@@ -412,6 +417,10 @@ Two things this gets for free, and one it must respect:
 - **A wide graph re-runs often.** One change re-runs every hot expression that depends on it, and
   each of those may raise to its own subscribers. To be measured on a realistic page; the escape
   hatches are the comparer (stop the cascade) and coalescing at the component.
+- **A broken expression raises on every re-run.** Once an exception is a cached result, each failing run
+  hands out a new one, and a new exception is a changed result (section 3.7). A dependency that
+  churns while a function is broken therefore notifies on every change. That is the honest rule - the
+  reader decides what a given exception means - and the alternative is a comparison that guesses.
 - **Equality is the trap for object results.** An expression returning a freshly built object that
   does not override `Equals` raises on every run. For `VNode` trees that is why the component seam
   measuring before it is called cheap.
@@ -474,8 +483,8 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | **Cold work costs nothing** | `CreateExpression` runs the function zero times; an expression with no handlers has zero dependency hooks (asserted on a counting source) and re-runs on every read; attaching the first handler runs it once more and stops the re-running. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
-| **Equality keeps the graph quiet** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. |
-| **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression raising once, reporting once, and throwing on every read (there is nobody to throw at during the run itself); a cycle throws with the chain named; a write inside a scope throws; a read after `Dispose` throws `ObjectDisposedException`. |
+| **Equality keeps the graph quiet, except for exceptions** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. A re-run that fails again does raise, because the replacement exception is a changed result (3.7). |
+| **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression reporting once, raising (a new exception is a changed result), and throwing on every read (there is nobody to throw at during the run itself); a cycle throws with the chain named; a write inside a scope throws; a read after `Dispose` throws `ObjectDisposedException`. |
 | **The seam re-renders on the frame after a change** | In the Virtual DOM suite: a component reading two model values renders once per frame however many of them changed, stops listening to a value its render stopped reading, and unhooks everything when detached. |
 | **AOT- and trim-clean** | The sample's published render is byte-identical to the JIT build's, and `Kolvir.Minimal` publishes with no observables artifact. The feature has no reflection, no `dynamic`, and no serializers, so this is expected rather than arranged. |
 
