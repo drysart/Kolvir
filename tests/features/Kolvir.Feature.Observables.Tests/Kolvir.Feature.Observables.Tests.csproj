@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The observables feature's own suite. The feature is a rung-3 package, so its tests are not part
+       of the core suite: they reference the package the way an application does.
+
+       This project references the package under test and nothing else - no scene, no host, no window,
+       no Kolvir. That is not a coincidence: the package has no reference to Kolvir at all, which is
+       what makes it usable in a test, a console host or a server process as much as in a UI
+       (dev-docs/OBSERVABLES.md sections 8.1 and 12.1). Any test here that needed a control would be
+       evidence of the seam leaking.
+
+       The feature multi-targets for packaging, but these tests only touch `common/`, so the project
+       takes one portable target framework and the reference resolves the `net10.0` inner build. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Observables.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.Observables\Kolvir.Feature.Observables.csproj" />
+  </ItemGroup>
+
+</Project>

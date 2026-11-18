@@ -290,7 +290,7 @@ production. A background thread that changes state marshals, exactly as it does 
 | --- | --- |
 | **Nothing needs disposing for memory.** | A source with no handlers roots nothing: the handler list is the only thing it holds, and the registrant holds the token. Dropping the last reference to an unwatched value collects it, with no bookkeeping anywhere. This is what makes observables usable as plain model state. |
 | **`Dispose` marks the source dead, raises once, then clears the handlers - in that order.** | 1. It is dead: `IsDisposed` is true and `Value` throws `ObjectDisposedException` from that moment. 2. It raises its event once, to the handlers still registered, so a registrant learns its dependency is gone instead of quietly ceasing to hear from it. 3. It clears the list, which is what drops the registrants' closures - and the reason any of this exists, since a forgotten registration on a long-lived source would otherwise keep a dead screen's state alive for the life of the process. |
-| **The order is the behaviour, not an implementation detail.** | A handler that reads `Value` during that final raise gets `ObjectDisposedException` rather than a last value: the source has stopped being meaningful, and handing back a number that will never update again is the kind of "still working" lie a lifetime bug hides behind. A handler that acts on the notification alone - unregister, release, mark the row gone - never reads and is unaffected; one that does read has the exception isolated and reported by the dispatch boundary (section 3.4) rather than escaping through `Dispose`. Raising first and marking dead afterwards would let a handler read a value it cannot rely on, which is a worse thing to hand to code that is being told to let go. |
+| **The order is the behaviour, not an implementation detail.** | A handler that reads `Value` during that final raise gets `ObjectDisposedException` rather than a last value: the source has stopped being meaningful, and handing back a number that will never update again is the kind of "still working" lie a lifetime bug hides behind. A handler that acts on the notification alone - unregister, release, mark the row gone - never reads and is unaffected; one that does read has that read throw out of `Dispose` like any other raise (section 3.4), with the handler list still released, because the release is in a `finally` and a leaked registration is the one outcome disposal exists to prevent. Raising first and marking dead afterwards would let a handler read a value it cannot rely on, which is a worse thing to hand to code that is being told to let go. |
 | **After disposal every use throws, except the two that must not.** | `Value` (read or write), `RaiseEvent`, and registering a handler all throw `ObjectDisposedException`. `RemoveObservableEventRaisedHandler` stays safe - teardown paths dispose tokens without checking what they point at - and `Dispose` is idempotent. A dead source is a bug in the caller's lifetime, and saying so beat-by-beat is more useful than silently accepting writes to something nothing will ever read again. |
 | **An expression whose dependency dies fails loudly.** | The final raise wakes it, the re-run's read of the dead dependency throws `ObjectDisposedException`, that becomes the expression's cached result (section 3.7), so it raises in turn and every read of it throws. A cascade of "the thing below me is gone" is the honest outcome; the alternative is a derived value that silently freezes. |
 | **Unregistering a handler is the onus of whoever registers.** | The token is the unregister. An expression unhooks every dependency when it goes cold and on disposal, so the common accidental leak - a derived value that outlives its listeners - cannot happen. |
@@ -691,7 +691,7 @@ components (section 8.1).
 
 | # | Step | Done when |
 | --- | --- | --- |
-| 1 | Package skeleton, the interfaces, the mutable value and snapshot dispatch | A value raises only when it actually changes; a handler can subscribe and unsubscribe during dispatch; a throwing handler does not stop the others |
+| 1 | Package skeleton, the interfaces, the mutable value and snapshot dispatch | A value raises only when it actually changes; a handler can subscribe and unsubscribe during dispatch, including itself; a throwing handler propagates out of the raise and the handlers behind it do not run |
 | 2 | The collector stack, `CollectDependencies` and `CollectDependencies<T>` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope and still arrives with the set the body read |
 | 3 | Expressions: cold/hot, caching, re-collection, equality, the exception comparer | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
 | 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
@@ -713,9 +713,9 @@ Five things outside the new code, in the shape `VIRTUAL-DOM.md` section 8.1 reco
    nothing else - no scene, no host, no window.
 3. **`Kolvir.slnx`** gets both, under `/src/features/` and `/tests/features/`. The solution is
    hand-listed, not globbed.
-4. **`.github/workflows/tests.yml`** gets a restore step and a test step for the new suite, and the
-   workflow's path filter needs `src/features/Kolvir.Feature.Observables/**`.
-5. **`packages.yml`** and the pack globs, which are what publish a feature package at all.
+4. **`.github/workflows/tests.yml`** gets a restore step and a test step for the new suite. The
+   workflow's `src/features/**` and `tests/**` filters already cover both trees, so only the two
+   steps are new.
 
 XML documentation is mandatory and CS1591 is an error for anything that ships
 (`Directory.Build.props`), so every public member in this design needs a `<summary>` - the interface
@@ -744,7 +744,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 
 | Step | State | Notes |
 | --- | --- | --- |
-| 1 | Not started | |
+| 1 | Done | The package, the four interfaces, `CreateValue`/`ObservableValue<T>` and snapshot dispatch, plus the read scope the collectors will use. Sixteen tests, no reference to Kolvir, and the package packs three `lib/` folders with an empty dependency group each |
 | 2 | Not started | |
 | 3 | Not started | |
 | 4 | Not started | |

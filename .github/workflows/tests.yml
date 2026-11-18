@@ -90,6 +90,7 @@ jobs:
           dotnet restore tests/features/Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj --nologo -p:TargetFramework=net10.0
           dotnet restore tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj --nologo -p:KolvirVirtualDomFrameworks=net10.0
+          dotnet restore tests/features/Kolvir.Feature.Observables.Tests/Kolvir.Feature.Observables.Tests.csproj --nologo -p:KolvirObservablesFrameworks=net10.0
           dotnet restore tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --nologo -p:KolvirVirtualDomFrameworks=net10.0
 
       # The filter is the category contract: a test that can only run on one platform carries
@@ -253,6 +254,27 @@ jobs:
             --logger "trx;LogFileName=virtualdom-generator.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The observables feature's suite. Smallest leg in the workflow, and the only one that asserts
+      # something with no window, no frame and no control anywhere near it: the package deliberately
+      # references nothing from Kolvir, which is what makes it usable in a console host or a server
+      # process as much as in a UI. Nothing here draws anything.
+      #
+      # -p:KolvirObservablesFrameworks=net10.0 for the same reason as the virtual DOM leg: the feature
+      # lists all three frameworks so that one `dotnet pack` produces the package, and an unnarrowed
+      # restore would evaluate the net10.0-macos and net10.0-windows inner builds on a runner that has
+      # no macOS workload and, on Linux, no Windows reference pack.
+      - name: Test the observables feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test tests/features/Kolvir.Feature.Observables.Tests/Kolvir.Feature.Observables.Tests.csproj --no-restore --nologo \
+            -p:KolvirObservablesFrameworks=net10.0 \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=observables.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
       # The Win32 backend's own suite targets net10.0-windows and exists only on the Windows leg.
       # It covers the internal GL fallback decision with a fake probe; the accelerated path itself
       # needs a real driver, which no hosted runner has, so that half is verified by hand and
