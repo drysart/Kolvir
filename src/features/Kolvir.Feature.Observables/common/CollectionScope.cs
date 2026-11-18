@@ -16,11 +16,11 @@ namespace Kolvir.Observables;
 /// is thrown away and immediately recomputed. One run, one result, one set.
 /// </para>
 /// <para>
-/// Distinct by reference identity rather than by equality, because a source has no value equality to
-/// have an opinion about and two named dependencies for one key are the same instance anyway. Identity
-/// is enforced rather than assumed: a hand-written source is free to override
-/// <see cref="object.Equals(object)"/>, and two such sources that compare equal are still two different
-/// dependencies.
+/// Distinct by the source's own equality. For a value or an expression that is reference identity, which
+/// is what a type with no opinion about equality gives and what the layer wants: every value is one
+/// dependency. A named dependency is the other case - a handle is a name rather than an entry, so two
+/// handles for one key are the same dependency and say so through <c>Equals</c>, which is what makes a
+/// run that reads one key twice subscribe once (section 3.2).
 /// </para>
 /// <para>
 /// The order is the first read of each, which is the order the body reached them - the useful report of
@@ -71,7 +71,7 @@ internal sealed class CollectionScope
 
         foreach (var dependency in _dependencies)
         {
-            if (ReferenceEquals(dependency, source))
+            if (dependency.Equals(source))
             {
                 return true;
             }
@@ -90,7 +90,7 @@ internal sealed class CollectionScope
         }
         else if (_dependencies.Count > LinearScanLimit)
         {
-            _seen = new HashSet<IObservableEventSource>(_dependencies, ReferenceEqualityComparer.Instance);
+            _seen = new HashSet<IObservableEventSource>(_dependencies);
         }
     }
 }

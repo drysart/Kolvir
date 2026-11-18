@@ -101,14 +101,6 @@ public static partial class Observable
         }
     }
 
-    /// <summary>Whether a raise or a cold read is in progress, at any depth.</summary>
-    /// <remarks>
-    /// What the named table waits for: eviction is deferred while something is running, because the code
-    /// that has just emptied an entry is very often the code that is about to fill it again
-    /// (see <see cref="NamedDependencies"/>).
-    /// </remarks>
-    internal static bool IsEvaluating => _depth > 0;
-
     /// <summary>
     /// Counts one level for a raise, for as long as the caller's scope runs.
     /// </summary>
@@ -182,10 +174,6 @@ public static partial class Observable
             if (_previousDepth == 0)
             {
                 _isOverflowed = false;
-
-                // And it is the first moment the named table may evict anything: an entry emptied by this
-                // chain might have been re-registered by the very run that emptied it (section 3.2).
-                NamedDependencies.Drain();
             }
         }
     }

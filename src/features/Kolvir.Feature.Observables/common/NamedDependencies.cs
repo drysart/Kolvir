@@ -1,56 +1,61 @@
+﻿using System.Collections.Immutable;
+
 namespace Kolvir.Observables;
 
 /// <summary>
-/// The process-wide table of named dependencies, and the eviction that keeps it as small as what is
-/// watched.
+/// The process-wide table of named dependencies: who is listening to each key, and nothing else.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Keys are opaque objects compared by the default comparer, so a tuple key compares structurally with no
-/// extra layer and the layer never has to know which part of a name is the scope
+/// extra layer and the table never has to know which part of a name is the scope
 /// (dev-docs/OBSERVABLES.md section 3.2).
 /// </para>
 /// <para>
-/// An entry is alive while something is registered on it. When the last handler goes it is only
-/// <em>scheduled</em>: the table keeps it until nothing is in progress, because the thing that just emptied
-/// it is very often the thing about to fill it again - an expression releases its whole set before it
-/// re-runs, and evicting in that window would hand the same run a fresh handle every time it evaluated,
-/// changing the entry's identity for no reason and adding an allocation to every recompute.
+/// An entry exists exactly as long as something is registered on it, and is dropped the moment the last
+/// handler is removed. No deferral is needed because no caller holds an entry: a handle is a name that
+/// resolves here on every operation, so the code that empties an entry and the code that fills it again are
+/// not sharing an object that could go stale. A raise walks the array it started with, which is a snapshot
+/// because the array is immutable - a handler that unregisters itself mid-dispatch removes its own key's
+/// entry from the table without disturbing the walk, and a handler that registers again recreates it.
 /// </para>
 /// <para>
-/// Nothing here is a cache of values, so an entry created and never watched costs one dictionary slot until
-/// the next evacuation. Single-threaded like everything else (section 3.9).
+/// Nothing here is a cache of values, so an entry costs one dictionary slot while it is watched and nothing
+/// afterwards. Single-threaded like everything else (section 3.9).
 /// </para>
 /// </remarks>
 internal static class NamedDependencies
 {
-    private static Dictionary<object, NamedEventSource>? _entries;
-    private static List<NamedEventSource>? _candidates;
+    private static Dictionary<object, Entry>? _entries;
 
-    /// <summary>The entry for <paramref name="key"/>, created if there is none.</summary>
-    /// <remarks>
-    /// The caller is asking for a handle because it is about to register on it, so there has to be an entry
-    /// to register on. A caller that only wants to announce a change uses
-    /// <see cref="Raise"/> instead, which never creates one.
-    /// </remarks>
-    internal static NamedEventSource Get(object key)
+    /// <summary>Adds a handler for <paramref name="key"/>, creating the entry if there is none.</summary>
+    internal static void Subscribe(object key, Action<IObservableEventSource> handler)
     {
-        _entries ??= new Dictionary<object, NamedEventSource>();
+        _entries ??= new Dictionary<object, Entry>();
 
-        if (_entries.TryGetValue(key, out var existing))
+        if (!_entries.TryGetValue(key, out var entry))
         {
-            return existing;
+            entry = new Entry(new NamedEventSource(key));
+            _entries.Add(key, entry);
         }
 
-        var entry = new NamedEventSource(key);
-        _entries.Add(key, entry);
+        entry.Handlers = entry.Handlers.Add(handler);
+    }
 
-        // Queued but not drained: the registration this handle exists for has not happened yet, and the
-        // caller may be several statements away from it. If it never comes, the next evacuation takes the
-        // entry back.
-        AddCandidate(entry);
+    /// <summary>Removes a handler, and the entry with it when it was the last one.</summary>
+    internal static void Unsubscribe(object key, Action<IObservableEventSource> handler)
+    {
+        if (_entries is null || !_entries.TryGetValue(key, out var entry))
+        {
+            return;
+        }
 
-        return entry;
+        entry.Handlers = entry.Handlers.Remove(handler);
+
+        if (entry.Handlers.IsEmpty)
+        {
+            _entries.Remove(key);
+        }
     }
 
     /// <summary>Raises the entry for <paramref name="key"/>, or does nothing when nobody watches it.</summary>
@@ -63,62 +68,22 @@ internal static class NamedDependencies
     {
         if (_entries is not null && _entries.TryGetValue(key, out var entry))
         {
-            entry.RaiseEvent();
+            Observable.RaiseToHandlers(entry.Source, entry.Handlers);
         }
     }
 
-    /// <summary>Hands <paramref name="entry"/> to the table to be evicted once it is still unwanted.</summary>
-    internal static void Schedule(NamedEventSource entry)
-    {
-        AddCandidate(entry);
-        Drain();
-    }
-
-    private static void AddCandidate(NamedEventSource entry)
-    {
-        _candidates ??= [];
-        _candidates.Add(entry);
-    }
-
-    /// <summary>Evicts the scheduled entries that nothing has registered on, if nothing is in progress.</summary>
+    /// <summary>One key's handlers, and the source a dispatch reports itself as.</summary>
     /// <remarks>
-    /// Called when a raise or a cold read ends, and when a run ends, so the queue is emptied at every point
-    /// where the application could be about to do something else. Deferring at any other time is the whole
-    /// design: a raise is dispatching, and a run is collecting, and in either one the removal that emptied
-    /// an entry may be the same code that is about to subscribe again.
+    /// The source is the handle the entry was created for. Handles for one key are interchangeable - they
+    /// compare equal and every operation resolves through the table - so passing the one that happens to be
+    /// first is passing the key's handle, whichever instance a subscriber registered with.
     /// </remarks>
-    internal static void Drain()
+    private sealed class Entry
     {
-        var candidates = _candidates;
+        internal Entry(NamedEventSource source) => Source = source;
 
-        if (candidates is null || candidates.Count == 0)
-        {
-            return;
-        }
+        internal NamedEventSource Source { get; }
 
-        if (Observable.IsEvaluating || ReadScope.IsInCollection)
-        {
-            return;
-        }
-
-        _candidates = null;
-
-        foreach (var entry in candidates)
-        {
-            if (entry.IsWatched || entry.IsDisposed)
-            {
-                continue;
-            }
-
-            if (_entries is null
-                || !_entries.TryGetValue(entry.Key, out var current)
-                || !ReferenceEquals(current, entry))
-            {
-                continue;
-            }
-
-            _entries.Remove(entry.Key);
-            entry.Evict();
-        }
+        internal ImmutableArray<Action<IObservableEventSource>> Handlers { get; set; } = [];
     }
 }

@@ -1,7 +1,8 @@
-namespace Kolvir.Observables;
+﻿namespace Kolvir.Observables;
 
 /// <summary>
-/// The named dependencies: one key, one handle, and a way to raise a key nobody has a handle for.
+/// The named dependencies: one key, a handle that names it, and a way to raise a key nobody has a handle
+/// for.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -28,36 +29,36 @@ namespace Kolvir.Observables;
 /// </remarks>
 public static partial class Observable
 {
-    /// <summary>The handle for <paramref name="key"/>, created if there is none.</summary>
+    /// <summary>A handle naming <paramref name="key"/>.</summary>
     /// <param name="key">What the dependency is named. Compared by the key's own equality.</param>
     /// <returns>
-    /// The one handle for that key, which is the same instance for every caller and for as long as the key
-    /// is watched. It is an <see cref="IObservableEventSource"/> and nothing more: depend on it inside a run,
-    /// and raise it - or <see cref="RaiseNamedEvent"/> it - when the thing behind the key changes.
+    /// The handle to depend on. Handles for equal keys compare equal, so it does not matter which one a run
+    /// gets: reading the same key twice in one run is one dependency, and a handler registered through any
+    /// handle hears a raise made through any other.
     /// </returns>
     /// <exception cref="ArgumentNullException"><paramref name="key"/> is null.</exception>
     /// <remarks>
     /// <para>
-    /// Resolve the handle where it is used rather than holding it: the entry exists only while something is
-    /// registered on it, so the handle a run keeps alive is the one it registered on. A handle kept past
-    /// that - across a re-collection, or as a field for raising - is dead, and says so by throwing
-    /// (section 3.10).
+    /// A name and nothing else, which is why a caller may keep one. It holds no handlers and no value, so it
+    /// cannot go stale, and holding it across an expression's re-collection - or as a model's field for
+    /// raising - is ordinary rather than a mistake. What holds handlers is the table, and it holds them for
+    /// exactly as long as something is subscribed.
     /// </para>
     /// <para>
-    /// Asking for a handle creates the entry, because the caller is about to register on it. Announcing a
-    /// change does not need a handle, and <see cref="RaiseNamedEvent"/> exists so that announcing one for
-    /// an unwatched key costs a lookup and nothing else.
+    /// It costs one small allocation and nothing else: asking for a handle does not create an entry, because
+    /// nothing is watching the key yet. Announcing a change does not need a handle either -
+    /// <see cref="RaiseNamedEvent"/> resolves the key on its own, so an unwatched key costs a lookup.
     /// </para>
     /// <para>
-    /// Value-type keys are boxed for the lookup, so a caller that reads a keyed dependency on a hot path
-    /// should hold the handle for the length of the run that reads it (section 11).
+    /// Value-type keys are boxed for the table's lookup, so a run that reads a keyed dependency repeatedly
+    /// should hold the handle rather than call this per read (section 11).
     /// </para>
     /// </remarks>
     public static IObservableEventSource GetNamed(object key)
     {
         ArgumentNullException.ThrowIfNull(key);
 
-        return NamedDependencies.Get(key);
+        return new NamedEventSource(key);
     }
 
     /// <summary>Raises the named dependency for <paramref name="key"/>, if anyone is watching it.</summary>

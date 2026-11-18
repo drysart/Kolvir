@@ -13,9 +13,10 @@ namespace Kolvir.Observables;
 /// consequence to get wrong.
 /// </para>
 /// <para>
-/// It is not <see cref="IDisposable"/>. A named dependency is shared, so disposing it would take it
-/// away from every other holder; only the value types are disposable. What a registrant gets is
-/// <see cref="AddObservableEventRaisedHandler"/>, and disposing that unregisters that one handler.
+/// It is not <see cref="IDisposable"/>. A named dependency is a name that any number of callers may hold
+/// at once, so there is nothing for one of them to dispose; only the value types are disposable. What a
+/// registrant gets is <see cref="AddObservableEventRaisedHandler"/>, and disposing that unregisters that
+/// one handler.
 /// </para>
 /// <para>
 /// A raise is a synchronous callback and behaves like one. The handler list is snapshotted, so a

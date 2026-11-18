@@ -1,23 +1,23 @@
-namespace Kolvir.Observables.Tests;
+﻿namespace Kolvir.Observables.Tests;
 
 /// <summary>
-/// Named dependencies: one handle per key, a raise that needs no handle, and eviction that waits for
-/// whatever is in progress to finish.
+/// Named dependencies: a handle is a name rather than an entry, handles for one key are interchangeable,
+/// and the table holds the handlers for exactly as long as something is subscribed.
 /// </summary>
 [TestClass]
 [TestCategory("Observables")]
 public sealed class NamedDependencyTests
 {
     [TestMethod]
-    public void OneKeyReturnsOneHandle()
+    public void HandlesForOneKeyAreEqualButNotTheSameInstance()
     {
-        var key = "row-7";
+        var first = Observable.GetNamed("row-7");
+        var second = Observable.GetNamed("row-7");
 
-        var first = Observable.GetNamed(key);
-        var second = Observable.GetNamed(key);
-
-        Assert.AreSame(first, second, "the entry owns its handle and hands out that instance");
-        Assert.AreNotSame(first, Observable.GetNamed("row-8"), "and a different key is a different entry");
+        Assert.AreEqual(first, second, "two handles for one key are the same dependency");
+        Assert.AreEqual(first.GetHashCode(), second.GetHashCode(), "and hash the same, so a set agrees");
+        Assert.AreNotSame(first, second, "but they are different objects: a handle is a name, not an entry");
+        Assert.AreNotEqual(first, Observable.GetNamed("row-8"), "and a different key is a different dependency");
     }
 
     [TestMethod]
@@ -25,59 +25,53 @@ public sealed class NamedDependencyTests
     {
         // Tuple keys are the reason the key is an object and not a string: the layer compares them the way
         // the type does, so a multi-part name needs no formatting and no separator escaping.
-        var first = Observable.GetNamed((7, "text"));
-        var second = Observable.GetNamed((7, "text"));
-
-        Assert.AreSame(first, second, "two structurally equal keys are one dependency");
-        Assert.AreNotSame(first, Observable.GetNamed((7, "done")), "and one part differing is another");
+        Assert.AreEqual(Observable.GetNamed((7, "text")), Observable.GetNamed((7, "text")), "one dependency");
+        Assert.AreNotEqual(Observable.GetNamed((7, "text")), Observable.GetNamed((7, "done")), "and one part differs");
     }
 
     [TestMethod]
-    public void AnEntryLivesWhileItIsWatchedAndIsEvictedWhenTheLastHandlerGoes()
+    public void EveryHandleForOneKeyHearsTheRaise()
     {
-        var key = "watched";
-        var handle = Observable.GetNamed(key);
+        // The handlers belong to the key, not to the object a caller happened to get, so it does not matter
+        // which handle a subscriber registered through or which handle the raise came from.
+        var first = 0;
+        var second = 0;
 
-        var first = handle.AddObservableEventRaisedHandler(_ => { });
-        var second = handle.AddObservableEventRaisedHandler(_ => { });
+        Observable.GetNamed("both").AddObservableEventRaisedHandler(_ => first++);
+        Observable.GetNamed("both").AddObservableEventRaisedHandler(_ => second++);
 
-        Assert.IsFalse(handle.IsDisposed, "a watched entry is alive");
+        Observable.RaiseNamedEvent("both");
 
-        first.Dispose();
-
-        Assert.IsFalse(handle.IsDisposed, "and stays alive while anything is registered");
-
-        second.Dispose();
-
-        Assert.IsTrue(handle.IsDisposed, "removing the last handler lets the key go");
-        Assert.AreNotSame(handle, Observable.GetNamed(key), "a later ask gets a fresh handle");
-        Assert.IsFalse(Observable.GetNamed(key).IsDisposed, "which is alive");
+        Assert.AreEqual(1, first, "one subscriber heard it");
+        Assert.AreEqual(1, second, "and so did the other");
     }
 
     [TestMethod]
-    public void AStaleHandleIsDeadForEveryUse()
+    public void AHandleIsNeverDead()
     {
-        var handle = Observable.GetNamed("stale");
+        // A name has no lifetime, so nothing a caller does with a handle can make it fail: it is not holding
+        // anything that could be taken away.
+        var handle = Observable.GetNamed("never-dies");
+
         var token = handle.AddObservableEventRaisedHandler(_ => { });
         token.Dispose();
 
-        Assert.IsTrue(handle.IsDisposed, "the table let the key go");
-        Assert.ThrowsExactly<ObjectDisposedException>(() => handle.AddObservableEventRaisedHandler(_ => { }));
-        Assert.ThrowsExactly<ObjectDisposedException>(() => handle.DependUpon());
-        Assert.ThrowsExactly<ObjectDisposedException>(() => handle.RaiseEvent());
+        Assert.IsFalse(handle.IsDisposed, "releasing the last handler does not kill the name");
 
+        handle.DependUpon();
+        handle.RaiseEvent();
         handle.RemoveObservableEventRaisedHandler(_ => { });
-        token.Dispose();
 
-        Assert.IsTrue(handle.IsDisposed, "while unregistering and disposing again stay safe");
+        handle.AddObservableEventRaisedHandler(_ => { }).Dispose();
+
+        Assert.IsFalse(handle.IsDisposed, "and it is still usable afterwards");
     }
 
     [TestMethod]
     public void RaisingReachesAWatchedKeyAndIsHarmlessForAnUnwatchedOne()
     {
         var raised = 0;
-        var watched = Observable.GetNamed("watched");
-        watched.AddObservableEventRaisedHandler(_ => raised++);
+        Observable.GetNamed("watched").AddObservableEventRaisedHandler(_ => raised++);
 
         Observable.RaiseNamedEvent("watched");
 
@@ -86,20 +80,29 @@ public sealed class NamedDependencyTests
         Observable.RaiseNamedEvent("nobody-asked");
 
         Assert.AreEqual(1, raised, "and an unwatched key notifies nothing and throws nothing");
-        Assert.IsFalse(Observable.GetNamed("nobody-asked").IsDisposed, "the raise created no dead entry behind it");
     }
 
     [TestMethod]
     public void AnExpressionReadingTheSameKeyTwiceHooksItOnce()
     {
-        // Two registrations would mean two calls per raise, and one unhook per release. The raise is the
-        // measurement: one raise, one re-run.
+        // Two subscriptions would mean two calls per raise, and one unhook per release. Two measurements: the
+        // set the run reports, and how many re-runs one raise causes.
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                Observable.GetNamed("counted").DependUpon();
+                Observable.GetNamed("counted").DependUpon();
+            },
+            _ => { });
+
+        Assert.AreEqual(1, run.Dependencies.Count, "one key read twice is one dependency, through two handles");
+
         var runs = 0;
         var expression = Observable.CreateExpression(() =>
         {
             runs++;
 
-            var source = Observable.GetNamed("counted");
+            var source = Observable.GetNamed("counted-expression");
             source.DependUpon();
             source.DependUpon();
 
@@ -109,42 +112,47 @@ public sealed class NamedDependencyTests
         expression.AddObservableEventRaisedHandler(_ => { });
         Assert.AreEqual(1, runs, "hooking runs it once");
 
-        Observable.RaiseNamedEvent("counted");
+        Observable.RaiseNamedEvent("counted-expression");
 
         Assert.AreEqual(2, runs, "and one raise is one re-run, not two");
     }
 
     [TestMethod]
-    public void EvictionWaitsForTheRaiseThatEmptiedTheEntryToFinish()
+    public void AHandlerThatRemovesItselfDoesNotDisturbTheRestOfTheRaise()
     {
-        // A handler is allowed to unregister itself during its own dispatch (section 3.4). If that evicted
-        // the entry on the spot, the walk that is still calling the other handlers would be holding a dead
-        // source - and a handler after this one could not register on it.
+        // Removing the last handler drops the entry from the table. The dispatch is walking the array it
+        // started with, which is a snapshot, so the handler behind it still runs - and a handler that
+        // registers again recreates the entry for the next raise.
         var handle = Observable.GetNamed("self-removing");
         IDisposable? token = null;
-        var aliveDuringTheRaise = false;
+        var selfRemoving = 0;
+        var after = 0;
 
         token = handle.AddObservableEventRaisedHandler(_ =>
         {
+            selfRemoving++;
             token!.Dispose();
-
-            aliveDuringTheRaise = !handle.IsDisposed;
         });
+        handle.AddObservableEventRaisedHandler(_ => after++);
 
         Observable.RaiseNamedEvent("self-removing");
 
-        Assert.IsTrue(aliveDuringTheRaise, "the entry outlives the dispatch it was emptied in");
-        Assert.IsTrue(handle.IsDisposed, "and is evicted once the raise is over");
+        Assert.AreEqual(1, after, "the handler behind the one that unregistered still ran");
+
+        Observable.RaiseNamedEvent("self-removing");
+
+        Assert.AreEqual(1, selfRemoving, "and the one that unregistered itself is not called again");
+        Assert.AreEqual(2, after, "while the one still registered is");
     }
 
     [TestMethod]
-    public void AnExpressionReCollectingKeepsTheEntryItWasWatching()
+    public void AHandleKeptAcrossARecomputeStillWorks()
     {
-        // An expression releases its whole set before it re-runs (section 3.6.1), so the entry it depends on
-        // is momentarily empty on every recompute. Evicting there would give it a fresh handle every time -
-        // and kill the one this function is holding while it re-reads it.
-        var handle = Observable.GetNamed("re-collected");
+        // The point of a name: an expression releases its whole set before it re-runs, so a handle it keeps
+        // in the function is the one thing a lifetime rule would have broken. Here it is ordinary.
+        var handle = Observable.GetNamed("retained");
         var runs = 0;
+
         var expression = Observable.CreateExpression(() =>
         {
             runs++;
@@ -153,59 +161,35 @@ public sealed class NamedDependencyTests
         });
 
         expression.AddObservableEventRaisedHandler(_ => { });
-        Assert.AreEqual(1, runs, "the first run hooked the key");
+        Assert.AreEqual(1, runs, "the first run subscribed");
 
-        Observable.RaiseNamedEvent("re-collected");
+        Observable.RaiseNamedEvent("retained");
 
         Assert.AreEqual(2, runs, "the raise re-ran it");
-        Assert.IsFalse(expression.IsDisposed, "against a live entry rather than a dead handle");
-        Assert.IsFalse(handle.IsDisposed, "which was never evicted in between");
-        Assert.AreSame(handle, Observable.GetNamed("re-collected"), "so its identity survived the recompute");
+
+        Observable.RaiseNamedEvent("retained");
+
+        Assert.AreEqual(3, runs, "and the same handle worked the second time");
     }
 
     [TestMethod]
-    public void AnEntryIsEvictedOnceTheRunThatReleasedItIsOver()
+    public void AKeyReleasedBetweenRunsIsWatchedAgainWhenItIsReadAgain()
     {
-        // The other half of the deferral: a key a run stopped reading is not watched any more, and the table
-        // takes it back as soon as the run is finished rather than at some later change.
-        var handle = Observable.GetNamed("dropped");
-        IObservableValue<bool>? flag = null;
-
-        using var run = Observable.CollectDependencies(
-            () =>
-            {
-                Observable.GetNamed("dropped").DependUpon();
-                _ = flag!.Value;
-            },
+        var first = Observable.CollectDependencies(
+            () => Observable.GetNamed("alternating").DependUpon(),
             _ => { });
 
-        Assert.IsFalse(handle.IsDisposed, "the run is watching it");
+        first.Dispose();
 
-        run.Dispose();
+        var raised = 0;
 
-        Assert.IsTrue(handle.IsDisposed, "and releasing the run lets the key go");
-    }
+        using var second = Observable.CollectDependencies(
+            () => Observable.GetNamed("alternating").DependUpon(),
+            _ => raised++);
 
-    [TestMethod]
-    public void AHandleNobodyRegistersOnDoesNotOutliveTheNextChange()
-    {
-        // The table is as large as what is watched, so a key somebody asked about and never subscribed to is
-        // taken back at the first idle point rather than sitting there for the life of the process.
-        var abandoned = Observable.GetNamed("asked-and-forgotten");
-        var value = Observable.CreateValue(0);
-        value.AddObservableEventRaisedHandler(_ => { });
+        Observable.RaiseNamedEvent("alternating");
 
-        value.Value = 1;
-
-        Assert.IsTrue(abandoned.IsDisposed, "the entry nobody registered on was let go");
-        Assert.AreNotSame(abandoned, Observable.GetNamed("asked-and-forgotten"), "and a later ask creates a new one");
-    }
-
-    [TestMethod]
-    public void NullKeysAreRefused()
-    {
-        Assert.ThrowsExactly<ArgumentNullException>(() => Observable.GetNamed(null!));
-        Assert.ThrowsExactly<ArgumentNullException>(() => Observable.RaiseNamedEvent(null!));
+        Assert.AreEqual(1, raised, "the key was picked up again by the run that re-read it");
     }
 
     [TestMethod]
@@ -213,13 +197,19 @@ public sealed class NamedDependencyTests
     {
         // A named raise goes through the same dispatch a write does, so a key whose handler raises it again
         // is a loop like any other rather than a recursion the depth cannot see.
-        var handle = Observable.GetNamed("looping");
-        handle.AddObservableEventRaisedHandler(_ => Observable.RaiseNamedEvent("looping"));
+        Observable.GetNamed("looping").AddObservableEventRaisedHandler(_ => Observable.RaiseNamedEvent("looping"));
 
         var thrown = Assert.ThrowsExactly<InvalidOperationException>(
             () => Observable.RaiseNamedEvent("looping"),
             "the loop is refused at the limit");
 
         StringAssert.Contains(thrown.Message, "MaxEventStackSize", "with the limit named");
+    }
+
+    [TestMethod]
+    public void NullKeysAreRefused()
+    {
+        Assert.ThrowsExactly<ArgumentNullException>(() => Observable.GetNamed(null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => Observable.RaiseNamedEvent(null!));
     }
 }
