@@ -132,10 +132,10 @@ model and the *event* in the named source means eviction has no consequence to g
 
 ### 3.3 Collecting dependencies: a stack, not a slot
 
-`PublishRead(source)` appends the source to the *innermost* active collection scope. A scope is
-entered by `CreateExpression` while it runs its function, and by `CollectDependencies(body)`
-(section 4).
-Nested scopes are isolated: the outer run never sees what the inner run read.
+`PublishRead(source)` hands the source to the *innermost* active collection scope, which records it
+**and subscribes to it there and then**. A scope is entered by `CreateExpression` while it runs its
+function, and by `CollectDependencies(body, onChanged)` (section 4). Nested scopes are isolated: the
+outer run never sees what the inner run read.
 
 - **Isolation is correct, not just convenient** (this was a review question, answered by the design
   rather than by convenience): if the outer function builds an inner expression and *reads its
@@ -151,7 +151,17 @@ Nested scopes are isolated: the outer run never sees what the inner run read.
 - **The scope is restored in `finally`**, so an exception from a function cannot leave the collector
   pointing at a scope that is no longer running.
 - **Duplicates are removed per run** by reference identity, so an expression that reads `Count` in a
-  loop hooks the count source once.
+  loop subscribes to the count source once.
+- **A read that returns has already subscribed.** The scope subscribes during the read rather than
+  afterwards, so there is no window in which a body holds a value and is not yet watching what
+  produced it. It is also why a cold expression read from inside an outer run is hot by the time the
+  read returns: the value handed back is the one it keeps, rather than the result of an unmonitored
+  run that is thrown away and immediately recomputed.
+- **A cold read collects nothing**, because it happens with no run in progress - if one were, the read
+  would have subscribed this expression and made it hot before the question was asked.
+- **Being in a scope forbids a change.** A write or a raise from inside a run would re-enter it with a
+  set that no longer describes what happened, so `ReadScope` refuses both and names the run that was
+  going on (section 3.8). Handlers run with no scope active, so a change from inside one is ordinary.
 
 ### 3.4 Dispatch: snapshot, isolate, never re-enter the list
 
@@ -190,13 +200,13 @@ two states:
 
 | State | Dependencies hooked | `Value` read |
 | --- | --- | --- |
-| **Cold** - no handlers on it | no | re-runs the function every time with collection suspended: its reads are discarded, so none are collected |
+| **Cold** - no handlers on it | no | re-runs the function every time, with no run in progress and so nothing collected |
 | **Hot** - at least one handler | yes, all of them | returns the cached result |
 
 | Decision | Why |
 | --- | --- |
 | **Creation runs nothing.** | A derived value that nobody reads should cost a delegate and nothing else - not a run, not a dependency set, not an exception it might throw before anyone is listening. It also means a function that throws is only ever discovered by somebody who asked for the result, which is the same rule as a read.
-| **Cold expressions hook nothing.** | An expression nobody watches is a function, and paying to keep its dependencies wired up would make an unused derived value cost the same as a used one - and would keep its whole dependency tree alive. A cold read collects nothing at all - collection is suspended for it, which is also what keeps its reads out of whatever outer run it was read from - and the next transition to hot runs and collects from scratch, so there is no set that could be kept wrong. |
+| **Cold expressions hook nothing.** | An expression nobody watches is a function, and paying to keep its dependencies wired up would make an unused derived value cost the same as a used one - and would keep its whole dependency tree alive. A cold read is a read with no run in progress, so there is nothing to collect and nothing to keep: the read calls the function directly. Read from inside somebody else's run it would not be cold at all - that read subscribes it and makes it hot before the question is asked (section 3.3). |
 | **Cold reads always re-run**, even though a cached result may exist. | The cache cannot be trusted when nothing is telling the expression that its inputs moved. This is the user's rule, and it is the only self-consistent one: a cache is valid exactly when the subscription that maintains it is live. |
 | **Hot reads never re-run.** | A hot expression's cache is maintained by its dependency hooks, so a read is a field. A render that reads the same expression twice must not cost two runs. |
 | **Becoming hot evaluates once, then hooks,** and raises nothing. | It is the first run when nothing has read the expression yet, and it is what makes the value hot-cached. The subscriber count just went from zero to one, so no earlier subscriber could have missed a change, and the new one can read `Value` for the current result. If that run throws, the registration still succeeds: the exception is cached, the dependencies it reached are hooked, and the subscriber finds out by reading (3.7). Failing the registration instead would put a lifetime decision on a type call - who unregisters the handler that was refused? - for a bug the read surfaces anyway. |
@@ -256,9 +266,10 @@ var total = Observable.CreateExpression(
 
 | Decision | Why |
 | --- | --- |
-| **A thread-static evaluation stack detects cycles.** Before running, an expression checks whether it is already on the stack; if it is, it throws naming the chain (`Model.cs:88 -> Model.cs:214 -> Model.cs:88`). | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. Naming the chain turns a crash into a message. The stack carries a name per expression (3.8.1), which is what makes the chain readable. |
-| **Mutating an observable while a collection scope is active throws.** | An expression is a pure function of what it read. A write inside one raises into other expressions while the collector is mid-run, so the set being collected no longer describes what happened. `Observable` carries a collection depth for this, and `set`/`RaiseEvent` refuse while it is non-zero. Cheap - one static compare on a write - and it names the expression. |
+| **An expression that reads itself while running is refused.** The read throws, naming the expression, instead of recursing. | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. The read is the one place the loop can be closed, and refusing there turns a crash into a message. Shipped as a per-expression flag; the chain across several expressions (`Model.cs:88 -> Model.cs:214 -> Model.cs:88`) needs an evaluation stack and is still to come. |
+| **Mutating an observable while a collection scope is active throws.** | An expression is a pure function of what it read. A write inside one raises into a run that is still collecting, and because reads now subscribe as they happen that raise would re-enter the very run that is mid-collection, interleaving two sets. `ReadScope` refuses both a `set` and a `RaiseEvent` while a run is in progress, naming the run. Cheap - one static field load and a null test on a write. |
 | **A mutation from inside a *handler*** is ordinary and allowed. | Handlers run with no collection active: they may write other values, and those changes cascade. That is the event-driven style the layer is for. |
+
 #### 3.8.1 How an expression is named
 
 Two overloads, and the split exists to keep a path out of an application that did not ask for one:
@@ -296,32 +307,36 @@ production. A background thread that changes state marshals, exactly as it does 
 
 ## 4. The collector, and the primitive under expressions
 
+A run happens inside a collection scope. `PublishRead` hands the source to that scope, and the scope
+**records it and subscribes to it there and then**, with the handler the caller supplied:
+
 ```csharp
-// Internally, an expression runs its function inside a collection scope, and reads publish into it:
-using (Observable.BeginCollection(scope))   // internal; CollectDependencies is the public face
+// Internally, which is also what the public form does:
+using (ReadScope.Begin(new CollectionScope(onChanged, description)))
 {
-    result = func();
+    result = body();
 }
 ```
 
-Two public forms. `CollectDependencies(Action body)` runs a body that has no result;
-`CollectDependencies<T>(Func<T> body)` runs one that does, and returns the result alongside the set:
+Two public forms. `CollectDependencies(Action body, Action<IObservableEventSource> onChanged)` runs a
+body that has no result; `CollectDependencies<T>(Func<T> body, onChanged)` runs one that does, and
+returns the result alongside the subscriptions:
 
 | Member | Gives you |
 | --- | --- |
-| `Dependencies` | the distinct sources the body read, in first-read order |
+| `Dependencies` | the distinct sources the body read, in first-read order, each already subscribed |
 | `IsFaulted`, `Fault` | whether the body threw, and the exception without throwing it again |
 | `Value` (the `Func<T>` form) | the body's result; **throws `Fault`** if the body threw |
 | `Throw()` | rethrows `Fault` if there is one, for the `Action` form which has no `Value` to throw through |
+| `Dispose()` | releases every subscription the run took |
 
 ```csharp
-var run = Observable.CollectDependencies(() => _panel.Render());
-foreach (var dep in run.Dependencies)
-{
-    tokens.Add(dep.AddObservableEventRaisedHandler(_ => Invalidate()));
-}
+// A render, in full: the run is listening to what it read by the time it returns, and the token for
+// that listening is the run itself.
+_render?.Dispose();
+_render = Observable.CollectDependencies(() => _panel.Render(), _ => Invalidate());
 
-return run.Value;   // throws into whoever called this, with the set already hooked
+return _render.Value;   // throws into whoever called this, still subscribed
 ```
 
 | Decision | Why |
@@ -329,6 +344,8 @@ return run.Value;   // throws into whoever called this, with the set already hoo
 | **The set comes back even when the body threw.** | That is the rule a failing expression already follows (section 3.6.1): the dependencies a run *reached* are what its result - success or exception - was computed from, and therefore what can change it. Throwing straight through would hand the caller an exception and no set, which for a render means a component that never re-renders again. |
 | **`Value` throws rather than returning a default.** | A caller that wants the result has to deal with the failure at the point where it uses it, and cannot mistake "the body failed" for "the body returned null". A caller that only wants the dependencies never reads `Value` and is unaffected. |
 | **Nothing is reported to anyone.** | The caller is right here: this is a synchronous call with somebody waiting, so the exception goes to them through `Value`. There is no report channel to send it to as well (section 8.1). |
+| **Subscribing belongs to the read, not to a later pass over the set.** | Recording a source and hooking it after the body returns leaves a window in which the body has a value and is not listening to what produced it, and makes a cold expression cost two runs: one unmonitored run whose result is thrown away, then the real one when the outer run hooks it. Subscribing during the read closes the window and collapses the two runs into one - what the read returns is what the expression keeps. |
+| **`Collected` is what holds the listening.** | So the caller has one thing to dispose rather than a token list it has to build, and so the failure path needs no special case: a body that throws is still subscribed to what it reached, because the subscription happened before the throw. |
 
 It exists because the component layer (section 9) needs exactly this and *not* an expression: a render
 produces a tree it does not want to compare, so it wants "the dependencies of this run" plus "call me
@@ -373,9 +390,9 @@ A read-only model is the same with the setter left off: `public string Text => _
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
-| `Observable.CollectDependencies(Action)` | `Collected` | The dependencies of one synchronous run, `IsFaulted`/`Fault` if the body threw, and `Throw()` for the form that has no `Value`. |
-| `Observable.CollectDependencies<T>(Func<T>)` | `Collected<T>` | The same plus `Value` - the body's result, or the exception thrown through it. This is the component seam (section 9). |
-| `Collected` | `Dependencies`, `IsFaulted`, `Fault`, `Throw()` | The first collector's result: distinct sources in first-read order by reference identity, the exception the body threw, and a way to rethrow it that a `Value`-less caller can use. |
+| `Observable.CollectDependencies(Action, Action<IObservableEventSource>)` | `Collected` | Runs the body once, subscribing `onChanged` to every source it reads **as it reads it**. Carries `IsFaulted`/`Fault`, and `Throw()` for the form that has no `Value`. Dispose the result to stop listening. |
+| `Observable.CollectDependencies<T>(Func<T>, Action<IObservableEventSource>)` | `Collected<T>` | The same plus `Value` - the body's result, or the exception thrown through it. This is the component seam (section 9). |
+| `Collected` | `Dependencies`, `IsFaulted`, `Fault`, `Throw()`, `Dispose()` | The first collector's result: distinct sources in first-read order by reference identity, each already subscribed, the exception the body threw, and a way to rethrow it that a `Value`-less caller can use. Disposing it releases the subscriptions. |
 | `Collected<T> : Collected` | `+ Value` | The second collector's result. Reading `Value` throws `Fault` when there is one, rethrown with its original stack, so a caller cannot mistake a failure for a `default`. |
 
 No `services.AddObservables()`: there is nothing to register, no process-wide state that needs a
@@ -481,22 +498,22 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
         ThrowIfDisposed();
 
         // Re-rendering re-collects: the dependency set follows the render, exactly as an
-        // expression's follows its function.
+        // expression's follows its function. The run subscribes itself as the render reads, so there
+        // is no pass over the set afterwards - and a render that throws is still subscribed to what it
+        // reached, which is what stops a component that failed once from being stranded.
         CleanupDependencies();
         var deps = _deps = new List<IDisposable>();
 
         var run = _dataModel is null
-            ? Observable.CollectDependencies(() => RenderWithNullModel(new RenderArgs(deps.Add)))
+            ? Observable.CollectDependencies(
+                () => RenderWithNullModel(new RenderArgs(deps.Add)),
+                _ => _mount?.Invalidate())
             : Observable.CollectDependencies(
-                () => RenderWithDataModel(new RenderArgs<TDataModel>(_dataModel, deps.Add)));
+                () => RenderWithDataModel(new RenderArgs<TDataModel>(_dataModel, deps.Add)),
+                _ => _mount?.Invalidate());
 
-        // Hooking before reading the result is the point: a render that threw still leaves the
-        // component listening to what it read, so the next change to one of those values asks for
-        // another render instead of leaving the component stranded (section 3.6.1).
-        foreach (var dep in run.Dependencies)
-        {
-            deps.Add(dep.AddObservableEventRaisedHandler(_ => _mount?.Invalidate()));
-        }
+        // The run is the listener; the list holds it beside whatever the render registered for itself.
+        deps.Add(run);
 
         return run.Value;   // throws into the frame boundary if the render failed
     }
@@ -582,7 +599,7 @@ a base class:
 
 | List | Lifetime | What belongs in it |
 | --- | --- | --- |
-| `_deps` | one render | the handlers on the observables that render read, plus anything the render itself registered through `RenderArgs.AddDisposable` - a subscription set up behind a condition, a one-shot listener |
+| `_deps` | one render | the run itself, which is the subscription to everything that render read, plus anything the render registered through `RenderArgs.AddDisposable` - a subscription set up behind a condition, a one-shot listener |
 | `_attachDeps` | one mount | whatever `OnAttached` registered through `AttachedArgs.AddDisposable` - a timer, a keyboard hook, a subscription that should outlive every render |
 
 Clearing the render list at the top of a render, and both on detach, is what makes re-collecting work: a
@@ -600,9 +617,9 @@ Three things this gets for free:
   `IComponent.Render` already states and which is the same rule as a write inside a collection scope
   (section 3.8).
 - **A render that fails *later* keeps its dependencies, and a first render that fails keeps none.**
-  Hooking before `run.Value` is what leaves a failing render listening, so the next change to one of
+  Subscribing during the read is what leaves a failing render listening, so the next change to one of
   the values it did read asks for another render instead of stranding it. On a *first* render the mount
-  undoes the attach instead, so `Detach` releases those hooks again immediately - correct, because a
+  undoes the attach instead, so `Detach` releases that run again immediately - correct, because a
   component that never produced a tree has nothing to patch.
 
 Three things it must respect:
@@ -696,7 +713,7 @@ components (section 8.1).
 | 2 | The collector stack, `CollectDependencies` and `CollectDependencies<T>` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope and still arrives with the set the body read |
 | 3 | Expressions: cold/hot, caching, re-collection, equality, the exception comparer | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
 | 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
-| 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value |
+| 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value. Disposed reads and the mutation guard shipped with steps 1 and 3, and so did refusing a self-read; what is left is the chain across several expressions |
 | 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, stops listening to a value its render stopped reading, and releases render-scoped and attach-scoped tokens independently (section 9) |
 | 7 | A demo page, the developer-guide section, and the AOT measurement | The published sample renders the page byte-for-byte identically to the JIT build, and a minimal app publishes with no observables artifact |
 
@@ -731,9 +748,10 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | --- | --- |
 | **A raise dispatches over a snapshot** | A handler that removes itself, and one that adds another, both leave the current dispatch's remaining handlers running and the next dispatch reflecting the change. |
 | **One entry, one identity** | Two `GetNamed` calls for one key return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). `RaiseNamedEvent` reaches the handler of a watched key and does nothing at all for an unwatched one. The cost claim - one lookup, no entry, no allocation - is a measurement on the same day the read costs are measured, not a test, because "no entry was created" is not observable through the public API. |
-| **Cold work costs nothing** | `CreateExpression` runs the function zero times; an expression with no handlers has zero dependency hooks (asserted on a counting source), collects nothing (collection is suspended for it, so its reads do not reach an enclosing run) and re-runs on every read; attaching the first handler runs it once more and stops the re-running. |
+| **Cold work costs nothing** | `CreateExpression` runs the function zero times; an expression with no handlers has zero subscriptions (asserted on a counting source) and re-runs on every read - a cold read being a read with no run in progress, so there is nothing to collect; attaching the first handler runs it once more, subscribes that run, and stops the re-running. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
-| **A failed run still yields its dependencies** | `CollectDependencies(() => { read; throw new ...; })` returns the sources it read before the throw and `IsFaulted` true, and `Throw()` rethrows that exact instance; the `Func<T>` form adds a `Value` that throws the same instance, rethrown with its original stack. That is what lets the seam hook the set and then fail. |
+| **A read subscribes as it reads** | A counting source read inside a `CollectDependencies` body reports one handler **from inside the body**, before the read returns; a raise afterwards reaches the caller's handler, and disposing the run leaves zero handlers. Reading a cold expression from inside somebody else's run runs it once, not twice, and the next read of it is a field. |
+| **A failed run still yields its dependencies** | `CollectDependencies(() => { read; throw new ...; })` returns the sources it read before the throw, `IsFaulted` true, and still subscribed to them; `Throw()` rethrows that exact instance, and the `Func<T>` form adds a `Value` that throws the same instance with its original stack. That is what lets a render fail and still be listening to what could revive it. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
 | **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression raising (a new exception is a changed result) and throwing on every read, with nothing thrown at anybody during the run itself; a cycle throws with the chain named; a write inside a scope throws; and every use after `Dispose` throws `ObjectDisposedException` - read, write, raise, or register. Nothing is reported anywhere, which is asserted by the absence of an application dependency in the package (section 8.1). |
 | **Disposal is ordered, and the order is observable** | A handler registered on a value source sees `IsDisposed` true and gets `ObjectDisposedException` if it reads `Value` during the final notification, while a handler that only counts the notification sees it exactly once - so "dead first, then one raise, then the list is cleared" is asserted rather than assumed. An expression whose dependency is disposed raises in turn, with the `ObjectDisposedException` as its cached result. Afterwards, `Value`, `RaiseEvent` and registration all throw while removing a handler and disposing again stay safe. |
@@ -745,9 +763,9 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | Step | State | Notes |
 | --- | --- | --- |
 | 1 | Done | The package, the four interfaces, `CreateValue`/`ObservableValue<T>` and snapshot dispatch, plus the read scope the collectors will use. Sixteen tests, no reference to Kolvir, and the package packs three `lib/` folders with an empty dependency group each |
-| 2 | Done | `Collected`/`Collected<T>` and the two `CollectDependencies` overloads over the scope stack. Twelve tests, including nested isolation, reference-identity de-duplication, and the scope being restored when a body throws |
-| 3 | Done | `CreateExpression` in both forms, `ObservableExpression<T>` with the cold/hot states, unhook-run-hook, cached exceptions, the value comparer and the exception comparer. Fifteen tests, including conditional re-collection and the comparer suppressing a repeat without suppressing the update |
+| 2 | Done | `Collected`/`Collected<T>` and the two `CollectDependencies` overloads over the scope stack, subscribing as the body reads and disposed to stop listening. Fourteen tests, including nested isolation, reference-identity de-duplication, the scope being restored when a body throws, and the mutation guard |
+| 3 | Done | `CreateExpression` in both forms, `ObservableExpression<T>` with the cold/hot states, release-run-resubscribe, cached exceptions, the value comparer, the exception comparer and the self-read refusal. Twenty-four tests, including conditional re-collection, the comparer suppressing a repeat without suppressing the update, and an outer expression turning a cold inner one hot by reading it |
 | 4 | Not started | |
-| 5 | Not started | |
+| 5 | In progress | The mutation guard and the self-read refusal are in, because subscribing at read time made both load-bearing. The multi-expression cycle chain is not |
 | 6 | Not started | |
 | 7 | Not started | |

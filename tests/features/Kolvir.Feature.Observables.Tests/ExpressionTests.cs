@@ -68,15 +68,24 @@ public sealed class ExpressionTests
         // Isolation: the outer run hears about the inner expression changing through the expression, so
         // it re-evaluates once per inner change rather than once per deep dependency.
         var value = Observable.CreateValue(1);
-        var expression = Observable.CreateExpression(() => value.Value * 2);
-
-        var run = Observable.CollectDependencies(() =>
+        var runs = 0;
+        var expression = Observable.CreateExpression(() =>
         {
-            _ = expression.Value;
+            runs++;
+            return value.Value * 2;
         });
+
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = expression.Value;
+            },
+            _ => { });
 
         Assert.AreEqual(1, run.Dependencies.Count, "one dependency, not two");
         Assert.AreSame(expression, run.Dependencies[0], "and it is the expression, not what it reads");
+        Assert.AreEqual(1, runs, "and the read ran it once, not once for the read and again for the "
+            + "subscription the run took on it");
     }
 
     [TestMethod]
@@ -342,6 +351,35 @@ public sealed class ExpressionTests
     }
 
     [TestMethod]
+    public void AReadFromInsideARunLeavesTheExpressionSubscribed()
+    {
+        // Reads subscribe as they happen, so the expression is hot by the time the read returns: the value
+        // handed back is the one it keeps, and a second read is a field rather than another run. Before
+        // that, the read was an unmonitored run whose result was thrown away and recomputed the moment the
+        // outer run subscribed.
+        var runs = 0;
+        var value = Observable.CreateValue(1);
+        var expression = Observable.CreateExpression(() =>
+        {
+            runs++;
+            return value.Value * 2;
+        });
+
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = expression.Value;
+            },
+            _ => { });
+
+        Assert.AreEqual(1, run.Dependencies.Count, "the outer run depends on the expression");
+        Assert.AreEqual(1, runs, "and the read ran it exactly once");
+
+        Assert.AreEqual(2, expression.Value, "the value it kept");
+        Assert.AreEqual(1, runs, "so the next read is a field, because the subscription is already there");
+    }
+
+    [TestMethod]
     public void AColdExpressionReadByAColdExpressionStillReachesTheTop()
     {
         // The notification path has to survive two cold links, which is the case a suspended collection
@@ -385,6 +423,30 @@ public sealed class ExpressionTests
 
         Assert.AreEqual(1, raised, "the transient inner expression still carried the change up");
         Assert.AreEqual(11, outer.Value, "and the outer rebuilt it around the new value");
+    }
+
+    [TestMethod]
+    public void AnExpressionThatDependsOnItselfIsRefused()
+    {
+        // A cycle would evaluate forever. Refused where it is detected, with the expression named, rather
+        // than left to exhaust the stack - and on the hot path it lands in the cache like any other
+        // failure, so a read throws it instead of returning a value that was never computed.
+        IObservableValue<int>? self = null;
+        self = Observable.CreateExpression(() => self!.Value + 1);
+
+        var cold = Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = self!.Value,
+            "a cold read of a cycle is refused");
+
+        StringAssert.Contains(cold.Message, "depends on itself", "and says what the problem is");
+
+        self.AddObservableEventRaisedHandler(_ => { });
+
+        var hot = Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = self.Value,
+            "and once it is hot the same failure is the cached result");
+
+        StringAssert.Contains(hot.Message, "depends on itself", "with the same message");
     }
 
     [TestMethod]

@@ -52,6 +52,11 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
         {
             ObjectDisposedException.ThrowIf(_isDisposed, this);
 
+            // A write from inside a function is refused rather than raised: it would re-enter the run
+            // that is collecting, and the set that run is halfway through would no longer describe what
+            // happened.
+            ReadScope.EnsureNotCollecting("An observable value was assigned");
+
             // An event means something a listener cares about is different, so a write that changes
             // nothing is not one.
             if (EqualityComparer<T>.Default.Equals(_value, value))
@@ -102,6 +107,7 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
     public void RaiseEvent()
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
+        ReadScope.EnsureNotCollecting("An observable event was raised");
 
         RaiseToHandlers();
     }

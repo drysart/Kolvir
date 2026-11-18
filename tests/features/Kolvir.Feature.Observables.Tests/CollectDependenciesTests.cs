@@ -1,8 +1,8 @@
 namespace Kolvir.Observables.Tests;
 
 /// <summary>
-/// The collector: one synchronous run, the distinct sources it read in the order it read them, and the
-/// set that comes back even when the body threw.
+/// The collector: one synchronous run, the sources it read in the order it read them, a subscription to
+/// each of them taken as it read, and the set that comes back even when the body threw.
 /// </summary>
 [TestClass]
 [TestCategory("Observables")]
@@ -14,11 +14,13 @@ public sealed class CollectDependenciesTests
         var first = Observable.CreateValue(1);
         var second = Observable.CreateValue(2);
 
-        var run = Observable.CollectDependencies(() =>
-        {
-            _ = first.Value;
-            _ = second.Value;
-        });
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = first.Value;
+                _ = second.Value;
+            },
+            _ => { });
 
         Assert.AreEqual(2, run.Dependencies.Count, "both reads were collected");
         Assert.AreSame(first, run.Dependencies[0], "in the order the body read them");
@@ -30,7 +32,7 @@ public sealed class CollectDependenciesTests
     [TestMethod]
     public void CollectingAnEmptyBodyReportsNothing()
     {
-        var run = Observable.CollectDependencies(() => { });
+        using var run = Observable.CollectDependencies(() => { }, _ => { });
 
         Assert.AreEqual(0, run.Dependencies.Count, "a body that read nothing depends on nothing");
         Assert.IsFalse(run.IsFaulted, "and it finished");
@@ -39,17 +41,19 @@ public sealed class CollectDependenciesTests
     [TestMethod]
     public void DuplicatesCollapseToTheirFirstRead()
     {
-        // A body that reads a value in a loop must report one dependency, or every expression over a
-        // collection would hook the same source once per item.
+        // A body that reads a value in a loop must report one dependency and take one subscription, or
+        // every expression over a collection would subscribe to the same source once per item.
         var value = Observable.CreateValue(1);
 
-        var run = Observable.CollectDependencies(() =>
-        {
-            for (var i = 0; i < 5; i++)
+        using var run = Observable.CollectDependencies(
+            () =>
             {
-                _ = value.Value;
-            }
-        });
+                for (var index = 0; index < 5; index++)
+                {
+                    _ = value.Value;
+                }
+            },
+            _ => { });
 
         Assert.AreEqual(1, run.Dependencies.Count, "read five times, collected once");
         Assert.AreSame(value, run.Dependencies[0], "and it is the source itself");
@@ -61,10 +65,12 @@ public sealed class CollectDependenciesTests
         var value = Observable.CreateValue("hello");
         IObservableValue untyped = value;
 
-        var run = Observable.CollectDependencies(() =>
-        {
-            _ = untyped.Value;
-        });
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = untyped.Value;
+            },
+            _ => { });
 
         Assert.AreEqual(1, run.Dependencies.Count, "a consumer that reads through the untyped view is "
             + "tracked like one that reads the typed one");
@@ -82,12 +88,17 @@ public sealed class CollectDependenciesTests
         var outerAfter = Observable.CreateValue(3);
         Collected? inner = null;
 
-        var outer = Observable.CollectDependencies(() =>
-        {
-            _ = outerBefore.Value;
-            inner = Observable.CollectDependencies(() => { _ = innerOnly.Value; });
-            _ = outerAfter.Value;
-        });
+        using var outer = Observable.CollectDependencies(
+            () =>
+            {
+                _ = outerBefore.Value;
+                inner = Observable.CollectDependencies(() =>
+                {
+                    _ = innerOnly.Value;
+                }, _ => { });
+                _ = outerAfter.Value;
+            },
+            _ => { });
 
         Assert.IsNotNull(inner, "the inner run happened");
         Assert.AreEqual(1, inner!.Dependencies.Count, "the inner run sees only what it read");
@@ -106,35 +117,111 @@ public sealed class CollectDependenciesTests
 
         _ = outside.Value;
 
-        var run = Observable.CollectDependencies(() =>
-        {
-            _ = inside.Value;
-        });
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = inside.Value;
+            },
+            _ => { });
 
         Assert.AreEqual(1, run.Dependencies.Count, "a read with no run to publish to goes nowhere");
         Assert.AreSame(inside, run.Dependencies[0], "and the run collected only its own");
     }
 
     [TestMethod]
+    public void CollectingSubscribesWhileItReadsRatherThanAfterwards()
+    {
+        // The whole point of the shape: by the time a read returns, the source is already being watched,
+        // so there is no window in which the body has the value and is not listening to what produced it.
+        var probe = new CountingSource();
+        var handlersSeenDuringTheBody = -1;
+        var raised = 0;
+
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                ((IObservableEventSource)probe).DependUpon();
+                handlersSeenDuringTheBody = probe.ActiveHandlers;
+            },
+            _ => raised++);
+
+        Assert.AreEqual(1, handlersSeenDuringTheBody, "subscribed before the read returned");
+        Assert.AreEqual(1, run.Dependencies.Count, "and reported as a dependency");
+
+        probe.RaiseEvent();
+
+        Assert.AreEqual(1, raised, "so a raise reaches the handler the run was given");
+    }
+
+    [TestMethod]
+    public void DisposingTheRunStopsListening()
+    {
+        var probe = new CountingSource();
+        var raised = 0;
+        var run = Observable.CollectDependencies(
+            () => ((IObservableEventSource)probe).DependUpon(),
+            _ => raised++);
+
+        run.Dispose();
+
+        Assert.AreEqual(0, probe.ActiveHandlers, "the subscriptions went with it");
+
+        probe.RaiseEvent();
+        Assert.AreEqual(0, raised, "so a raise afterwards reaches nobody");
+
+        run.Dispose();
+
+        Assert.AreEqual(0, probe.ActiveHandlers, "and disposing twice is not an error");
+    }
+
+    [TestMethod]
+    public void AChangeMadeInsideTheBodyIsRefused()
+    {
+        // A function has to be a pure function of what it read. The write would re-enter the run that is
+        // collecting, so it is refused rather than recorded into a set that no longer describes it.
+        var value = Observable.CreateValue(1);
+
+        using var written = Observable.CollectDependencies(() => value.Value = 2, _ => { });
+
+        Assert.IsTrue(written.IsFaulted, "the write was refused");
+        Assert.IsInstanceOfType<InvalidOperationException>(written.Fault, "with a message about why");
+        Assert.AreEqual(1, value.Value, "and the value was left alone");
+        Assert.AreEqual(0, written.Dependencies.Count, "and nothing was read, so nothing was subscribed");
+
+        using var raised = Observable.CollectDependencies(
+            () => ((IObservableEventSource)value).RaiseEvent(),
+            _ => { });
+
+        Assert.IsInstanceOfType<InvalidOperationException>(raised.Fault, "a raise from inside a run is refused too");
+    }
+
+    [TestMethod]
     public void TheSetComesBackWhenTheBodyThrows()
     {
         // The dependencies a run reached are what its result - success or exception - was computed from,
-        // so they come back with the failure instead of being replaced by it.
+        // so they come back with the failure, and so does the subscription to them.
         var read = Observable.CreateValue(1);
         var never = Observable.CreateValue(2);
         var thrown = new InvalidOperationException("boom");
+        var raised = 0;
 
-        var run = Observable.CollectDependencies(() =>
-        {
-            _ = read.Value;
-            throw thrown;
-        });
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = read.Value;
+                throw thrown;
+            },
+            _ => raised++);
 
         Assert.AreEqual(1, run.Dependencies.Count, "what it read before throwing is in the set");
         Assert.AreSame(read, run.Dependencies[0], "and what it never reached is not");
         Assert.IsTrue(run.IsFaulted, "the failure is recorded rather than thrown");
         Assert.AreSame(thrown, run.Fault, "the original instance, for a caller that wants to inspect it");
-        Assert.IsFalse(run.Dependencies.Contains(never), "the unread value is not there");
+
+        read.Value = 5;
+
+        Assert.AreEqual(1, raised, "and the run is still watching what it reached, which is what can "
+            + "make the failure go away");
 
         var rethrown = Assert.ThrowsExactly<InvalidOperationException>(run.Throw, "Throw rethrows it");
 
@@ -144,7 +231,7 @@ public sealed class CollectDependenciesTests
     [TestMethod]
     public void ThrowDoesNothingWhenTheBodyFinished()
     {
-        var run = Observable.CollectDependencies(() => { });
+        using var run = Observable.CollectDependencies(() => { }, _ => { });
 
         run.Throw();
 
@@ -157,7 +244,7 @@ public sealed class CollectDependenciesTests
         var first = Observable.CreateValue(1);
         var second = Observable.CreateValue(2);
 
-        var run = Observable.CollectDependencies(() => first.Value + second.Value);
+        using var run = Observable.CollectDependencies(() => first.Value + second.Value, _ => { });
 
         Assert.AreEqual(3, run.Value, "the result comes back beside the set");
         Assert.AreEqual(2, run.Dependencies.Count, "with both reads");
@@ -166,18 +253,18 @@ public sealed class CollectDependenciesTests
     [TestMethod]
     public void TheTypedFormThrowsThroughValue()
     {
-        // Reading Value is how the two halves are used together: hook the set, then read the result. A
-        // render that threw therefore still ends up listening to what it read.
         var read = Observable.CreateValue(1);
         var thrown = new InvalidOperationException("boom");
 
-        var run = Observable.CollectDependencies<int>(() =>
-        {
-            _ = read.Value;
-            throw thrown;
-        });
+        using var run = Observable.CollectDependencies<int>(
+            () =>
+            {
+                _ = read.Value;
+                throw thrown;
+            },
+            _ => { });
 
-        Assert.AreEqual(1, run.Dependencies.Count, "the set is there to hook first");
+        Assert.AreEqual(1, run.Dependencies.Count, "the run is subscribed to what it read first");
 
         var rethrown = Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = run.Value,
@@ -191,15 +278,17 @@ public sealed class CollectDependenciesTests
     public void TheScopeIsRestoredWhenTheBodyThrows()
     {
         // The scope is restored in a finally. If it were not, the failed run's scope would still be
-        // current and every later read in the process would join a set that has already been handed out.
+        // current, and every later read in the process would join a set that has already been handed out.
         var first = Observable.CreateValue(1);
         var later = Observable.CreateValue(2);
 
-        var run = Observable.CollectDependencies(() =>
-        {
-            _ = first.Value;
-            throw new InvalidOperationException("boom");
-        });
+        using var run = Observable.CollectDependencies(
+            () =>
+            {
+                _ = first.Value;
+                throw new InvalidOperationException("boom");
+            },
+            _ => { });
 
         _ = later.Value;
 
@@ -211,21 +300,23 @@ public sealed class CollectDependenciesTests
     public void ALargeReadSetStillDeDuplicatesAndKeepsItsOrder()
     {
         // Past the scope's scan limit it hashes instead of scanning. The two have to agree: no
-        // duplicates, and first-read order either way.
+        // duplicates, no second subscription, and first-read order either way.
         var values = Enumerable.Range(0, 40).Select(index => Observable.CreateValue(index)).ToArray();
 
-        var run = Observable.CollectDependencies(() =>
-        {
-            foreach (var value in values)
+        using var run = Observable.CollectDependencies(
+            () =>
             {
-                _ = value.Value;
-            }
+                foreach (var value in values)
+                {
+                    _ = value.Value;
+                }
 
-            foreach (var value in values)
-            {
-                _ = value.Value;
-            }
-        });
+                foreach (var value in values)
+                {
+                    _ = value.Value;
+                }
+            },
+            _ => { });
 
         Assert.AreEqual(values.Length, run.Dependencies.Count, "read twice, collected once each");
 
@@ -233,18 +324,5 @@ public sealed class CollectDependenciesTests
         {
             Assert.AreSame(values[index], run.Dependencies[index], "first-read order survives the switch to hashing");
         }
-    }
-
-    [TestMethod]
-    public void CollectingDoesNotSubscribe()
-    {
-        // The collector reports; hooking is the caller's decision and the caller's token. The component
-        // seam depends on that split, because it hooks only after it knows the whole set.
-        var probe = new CountingSource();
-
-        var run = Observable.CollectDependencies(() => ((IObservableEventSource)probe).DependUpon());
-
-        Assert.AreEqual(1, run.Dependencies.Count, "the read was collected");
-        Assert.AreEqual(0, probe.Registrations, "and the collector registered nothing");
     }
 }
