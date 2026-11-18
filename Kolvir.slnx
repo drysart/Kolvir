@@ -27,6 +27,7 @@
     <Project Path="src/features/Kolvir.Feature.Audio/Kolvir.Feature.Audio.csproj" />
     <Project Path="src/features/Kolvir.Feature.Badges/Kolvir.Feature.Badges.csproj" />
     <Project Path="src/features/Kolvir.Feature.DragDrop/Kolvir.Feature.DragDrop.csproj" />
+    <Project Path="src/features/Kolvir.Feature.Observables/Kolvir.Feature.Observables.csproj" />
     <Project Path="src/features/Kolvir.Feature.Svg/Kolvir.Feature.Svg.csproj" />
     <Project Path="src/features/Kolvir.Feature.VirtualDom/Kolvir.Feature.VirtualDom.csproj" />
     <Project Path="src/features/Kolvir.Feature.WoffFonts/Kolvir.Feature.WoffFonts.csproj" />
@@ -49,6 +50,7 @@
     <Project Path="tests/features/Kolvir.Feature.Badges.Tests.Windows/Kolvir.Feature.Badges.Tests.Windows.csproj" />
     <Project Path="tests/features/Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj" />
     <Project Path="tests/features/Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj" />
+    <Project Path="tests/features/Kolvir.Feature.Observables.Tests/Kolvir.Feature.Observables.Tests.csproj" />
     <Project Path="tests/features/Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj" />
     <Project Path="tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj" />
     <Project Path="tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj" />

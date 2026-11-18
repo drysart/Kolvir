@@ -37,6 +37,20 @@
     <WarningsAsErrors Condition="'$(ShipsToConsumers)' == 'true'">$(WarningsAsErrors);CS1591</WarningsAsErrors>
   </PropertyGroup>
 
+  <!-- The feature packages list their platform frameworks so that one `dotnet pack` produces every
+       `lib/` folder, and each has a property a test project narrows instead of the framework list:
+       KolvirVirtualDomFrameworks, KolvirObservablesFrameworks, KolvirBadgeFrameworks. Two of them have
+       to travel together, because the virtual DOM feature references the observables one: restoring
+       `-p:KolvirVirtualDomFrameworks=net10.0` narrows the package that was named and leaves the package
+       it references listing all three, which evaluates the observables net10.0-macos inner build and
+       stops a CI runner - or a developer machine - with NETSDK1147 on a workload it deliberately does
+       not install. Deriving one from the other is what keeps the documented one-property narrowing
+       working through the reference graph. An explicit -p:KolvirObservablesFrameworks still wins,
+       because the derivation only fills an empty value. -->
+  <PropertyGroup Condition="'$(KolvirObservablesFrameworks)' == '' and '$(KolvirVirtualDomFrameworks)' != ''">
+    <KolvirObservablesFrameworks>$(KolvirVirtualDomFrameworks)</KolvirObservablesFrameworks>
+  </PropertyGroup>
+
   <!-- A NuGet consumer imports buildTransitive/Kolvir.props from the package automatically. This
 	   repository's projects reference Kolvir by project instead, and a ProjectReference imports no
 	   build assets at all, so the same file is imported here. Keeping the two routes identical is

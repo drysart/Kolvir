@@ -1,0 +1,53 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4, and rung 3
+       because change notification is a way of building an application rather than a control: an
+       application that reads its models directly should not carry it. Everything here is portable
+       object graph work over the BCL, so `common/` holds all of it and the platform folders stay
+       empty - they exist because the `lib/` folders and dependency groups come from these same inner
+       builds. -->
+  <PropertyGroup>
+    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <!-- A test project that wants one framework narrows the list here instead:
+         `-p:KolvirObservablesFrameworks=net10.0`. `-p:TargetFramework=` cannot do it here, because a
+         global TargetFramework also overrides the single-framework projects underneath and leaves
+         the answer restored for one framework and built for another. Same shape and same reason as
+         KolvirBadgeFrameworks and KolvirVirtualDomFrameworks. -->
+    <TargetFrameworks Condition="'$(KolvirObservablesFrameworks)' != ''">$(KolvirObservablesFrameworks)</TargetFrameworks>
+    <RootNamespace>Kolvir.Observables</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- AOT compatible for the same reason the library is: an application that opts in publishes the
+         same way whether it did or not. There is no reflection here at all - a dependency set is the
+         observables a function actually read, which the code learns by being told, not by looking. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Change notification for Kolvir data models: values, expressions and named dependencies that a component can watch, with no reference to Kolvir itself.</Description>
+  </PropertyGroup>
+
+  <!-- Deliberately no reference to Kolvir. This package is a data-model library over the BCL, which is
+       what makes it usable in a test, a console host or a server process as much as in a UI: it has no
+       report channel to hand a failure to, no policy to impose, and no dependency on a control, a host
+       or an application (dev-docs/OBSERVABLES.md sections 8.1 and 12.1). The virtual DOM feature
+       references this one, not the other way round. -->
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. The platform folders
+       are empty, so the includes below match nothing. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>
