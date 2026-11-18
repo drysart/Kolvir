@@ -59,6 +59,7 @@ Non-goals, for this plan:
 ## 2. The type model
 
 ```
+
 IObservableEventSource                      "something happened" - the dependency primitive
   bool IsDisposed { get; }
   IDisposable AddObservableEventRaisedHandler(Action<IObservableEventSource> handler)
@@ -110,7 +111,7 @@ in another assembly needs it.
 | --- | --- |
 | **A write of an equal value raises nothing.** | The whole point of an event is that something a listener cares about is different. A model that recomputes and assigns 42 over 42 should not wake anything up, and a setter that always raises would make every "changed" handler an "assigned" handler. |
 | **Equality is `EqualityComparer<T>.Default`.** | The best comparer available is the type's own: `IEquatable<T>`, `override Equals`, or the operator-free default for structs. It is also what every other equality decision in the library uses, so a record's value semantics work with no ceremony. An optional `IEqualityComparer<T>` overload covers the rest (a case-insensitive string, a key rather than a whole object). |
-| **An expression compares its result the same way - except for exceptions.** | The dependencies that produced the value are still the dependencies that produce it, and they can change without the *result* changing (section 3.6). Only the raise is conditional. An exception result is the one case where a "result" is not comparable: it is never equal to a value, and never equal to another exception, because a reader may branch on its details (section 3.7). |
+| **An expression compares its result the same way - except for exceptions.** | The dependencies that produced the value are still the dependencies that produce it, and they can change without the *result* changing (section 3.6). Only the raise is conditional. An exception result is the one case a reader may care about in detail, so it is compared by identity unless the expression is given its own `IEqualityComparer<Exception>`, and it is never equal to a value (section 3.7). |
 
 ### 3.2 Named dependencies are event sources, not values
 
@@ -222,14 +223,30 @@ two states:
   started by the first handler registers without raising to the handler that caused it (becoming hot
   raises nothing, 3.6). Whoever needs the value finds out when it reads it, which is where the
   exception belongs anyway.
-- **Every difference in the result is a change, including one exception replacing another.** A reader
-  can branch on the exception it finds - its type, its message, an inner exception, a data entry - so
-  "still failing, differently" is not the same result and subscribing to it must say so. Two
-  exceptions are therefore never equal to each other: the comparison is identity by construction (a
-  run that throws builds a new exception), so a broken expression raises on each re-run that fails, and
-  a value and an exception are never equal either. The alternative - comparing type and message to
-  suppress repeats - is a guess about which details a reader cares about, and it is wrong exactly when
-  the detail that changed is the one that mattered.
+- **By default every difference in the result is a change, including one exception replacing another.**
+  A reader can branch on the exception it finds - its type, its message, an inner exception, a data
+  entry - so "still failing, differently" is not the same result and subscribing to it must say so.
+  With no comparer supplied, two exceptions are never equal to each other, because a run that throws
+  builds a new exception, so a broken expression raises on each re-run that fails. A value and an
+  exception are never equal under any comparer: only two exceptions are compared as exceptions.
+- **An exception comparer is how an application decides that, and it is a judgement, not a default.**
+  `CreateExpression` takes an optional `IEqualityComparer<Exception>`; the layer has no opinion about
+  which exception details matter, because that is app-specific knowledge - a service that already
+  reported "backend unavailable" twice does not want the second wait to look like progress, while a
+  reader that switches on the message does. Suppressing a repeat affects only the notification: the new
+  exception still replaces the cached one, so a read after a suppressed raise throws the newest
+  exception, not the one the comparer called equivalent.
+
+```csharp
+// Collapse a repeated failure into one notification, while a read after it still gets the
+// newest exception.
+var total = Observable.CreateExpression(
+    () => _service.Total(),
+    exceptionComparer: EqualityComparer<Exception>.Create(
+        (a, b) => a.GetType() == b.GetType() && a.Message == b.Message),
+    name: "service total");
+```
+
 - **The report happens once, at the point of evaluation,** through
   `Application.HandleNativeBoundary` - the same place a render's failure goes. Not when a *read*
   started the run: that caller is already getting the exception, and reporting it as well would
@@ -312,7 +329,7 @@ var wordCount = Observable.CreateExpression(
 | Member | Returns | Notes |
 | --- | --- | --- |
 | `Observable.CreateValue<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
-| `Observable.CreateExpression<T>(Func<T>, string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). Optional comparer overload. |
+| `Observable.CreateExpression<T>(Func<T>, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null, string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). The first comparer decides when two `T` results are the same and the second when two exceptions are (3.7); null means `EqualityComparer<T>.Default` and, for exceptions, never equal. |
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
@@ -401,7 +418,7 @@ Two things this gets for free, and one it must respect:
 | `INotifyPropertyChanged` and string property names | The failure this layer exists to avoid: a typo is a compile error here and silence there, and a handler cannot know what a caller actually read. |
 | `System.IObservable<T>` / `IObserver<T>` and `Subscribe` | The name collides outright with the BCL's generic interface in any file that has `using System;` (measured: CS0104), and Rx's contract - a sequence with completion and errors on a subscription - describes a stream, not a mutable value and its readers. `IsDisposed` plus a final raise borrows the useful part of the completion story without the subscription type. |
 | Weak references between a source and its handlers | Every read of the graph would test and resurrect, and the semantics of "the handler went away" would have to be invented. Explicit tokens and disposal (section 3.10) put the cost where the mistake is. |
-| Comparing exceptions by type and message, to suppress "still failing" notifications | A reader may branch on any detail of the exception it finds, so suppressing a differing one would tell a subscriber "no change" about a result that changed. The rule chosen is identity - a run that throws builds a new exception, so a failing re-run is always a change (section 3.7). |
+| Hard-coding an exception comparison - type and message - to suppress "still failing" notifications | A reader may branch on any detail of the exception it finds, so no built-in comparison can be right for every application: one wants repeats collapsed, another wants the message to matter. The comparison is therefore an optional `IEqualityComparer<Exception>` on the expression (section 3.7), and the default is identity - a failing re-run is a change. |
 | Named dependencies that carry a value | A value that lives in an evictable entry resets when the last listener leaves - and eviction happens in the middle of a re-evaluation that unhooks before re-hooking (section 3.2). The event-only form has no such state to lose. |
 | Disposal that clears handlers silently, with no final raise | Simpler, and the alternative chosen is a judgement call: a final raise makes a dependency's death visible to whoever was watching instead of quietly freezing a derived value. Worth confirming (section 11). |
 | Lazy, pull-on-read evaluation for all expressions | Glitch-free and no wasted runs, but every read becomes a recursive walk and every value needs a dirty flag. Section 3.6's cold/hot split gets the useful half of it (no work when nobody watches) without that cost. |
@@ -417,10 +434,11 @@ Two things this gets for free, and one it must respect:
 - **A wide graph re-runs often.** One change re-runs every hot expression that depends on it, and
   each of those may raise to its own subscribers. To be measured on a realistic page; the escape
   hatches are the comparer (stop the cascade) and coalescing at the component.
-- **A broken expression raises on every re-run.** Once an exception is a cached result, each failing run
-  hands out a new one, and a new exception is a changed result (section 3.7). A dependency that
-  churns while a function is broken therefore notifies on every change. That is the honest rule - the
-  reader decides what a given exception means - and the alternative is a comparison that guesses.
+- **A broken expression raises on every re-run, unless it is told not to.** Each failing run hands out a
+  new exception, and by default a new exception is a changed result (section 3.7), so a dependency
+  that churns while a function is broken notifies on every change. An application that would rather
+  collapse repeats passes an `IEqualityComparer<Exception>`, which puts the judgement where the
+  knowledge is - but a comparer that is too loose hides a change a reader would have acted on.
 - **Equality is the trap for object results.** An expression returning a freshly built object that
   does not override `Equals` raises on every run. For `VNode` trees that is why the component seam
   measuring before it is called cheap.
@@ -443,7 +461,7 @@ Two things this gets for free, and one it must respect:
 | --- | --- | --- |
 | 1 | Package skeleton, the interfaces, the mutable value and snapshot dispatch | A value raises only when it actually changes; a handler can subscribe and unsubscribe during dispatch; a throwing handler does not stop the others |
 | 2 | The collector stack and `CollectDependencies` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope |
-| 3 | Expressions: cold/hot, caching, re-collection, equality | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
+| 3 | Expressions: cold/hot, caching, re-collection, equality, the exception comparer | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
 | 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
 | 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value |
 | 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, and stops listening to a value its render stopped reading |
@@ -483,7 +501,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | **Cold work costs nothing** | `CreateExpression` runs the function zero times; an expression with no handlers has zero dependency hooks (asserted on a counting source) and re-runs on every read; attaching the first handler runs it once more and stops the re-running. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
-| **Equality keeps the graph quiet, except for exceptions** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. A re-run that fails again does raise, because the replacement exception is a changed result (3.7). |
+| **Equality keeps the graph quiet, except for exceptions** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. A re-run that fails again raises by default, because the replacement exception is a changed result, and does not raise when the expression was given an `IEqualityComparer<Exception>` that calls the two equivalent - while a read after that still throws the newer exception (3.7). |
 | **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression reporting once, raising (a new exception is a changed result), and throwing on every read (there is nobody to throw at during the run itself); a cycle throws with the chain named; a write inside a scope throws; a read after `Dispose` throws `ObjectDisposedException`. |
 | **The seam re-renders on the frame after a change** | In the Virtual DOM suite: a component reading two model values renders once per frame however many of them changed, stops listening to a value its render stopped reading, and unhooks everything when detached. |
 | **AOT- and trim-clean** | The sample's published render is byte-identical to the JIT build's, and `Kolvir.Minimal` publishes with no observables artifact. The feature has no reflection, no `dynamic`, and no serializers, so this is expected rather than arranged. |
