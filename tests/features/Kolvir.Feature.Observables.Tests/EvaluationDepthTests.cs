@@ -1,12 +1,12 @@
 namespace Kolvir.Observables.Tests;
 
 /// <summary>
-/// The one limit on a runaway graph: raises nest, a chain of them is counted, and the raise past the
-/// limit is refused instead of exhausting the stack.
+/// The one limit on a runaway graph: raises and cold reads nest, both are counted in one depth, and the
+/// step past the limit is refused instead of exhausting the stack.
 /// </summary>
 [TestClass]
 [TestCategory("Observables")]
-public sealed class RaiseDepthTests
+public sealed class EvaluationDepthTests
 {
     [TestMethod]
     public void TheLimitIsFiftyByDefaultAndRefusesLessThanOne()
@@ -96,6 +96,83 @@ public sealed class RaiseDepthTests
 
         Assert.AreEqual(2, raised, "ordinary raises work again, counted from zero");
         Assert.AreEqual(2, other.Value, "with their writes landing");
+    }
+
+    [TestMethod]
+    public void AColdReadOfAnExpressionThatReadsItselfIsRefused()
+    {
+        // The loop the raise depth cannot see: nothing is subscribed, so a read is a plain run, and a
+        // function that reads its own expression runs itself until the stack dies. Counting the run in
+        // the same depth as a raise is what turns that crash into a message.
+        IObservableValue<int>? self = null;
+        self = Observable.CreateExpression(() => self!.Value + 1);
+
+        var thrown = Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = self!.Value,
+            "the run is refused instead of recursing");
+
+        StringAssert.Contains(thrown.Message, "cold read", "and names the step that was refused");
+        StringAssert.Contains(thrown.Message, "MaxEventStackSize", "and the limit");
+    }
+
+    [TestMethod]
+    public void AColdReadOfTwoExpressionsThatReadEachOtherIsRefused()
+    {
+        // The same loop with no expression on it twice in a row, so nothing could notice by name.
+        IObservableValue<int>? first = null;
+        IObservableValue<int>? second = null;
+        first = Observable.CreateExpression(() => second!.Value + 1);
+        second = Observable.CreateExpression(() => first!.Value + 1);
+
+        var thrown = Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = first!.Value,
+            "two expressions reading each other are refused as well");
+
+        StringAssert.Contains(thrown.Message, "MaxEventStackSize", "with the limit named");
+    }
+
+    [TestMethod]
+    public void ALegitimateChainOfColdReadsCountsAgainstTheSameLimit()
+    {
+        // Not a loop, just depth: three derived values read from the top nest three deep, because a cold
+        // read of each runs it. The limit covers this chain and a chain of raises with one number, which
+        // is what makes a chain that alternates between them bounded too.
+        var leaf = Observable.CreateValue(1);
+        var first = Observable.CreateExpression(() => leaf.Value + 1);
+        var second = Observable.CreateExpression(() => first.Value + 1);
+        var third = Observable.CreateExpression(() => second.Value + 1);
+
+        try
+        {
+            Observable.MaxEventStackSize = 2;
+
+            Assert.ThrowsExactly<InvalidOperationException>(
+                () => _ = third.Value,
+                "a limit below the chain's depth refuses it, exactly as it would a chain of raises");
+
+            Observable.MaxEventStackSize = 50;
+
+            Assert.AreEqual(4, third.Value, "and the same chain is fine under the default");
+        }
+        finally
+        {
+            Observable.MaxEventStackSize = 50;
+        }
+    }
+
+    [TestMethod]
+    public void TheDepthGoesBackToZeroAfterARefusedColdRead()
+    {
+        // Same requirement as for a raise: a refusal that left the depth or the overrun behind would
+        // refuse the next read in the application.
+        IObservableValue<int>? self = null;
+        self = Observable.CreateExpression(() => self!.Value + 1);
+
+        Assert.ThrowsExactly<InvalidOperationException>(() => _ = self!.Value);
+
+        var leaf = Observable.CreateValue(2);
+
+        Assert.AreEqual(3, Observable.CreateExpression(() => leaf.Value + 1).Value, "an ordinary read works");
     }
 
     [TestMethod]

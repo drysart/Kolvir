@@ -59,10 +59,17 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
 
     /// <inheritdoc/>
     /// <remarks>
+    /// <para>
     /// The read publishes <em>this</em> expression, not what it reads, which is what keeps nested runs
     /// isolated: an outer function that reads this one depends on it and hears about any change through
     /// it (section 3.3). And because a scope subscribes as it reads, a cold expression read from inside
     /// somebody else's run is hot by the time this returns - the value handed back is the one it keeps.
+    /// </para>
+    /// <para>
+    /// A cold read is a run, so it counts against <see cref="Observable.MaxEventStackSize"/> exactly as a
+    /// raise does: what the function reads may run in turn, and that is the one recursion no notification
+    /// would reveal (section 3.8).
+    /// </para>
     /// </remarks>
     public T Value
     {
@@ -75,8 +82,12 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
             // Cold, which now means "read with no run in progress": nothing is listening, so nothing is
             // maintaining the cache and this read is a run. There is no scope to report to either - if
             // there were, the read above would have made this expression hot - so nothing is collected.
+            // The run is counted against the same depth a raise is, because it nests the same way: what
+            // the function reads may run in turn.
             if (_handlers.IsEmpty)
             {
+                using var evaluation = Observable.EnterColdRead(this);
+
                 return _function();
             }
 

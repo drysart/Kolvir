@@ -27,7 +27,7 @@ public static partial class Observable
     /// <typeparam name="T">What the function returns.</typeparam>
     /// <param name="function">The function to evaluate. It is not run here.</param>
     /// <param name="name">
-    /// How this expression is described in a diagnostic message - the name a refused raise in a chain
+    /// How this expression is described in a diagnostic message - the name a refused step in a chain
     /// names as its source. Nothing looks it up; it is a label.
     /// </param>
     /// <param name="valueComparer">

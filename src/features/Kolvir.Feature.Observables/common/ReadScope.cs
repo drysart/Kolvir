@@ -13,7 +13,7 @@ namespace Kolvir.Observables;
 /// <para>
 /// Being in a scope says nothing about what a change may do. A body is free to write, and a write it
 /// made to something it had already read raises straight back into the run through the subscription
-/// that read took - a loop, stopped by the raise depth and not here (see
+/// that read took - a loop, stopped by the evaluation depth and not here (see
 /// <see cref="Observable.MaxEventStackSize"/>). The scope only collects.
 /// </para>
 /// <para>
