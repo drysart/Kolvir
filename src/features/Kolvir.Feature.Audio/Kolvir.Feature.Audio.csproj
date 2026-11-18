@@ -5,16 +5,11 @@
        use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
        platform. Nothing in this assembly runs unless an application calls AddAudio(). -->
   <PropertyGroup>
-    <!-- Every platform the feature supports, unconditionally, because `dotnet pack` is what makes the
-         package and it needs all three in one build. Narrow one inner build for local work with
-         `-p:KolvirAudioFrameworks=net10.0`; the plural `-p:TargetFrameworks=...` does not work as a
-         switch, because it reaches the restore graph and not the referenced projects' builds. An
-         application that references this project still builds only the inner build its own framework
-         can use. -->
-    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
-    <!-- The test project narrows the list here, so its restore does not evaluate the macOS inner build
-         on a machine without the macOS workload. -->
-    <TargetFrameworks Condition="'$(KolvirAudioFrameworks)' != ''">$(KolvirAudioFrameworks)</TargetFrameworks>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
     <RootNamespace>Kolvir.Audio</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

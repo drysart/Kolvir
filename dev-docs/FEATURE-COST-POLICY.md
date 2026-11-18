@@ -142,7 +142,10 @@ The project multi-targets every platform the feature supports, and each inner bu
 
 ```xml
 <PropertyGroup>
-  <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+  <!-- Every platform, which is what a package needs and what the pack job asks for by name.
+       Directory.Build.props gives every other build the platform it is running on plus the
+       portable framework. -->
+  <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
 </PropertyGroup>
 
 <ItemGroup>
@@ -176,23 +179,32 @@ move.
 
 A consuming solution is simpler than either alternative. The project reference is one unconditional
 line, and MSBuild builds only the inner build that matches the consuming project, so there is no
-host detection and no condition choosing which platform to reference. Only the feature project's own
-build enumerates all three, which matters in one case: a direct or solution build of the project
-needs the macOS workload, because that is the one platform whose reference assemblies do not come
-with the SDK. A machine without it fails with `NETSDK1147`. The development solution lists the
-feature project and `Kolvir.Backend.AppKit`, which carries the same requirement, so the workload is
-a prerequisite for building the solution and a contributor meets it once with
-`dotnet workload install macos`. That is a deliberate trade: the feature and the backend are visible
-in the IDE and compiled by the ordinary build, at the cost of one prerequisite, rather than being
-reachable only through the pack pipeline.
+host detection and no condition choosing which platform to reference.
 
-Only the macOS workload is actually a workload, so one macOS machine packs the whole package:
-`-p:EnableWindowsTargeting=true` brings the Windows reference pack to it, and the Linux framework
-needs nothing extra. Without the property the `net10.0-windows` inner build stops with `NETSDK1100`.
-For local work, `-p:TargetFramework=net10.0-windows` builds one inner build without editing the
-file; the plural `-p:TargetFrameworks=...` does not work as a narrowing switch, because a global
-property reaches the restore graph but not the referenced projects' own builds, so those build the
-frameworks they declare against assets restored for one, and the build stops with `NETSDK1005`.
+Which frameworks a build has at all is one property, `KolvirTargetFrameworks` in
+`Directory.Build.props`: the platform the build is running on plus the portable framework, and
+nothing else. The portable framework has to stay in the list because the suites are portable
+`net10.0` assemblies, and a `net10.0` project cannot bind a platform-only asset - NuGet refuses the
+pair outright, as `NU1201`. Linux has no platform framework of its own, so its list *is* `net10.0`.
+
+Two consequences are worth knowing. A build on macOS evaluates `net10.0-macos` and therefore needs
+the macOS workload, the one platform whose reference assemblies do not come with the SDK; without it
+the build fails with `NETSDK1147`, and a contributor on macOS meets that once with
+`dotnet workload install macos`. And because the list is computed in one place, a project cannot
+disagree with the project it references: the restore follows the same set through the whole graph.
+That is what keeps a stray `net10.0-macos` from dragging `Kolvir.Backend.AppKit`, and the workload
+with it, into a build that never asked for either - which is the failure the per-project framework
+lists used to cause on every runner.
+
+Packaging is the exception, and it says so by name:
+`-p:KolvirTargetFrameworks="net10.0-windows;net10.0-macos;net10.0"`, which is what the pack job
+passes. Only macOS is actually a workload, so one macOS machine packs the whole package: the same
+command with `-p:EnableWindowsTargeting=true` brings the Windows reference pack to it, and the Linux
+framework needs nothing extra. Without the property the `net10.0-windows` inner build stops with
+`NETSDK1100`. Setting the property is deliberately not the same as `-p:TargetFrameworks=...`: each
+project assigns `TargetFrameworks` from it, which a plural global property cannot do, because it
+reaches the restore graph but not the referenced projects' own builds - those then build frameworks
+they have no assets for and stop with `NETSDK1005`.
 
 Pin the macOS target framework version rather than writing the floating `net10.0-macos`. The packed
 `lib/` folder name carries whatever platform version the build machine's workload supplies, and an
@@ -271,8 +283,9 @@ The same rule governs the `lib/` folders, where the failure is worse because it 
 chooses one `lib/` folder per package per target framework, so a missing Windows folder is not an
 error: the `net10.0-windows` consumer compiles against the `net10.0` folder instead, and a Windows
 application ships the Linux assembly. A project that multi-targets cannot produce that shape by
-accident, because each folder is written by the same inner build that the `TargetFrameworks` list
-requires.
+accident at pack time either: a build defaults to the host's platform, so packing refuses to run
+unless the list is the full three (the guard in `Directory.Build.targets` names the property), and
+the folders are written by the same inner builds the list requires.
 
 #### The pack job
 

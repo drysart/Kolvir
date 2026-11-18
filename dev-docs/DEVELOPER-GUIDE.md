@@ -94,21 +94,22 @@ list that Windows has to evaluate; and a portable `net10.0` build *on a Mac* def
 One TFM per OS is what keeps `Program.cs`'s `#if` blocks honest.
 See [On macOS (AppKit)](#on-macos-appkit).
 
-Building `Kolvir.slnx` needs the macOS workload, because the solution lists
-`Kolvir.Backend.AppKit` and `Kolvir.Feature.DragDrop`, which both target `net10.0-macos`.
-`dotnet workload install macos` satisfies it where it is not already present; a build without it
-stops with `NETSDK1147`. Nothing else in the solution needs a workload, and an application that
-references either project still builds only the one inner build its own framework can use.
+Building `Kolvir.slnx` needs the macOS workload on any platform, because the solution lists
+`Kolvir.Backend.AppKit`, which targets `net10.0-macos` and nothing else. `dotnet workload install
+macos` satisfies it where it is not already present; a build without it stops with `NETSDK1147`.
+Nothing else in the solution needs one: the selector and every feature package list the host's
+platform plus the portable framework (`KolvirTargetFrameworks` in `Directory.Build.props`), so a
+Windows build has `net10.0-windows` and `net10.0` and never evaluates `net10.0-macos` at all. An
+application that references any of them still builds only the inner build its own framework can use.
 
 `Kolvir.Backend` is the way out of that `#if` for an application that wants nothing more than a
 default backend. It is a project that multi-targets and references exactly one backend per target
 framework, so referencing *it* is enough: the framework the application builds for decides which
 backend it gets, and a publish carries only that one. `KolvirBackend.CreateDefault()` returns the
 backend and loads the embedded Skia library on the way, so `Main` names no platform and no graphics
-library. `Kolvir.Minimal` is written that way. The selector's framework list is unconditional,
-because a selector that offered only the host's framework could not be packed for the others;
-restoring it therefore evaluates all three, and building the fixture needs the macOS workload on
-every platform, not just on the Mac.
+library. `Kolvir.Minimal` is written that way. The selector takes its framework list from the same
+property every package does, so referencing it costs a build only its own platform's backend;
+packing is the only thing that asks for all three, and it says so by name.
 has to read `--classic-menus` before it can build a backend.
 
 ## Design
@@ -231,26 +232,13 @@ dotnet test tests/core/Kolvir.Tests/Kolvir.Tests.csproj \
 A rung-3 feature is a package of its own, so its tests are an assembly of their own:
 
 ```
-dotnet test tests/features/Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj \
-  -p:TargetFramework=net10.0
-
-dotnet test tests/features/Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj \
-  -p:TargetFramework=net10.0
-
-dotnet test tests/features/Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj \
-  -p:TargetFramework=net10.0
-
-dotnet test tests/features/Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj \
-  -p:TargetFramework=net10.0
-
-dotnet test tests/features/Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj \
-  -p:TargetFramework=net10.0
-
-dotnet test tests/features/Kolvir.Feature.Audio.Tests/Kolvir.Feature.Audio.Tests.csproj \
-  -p:TargetFramework=net10.0
-
-dotnet test tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj \
-  -p:TargetFramework=net10.0
+dotnet test tests/features/Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj
+dotnet test tests/features/Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj
+dotnet test tests/features/Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj
+dotnet test tests/features/Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj
+dotnet test tests/features/Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj
+dotnet test tests/features/Kolvir.Feature.Audio.Tests/Kolvir.Feature.Audio.Tests.csproj
+dotnet test tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj
 ```
 
 All seven portable suites are what the `Tests` workflow dispatches, on all three platforms.
@@ -267,9 +255,8 @@ probe that always fails, which is what a machine with no OpenGL ICD looks like; 
 path needs a real driver and is verified by hand through the demo's measured-rendering page.
 
 `Kolvir.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
-`Animations` categories, the same filter, plain `net10.0` on every platform, and the same
-`-p:TargetFramework=net10.0` narrowing, because the feature lists all three frameworks
-unconditionally for `dotnet pack`. What its tests drive is the same code production runs: a
+`Animations` categories, the same filter, plain `net10.0` on every platform. What its tests drive is
+the same code production runs: a
 `TestClock` the test advances and a `ManualFrameSource` the test fires are handed to a real
 `AnimationScheduler`, so the timeline's arithmetic and the clock's start and stop edges are
 exercised exactly rather than approximately, and nothing sleeps. The one thing the suite cannot show
@@ -281,15 +268,14 @@ platform: the tests only touch the feature's `common/` folder, and a test projec
 `net10.0-macos` would need the .NET for macOS SDK with an exactly matching Xcode on whichever Mac
 builds it, which is a requirement no test project should impose.
 
-`-p:TargetFramework=net10.0` is what keeps that promise on a machine that has no macOS workload.
-`Kolvir.Feature.DragDrop` lists `net10.0-windows;net10.0-macos;net10.0` unconditionally, because one
-`dotnet pack` has to produce all three dependency groups, and restore follows every framework in the
-reference graph rather than only the inner build the tests bind. Restoring or testing the test
-project without the property therefore resolves the `net10.0-macos` inner build, finds
-`Kolvir.Backend.AppKit` behind it and stops with `NETSDK1147`. The property selects the single
-portable inner build instead; the plural `-p:TargetFrameworks=` does not work as a switch, because it
-reaches the restore graph and not the referenced projects' builds. The `Tests` workflow passes it on
-both its restore and its test step, so a local run with it matches CI.
+Nothing narrows a feature for that run. `KolvirTargetFrameworks` in `Directory.Build.props` gives
+every build the platform it is running on plus the portable framework, so this project restores the
+`net10.0` inner build of the feature it tests and never reaches `Kolvir.Backend.AppKit` - the
+workload an unnarrowed restore used to demand, and the reason each suite once carried a
+`-p:TargetFramework=net10.0` of its own. On macOS the graph does include the feature's
+`net10.0-macos` inner build, which is why that machine needs `dotnet workload install macos` once.
+Packaging is the only thing that asks for all three, by name. The `Tests` workflow passes no
+framework property at all, so a local run matches CI.
 
 That suite drives the feature's router and per-control state directly, and the feature project grants
 it `InternalsVisibleTo` for exactly that. Both types are internal on purpose - an application never

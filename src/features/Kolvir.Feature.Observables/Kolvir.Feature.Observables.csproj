@@ -7,13 +7,11 @@
        empty - they exist because the `lib/` folders and dependency groups come from these same inner
        builds. -->
   <PropertyGroup>
-    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
-    <!-- A test project that wants one framework narrows the list here instead:
-         `-p:KolvirObservablesFrameworks=net10.0`. `-p:TargetFramework=` cannot do it here, because a
-         global TargetFramework also overrides the single-framework projects underneath and leaves
-         the answer restored for one framework and built for another. Same shape and same reason as
-         KolvirBadgeFrameworks and KolvirVirtualDomFrameworks. -->
-    <TargetFrameworks Condition="'$(KolvirObservablesFrameworks)' != ''">$(KolvirObservablesFrameworks)</TargetFrameworks>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
     <RootNamespace>Kolvir.Observables</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

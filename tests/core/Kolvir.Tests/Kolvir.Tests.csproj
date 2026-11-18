@@ -43,11 +43,9 @@
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
     <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
-    <!-- Kolvir.Backend (the selector) is deliberately not referenced. It lists all three platform
-         frameworks unconditionally, so restoring it needs the macOS workload on the machine doing
-         the restore - true on a developer's machine here, false on a stock GitHub runner. The suite
-         needs the headless backend and nothing else, and a reference that only works where a
-         workload happens to be installed is worse than no reference. -->
+    <!-- Kolvir.Backend (the selector) is deliberately not referenced. The suite needs the headless
+         backend and nothing else, and the selector resolves a platform backend for the platform it
+         is built for - which for a portable suite is the one thing it must not depend on. -->
   </ItemGroup>
 
   <!-- The one embedded face is the demo's, reused rather than copied: one .ttf in the repository

@@ -5,11 +5,11 @@
        use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
        platform. Nothing in this assembly runs unless an application calls AddAnimatedGifImages(). -->
   <PropertyGroup>
-    <!-- Every platform the feature supports, unconditionally, so `dotnet pack` needs all three in one
-         build. Narrow one inner build for local work with `-p:TargetFramework=net10.0`; the plural
-         `-p:TargetFrameworks=...` does not work as a switch, because it reaches the restore graph
-         and not the referenced projects' builds. -->
-    <TargetFrameworks>net10.0-windows;net10.0-macos;net10.0</TargetFrameworks>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
     <RootNamespace>Kolvir</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>

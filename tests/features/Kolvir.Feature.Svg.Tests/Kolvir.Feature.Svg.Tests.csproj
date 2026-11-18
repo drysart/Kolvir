@@ -11,10 +11,9 @@
        net10.0-macos would need the .NET for macOS SDK with a matching Xcode on whichever machine
        builds it. Rendering an SVG is portable, so one inner build is the whole feature.
 
-       Restoring from this project needs -p:TargetFramework=net10.0, exactly as the other feature
-       suites do: the feature lists all three frameworks unconditionally for `dotnet pack`, and a
-       plain restore follows every framework in the reference graph, including the macOS one whose
-       workload no runner has. -->
+       Nothing narrows the restore either: the feature builds for the platform this machine is on
+       plus the portable framework (KolvirTargetFrameworks, in Directory.Build.props), so this
+       project resolves its `net10.0` inner build and the graph never reaches another platform. -->
 
   <PropertyGroup>
     <TargetFramework>net10.0</TargetFramework>
