@@ -37,7 +37,9 @@ Linux              GTK4                 net10.0
   three platforms.
 
 Features that cost native code are separate packages, so an application pays only for what it uses:
-drag and drop, animations, app badging, audio, SVG, animated GIF, animated WebP and web fonts.
+drag and drop, animations, app badging, audio, SVG, animated GIF, animated WebP and web fonts. There
+is also a virtual DOM, `Kolvir.Feature.VirtualDom`, for applications that would rather describe their
+controls than build them - see [the developer guide](dev-docs/DEVELOPER-GUIDE.md#virtual-dom).
 
 ## Getting started
 

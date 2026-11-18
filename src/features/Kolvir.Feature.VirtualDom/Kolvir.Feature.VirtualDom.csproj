@@ -30,25 +30,40 @@
     <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
   </ItemGroup>
 
-  <!-- The build-time half. It is referenced as an analyzer so that the projects in this repository
-       get the generator and the diagnostics from the build, and it is packed into this package under
-       `analyzers/dotnet/cs`, which is the folder NuGet and the compiler look in - how
-       System.Text.Json's generator travels. A `ProjectReference` alone would reach this repository and
-       nobody else. -->
-  <ItemGroup>
-    <ProjectReference Include="..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj"
-                      OutputItemType="Analyzer"
-                      ReferenceOutputAssembly="false" />
-  </ItemGroup>
+  <!-- The build-time half. It is packed into this package under `analyzers/dotnet/cs`, which is the
+       folder NuGet and the compiler look in - how System.Text.Json's generator travels. A
+       `ProjectReference` alone would reach this repository and nobody else.
 
-  <!-- Packed from the generator's own output rather than from the resolved analyzer item: a
-       `ProjectReference` does not hand its output path to the referencing project, and MSBuild has no
-       target in the pack graph that exposes it. The path is stable because the generator's target
-       framework is fixed at netstandard2.0, and a missing file fails the pack rather than shipping a
-       package with no generator in it. Added once rather than per target framework: pack runs once, and
-       the analyzer is one assembly whichever framework a consumer ends up binding. -->
+       It is deliberately **not** a project reference. This project does not use the analyzer to
+       compile - it has no manifest of its own - so all it needs is the dll at pack time. A project
+       reference would put a netstandard2.0 project in the graph of everything that references this
+       one, and `dotnet publish -p:PublishAot=true` passes PublishAot as a *global* property, which a
+       netstandard2.0 project cannot satisfy: the publish stops with NETSDK1207 on the generator
+       itself, in an application that never asked for a generator. A consumer of the package is
+       unaffected either way, because a package ships the dll.
+
+       Built with a separate `dotnet build` process rather than the `MSBuild` task, because the task
+       inherits this build's global properties - a nested build under `dotnet pack` came out with no
+       reference assemblies at all - and there is no reliable way to un-inherit all of them. A new
+       process starts from the environment, which is exactly what a generator project needs, and `dotnet
+       build` restores first, so a fresh checkout works. -->
+  <PropertyGroup>
+    <VirtualDomGeneratorProject>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj</VirtualDomGeneratorProject>
+    <VirtualDomGeneratorDll>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll</VirtualDomGeneratorDll>
+  </PropertyGroup>
+
+  <Target Name="BuildVirtualDomGenerator" BeforeTargets="GenerateNuspec">
+    <Exec Command="dotnet build &quot;$(VirtualDomGeneratorProject)&quot; -c $(Configuration) --nologo" />
+  </Target>
+
+  <!-- Packed from the generator's own output: a project reference does not hand its output path to the
+       referencing project, and there is no target in the pack graph that exposes one. The path is
+       stable because the generator's target framework is fixed at netstandard2.0, and a missing file
+       fails the pack rather than shipping a package with no generator in it. Added once rather than
+       per target framework: pack runs once, and the analyzer is one assembly whichever framework a
+       consumer ends up binding. -->
   <ItemGroup>
-    <None Include="..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll"
+    <None Include="$(VirtualDomGeneratorDll)"
           Pack="true"
           PackagePath="analyzers/dotnet/cs"
           Visible="false" />

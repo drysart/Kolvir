@@ -21,10 +21,24 @@ namespace Kolvir.VirtualDom;
 internal static class Reconciler
 {
     /// <summary>Creates a control for a node that has no previous control to reuse.</summary>
+    /// <param name="owner">The control the new control is parented to.</param>
     /// <param name="node">The node to make a control for.</param>
     /// <returns>The mounted record, with no children reconciled yet.</returns>
-    internal static Mounted Create(VNode node)
+    /// <remarks>
+    /// A <see cref="VComponent"/> is mounted rather than created: the component renders its own root,
+    /// and the mount keeps the child's subtree in step from then on. The root control is appended to
+    /// <paramref name="owner"/> and then moved into place by the caller, which is one move per inserted
+    /// child inside a single suspended layout.
+    /// </remarks>
+    internal static Mounted Create(Control owner, VNode node)
     {
+        if (node is VComponent component)
+        {
+            var mount = new ComponentMount(owner, component.Component);
+
+            return new Mounted(node, mount.Root!) { ComponentMount = mount };
+        }
+
         var control = node.NodeType.Create();
         node.ApplyTo(control);
         return new Mounted(node, control);
@@ -32,10 +46,29 @@ internal static class Reconciler
 
     /// <summary>Detaches a mounted control from wherever it sits, and drops its subtree.</summary>
     /// <param name="mounted">The record to unmount.</param>
+    /// <remarks>
+    /// The walk is recursive, because a component can be nested below ordinary nodes: a render that
+    /// puts a <see cref="VComponent"/> inside a panel leaves the panel's record holding the child's
+    /// mount, and dropping that record without disposing the mount would leave the child rendering into
+    /// a control that is no longer in any tree - and refusing to be mounted again, because it is still
+    /// mounted as far as it knows.
+    /// </remarks>
     internal static void Unmount(Mounted mounted)
     {
-        mounted.Control.Parent?.Controls.Remove(mounted.Control);
+        if (mounted.ComponentMount is { } mount)
+        {
+            // Disposing the child's mount removes its controls and unwinds whatever it mounted in turn.
+            mount.Dispose();
+            return;
+        }
+
+        foreach (var child in mounted.Children)
+        {
+            Unmount(child);
+        }
+
         mounted.Children.Clear();
+        mounted.Control.Parent?.Controls.Remove(mounted.Control);
     }
 
     /// <summary>
@@ -74,9 +107,21 @@ internal static class Reconciler
                 var match = matches[i];
                 Mounted mounted;
 
-                if (match is not null && ReferenceEquals(match.Node.NodeType, node.NodeType))
+                if (node is VComponent { Children.Count: > 0 })
                 {
-                    node.PatchFrom(match.Node, match.Control);
+                    throw new InvalidOperationException(
+                        "A VComponent takes its controls from the component's render, so it cannot be given Children as well - return them from the component's own Render instead.");
+                }
+
+                if (match is not null && CanReuse(match.Node, node))
+                {
+                    if (node is not VComponent)
+                    {
+                        // A component node has no properties of its own: its subtree belongs to the
+                        // child's mount, which this render deliberately leaves alone.
+                        node.PatchFrom(match.Node, match.Control);
+                    }
+
                     match.Node = node;
                     mounted = match;
                 }
@@ -84,12 +129,13 @@ internal static class Reconciler
                 {
                     if (match is not null)
                     {
-                        // Same slot, different node class: the control cannot be patched, so it is
-                        // replaced. The old subtree goes with it.
+                        // Same slot, different node: the control cannot be patched, so it is replaced.
+                        // The old subtree goes with it, which for a component means its mount is
+                        // disposed and the child's state stops being rendered.
                         Unmount(match);
                     }
 
-                    mounted = Create(node);
+                    mounted = Create(owner, node);
                 }
 
                 Place(owner, mounted.Control, i);
@@ -101,6 +147,11 @@ internal static class Reconciler
 
             for (int i = 0; i < next.Count; i++)
             {
+                if (next[i] is VComponent)
+                {
+                    continue;
+                }
+
                 ReconcileChildren(updated[i].Control, updated[i].Children, next[i].Children);
             }
         }
@@ -123,6 +174,26 @@ internal static class Reconciler
         {
             owner.Controls.Move(current, index);
         }
+    }
+
+    /// <summary>
+    /// Whether <paramref name="next"/> can take over the mounted record <paramref name="previous"/> left,
+    /// instead of replacing it.
+    /// </summary>
+    /// <remarks>
+    /// Two nodes of the same control class are patched, which is the ordinary case. A component node is
+    /// matched by the component <em>instance</em> instead: the same child keeps its mount - and so its
+    /// state and the controls showing it - while a different child in the same slot is a different
+    /// component and inherits nothing from the one it replaces. The two kinds never match each other.
+    /// </remarks>
+    private static bool CanReuse(VNode previous, VNode next)
+    {
+        if (previous is VComponent mounted)
+        {
+            return next is VComponent node && ReferenceEquals(mounted.Component, node.Component);
+        }
+
+        return next is not VComponent && ReferenceEquals(previous.NodeType, next.NodeType);
     }
 
     /// <summary>

@@ -3,13 +3,13 @@ using XDock = Kolvir.DockStyle;
 namespace Kolvir.Demo;
 
 /// <summary>
-/// The buttons page: the three button styles, and the primary action the footer's own buttons disable
-/// and the labels page counts.
+/// The buttons page: the three button styles, the switch that enables and disables the primary action,
+/// and the primary action the labels page counts.
 /// </summary>
 /// <remarks>
-/// The primary button is the window's rather than this page's: the footer has a button that disables
-/// it, and its click count is shown on another page. The page builds it and hands it over, so both
-/// halves of the sample point at the same control.
+/// The click count is the window's rather than this page's, and the labels page is what shows it. The
+/// page builds the primary button and hands it to no one: the switch that disables it sits directly
+/// under it, so both halves of the sample are on the page that owns them.
 /// </remarks>
 internal sealed class ButtonsAndInputPage : DemoPage
 {
@@ -34,7 +34,21 @@ internal sealed class ButtonsAndInputPage : DemoPage
             SetStatus($"Primary action clicked {clicks} time(s).");
         });
         card.Controls.Add(primary);
-        Shell.UsePrimaryButton(primary);
+
+        var enableSwitch = new Button("Disable primary")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = ButtonStyle.Secondary,
+            Margin = new Thickness(0f, 0f, 0f, 10f),
+        };
+        enableSwitch.AddClickHandler(_ =>
+        {
+            primary.Enabled = !primary.Enabled;
+            enableSwitch.Text = primary.Enabled ? "Disable primary" : "Enable primary";
+            SetStatus(primary.Enabled ? "Primary action enabled." : "Primary action disabled.");
+        });
+        card.Controls.Add(enableSwitch);
 
         var secondary = new Button("Secondary action")
         {
