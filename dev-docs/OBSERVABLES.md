@@ -14,7 +14,7 @@ component to re-render - and the render still goes through the frame queue, so a
 changes is still one render (see §9).
 
 Status of this document: **living plan, no code yet.** Section 3 records the decisions and the
-reasons; section 12 is the order of work; section 11 lists what is still open, including six things
+reasons; section 12 is the order of work; section 11 lists what is still open, including five things
 decided here for the first time that should be confirmed before the code exists.
 
 ## 1. Goals and non-goals
@@ -113,10 +113,10 @@ model and the *event* in the named source means eviction has no consequence to g
 
 | Decision | Why |
 | --- | --- |
-| **`GetNamed(object scope, object key)` returns an `IObservableEventSource`.** | `scope` is the owner (a dictionary instance, a model, or a `static readonly object` sentinel for a process-wide name) and `key` is the entry. Object keys rather than strings: no formatting on a read path that runs inside renders, no separator-escaping aliasing (`"a|b"` vs `"a"` + `"b"`), and value keys come out exact. `ValueTuple<object, object>` as the dictionary key gives both levels one lookup and no boxing for reference keys. |
+| **`GetNamed(object key)` returns an `IObservableEventSource`.** | One `object` key, and no notion of an owner baked into the API: a dependency whose name is logically several values composes them itself - a tuple, a small key object, whatever its owner decides - so the layer never has to guess which part of a name is the scope. Object keys rather than strings: no formatting on a read path that runs inside renders, no separator-escaping aliasing (`"a|b"` vs `"a"` + `"b"`), and value keys come out exact. The backing table is `Dictionary<object, Entry>` with `EqualityComparer<object>.Default`, so a tuple key compares structurally with no extra layer. |
 | **One handle instance per entry, returned to every caller.** | The dependency set is a `HashSet<IObservableEventSource>`, so two handles for one entry that compare by reference would be two dependencies - and an expression that read the same key twice would hook it twice and unhook it once. The entry owns its handle and `GetNamed` returns it. This also removes an allocation from every read. |
 | **An entry exists only while it has a handler, and is evicted when the last one is removed.** | That is the memory story: a dependency nobody is listening to is not memory. Eviction is deferred while a raise is in progress (§3.4), because a handler is allowed to remove itself during its own dispatch. |
-| **A caller that reads a key repeatedly holds the handle.** | `GetNamed` is a dictionary lookup plus a `ValueTuple` allocation for value-type keys; the model that owns the entries caches the handles it hands out. This is what the collection types in the next step will do internally. |
+| **A caller that reads a key repeatedly holds the handle.** | `GetNamed` is a dictionary lookup on an `object` key, which boxes a value-type key; the model that owns the entries caches the handles it hands out. This is what the collection types in the next step will do internally. |
 
 ### 3.3 Collecting dependencies: a stack, not a slot
 
@@ -280,7 +280,7 @@ var wordCount = Observable.CreateExpression(
 | --- | --- | --- |
 | `Observable.CreateNew<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
 | `Observable.CreateExpression<T>(Func<T>, string? name = null)` | `IObservableValue<T>` | Runs once at creation; throws if that throws. Optional comparer overload. |
-| `Observable.GetNamed(object scope, object key)` | `IObservableEventSource` | The same instance for the same pair, for as long as the entry lives. |
+| `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
 | `Observable.CollectDependencies(Action)` | `IReadOnlyList<IObservableEventSource>` | The component seam (§9). |
 
@@ -297,8 +297,10 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 - **A change raises both** the touched key's source and the shape source (both, when a write replaces
   an existing value). Raised after the mutation completes, never inside a loop over storage, because
   a handler is allowed to re-enter the collection.
-- **Per-collection scoping** comes free from the `(scope, key)` form of `GetNamed`: two dictionaries
-  that both hold a `"name"` key cannot collide.
+- **Per-collection scoping** is the collection's own business, since `GetNamed` takes one opaque key: a
+  dictionary keys its dependencies however it likes - `(this, key)` for a tuple, or its own key type
+  that compares on both - so two dictionaries that both hold a `"name"` entry cannot collide without
+  the layer knowing anything about ownership.
 - **Enumerating does not depend on every key** - that would hook N sources to render a list. It
   depends on the shape source, and rows that care about their own values depend on their own keys.
 
@@ -384,12 +386,12 @@ Two things this gets for free, and one it must respect:
 - **Object keys box value types on a miss.** A dictionary keyed by `int` pays a box per `GetNamed`
   call that misses its cache. Collections will cache handles per key; a caller that reads in a hot
   path should hold the handle.
-- **The named table is process-wide, and only as large as what is watched.** Names are `(scope, key)` pairs,
+- **The named table is process-wide, and only as large as what is watched.** Names are opaque `object` keys,
   so the growth is bounded by the keys that someone is actually listening to - but a long-lived
   scope with churning keys relies on eviction, which only happens when the last handler goes.
 - **`IsLive` and the final raise are additions this design makes to the spec** (§3.10, §10) and are
   the likeliest thing to be reconsidered.
-- **To confirm before the code exists:** the `(scope, key)` shape of `GetNamed`; `IsLive`; the final
+- **To confirm before the code exists:** `IsLive`; the final
   raise on disposal; `CollectDependencies` as public API; refusing mutation inside a collection
   scope; and the optional `name` on `CreateExpression`.
 
@@ -400,7 +402,7 @@ Two things this gets for free, and one it must respect:
 | 1 | Package skeleton, the interfaces, the mutable value and snapshot dispatch | A value raises only when it actually changes; a handler can subscribe and unsubscribe during dispatch; a throwing handler does not stop the others |
 | 2 | The collector stack and `CollectDependencies` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope |
 | 3 | Expressions: cold/hot, caching, re-collection, equality | A cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
-| 4 | Named dependencies: `(scope, key)`, one handle, eviction | Two handles for one key are the same object; an entry disappears when its last handler goes, and not during a raise |
+| 4 | Named dependencies: one opaque key, one handle, eviction | Two handles for one key are the same object; an entry disappears when its last handler goes, and not during a raise |
 | 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value |
 | 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, and stops listening to a value its render stopped reading |
 | 7 | A demo page, the developer-guide section, and the AOT measurement | The published sample renders the page byte-for-byte identically to the JIT build, and a minimal app publishes with no observables artifact |
@@ -435,7 +437,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | Claim | How it is proven |
 | --- | --- |
 | **A raise dispatches over a snapshot** | A handler that removes itself, and one that adds another, both leave the current dispatch's remaining handlers running and the next dispatch reflecting the change. |
-| **One entry, one identity** | Two `GetNamed` calls for one `(scope, key)` return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). |
+| **One entry, one identity** | Two `GetNamed` calls for one key return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). |
 | **Cold work costs nothing** | An expression with no handlers has zero dependency hooks (asserted on each dependency's handler count) and re-runs on every read; the second handler registration stops it re-running. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
 | **Equality keeps the graph quiet** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. |
