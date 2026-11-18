@@ -83,7 +83,7 @@ IObservableMutableValue<T> : IObservableValue<T>       <- what CreateValue retur
 | `IObservableValue` | `object? Value` | The untyped view, for a homogeneous dependency set and for `PublishRead`. Reading it publishes. |
 | `IObservableValue<T>` | `new T Value { get; }` | What a dependency set holds. Read-only on purpose: a subscriber can watch a value but cannot write it. |
 | `IObservableMutableValue<T>` | `new T Value { get; set; }` | What `CreateValue` hands back, to the one piece of code that owns the state. |
-| `Observable` | static | `CreateValue<T>`, `CreateExpression<T>`, `GetNamed`, `RaiseNamedEvent`, `PublishRead`, `CollectDependencies`. |
+| `Observable` | static | `CreateValue<T>`, `CreateExpression<T>`, `GetNamed`, `RaiseNamedEvent`, `PublishRead`, `CollectDependencies`, `CollectDependencies<T>`. |
 
 Three consequences worth stating plainly:
 
@@ -298,16 +298,31 @@ using (Observable.BeginCollection(scope))   // internal; CollectDependencies is 
 }
 ```
 
-`CollectDependencies(Action body)` is the public version of the same thing, returning the distinct
-sources the body read:
+Two public forms. `CollectDependencies(Action body)` runs a body that has no result;
+`CollectDependencies<T>(Func<T> body)` runs one that does, and returns the result alongside the set:
+
+| Member | Gives you |
+| --- | --- |
+| `Dependencies` | the distinct sources the body read, in first-read order |
+| `IsFaulted`, `Fault` | whether the body threw, and the exception without throwing it again |
+| `Value` (the `Func<T>` form) | the body's result; **throws `Fault`** if the body threw |
+| `Throw()` | rethrows `Fault` if there is one, for the `Action` form which has no `Value` to throw through |
 
 ```csharp
-var deps = Observable.CollectDependencies(() => _panel.Render());
-foreach (var dep in deps)
+var run = Observable.CollectDependencies(() => _panel.Render());
+foreach (var dep in run.Dependencies)
 {
     tokens.Add(dep.AddObservableEventRaisedHandler(_ => Invalidate()));
 }
+
+return run.Value;   // throws into whoever called this, with the set already hooked
 ```
+
+| Decision | Why |
+| --- | --- |
+| **The set comes back even when the body threw.** | That is the rule a failing expression already follows (section 3.6.1): the dependencies a run *reached* are what its result - success or exception - was computed from, and therefore what can change it. Throwing straight through would hand the caller an exception and no set, which for a render means a component that never re-renders again. |
+| **`Value` throws rather than returning a default.** | A caller that wants the result has to deal with the failure at the point where it uses it, and cannot mistake "the body failed" for "the body returned null". A caller that only wants the dependencies never reads `Value` and is unaffected. |
+| **Nothing is reported to the application.** | The caller is right here: this is a synchronous call with somebody waiting, so the exception goes to them through `Value` and is not also sent to `Application.HandleNativeBoundary` (the same rule as a read-started re-run, section 3.7). |
 
 It exists because the component layer (section 9) needs exactly this and *not* an expression: a render
 produces a tree it does not want to compare, so it wants "the dependencies of this run" plus "call me
@@ -342,6 +357,8 @@ var wordCount = Observable.CreateExpression(
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
+| `Observable.CollectDependencies(Action)` | `Collected` | The dependencies of one synchronous run, `IsFaulted`/`Fault` if the body threw, and `Throw()` for the form that has no `Value`. |
+| `Observable.CollectDependencies<T>(Func<T>)` | `Collected<T>` | The same plus `Value` - the body's result, or the exception thrown through it. This is the component seam (section 9). |
 
 No `services.AddObservables()`: there is nothing to register, no process-wide state that needs a
 container, and the named table is created on first use.
@@ -372,6 +389,7 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 | Expression's function throws on its first run (first read or first handler) | cached as the result, the dependencies it reached are hooked, and every read throws it; the report goes to `Application.HandleNativeBoundary` unless the run was triggered by a read, which throws to its caller |
 | Expression's function throws on a dependency-started re-run | cached as the result, reported to `Application.HandleNativeBoundary`, raised (a new exception is a changed result), and every read throws it |
 | A handler throws during a raise | isolated per handler, reported to `Application.HandleNativeBoundary`, the rest of the snapshot still runs (unless the application lets it rethrow) |
+| A collector body throws | the exception is returned in `Fault`, `Value` throws it, and the set the body reached comes back with it |
 | A dependency cycle is read | `InvalidOperationException` naming the chain, before any recursion |
 | A write inside a running expression | `InvalidOperationException` naming the expression |
 | Using a disposed source: reading `Value` or writing it, `RaiseEvent`, or registering a handler | `ObjectDisposedException` |
@@ -395,13 +413,17 @@ internal sealed class ObservableComponent : IComponent
         foreach (var token in _tokens) { token.Dispose(); }
         _tokens.Clear();
 
-        VNode tree = null!;
-        foreach (var dep in Observable.CollectDependencies(() => tree = Build()))
+        var run = Observable.CollectDependencies(Build);
+
+        // Hooking before reading the result is the point: a render that threw still leaves the
+        // component listening to what it read, so the next change to one of those values asks for
+        // another render instead of leaving the component stranded (4, and 3.6.1 for the rule).
+        foreach (var dep in run.Dependencies)
         {
             _tokens.Add(dep.AddObservableEventRaisedHandler(_ => _mount?.Invalidate()));
         }
 
-        return tree;
+        return run.Value;   // throws into the frame boundary if the render failed
     }
 
     public void Attach(ComponentMount mount) => _mount = mount;
@@ -479,7 +501,7 @@ Two things this gets for free, and one it must respect:
 | # | Step | Done when |
 | --- | --- | --- |
 | 1 | Package skeleton, the interfaces, the mutable value and snapshot dispatch | A value raises only when it actually changes; a handler can subscribe and unsubscribe during dispatch; a throwing handler does not stop the others |
-| 2 | The collector stack and `CollectDependencies` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope |
+| 2 | The collector stack, `CollectDependencies` and `CollectDependencies<T>` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope and still arrives with the set the body read |
 | 3 | Expressions: cold/hot, caching, re-collection, equality, the exception comparer | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
 | 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
 | 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value |
@@ -519,6 +541,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | **One entry, one identity** | Two `GetNamed` calls for one key return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). `RaiseNamedEvent` reaches the handler of a watched key and does nothing at all for an unwatched one. The cost claim - one lookup, no entry, no allocation - is a measurement on the same day the read costs are measured, not a test, because "no entry was created" is not observable through the public API. |
 | **Cold work costs nothing** | `CreateExpression` runs the function zero times; an expression with no handlers has zero dependency hooks (asserted on a counting source) and re-runs on every read; attaching the first handler runs it once more and stops the re-running. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
+| **A failed run still yields its dependencies** | `CollectDependencies(() => throw ...)` returns the sources it read before the throw, `IsFaulted` true, and a `Value` that throws the same exception instance - for both collectors - which is what lets the seam hook the set and then fail. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
 | **Equality keeps the graph quiet, except for exceptions** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. A re-run that fails again raises by default, because the replacement exception is a changed result, and does not raise when the expression was given an `IEqualityComparer<Exception>` that calls the two equivalent - while a read after that still throws the newer exception (3.7). |
 | **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression reporting once, raising (a new exception is a changed result), and throwing on every read (there is nobody to throw at during the run itself); a cycle throws with the chain named; a write inside a scope throws; and every use after `Dispose` throws `ObjectDisposedException` - read, write, raise, or register. |
