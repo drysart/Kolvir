@@ -40,7 +40,20 @@ public sealed class ComponentMount : IDisposable
 
         Component = component;
         component.Attach(this);
-        _handle = new MountHandle(parent, Render());
+
+        try
+        {
+            _handle = new MountHandle(parent, Render());
+        }
+        catch
+        {
+            // A mount that never happened must not leave the component pointing at a half-built handle:
+            // every later SetState, and any attempt to mount it again, would dereference null. Render
+            // has to run after the attach for a render that changes state to be caught by name, so the
+            // attach is undone here rather than moved.
+            component.Detach(this);
+            throw;
+        }
     }
 
     /// <summary>The component this mount renders.</summary>

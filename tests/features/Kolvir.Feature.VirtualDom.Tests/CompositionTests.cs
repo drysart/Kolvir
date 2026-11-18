@@ -393,6 +393,208 @@ public sealed class CompositionTests
         Assert.IsInstanceOfType<Label>(root.Controls.OfType<Control>().Single(), "and the slot still holds the new one");
     }
 
+    [TestMethod]
+    public void AComponentWhoseRenderThrowsDoesNotStrandTheRestOfTheFrame()
+    {
+        // The batch leaves the queue before it renders, so an exception escaping one render would leave
+        // everything behind it marked pending and never queued again. It goes to the application
+        // instead, and the rest of the frame still renders.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+
+        var first = new Child("first");
+        var thrower = new ThrowOnce("boom");
+        var last = new Child("last");
+        var parent = new Holder(first, thrower, last);
+        using var mount = VirtualDomRuntime.Mount(host, parent);
+
+        var reported = new List<Exception>();
+        using var handler = scene.Application.AddUnhandledExceptionHandler((_, e) =>
+        {
+            reported.Add(e.Exception);
+            e.Handled = true;
+        });
+
+        first.Change("one");
+        thrower.Change("two");
+        last.Change("three");
+
+        scene.Frame();
+
+        Assert.AreEqual(1, reported.Count, "the render that threw was reported to the application");
+        StringAssert.Contains(reported[0].Message, "boom");
+        Assert.AreEqual(2, first.Renders, "the component before it rendered");
+        Assert.AreEqual(2, last.Renders, "and so did the component after it");
+        Assert.AreEqual("one,boom,three", string.Join(",", Texts(mount)), "and the screen shows both of them");
+    }
+
+    [TestMethod]
+    public void AComponentWhoseRenderThrewIsNotStranded()
+    {
+        // The throw itself must not leave the mount unable to render again: the flag it was queued for
+        // is cleared before the render runs, so the next SetState queues it like any other.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var thrower = new ThrowOnce("boom");
+        var parent = new Holder(thrower);
+        using var mount = VirtualDomRuntime.Mount(host, parent);
+
+        using var handler = scene.Application.AddUnhandledExceptionHandler((_, e) => e.Handled = true);
+
+        thrower.Change("two");
+        scene.Frame();
+
+        Assert.AreEqual(2, thrower.Renders, "the render ran and threw");
+
+        thrower.Change("three");
+        scene.Frame();
+
+        Assert.AreEqual(3, thrower.Renders, "and the next frame rendered it again");
+        Assert.AreEqual("three", Texts(mount).Single());
+    }
+
+    [TestMethod]
+    public void UnmountingASubtreeDisposesTheComponentsInsideIt()
+    {
+        // A component can be nested below ordinary nodes, so the unwinding has to recurse: a plain
+        // record's children are where a nested component's mount lives.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var child = new Child("nested");
+        var parent = new NestedParent(child);
+        using var mount = VirtualDomRuntime.Mount(host, parent);
+
+        parent.Hide();
+
+        scene.Frame();
+
+        Assert.AreEqual(0, ((Panel)mount.Root!).Controls.Count, "the subtree went with it");
+
+        child.Change("after");
+
+        scene.Frame();
+
+        Assert.AreEqual(1, child.Renders, "the nested component was disposed with the subtree");
+
+        // And because it was disposed rather than left mounted, the same instance can be mounted again.
+        using var again = VirtualDomRuntime.Mount(host, child);
+
+        Assert.AreEqual(2, child.Renders, "a fresh mount rendered it once more");
+    }
+
+    [TestMethod]
+    public void AFailedFirstRenderLeavesTheComponentMountable()
+    {
+        // The first render runs after the attach, so a throw has to undo it: otherwise the component
+        // points at a mount that never finished, and everything from there is a null dereference.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var thrower = new ThrowOnce("boom", throwOnRender: 1);
+
+        var exception = Assert.ThrowsExactly<InvalidOperationException>(
+            () => VirtualDomRuntime.Mount(host, thrower));
+
+        StringAssert.Contains(exception.Message, "boom");
+
+        thrower.SetState();
+
+        Assert.AreEqual(1, thrower.Renders, "the unattached component has nothing to render");
+
+        using var mount = VirtualDomRuntime.Mount(host, thrower);
+
+        Assert.AreEqual(2, thrower.Renders, "and it mounts once it stops throwing");
+    }
+
+    /// <summary>A parent that holds any components, so a failing one can sit in a list beside good ones.</summary>
+    private sealed class Holder : Component
+    {
+        private readonly Component[] _children;
+
+        internal Holder(params Component[] children) => _children = children;
+
+        public override VNode Render() => new VPanel
+        {
+            Dock = DockStyle.Fill,
+            Children =
+            [
+                new VPanel
+                {
+                    Dock = DockStyle.Fill,
+                    Children = [.. _children.Select(child => new VComponent(child) { Key = child })],
+                },
+            ],
+        };
+    }
+
+    /// <summary>A component whose render throws on the Nth render, so a failure can be aimed.</summary>
+    private sealed class ThrowOnce : Component
+    {
+        private readonly int _throwOnRender;
+
+        internal ThrowOnce(string text, int throwOnRender = 2)
+        {
+            Text = text;
+            _throwOnRender = throwOnRender;
+        }
+
+        internal string Text { get; private set; }
+
+        internal int Renders { get; private set; }
+
+        public override VNode Render()
+        {
+            Renders++;
+
+            if (Renders == _throwOnRender)
+            {
+                throw new InvalidOperationException("boom");
+            }
+
+            return new VPanel
+            {
+                Dock = DockStyle.Top,
+                Children = [new VLabel { Text = Text }],
+            };
+        }
+
+        internal void Change(string text)
+        {
+            Text = text;
+            SetState();
+        }
+    }
+
+    /// <summary>A component that nests another one below an ordinary node, and can drop the subtree.</summary>
+    private sealed class NestedParent : Component
+    {
+        private readonly Child _child;
+        private bool _hidden;
+
+        internal NestedParent(Child child) => _child = child;
+
+        public override VNode Render()
+        {
+            var children = new List<VNode>();
+
+            if (!_hidden)
+            {
+                children.Add(new VPanel
+                {
+                    Dock = DockStyle.Fill,
+                    Children = [new VComponent(_child)],
+                });
+            }
+
+            return new VPanel { Dock = DockStyle.Fill, Children = children };
+        }
+
+        internal void Hide()
+        {
+            _hidden = true;
+            SetState();
+        }
+    }
+
     /// <summary>The panel the parent docked the children into.</summary>
     private static Panel Stage(ComponentMount mount) =>
         ((Panel)mount.Root!).Controls.OfType<Panel>().Single();

@@ -37,9 +37,18 @@ internal static class RenderQueue
 
     /// <summary>Renders everything queued, once each, in the order the state changed.</summary>
     /// <remarks>
+    /// <para>
     /// The batch is taken before any render runs, because a render can dispose a mount that is still
     /// waiting its turn - a list that removes a row while both are queued. A disposed mount renders
     /// nothing, so the batch stays simple.
+    /// </para>
+    /// <para>
+    /// A render that throws is the application's to handle, exactly as it would be from the frame hook
+    /// itself, so it goes to <see cref="Application.HandleNativeBoundary"/> and the rest of the batch
+    /// still runs. Letting it out of here instead would strand every component behind it: they have
+    /// already left the queue, and their pending flag makes the next <c>SetState</c> a no-op, so they
+    /// would never render again.
+    /// </para>
     /// </remarks>
     internal static void Drain()
     {
@@ -48,21 +57,36 @@ internal static class RenderQueue
             return;
         }
 
+        var batch = Pending.ToArray();
+        Pending.Clear();
         _draining = true;
+
+        int next = 0;
 
         try
         {
-            var batch = Pending.ToArray();
-            Pending.Clear();
-
-            foreach (var mount in batch)
+            for (; next < batch.Length; next++)
             {
-                mount.RenderQueued();
+                try
+                {
+                    batch[next].RenderQueued();
+                }
+                catch (Exception exception)
+                {
+                    Application.HandleNativeBoundary(exception);
+                }
             }
         }
         finally
         {
             _draining = false;
+
+            // If a boundary chose to rethrow, the mounts the loop never reached are still marked
+            // pending, so they have to go back on the queue or the flag would keep them off it.
+            for (int i = next + 1; i < batch.Length; i++)
+            {
+                Pending.Add(batch[i]);
+            }
         }
     }
 

@@ -46,6 +46,13 @@ internal static class Reconciler
 
     /// <summary>Detaches a mounted control from wherever it sits, and drops its subtree.</summary>
     /// <param name="mounted">The record to unmount.</param>
+    /// <remarks>
+    /// The walk is recursive, because a component can be nested below ordinary nodes: a render that
+    /// puts a <see cref="VComponent"/> inside a panel leaves the panel's record holding the child's
+    /// mount, and dropping that record without disposing the mount would leave the child rendering into
+    /// a control that is no longer in any tree - and refusing to be mounted again, because it is still
+    /// mounted as far as it knows.
+    /// </remarks>
     internal static void Unmount(Mounted mounted)
     {
         if (mounted.ComponentMount is { } mount)
@@ -55,8 +62,13 @@ internal static class Reconciler
             return;
         }
 
-        mounted.Control.Parent?.Controls.Remove(mounted.Control);
+        foreach (var child in mounted.Children)
+        {
+            Unmount(child);
+        }
+
         mounted.Children.Clear();
+        mounted.Control.Parent?.Controls.Remove(mounted.Control);
     }
 
     /// <summary>
