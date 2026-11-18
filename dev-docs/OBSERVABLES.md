@@ -462,9 +462,9 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
         {
             ThrowIfDisposed();
 
-            // The same rule as section 3.1: equality decides "changed", so a model that wants
-            // identity rather than value semantics simply does not override Equals.
-            if (EqualityComparer<TDataModel?>.Default.Equals(value, _dataModel)) { return; }
+            // Identity, not value equality: replacing the model is the only change this setter can
+            // see, and a change *inside* a model arrives through that model's own observables.
+            if (object.ReferenceEquals(value, _dataModel)) { return; }
 
             _dataModel = value;
             _mount?.Invalidate();   // all of "a data change asks for a render"
@@ -617,10 +617,11 @@ Three things it must respect:
   or a `Render` from inside a token's `Dispose` throws rather than half-working, and drop the
   references last.
 
-`where TDataModel : class` is not an accident. A struct model would want `Nullable<TDataModel>` for
-"no model yet", which is a different field shape and a different base class over the same core; it is
-not designed here. A class model also gets the right default equality for free - identity unless the
-model says otherwise - which is what "the model was replaced" means.
+`where TDataModel : class` is not an accident. `ReferenceEquals` needs it, and so does "no model yet",
+which wants `null` rather than `Nullable<TDataModel>`. A struct model would be a different base class
+over the same core, and is not designed here. Identity is the only question the setter asks, which is
+why it compares references and not values: a change inside a model is announced by that model, so all
+that is left for the setter to notice is the instance itself being swapped.
 
 The one consequence outside this section: `Kolvir.Feature.VirtualDom` gains a package reference to
 `Kolvir.Feature.Observables`. The dependency runs one way only - observables still know nothing about
