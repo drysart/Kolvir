@@ -256,7 +256,7 @@ var total = Observable.CreateExpression(
 
 | Decision | Why |
 | --- | --- |
-| **A thread-static evaluation stack detects cycles.** Before running, an expression checks whether it is already on the stack; if it is, it throws naming the chain (`A -> B -> A`). | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. Naming the chain turns a crash into a message. The stack also carries a name per expression, which is what makes the chain readable. The name comes from `[CallerArgumentExpression(nameof(function))]` - the compiler passes the lambda's own source text, so `CreateExpression(() => _service.Total())` is already called `() => _service.Total()` - and an explicit `name:` overrides it when that text is unwieldy. Nothing is reflected or looked up: it is a string constant the compiler supplies at the call site, and it is used only in messages. |
+| **A thread-static evaluation stack detects cycles.** Before running, an expression checks whether it is already on the stack; if it is, it throws naming the chain (`A -> B -> A`). | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. Naming the chain turns a crash into a message. The stack also carries a location per expression, which is what makes the chain readable. The compiler fills `[CallerFilePath]` and `[CallerLineNumber]` in, so every expression knows the `Model.cs:88` it was created at, and an explicit `name:` overrides it. Nothing is reflected or looked up - they are a constant and an integer the compiler supplies at the call site - and the file name is only ever taken from the path when a message is built, so the whole thing costs one reference, one `int`, and nothing at run time. |
 | **Mutating an observable while a collection scope is active throws.** | An expression is a pure function of what it read. A write inside one raises into other expressions while the collector is mid-run, so the set being collected no longer describes what happened. `Observable` carries a collection depth for this, and `set`/`RaiseEvent` refuse while it is non-zero. Cheap - one static compare on a write - and it names the expression. |
 | **A mutation from inside a *handler*** is ordinary and allowed. | Handlers run with no collection active: they may write other values, and those changes cascade. That is the event-driven style the layer is for. |
 
@@ -327,7 +327,7 @@ var wordCount = Observable.CreateExpression(
 | Member | Returns | Notes |
 | --- | --- | --- |
 | `Observable.CreateValue<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
-| `Observable.CreateExpression<T>(Func<T>, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null, [CallerArgumentExpression(nameof(function))] string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). The first comparer decides when two `T` results are the same and the second when two exceptions are (3.7); null means `EqualityComparer<T>.Default` and, for exceptions, never equal. `name` is diagnostics only (3.8): the compiler fills it from the call site, so it costs the caller nothing. |
+| `Observable.CreateExpression<T>(Func<T>, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null, [CallerFilePath] string? file = null, [CallerLineNumber] int line = 0, string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). The first comparer decides when two `T` results are the same and the second when two exceptions are (3.7); null means `EqualityComparer<T>.Default` and, for exceptions, never equal. The caller attributes are diagnostics only (3.8): the compiler fills them in, so they cost the caller nothing, and `name:` overrides them. |
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
@@ -437,6 +437,13 @@ Two things this gets for free, and one it must respect:
   that churns while a function is broken notifies on every change. An application that would rather
   collapse repeats passes an `IEqualityComparer<Exception>`, which puts the judgement where the
   knowledge is - but a comparer that is too loose hides a change a reader would have acted on.
+- **`CallerFilePath` embeds the build machine's paths in the assembly.** One copy per file that creates an
+  expression, since identical literals are deduplicated - but it is an absolute path, so a published
+  binary carries `C:\Users\...` or `/home/...` strings it does not need, and a message built from it
+  names a directory that does not exist on the user's machine. The mitigation is to render only
+  `Path.GetFileName(file)` plus the line in messages and never display the whole path, and to set
+  `PathMap` when reproducible or path-free output matters: the compiler applies it to these constants
+  too.
 - **Equality is the trap for object results.** An expression returning a freshly built object that
   does not override `Equals` raises on every run. For `VNode` trees that is why the component seam
   measuring before it is called cheap.
