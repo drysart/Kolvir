@@ -397,6 +397,41 @@ additionally supports inline controls, which are `VNode`s rather than props: a c
 place where "children" and "props" interact, and it is decided by the parent's capability, not the
 child's type (section 10 lists it as the fiddliest part of the design).
 
+### 6.2 Fragments and the empty node
+
+A `VFragment` is a node with no control and any number of children. It exists because two things a
+render has to be able to say have no node to say them: *these five nodes, at the top level* and
+*nothing*. Every other node describes exactly one control, so the first can only be expressed by
+inventing a container - which lays out, paints and takes a slot in the z-order the tree did not ask
+for - and the second cannot be expressed at all.
+
+The reconciler inlines it. `ReconcileChildren` replaces each fragment in a child list with its
+children, recursively, before anything is matched; a fragment is therefore never matched, placed,
+patched or unmounted, because by then it is not in the list. `[a, fragment([b, c]), d]` and
+`[a, b, c, d]` reconcile identically - same controls, same order, same identity across renders - and
+`new VFragment()` reconciles into nothing at all.
+
+Three consequences follow from inlining rather than from a choice:
+
+| Consequence | What it means |
+| --- | --- |
+| **A fragment is not a sibling** | Its children are matched among *all* of the parent's children, so a `Key` has to be unique across the whole list and not per fragment. |
+| **A key on the fragment is refused** | Inlining leaves nothing for a key to identify. Ignoring it would silently rename the identity the caller meant to control, so it is an `InvalidOperationException` that names the node. |
+| **Nesting is ordinary, cycles are not** | Inlining is recursive, so a fragment that ends up containing itself would never finish: past 64 levels it throws instead of taking the stack with it. |
+
+The empty fragment is what lets `ObservableComponent.RenderWithNullModel` default to showing nothing
+(section 11 of [`OBSERVABLES.md`](OBSERVABLES.md)), and it needed one thing the rest did not: a mount
+that owns no controls. `MountHandle` therefore owns a *slice* of its parent's children - a list, which
+a root fragment fills with two controls or none - and `IsMounted` is a state rather than "there is a
+root control". A component whose render is an empty fragment is mounted, listens to what its render
+read, and holds its place, so the controls its next render makes go where the parent said the child
+is rather than at the end of the parent.
+
+The asymmetry that survives is that a component's slot is one record in its parent however many nodes
+it renders. Placement therefore carries a running total of `Mounted.ControlCount` and asks a child
+mount to place its own span, which is what keeps the sibling after it from being laid out over the top
+of what the child rendered.
+
 ## 7. The application-facing API
 
 The plan's surface, in the order a developer meets it:
@@ -685,6 +720,13 @@ Five things outside the new code that the feature cannot land without:
   operation list per render to protect against a case that only exists while a bug is live - and a
   render that throws is a bug the report names. The next render of that component patches from the node
   tree it now holds, so it converges rather than staying wrong.
+- **A component's slot may be several controls, so placement depends on a running total.** A fragment
+  makes the number of top-level nodes a render produces a per-render quantity, so `ReconcileChildren`
+  advances by `Mounted.ControlCount` rather than by one, and a child mount places its own span when the
+  parent moves it. What keeps that arithmetic right is that a mount's controls stay contiguous in its
+  parent from the position it was placed at. A control inserted into the parent by hand between a
+  mount's renders would break it - the same assumption the single-root handle made before fragments
+  existed, and no worse, but now it covers several controls instead of one.
 
 ## 11. Verification approach
 
@@ -692,7 +734,7 @@ Every step is checked with headless tests in `tests/features/Kolvir.Feature.Virt
 build a tree, mount it into a `HeadlessScene`, and inspect the resulting `Control` tree - the same
 approach the selection and layout work uses, and the reason none of this needs a window.
 
-Ten claims get special treatment, because they are the ones that would otherwise only fail in a
+Eleven claims get special treatment, because they are the ones that would otherwise only fail in a
 published application:
 
 | Claim | How it is proven |
@@ -707,6 +749,8 @@ published application:
 | **A `null` for a non-nullable property does not build** | `tests/generators/...Generators.Tests` runs the analyzer over a real compilation and asserts VD010 for a null literal, for a possibly-null variable, and for both under `#nullable disable`; and asserts nothing for a value, for a nullable property, and for `null!`. The end-to-end wiring - an analyzer arriving from the package and failing a build - was checked by hand: a `Children = [child]` on a `VLabel` in the feature suite stops its build with VD011. |
 | **AOT- and trim-clean** | Measured on Windows, `win-x64`: `dotnet publish -c Release -r win-x64 -p:PublishAot=true` of the sample succeeds and its `--render virtual-dom` output is **byte-for-byte identical** to the JIT build's (57,658 bytes for `--page virtual-dom` at the default window size, compared with `SequenceEqual`, and two JIT runs measured identical so the comparison is meaningful rather than lucky), so the generated node classes, the reconciler, the component layer, the composition path and the frame-drained render queue all survive native compilation unchanged. `Kolvir.Minimal`, which does not use the feature, publishes with **no virtual-DOM artifact at all** in its output. What this does *not* cover: the other two platforms, and a publish from the release workflow rather than a developer machine. |
 | **The generator does not get in a publish's way** | `PublishAot` is a global property and a `netstandard2.0` project cannot satisfy it, so a project reference to the generator fails an AOT publish with NETSDK1207 (section 8.1, item 4). The feature carries no such reference, and both the sample and the pack build the generator in a `dotnet build` child process, where the inheritance that causes it does not exist. Verified from a deleted generator `bin/` and `obj/`, because the first attempt - the `MSBuild` task with `RemoveProperties` - passed locally and then built the generator with no references at all on a clean machine. |
+
+| **A fragment is inlined, and an empty one takes no room** | `FragmentTests` holds twelve cases (section 6.2): a fragment's children take its place among the parent's siblings by reference identity, nesting flattens, a root fragment owns one control per child and a root empty one owns none but takes what it is given later, an empty child component occupies no slot and appears in its own place when it has something to show, a grandchild component inside a fragment gets the right slot, a component that renders two nodes does not have its parent's sibling laid out over it, and the key and cycle refusals are asserted by message. The placement arithmetic was also seen failing with its fix removed: writing the index as `startIndex + i` instead of a running total breaks three of them. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
 published-build render comparison covers the new code path automatically.
@@ -725,3 +769,9 @@ published-build render comparison covers the new code path automatically.
 | 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, and the render queue drained at the start of the next frame through `UiHost.AddFrameStartingHandler` (added to core for it), so a handler that changes five things renders once. `Render` is one pass with no settling loop, and one that changes state is refused rather than iterated. One rule for the two states that have no tree to patch - a state change before the first mount or after `Dispose` does nothing, and the first render picks up what was stored in the meantime. Composition arrived with it as `VComponent` (section 7.2): a child component is a node, matched by instance, keyed when it can move, one mount per instance. 29 tests across `ComponentTests` and `CompositionTests`, including a click through the headless host that asserts nothing rendered until a frame, three state changes before a frame costing one render, a change made with no host at all that the first frame drains, a mount disposed by an earlier render in the same batch, a text box echo that is not a second render, and three levels of nesting. A review of the whole branch then found three ways a *failing* render could take the rest of the frame with it - no per-entry isolation in the drain, an unwinding that did not recurse below ordinary nodes, and an attach that outlived a first render that threw - all three fixed in the mount, the reconciler and the drain, each with a regression test confirmed to fail without its fix (sections 7.2 and 11). Section 7.1 records the four `SetState` decisions. The component layer also split into a protocol and an implementation - `IComponent` is what the mount needs, `Component` is what an application derives from - so the base class is replaceable without touching the mount (section 7.3). `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
 | 9 | Not started | |
 | 10 | Done | A **Virtual DOM** card in the sample (`--page virtual-dom`), the `DEVELOPER-GUIDE.md` section, and the AOT verification measured rather than asserted: the `win-x64` published build renders the card byte-for-byte identically to the JIT build, and `Kolvir.Minimal` publishes with no virtual-DOM artifact. The work also found a real publish failure - `PublishAot` is global, a `netstandard2.0` generator cannot satisfy it, and a project reference therefore breaks `dotnet publish` for applications that never asked for a generator (section 8.1, item 4). |
+
+Beyond the ten steps, `VFragment` (section 6.2) was added to close the gap section 11 of
+[`OBSERVABLES.md`](OBSERVABLES.md) recorded: a node that makes no control, so that a render can return
+several top-level nodes and `ObservableComponent.RenderWithNullModel` can default to showing nothing.
+That made a mount own a slice of its parent's children rather than one child, which is the only part
+of it that reaches code written before it - and the reason `Mounted.ControlCount` exists.

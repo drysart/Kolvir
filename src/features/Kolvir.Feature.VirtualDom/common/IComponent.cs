@@ -58,6 +58,11 @@ public interface IComponent
     /// changed. It must not change state either: calling <see cref="ComponentMount.Invalidate"/> from
     /// inside a render is refused, because a render that changes the state describes a tree that is
     /// already out of date.
+    /// <para>
+    /// A <see cref="VFragment"/> is a legal return: it puts one control per child in the parent, at the
+    /// place the component holds, and an empty one describes a component with nothing to show - which
+    /// puts no controls there at all.
+    /// </para>
     /// </remarks>
     VNode Render();
 

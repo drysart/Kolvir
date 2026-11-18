@@ -549,12 +549,9 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
 
     protected abstract VNode RenderWithDataModel(RenderArgs<TDataModel> args);
 
-    // TODO: the intended default is "a node that produces no control", which needs an empty node type
-    // this feature does not have yet (section 11). Until then, not overriding it is worth being loud
-    // about, rather than quietly rendering nothing - which looks exactly like a broken binding.
-    protected virtual VNode RenderWithNullModel(RenderArgs args) =>
-        throw new NotSupportedException(
-            $"{GetType().Name} has no data model and does not override RenderWithNullModel.");
+    // Nothing at all: an empty fragment makes no control, and the mount holds the place the controls
+    // will go, so the model arriving later is one ordinary render (VIRTUAL-DOM.md section 6.2).
+    protected virtual VNode RenderWithNullModel(RenderArgs args) => new VFragment();
 
     protected virtual void OnAttached(AttachedArgs args) { }
     protected virtual void OnDetached() { }
@@ -735,11 +732,12 @@ components (section 8.1).
   handles it holds, which are names and die with their holders.
 - **`IsDisposed` and the final raise are additions this design makes to the spec** (section 3.10,
   section 10) and are the likeliest thing to be reconsidered.
-- **The component seam has no way to render nothing yet** (section 9). `RenderWithNullModel` wants to
-  default to a node that produces no control, and the Virtual DOM feature has no such node type - every
-  node describes one control, and an empty `Children` list on a container is not the same thing. So the
-  default throws for now, and either an empty node type is added or the local model in
-  `ObservableComponent` becomes `TDataModel` plus a flag.
+- **The empty render is the default, and it looks like a component nobody gave a model to.** The
+  component seam renders nothing before a model is set (section 9), which is right for a page that is
+  mounted before its document has loaded and indistinguishable from a mistake. A derived class that
+  wants to be told so overrides `RenderWithNullModel` with a placeholder. The node it returns by
+  default - an empty `VFragment` - arrived with the fragment work in `VIRTUAL-DOM.md` section 6.2,
+  after this section was written.
 - **To confirm before the code exists:** `IsDisposed`; the final raise on disposal;
   `CollectDependencies` as public API and `Collected` as the thing that holds the listening; and
   `ObservableComponent` living in the Virtual DOM feature rather than in a third package over both

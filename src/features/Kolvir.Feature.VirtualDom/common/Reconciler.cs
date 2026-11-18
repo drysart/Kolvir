@@ -17,9 +17,23 @@ namespace Kolvir.VirtualDom;
 /// out ten times; with it the whole update costs one pass, which matters because a reorder issues one
 /// <see cref="ControlCollection.Move"/> per moved child and each of those asks for a layout.
 /// </para>
+/// <para>
+/// Fragments never get this far: <see cref="ReconcileChildren"/> inlines them into their parent before
+/// matching anything, so every node below that point owns exactly one control - which is the invariant
+/// the rest of the class reads, including <see cref="Mounted.ControlCount"/>, the one exception that
+/// lets a component own a span of its parent's children.
+/// </para>
 /// </remarks>
 internal static class Reconciler
 {
+    /// <summary>The deepest chain of inlined fragments a tree may use before it is refused.</summary>
+    /// <remarks>
+    /// Only a cycle can reach it - a fragment is a plain node, so nesting one inside another is ordinary
+    /// and shallow - and the check exists so that a node that somehow contains itself fails by name
+    /// instead of finishing the process off with a stack overflow.
+    /// </remarks>
+    private const int MaxFragmentDepth = 64;
+
     /// <summary>Creates a control for a node that has no previous control to reuse.</summary>
     /// <param name="owner">The control the new control is parented to.</param>
     /// <param name="node">The node to make a control for.</param>
@@ -36,7 +50,7 @@ internal static class Reconciler
         {
             var mount = new ComponentMount(owner, component.Component);
 
-            return new Mounted(node, mount.Root!) { ComponentMount = mount };
+            return new Mounted(node, mount.Root) { ComponentMount = mount };
         }
 
         var control = node.NodeType.Create();
@@ -68,7 +82,11 @@ internal static class Reconciler
         }
 
         mounted.Children.Clear();
-        mounted.Control.Parent?.Controls.Remove(mounted.Control);
+
+        if (mounted.Control is { } control)
+        {
+            control.Parent?.Controls.Remove(control);
+        }
     }
 
     /// <summary>
@@ -78,8 +96,23 @@ internal static class Reconciler
     /// <param name="owner">The control whose <see cref="Control.Controls"/> this maintains.</param>
     /// <param name="previous">The mounted children as they stand, replaced by the new list.</param>
     /// <param name="next">The children the new node asks for.</param>
-    internal static void ReconcileChildren(Control owner, List<Mounted> previous, IReadOnlyList<VNode> next)
+    /// <param name="startIndex">
+    /// Where in <paramref name="owner"/> the first of these children belongs. Zero for a control's own
+    /// children, and not zero for a mount that owns a slice of a parent's list - a window's root panel
+    /// already holding something, or a component whose controls sit between two of its parent's.
+    /// </param>
+    /// <remarks>
+    /// Fragments are inlined first, so everything below deals in nodes that each own exactly one control:
+    /// a fragment is never matched, placed or patched, because it is no longer in the list.
+    /// </remarks>
+    internal static void ReconcileChildren(
+        Control owner,
+        List<Mounted> previous,
+        IReadOnlyList<VNode> next,
+        int startIndex = 0)
     {
+        next = Inline(next);
+
         if (previous.Count == 0 && next.Count == 0)
         {
             return;
@@ -101,6 +134,11 @@ internal static class Reconciler
 
             var updated = new List<Mounted>(next.Count);
 
+            // The place the next child belongs at, carried from child to child: a component whose render
+            // put several nodes at the top level owns that many controls, so the one after it is further
+            // along than its sibling index would suggest.
+            var index = startIndex;
+
             for (int i = 0; i < next.Count; i++)
             {
                 var node = next[i];
@@ -115,11 +153,12 @@ internal static class Reconciler
 
                 if (match is not null && CanReuse(match.Node, node))
                 {
-                    if (node is not VComponent)
+                    // A component node has no properties of its own: its subtree belongs to the child's
+                    // mount, which this render deliberately leaves alone. The control test covers that
+                    // same case - a component is the only record that can have no control.
+                    if (node is not VComponent && match.Control is { } control)
                     {
-                        // A component node has no properties of its own: its subtree belongs to the
-                        // child's mount, which this render deliberately leaves alone.
-                        node.PatchFrom(match.Node, match.Control);
+                        node.PatchFrom(match.Node, control);
                     }
 
                     match.Node = node;
@@ -138,7 +177,8 @@ internal static class Reconciler
                     mounted = Create(owner, node);
                 }
 
-                Place(owner, mounted.Control, i);
+                Place(owner, mounted, index);
+                index += mounted.ControlCount;
                 updated.Add(mounted);
             }
 
@@ -147,12 +187,13 @@ internal static class Reconciler
 
             for (int i = 0; i < next.Count; i++)
             {
-                if (next[i] is VComponent)
+                if (next[i] is VComponent || updated[i].Control is not { } control)
                 {
+                    // A component's subtree belongs to the child's mount, which reconciles it itself.
                     continue;
                 }
 
-                ReconcileChildren(updated[i].Control, updated[i].Children, next[i].Children);
+                ReconcileChildren(control, updated[i].Children, next[i].Children);
             }
         }
         finally
@@ -161,18 +202,103 @@ internal static class Reconciler
         }
     }
 
+    /// <summary>Puts every control <paramref name="child"/> stands for at <paramref name="index"/>.</summary>
+    /// <remarks>
+    /// A component owns its controls rather than merely pointing at one - a fragment in its render can
+    /// give it several - so it is asked to move its own span. That keeps the parent's arithmetic honest:
+    /// it advances by <see cref="Mounted.ControlCount"/>, which is what the child actually placed.
+    /// </remarks>
+    internal static void Place(Control owner, Mounted child, int index)
+    {
+        if (child.ComponentMount is { } mount)
+        {
+            mount.PlaceIn(index);
+            return;
+        }
+
+        Place(owner, child.Control!, index);
+    }
+
     /// <summary>Puts <paramref name="child"/> at <paramref name="index"/> in <paramref name="owner"/>.</summary>
-    private static void Place(Control owner, Control child, int index)
+    internal static void Place(Control owner, Control child, int index)
     {
         var current = owner.Controls.IndexOf(child);
 
         if (current < 0)
         {
-            owner.Controls.Insert(index, child);
+            owner.Controls.Insert(Math.Min(index, owner.Controls.Count), child);
         }
         else if (current != index)
         {
-            owner.Controls.Move(current, index);
+            owner.Controls.Move(current, Math.Min(index, owner.Controls.Count - 1));
+        }
+    }
+
+    /// <summary>
+    /// Replaces each <see cref="VFragment"/> in <paramref name="nodes"/> with its children, in place.
+    /// </summary>
+    /// <param name="nodes">The child nodes as the tree gives them.</param>
+    /// <returns>
+    /// The nodes that stand for controls, which is <paramref name="nodes"/> itself when it holds no
+    /// fragment - the ordinary case, and the reason a tree without fragments allocates nothing extra.
+    /// </returns>
+    private static IReadOnlyList<VNode> Inline(IReadOnlyList<VNode> nodes)
+    {
+        List<VNode>? flat = null;
+
+        for (int i = 0; i < nodes.Count; i++)
+        {
+            var node = nodes[i];
+
+            if (node is not VFragment fragment)
+            {
+                flat?.Add(node);
+                continue;
+            }
+
+            if (flat is null)
+            {
+                flat = new List<VNode>(nodes.Count);
+
+                for (int j = 0; j < i; j++)
+                {
+                    flat.Add(nodes[j]);
+                }
+            }
+
+            Inline(fragment, flat, 1);
+        }
+
+        return flat ?? nodes;
+    }
+
+    /// <summary>Adds a fragment's children to <paramref name="flat"/>, inlining the fragments among them.</summary>
+    /// <param name="fragment">The fragment being inlined.</param>
+    /// <param name="flat">The flattened children of the fragment's parent, appended to.</param>
+    /// <param name="depth">How many fragments deep the walk is, so that a cycle fails by name.</param>
+    private static void Inline(VFragment fragment, List<VNode> flat, int depth)
+    {
+        if (fragment.Key is not null)
+        {
+            throw new InvalidOperationException(
+                "A VFragment cannot have a Key. Its children take its place among their parent's children, so a fragment has no identity of its own to key - give the key to the child whose identity it is.");
+        }
+
+        if (depth > MaxFragmentDepth)
+        {
+            throw new InvalidOperationException(
+                $"A VFragment is nested more than {MaxFragmentDepth} deep. Fragments are inlined into their parent, so this is a fragment that contains itself as a descendant: break the cycle, or return a container node where the nesting really is that deep.");
+        }
+
+        foreach (var child in fragment.Children)
+        {
+            if (child is VFragment nested)
+            {
+                Inline(nested, flat, depth + 1);
+                continue;
+            }
+
+            flat.Add(child);
         }
     }
 

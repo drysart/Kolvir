@@ -30,8 +30,10 @@ public sealed class ComponentMount : IDisposable
     /// <paramref name="parent"/> or <paramref name="component"/> is null.
     /// </exception>
     /// <remarks>
-    /// The first render is the one that is not deferred: a mount has to produce a control before
-    /// anything can be placed in the tree, so it renders here and every later render waits for a frame.
+    /// The first render is the one that is not deferred: the tree has to exist before a frame can be asked
+    /// to update it, so it renders here and every later render waits for a frame. It may render nothing -
+    /// an empty <see cref="VFragment"/> - which leaves the mount owning a place in the parent and no
+    /// controls in it.
     /// </remarks>
     internal ComponentMount(Control parent, IComponent component)
     {
@@ -59,10 +61,15 @@ public sealed class ComponentMount : IDisposable
     /// <summary>The component this mount renders.</summary>
     public IComponent Component { get; }
 
-    /// <summary>The control the root node became, or null when nothing is mounted.</summary>
+    /// <summary>The first control the root node became, or null when the render makes none.</summary>
+    /// <remarks>
+    /// A render that returns a <see cref="VFragment"/> makes as many controls as the fragment has
+    /// children, so this is the first of them; a render that returns an empty one makes none, and the
+    /// component is still mounted - it just has nothing on screen yet.
+    /// </remarks>
     public Control? Root => _handle.Root;
 
-    /// <summary>True while a tree is mounted.</summary>
+    /// <summary>True while a tree is mounted, whether or not it made any controls.</summary>
     public bool IsMounted => _handle.IsMounted;
 
     /// <inheritdoc />
@@ -128,6 +135,17 @@ public sealed class ComponentMount : IDisposable
         // is right: there is no window to draw into yet, and the next frame of any window drains this.
         Root?.Invalidate();
     }
+
+    /// <summary>How many controls this component's tree owns in its parent.</summary>
+    internal int ControlCount => _handle.ControlCount;
+
+    /// <summary>Moves this component's controls so that they start at <paramref name="index"/>.</summary>
+    /// <param name="index">The position in the parent's children the first control belongs at.</param>
+    /// <remarks>
+    /// The parent places a child by asking it, rather than by moving a control it assumes exists: a
+    /// component's render decides how many controls there are, and only the mount knows.
+    /// </remarks>
+    internal void PlaceIn(int index) => _handle.PlaceIn(index);
 
     /// <summary>Renders the component now, because the frame it was queued for has started.</summary>
     internal void RenderQueued()

@@ -165,17 +165,25 @@ public sealed class ObservableComponentTests
     }
 
     [TestMethod]
-    public void ANullModelWithNoOverrideIsRefusedByName()
+    public void ANullModelWithNoOverrideRendersNothing()
     {
-        // The intended default is a node that produces no control, and this feature has no such node yet -
-        // so a component that never got a model says so instead of quietly rendering nothing.
+        // The empty fragment is the default, so a component with no model yet puts no controls in the
+        // parent - and the model arriving is one ordinary render that fills the place the mount held.
         var host = new Panel { Dock = DockStyle.Fill };
         using var scene = Scene.Create(host);
         var page = new ModelOnlyPage();
 
-        var thrown = Assert.ThrowsExactly<NotSupportedException>(() => VirtualDomRuntime.Mount(host, page));
+        using var mount = VirtualDomRuntime.Mount(host, page);
 
-        StringAssert.Contains(thrown.Message, nameof(ModelOnlyPage), "the message names the component");
+        Assert.AreEqual(0, host.Controls.Count, "an empty fragment adds nothing to the parent");
+        Assert.IsNull(mount.Root, "there is no control to name");
+        Assert.IsTrue(mount.IsMounted, "and the component is mounted all the same");
+
+        page.DataModel = new PageModel();
+        scene.Frame();
+
+        Assert.AreEqual(1, host.Controls.Count, "the model's render takes the place the mount held");
+        Assert.IsInstanceOfType<Panel>(mount.Root);
     }
 
     [TestMethod]
@@ -401,7 +409,7 @@ public sealed class ObservableComponentTests
         protected override void OnAttached(AttachedArgs args) => args.AddDisposable(AttachProbe);
     }
 
-    /// <summary>Has no null-model render at all, which is what makes the default refuse it.</summary>
+    /// <summary>Has no null-model render at all, so it shows nothing until it is given a model.</summary>
     private sealed class ModelOnlyPage : ObservableComponent<PageModel>
     {
         protected override VNode RenderWithDataModel(RenderArgs<PageModel> args) =>

@@ -125,9 +125,6 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
     /// <summary>Describes the controls the model calls for, inside a collection scope.</summary>
     /// <returns>The tree to reconcile into what is mounted.</returns>
     /// <exception cref="ObjectDisposedException">The component is disposed.</exception>
-    /// <exception cref="NotSupportedException">
-    /// There is no model and this component does not override <see cref="RenderWithNullModel"/>.
-    /// </exception>
     /// <remarks>
     /// <para>
     /// Called by the mount when the component has been invalidated, and once before that to mount a tree.
@@ -177,17 +174,21 @@ public abstract class ObservableComponent<TDataModel> : IComponent, IDisposable
 
     /// <summary>Describes the controls to show when there is no model.</summary>
     /// <param name="args">A way to register something for the life of this render.</param>
-    /// <returns>The tree to reconcile into what is mounted.</returns>
-    /// <exception cref="NotSupportedException">Always, unless overridden.</exception>
+    /// <returns>An empty <see cref="VFragment"/> - no controls at all - unless overridden.</returns>
     /// <remarks>
-    /// The intended default is a node that produces no control, and the Virtual DOM feature has no such
-    /// node yet - every node describes one control, and a container with no children is not the same thing.
-    /// So this throws instead of quietly rendering nothing, which looks exactly like a component nobody
-    /// remembered to give a model to.
+    /// <para>
+    /// Rendering nothing is the default because having no model yet is ordinary: a page is mounted before
+    /// its document has loaded, and a component that showed a spinner and nothing else would be showing
+    /// something it did not ask for. Override this to describe what a model-less component looks like - a
+    /// placeholder, a "not loaded" line - which is a decision about that component rather than a rule.
+    /// </para>
+    /// <para>
+    /// Nothing is where it stops: an empty fragment puts no controls in the parent, and the mount still
+    /// holds the place the controls will go, so the model arriving later is one ordinary render that adds
+    /// them.
+    /// </para>
     /// </remarks>
-    protected virtual VNode RenderWithNullModel(RenderArgs args) =>
-        throw new NotSupportedException(
-            $"{GetType().Name} has no data model and does not override RenderWithNullModel.");
+    protected virtual VNode RenderWithNullModel(RenderArgs args) => new VFragment();
 
     /// <summary>Called once per mount, before the first render.</summary>
     /// <param name="args">A way to register something for the life of this mount.</param>

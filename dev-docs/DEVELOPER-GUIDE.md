@@ -4696,6 +4696,40 @@ analyzer with the generator:
 `null!` is left alone: that is the caller overruling the analysis, and the control's own setter is
 the backstop.
 
+#### Fragments, and rendering nothing
+
+A `VFragment` is a node with no control of its own. Its children take its place among the parent's
+children, so a group of nodes can sit anywhere a single node can - including at the top of a render:
+
+```csharp
+public override VNode Render() => new VFragment
+{
+    Children =
+    [
+        new VLabel { Text = _title },
+        new VLabel { Text = $"{_words} words" },
+    ],
+};
+```
+
+The alternative is a container, which lays out, paints and takes a slot in the z-order that the tree
+did not ask for. An *empty* fragment - `new VFragment()` - is the same idea with nothing in it, and it
+is what a render returns when it has nothing to show: it puts no controls in the parent at all.
+
+Three things follow from the children being inlined, and they are worth knowing before reaching for
+one:
+
+| Rule | Why |
+| --- | --- |
+| **A fragment's children are its parent's siblings** | They are matched against *all* of the parent's children, so a `Key` has to be unique across the whole list, not per fragment. |
+| **A `Key` on the fragment itself is refused** | Inlining leaves nothing for a key to identify; ignoring one would silently rename the identity the caller meant to control, so it throws and names the node. |
+| **Nesting is fine, cycles are not** | A fragment's child may be another fragment. Inlining is recursive, so one that ends up containing itself throws instead of taking the stack with it. |
+
+The mount owns a *slice* of the parent's children rather than one child, which is what makes an empty
+fragment possible: a component whose render is empty is mounted, listening and holding its place, and
+the controls its next render makes go where the parent said the child is. `MountHandle.Root` is null
+in that state, and `MountHandle.IsMounted` is true.
+
 #### A view model
 
 A `Component` is a view model whose `Render` returns the tree for its current state:
@@ -5036,9 +5070,10 @@ Two lifetimes, and the difference is what a base class is for:
 | `RenderArgs.AddDisposable`, during the render | one render: released before the next one starts |
 | `AttachedArgs.AddDisposable`, in `OnAttached` | one mount: released on detach, or on dispose |
 
-`RenderWithNullModel` is what renders before a model is set. No node in the virtual DOM produces no
-control yet, so its default throws and names the component - loudly, rather than as a card that quietly
-renders nothing.
+`RenderWithNullModel` is what renders before a model is set, and its default is an empty
+`VFragment`: no controls at all, and the mount holds the place they will go, so setting the model is
+one ordinary render that fills it. Override it to describe what a model-less component looks like - a
+placeholder, a "not loaded" line - which is a decision about that component rather than a rule.
 
 #### What the layer will and will not do
 
