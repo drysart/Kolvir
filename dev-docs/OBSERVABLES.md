@@ -21,7 +21,7 @@ decided here for the first time that should be confirmed before the code exists.
 
 Goals:
 
-- **Values that can be watched.** `Observable.CreateNew<T>(initial)` returns an
+- **Values that can be watched.** `Observable.CreateValue<T>(initial)` returns an
   `IObservableMutableValue<T>`, so the creator can write and everyone else can only read.
 - **Dependencies that are discovered, not declared.** An expression observable runs its function,
   notes which observables that run read, and subscribes to exactly those. No strings, no attributes,
@@ -64,7 +64,7 @@ IObservableValue : IObservableEventSource, IDisposable
 IObservableValue<T> : IObservableValue
   new T Value { get; }
 
-IObservableMutableValue<T> : IObservableValue<T>       ← what CreateNew returns
+IObservableMutableValue<T> : IObservableValue<T>       ← what CreateValue returns
   new T Value { get; set; }
 ```
 
@@ -73,8 +73,8 @@ IObservableMutableValue<T> : IObservableValue<T>       ← what CreateNew return
 | `IObservableEventSource` | handler pair, `DependUpon`, `RaiseEvent`, `IsLive` | The dependency primitive. A named dependency and a collection's per-key dependency are this and nothing more: they carry no value, only "this particular thing changed". |
 | `IObservableValue` | `object? Value` | The untyped view, for a homogeneous dependency set and for `PublishRead`. Reading it publishes. |
 | `IObservableValue<T>` | `new T Value { get; }` | What a dependency set holds. Read-only on purpose: a subscriber can watch a value but cannot write it. |
-| `IObservableMutableValue<T>` | `new T Value { get; set; }` | What `CreateNew` hands back, to the one piece of code that owns the state. |
-| `Observable` | static | `CreateNew<T>`, `CreateExpression<T>`, `GetNamed`, `PublishRead`, `CollectDependencies`. |
+| `IObservableMutableValue<T>` | `new T Value { get; set; }` | What `CreateValue` hands back, to the one piece of code that owns the state. |
+| `Observable` | static | `CreateValue<T>`, `CreateExpression<T>`, `GetNamed`, `PublishRead`, `CollectDependencies`. |
 
 Three consequences worth stating plainly:
 
@@ -261,7 +261,7 @@ trees to decide nothing.
 // A model: the creator keeps the mutable handle, everything else sees the read-only one.
 internal sealed class DocumentModel
 {
-    private readonly IObservableMutableValue<string> _text = Observable.CreateNew(string.Empty);
+    private readonly IObservableMutableValue<string> _text = Observable.CreateValue(string.Empty);
 
     public IObservableValue<string> Text => _text;
 
@@ -278,7 +278,7 @@ var wordCount = Observable.CreateExpression(
 
 | Member | Returns | Notes |
 | --- | --- | --- |
-| `Observable.CreateNew<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
+| `Observable.CreateValue<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
 | `Observable.CreateExpression<T>(Func<T>, string? name = null)` | `IObservableValue<T>` | Runs once at creation; throws if that throws. Optional comparer overload. |
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
