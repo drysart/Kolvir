@@ -406,6 +406,19 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 | Using a disposed source: reading `Value` or writing it, `RaiseEvent`, or registering a handler | `ObjectDisposedException` |
 | Registering on an evicted named dependency | the handle is dead: `IsDisposed` is true and every use throws `ObjectDisposedException`, registering included. That is deliberate - a cached handle that quietly stops working is the one way a dependency can go silent, so it is made loud. A later `GetNamed` for the same key returns a fresh handle, and the situation cannot arise while an entry is still watched, since a handler is what keeps the entry alive |
 
+### 8.1 Why the application is told, and the caller is not
+
+Two rows above report to `Application.HandleNativeBoundary`, and the reason is an order of decisions rather than a taste for that particular function:
+
+1. **The dispatch has to survive a bad handler.** A subscriber that throws would otherwise abandon every subscriber after it in the snapshot, and they did nothing wrong. So each handler is caught on its own (section 3.4).
+2. **A caught exception must not vanish.** Swallowing it would be the one thing worse than crashing: a value silently stops updating its subscribers and nothing anywhere says why.
+3. **Having caught it, there is no caller.** A dependency-started re-run was started by a `set`, or by another expression - the code that wrote the value is not the code at fault, and rethrowing there would make an innocent `_model.Text = text;` throw because some unrelated subscriber has a bug. Worse, it would mean a single bad subscriber breaks every write for everyone.
+4. **`HandleNativeBoundary` is the library's existing channel for exactly this.** It is what a render that throws and a frame-starting handler that throws already go through, it is where the application's `UnhandledExceptionEventArgs.Handled` decision lives, and it **rethrows when there is no `Application`** - so a test, a console host or any process without one gets the exception at the point it was raised, losing nothing to a report that nobody collects.
+
+The name is about the *policy*, not the plumbing: it is the place Kolvir hands an exception it cannot fix to the application, and an observables handler that throws is that same kind of exception: raised by code the application gave the library, not by code that called the library.
+
+Two consequences worth being explicit about. A handler that throws costs the handlers behind it only if the application lets the report rethrow (section 3.4). And a re-run that throws has no subscriber to skip at all - it reports, caches, and the next read throws (section 3.7), so the two rows differ in what they were in the middle of, not in the policy.
+
 ## 9. The component seam (a later step, in the Virtual DOM feature)
 
 `VIRTUAL-DOM.md` section 7.3 split the mount's protocol out so a base class could be replaced.
