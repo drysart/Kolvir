@@ -26,8 +26,8 @@ habit is not worth keeping, and nothing in the document needs them.
 Goals:
 
 - **Values that can be watched.** `Observable.CreateValue<T>(initial)` returns an
-  `IObservableMutableValue<T>`, which the model keeps private and exposes as an ordinary property - so the
-  creator can write, readers read, and nobody outside sees an observable to hold on to.
+  `IObservableMutableValue<T>`, kept private and exposed as an ordinary property - so the creator
+  can write, readers read, and nobody outside sees an observable to hold on to.
 - **Dependencies that are discovered, not declared.** An expression observable runs its function,
   notes which observables that run read, and subscribes to exactly those. No strings, no attributes,
   no registration lists, and no reflection - so it stays AOT-clean.
@@ -158,7 +158,7 @@ Nested scopes are isolated: the outer run never sees what the inner run read.
 | Decision | Why |
 | --- | --- |
 | **A raise iterates a snapshot of the handler list.** | A handler is allowed to subscribe and unsubscribe freely, including itself, and none of that may disturb the dispatch that is running. Mutations apply to the next raise, and a handler that disposes the source mid-dispatch does not stop the snapshot either: the remaining handlers are already in the list being walked. |
-| **Each handler gets its own boundary.** | An exception escaping one handler would abandon the rest of the snapshot; it goes to `Application.HandleNativeBoundary` instead and the loop continues. If the application chooses to let it rethrow (no `Application.Current`, or `Handled` left false), it propagates from `RaiseEvent` and the handlers behind it did not run - the same policy, and the same caveat, as `RenderQueue`'s batch in `VIRTUAL-DOM.md` section 7.2. |
+| **Nothing is caught: an exception from a handler propagates.** | A raise is a synchronous callback and behaves like one: as with a multicast delegate, the first handler that throws ends the notification and the exception travels out of `RaiseEvent` to whoever caused the change. This library has no reporting channel to hand it to and no policy to impose, and each alternative was worse - swallowing it silently, inventing a target for it, or rethrowing after the loop, which would assume that the remaining handlers must still be told even though nothing can vouch for the state after a bug. A use case that needs more (a render that must survive its own failure, say) is where that judgement belongs (section 8.1). The consequence to be aware of: handlers after the throwing one do not run for that change. |
 | **`RaiseEvent` is on the interface and is public.** | A source that owns a change raises it: a dictionary raising a key's dependency, a hand-written source raising on a timer tick. It is not something a consumer calls - a consumer changes the model and the model raises. Documented rather than restricted, because restricting it would need a second type for "the raiser". |
 | **`RaiseEvent` on a disposed source throws `ObjectDisposedException`.** | A dead source is a lifetime bug in whoever still holds it, and a silent no-op makes that bug invisible: the call looks like it announced something. The case that *is* ordinary - a dictionary raising for a key that nobody is watching - is not this one: `RaiseNamedEvent` resolves the entry and does nothing when there is none (section 3.2), because an absent entry is "no listener", not "dead source". |
 
@@ -246,12 +246,12 @@ var total = Observable.CreateExpression(
     exceptionComparer: EqualityComparer<Exception>.Create(
         (a, b) => a.GetType() == b.GetType() && a.Message == b.Message));
 ```
-
-- **The report happens once, at the point of evaluation,** through
-  `Application.HandleNativeBoundary` - the same place a render's failure goes. Not when a *read*
-  started the run: that caller is already getting the exception, and reporting it as well would
-  count one bug twice. A handler that then reads `Value` gets the exception thrown into it, which the
-  dispatch loop isolates (section 3.4).
+- **Nothing is reported anywhere.** This library has no report channel (section 8.1): a failure is
+  visible through the value itself - a read throws it, and a success-to-failure or failure-to-failure
+  change raises the event on the expression. A subscriber that reads `Value` in response gets
+  the exception thrown into it, and that throw propagates out of `RaiseEvent` like any other
+  (section 3.4), which is where a use case that cares has to catch it.
+  where a use case that cares has to catch it.
 
 ### 3.8 Cycles, and expressions that mutate
 
@@ -269,7 +269,13 @@ Two overloads, and the split exists to keep a path out of an application that di
 | `CreateExpression(f, name, ...)` | nothing extra - a name was given, so this signature has no caller attributes to fill |
 | `CreateExpression(f, ...)` | the creation site: a `[CallerFilePath]` constant and a `[CallerLineNumber]` integer |
 
-An application that names the expressions it cares about therefore pays nothing at all, and one that does not still gets `Model.cs:88` in the cycle chain and in the "changed state from inside its own function" message. A name is *required* on the named overload and absent from the located one, which is what makes the call site choose instead of the binder guessing - `CreateExpression(f, "total")` and `CreateExpression(f, "total", comparer)` bind to the named one, `CreateExpression(f)` and `CreateExpression(f, comparer)` to the located one. Nothing is reflected or looked up either way, and the path is reduced to a file name only when a message is built (section 11 records what the constant costs).
+An application that names the expressions it cares about therefore pays nothing at all, and one that
+does not still gets `Model.cs:88` in the cycle chain and in the "changed state from inside its own
+function" message. A name is *required* on the named overload and absent from the located one, which is
+what makes the call site choose instead of the binder guessing - `CreateExpression(f, "total")` and
+`CreateExpression(f, "total", comparer)` bind to the named one, `CreateExpression(f)` and
+`CreateExpression(f, comparer)` to the located one. Nothing is reflected or looked up either way, and
+the path is reduced to a file name only when a message is built (section 11 records what that costs).
 
 ### 3.9 Single-threaded, with no locks
 
@@ -323,7 +329,7 @@ return run.Value;   // throws into whoever called this, with the set already hoo
 | --- | --- |
 | **The set comes back even when the body threw.** | That is the rule a failing expression already follows (section 3.6.1): the dependencies a run *reached* are what its result - success or exception - was computed from, and therefore what can change it. Throwing straight through would hand the caller an exception and no set, which for a render means a component that never re-renders again. |
 | **`Value` throws rather than returning a default.** | A caller that wants the result has to deal with the failure at the point where it uses it, and cannot mistake "the body failed" for "the body returned null". A caller that only wants the dependencies never reads `Value` and is unaffected. |
-| **Nothing is reported to the application.** | The caller is right here: this is a synchronous call with somebody waiting, so the exception goes to them through `Value` and is not also sent to `Application.HandleNativeBoundary` (the same rule as a read-started re-run, section 3.7). |
+| **Nothing is reported to anyone.** | The caller is right here: this is a synchronous call with somebody waiting, so the exception goes to them through `Value`. There is no report channel to send it to as well (section 8.1). |
 
 It exists because the component layer (section 9) needs exactly this and *not* an expression: a render
 produces a tree it does not want to compare, so it wants "the dependencies of this run" plus "call me
@@ -397,27 +403,37 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 
 | Situation | Behaviour |
 | --- | --- |
-| Expression's function throws on its first run (first read or first handler) | cached as the result, the dependencies it reached are hooked, and every read throws it; the report goes to `Application.HandleNativeBoundary` unless the run was triggered by a read, which throws to its caller |
-| Expression's function throws on a dependency-started re-run | cached as the result, reported to `Application.HandleNativeBoundary`, raised (a new exception is a changed result), and every read throws it |
-| A handler throws during a raise | isolated per handler, reported to `Application.HandleNativeBoundary`, the rest of the snapshot still runs (unless the application lets it rethrow) |
+| Expression's function throws on its first run (first read or first handler) | cached as the result, the dependencies it reached are hooked, and every read throws it; a read-started run throws to that caller, and a run started by the first handler attaches without raising |
+| Expression function throws on a dependency-started re-run | cached as the result, raised (a new exception is a changed result), and every read throws it. The raise is the only notification the library gives - there is no report channel (section 8.1) |
+| A handler throws during a raise | nothing is caught: it propagates out of `RaiseEvent`, and the handlers after it in that dispatch do not run |
 | A collector body throws | the exception is returned in `Fault`, `Value` throws it, and the set the body reached comes back with it |
 | A dependency cycle is read | `InvalidOperationException` naming the chain, before any recursion |
 | A write inside a running expression | `InvalidOperationException` naming the expression |
 | Using a disposed source: reading `Value` or writing it, `RaiseEvent`, or registering a handler | `ObjectDisposedException` |
 | Registering on an evicted named dependency | the handle is dead: `IsDisposed` is true and every use throws `ObjectDisposedException`, registering included. That is deliberate - a cached handle that quietly stops working is the one way a dependency can go silent, so it is made loud. A later `GetNamed` for the same key returns a fresh handle, and the situation cannot arise while an entry is still watched, since a handler is what keeps the entry alive |
 
-### 8.1 Why the application is told, and the caller is not
+### 8.1 The library imposes no failure policy, and talks to nobody
 
-Two rows above report to `Application.HandleNativeBoundary`, and the reason is an order of decisions rather than a taste for that particular function:
+Nothing in this package reports an exception anywhere. It does not reference `Application`, a host, a
+window or any other part of Kolvir - it is a data-model library over the BCL, which is what makes it
+usable in a test, a console host or a server process as much as in a UI (section 12.1). So an exception
+from a handler is simply not caught (section 3.4), an exception from a function is stored as the
+expression's result and raised like any other change (section 3.7), and the only acknowledgement a
+failure gets is the value itself, which throws it to whoever reads it.
 
-1. **The dispatch has to survive a bad handler.** A subscriber that throws would otherwise abandon every subscriber after it in the snapshot, and they did nothing wrong. So each handler is caught on its own (section 3.4).
-2. **A caught exception must not vanish.** Swallowing it would be the one thing worse than crashing: a value silently stops updating its subscribers and nothing anywhere says why.
-3. **Having caught it, there is no caller.** A dependency-started re-run was started by a `set`, or by another expression - the code that wrote the value is not the code at fault, and rethrowing there would make an innocent `_model.Text = text;` throw because some unrelated subscriber has a bug. Worse, it would mean a single bad subscriber breaks every write for everyone.
-4. **`HandleNativeBoundary` is the library's existing channel for exactly this.** It is what a render that throws and a frame-starting handler that throws already go through, it is where the application's `UnhandledExceptionEventArgs.Handled` decision lives, and it **rethrows when there is no `Application`** - so a test, a console host or any process without one gets the exception at the point it was raised, losing nothing to a report that nobody collects.
+That is deliberate, because the right response is different for different uses and the library cannot
+know which it is in the middle of:
 
-The name is about the *policy*, not the plumbing: it is the place Kolvir hands an exception it cannot fix to the application, and an observables handler that throws is that same kind of exception: raised by code the application gave the library, not by code that called the library.
+| Use | What it should do about a throw | Where that lives |
+| --- | --- | --- |
+| A virtual DOM component whose render reads model values | Let the render fail into the frame's own boundary, having already hooked the dependencies it did read, so the component re-renders on the next change instead of being stranded | `VIRTUAL-DOM.md` section 7.2 and this document section 9 |
+| A model used by an event handler | Nothing: the exception surfaces where the change was made, which is inside a control event and therefore inside the host's own boundary | The application |
+| A test | Nothing: the exception arrives at the assertion that caused the change, unwrapped and with the original stack | The test |
+| A background or server process | Catch where the change is made and log it; there is no UI to show it in | The application |
 
-Two consequences worth being explicit about. A handler that throws costs the handlers behind it only if the application lets the report rethrow (section 3.4). And a re-run that throws has no subscriber to skip at all - it reports, caches, and the next read throws (section 3.7), so the two rows differ in what they were in the middle of, not in the policy.
+The pattern those share is that the caller of the change is the outermost frame that can do anything
+useful - so the library leaves the decision to it rather than shipping a policy it would have to call
+back into an application to apply.
 
 ## 9. The component seam (a later step, in the Virtual DOM feature)
 
@@ -540,10 +556,10 @@ without a window, and the seam is testable without a second renderer.
 Five things outside the new code, in the shape `VIRTUAL-DOM.md` section 8.1 recorded for its feature:
 
 1. **`src/features/Kolvir.Feature.Observables/`** in the rung-3 four-folder layout, all of the code in
-   `common/`, namespace `Kolvir.Observables`, `IsAotCompatible`. Referencing `Kolvir` core for
-   `Application.HandleNativeBoundary` and nothing else.
-2. **`tests/features/Kolvir.Feature.Observables.Tests/`**, which needs no reference to core beyond what
-   the scene tests already use.
+   `common/`, namespace `Kolvir.Observables`, `IsAotCompatible`, and **no reference to Kolvir at all** -
+   nothing here needs a control, a host or an application (section 8.1).
+2. **`tests/features/Kolvir.Feature.Observables.Tests/`**, which references the package under test and
+   nothing else - no scene, no host, no window.
 3. **`Kolvir.slnx`** gets both, under `/src/features/` and `/tests/features/`. The solution is
    hand-listed, not globbed.
 4. **`.github/workflows/tests.yml`** gets a restore step and a test step for the new suite, and the
@@ -568,7 +584,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | **A failed run still yields its dependencies** | `CollectDependencies(() => throw ...)` returns the sources it read before the throw, `IsFaulted` true, and a `Value` that throws the same exception instance - for both collectors - which is what lets the seam hook the set and then fail. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
 | **Equality keeps the graph quiet, except for exceptions** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. A re-run that fails again raises by default, because the replacement exception is a changed result, and does not raise when the expression was given an `IEqualityComparer<Exception>` that calls the two equivalent - while a read after that still throws the newer exception (3.7). |
-| **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression reporting once, raising (a new exception is a changed result), and throwing on every read (there is nobody to throw at during the run itself); a cycle throws with the chain named; a write inside a scope throws; and every use after `Dispose` throws `ObjectDisposedException` - read, write, raise, or register. |
+| **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression raising (a new exception is a changed result) and throwing on every read, with nothing thrown at anybody during the run itself; a cycle throws with the chain named; a write inside a scope throws; and every use after `Dispose` throws `ObjectDisposedException` - read, write, raise, or register. Nothing is reported anywhere, which is asserted by the absence of an application dependency in the package (section 8.1). |
 | **Disposal is ordered, and the order is observable** | A handler registered on a value source sees `IsDisposed` true and gets `ObjectDisposedException` if it reads `Value` during the final notification, while a handler that only counts the notification sees it exactly once - so "dead first, then one raise, then the list is cleared" is asserted rather than assumed. An expression whose dependency is disposed raises in turn, with the `ObjectDisposedException` as its cached result. Afterwards, `Value`, `RaiseEvent` and registration all throw while removing a handler and disposing again stay safe. |
 | **The seam re-renders on the frame after a change** | In the Virtual DOM suite: a component reading two model values renders once per frame however many of them changed, stops listening to a value its render stopped reading, and unhooks everything when detached. |
 | **AOT- and trim-clean** | The sample's published render is byte-identical to the JIT build's, and `Kolvir.Minimal` publishes with no observables artifact. The feature has no reflection, no `dynamic`, and no serializers, so this is expected rather than arranged. |
