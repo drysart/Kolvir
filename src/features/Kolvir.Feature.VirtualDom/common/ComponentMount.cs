@@ -33,7 +33,7 @@ public sealed class ComponentMount : IDisposable
     /// The first render is the one that is not deferred: a mount has to produce a control before
     /// anything can be placed in the tree, so it renders here and every later render waits for a frame.
     /// </remarks>
-    internal ComponentMount(Control parent, Component component)
+    internal ComponentMount(Control parent, IComponent component)
     {
         ArgumentNullException.ThrowIfNull(parent);
         ArgumentNullException.ThrowIfNull(component);
@@ -57,7 +57,7 @@ public sealed class ComponentMount : IDisposable
     }
 
     /// <summary>The component this mount renders.</summary>
-    public Component Component { get; }
+    public IComponent Component { get; }
 
     /// <summary>The control the root node became, or null when nothing is mounted.</summary>
     public Control? Root => _handle.Root;
@@ -82,7 +82,13 @@ public sealed class ComponentMount : IDisposable
     /// <summary>Asks for this component to be rendered on the next frame.</summary>
     /// <remarks>
     /// <para>
-    /// The cheap half of <see cref="Component.SetState"/>: a flag and a frame request. Calling it twice
+    /// The primitive a component is built on. <see cref="Component.SetState"/> is one line over it, and
+    /// an <see cref="IComponent"/> of one's own calls it from its own state setter - which is why it is
+    /// public: an interface whose only way to be re-rendered is a method the mount never calls would be
+    /// a seam nothing can use.
+    /// </para>
+    /// <para>
+    /// The whole of it is cheap on purpose: a flag, a queue entry and a frame request. Calling it twice
     /// for one frame queues the component once, which is what turns a handler that changes a list five
     /// times into one render and one tree update.
     /// </para>
@@ -93,9 +99,9 @@ public sealed class ComponentMount : IDisposable
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// The component changed state from inside its own <see cref="Component.Render"/>.
+    /// The component changed state from inside its own <see cref="IComponent.Render"/>.
     /// </exception>
-    internal void Invalidate()
+    public void Invalidate()
     {
         if (_disposed)
         {

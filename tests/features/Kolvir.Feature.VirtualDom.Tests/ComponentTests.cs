@@ -189,10 +189,43 @@ public sealed class ComponentTests
     }
 
     [TestMethod]
+    public void AComponentThatDoesNotDeriveFromComponentMountsAndRenders()
+    {
+        // The seam. The mount needs Render, Attach and Detach and nothing else, so a base class of its
+        // own - one that cannot inherit, or that schedules differently - gets the whole layer: the
+        // deferred render, the patch and the teardown. SetState is the application's half of the
+        // protocol and is not on the interface, so this one spells its own state change instead.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var counter = new PlainCounter();
+
+        using var mount = VirtualDomRuntime.Mount(host, counter);
+
+        Assert.AreEqual(1, counter.Renders, "the mount renders it once");
+        Assert.AreSame(mount, counter.Mount, "and told it which mount owns the tree");
+        Assert.AreEqual("0 clicks", Text(mount));
+
+        counter.Add();
+
+        Assert.AreEqual(1, counter.Renders, "Invalidate is the same deferral SetState is");
+        Assert.AreEqual("0 clicks", Text(mount), "and the screen has not followed yet");
+
+        scene.Frame();
+
+        Assert.AreEqual(2, counter.Renders, "one frame is one render");
+        Assert.AreEqual("1 clicks", Text(mount));
+        Assert.AreSame(mount, counter.Mount, "and it is still mounted through the same one");
+
+        mount.Dispose();
+
+        Assert.IsNull(counter.Mount, "disposing detached it, because Detach is the interface's half");
+    }
+
+    [TestMethod]
     public void MountingNeedsAParentAndAComponent()
     {
         Assert.ThrowsExactly<ArgumentNullException>(() => VirtualDomRuntime.Mount(null!, new Counter()));
-        Assert.ThrowsExactly<ArgumentNullException>(() => VirtualDomRuntime.Mount(new Panel(), (Component)null!));
+        Assert.ThrowsExactly<ArgumentNullException>(() => VirtualDomRuntime.Mount(new Panel(), (IComponent)null!));
     }
 
     [TestMethod]
@@ -245,6 +278,62 @@ public sealed class ComponentTests
             HandlerCalls++;
             _count++;
             SetState();
+        }
+    }
+
+    /// <summary>
+    /// An <see cref="IComponent"/> that does not derive from <see cref="Component"/>: the seam, exercised.
+    /// </summary>
+    /// <remarks>
+    /// It deliberately spells out the three members the mount uses, including the single-mount rule that
+    /// <see cref="Component"/> keeps for its own subclasses. Its state change is
+    /// <see cref="ComponentMount.Invalidate"/> and nothing else, which is the whole point of the
+    /// interface not carrying `SetState`.
+    /// </remarks>
+    private sealed class PlainCounter : IComponent
+    {
+        private int _count;
+
+        internal int Renders { get; private set; }
+
+        internal ComponentMount? Mount { get; private set; }
+
+        public VNode Render()
+        {
+            Renders++;
+
+            return new VPanel
+            {
+                Dock = DockStyle.Fill,
+                Children =
+                [
+                    new VButton { Dock = DockStyle.Fill, Text = $"{_count} clicks", Click = _ => Add() },
+                ],
+            };
+        }
+
+        public void Attach(ComponentMount mount)
+        {
+            if (Mount is { IsMounted: true } existing && !ReferenceEquals(existing, mount))
+            {
+                throw new InvalidOperationException($"{nameof(PlainCounter)} is already mounted.");
+            }
+
+            Mount = mount;
+        }
+
+        public void Detach(ComponentMount mount)
+        {
+            if (ReferenceEquals(Mount, mount))
+            {
+                Mount = null;
+            }
+        }
+
+        internal void Add()
+        {
+            _count++;
+            Mount?.Invalidate();
         }
     }
 

@@ -7,7 +7,7 @@ namespace Kolvir.VirtualDom;
 /// <para>
 /// There are two entry points and nothing else. <see cref="Mount(Control, VNode)"/> takes a tree that
 /// the application rebuilds and compares itself, and hands back a handle whose
-/// <see cref="MountHandle.Update"/> is what a render calls. <see cref="Mount(Control, Component)"/>
+/// <see cref="MountHandle.Update"/> is what a render calls. <see cref="Mount(Control, IComponent)"/>
 /// takes a view model that renders itself, which is the same thing with the comparison and the
 /// scheduling wrapped up. That is deliberately the entire API, because a virtual DOM is a way of
 /// owning a subtree, not a control.
@@ -38,8 +38,8 @@ public static class VirtualDomRuntime
     /// <param name="parent">The control whose children the tree owns. Typically a window's root panel.</param>
     /// <param name="component">The component to render and keep in step.</param>
     /// <returns>
-    /// A handle that re-renders the component whenever <see cref="Component.SetState"/> is called, which
-    /// also detaches the tree when it is disposed.
+    /// A handle that re-renders the component whenever <see cref="ComponentMount.Invalidate"/> is called - which
+    /// is what <see cref="Component.SetState"/> does - and that also detaches the tree when it is disposed.
     /// </returns>
     /// <exception cref="ArgumentNullException">
     /// <paramref name="parent"/> or <paramref name="component"/> is null.
@@ -51,7 +51,7 @@ public static class VirtualDomRuntime
     /// void Show() => _screen = VirtualDomRuntime.Mount(Root, new MainScreen());
     /// </code>
     /// </example>
-    public static ComponentMount Mount(Control parent, Component component)
+    public static ComponentMount Mount(Control parent, IComponent component)
     {
         ArgumentNullException.ThrowIfNull(parent);
         ArgumentNullException.ThrowIfNull(component);

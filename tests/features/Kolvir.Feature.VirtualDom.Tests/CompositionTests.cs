@@ -505,6 +505,44 @@ public sealed class CompositionTests
         Assert.AreEqual(2, thrower.Renders, "and it mounts once it stops throwing");
     }
 
+    [TestMethod]
+    public void AChildThatIsNotAComponentStillComposes()
+    {
+        // VComponent wraps IComponent, not Component, so a view model with its own base class composes
+        // like any other: its own mount, its own renders, and a parent render that leaves it alone.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var inner = new PlainChild("inner");
+        var parent = new Emits(inner);
+
+        var mount = VirtualDomRuntime.Mount(host, parent);
+
+        Assert.AreEqual(1, inner.Renders, "the child mounted and rendered");
+        Assert.AreEqual(1, parent.Renders);
+        Assert.AreEqual("inner", Texts(mount).Single());
+
+        inner.Change("changed");
+        scene.Frame();
+
+        Assert.AreEqual(2, inner.Renders, "its own Invalidate rendered it");
+        Assert.AreEqual(1, parent.Renders, "and the parent was not involved");
+        Assert.AreEqual("changed", Texts(mount).Single());
+
+        parent.Rerender();
+        scene.Frame();
+
+        Assert.AreEqual(2, parent.Renders, "the parent re-rendered");
+        Assert.AreEqual(2, inner.Renders, "and the child did not");
+
+        mount.Dispose();
+
+        inner.Change("after");
+
+        scene.Frame();
+
+        Assert.AreEqual(2, inner.Renders, "disposing the parent's mount detached the child too");
+    }
+
     /// <summary>A parent that holds any components, so a failing one can sit in a list beside good ones.</summary>
     private sealed class Holder : Component
     {
@@ -524,6 +562,65 @@ public sealed class CompositionTests
                 },
             ],
         };
+    }
+
+    /// <summary>An <see cref="IComponent"/> with no <see cref="Component"/> above it, used as a child.</summary>
+    private sealed class PlainChild : IComponent
+    {
+        private string _text;
+
+        internal PlainChild(string text) => _text = text;
+
+        internal int Renders { get; private set; }
+
+        internal ComponentMount? Mount { get; private set; }
+
+        public VNode Render()
+        {
+            Renders++;
+            return new VPanel { Dock = DockStyle.Top, Children = [new VLabel { Text = _text }] };
+        }
+
+        public void Attach(ComponentMount mount) => Mount = mount;
+
+        public void Detach(ComponentMount mount)
+        {
+            if (ReferenceEquals(Mount, mount))
+            {
+                Mount = null;
+            }
+        }
+
+        internal void Change(string text)
+        {
+            _text = text;
+            Mount?.Invalidate();
+        }
+    }
+
+    /// <summary>A parent that emits one <see cref="IComponent"/> child, whoever implemented it.</summary>
+    private sealed class Emits : Component
+    {
+        private readonly IComponent _child;
+
+        internal Emits(IComponent child) => _child = child;
+
+        internal int Renders { get; private set; }
+
+        public override VNode Render()
+        {
+            Renders++;
+            return new VPanel
+            {
+                Dock = DockStyle.Fill,
+                Children =
+                [
+                    new VPanel { Dock = DockStyle.Fill, Children = [new VComponent(_child)] },
+                ],
+            };
+        }
+
+        internal void Rerender() => SetState();
     }
 
     /// <summary>A component whose render throws on the Nth render, so a failure can be aimed.</summary>

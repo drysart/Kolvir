@@ -25,7 +25,7 @@ namespace Kolvir.VirtualDom;
 /// </para>
 /// <para>
 /// A component is re-rendered through the mount that owns its tree, which is what
-/// <see cref="VirtualDomRuntime.Mount(Control, Component)"/> creates. Until something mounts it there is
+/// <see cref="VirtualDomRuntime.Mount(Control, IComponent)"/> creates. Until something mounts it there is
 /// no tree to patch, so <see cref="SetState"/> does nothing - and nothing is lost, because the first
 /// render reads whatever the state is by then. A component that is never mounted shows no controls at
 /// all, which is what tells its author that the mount call is missing. Once the mount is disposed,
@@ -42,6 +42,13 @@ namespace Kolvir.VirtualDom;
 /// render must not call <see cref="SetState"/>. That contract is what lets a render be one pass with no
 /// settling loop, and calling <see cref="SetState"/> from inside one is refused rather than deferred,
 /// because a render that changes the state has already described a tree that is out of date.
+/// </para>
+/// <para>
+/// The mount needs a smaller set of members than this class has - <see cref="Render"/> and the two
+/// bookkeeping calls - and those are <see cref="IComponent"/>. Deriving from this class is what buys
+/// <see cref="SetState"/> and the single-instance rule; a view model that cannot inherit, or that wants
+/// to schedule its own way, implements the interface instead and calls
+/// <see cref="ComponentMount.Invalidate"/> where this class calls it from <see cref="SetState"/>.
 /// </para>
 /// </remarks>
 /// <example>
@@ -64,7 +71,7 @@ namespace Kolvir.VirtualDom;
 /// using var mount = VirtualDomRuntime.Mount(window.Root, new Counter());
 /// </code>
 /// </example>
-public abstract class Component
+public abstract class Component : IComponent
 {
     private ComponentMount? _mount;
 
@@ -100,7 +107,11 @@ public abstract class Component
     /// The component is already mounted. One component is one subtree, so a second mount would leave the
     /// first one rendering a component that no longer points at it.
     /// </exception>
-    internal void Attach(ComponentMount mount)
+    /// <remarks>
+    /// Implemented explicitly, so it belongs to <see cref="IComponent"/> rather than to this class's own
+    /// surface: an application has no reason to call it and no way to reach it.
+    /// </remarks>
+    void IComponent.Attach(ComponentMount mount)
     {
         if (_mount is { IsMounted: true } existing && !ReferenceEquals(existing, mount))
         {
@@ -113,7 +124,8 @@ public abstract class Component
 
     /// <summary>Forgets <paramref name="mount"/> if it is the one this component renders through.</summary>
     /// <param name="mount">The mount being disposed.</param>
-    internal void Detach(ComponentMount mount)
+    /// <remarks>Explicit for the same reason as <see cref="IComponent.Attach"/>.</remarks>
+    void IComponent.Detach(ComponentMount mount)
     {
         if (ReferenceEquals(_mount, mount))
         {

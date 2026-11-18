@@ -38,14 +38,14 @@ public sealed class VComponent : VNode
     /// <summary>Wraps <paramref name="component"/> so that it can be a child node.</summary>
     /// <param name="component">The component to mount under the parent that renders this node.</param>
     /// <exception cref="ArgumentNullException"><paramref name="component"/> is null.</exception>
-    public VComponent(Component component)
+    public VComponent(IComponent component)
     {
         ArgumentNullException.ThrowIfNull(component);
         Component = component;
     }
 
     /// <summary>The component this node stands for.</summary>
-    public Component Component { get; }
+    public IComponent Component { get; }
 
     /// <inheritdoc />
     /// <remarks>

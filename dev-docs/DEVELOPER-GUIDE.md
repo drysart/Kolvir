@@ -4797,6 +4797,47 @@ with its own text box, its own Up/Down/Remove buttons and its own render count. 
 that row's count and leaves the list's alone; adding or moving raises the list's and leaves the
 untouched rows alone.
 
+#### Writing your own component base class
+
+`Component` is one implementation of `IComponent`, and the mount only needs the interface:
+
+| Member | Who calls it |
+| --- | --- |
+| `VNode Render()` | the mount, once per frame in which the component was invalidated |
+| `void Attach(ComponentMount mount)` | the mount, before its first render |
+| `void Detach(ComponentMount mount)` | the mount, when it is disposed or its first render threw |
+
+`SetState` is **not** on the interface. It is the application-facing half - the call an event handler
+makes, and the one the mount never calls - so requiring it would have made every implementation
+reproduce a spelling the mount has no opinion about. What the mount does need underneath it,
+`ComponentMount.Invalidate()`, is public for exactly this reason: that is what a base class of your own
+calls from its own state setter.
+
+```csharp
+internal sealed class Counter : IComponent
+{
+    private ComponentMount? _mount;
+    private int _count;
+
+    public VNode Render() => new VLabel { Text = $"{_count} clicks" };
+
+    public void Attach(ComponentMount mount) => _mount = mount;       // refuse a second live mount
+
+    public void Detach(ComponentMount mount) { if (ReferenceEquals(_mount, mount)) _mount = null; }
+
+    internal void Count()
+    {
+        _count++;
+        _mount?.Invalidate();     // the same one line SetState is
+    }
+}
+```
+
+A derived `Component` also gets the single-instance rule and `SetState` for free, so implement the
+interface directly only when you cannot inherit - a record, a source-generated view model, a wrapper
+over an existing one - or when you want to schedule differently. `VComponent` and
+`VirtualDomRuntime.Mount` take the interface, so such a component composes as a child like any other.
+
 #### Keys, and what they buy
 
 A node's `Key` identifies it among its siblings. Without one, children are matched by position, so
