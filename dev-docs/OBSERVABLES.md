@@ -203,7 +203,7 @@ from. It has two states:
 | Decision | Why |
 | --- | --- |
 | **Unhook, then run, then hook.** | A dependency the expression no longer reads must not be able to start a second re-evaluation while the first is still running. Unhooking first means the run is the last thing the old set can influence: by the time the function executes, nothing in the old set reaches this expression at all, so a value the run is about to stop reading - or one that a handler of another expression just changed - cannot re-enter it. Hook-then-run would have exactly that hole, and the damage is not a duplicate render: a nested re-evaluation would re-collect while the outer run is mid-collect, so the two runs would interleave their dependency sets. |
-| **The failure path hooks the union of the old set and the partial new one.** | Unhooking first is what makes this necessary: a run that throws has already let go of the dependencies it will still need. If it hooked only what it read before the throw, a dependency that is read *after* the throwing statement would never wake it again, and the expression would stay broken and silent forever. Hooking the old set back as well guarantees it can always be woken, and the next run re-collects properly (3.7). |
+| **A run that throws hooks what it read before the throw, and nothing else.** | The set is what the run accessed, on the failure path as much as the success one, and that is enough to recover: the exception happened at a point the run had already reached, so it was caused by a value the run had already read, and it cannot go away until one of those values changes. Hooking anything more - the old set, or values the run never reached - would be registering a dependency the result does not actually have. Two things follow. A value read *after* the throwing statement never contributed to the exception, so it does not need to wake the expression. And a function that throws before reading anything at all ends up hooked to nothing: reads still throw the cached exception (3.7), so it is loud when reached, but the only things that can revive it are reading it or recreating it - the honest cost of not inventing dependencies. |
 | **A successful run whose result is unchanged still swaps the set.** | The set describes the current run, and a conditional read can change the set without changing the result. Keeping the old set would leave the expression hooked to values it no longer reads and deaf to ones it does. |
 
 ### 3.7 A function that throws is a cached result
@@ -218,6 +218,8 @@ from. It has two states:
   expression is still broken, subscribers already know, and re-raising on every dependency change
   would turn one bug into a storm. The cached exception is replaced, so a later read reports the
   newest message.
+- **The failed run still hooks its dependencies - the ones it reached** (3.6.1), because they are what
+  the exception was computed from, and therefore what can resolve it.
 - **The report happens once, at the point of evaluation,** through
   `Application.HandleNativeBoundary` - the same place a render's failure goes. A handler that then
   reads `Value` gets the exception thrown into it, which the dispatch loop isolates (section 3.4).
