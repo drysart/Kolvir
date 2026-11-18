@@ -15,7 +15,7 @@
   <Target Name="KolvirRequireEveryPlatformToPack"
           BeforeTargets="GenerateNuspec"
           Condition="'$(ShipsToConsumers)' == 'true' and '$(TargetFrameworks)' != '' and '$(TargetFrameworks)' != '$(KolvirShipTargetFrameworks)'">
-    <Error Text="$(MSBuildProjectName) is packing for '$(TargetFrameworks)', and a package needs every platform - NuGet falls back to the nearest lib/ folder, so a package missing one hands its consumers another platform's assembly without saying so. Pack with -p:KolvirTargetFrameworks=&quot;$(KolvirShipTargetFrameworks)&quot;, which is what the pack job passes." />
+    <Error Text="$(MSBuildProjectName) is packing for '$(TargetFrameworks)', and a package needs every platform - NuGet falls back to the nearest lib/ folder, so a package missing one hands its consumers another platform's assembly without saying so. Pack with -p:KolvirAllPlatforms=true, which is what the pack job passes." />
   </Target>
 
   <!-- The same arrangement for the SVG feature's own native library. Both files are inert unless an

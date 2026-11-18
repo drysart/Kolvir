@@ -196,9 +196,13 @@ That is what keeps a stray `net10.0-macos` from dragging `Kolvir.Backend.AppKit`
 with it, into a build that never asked for either - which is the failure the per-project framework
 lists used to cause on every runner.
 
-Packaging is the exception, and it says so by name:
-`-p:KolvirTargetFrameworks="net10.0-windows;net10.0-macos;net10.0"`, which is what the pack job
-passes. Only macOS is actually a workload, so one macOS machine packs the whole package: the same
+Packaging is the exception, and it says so by name: `-p:KolvirAllPlatforms=true`, which is what the
+pack job passes. It is a switch rather than the list itself because MSBuild cannot take a list on
+the command line: a `-p:` value is split on semicolons and commas, so a list there is `MSB1006`, and
+passing it escaped as `%3B` leaves the escapes in `TargetFrameworks`, where the SDK's inner-build
+dispatch re-enters with `TargetFramework=net10.0-windows;net10.0-macos;net10.0` and stops with
+`NETSDK1046`. Both were measured. The list itself stays in `Directory.Build.props`. Only macOS is
+actually a workload, so one macOS machine packs the whole package: the same
 command with `-p:EnableWindowsTargeting=true` brings the Windows reference pack to it, and the Linux
 framework needs nothing extra. Without the property the `net10.0-windows` inner build stops with
 `NETSDK1100`. Setting the property is deliberately not the same as `-p:TargetFrameworks=...`: each

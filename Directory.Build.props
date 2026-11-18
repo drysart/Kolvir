@@ -48,17 +48,22 @@
        (NU1201), so the portable framework has to stay in the list. Linux has no platform framework of
        its own, so its list *is* net10.0.
 
-       Packaging is the one thing that needs every platform, and only packaging asks for it, by name:
-       `-p:KolvirTargetFrameworks="net10.0-windows;net10.0-macos;net10.0"`. Anything set that way is
-       used verbatim, so the same property is also how one platform is cross-built deliberately. -->
+       Packaging is the one thing that needs every platform, and only packaging asks for it:
+       `-p:KolvirAllPlatforms=true`. A switch rather than the list itself, because MSBuild cannot take
+       one on the command line - a `-p:` value is split on semicolons and commas, so a list there is
+       MSB1006, and passing it escaped as `%3B` leaves the escapes in TargetFrameworks and fails the
+       inner-build dispatch with NETSDK1046. Both were measured; the list stays inside this file,
+       where nothing has to escape anything. -->
   <PropertyGroup>
+    <!-- Every platform a package ships for: what the switch below selects, and what the pack guard in
+         Directory.Build.targets checks for. It has to be defined before it is used - MSBuild reads a
+         PropertyGroup top to bottom, so a property referenced above its assignment is empty. -->
+    <KolvirShipTargetFrameworks>net10.0-windows;net10.0-macos;net10.0</KolvirShipTargetFrameworks>
     <KolvirPlatformFramework Condition="$([MSBuild]::IsOSPlatform('Windows'))">net10.0-windows</KolvirPlatformFramework>
     <KolvirPlatformFramework Condition="$([MSBuild]::IsOSPlatform('OSX'))">net10.0-macos</KolvirPlatformFramework>
-    <KolvirTargetFrameworks Condition="'$(KolvirTargetFrameworks)' == '' and '$(KolvirPlatformFramework)' == ''">net10.0</KolvirTargetFrameworks>
-    <KolvirTargetFrameworks Condition="'$(KolvirTargetFrameworks)' == '' and '$(KolvirPlatformFramework)' != ''">$(KolvirPlatformFramework);net10.0</KolvirTargetFrameworks>
-    <!-- The list a package must have, kept here so the projects' own comments and the pack guard in
-         Directory.Build.targets name the same one. -->
-    <KolvirShipTargetFrameworks>net10.0-windows;net10.0-macos;net10.0</KolvirShipTargetFrameworks>
+    <KolvirTargetFrameworks>net10.0</KolvirTargetFrameworks>
+    <KolvirTargetFrameworks Condition="'$(KolvirAllPlatforms)' == 'true'">$(KolvirShipTargetFrameworks)</KolvirTargetFrameworks>
+    <KolvirTargetFrameworks Condition="'$(KolvirAllPlatforms)' != 'true' and '$(KolvirPlatformFramework)' != ''">$(KolvirPlatformFramework);net10.0</KolvirTargetFrameworks>
   </PropertyGroup>
 
   <!-- A NuGet consumer imports buildTransitive/Kolvir.props from the package automatically. This

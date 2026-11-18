@@ -77,7 +77,7 @@ runs:
           name="$(basename "$project" .csproj)"
           echo "::group::pack $name"
           # EnableWindowsTargeting is what lets the net10.0-windows inner build run on macOS;
-          # without it the SDK stops with NETSDK1100. KolvirTargetFrameworks is the one thing this
+          # without it the SDK stops with NETSDK1100. KolvirAllPlatforms is the one thing this
           # job has to say out loud: every other build gets its own platform plus the portable
           # framework (Directory.Build.props), and a package needs all three - a `dotnet pack` that
           # leaves one out packs happily and ships another platform's assembly, because NuGet falls
@@ -89,7 +89,7 @@ runs:
             -c "$CONFIGURATION" \
             --nologo \
             -p:EnableWindowsTargeting=true \
-            -p:KolvirTargetFrameworks="net10.0-windows;net10.0-macos;net10.0" \
+            -p:KolvirAllPlatforms=true \
             -p:PackageVersion="$PACKAGE_VERSION" \
             -p:PackageOutputPath="$out" \
             2>&1 | tee "$RUNNER_TEMP/pack-$name.log"
