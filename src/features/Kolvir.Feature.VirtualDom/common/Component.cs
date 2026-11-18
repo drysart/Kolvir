@@ -11,10 +11,17 @@ namespace Kolvir.VirtualDom;
 /// any component at all, and a view that prefers its own scheduling can keep using those directly.
 /// </para>
 /// <para>
-/// The loop a component runs is: something changes state, <see cref="SetState"/> is called, the
-/// component's <see cref="Render"/> produces a new tree, and the mount diffs it into the controls that
-/// are already there. A control the new tree still describes is patched rather than rebuilt, so scroll
-/// position, selection, caret and focus survive a render that only changed a value.
+/// The loop a component runs is: something changes state, <see cref="SetState"/> is called, and by the
+/// time the next frame is drawn the component's <see cref="Render"/> has produced a new tree and the
+/// mount has diffed it into the controls that are already there. A control the new tree still describes
+/// is patched rather than rebuilt, so scroll position, selection, caret and focus survive a render that
+/// only changed a value.
+/// </para>
+/// <para>
+/// <see cref="SetState"/> is deliberately not a render. It marks the component and asks for a frame, so
+/// a handler that changes a list five times renders once and touches the tree once, and no caller has
+/// to think about layout thrashing. The renders themselves run in a batch at the start of the next
+/// frame any window draws, in the order the state changed.
 /// </para>
 /// <para>
 /// A component is re-rendered through the mount that owns its tree, which is what
@@ -31,10 +38,10 @@ namespace Kolvir.VirtualDom;
 /// subtree and a render of its parent leaves it alone.
 /// </para>
 /// <para>
-/// Rendering is synchronous on the calling thread, which is the UI thread. There is no batching, no
-/// scheduler and no background render: a <see cref="SetState"/> finishes with the controls on screen
-/// already correct, which is what makes a test - and a developer - able to reason about it without a
-/// frame clock.
+/// <see cref="Render"/> is a description and not a mutation, and that includes the state it reads: a
+/// render must not call <see cref="SetState"/>. That contract is what lets a render be one pass with no
+/// settling loop, and calling <see cref="SetState"/> from inside one is refused rather than deferred,
+/// because a render that changes the state has already described a tree that is out of date.
 /// </para>
 /// </remarks>
 /// <example>
@@ -64,19 +71,20 @@ public abstract class Component
     /// <summary>Describes the controls this component's current state calls for.</summary>
     /// <returns>The tree to reconcile into what is mounted.</returns>
     /// <remarks>
-    /// Called by the mount, every time the component is rendered - not once per property. It is a
+    /// Called by the mount, once per frame in which the state changed - not once per property. It is a
     /// description and not a mutation: build and return a tree, and let the reconciler work out what
-    /// changed. Reading the state here is the whole of the read side, and calling
-    /// <see cref="SetState"/> from inside a render is folded into the same pass rather than recursing.
+    /// changed. It must not change state either: calling <see cref="SetState"/> from inside a render is
+    /// refused, because a render that changes the state describes a tree that is already out of date.
     /// </remarks>
     public abstract VNode Render();
 
-    /// <summary>Re-renders and patches the mounted tree, because this component's state changed.</summary>
+    /// <summary>Marks this component for a render, on the next frame.</summary>
     /// <remarks>
     /// <para>
-    /// Synchronous: when this returns, the controls on screen reflect the new state. It is what an
-    /// event handler calls after assigning the field the render reads, and that is the whole protocol -
-    /// there is no observable, no notification and no binding to keep in step.
+    /// The whole of the protocol: assign the field the render reads, call this, and the screen follows
+    /// on the next frame. It is cheap on purpose - a flag, a queue entry and a request for a frame - so
+    /// a handler can call it as often as it likes, or several times as it changes several things, and
+    /// the component still renders once.
     /// </para>
     /// <para>
     /// It does nothing when the component has no live tree - before the first mount, or after the mount

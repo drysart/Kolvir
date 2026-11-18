@@ -43,6 +43,8 @@ public sealed class CompositionTests
 
         child.Change("two");
 
+        scene.Frame();
+
         Assert.AreEqual(2, child.Renders, "the child rendered its own new state");
         Assert.AreEqual(1, parent.Renders, "and the parent did not render at all");
         Assert.AreEqual("two", Texts(mount).Single(), "the screen followed the child's state");
@@ -62,6 +64,8 @@ public sealed class CompositionTests
 
         parent.Bump();
 
+        scene.Frame();
+
         Assert.AreEqual(2, parent.Renders);
         Assert.AreEqual(1, child.Renders, "emitting the child again does not re-render it");
         Assert.AreSame(control, ChildControls(mount).Single(), "nor rebuild its controls");
@@ -78,9 +82,13 @@ public sealed class CompositionTests
 
         parent.Hide(child);
 
+        scene.Frame();
+
         Assert.AreEqual(0, ChildControls(mount).Count, "the child's controls went with it");
 
         child.Change("two");
+
+        scene.Frame();
 
         Assert.AreEqual(1, child.Renders, "a removed child has no tree to patch");
     }
@@ -98,6 +106,8 @@ public sealed class CompositionTests
         var childControls = ChildControls(mount);
 
         parent.Reverse();
+
+        scene.Frame();
 
         var after = ChildControls(mount);
         Assert.AreEqual("b,a", string.Join(",", Texts(mount)), "the order followed the parent's state");
@@ -119,10 +129,14 @@ public sealed class CompositionTests
         var second = new Child("b");
         parent.Replace(first, second);
 
+        scene.Frame();
+
         Assert.AreEqual("b", Texts(mount).Single(), "the slot shows the component the parent now asks for");
         Assert.AreEqual(1, second.Renders);
 
         first.Change("gone");
+
+        scene.Frame();
 
         Assert.AreEqual(1, first.Renders, "the replaced child was disposed, so its state goes nowhere");
     }
@@ -180,6 +194,8 @@ public sealed class CompositionTests
         Assert.AreEqual("deep", ((Label)Descend(mount.Root!, 3)).Text);
 
         middle.Bump();
+
+        scene.Frame();
 
         Assert.AreEqual(1, leaf.Renders, "a render three levels up does not reach the leaf");
         Assert.AreEqual("deep", ((Label)Descend(mount.Root!, 3)).Text);
@@ -274,6 +290,52 @@ public sealed class CompositionTests
     }
 
     [TestMethod]
+    public void ADisposedMountInTheSameBatchRendersNothing()
+    {
+        // The parent drains first - it was queued first - and its render removes the child, so the
+        // child's queued render is skipped. That is why the batch is taken before any render runs and a
+        // disposed mount renders nothing.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var child = new Child("one");
+        var parent = new Parent(child);
+        using var mount = VirtualDomRuntime.Mount(host, parent);
+
+        parent.Hide(child);
+        child.Change("two");
+
+        scene.Frame();
+
+        Assert.AreEqual(0, ChildControls(mount).Count, "the child's controls went with it");
+        Assert.AreEqual(1, child.Renders, "a mount disposed by an earlier render in the batch renders nothing");
+    }
+
+    [TestMethod]
+    public void AChildThatRendersBeforeItIsRemovedStillEndsRemoved()
+    {
+        // The other order, for the same frame: the child drains first and re-renders, then the parent's
+        // render disposes it. The frame ends with the same tree either way, which is what makes the
+        // order of the queue invisible to the result.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var child = new Child("one");
+        var parent = new Parent(child);
+        using var mount = VirtualDomRuntime.Mount(host, parent);
+
+        child.Change("two");
+        parent.Hide(child);
+
+        scene.Frame();
+
+        Assert.AreEqual(0, ChildControls(mount).Count, "the child is gone either way");
+        Assert.AreEqual(2, child.Renders, "it rendered, and then its parent removed it");
+
+        scene.Frame();
+
+        Assert.AreEqual(2, child.Renders, "and a later frame renders nothing for it");
+    }
+
+    [TestMethod]
     public void ATextBoxChangeRendersOnlyTheComponentThatOwnsIt()
     {
         // The demo's row in miniature: a child component whose state is a text box's text. Typing
@@ -289,6 +351,8 @@ public sealed class CompositionTests
         var box = ((Panel)mount.Root!).Controls.OfType<Panel>().Single().Controls.OfType<TextBox>().Single();
 
         box.Text = "typed";
+
+        scene.Frame();
 
         Assert.AreEqual("typed", editor.Text, "the component took the box's text");
         Assert.AreEqual(2, editor.Renders, "one render for the keystroke, and the echo is not another");
@@ -311,11 +375,15 @@ public sealed class CompositionTests
 
         child.Swap();
 
+        scene.Frame();
+
         var root = (Panel)mount.Root!;
         Assert.AreEqual(1, root.Controls.Count, "the child's own swap left nothing behind");
         Assert.IsInstanceOfType<Label>(root.Controls.OfType<Control>().Single());
 
         holder.Bump();
+
+        scene.Frame();
 
         root = (Panel)mount.Root!;
         Assert.AreEqual(

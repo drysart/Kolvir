@@ -12,16 +12,15 @@ namespace Kolvir.VirtualDom;
 /// <para>
 /// Holding the component rather than a node is the whole difference: the mount can render again on its
 /// own, which is what makes <see cref="Component.SetState"/> a one-line call at a call site that knows
-/// nothing about trees.
+/// nothing about trees. That render does not happen at the call site, though - it happens at the start
+/// of the next frame, which is what <see cref="RenderQueue"/> is for.
 /// </para>
 /// </remarks>
 public sealed class ComponentMount : IDisposable
 {
-    private const int MaxRenderPasses = 100;
-
     private readonly MountHandle _handle;
-    private bool _painting;
-    private bool _dirty;
+    private bool _pending;
+    private bool _rendering;
     private bool _disposed;
 
     /// <summary>Mounts <paramref name="component"/>'s first tree under <paramref name="parent"/>.</summary>
@@ -30,6 +29,10 @@ public sealed class ComponentMount : IDisposable
     /// <exception cref="ArgumentNullException">
     /// <paramref name="parent"/> or <paramref name="component"/> is null.
     /// </exception>
+    /// <remarks>
+    /// The first render is the one that is not deferred: a mount has to produce a control before
+    /// anything can be placed in the tree, so it renders here and every later render waits for a frame.
+    /// </remarks>
     internal ComponentMount(Control parent, Component component)
     {
         ArgumentNullException.ThrowIfNull(parent);
@@ -37,11 +40,7 @@ public sealed class ComponentMount : IDisposable
 
         Component = component;
         component.Attach(this);
-
-        // The first render happens before there is a handle to patch, so a SetState from inside it has
-        // to fold into this pass rather than looking for one. Rendering until clean is what turns that
-        // into the same loop every later render runs.
-        _handle = new MountHandle(parent, RenderUntilClean());
+        _handle = new MountHandle(parent, Render());
     }
 
     /// <summary>The component this mount renders.</summary>
@@ -62,16 +61,27 @@ public sealed class ComponentMount : IDisposable
     public void Dispose()
     {
         _disposed = true;
+        RenderQueue.Forget(this);
         _handle.Dispose();
         Component.Detach(this);
     }
 
-    /// <summary>Re-renders and patches, or notes that the pass in progress has to run again.</summary>
+    /// <summary>Asks for this component to be rendered on the next frame.</summary>
     /// <remarks>
-    /// A render that changes state calls back into here, and re-entering the reconciler in the middle
-    /// of a diff would be undefined. So the request is recorded instead and the pass that is already
-    /// running repeats, which is what lets a component correct itself during a render.
+    /// <para>
+    /// The cheap half of <see cref="Component.SetState"/>: a flag and a frame request. Calling it twice
+    /// for one frame queues the component once, which is what turns a handler that changes a list five
+    /// times into one render and one tree update.
+    /// </para>
+    /// <para>
+    /// Calling it from inside a render is refused rather than folded into the pass: a render describes
+    /// what the state is, so a render that changes the state describes a tree that is already out of
+    /// date, and there is no fixed point to iterate to. The message names the component.
+    /// </para>
     /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The component changed state from inside its own <see cref="Component.Render"/>.
+    /// </exception>
     internal void Invalidate()
     {
         if (_disposed)
@@ -79,46 +89,50 @@ public sealed class ComponentMount : IDisposable
             return;
         }
 
-        if (_painting)
+        if (_rendering)
         {
-            _dirty = true;
+            throw new InvalidOperationException(
+                $"{Component.GetType().Name} changed state from inside Render. A render describes the state it is given, so it must not call SetState; do it from the event handler that changed the state instead.");
+        }
+
+        if (_pending)
+        {
+            // Already queued for the next frame, and the frame has not run yet: the render that is
+            // coming will read the state as it is by then.
             return;
         }
 
-        _handle.Update(RenderUntilClean());
+        _pending = true;
+        RenderQueue.Enqueue(this);
+
+        // Ask for the frame the render is waiting for. A control with no host asks for nothing, which
+        // is right: there is no window to draw into yet, and the next frame of any window drains this.
+        Root?.Invalidate();
     }
 
-    private VNode RenderUntilClean()
+    /// <summary>Renders the component now, because the frame it was queued for has started.</summary>
+    internal void RenderQueued()
     {
-        VNode node;
+        if (_disposed || !_pending)
+        {
+            return;
+        }
 
-        _painting = true;
+        _pending = false;
+        _handle.Update(Render());
+    }
+
+    private VNode Render()
+    {
+        _rendering = true;
 
         try
         {
-            var passes = 0;
-
-            do
-            {
-                _dirty = false;
-                node = Component.Render();
-
-                // A render that sets state every time never settles. Failing on the hundredth pass
-                // names the component instead of hanging the application, which is the difference
-                // between a stack trace and a frozen window.
-                if (++passes > MaxRenderPasses)
-                {
-                    throw new InvalidOperationException(
-                        $"{Component.GetType().Name} still had state to change after {MaxRenderPasses} renders. A render must not call SetState unconditionally.");
-                }
-            }
-            while (_dirty);
+            return Component.Render();
         }
         finally
         {
-            _painting = false;
+            _rendering = false;
         }
-
-        return node;
     }
 }

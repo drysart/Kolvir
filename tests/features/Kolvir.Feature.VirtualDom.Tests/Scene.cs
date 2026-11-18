@@ -14,6 +14,8 @@ namespace Kolvir.VirtualDom.Tests;
 /// </remarks>
 internal sealed class Scene : IDisposable
 {
+    private SKSurface? _surface;
+
     private Scene(Application application, Window window)
     {
         Application = application;
@@ -56,6 +58,27 @@ internal sealed class Scene : IDisposable
     /// <summary>Runs the layout pass again, which is what a test does after changing a tree.</summary>
     public void Layout() => Host.PerformLayout();
 
+    /// <summary>
+    /// Draws a frame, which is when a component that called <c>SetState</c> renders.
+    /// </summary>
+    /// <remarks>
+    /// A frame is the only thing that drains the render queue, so a test that asserts on what a state
+    /// change did has to draw one - which is the point of the design rather than a testing compromise.
+    /// The surface is created once and reused, because nothing here reads the pixels.
+    /// </remarks>
+    public void Frame()
+    {
+        _surface ??= SKSurface.Create(new SKImageInfo(
+            (int)Window.ClientSize.Width,
+            (int)Window.ClientSize.Height));
+
+        Host.Paint(_surface.Canvas);
+    }
+
     /// <inheritdoc />
-    public void Dispose() => Application.Dispose();
+    public void Dispose()
+    {
+        _surface?.Dispose();
+        Application.Dispose();
+    }
 }

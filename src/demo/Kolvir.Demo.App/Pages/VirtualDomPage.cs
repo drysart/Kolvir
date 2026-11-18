@@ -16,10 +16,17 @@ namespace Kolvir.Demo;
 /// </para>
 /// <para>
 /// The rows are components too. The list decides that a row is there and where it sits; the row decides
-/// what it looks like and re-renders itself when someone types in it. So the two render counts on the
-/// card move independently: typing in a row raises that row's count and leaves the list's alone, and
-/// the list's count rises for an add, a move or a remove without any row rendering. A moved row's
-/// controls are <em>moved</em> rather than rebuilt, which is why the caret stays in the box that moved.
+/// what it looks like and marks itself when someone types in it. So the two render counts on the card
+/// move independently: typing in a row raises that row's count and leaves the list's alone, and the
+/// list's count rises for an add, a move or a remove without any row rendering. A moved row's controls
+/// are <em>moved</em> rather than rebuilt, which is why the caret stays in the box that moved.
+/// </para>
+/// <para>
+/// Nothing on the card renders when it is clicked. Every handler changes state and calls
+/// <see cref="Component.SetState"/>, which only marks the component, and the frame that follows renders
+/// everything marked - once each. Adding a row, for instance, changes the list <em>and</em> the
+/// two rows whose arrows no longer apply, and the card shows all of it after one render of each rather
+/// than after five.
 /// </para>
 /// </remarks>
 internal sealed class VirtualDomPage : DemoPage
@@ -39,8 +46,8 @@ internal sealed class VirtualDomPage : DemoPage
         card.Controls.Add(Note(
             "The card below is a view model: its Render() returns a description of the controls it "
             + "wants, and the reconciler diffs that into the tree underneath. The rows are components "
-            + "as well, each with its own state and its own mount: type in a row and watch that row's "
-            + "render count rise while the list's stays put."));
+            + "as well, each with its own state and mount: type in a row and only that row renders - and "
+            + "nothing renders at all until the next frame is drawn."));
 
         var stage = new Panel
         {

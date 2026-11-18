@@ -100,7 +100,7 @@ manifest is expected to be short and per application rather than a library-wide 
 | Name collisions | A control property whose name matches a `VNode` member (`Key`, `Children`) is reported as VD012 and left out of the generated class | Flattening puts control properties in the same namespace as the node's own members, so a clash has to be diagnosed rather than silently shadowed. No built-in control declares either name today, so the diagnostic is insurance. |
 | Reordering children | `ControlCollection.Move`, added to core for this | Added to `Kolvir` on rung 1 rather than worked around: `Remove` + `Insert` detaches and re-attaches the child, which re-reads enabled/displayed/appearance state for its subtree and re-runs `OnControlAdded`, so a keyed reorder would disturb exactly the state it exists to preserve. A general reorder primitive is worth having on its own terms and costs nothing to an application that does not call it. |
 | Reflective escape hatch | Available, but explicitly not the default: an annotated `Type`-taking registration, and unannotated overloads marked `[RequiresUnreferencedCode]` | The only case that genuinely needs it is a type supplied at run time - a plugin, or a control set read from configuration. Marking the unannotated overloads means an AOT build gets a warning instead of a post-trim crash. |
-| Renders are event-driven | `SetState` renders synchronously; no per-frame rendering, no scheduled batching in the first cut | Batching is an optimisation for a problem that does not exist yet in a UI driven by clicks and messages, and it needs a scheduling seam (`FEATURE-COST-POLICY.md` 6.2) that this feature is not entitled to invent. Section 10 lists coalescing as the follow-up. |
+| Renders are event-driven, and coalesced | `SetState` marks the component and asks for a frame; the marked components render once each at the start of the next frame a host draws | One `SetState` per keystroke is a flag, and a handler that changes five things costs one render and one tree update instead of five - so there is no layout thrashing to work around and no cost to "just change it again". The seam is `UiHost.AddFrameStartingHandler`, added to core for this (section 7.1): it is the one point where the tree can still change and still be drawn by the frame that is starting. |
 | Markup front end | Not in this plan | See section 9. Deciding it early would constrain the node model for no benefit; the node model is the stable ABI, and a markup generator can be added later behind it. |
 
 ## 4. What a developer writes
@@ -406,7 +406,7 @@ The plan's surface, in the order a developer meets it:
 | `VirtualDomAttribute` | `[VirtualDom(typeof(Label), Name = "...")]`, `AllowMultiple` | The manifest entry (section 3). |
 | `VNode` | Abstract base: `Key`, `Children` (init-only `IReadOnlyList<VNode>`), and the abstract `NodeType`/`ApplyTo`/`PatchFrom` members the reconciler drives | The description (section 3). Everything a developer writes derives from a generated class over this. |
 | `V<Control>` (generated) | One class per registered control: a tracked property per settable control property, plus `Create`, `ApplyTo`, `PatchFrom` and a `NodeType` | What a view actually constructs (section 5). `Specified<T>` is a private field type inside it, never a public signature. |
-| `Component` | `abstract VNode Render();`, `void SetState()` | The view model base. `SetState` renders synchronously through the mount that owns the tree, then patches. |
+| `Component` | `abstract VNode Render();`, `void SetState()` | The view model base. `SetState` marks the component and asks for a frame; the render itself runs at the start of the next frame. |
 | `ComponentMount` | `Component`, `Root`, `IsMounted`, `Dispose` | What `Mount` returns for a component: the handle a window owns, which is also how a `SetState` finds something to patch. |
 | `VComponent` | A `VNode` wrapping a `Component`, with the inherited `Key` | A component as a child of another component's render (section 7.2). |
 | `VirtualDomRuntime.Mount(Control parent, Component component)` | Returns a `ComponentMount` | The same entry point with the scheduling wrapped up (section 7.1). |
@@ -425,23 +425,49 @@ can have it.
 
 ### 7.1 What `SetState` means
 
-The loop is one line at the call site and entirely synchronous:
+The loop is one line at the call site, and it does not render:
 
 ```csharp
 private void OnAddClick(object sender)
 {
     _count++;
-    SetState();          // renders now; when this returns the screen is correct
+    SetState();          // marks the component; the next frame renders it
 }
 ```
 
-Three decisions follow from that, each of them the opposite of a React-shaped framework somewhere:
+`SetState` is a flag, a queue entry and a request for a frame. Everything queued is rendered at the start
+of the next frame any host draws, which is where `UiHost.Paint` raises its frame-starting handlers - the
+one point where the tree can still change and still be drawn by the frame that is starting.
+
+The consequences, which are the reason for the design:
+
+- **A handler that changes five things costs one render and one tree update**, not five of each. A list
+  edited in a loop, or a form handler that sets three fields, cannot thrash layout: the tree is touched
+  once, in the frame that shows the result.
+- **`SetState` is cheap enough to call casually.** It allocates one queue entry, and a second call before
+  the frame is a no-op rather than a second render.
+- **A test draws a frame** (`Scene.Frame`, which calls the real `Host.Paint`) between the state change
+  and the assertion. That is not a testing compromise: the frame is when the work happens, so a test
+  that skips it is asserting on something the application would not yet have done.
+- **The first render is not deferred.** A mount has to produce a control before it can be placed, so
+  `Mount` renders once, synchronously, and every later render waits for a frame.
+
+Four decisions follow from that:
 
 | Decision | Why |
 | --- | --- |
-| **Synchronous, on the calling thread.** No batching, no scheduler, no `await`. | Kolvir is single-threaded by design, and a synchronous render is what lets a test and a developer reason about the screen without a frame clock. Deferring renders is a scheduling feature with its own seam; section 10 records it as deliberately absent. |
+| **Coalesced to the next frame, not to a timer.** No scheduler, no `await`, no debounce. | The frame is the deadline that already exists and is already the moment the screen changes, so waiting for anything else would either delay the update for no reason or render more often than the screen can show it. |
+| **`Render` must not change state, and is not iterated to a fixed point.** | A render is a description of the state it was given; one that changes the state has described a tree that is already out of date, and there is no fixed point to settle on. So the settling loop and its hundred-pass cap are gone, and `SetState` from inside a render is refused with a message naming the component. This is what buys the one-and-done pass. |
 | **No live tree, nothing to do.** A `SetState` before the first mount and a `SetState` after the mount was disposed are both no-ops. | The two states with no tree to patch get one rule rather than two. Before a mount nothing is lost, because the first render reads the state as it is by then - so storing state first and mounting second is a legal order. After one there is no screen left to correct, and an event that arrives after its window closed is ordinary. A component that is *never* mounted shows no controls at all, and that absence is the diagnosis; an exception at the first state change would say less, and would make construction order matter. |
-| **`SetState` during a render folds into the same pass.** | Re-entering the reconciler mid-diff is undefined, so the request is recorded and the pass repeats. A render that sets state *every* time never settles, so the hundredth pass throws and names the component rather than hanging the window. |
+| **The batch is taken before any render runs.** | A render can dispose a mount that is still waiting its turn - a list that removes a row while both are queued - so the batch is a snapshot and a disposed mount renders nothing. Which of the two orders a frame happens to take is invisible in the result, and both are tested. |
+
+The queue is process-wide rather than per window, because a mount can exist before any window holds it.
+Every host that draws drains it, so a second window painting simply finds an empty queue; the work that
+was deferred is drawn by whichever frame comes first, which is the frame the user is about to see.
+
+A component owns its whole tree, and the tree can hold other components. A child component is a node -
+a `VComponent` - so a parent decides that a child is there and where it sits, and the child decides what
+it looks like. Section 7.2 is the whole of that rule.
 
 A component owns its whole tree, and the tree can hold other components. A child component is a node -
 a `VComponent` - so a parent decides that a child is there and where it sits, and the child decides what
@@ -469,8 +495,8 @@ container element or a presenter control to exist.
 | **The parent owns the place, the child owns the content.** | The parent decides whether there is a child here and in what order; the child decides what it says and re-renders itself when its own state changes. That division is what keeps a child's state out of the parent's, and what makes the two render counts move independently. |
 | **A slot is matched by component instance.** | Emitting the same component again keeps its mount, so a parent's render neither re-renders the child nor rebuilds its controls: caret, scroll position, selection and focus all survive. A different instance in the same slot is a different component, so the old mount is disposed and the new one rendered fresh - nothing can be inherited across that boundary. |
 | **A child that can move needs a `Key`.** | Without one, children are matched by position, so a reorder pairs each slot with its neighbour's component, finds a different instance, and rebuilds both. With one, the controls are moved, which is the same guarantee section 6 gives an ordinary keyed list. |
-| **A child's `SetState` renders the child and nothing else.** | The child's mount patches the child's own subtree. The parent is not involved, so a keystroke in one row cannot re-render the list or its siblings. |
-| **A parent's `SetState` does not render its children.** | The child's subtree belongs to the child's mount. A parent render walks past it, which is the point: a parent that renders ten times still costs one render per child. |
+| **A child's `SetState` renders the child and nothing else.** | The child's mount patches the child's own subtree, and both components ride the same frame batch. The parent is not involved, so a keystroke in one row cannot re-render the list or its siblings. |
+| **A parent's `SetState` does not render its children.** | The child's subtree belongs to the child's mount. A parent render walks past it, which is the point: a parent that renders ten frames running still costs one render per child, and only for the children that asked for one. |
 | **One component is one mount.** | The same instance emitted twice is refused rather than mounted twice, because the second mount would silently take over the component and leave the first patching a tree nothing points at. Give each place its own instance. |
 | **Removing a child node disposes its mount.** | Its controls are removed and its state is no longer rendered, because the parent said the child is not there any more. Unwinding is recursive: a removed child takes its own children with it. |
 
@@ -490,7 +516,7 @@ a message rather than quietly ignored.
 | 5 | Keys and reordering | Keyed matching, mixed keyed/unkeyed lists, minimum move sequence over `ControlCollection.Move` | Reversing a keyed list moves controls instead of recreating them, proven by reference identity and by scroll position surviving |
 | 6 | Events | Generated `AddXxxHandler`/`RemoveXxxHandler` mapping, delegate identity tracking | Re-rendering with the same handler subscribes once; a new handler replaces the old one |
 | 7 | The source generator and its analyzer | Attribute, `ForAttributeWithMetadataName`, node classes with tracked properties, `ApplyTo`/`PatchFrom`, diagnostics VD001-VD005, VD007 and VD012, plus the analyzer half with VD010 and VD011 | The manifest in section 4 compiles, the generated classes pass the whole existing suite unchanged, and snippets that assign `null` to a non-nullable property or children to a leaf node fail the build - VD010 also with `#nullable disable` |
-| 8 | The component layer | `Component`, `SetState`, dirty tracking, render-and-patch | A headless scene shows new controls after a `SetState`, and `Render` runs exactly once per change |
+| 8 | The component layer | `Component`, `SetState`, the render queue drained by the frame, render-and-patch | A headless scene shows new controls on the frame after a `SetState`, and `Render` runs exactly once per frame in which the state changed |
 | 9 | Reflective escape hatch | Annotated `Type` registration, `[RequiresUnreferencedCode]` unannotated overloads, the runtime table | A control registered by `typeof` at run time mounts through the reflective binder, and an AOT build warns on the unannotated overload |
 | 10 | Demo, docs and AOT verification | A virtual-DOM card in the demo app, `DEVELOPER-GUIDE.md` sections, single-file AOT publish | The published exe renders the card identically to the JIT build, and the trimmer's report shows only the registered controls |
 
@@ -579,9 +605,10 @@ Five things outside the new code that the feature cannot land without:
   `RichLabel`'s children are inline controls, based on the parent rather than the child, is the
   simplest rule available but the least obvious; step 4 is where it gets tested.
 - **A node tree per render is allocation.** A React-style `Render()` rebuilds everything it describes.
-  That is fine for event-driven UI and unacceptable for anything rendering per frame, which is why
-  section 3 rules out per-frame rendering. If someone needs per-frame animation, the answer is
-  animating props of existing controls, not re-rendering a tree; a `ShouldUpdate` subtree skip is the
+  That is fine for event-driven UI, and renders are coalesced to one per component per frame, so a
+  handler that changes five things still builds one tree. It stays unacceptable for per-frame
+  animation - a component that re-rendered every frame would allocate a tree every frame - so the
+  answer there is animating props of existing controls, and a `ShouldUpdate` subtree skip is the
   follow-up if it turns out to be needed.
 - **The pristine snapshot is read from a real control, so it can only describe properties the
   constructor leaves stable.** A property whose initial value depends on something outside the control
@@ -616,9 +643,10 @@ Five things outside the new code that the feature cannot land without:
 - **The reflective path is a real user-visible failure mode** if someone publishes AOT after ignoring
   an `IL2xxx` warning. Mitigated by `[RequiresUnreferencedCode]` on the unannotated overloads, not by
   documentation alone.
-- **Batching renders** (coalescing several `SetState` calls in one message, or rendering before paint
-  rather than synchronously) is deliberately not in the plan. It needs a scheduling seam of its own
-  and should be decided when there is a UI that needs it.
+- **Deferral relies on the frame.** A `SetState` that nothing ever paints is a state change that never
+  reaches the screen, so the queue is drained from the frame-starting hook rather than from a timer and
+  the sample's `--render` path proves a frame is all it takes. The risk that remains is an application
+  that changes state while no window is painting at all, which is a program with nothing to show.
 
 ## 11. Verification approach
 
@@ -626,18 +654,19 @@ Every step is checked with headless tests in `tests/features/Kolvir.Feature.Virt
 build a tree, mount it into a `HeadlessScene`, and inspect the resulting `Control` tree - the same
 approach the selection and layout work uses, and the reason none of this needs a window.
 
-Eight claims get special treatment, because they are the ones that would otherwise only fail in a
+Nine claims get special treatment, because they are the ones that would otherwise only fail in a
 published application:
 
 | Claim | How it is proven |
 | --- | --- |
+| **A frame-starting handler's work is drawn by the frame it was raised for** | `FrameStartingTests` in the core suite: a control added from a frame-starting handler is measured and arranged by the paint that is already underway, and a handler is called once per frame and told which host is drawing. That is the property the whole deferral rests on. |
 | **No mirror drift** between a control and its generated node class | For every control the test manifest registers, a test enumerates the control's public instance settable properties and asserts the generated class exposes each one **with the same property type**. Types matter as much as names here: a node property typed `object` would compile and then fail at the assignment. The test fails on the day a property is added to a control without regenerating. |
 | **Omitted, set, and set to null stay distinct** | `new VLabel { Text = "" }` clears the text while `new VLabel { }` says nothing about it; a render that drops a property restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`); and `Font = null` arrives at the control as null rather than as absence. |
 | **Patches instead of rebuilds** | Assertions on reference identity: the control instance is the same object across a render, and keyed reorders preserve specific state (a `RichLabel`'s layout is not rebuilt, a `Panel`'s scroll position is unchanged). |
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
-| **Composition keeps the two halves apart** | `CompositionTests` holds the directions separately: a child's `SetState` raises the child's render count and leaves the parent's alone while the screen follows, a parent's render leaves the child's count and its control identity untouched, a keyed reorder moves the children's controls by reference rather than rebuilding them, a different instance in the same slot leaves the replaced child with nothing to render, and nesting three levels deep changes nothing (section 7.2). |
+| **Composition keeps the two halves apart** | `CompositionTests` holds the directions separately: a child's `SetState` raises the child's render count and leaves the parent's alone while the screen follows the frame, a parent's render leaves the child's count and its control identity untouched, a keyed reorder moves the children's controls by reference rather than rebuilding them, a different instance in the same slot leaves the replaced child with nothing to render, a mount disposed by an earlier render in the same batch renders nothing, and nesting three levels deep changes nothing (section 7.2). |
 | **A `null` for a non-nullable property does not build** | `tests/generators/...Generators.Tests` runs the analyzer over a real compilation and asserts VD010 for a null literal, for a possibly-null variable, and for both under `#nullable disable`; and asserts nothing for a value, for a nullable property, and for `null!`. The end-to-end wiring - an analyzer arriving from the package and failing a build - was checked by hand: a `Children = [child]` on a `VLabel` in the feature suite stops its build with VD011. |
-| **AOT- and trim-clean** | Measured on Windows, `win-x64`: `dotnet publish -c Release -r win-x64 -p:PublishAot=true` of the sample succeeds and its `--render virtual-dom` output is **byte-for-byte identical** to the JIT build's (57,016 bytes with the composed rows, compared with `SequenceEqual`), so the generated node classes, the reconciler, the component layer and the composition path all survive native compilation unchanged. `Kolvir.Minimal`, which does not use the feature, publishes with **no virtual-DOM artifact at all** in its output. What this does *not* cover: the other two platforms, and a publish from the release workflow rather than a developer machine. |
+| **AOT- and trim-clean** | Measured on Windows, `win-x64`: `dotnet publish -c Release -r win-x64 -p:PublishAot=true` of the sample succeeds and its `--render virtual-dom` output is **byte-for-byte identical** to the JIT build's (57,257 bytes with the composed rows, compared with `SequenceEqual`), so the generated node classes, the reconciler, the component layer, the composition path and the frame-drained render queue all survive native compilation unchanged. `Kolvir.Minimal`, which does not use the feature, publishes with **no virtual-DOM artifact at all** in its output. What this does *not* cover: the other two platforms, and a publish from the release workflow rather than a developer machine. |
 | **The generator does not get in a publish's way** | `PublishAot` is a global property and a `netstandard2.0` project cannot satisfy it, so a project reference to the generator fails an AOT publish with NETSDK1207 (section 8.1, item 4). The feature carries no such reference, and both the sample and the pack build the generator in a `dotnet build` child process, where the inheritance that causes it does not exist. Verified from a deleted generator `bin/` and `obj/`, because the first attempt - the `MSBuild` task with `RemoveProperties` - passed locally and then built the generator with no references at all on a clean machine. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
@@ -654,6 +683,6 @@ published-build render comparison covers the new code path automatically.
 | 5 | Done | Keyed matching plus `ControlCollection.Move`, from [#99](https://github.com/drysart/Kolvir/pull/99) and [#100](https://github.com/drysart/Kolvir/pull/100). Reversing a keyed list moves the controls instead of rebuilding them, proven by reference identity; keyed and unkeyed children mix without a keyed node ever being claimed positionally. |
 | 6 | Done | Generated `Click`-style event properties over the `AddXxxHandler`/`RemoveXxxHandler` pairs, with the attached delegate tracked so a changed handler detaches the old one. Same render subscribes once, and a handler the node stops setting is removed. `EventTests` holds the cases. |
 | 7 | Done | `src/generators/Kolvir.Feature.VirtualDom.Generators`: the incremental generator, `LeafNodeAttribute`, and `NullAndLeafAnalyzer` (VD010, VD011). The hand-written `VLabel`/`VNote`/`VButton`/`VPanel` are gone: the feature suite now consumes generated classes through an analyzer reference and its 26 tests pass unchanged, which is the point of step 7 having been deferred. A second suite, `tests/generators/...Generators.Tests`, holds 30 tests: the emission shape, VD001-VD005/VD007/VD012, VD010/VD011 with their false-positive cases, and the mirror-drift check over 14 real controls. The analyzer was also seen failing a real build (a `Children` on a `VLabel` in the feature suite stops it with VD011). Found and fixed on the way: an implicit conversion does not apply to a nullable reference type argument (section 5), and a file name derived from the namespace alone collided when one namespace held two manifests. |
-| 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, re-entrancy folded into one pass with a cap so a render that never settles fails instead of hanging, and one rule for the two states that have no tree to patch - a state change before the first mount or after `Dispose` does nothing, and the first render picks up what was stored in the meantime. Composition arrived with it as `VComponent` (section 7.2): a child component is a node, matched by instance, keyed when it can move, one mount per instance. 21 tests across `ComponentTests` and `CompositionTests`, including one that clicks a real control through the headless host, one that sets state twice before mounting, one that types into a child's text box and asserts the echo is not a second render, and one that nests three levels deep. Section 7.1 records the three `SetState` decisions. `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
+| 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, and the render queue drained at the start of the next frame through `UiHost.AddFrameStartingHandler` (added to core for it), so a handler that changes five things renders once. `Render` is one pass with no settling loop, and one that changes state is refused rather than iterated. One rule for the two states that have no tree to patch - a state change before the first mount or after `Dispose` does nothing, and the first render picks up what was stored in the meantime. Composition arrived with it as `VComponent` (section 7.2): a child component is a node, matched by instance, keyed when it can move, one mount per instance. 25 tests across `ComponentTests` and `CompositionTests`, including a click through the headless host that asserts nothing rendered until a frame, three state changes before a frame costing one render, a change made with no host at all that the first frame drains, a mount disposed by an earlier render in the same batch, a text box echo that is not a second render, and three levels of nesting. Section 7.1 records the four `SetState` decisions. `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
 | 9 | Not started | |
 | 10 | Done | A **Virtual DOM** card in the sample (`--page virtual-dom`), the `DEVELOPER-GUIDE.md` section, and the AOT verification measured rather than asserted: the `win-x64` published build renders the card byte-for-byte identically to the JIT build, and `Kolvir.Minimal` publishes with no virtual-DOM artifact. The work also found a real publish failure - `PublishAot` is global, a `netstandard2.0` generator cannot satisfy it, and a project reference therefore breaks `dotnet publish` for applications that never asked for a generator (section 8.1, item 4). |

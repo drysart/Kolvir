@@ -4736,23 +4736,33 @@ void Show() => _screen = VirtualDomRuntime.Mount(root, new Counter());
 void Hide() => _screen?.Dispose();
 ```
 
-`SetState` re-renders immediately, on the calling thread, and patches what is mounted: when it
-returns, the controls on screen are correct. There is no observable, no binding, no notification and
-no frame clock, and a control the new tree still describes is patched rather than rebuilt, so scroll
-position, selection, caret and focus survive a render that only changed a value.
+`SetState` does not render. It marks the component and asks for a frame; everything marked is rendered
+at the start of the next frame any window draws, once each, in the order the state changed - a control
+the new tree still describes is patched rather than rebuilt, so scroll position, selection, caret and
+focus survive a render that only changed a value. That is what makes a handler that changes five things
+cost one render and one tree update instead of five, and it is why no caller has to think about layout
+thrashing.
 
-Three rules follow from that, and they are the whole of the state model:
+Four rules, and they are the whole of the state model:
 
-- **Synchronous.** No batching and no scheduling. Deferring renders is a feature with a seam of its
-  own, and it is not in this one.
+- **Coalesced to the frame.** No batching timer, no scheduler, no debounce: the frame is the deadline
+  that already exists and the moment the screen changes anyway. A second `SetState` before the frame is
+  a no-op rather than a second render.
+- **`Render` must not change state.** A render describes the state it is given, so one that changes it
+  has described a tree that is already out of date and there is no fixed point to settle on. `SetState`
+  from inside a render throws, naming the component; the settling loop and its pass cap are gone.
 - **No live tree does nothing.** Before the first mount and after `Dispose`, a `SetState` is a no-op.
   Nothing is lost in the first case - the first render reads the state as it is by then, so storing
   state before mounting is legal - and there is no screen left to correct in the second. A component
   that is never mounted shows no controls at all, and that absence is what says the mount call is
   missing.
-- **`SetState` during a render folds into the same pass.** Re-entering the reconciler mid-diff is
-  undefined, so the request is recorded and the pass repeats; a render that sets state every time
-  never settles, so the hundredth pass throws and names the component instead of hanging the window.
+- **The first render is not deferred.** A mount has to produce a control before it can be placed, so
+  `Mount` renders once, synchronously, and every later render waits for a frame.
+
+A test therefore draws a frame between changing state and asserting: `scene.Frame()` in the feature
+suite's `Scene` calls the real `Host.Paint`. That is not a testing compromise - the frame is when the
+work happens, so a test that skipped it would be asserting on something the application had not yet
+done.
 
 A component owns its whole tree, and the tree can hold other components. A child component is a node,
 so the rules are the reconciler's rules plus one: a slot is matched by component *instance* (section

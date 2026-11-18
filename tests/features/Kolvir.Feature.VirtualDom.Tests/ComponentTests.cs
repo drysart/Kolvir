@@ -3,8 +3,8 @@ using Kolvir;
 namespace Kolvir.VirtualDom.Tests;
 
 /// <summary>
-/// The component layer: a view model renders a tree, patches it when its state changes, and does
-/// nothing - while losing nothing - when it has no tree to patch.
+/// The component layer: a view model renders a tree, marks itself when its state changes, and renders
+/// once on the next frame - or does nothing at all when it has no tree to patch.
 /// </summary>
 [TestClass]
 [TestCategory("VirtualDom")]
@@ -24,7 +24,7 @@ public sealed class ComponentTests
     }
 
     [TestMethod]
-    public void SetStateRendersOnceAndReusesTheControls()
+    public void SetStateRendersOnceOnTheNextFrame()
     {
         var host = new Panel { Dock = DockStyle.Fill };
         using var scene = Scene.Create(host);
@@ -35,9 +35,33 @@ public sealed class ComponentTests
 
         counter.Add();
 
-        Assert.AreEqual(2, counter.Renders, "one SetState is one render");
+        Assert.AreEqual(1, counter.Renders, "SetState only marks the component: the next frame renders it");
+
+        scene.Frame();
+
+        Assert.AreEqual(2, counter.Renders, "and one frame is one render");
         Assert.AreEqual("1 clicks", Text(mount));
         Assert.AreSame(button, Button(mount), "the button is patched, not rebuilt");
+    }
+
+    [TestMethod]
+    public void SeveralStateChangesBeforeAFrameRenderOnce()
+    {
+        // The whole reason for deferring: a handler that changes several things costs one render and
+        // one tree update, not one of each per change - which is what keeps layout thrashing out.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var counter = new Counter();
+        using var mount = VirtualDomRuntime.Mount(host, counter);
+
+        counter.Add();
+        counter.Add();
+        counter.Add();
+
+        scene.Frame();
+
+        Assert.AreEqual(2, counter.Renders, "three changes and one render");
+        Assert.AreEqual("3 clicks", Text(mount), "the render read the state as it was by then");
     }
 
     [TestMethod]
@@ -57,7 +81,12 @@ public sealed class ComponentTests
         scene.Click(Button(mount));
 
         Assert.AreEqual(1, counter.HandlerCalls, "the click should have reached the mounted button");
-        Assert.AreEqual("1 clicks", Text(mount));
+        Assert.AreEqual(1, counter.Renders, "the click changed state; it did not render");
+
+        scene.Frame();
+
+        Assert.AreEqual(1, counter.HandlerCalls, "the frame does not re-run the handler");
+        Assert.AreEqual("1 clicks", Text(mount), "the frame shows what the click changed");
     }
 
     [TestMethod]
@@ -72,35 +101,28 @@ public sealed class ComponentTests
 
         swapper.Swap();
 
+        Assert.IsInstanceOfType<Panel>(mount.Root, "the swap waits for a frame like any other state change");
+
+        scene.Frame();
+
         Assert.IsInstanceOfType<Label>(mount.Root, "a different root node class swaps the control in place");
         Assert.AreEqual(1, host.Controls.Count);
     }
 
     [TestMethod]
-    public void StateChangedDuringARenderIsFoldedIntoTheSamePass()
+    public void ARenderThatChangesStateIsRefused()
     {
-        // A component correcting its own state while rendering must not recurse into the reconciler
-        // from inside a diff. It records the request and the pass repeats, so the screen ends correct.
+        // A render describes the state it is given, so one that changes the state describes a tree that
+        // is already out of date: there is no fixed point to settle on, so this is refused at the call.
         var host = new Panel { Dock = DockStyle.Fill };
         using var scene = Scene.Create(host);
         var corrector = new Corrector();
 
-        using var mount = VirtualDomRuntime.Mount(host, corrector);
-
-        Assert.AreEqual(2, corrector.Renders, "the render that corrected itself ran again, once");
-        Assert.AreEqual("fixed", LabelText(mount));
-    }
-
-    [TestMethod]
-    public void AComponentThatNeverSettlesFailsInsteadOfHanging()
-    {
-        var host = new Panel { Dock = DockStyle.Fill };
-        using var scene = Scene.Create(host);
-
         var exception = Assert.ThrowsExactly<InvalidOperationException>(
-            () => VirtualDomRuntime.Mount(host, new NeverSettles()));
+            () => VirtualDomRuntime.Mount(host, corrector));
 
-        StringAssert.Contains(exception.Message, nameof(NeverSettles));
+        StringAssert.Contains(exception.Message, nameof(Corrector));
+        StringAssert.Contains(exception.Message, nameof(Component.SetState));
     }
 
     [TestMethod]
@@ -138,8 +160,32 @@ public sealed class ComponentTests
 
         counter.Add();
 
-        Assert.AreEqual(rendersBefore, counter.Renders, "a disposed mount does not render again");
+        scene.Frame();
+
+        Assert.AreEqual(rendersBefore, counter.Renders, "a disposed mount does not render, even when a frame runs");
         Assert.IsFalse(mount.IsMounted);
+    }
+
+    [TestMethod]
+    public void StateSetBeforeTheTreeIsOnScreenRendersOnTheFirstFrame()
+    {
+        // A mount does not need a host: a page builds and mounts its components while the window is
+        // still being assembled, so a state change with nothing to draw into has to be queued rather
+        // than dropped - and the first frame of any window drains it.
+        var host = new Panel { Dock = DockStyle.Fill };
+        var counter = new Counter();
+        using var mount = VirtualDomRuntime.Mount(host, counter);
+
+        counter.Add();
+
+        Assert.AreEqual(1, counter.Renders, "no frame has been drawn, so nothing rendered");
+
+        using var scene = Scene.Create(host);
+
+        scene.Frame();
+
+        Assert.AreEqual(2, counter.Renders, "the first frame drew the change that was waiting");
+        Assert.AreEqual("1 clicks", Text(mount));
     }
 
     [TestMethod]
@@ -167,9 +213,6 @@ public sealed class ComponentTests
         ((Panel)mount.Root!).Controls.OfType<Button>().First();
 
     private static string Text(ComponentMount mount) => Button(mount).Text ?? string.Empty;
-
-    private static string LabelText(ComponentMount mount) =>
-        ((Panel)mount.Root!).Controls.OfType<Label>().First().Text ?? string.Empty;
 
     /// <summary>A counter whose state changes from an event handler, which is the ordinary shape.</summary>
     private sealed class Counter : Component
@@ -221,33 +264,8 @@ public sealed class ComponentTests
         }
     }
 
-    /// <summary>Corrects its own state during its first render.</summary>
+    /// <summary>Changes its own state from inside its first render, which the contract forbids.</summary>
     private sealed class Corrector : Component
-    {
-        private bool _fixed;
-
-        internal int Renders { get; private set; }
-
-        public override VNode Render()
-        {
-            Renders++;
-
-            if (!_fixed)
-            {
-                _fixed = true;
-                SetState();
-            }
-
-            return new VPanel
-            {
-                Dock = DockStyle.Fill,
-                Children = [new VLabel { Text = _fixed ? "fixed" : "broken" }],
-            };
-        }
-    }
-
-    /// <summary>Sets state on every render, which can never settle.</summary>
-    private sealed class NeverSettles : Component
     {
         public override VNode Render()
         {

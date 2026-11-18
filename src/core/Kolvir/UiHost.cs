@@ -19,6 +19,9 @@ public sealed class UiHost
     private Action<object>? _invalidated;
     private Action<object>? _framePainted;
     private Action<object>? _cursorChanged;
+
+    /// <summary>Handlers that run at the start of every frame any host draws.</summary>
+    private static Action<UiHost>? _frameStarting;
     private Window? _window;
     private IDisposable? _windowShownToken;
     private IDisposable? _windowClosedToken;
@@ -101,6 +104,41 @@ public sealed class UiHost
     {
         ArgumentNullException.ThrowIfNull(handler);
         _framePainted -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs at the start of a frame, before that frame is laid out and drawn.
+    /// </summary>
+    /// <param name="handler">What to run; it is told which host is about to draw.</param>
+    /// <returns>A token that removes the handler when disposed.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is the point at which the tree still can change: the layout pass and the dirty region are
+    /// both decided after these handlers have run, so a control created here is laid out and drawn by
+    /// the frame that is starting rather than the one after it. Work that only wants to know what was
+    /// drawn uses <see cref="AddFramePaintedHandler"/> instead.
+    /// </para>
+    /// <para>
+    /// Static because the work that needs it is process-wide rather than per window - a virtual-DOM
+    /// mount can exist before any window holds it - and because every handler is told which host is
+    /// drawing, so a handler that does care can narrow to one. Handlers run on the UI thread, once per
+    /// host per frame; an application with two windows painting runs them twice, which is why they must
+    /// be cheap and idempotent.
+    /// </para>
+    /// </remarks>
+    public static IDisposable AddFrameStartingHandler(Action<UiHost> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _frameStarting += handler;
+        return new HandlerToken<Action<UiHost>>(RemoveFrameStartingHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddFrameStartingHandler"/> added.</summary>
+    /// <param name="handler">The handler to remove.</param>
+    public static void RemoveFrameStartingHandler(Action<UiHost> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _frameStarting -= handler;
     }
 
     /// <summary>Adds a handler that runs when the control under the pointer requests a different cursor.</summary>
@@ -602,6 +640,14 @@ public sealed class UiHost
     public SKRectI Paint(SKCanvas canvas, bool full = false)
     {
         ArgumentNullException.ThrowIfNull(canvas);
+
+        // Whatever a frame-starting handler changes is laid out and drawn by this frame: it runs before
+        // the layout pass and before the dirty region is taken. That is what makes it the place for
+        // work that has been deferred to "the next frame" - a virtual-DOM render, for instance.
+        if (_frameStarting is { } frameStarting)
+        {
+            Guard(() => frameStarting(this));
+        }
 
         // Sizes and structure that arrived since the last frame are answered here: this is the one
         // point where the tree has to be right, because it is about to be drawn.
