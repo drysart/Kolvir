@@ -52,7 +52,7 @@ Non-goals, for this plan:
 
 ```
 IObservableEventSource                      "something happened" - the dependency primitive
-  bool IsLive { get; }
+  bool IsDisposed { get; }
   IDisposable AddObservableEventRaisedHandler(Action<IObservableEventSource> handler)
   void RemoveObservableEventRaisedHandler(Action<IObservableEventSource> handler)
   void DependUpon()                         default: Observable.PublishRead(this)
@@ -70,7 +70,7 @@ IObservableMutableValue<T> : IObservableValue<T>       ← what CreateValue retu
 
 | Piece | Shape | Purpose |
 | --- | --- | --- |
-| `IObservableEventSource` | handler pair, `DependUpon`, `RaiseEvent`, `IsLive` | The dependency primitive. A named dependency and a collection's per-key dependency are this and nothing more: they carry no value, only "this particular thing changed". |
+| `IObservableEventSource` | handler pair, `DependUpon`, `RaiseEvent`, `IsDisposed` | The dependency primitive. A named dependency and a collection's per-key dependency are this and nothing more: they carry no value, only "this particular thing changed". |
 | `IObservableValue` | `object? Value` | The untyped view, for a homogeneous dependency set and for `PublishRead`. Reading it publishes. |
 | `IObservableValue<T>` | `new T Value { get; }` | What a dependency set holds. Read-only on purpose: a subscriber can watch a value but cannot write it. |
 | `IObservableMutableValue<T>` | `new T Value { get; set; }` | What `CreateValue` hands back, to the one piece of code that owns the state. |
@@ -224,7 +224,7 @@ production. A background thread that changes state marshals, exactly as it does 
 | --- | --- |
 | **Nothing needs disposing for memory.** | A source with no handlers roots nothing: the handler list is the only thing it holds, and the registrant holds the token. Dropping the last reference to an unwatched value collects it, with no bookkeeping anywhere. This is what makes observables usable as plain model state. |
 | **`Dispose` marks a source dead and clears its handlers.** | The escape hatch for the case that *is* a problem: a long-lived source with registrants who forgot to unregister. Disposal drops their closures, so a forgotten registration cannot keep a dead screen's state alive for the life of the process. |
-| **Disposal raises one last time, with `IsLive` already false.** | So a registrant can tell why its dependency went quiet - the final raise is the notification, and `IsLive` is what distinguishes it from an ordinary change. A handler may still read the last value during that raise; reads throw only after `Dispose` returns. This is `OnCompleted` semantics from Rx and it is the one call in this section that is a design choice rather than a consequence; the alternative (clear the list silently) is in §10. |
+| **Disposal raises one last time, with `IsDisposed` already true.** | So a registrant can tell why its dependency went quiet - the final raise is the notification, and `IsDisposed` is what distinguishes it from an ordinary change. A handler may still read the last value during that raise; reads throw only after `Dispose` returns. This is `OnCompleted` semantics from Rx and it is the one call in this section that is a design choice rather than a consequence; the alternative (clear the list silently) is in §10. |
 | **After disposal:** `set` and `RaiseEvent` are no-ops, `Value` reads throw `ObjectDisposedException`, and `Dispose` is idempotent. | A dead source is a bug in the reader's lifetime, and saying so is more useful than returning a stale value forever. |
 | **An expression whose dependency dies fails loudly.** | The final raise wakes it, the re-run's read of the dead dependency throws `ObjectDisposedException`, that becomes the expression's cached result (§3.7), so it raises in turn and every read of it throws. A cascade of "the thing below me is gone" is the honest outcome; the alternative is a derived value that silently freezes. |
 | **Registering a handler is the onus of whoever registers.** | The token is the unregister. An expression unhooks every dependency when it goes cold and on disposal, so the common accidental leak - a derived value that outlives its listeners - cannot happen. |
@@ -314,7 +314,7 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 | A dependency cycle is read | `InvalidOperationException` naming the chain, before any recursion |
 | A write inside a running expression | `InvalidOperationException` naming the expression |
 | Reading a disposed value or expression | `ObjectDisposedException` |
-| Registering on an evicted named dependency | the handle is dead: `IsLive` is false, registration is a no-op, and a later `GetNamed` returns a fresh handle. It cannot happen while an entry is still watched - a handler is what keeps the entry alive |
+| Registering on an evicted named dependency | the handle is dead: `IsDisposed` is true, registration is a no-op, and a later `GetNamed` returns a fresh handle. It cannot happen while an entry is still watched - a handler is what keeps the entry alive |
 
 ## 9. The component seam (a later step, in the Virtual DOM feature)
 
@@ -364,7 +364,7 @@ Two things this gets for free, and one it must respect:
 | Option | Why not |
 | --- | --- |
 | `INotifyPropertyChanged` and string property names | The failure this layer exists to avoid: a typo is a compile error here and silence there, and a handler cannot know what a caller actually read. |
-| `System.IObservable<T>` / `IObserver<T>` and `Subscribe` | The name collides outright with the BCL's generic interface in any file that has `using System;` (measured: CS0104), and Rx's contract - a sequence with completion and errors on a subscription - describes a stream, not a mutable value and its readers. `IsLive` plus a final raise borrows the useful part of the completion story without the subscription type. |
+| `System.IObservable<T>` / `IObserver<T>` and `Subscribe` | The name collides outright with the BCL's generic interface in any file that has `using System;` (measured: CS0104), and Rx's contract - a sequence with completion and errors on a subscription - describes a stream, not a mutable value and its readers. `IsDisposed` plus a final raise borrows the useful part of the completion story without the subscription type. |
 | Weak references between a source and its handlers | Every read of the graph would test and resurrect, and the semantics of "the handler went away" would have to be invented. Explicit tokens and disposal (§3.10) put the cost where the mistake is. |
 | Named dependencies that carry a value | A value that lives in an evictable entry resets when the last listener leaves - and eviction happens in the middle of a re-evaluation that unhooks before re-hooking (§3.2). The event-only form has no such state to lose. |
 | Disposal that clears handlers silently, with no final raise | Simpler, and the alternative chosen is a judgement call: a final raise makes a dependency's death visible to whoever was watching instead of quietly freezing a derived value. Worth confirming (§11). |
@@ -389,9 +389,9 @@ Two things this gets for free, and one it must respect:
 - **The named table is process-wide, and only as large as what is watched.** Names are opaque `object` keys,
   so the growth is bounded by the keys that someone is actually listening to - but a long-lived
   scope with churning keys relies on eviction, which only happens when the last handler goes.
-- **`IsLive` and the final raise are additions this design makes to the spec** (§3.10, §10) and are
+- **`IsDisposed` and the final raise are additions this design makes to the spec** (§3.10, §10) and are
   the likeliest thing to be reconsidered.
-- **To confirm before the code exists:** `IsLive`; the final
+- **To confirm before the code exists:** `IsDisposed`; the final
   raise on disposal; `CollectDependencies` as public API; refusing mutation inside a collection
   scope; and the optional `name` on `CreateExpression`.
 
