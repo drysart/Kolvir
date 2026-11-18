@@ -1,3 +1,5 @@
+using System.Collections.Immutable;
+
 namespace Kolvir.Observables;
 
 /// <summary>
@@ -16,11 +18,18 @@ namespace Kolvir.Observables;
 /// <see cref="Dispose"/> exists for the other problem: a long-lived value that a dead screen's handler
 /// is still registered on would keep that screen's state alive for the life of the process.
 /// </para>
+/// <para>
+/// The handlers are an <see cref="ImmutableArray{T}"/>, so a raise is a snapshot for free: subscribing
+/// or unsubscribing replaces the array rather than editing it, and the raise that is running keeps
+/// walking the array it started with. Subscribing copies, which happens once per registration;
+/// raising copies nothing, which happens on every change - the right way round, and iteration over an
+/// immutable array is a struct enumerator over contiguous memory.
+/// </para>
 /// </remarks>
 internal sealed class ObservableValue<T> : IObservableMutableValue<T>
 {
     private T _value;
-    private List<Action<IObservableEventSource>>? _handlers;
+    private ImmutableArray<Action<IObservableEventSource>> _handlers = [];
     private bool _isDisposed;
 
     internal ObservableValue(T value) => _value = value;
@@ -64,7 +73,9 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
         ObjectDisposedException.ThrowIf(_isDisposed, this);
         ArgumentNullException.ThrowIfNull(handler);
 
-        (_handlers ??= []).Add(handler);
+        // Copy-on-write, which is what makes the raise a snapshot without copying it: the array a raise
+        // is walking is the one it began with, and this registration belongs to the next raise.
+        _handlers = _handlers.Add(handler);
         return new HandlerRegistration(this, handler);
     }
 
@@ -78,7 +89,9 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        _handlers?.Remove(handler);
+        // Once per registration: the same handler subscribed twice needs both tokens released, and this
+        // removes one of the two. Replaces the array rather than editing it, for the reason above.
+        _handlers = _handlers.Remove(handler);
     }
 
     /// <inheritdoc/>
@@ -90,10 +103,7 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
     {
         ObjectDisposedException.ThrowIf(_isDisposed, this);
 
-        if (_handlers is { Count: > 0 } handlers)
-        {
-            RaiseToSnapshot(handlers);
-        }
+        RaiseToHandlers();
     }
 
     /// <inheritdoc/>
@@ -121,27 +131,27 @@ internal sealed class ObservableValue<T> : IObservableMutableValue<T>
 
         try
         {
-            if (_handlers is { Count: > 0 } handlers)
-            {
-                RaiseToSnapshot(handlers);
-            }
+            RaiseToHandlers();
         }
         finally
         {
-            _handlers = null;
+            _handlers = [];
         }
     }
 
-    /// <summary>Calls every handler the list held when the raise began.</summary>
+    /// <summary>Calls every handler the array held when this raise began.</summary>
     /// <remarks>
-    /// A snapshot and not the live list: a handler may subscribe and unsubscribe freely, including
-    /// itself, and none of that may disturb the raise that is running - mutations apply to the next one.
-    /// The snapshot also means a handler that disposes the source mid-dispatch does not shorten the
-    /// walk; the remaining handlers are already in the list being read.
+    /// The local is the snapshot, and reading it is all the snapshot costs: because the array is
+    /// immutable, a handler that subscribes or unsubscribes - itself, another handler, or everything by
+    /// disposing the value - replaces the field rather than changing what this walk is reading. So
+    /// mutations apply to the next raise, and a handler that disposes the value mid-dispatch does not
+    /// shorten this one; the remaining handlers are already in the array being walked.
     /// </remarks>
-    private void RaiseToSnapshot(List<Action<IObservableEventSource>> handlers)
+    private void RaiseToHandlers()
     {
-        foreach (var handler in handlers.ToArray())
+        var handlers = _handlers;
+
+        foreach (var handler in handlers)
         {
             handler(this);
         }

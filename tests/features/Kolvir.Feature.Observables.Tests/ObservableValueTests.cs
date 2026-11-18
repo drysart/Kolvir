@@ -86,7 +86,7 @@ public sealed class ObservableValueTests
 
         value.Value = 1;
 
-        Assert.AreEqual(1, second, "the handler was already in the snapshot, so it still ran");
+        Assert.AreEqual(1, second, "the handler was already in the array being walked, so it still ran");
 
         value.Value = 2;
 
