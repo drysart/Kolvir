@@ -256,9 +256,19 @@ var total = Observable.CreateExpression(
 
 | Decision | Why |
 | --- | --- |
-| **A thread-static evaluation stack detects cycles.** Before running, an expression checks whether it is already on the stack; if it is, it throws naming the chain (`A -> B -> A`). | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. Naming the chain turns a crash into a message. The stack also carries a location per expression, which is what makes the chain readable. The compiler fills `[CallerFilePath]` and `[CallerLineNumber]` in, so every expression knows the `Model.cs:88` it was created at, and an explicit `name:` overrides it. Nothing is reflected or looked up - they are a constant and an integer the compiler supplies at the call site - and the file name is only ever taken from the path when a message is built, so the whole thing costs one reference, one `int`, and nothing at run time. |
+| **A thread-static evaluation stack detects cycles.** Before running, an expression checks whether it is already on the stack; if it is, it throws naming the chain (`Model.cs:88 -> Model.cs:214 -> Model.cs:88`). | A dependency cycle in a push-based graph is infinite recursion, and a `StackOverflowException` under .NET kills the process with no report. Naming the chain turns a crash into a message. The stack carries a name per expression (3.8.1), which is what makes the chain readable. |
 | **Mutating an observable while a collection scope is active throws.** | An expression is a pure function of what it read. A write inside one raises into other expressions while the collector is mid-run, so the set being collected no longer describes what happened. `Observable` carries a collection depth for this, and `set`/`RaiseEvent` refuse while it is non-zero. Cheap - one static compare on a write - and it names the expression. |
 | **A mutation from inside a *handler*** is ordinary and allowed. | Handlers run with no collection active: they may write other values, and those changes cascade. That is the event-driven style the layer is for. |
+#### 3.8.1 How an expression is named
+
+Two overloads, and the split exists to keep a path out of an application that did not ask for one:
+
+| Overload | What the compiler emits |
+| --- | --- |
+| `CreateExpression(f, name, ...)` | nothing extra - a name was given, so this signature has no caller attributes to fill |
+| `CreateExpression(f, ...)` | the creation site: a `[CallerFilePath]` constant and a `[CallerLineNumber]` integer |
+
+An application that names the expressions it cares about therefore pays nothing at all, and one that does not still gets `Model.cs:88` in the cycle chain and in the "changed state from inside its own function" message. A name is *required* on the named overload and absent from the located one, which is what makes the call site choose instead of the binder guessing - `CreateExpression(f, "total")` and `CreateExpression(f, "total", comparer)` bind to the named one, `CreateExpression(f)` and `CreateExpression(f, comparer)` to the located one. Nothing is reflected or looked up either way, and the path is reduced to a file name only when a message is built (section 11 records what the constant costs).
 
 ### 3.9 Single-threaded, with no locks
 
@@ -327,7 +337,8 @@ var wordCount = Observable.CreateExpression(
 | Member | Returns | Notes |
 | --- | --- | --- |
 | `Observable.CreateValue<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
-| `Observable.CreateExpression<T>(Func<T>, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null, [CallerFilePath] string? file = null, [CallerLineNumber] int line = 0, string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). The first comparer decides when two `T` results are the same and the second when two exceptions are (3.7); null means `EqualityComparer<T>.Default` and, for exceptions, never equal. The caller attributes are diagnostics only (3.8): the compiler fills them in, so they cost the caller nothing, and `name:` overrides them. |
+| `Observable.CreateExpression<T>(Func<T>, string? name, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null)` | `IObservableValue<T>` | The named form, and **it carries no caller attributes on purpose**: passing a name selects this overload, so no file path is compiled into the application at that call site (3.8). |
+| `Observable.CreateExpression<T>(Func<T>, IEqualityComparer<T>? = null, IEqualityComparer<Exception>? = null, [CallerFilePath] string? file = null, [CallerLineNumber] int line = 0)` | `IObservableValue<T>` | The unnamed form: the compiler supplies the creation site, which becomes the expression's name in messages. Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). In both overloads the first comparer decides when two `T` results are the same and the second when two exceptions are (3.7); null means `EqualityComparer<T>.Default` and, for exceptions, never equal. |
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
@@ -437,13 +448,16 @@ Two things this gets for free, and one it must respect:
   that churns while a function is broken notifies on every change. An application that would rather
   collapse repeats passes an `IEqualityComparer<Exception>`, which puts the judgement where the
   knowledge is - but a comparer that is too loose hides a change a reader would have acted on.
-- **`CallerFilePath` embeds the build machine's paths in the assembly.** One copy per file that creates an
-  expression, since identical literals are deduplicated - but it is an absolute path, so a published
-  binary carries `C:\Users\...` or `/home/...` strings it does not need, and a message built from it
-  names a directory that does not exist on the user's machine. The mitigation is to render only
-  `Path.GetFileName(file)` plus the line in messages and never display the whole path, and to set
-  `PathMap` when reproducible or path-free output matters: the compiler applies it to these constants
-  too.
+- **`CallerFilePath` embeds the build machine's paths in the assembly, wherever no name is given.**
+  Measured on two throwaway assemblies: four unnamed `CreateExpression` calls in one file embed the
+  file's **absolute** path exactly once (identical literals deduplicate, and the DLL grew by about 2 KB
+  against the named-only build), while an assembly whose calls all pass a name embeds no path and no
+  file name at all. So it is a per-file cost, paid only by call sites that did not name themselves, and
+  a published binary then carries `C:\Users\...` or `/home/...` strings it does not need. Three
+  mitigations, in order of preference: name the expressions that matter (3.8 - that overload has no
+  caller attributes, so nothing is emitted), render only `Path.GetFileName(file)` plus the line and
+  never display the whole path, and set `PathMap` when reproducible or path-free output matters, since
+  the compiler applies it to these constants too.
 - **Equality is the trap for object results.** An expression returning a freshly built object that
   does not override `Equals` raises on every run. For `VNode` trees that is why the component seam
   measuring before it is called cheap.
