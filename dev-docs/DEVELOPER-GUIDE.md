@@ -60,8 +60,12 @@ src/
       common/                 the format provider, the WOFF unwrap, the WOFF 2 glyph reconstruction
       windows/ macos/ linux/  empty: a container is zlib, Brotli and arithmetic over bytes
     Kolvir.Feature.VirtualDom/ a virtual DOM, as a separate package: same layout, all portable
-      common/                 the node model, the reconciler, the component layer, the mount handles
+      common/                 the node model, the reconciler, the component layer, the mount handles,
+                              ObservableComponent (the observables seam)
       windows/ macos/ linux/  empty: reconciling a tree is comparison over objects that already exist
+    Kolvir.Feature.Observables/ observable model state, as a separate package: all portable, and the
+      common/                 one package that references nothing from Kolvir at all: values,
+                              expressions, named dependencies, the collectors, the raise depth
   generators/
     Kolvir.Feature.VirtualDom.Generators/ the virtual DOM's build-time half: the source generator that
       turns a manifest into node classes, and the analyzer that ships inside the feature package
@@ -4888,6 +4892,171 @@ with NETSDK1207 on the generator, in an application that never asked for one. A 
 cannot remove an inherited global property, and neither can the `MSBuild` task, so the sample shells
 out to `dotnet build` for the generator, where the properties are the environment's and not the
 publish's.
+
+### Observables
+
+`Kolvir.Feature.Observables` is model state that says what changed: a value that raises when it is
+written, an expression that is a function of what it read, and a named dependency for a thing that is
+not a value at all. `ObservableComponent<TDataModel>`, in the virtual DOM package, is the component
+that re-renders itself from that state - the half `Component` leaves to you.
+
+The package references nothing from Kolvir - no control, no host, no application - so it works in a
+console host, a server or a test as readily as in a UI. The design, the rejected alternatives and the
+measurements are in [`OBSERVABLES.md`](OBSERVABLES.md).
+
+#### A model
+
+A value is created where the state lives and read where it is used:
+
+```csharp
+internal sealed class ReleaseModel
+{
+    private readonly IObservableMutableValue<string> _name = Observable.CreateValue("Kolvir 1.0");
+
+    public string Name
+    {
+        get => _name.Value;        // a read that a run collects
+        set => _name.Value = value;
+    }
+}
+```
+
+`CreateValue` returns the only writable view, so the owner keeps the mutability and everything else
+sees `IObservableValue<T>`. The property over it is not ceremony: a getter that reads `Value` is
+tracked exactly as `model.Name` is, with no name string anywhere - a typo is a compile error - and a
+consumer that reads the property needs no special type.
+
+Three rules, and they are the whole of a value:
+
+- **An equal write raises nothing.** "Changed" is the type's own equality, so a record's value semantics
+  work with no ceremony, and a model that recomputes the same answer wakes nobody up.
+- **A read outside a run costs one null check.** Nothing allocated, nothing registered.
+- **Reading is not subscribing.** A run collects the reads - an expression's, or a render's - and that
+  collection is what turns them into a subscription.
+
+#### An expression
+
+An expression is a function, its cached result, and the set of things the result was computed from:
+
+```csharp
+var words = Observable.CreateExpression(
+    () => document.Text.Split(' ', StringSplitOptions.RemoveEmptyEntries).Length);
+```
+
+It is **cold** until something listens: with no handlers every read runs the function and nothing is
+subscribed. The first handler makes it **hot** - the function runs once, that run subscribes to what it
+read, every later read is a field, and a change to a dependency re-runs it. An expression is read-only
+on purpose: the only way to change one is to change something it read, which is what makes a graph of
+them trustworthy.
+
+| Decision | Default | Why |
+| --- | --- | --- |
+| Is the result different? | `EqualityComparer<T>.Default` | Pass an `IEqualityComparer<T>` to change it. A freshly built object that does not override `Equals` raises on every run - that is why the component seam never compares the trees it renders. |
+| Is a *failure* different? | always | Every exception is a change, so a dependency that churns while a function is broken notifies every time. Pass an `IEqualityComparer<Exception>` to collapse repeats; the comparer suppresses the notification, not the update - a read still throws the newest. |
+
+A function that throws caches the exception in place of the result and stays subscribed to what it
+reached, so the value that broke it is the one that can fix it. Reading the expression throws it, with
+its original stack.
+
+#### A name, for something that is not a value
+
+A dictionary row, a collection key, a property of a model that is keyed rather than stored: what
+changed is "the thing behind this key", and there is no value to hold - a value living in an evictable
+entry would vanish, and would reset in the middle of a re-evaluation that unhooks before it re-hooks.
+
+```csharp
+// The owner of the thing announces a change. No handle, no registration, no allocation.
+Observable.RaiseNamedEvent(row.Id);
+
+// A reader depends on the key, then reads the thing itself.
+var text = Observable.CreateExpression(() =>
+{
+    Observable.GetNamed(row.Id).DependUpon();
+    return model.TextOf(row.Id);
+});
+```
+
+`GetNamed` returns a handle that is a **name**: a fresh object per call, equal to every other handle for
+the same key, holding nothing. Reading one key through two handles in a run is one dependency, and a
+handle cannot go stale - it resolves the key on every operation - so keeping one is ordinary rather
+than a mistake: as a field for raising, or in a function across re-evaluations. The handlers live in a
+table keyed by key and are dropped the moment the last one goes, so the table is exactly as large as
+what is watched, and a raise for a key nobody watches is one lookup.
+
+#### A component that renders itself
+
+`ObservableComponent<TDataModel>` renders its model inside a collection scope, so the render's reads are
+its subscription:
+
+```csharp
+internal sealed class ReleaseCard : ObservableComponent<ReleaseModel>
+{
+    protected override VNode RenderWithDataModel(RenderArgs<ReleaseModel> args)
+    {
+        var model = args.DataModel;
+
+        return new VPanel
+        {
+            Dock = DockStyle.Fill,
+            Children =
+            [
+                new VLabel { Dock = DockStyle.Top, Text = model.Name },
+                new VTextBox { Dock = DockStyle.Fill, Text = model.Name, TextChanged = s => Type(s, model) },
+            ],
+        };
+    }
+
+    // Writing the model is the whole of the binding: the write raises, the raise invalidates this card,
+    // and the next frame renders the same text back into the box - which is not a change, so the caret
+    // stays where it is.
+    private static void Type(object sender, ReleaseModel model)
+    {
+        if (sender is TextBox box && !string.Equals(box.Text, model.Name, StringComparison.Ordinal))
+        {
+            model.Name = box.Text ?? string.Empty;
+        }
+    }
+}
+```
+
+```csharp
+var card = new ReleaseCard { DataModel = model };      // set it before mounting
+using var mount = VirtualDomRuntime.Mount(root, card);
+```
+
+There is no `SetState`: the render's reads are the subscription, and a change to any of them invalidates
+the card, which renders once on the next frame however many values changed first. Setting `DataModel` to
+a *different* instance does the same; setting it to the one it already has does not, because a change
+inside a model arrives through that model's own values.
+
+Two lifetimes, and the difference is what a base class is for:
+
+| Where it goes | How long it lives |
+| --- | --- |
+| `RenderArgs.AddDisposable`, during the render | one render: released before the next one starts |
+| `AttachedArgs.AddDisposable`, in `OnAttached` | one mount: released on detach, or on dispose |
+
+`RenderWithNullModel` is what renders before a model is set. No node in the virtual DOM produces no
+control yet, so its default throws and names the component - loudly, rather than as a card that quietly
+renders nothing.
+
+#### What the layer will and will not do
+
+- **It counts depth; it does not detect cycles.** Every raise and every cold run counts one level, and
+  the step past `Observable.MaxEventStackSize` (fifty) throws instead of recursing until the stack dies.
+  The refusal is sticky for the rest of the chain, so a loop stops once, where the limit is. A
+  legitimate graph nests a handful of levels; one that is deeper raises the limit. An expression that
+  reads itself with nothing subscribed is a cold run, and is caught the same way.
+- **It catches nothing.** A handler that throws ends that notification and the exception travels out of
+  the raise; a render that throws fails into the frame's own boundary, having stayed subscribed to what
+  it read. The library has no report channel, and does not call into an application to find one.
+- **`Dispose` is a lifetime decision, not memory management.** A value with no handlers roots nothing,
+  so dropping an unwatched one is enough. A long-lived value still holding a dead screen's handler is
+  the case `Dispose` exists for.
+
+The sample's **Observables** page is this in miniature: a card that renders an observable model, four
+ordinary buttons above it that change that model, and a render count on the card that moves once per
+frame no matter how many values a click changed.
 
 ## Hardware acceleration (Windows)
 

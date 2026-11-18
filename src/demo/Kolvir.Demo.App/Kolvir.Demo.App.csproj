@@ -60,6 +60,10 @@
     <ProjectReference Include="..\..\features\Kolvir.Feature.AnimatedWebp\Kolvir.Feature.AnimatedWebp.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.Svg\Kolvir.Feature.Svg.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.VirtualDom\Kolvir.Feature.VirtualDom.csproj" />
+    <!-- The observables page reads a model and renders it through
+         Kolvir.Feature.VirtualDom's ObservableComponent, so the sample names the package itself rather
+         than leaning on the reference VirtualDom already carries. -->
+    <ProjectReference Include="..\..\features\Kolvir.Feature.Observables\Kolvir.Feature.Observables.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.WoffFonts\Kolvir.Feature.WoffFonts.csproj" />
   </ItemGroup>
 

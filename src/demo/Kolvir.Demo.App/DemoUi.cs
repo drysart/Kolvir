@@ -577,6 +577,7 @@ public sealed class DemoUi
         ("app-badge", "App badge", demo => new AppBadgePage(demo)),
         ("audio", "Audio", demo => new AudioPage(demo)),
         ("virtual-dom", "Virtual DOM", demo => new VirtualDomPage(demo)),
+        ("observables", "Observables", demo => new ObservablesPage(demo)),
     };
 
     /// <summary>
