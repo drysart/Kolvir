@@ -216,10 +216,12 @@ two states:
   started by a read, by the first handler, or by a dependency change, the outcome is the same: the
   exception is cached in place of the value, the dependencies the run reached are hooked (3.6.1), and
   every read throws it. So a broken expression never silently serves a stale value.
-- **Only a dependency-started run raises.** A run started by a read throws to that caller, and one
-  started by the first handler attaches silently (becoming hot raises nothing, 3.6) - in both cases
-  the subscriber finds out the next time it reads. A run started by a dependency change raises, so
-  the failure reaches whoever is watching rather than only whoever is reading.
+- **Only a read has a caller to throw to.** A read can throw the exception at the code that asked. Every
+  other run has nobody to throw at: a dependency-started run recomputes the cached result - the
+  exception is the result - and then decides whether to raise its own value-changed event, and a run
+  started by the first handler registers without raising to the handler that caused it (becoming hot
+  raises nothing, 3.6). Whoever needs the value finds out when it reads it, which is where the
+  exception belongs anyway.
 - **Success to failure and failure to success are both changes.** Failure to failure is **not**: the
   expression is still broken, subscribers already know, and re-raising on every dependency change
   would turn one bug into a storm. The cached exception is replaced, so a later read reports the
@@ -338,7 +340,7 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 | Situation | Behaviour |
 | --- | --- |
 | Expression's function throws on its first run (first read or first handler) | cached as the result, the dependencies it reached are hooked, and every read throws it; the report goes to `Application.HandleNativeBoundary` unless the run was triggered by a read, which throws to its caller |
-| Expression's function throws on a re-run | cached as the result, reported to `Application.HandleNativeBoundary`, raised, and every read throws it |
+| Expression's function throws on a dependency-started re-run | cached as the result, reported to `Application.HandleNativeBoundary`, raised or not by the usual change rule, and every read throws it |
 | A handler throws during a raise | isolated per handler, reported to `Application.HandleNativeBoundary`, the rest of the snapshot still runs (unless the application lets it rethrow) |
 | A dependency cycle is read | `InvalidOperationException` naming the chain, before any recursion |
 | A write inside a running expression | `InvalidOperationException` naming the expression |
@@ -473,7 +475,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
 | **Equality keeps the graph quiet** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. |
-| **Failures are visible, not silent** | A function that throws on a re-run leaves the expression raising once, reporting once, and throwing on every read; a cycle throws with the chain named; a write inside a scope throws; a read after `Dispose` throws `ObjectDisposedException`. |
+| **Failures are visible, not silent** | A function that throws on a dependency-started re-run leaves the expression raising once, reporting once, and throwing on every read (there is nobody to throw at during the run itself); a cycle throws with the chain named; a write inside a scope throws; a read after `Dispose` throws `ObjectDisposedException`. |
 | **The seam re-renders on the frame after a change** | In the Virtual DOM suite: a component reading two model values renders once per frame however many of them changed, stops listening to a value its render stopped reading, and unhooks everything when detached. |
 | **AOT- and trim-clean** | The sample's published render is byte-identical to the JIT build's, and `Kolvir.Minimal` publishes with no observables artifact. The feature has no reflection, no `dynamic`, and no serializers, so this is expected rather than arranged. |
 
