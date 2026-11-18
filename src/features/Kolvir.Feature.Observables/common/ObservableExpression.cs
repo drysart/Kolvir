@@ -72,11 +72,15 @@ internal sealed class ObservableExpression<T> : IObservableValue<T>
             Observable.PublishRead(this);
 
             // Cold: nothing is maintaining the cache, so it is not trusted and this read is a run. The
-            // set it collects is discarded rather than kept, because becoming hot re-collects anyway and
-            // a set kept from a run whose inputs have moved could only be wrong.
+            // dependencies such a run reads are thrown away, so none are collected - the scope is
+            // suspended rather than entered, which costs nothing and also keeps these reads out of
+            // whatever run this expression was read from.
             if (_handlers.IsEmpty)
             {
-                return Observable.CollectDependencies(_function).Value;
+                using (ReadScope.Suspend())
+                {
+                    return _function();
+                }
             }
 
             return CachedOrThrow();

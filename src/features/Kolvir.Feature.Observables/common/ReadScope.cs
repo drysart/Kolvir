@@ -24,17 +24,28 @@ internal static class ReadScope
     internal static void Publish(IObservableEventSource source) => _current?.Add(source);
 
     /// <summary>Makes <paramref name="scope"/> the innermost scope until the token is disposed.</summary>
-    internal static ScopeToken Begin(CollectionScope scope)
+    internal static ScopeToken Begin(CollectionScope scope) => Enter(scope);
+
+    /// <summary>Publishes nothing until the token is disposed, whatever scope is current.</summary>
+    /// <remarks>
+    /// What a cold expression read does: it wants the function's result and throws its dependencies
+    /// away, so there is nothing to collect them into - and suspending also keeps them out of whatever
+    /// run this expression was read from, which is the isolation in section 3.3.
+    /// </remarks>
+    internal static ScopeToken Suspend() => Enter(null);
+
+    /// <summary>Swaps the current scope for <paramref name="scope"/> until the token is disposed.</summary>
+    private static ScopeToken Enter(CollectionScope? scope)
     {
         var previous = _current;
         _current = scope;
         return new ScopeToken(previous);
     }
 
-    /// <summary>Puts the scope that was current before <see cref="Begin"/> back.</summary>
+    /// <summary>Puts the scope that was current before <see cref="Enter"/> back.</summary>
     /// <remarks>
-    /// A struct and not a class, so entering a scope allocates the scope and nothing else - this runs
-    /// on every read of every expression.
+    /// A struct and not a class, so entering a scope allocates nothing at all - this runs on every read
+    /// of every expression.
     /// </remarks>
     internal readonly struct ScopeToken : IDisposable
     {
