@@ -182,7 +182,9 @@ change to `A`, and can call `D` while `C` still holds its old value. This is a d
 ### 3.6 Expressions: cold, hot, and what a read means
 
 An expression is one function plus a cached result plus the set of sources that result was computed
-from. It has two states:
+from. Nothing is computed when it is created: `CreateExpression` only records the function, and the
+first run happens when something asks for the value - a read, or the first handler attached. It has
+two states:
 
 | State | Dependencies hooked | `Value` read |
 | --- | --- | --- |
@@ -191,10 +193,11 @@ from. It has two states:
 
 | Decision | Why |
 | --- | --- |
+| **Creation runs nothing.** | A derived value that nobody reads should cost a delegate and nothing else - not a run, not a dependency set, not an exception it might throw before anyone is listening. It also means a function that throws is only ever discovered by somebody who asked for the result, which is the same rule as a read.
 | **Cold expressions hook nothing.** | An expression nobody watches is a function, and paying to keep its dependencies wired up would make an unused derived value cost the same as a used one - and would keep its whole dependency tree alive. A cold read discards the dependencies it collected rather than keeping a stale set: the next transition to hot re-runs and re-collects anyway, so a kept set could only ever be wrong. |
-| **Cold reads always re-run**, even though a cached result exists. | The cache cannot be trusted when nothing is telling the expression that its inputs moved. This is the user's rule, and it is the only self-consistent one: a cache is valid exactly when the subscription that maintains it is live. |
+| **Cold reads always re-run**, even though a cached result may exist. | The cache cannot be trusted when nothing is telling the expression that its inputs moved. This is the user's rule, and it is the only self-consistent one: a cache is valid exactly when the subscription that maintains it is live. |
 | **Hot reads never re-run.** | A hot expression's cache is maintained by its dependency hooks, so a read is a field. A render that reads the same expression twice must not cost two runs. |
-| **Becoming hot evaluates once, then hooks,** and raises nothing. | The subscriber count just went from zero to one; there is no earlier subscriber that could have missed a change, and the new subscriber can read `Value` for the current one. |
+| **Becoming hot evaluates once, then hooks,** and raises nothing. | It is the first run when nothing has read the expression yet, and it is what makes the value hot-cached. The subscriber count just went from zero to one, so no earlier subscriber could have missed a change, and the new one can read `Value` for the current result. If that run throws, the registration still succeeds: the exception is cached, the dependencies it reached are hooked, and the subscriber finds out by reading (3.7). Failing the registration instead would put a lifetime decision on a type call - who unregisters the handler that was refused? - for a bug the read surfaces anyway. |
 | **Becoming cold unhooks everything and keeps the result.** | Cheap teardown, and the value stays readable. It is just no longer trusted, per the row above. |
 | **A dependency raise unhooks the old set, re-runs the function, then hooks the new set, and raises only if the result differs.** | The order is load-bearing, not a matter of taste (3.6.1). Re-collecting on *every* run is what makes conditional reads work: `if (flag) x = a.Value;` makes `a` a dependency only in the runs where it is read. Hooking the new set even when the result is unchanged is what keeps the graph honest for a value that is recomputed but equal. |
 
@@ -208,21 +211,24 @@ from. It has two states:
 
 ### 3.7 A function that throws is a cached result
 
-- **At creation** the exception propagates out of `CreateExpression`: an expression that cannot
-  produce a value has no value to be watched, and the constructor is the only place where throwing is
-  unambiguous.
-- **On a later re-run** the exception is cached in place of the value (the user's rule), the
-  expression raises, and every read throws it. So a broken expression does not silently serve a stale
-  value, and the failure reaches whoever is watching rather than only whoever is reading.
+- **A throw is a cached result, on the first run and on any later one.** There is no special "at
+  creation" case, because creation does not run the function (3.6). Whether the run that threw was
+  started by a read, by the first handler, or by a dependency change, the outcome is the same: the
+  exception is cached in place of the value, the dependencies the run reached are hooked (3.6.1), and
+  every read throws it. So a broken expression never silently serves a stale value.
+- **Only a dependency-started run raises.** A run started by a read throws to that caller, and one
+  started by the first handler attaches silently (becoming hot raises nothing, 3.6) - in both cases
+  the subscriber finds out the next time it reads. A run started by a dependency change raises, so
+  the failure reaches whoever is watching rather than only whoever is reading.
 - **Success to failure and failure to success are both changes.** Failure to failure is **not**: the
   expression is still broken, subscribers already know, and re-raising on every dependency change
   would turn one bug into a storm. The cached exception is replaced, so a later read reports the
   newest message.
-- **The failed run still hooks its dependencies - the ones it reached** (3.6.1), because they are what
-  the exception was computed from, and therefore what can resolve it.
 - **The report happens once, at the point of evaluation,** through
-  `Application.HandleNativeBoundary` - the same place a render's failure goes. A handler that then
-  reads `Value` gets the exception thrown into it, which the dispatch loop isolates (section 3.4).
+  `Application.HandleNativeBoundary` - the same place a render's failure goes. Not when a *read*
+  started the run: that caller is already getting the exception, and reporting it as well would
+  count one bug twice. A handler that then reads `Value` gets the exception thrown into it, which the
+  dispatch loop isolates (section 3.4).
 
 ### 3.8 Cycles, and expressions that mutate
 
@@ -300,7 +306,7 @@ var wordCount = Observable.CreateExpression(
 | Member | Returns | Notes |
 | --- | --- | --- |
 | `Observable.CreateValue<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
-| `Observable.CreateExpression<T>(Func<T>, string? name = null)` | `IObservableValue<T>` | Runs once at creation; throws if that throws. Optional comparer overload. |
+| `Observable.CreateExpression<T>(Func<T>, string? name = null)` | `IObservableValue<T>` | Records the function and evaluates nothing; it runs on the first read or the first handler (3.6). Optional comparer overload. |
 | `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
 | `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
@@ -331,7 +337,7 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
 
 | Situation | Behaviour |
 | --- | --- |
-| Expression's function throws at creation | propagates out of `CreateExpression` |
+| Expression's function throws on its first run (first read or first handler) | cached as the result, the dependencies it reached are hooked, and every read throws it; the report goes to `Application.HandleNativeBoundary` unless the run was triggered by a read, which throws to its caller |
 | Expression's function throws on a re-run | cached as the result, reported to `Application.HandleNativeBoundary`, raised, and every read throws it |
 | A handler throws during a raise | isolated per handler, reported to `Application.HandleNativeBoundary`, the rest of the snapshot still runs (unless the application lets it rethrow) |
 | A dependency cycle is read | `InvalidOperationException` naming the chain, before any recursion |
@@ -426,7 +432,7 @@ Two things this gets for free, and one it must respect:
 | --- | --- | --- |
 | 1 | Package skeleton, the interfaces, the mutable value and snapshot dispatch | A value raises only when it actually changes; a handler can subscribe and unsubscribe during dispatch; a throwing handler does not stop the others |
 | 2 | The collector stack and `CollectDependencies` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope |
-| 3 | Expressions: cold/hot, caching, re-collection, equality | A cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
+| 3 | Expressions: cold/hot, caching, re-collection, equality | `CreateExpression` runs nothing; a cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
 | 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
 | 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value |
 | 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, and stops listening to a value its render stopped reading |
@@ -463,7 +469,7 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | --- | --- |
 | **A raise dispatches over a snapshot** | A handler that removes itself, and one that adds another, both leave the current dispatch's remaining handlers running and the next dispatch reflecting the change. |
 | **One entry, one identity** | Two `GetNamed` calls for one key return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). `RaiseNamedEvent` reaches the handler of a watched key and does nothing at all for an unwatched one. The cost claim - one lookup, no entry, no allocation - is a measurement on the same day the read costs are measured, not a test, because "no entry was created" is not observable through the public API. |
-| **Cold work costs nothing** | An expression with no handlers has zero dependency hooks (asserted on each dependency's handler count) and re-runs on every read; the second handler registration stops it re-running. |
+| **Cold work costs nothing** | `CreateExpression` runs the function zero times; an expression with no handlers has zero dependency hooks (asserted on a counting source) and re-runs on every read; attaching the first handler runs it once more and stops the re-running. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
 | **The old set is gone before the run** | A hand-written `IObservableEventSource` that counts its own registrations (public API, no internal hook) is read by an expression; while the function executes after a dependency raise, its count is zero for everything the previous run had hooked, and one again once the run finishes. That is 3.6.1 made observable: the run cannot be re-entered by a set it has already let go of. |
 | **Equality keeps the graph quiet** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. |
