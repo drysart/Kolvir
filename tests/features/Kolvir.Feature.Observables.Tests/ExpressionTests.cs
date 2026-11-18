@@ -342,6 +342,52 @@ public sealed class ExpressionTests
     }
 
     [TestMethod]
+    public void AColdExpressionReadByAColdExpressionStillReachesTheTop()
+    {
+        // The notification path has to survive two cold links, which is the case a suspended collection
+        // could plausibly break: the outer run records the middle expression as its dependency, hooking
+        // that expression is what makes the middle hot, and the middle hooking the innermost is what
+        // completes the chain. Nothing has to be collected during the cold reads for any of that.
+        var leaf = Observable.CreateValue(1);
+        var innermost = Observable.CreateExpression(() => leaf.Value * 2);
+        var middle = Observable.CreateExpression(() => innermost.Value + 10);
+        var outer = Observable.CreateExpression(() => middle.Value + 100);
+        var raised = 0;
+
+        outer.AddObservableEventRaisedHandler(_ => raised++);
+
+        Assert.AreEqual(112, outer.Value, "1 * 2 + 10 + 100, with all three cold until that line");
+
+        leaf.Value = 5;
+
+        Assert.AreEqual(1, raised, "a change at the leaf reached the top through two cold links");
+        Assert.AreEqual(120, outer.Value, "5 * 2 + 10 + 100");
+    }
+
+    [TestMethod]
+    public void AnExpressionBuiltInsideARunStillReachesIt()
+    {
+        // The strongest version of "it is not being monitored": the inner expression exists only for the
+        // duration of one outer run, and nothing holds it except the hook the outer took on it.
+        var leaf = Observable.CreateValue(1);
+        var outer = Observable.CreateExpression(() =>
+        {
+            var inner = Observable.CreateExpression(() => leaf.Value * 2);
+            return inner.Value + 1;
+        });
+        var raised = 0;
+
+        outer.AddObservableEventRaisedHandler(_ => raised++);
+
+        Assert.AreEqual(3, outer.Value, "1 * 2 + 1");
+
+        leaf.Value = 5;
+
+        Assert.AreEqual(1, raised, "the transient inner expression still carried the change up");
+        Assert.AreEqual(11, outer.Value, "and the outer rebuilt it around the new value");
+    }
+
+    [TestMethod]
     public void AnExpressionNamedAtItsCallSiteReportsThatName()
     {
         var named = Observable.CreateExpression(() => 1, "total");
