@@ -44,6 +44,8 @@ Non-goals, for this plan:
   what a "property" is.
 - Glitch-free, topologically-ordered delivery (§3.5): a listener may be called more than once for one
   logical change and may observe an intermediate value.
+- An asynchronous *expression* - a value that is produced by awaiting. Only the dependency collection is
+  async (§3.3.1); a value has to be current when it is read.
 - Collections. Observable dictionaries/lists are the next step and are deliberately out of scope;
   §7 provides the primitive they need (a dependency per key, plus one for the shape of the collection).
 - Binding a control to an observable without a component in between.
@@ -74,7 +76,7 @@ IObservableMutableValue<T> : IObservableValue<T>       ← what CreateValue retu
 | `IObservableValue` | `object? Value` | The untyped view, for a homogeneous dependency set and for `PublishRead`. Reading it publishes. |
 | `IObservableValue<T>` | `new T Value { get; }` | What a dependency set holds. Read-only on purpose: a subscriber can watch a value but cannot write it. |
 | `IObservableMutableValue<T>` | `new T Value { get; set; }` | What `CreateValue` hands back, to the one piece of code that owns the state. |
-| `Observable` | static | `CreateValue<T>`, `CreateExpression<T>`, `GetNamed`, `PublishRead`, `CollectDependencies`. |
+| `Observable` | static | `CreateValue<T>`, `CreateExpression<T>`, `GetNamed`, `RaiseNamedEvent`, `PublishRead`, `CollectDependencies`, `CollectDependenciesAsync`. |
 
 Three consequences worth stating plainly:
 
@@ -117,6 +119,7 @@ model and the *event* in the named source means eviction has no consequence to g
 | **One handle instance per entry, returned to every caller.** | The dependency set is a `HashSet<IObservableEventSource>`, so two handles for one entry that compare by reference would be two dependencies - and an expression that read the same key twice would hook it twice and unhook it once. The entry owns its handle and `GetNamed` returns it. This also removes an allocation from every read. |
 | **An entry exists only while it has a handler, and is evicted when the last one is removed.** | That is the memory story: a dependency nobody is listening to is not memory. Eviction is deferred while a raise is in progress (§3.4), because a handler is allowed to remove itself during its own dispatch. |
 | **A caller that reads a key repeatedly holds the handle.** | `GetNamed` is a dictionary lookup on an `object` key, which boxes a value-type key; the model that owns the entries caches the handles it hands out. This is what the collection types in the next step will do internally. |
+| **Raising does not need a handle: `Observable.RaiseNamedEvent(object key)`.** | The common shape is a model that raises without wanting to register - a dictionary announcing that a key changed - and going through `GetNamed` for it would create an entry and a handle for a key nobody is watching, which is an allocation and a dictionary write per mutation that is thrown away immediately. `RaiseNamedEvent` raises the entry if there is one and does nothing if there is not, so an unwatched key costs one lookup. `GetNamed` keeps the opposite behaviour deliberately: a caller asking for a handle is about to register on it, so there has to be an entry to register on. |
 
 ### 3.3 Collecting dependencies: a stack, not a slot
 
@@ -139,6 +142,31 @@ Nested scopes are isolated: the outer run never sees what the inner run read.
   pointing at a scope that is no longer running.
 - **Duplicates are removed per run** by reference identity, so an expression that reads `Count` in a
   loop hooks the count source once.
+
+#### 3.3.1 An async body needs a different slot
+
+`CollectDependenciesAsync(Func<Task>)` cannot use a static field, and the reason is the whole reason
+it exists as a separate method:
+
+- **A static slot does not survive an `await` unchanged.** The body suspends, the UI thread runs other
+  work - another screen building its tree, a frame draining a render queue - and every read in that
+  other work publishes into whatever the static slot happens to hold. The set would then describe
+  someone else's reads.
+- **The ambient scope is therefore an `AsyncLocal<T>` for the async case**, which flows *with the
+  async flow*: work on the same thread outside that flow sees its own value (null), and resumption
+  restores the scope that was pushed before the await. That is exactly the isolation a static field
+  cannot give.
+- **Reads stay cheap by checking the static slot first.** `PublishRead` looks at the static scope and
+  only falls through to `AsyncLocal` when it is null, so a synchronous run - an expression, a render -
+  costs what it did before: one static field and a branch. Only an asynchronous collection pays the
+  `AsyncLocal` cost, on a path that already awaits.
+- **There is no async expression.** `CreateExpression<T>` takes a `Func<T>` and has to produce a value
+  synchronously to be re-readable, and there is no useful notion of a cached `Task` here: the whole
+  point of the observable is that its `Value` is current. An async body gets a dependency *set*, and
+  it is the caller's business what to do with it - a loader that re-runs when its inputs change, for
+  instance.
+- **Async scopes nest like synchronous ones**: each push saves the previous `AsyncLocal` value and
+  restores it in a `finally`, which the compiler keeps across awaits.
 
 ### 3.4 Dispatch: snapshot, isolate, never re-enter the list
 
@@ -255,6 +283,23 @@ produces a tree it does not want to compare, so it wants "the dependencies of th
 when one of them changes". Expressing that through `CreateExpression` would mean comparing `VNode`
 trees to decide nothing.
 
+The asynchronous form is the same collection over a body that awaits, and returns the set once the
+body has finished:
+
+```csharp
+var deps = await Observable.CollectDependenciesAsync(async () =>
+{
+    await _store.Load(agent);
+    _header = _store.Title.Value;      // both of these publish into this run
+    _rows = _store.Rows.Value;
+});
+```
+
+Its scope lives in an `AsyncLocal<T>` rather than the static slot (§3.3.1), so work that runs on the
+UI thread while the body is suspended cannot publish into it. The returned set is what a caller
+subscribes to if it wants to re-run the load when one of those values changes; there is deliberately
+no async expression, because a value has to be current when it is read.
+
 ## 5. Reading and writing, in one place
 
 ```csharp
@@ -280,9 +325,11 @@ var wordCount = Observable.CreateExpression(
 | --- | --- | --- |
 | `Observable.CreateValue<T>(T initialValue)` | `IObservableMutableValue<T>` | Always a standalone value, unrelated to any other observable. |
 | `Observable.CreateExpression<T>(Func<T>, string? name = null)` | `IObservableValue<T>` | Runs once at creation; throws if that throws. Optional comparer overload. |
-| `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. |
+| `Observable.GetNamed(object key)` | `IObservableEventSource` | The same instance for the same key, for as long as the entry lives. Compose a multi-part name into one key object; the layer does not look inside it. Creates the entry if there is none, because the caller is about to register on it. |
+| `Observable.RaiseNamedEvent(object key)` | `void` | Raises the named dependency for `key` without materialising a handle, and **without creating an entry**: a raise for a key nobody watches is one lookup and nothing else. |
 | `Observable.PublishRead(IObservableEventSource)` | `void` | The primitive behind `DependUpon`. Public because a hand-written source needs it. |
-| `Observable.CollectDependencies(Action)` | `IReadOnlyList<IObservableEventSource>` | The component seam (§9). |
+| `Observable.CollectDependencies(Action)` | `IReadOnlyList<IObservableEventSource>` | The dependencies of one synchronous run. This is the component seam (§9). |
+| `Observable.CollectDependenciesAsync(Func<Task>)` | `Task<IReadOnlyList<IObservableEventSource>>` | The same for a body that awaits (§3.3). Returns the set, not an observable: an asynchronous value cannot be cached and re-read the way an expression's can. |
 
 No `services.AddObservables()`: there is nothing to register, no process-wide state that needs a
 container, and the named table is created on first use.
@@ -295,8 +342,10 @@ Recorded here so the primitive is built to fit them rather than retrofitted:
   depends on that key's named source; `Count`, `Keys` and enumeration depend on a *shape* source for
   the collection, which is raised by any addition, removal or clear.
 - **A change raises both** the touched key's source and the shape source (both, when a write replaces
-  an existing value). Raised after the mutation completes, never inside a loop over storage, because
-  a handler is allowed to re-enter the collection.
+  an existing value). The per-key half is `Observable.RaiseNamedEvent(key)`, which costs a lookup and
+  creates nothing for a key nobody is watching - a collection that mutates in a loop is not going to
+  allocate an entry per mutation. Raised after the mutation completes, never inside a loop over
+  storage, because a handler is allowed to re-enter the collection.
 - **Per-collection scoping** is the collection's own business, since `GetNamed` takes one opaque key: a
   dictionary keys its dependencies however it likes - `(this, key)` for a tuple, or its own key type
   that compares on both - so two dictionaries that both hold a `"name"` entry cannot collide without
@@ -355,7 +404,8 @@ Two things this gets for free, and one it must respect:
   the top of the next frame (`VIRTUAL-DOM.md` §7.1). So the glitches in §3.5 cannot reach the screen,
   and a handler that changes five model values still costs one render.
 - **The dependency set is re-collected per render**, so a render that stops reading a value stops
-  listening to it.
+  listening to it. This uses the *synchronous* collector (§4): a render has to produce a
+  tree, so the asynchronous form (§3.3.1) is not on this path.
 - **`Detach` must unhook**, or a component that lost its mount keeps its handlers and every model
   change calls a dead mount's `Invalidate` (a no-op, but the closures stay alive).
 
@@ -383,6 +433,9 @@ Two things this gets for free, and one it must respect:
 - **Equality is the trap for object results.** An expression returning a freshly built object that
   does not override `Equals` raises on every run. For `VNode` trees that is why the component seam
   does not use an expression at all (§4).
+- **`AsyncLocal` is the async scope, and it costs more than a static field.** Only an
+  asynchronous collection pays it (§3.3.1), on a path that is already awaiting - but it needs
+  measuring before it is called cheap.
 - **Object keys box value types on a miss.** A dictionary keyed by `int` pays a box per `GetNamed`
   call that misses its cache. Collections will cache handles per key; a caller that reads in a hot
   path should hold the handle.
@@ -400,9 +453,9 @@ Two things this gets for free, and one it must respect:
 | # | Step | Done when |
 | --- | --- | --- |
 | 1 | Package skeleton, the interfaces, the mutable value and snapshot dispatch | A value raises only when it actually changes; a handler can subscribe and unsubscribe during dispatch; a throwing handler does not stop the others |
-| 2 | The collector stack and `CollectDependencies` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope |
+| 2 | The collector stack, `CollectDependencies` and `CollectDependenciesAsync` | Nested scopes stay separate; duplicates collapse; a read outside a scope costs nothing; an exception restores the scope; a read from another async flow during an await is not collected |
 | 3 | Expressions: cold/hot, caching, re-collection, equality | A cold expression re-runs on every read and hooks nothing; a hot one hooks its dependencies, re-runs on a change, re-collects, and raises only when the result differs |
-| 4 | Named dependencies: one opaque key, one handle, eviction | Two handles for one key are the same object; an entry disappears when its last handler goes, and not during a raise |
+| 4 | Named dependencies: one opaque key, one handle, raising without a handle, eviction | Two handles for one key are the same object; `RaiseNamedEvent` reaches a watched key and does nothing for an unwatched one; an entry disappears when its last handler goes, and not during a raise |
 | 5 | Guards: cycles, mutation inside a scope, disposed reads | Each throws a named message instead of recursing, silently corrupting, or serving a stale value |
 | 6 | The component seam in `Kolvir.Feature.VirtualDom` | A component whose render reads model values re-renders on the next frame after one changes, and stops listening to a value its render stopped reading |
 | 7 | A demo page, the developer-guide section, and the AOT measurement | The published sample renders the page byte-for-byte identically to the JIT build, and a minimal app publishes with no observables artifact |
@@ -437,8 +490,9 @@ feature suites: no window, no frame, no timing. The claims that get special trea
 | Claim | How it is proven |
 | --- | --- |
 | **A raise dispatches over a snapshot** | A handler that removes itself, and one that adds another, both leave the current dispatch's remaining handlers running and the next dispatch reflecting the change. |
-| **One entry, one identity** | Two `GetNamed` calls for one key return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). |
+| **One entry, one identity** | Two `GetNamed` calls for one key return the same instance, and an expression reading the same key twice hooks it once (asserted on the handler count, not on the set). `RaiseNamedEvent` reaches the handler of a watched key and does nothing at all for an unwatched one. The cost claim - one lookup, no entry, no allocation - is a measurement on the same day the read costs are measured, not a test, because "no entry was created" is not observable through the public API. |
 | **Cold work costs nothing** | An expression with no handlers has zero dependency hooks (asserted on each dependency's handler count) and re-runs on every read; the second handler registration stops it re-running. |
+| **An async collection is isolated across its awaits** | A body awaits a task that, before completing, drives another run of reads on the same thread; the second run's reads do not appear in the first run's set, and the first run's set survives the suspension intact. |
 | **Re-collection follows the function** | A conditional read adds and removes a dependency as the condition flips, and a value that stops being read stops raising. |
 | **Equality keeps the graph quiet** | Writing an equal value raises nothing; an expression whose result is unchanged raises nothing but still re-hooks a changed dependency set. |
 | **Failures are visible, not silent** | A function that throws on a re-run leaves the expression raising once, reporting once, and throwing on every read; a cycle throws with the chain named; a write inside a scope throws; a read after `Dispose` throws `ObjectDisposedException`. |
