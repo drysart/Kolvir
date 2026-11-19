@@ -29,6 +29,15 @@ internal static class ReadScope
     /// <summary>Records a read, or does nothing when no run is in progress.</summary>
     internal static void Publish(IObservableEventSource source) => _current?.Add(source);
 
+    /// <summary>Whether any run is in progress.</summary>
+    /// <remarks>
+    /// What lets a collection decide whether publishing an address is worth the entry it would have to
+    /// create: <see cref="Publish"/> does nothing outside a run, but the source handed to it has to
+    /// exist first, and for a per-index dependency creating one is a dictionary slot and an allocation.
+    /// A read outside a run therefore asks this and allocates nothing at all.
+    /// </remarks>
+    internal static bool IsActive => _current is not null;
+
     /// <summary>Makes <paramref name="scope"/> the innermost scope until the token is disposed.</summary>
     internal static ScopeToken Begin(CollectionScope scope)
     {

@@ -88,6 +88,8 @@ IReadOnlyObservableList<T> : IReadOnlyList<T>, IDisposable
   void RemoveObservableListChangedHandler(Action<ObservableListChangedEventArgs<T>> handler)
 
 IObservableList<T> : IReadOnlyObservableList<T>, IList<T>
+  new int Count { get; }                       redeclared - see below
+  new T this[int index] { get; set; }          redeclared - see below
   int ChangeBatchDepth { get; }
   void BeginChangeBatch()
   void EndChangeBatch()
@@ -113,6 +115,18 @@ than anything clever.
 The list is not itself an `IObservableEventSource` (3.8). What it publishes instead is a dependency
 per kind of read - the count, an index, the contents - each of them internal and reachable only by
 making the read (3.6).
+
+**`Count` and the indexer are redeclared on `IObservableList<T>`, and that is a language requirement
+rather than a style choice.** `IList<T>` brings `ICollection<T>.Count` and
+`IReadOnlyObservableList<T>` brings `IReadOnlyCollection<T>.Count`; those are two different members
+with the same name, so a caller writing `list.Count` through the mutable interface is told the call is
+ambiguous, twice over (the indexer has the same shape). A concrete class does not have the problem
+because it declares one property to satisfy all three, which is why `List<T>` implements both
+interfaces and no such declaration exists there - the ambiguity is a property of an *interface* that
+inherits both. Redeclaring the two members on `IObservableList<T>` makes the most-derived declaration
+win, and the class still implements them once. This was found by building it, and the set and the
+dictionary will need the same two lines each for `IReadOnlySet<T>`/`ISet<T>` and
+`IReadOnlyDictionary<,>`/`IDictionary<,>`.
 
 ## 3. The list: decisions and why
 
@@ -278,11 +292,18 @@ Which record marks what, which is the whole of the mapping and the whole of what
 
 | Record | count | contents | indexes marked |
 | --- | --- | --- | --- |
-| `ItemAdded` at `p` | yes | yes | every watched index at or past `p` |
-| `ItemRemoved` at `p` | yes | yes | every watched index at or past `p` |
+| `ItemAdded` at `p` | yes | yes | every watched index at or past `p`, and below the size it grew to |
+| `ItemRemoved` at `p` | yes | yes | every watched index at or past `p`, and below the size before it shrank |
 | `ItemChanged` at `i` | no | yes | `i`, if it is watched |
 | `ItemMoved` `p` -> `q` | no | yes | every watched index in `min(p, q)..max(p, q)` |
-| `ListCleared` | yes | yes | every watched index |
+| `ListCleared` | yes | yes | every watched index, with no bound - the one conservative case |
+
+The bounds are what stop an index read that was already past the end from being woken by growth that
+does not reach it: an insert at 7 does not make index 12 answerable, so a reader watching 12 waits for
+the insert at 12. Recovering the size each record happened at is the one piece of arithmetic in the
+marking: walk the records backwards from the size the delivery left, then forward again applying them.
+A clear discards the size the records began with, so it marks every watched index and accepts the few
+spurious wakes that costs.
 
 A move marks the span rather than the two endpoints because the items in between shift: moving 1 to
 4 in `[a, b, c, d, e, f]` gives `[a, c, d, e, b, f]`, so indexes 1, 2, 3 and 4 all return a
@@ -416,6 +437,8 @@ public interface IReadOnlyObservableList<T> : IReadOnlyList<T>, IDisposable
 
 public interface IObservableList<T> : IReadOnlyObservableList<T>, IList<T>
 {
+    new int Count { get; }                      // redeclared: two inherited Counts are ambiguous
+    new T this[int index] { get; set; }         // and so are two inherited indexers
     int ChangeBatchDepth { get; }
     void BeginChangeBatch();
     void EndChangeBatch();
@@ -917,7 +940,13 @@ by the producer.
 | Step | State | Notes |
 | --- | --- | --- |
 | 0 | Done | This document: the contract, the decisions, the plan, and the open questions. Revised after review: 3.6 specifies a dependency per kind of read - count, index, contents - instead of one per list, which also settles open question 7. Extended after review: sections 6 and 7 are the set and the dictionary, and section 5 is the core they share |
-| 1 | Not started | |
+| 1 | Done | The two interfaces, `ObservableListChangeType`, `ObservableListChange<T>` with its five `Create*` factories, and `ObservableListChangedEventArgs<T>` - all documented, CS1591 clean, and pointing at the sections that decide them |
+| 2 | Done | `ObservableList<T>` over a `List<T>`: every mutation in 3.4 raises the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove raise nothing; an out-of-range mutation throws without recording; enumeration is the storage's own, so mutating under it throws |
+| 3 | Done | Delivery is a queue with a per-drain generation count rather than a recursive raise: a handler's own change is delivered after the event it is hearing, a batch is one event with every record in order, nesting delivers once at the outermost end, an unmatched end throws, and a loop is refused at `MaxEventStackSize` generations with the rest of the chain dropped. Disposal drops what a batch had not delivered, delivers one empty event, and then throws |
+| 4 | Done | `ObservableListDependencies<T>` and `ObservableDependency`: the count and contents are fields, an index entry is created by a read inside a run and dropped when its last handler goes (`ReadScope.IsActive` keeps a cold read from allocating), and marking is a pass over the watched entries. A write wakes its index and not the count; an insert wakes the indexes at or past it; a move wakes its span; a clear wakes all; a batch raises each once; a read past the end is still a read |
+| 5 | Done | The four `CreateList` overloads and the disposal order |
+| 6 | Done | 41 tests in three files - `ObservableListChangeTests`, `ObservableListDeliveryTests`, `ObservableListDependencyTests` - covering section 10's claims for the list, including a replay that reproduces the list from records alone |
+| 7 | Not started | The demo page and the guide passage |
 | 8 | Not started | The shared core, extracted once the list is behaving |
 | 9-10 | Not started | The set |
 | 11-12 | Not started | The dictionary |
