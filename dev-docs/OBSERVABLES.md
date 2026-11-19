@@ -428,9 +428,9 @@ container, and the named table is created on first use.
 
 ## 7. What collections will need (designed in `OBSERVABLE-COLLECTIONS.md`)
 
-Recorded here so the primitive is built to fit them rather than retrofitted. The first of these - a
-list, with change records and batches - is specified and planned in
-[`OBSERVABLE-COLLECTIONS.md`](OBSERVABLE-COLLECTIONS.md); the rest of the family follows it.
+Recorded here so the primitive is built to fit them rather than retrofitted. Three of these - a
+list, a set and a dictionary, each with change records and batches - are specified and planned in
+[`OBSERVABLE-COLLECTIONS.md`](OBSERVABLE-COLLECTIONS.md); the rest of the family follows them.
 
 - **Access by key or index**, iteration and `Count` are **different dependencies**. A read by key
   depends on that key's named source; `Count`, `Keys` and enumeration depend on a *shape* source for

@@ -13,10 +13,14 @@ applies in the order given. An insert says where the item went. A move is a move
 an addition. That is what lets a row shift instead of being rebuilt, and it is the whole point of
 doing this at all rather than shipping "something changed, re-read everything".
 
-Status of this document: **living plan, no code yet.** Section 2 fixes the shape, section 3 records
-the decisions and the reasons, section 4 is the API in full, section 5 sketches the sibling
-collections (dictionary, set, derived views) that will be fleshed out once the list is settled, and
-section 6 is the handful of things that should be confirmed before code exists.
+Status of this document: **living plan, no code yet.** Sections 2 to 4 are the list - its shape, its
+decisions and its API in full; section 5 is the core the three collections share; sections 6 and 7
+are the set and the dictionary; section 8 is the handful of things to confirm before code exists;
+section 9 is the order of work.
+
+The three can ship one at a time, and the list is first because it is the one whose addresses move: an
+insert shifts every index at or past it, which is the hardest case the marking rule has to get right.
+Once that is right, the set and the dictionary are the same design with a simpler address.
 
 This file is deliberately ASCII-only, like `OBSERVABLES.md`: write "section 3.4" rather than a
 section sign, and "<-" rather than an arrow.
@@ -26,12 +30,12 @@ section sign, and "<-" rather than an arrow.
 Goals:
 
 - **Full fidelity.** An observer that began from the same contents and receives every event can
-  reconstruct the list exactly, without ever reading it. That is a contract, not an aspiration: every
+  reconstruct the collection exactly, without ever reading it. That is a contract, not an aspiration: every
   change is reported, indexes are positions as of that moment, and delivery order is the order the
   changes happened in.
 - **Granularity enough to do minimal work.** A move is one record. Setting an item is one record
   with the old and the new item. An insert is one record with an index. Nothing is reported as
-  "everything changed" except an actual `Clear`.
+  "everything changed" except an actual `Clear` - in any of the three collections.
 - **Batches for the caller's sake, not the observer's.** `BeginChangeBatch`/`EndChangeBatch` turn N
   mutations into one notification while keeping every record, in order. The observer is called once
   instead of N times and loses nothing.
@@ -51,17 +55,17 @@ Non-goals:
 - Thread safety, cross-thread notification, or dispatching to the UI thread. Every collection is
   UI-thread state like every control, exactly as `OBSERVABLES.md` section 3.9 says of values.
 - Undo/redo. The records say what changed, not how to reverse it: `ListCleared` deliberately carries
-  no items (3.1), so an undo history is a different object that records its own state.
+  no items (3.1, and `SetCleared` and `DictionaryCleared` the same way), so an undo history is a`r`n  different object that records its own state.
 - `INotifyCollectionChanged`, `ObservableCollection<T>`, `IBindingList`, or any WPF/XAML interop.
   Section 3.8 has the mapping, which is close but not the same contract.
 - Sorting as a list operation. `IList<T>` has none, and a sort reported as moves is a diff problem
-  rather than a mutation, which is open question 6.6.
+  rather than a mutation, which is open question 8.6.
 - Coalescing or compacting records inside a batch (dropping an add that was removed again, merging
-  two sets of one item). The batch keeps what happened. 6.5 records the question.
-- Filtered, sorted or projected views over a list. Those are section 5, and they need the record
-  format to settle first.
+  two sets of one item). The batch keeps what happened. 8.5 records the question.
+- Filtered, sorted or projected views over a list (5.3), and ordered or sorted variants of any of the
+  three (open question 8.11). Both need the record format to settle first.
 
-## 2. The type model
+## 2. The list: type model
 
 ```
 ObservableListChangeType                       what a record says happened
@@ -110,7 +114,7 @@ The list is not itself an `IObservableEventSource` (3.8). What it publishes inst
 per kind of read - the count, an index, the contents - each of them internal and reachable only by
 making the read (3.6).
 
-## 3. Decisions and why
+## 3. The list: decisions and why
 
 ### 3.1 One record per change, and the fields each type fills in
 
@@ -140,7 +144,7 @@ Two details that follow from the table rather than from taste:
 Absent indexes and items are `null` (`int?`, `T?`). For a value type `T` the item field is `default`
 and null means "not applicable", so an observer switches on `ChangeType` and does not test the item
 for null. A second record type per change would make that checkable at compile time and would double
-the type count for a struct that is discarded in a frame's time; 6.2 keeps the question open.
+the type count for a struct that is discarded in a frame's time; 8.2 keeps the question open.
 
 ### 3.2 Indexes are positions at the time of the change, and replay is the contract
 
@@ -330,11 +334,11 @@ It is the wrong fit here, for a reason that shows up the moment you write the co
   subscribe to.
 
 So: typed handlers for the changes, and a dependency per kind of read underneath them. That also
-keeps `Dispose` free of a "what does a raise with no records mean" question (3.9). 6.1 asks to
+keeps `Dispose` free of a "what does a raise with no records mean" question (3.9). 8.1 asks to
 confirm this, since it is the one place this design departs from the shape of the values.
 
 For the record, the mapping to `INotifyCollectionChanged` is close but not the same, which is why
-6.3 keeps interop out of step 1:
+8.3 keeps interop out of step 1:
 
 | This package | WPF |
 | --- | --- |
@@ -380,7 +384,7 @@ similar objects is worse than one extra documented case.
   mutating during enumeration throws `InvalidOperationException` - the `List<T>` behaviour, kept
   because a mutation during a render is a bug worth failing.
 
-## 4. API surface, in full
+## 4. The list: API surface, in full
 
 ```csharp
 namespace Kolvir.Observables;
@@ -436,34 +440,369 @@ XML documentation is mandatory and CS1591 is an error for anything that ships, s
 needs a `<summary>`, and the members inherited from `IList<T>`/`IReadOnlyList<T>` need none until they
 are implemented.
 
-## 5. The family: what comes after the list
+## 5. The family: the shared core
 
-The list is the test case for a family, and the parts worth sharing are not the mutations - those are
-different for every collection - but the **record plumbing**: the pending batch, the delivery queue,
-the generation counting, the handler snapshot, the disposal order. That is one small type:
+Sections 2 to 4 are the list's. The set (section 6) and the dictionary (section 7) answer the same
+three questions with different records, and everything between a mutation and a handler is the same
+code for all three. That is the part to build once:
 
 ```
-ObservableChangeBatch<TChange>        internal: pending records, depth, delivery queue, generations
-  + a collection's job is to turn each mutation into a TChange and hand it over
+ObservableChangeBatch<TChange>       one collection's pending records, its batch depth, its delivery
+                                     queue and generations, and the handlers it delivers to
+ObservableKeyedDependencies<TKey>    the watched addresses: an entry per key holding that entry's
+                                     handlers, created by a read inside a run, dropped when its last
+                                     handler goes, and the thing a change walks to mark what moved
+ObservableShapeDependencies          the two sources every collection has: its shape, and its contents
 ```
 
-Which gives the siblings a shape to fit rather than a design to redo:
+A collection supplies three things and nothing else:
 
-| Collection | Interfaces | Record | Notes |
+1. **Its record**, and the enum that says which fields that record means.
+2. **Its mapping**, mutation to record: which call raises which record, and when it raises nothing.
+3. **Its marking rule**, record to dependency: an insert marks the indexes at or past it, a move marks
+   the span it moves across, a key marks itself, a clear marks everything.
+
+### 5.1 The three questions every collection answers
+
+This is the invariant worth stating once, because it is what makes all three designs one design:
+
+| Question a read asks | Dependency | Raised by |
+| --- | --- | --- |
+| **The shape** - how many items, or which keys exist | count, or structure | anything that adds or removes an item |
+| **The address** - what is at index `i`, is `x` present, what is at key `k` | that index, item or key | anything that may change that address's answer |
+| **The contents** - an enumeration or a scan | contents | any change at all |
+
+The three collections name them differently - a list's address is an index, a set's is an item, a
+dictionary's is a key, and a dictionary's shape is its key set rather than its count - but the split,
+the reasons and the code are the same. The address is the one that earns the work: it is what lets a
+row re-render without re-rendering the list, and it is why an address dependency is dropped when its
+last watcher goes rather than kept per address ever read.
+
+### 5.2 What is not shared
+
+- **The records, enums and event arguments** are per collection. One shared `ObservableChangeType`
+  would have nine values of which a list handler can see five, and every handler would have to know
+  which of the ones it was given are impossible (open question 8.9).
+- **The marking rule.** Marking is where a collection's semantics live: a list's insert marks a suffix
+  because positions shift, a dictionary's change marks one key, a set's bulk operation marks one entry
+  per item.
+- **The mutation surface.** `ISet<T>` has four bulk operations and no indexer, `IDictionary<,>` has an
+  indexer and no order, `IList<T>` has both an indexer and a `Move`.
+
+### 5.3 Still undesigned
+
+- **Derived views** - `Filter`, `Select`, `Sort` over an `IReadOnlyObservableList<T>`. The hard one: an
+  insert the filter drops is no record, and a re-sort is a diff rather than a mutation. These need the
+  source's records as input, which is why the list's records carry old and new items.
+- **`AsReadOnly` wrappers** for each collection: pass records through and hide the write surface. What
+  a model exposes when it wants to hand out a collection without letting anyone mutate it.
+- **An ordered or sorted variant.** A `SortedSet`-shaped collection has to report where things went,
+  which is `Move` with a different mutation surface (open question 8.11).
+
+## 6. The observable set
+
+The simplest of the three: no index, no value, so a change can only add an item or take one away, and
+the only interesting decision is what the four bulk operations of `ISet<T>` do to a record stream.
+
+Sections 3.1 to 3.5, 3.7, 3.9 and 3.10 apply unchanged - one record per change as a readonly struct,
+addresses as of the moment of the change, delivery in the order of the changes through a queue rather
+than a recursive raise, the depth guard in generations, disposal dropping pending records and
+delivering one last empty event, and nothing allocated when nothing is watching.
+
+### 6.1 The type model
+
+```
+ObservableSetChangeType                        what a set change can be
+  ItemAdded, ItemRemoved, SetCleared
+
+ObservableSetChange<T>                         one change
+  ObservableSetChangeType ChangeType { get; }
+  T? Item { get; }
+
+ObservableSetChangedEventArgs<T> : EventArgs
+  IReadOnlyList<ObservableSetChange<T>> Changes { get; }
+  IReadOnlyObservableSet<T> Set { get; }
+
+IReadOnlyObservableSet<T> : IReadOnlySet<T>, IDisposable
+  bool IsDisposed { get; }
+  IEqualityComparer<T> Comparer { get; }
+  IDisposable AddObservableSetChangedHandler(Action<ObservableSetChangedEventArgs<T>> handler)
+  void RemoveObservableSetChangedHandler(Action<ObservableSetChangedEventArgs<T>> handler)
+
+IObservableSet<T> : IReadOnlyObservableSet<T>, ISet<T>
+  int ChangeBatchDepth { get; }
+  void BeginChangeBatch()
+  void EndChangeBatch()
+```
+
+### 6.2 Decisions and why
+
+#### 6.2.1 The comparer is the identity, so it is exposed
+
+A set's `Contains`, `Add`'s "already there", `Remove` and every set-algebra operation mean what the
+comparer says they mean: two items it calls equal are *the same item*. So `Comparer` is on the read
+surface - a consumer mirroring the set has to build its mirror with the same comparer or it will
+disagree about what is in it - and it is what the per-item dependencies are keyed by. `CreateSet<T>()`
+without one uses `EqualityComparer<T>.Default`.
+
+This is also where `Observable.GetNamed` stops being usable, and the reason 3.6.1 said entries are the
+collection's own business: a named key compares by the key's own equality, while a set's comparer is a
+property of the set and not of the item. The entry table therefore lives in the set, keyed with the
+set's comparer.
+
+#### 6.2.2 The bulk operations are implicitly batched
+
+`UnionWith`, `ExceptWith`, `IntersectWith` and `SymmetricExceptWith` change a number of items nobody
+knows in advance. They report **one record per item actually added or removed**, inside an implicit
+batch, so the observer gets one event with all of them in order:
+
+- That is full fidelity without a "many items changed" record an observer would have to interpret, and
+  without a second notification shape for the bulk path.
+- It is the same mechanism a caller uses for a hand-written run of changes: `BeginChangeBatch` and
+  `EndChangeBatch` around the loop. Nested inside a caller's batch, the implicit one joins it rather
+  than delivering an event of its own.
+- A bulk operation that changes nothing raises nothing at all: `UnionWith` of a subset, `ExceptWith` of
+  an empty set, `IntersectWith` of a superset, symmetric difference with the set itself.
+
+#### 6.2.3 There is no `ItemChanged`, and no order
+
+A set holds one item per equality class, so "the value changed but the item is the same" is not a
+change a set can have: adding an item the comparer calls equal is a no-op that returns `false`, and
+swapping one for an unequal one is a removal and an addition, which the caller expresses as two calls
+or as `SymmetricExceptWith`. There is likewise no `Move`, because a set has no order to change - an
+ordered set is a different collection (open question 8.11).
+
+#### 6.2.4 Reads: the count, the item, the contents
+
+| Read | Depends on | Raised when |
+| --- | --- | --- |
+| `Count` | count | an item is added, an item is removed, or the set is cleared - never by a no-op |
+| `Contains(x)` | the entry for `x` | `x` is added or removed, by any call including the bulk operations and `Clear` |
+| enumeration, `SetEquals`, `IsSubsetOf`, `IsSupersetOf`, `IsProperSubsetOf`, `IsProperSupersetOf`, `Overlaps` | contents | any change at all |
+
+`Contains` earns its own entry because it is the read a rendered toggle makes - a chip per tag, each
+one asking whether its own tag is in the set - and a change to one tag must not re-render the others.
+The scans read every item, so they take the contents dependency for the reason 3.6 gives.
+
+`Comparer` is a constant of the set and publishes nothing.
+
+### 6.3 API surface, in full
+
+```csharp
+public enum ObservableSetChangeType { ItemAdded, ItemRemoved, SetCleared }
+
+public readonly struct ObservableSetChange<T>
+{
+    public ObservableSetChangeType ChangeType { get; }
+    public T? Item { get; }
+}
+
+public sealed class ObservableSetChangedEventArgs<T> : EventArgs
+{
+    public IReadOnlyList<ObservableSetChange<T>> Changes { get; }
+    public IReadOnlyObservableSet<T> Set { get; }
+}
+
+public static partial class Observable
+{
+    public static IObservableSet<T> CreateSet<T>();
+    public static IObservableSet<T> CreateSet<T>(IEqualityComparer<T>? comparer);
+    public static IObservableSet<T> CreateSet<T>(params ReadOnlySpan<T> items);
+    public static IObservableSet<T> CreateSet<T>(IEqualityComparer<T>? comparer, params ReadOnlySpan<T> items);
+}
+```
+
+### 6.4 What each mutation raises
+
+| Call | Record | Nothing raised when |
+| --- | --- | --- |
+| `Add(item)` | `ItemAdded` with the item | the comparer says it is already there, so `Add` returns `false` |
+| `Remove(item)` | `ItemRemoved` with the item | the item is not there, so `Remove` returns `false` |
+| `Clear()` | `SetCleared` | the set is already empty |
+| `UnionWith(other)` | one `ItemAdded` per item taken, in `other`'s order | nothing was taken |
+| `ExceptWith(other)` | one `ItemRemoved` per item removed | nothing was removed |
+| `IntersectWith(other)` | one `ItemRemoved` per item removed | nothing was removed |
+| `SymmetricExceptWith(other)` | `ItemRemoved` for what was there, then `ItemAdded` for what was not | nothing differs |
+
+`SymmetricExceptWith` reports removals before additions so that a replay never has to "add an item
+that is already there": an observer applying the records in order ends with the set it would have had.
+
+Which record marks what:
+
+| Record | count | contents | entries marked |
 | --- | --- | --- | --- |
-| List | `IReadOnlyObservableList<T>`, `IObservableList<T>` | 5 change types, one item | This document. `Move` is the only non-`IList<T>` operation |
-| Dictionary | `IReadOnlyObservableDictionary<TKey, TValue>`, `IObservableDictionary<TKey, TValue>` | Added / Removed / ValueChanged / Cleared, key + old/new value | No indexes at all, so the record carries the key. Its dependencies split the same three ways (3.6): a count, the contents, and a per-key one - and unlike an index, a change names the keys it touched, so `GetNamed` over the key is already the right shape there |
-| Set | `IReadOnlyObservableSet<T>`, `IObservableSet<T>` | Added / Removed / Cleared | The one collection where an equality comparer is part of the identity, and where a "changed" record has no meaning |
-| Derived views | `Filter`, `Select`, `Sort` over an `IReadOnlyObservableList<T>` | the view's own records, mapped from the source's | The hard one: an insert that the filter drops is no record, and a re-sort is a diff. These want the source's records as input, which is why the list's records carry old and new items |
-| Read-only wrapper | `AsReadOnly()` | passes the source's records through | What a model exposes when it wants to hand out the list without the write surface |
+| `ItemAdded` with `x` | yes | yes | `x` |
+| `ItemRemoved` with `x` | yes | yes | `x` |
+| `SetCleared` | yes | yes | every watched entry |
 
-Two things that must be settled for the dictionary and not for the list, and are therefore recorded
-here rather than designed here: whether a key's dependency is raised inside the same delivered event
-that carries the record for it (the list's answer is yes - 3.6.3), and whether a batch that ends with
-a key back at its original value still reports both changes (yes, by 3.3's ordering rule, unless 6.5
-says otherwise).
+### 6.5 Where it differs from the list on purpose
 
-## 6. Open questions - confirm before code
+- **No addresses to shift.** A list's insert marks a suffix; a set's change marks one item. That is the
+  whole of the per-collection work, and it is why a set of ten thousand tags with twelve toggles
+  rendered marks twelve entries at most.
+- **A bulk operation is N records and one event**, where a list would need a batch from the caller. The
+  set has no `AddRange`-shaped alternative to offer, so the batching is not optional.
+
+## 7. The observable dictionary
+
+The keyed collection: identity is the key, the payload is the value, and there is no index. Its record
+carries what an observer needs to replay it - which key, and what the value was and is.
+
+Sections 3.1 to 3.5, 3.7, 3.9 and 3.10 apply unchanged, as section 6 says of them.
+
+### 7.1 The type model
+
+```
+ObservableDictionaryChangeType                 what a dictionary change can be
+  ItemAdded, ItemRemoved, ItemChanged, DictionaryCleared
+
+ObservableDictionaryChange<TKey, TValue>       one change
+  ObservableDictionaryChangeType ChangeType { get; }
+  TKey Key { get; }
+  TValue? OldValue { get; }
+  TValue? NewValue { get; }
+
+ObservableDictionaryChangedEventArgs<TKey, TValue> : EventArgs
+  IReadOnlyList<ObservableDictionaryChange<TKey, TValue>> Changes { get; }
+  IReadOnlyObservableDictionary<TKey, TValue> Dictionary { get; }
+
+IReadOnlyObservableDictionary<TKey, TValue> : IReadOnlyDictionary<TKey, TValue>, IDisposable
+  bool IsDisposed { get; }
+  IEqualityComparer<TKey> Comparer { get; }
+  IDisposable AddObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler)
+  void RemoveObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler)
+
+IObservableDictionary<TKey, TValue> : IReadOnlyObservableDictionary<TKey, TValue>, IDictionary<TKey, TValue>
+  int ChangeBatchDepth { get; }
+  void BeginChangeBatch()
+  void EndChangeBatch()
+  bool TryAdd(TKey key, TValue value)
+```
+
+| ChangeType | Key | OldValue | NewValue | Raised by |
+| --- | --- | --- | --- | --- |
+| `ItemAdded` | the key | - | the value | `Add`, `TryAdd`, an indexer write to an absent key |
+| `ItemRemoved` | the key | the value that was there | - | `Remove` |
+| `ItemChanged` | the key | what it was | what it is | an indexer write to a present key, when the value differs |
+| `DictionaryCleared` | - | - | - | `Clear` of a non-empty dictionary |
+
+`ItemAdded` and `ItemRemoved` fill one side each and `ItemChanged` fills both, which is 3.1's rule
+again: a handler switches on `ChangeType` and reads the fields that type promises. `DictionaryCleared`
+carries nothing, for 3.1's reason - the observer that cared about the contents had them.
+
+`TryAdd` is on the interface because its absence is the one most felt: `IDictionary<,>` offers `Add`,
+which throws on a present key, and the indexer, which replaces. "Add if absent" would otherwise be a
+lookup, a decision and an exception to catch. It reports `ItemAdded` when it adds and nothing when the
+key was there.
+
+### 7.2 Decisions and why
+
+#### 7.2.1 The key is the address, and the key comparer is the identity
+
+`Comparer` is on the read surface for 6.2.1's reason one collection over: two keys the comparer calls
+equal are the same key, and a consumer mirroring the dictionary has to agree. The per-key dependency
+entries are keyed with it, in a table the dictionary owns.
+
+#### 7.2.2 `ItemChanged` only when the value differs
+
+An indexer write to a present key whose value `EqualityComparer<TValue>.Default` says is equal raises
+nothing - the rule a value's write (3.5) and a list's item write already follow. An optional value
+comparer is not in the first version (open question 8.10).
+
+#### 7.2.3 `Remove(KeyValuePair)` is conditional, as its interface says
+
+`ICollection<KeyValuePair<K, V>>.Remove` removes only when the key is present *and* its value matches
+the pair's, and returns `false` otherwise, which raises nothing. `Remove(key)` removes whatever the
+value is and reports it in the record.
+
+#### 7.2.4 Reads: the structure, the key, the contents
+
+| Read | Depends on | Raised when |
+| --- | --- | --- |
+| `Count`, `Keys` | structure | a key is added, a key is removed, or the dictionary is cleared |
+| `this[k]`, `TryGetValue`, `ContainsKey` | the entry for `k` | `k` is added, is removed, or its value changes |
+| `Values`, enumeration, `Contains(KeyValuePair)`, `CopyTo` | contents | any change at all |
+
+Two notes on that table:
+
+- **`ContainsKey` is over-raised, deliberately.** A value change does not change whether the key is
+  there, so a strict reading gives presence and value a dependency each. It does not, because the
+  entry is one thing to everyone who holds it: a `TryGetValue` caller cares about both halves, a
+  `ContainsKey` caller is rare, and two entries per key would double the watched set to serve a
+  distinction almost nobody makes. The over-raise costs a re-run, never a wrong answer.
+- **`Keys` is structure and `Values` is contents**, because a key's identity cannot change without the
+  key being a different key, while a value changes every time someone edits one. Reading the property
+  publishes for the collection the property is a view of; enumerating what it returned afterwards is
+  the reader's own read, and those are live views with `Dictionary<,>` semantics, so enumerating one
+  during a mutation throws exactly as it does today.
+
+### 7.3 API surface, in full
+
+```csharp
+public enum ObservableDictionaryChangeType { ItemAdded, ItemRemoved, ItemChanged, DictionaryCleared }
+
+public readonly struct ObservableDictionaryChange<TKey, TValue>
+{
+    public ObservableDictionaryChangeType ChangeType { get; }
+    public TKey Key { get; }
+    public TValue? OldValue { get; }
+    public TValue? NewValue { get; }
+}
+
+public sealed class ObservableDictionaryChangedEventArgs<TKey, TValue> : EventArgs
+{
+    public IReadOnlyList<ObservableDictionaryChange<TKey, TValue>> Changes { get; }
+    public IReadOnlyObservableDictionary<TKey, TValue> Dictionary { get; }
+}
+
+public static partial class Observable
+{
+    public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>() where TKey : notnull;
+    public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>(IEqualityComparer<TKey>? comparer) where TKey : notnull;
+    public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>(IEnumerable<KeyValuePair<TKey, TValue>> items) where TKey : notnull;
+    public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>(IEnumerable<KeyValuePair<TKey, TValue>> items, IEqualityComparer<TKey>? comparer) where TKey : notnull;
+}
+```
+
+`TKey : notnull` is `IDictionary<TKey, TValue>`'s own constraint, so the factories carry it.
+
+### 7.4 What each mutation raises
+
+| Call | Record | Nothing raised when |
+| --- | --- | --- |
+| `Add(k, v)` | `ItemAdded` | `k` is present, which throws `ArgumentException` |
+| `TryAdd(k, v)` | `ItemAdded` | `k` is present, and it returns `false` |
+| `this[k] = v`, `k` absent | `ItemAdded` | - |
+| `this[k] = v`, `k` present | `ItemChanged` with old and new | the new value equals the old |
+| `Add(KeyValuePair)` | `ItemAdded` | `k` is present, which throws |
+| `Remove(k)` | `ItemRemoved` with the value that was there | `k` is absent, and it returns `false` |
+| `Remove(KeyValuePair)` | `ItemRemoved` | `k` is absent, or its value differs from the pair's |
+| `Clear()` | `DictionaryCleared` | the dictionary is already empty |
+
+An indexer read of an absent key throws `KeyNotFoundException` and publishes nothing, which is the one
+place this design departs from 3.6's "publish before the check": a list's index is a position the
+caller can always ask about, while a dictionary's indexer is the wrong shape of question about a key
+that is gone. `TryGetValue` and `ContainsKey` are the right shapes, and both publish the key's entry
+before answering, so a reader that asked about an absent key is woken by the key appearing.
+
+Which record marks what:
+
+| Record | structure | contents | entries marked |
+| --- | --- | --- | --- |
+| `ItemAdded` with `k` | yes | yes | `k` |
+| `ItemRemoved` with `k` | yes | yes | `k` |
+| `ItemChanged` with `k` | no | yes | `k` |
+| `DictionaryCleared` | yes | yes | every watched key |
+
+### 7.5 What is left for a later pass
+
+- A sorted dictionary, or one whose enumeration order is a promise: both need an order to report,
+  which is `Move`-shaped (open question 8.11).
+- A value comparer per dictionary (open question 8.10).
+- The `Dictionary<,>`-only conveniences (`Remove(k, out v)`, `GetValueOrDefault`). None of them is a
+  change, and all of them are one line over the interface.
+
+## 8. Open questions - confirm before code
 
 1. **Not an `IObservableEventSource`** (3.8). The alternative is to derive both interfaces from it and
    adapt the untyped handlers onto the typed event. The argument against is in 3.8; the argument for
@@ -489,8 +828,24 @@ says otherwise).
    `IDisposable EnterChangeBatch()` that pairs them is the shape a caller actually wants
    (`using var batch = list.EnterChangeBatch();`), including on an exception path. It is in the plan
    unless the pairing-token argument is unwanted.
+9. **A shared enum, or one per collection** (5.2). One `ObservableChangeType` for all nine change
+   types would let a single handler serve any collection, at the price of every handler having to
+   know which of the values it can be given are impossible. This document assumes one per collection.
+10. **A value comparer for the dictionary** (7.2.2). `ItemChanged` is decided with
+    `EqualityComparer<TValue>.Default` in the first version; a per-dictionary `IEqualityComparer<TValue>`
+    is the obvious follow-up if a model ever needs it, and it is one more field.
+11. **Sorted and ordered variants are out of scope** (5.3, 6.2.3, 7.5). An ordered collection has to
+    report where an item went, which is the list's `Move` with a different mutation surface; none of
+    the three here promises an order, and the dictionary's enumeration order is the storage's.
+12. **A shared non-generic marker.** `IObservableCollection` - `IsDisposed`, `Count`,
+    `ChangeBatchDepth`, and nothing else - would let a tool hold "some observable collection" without
+    knowing its shape. Nothing in this plan needs it yet, which is the reason to leave it out rather
+    than to design it.
+13. **`Comparer` on the list.** The set and the dictionary expose it because it defines their
+    identity (6.2.1, 7.2.1); the list's comparer only decides whether a write changed an item (3.5),
+    so exposing it there is symmetry without a use.
 
-## 7. Steps
+## 9. Steps
 
 | # | Step | Done when |
 | --- | --- | --- |
@@ -499,14 +854,23 @@ says otherwise).
 | 3 | Delivery: queue, generations, batches | Records arrive in mutation order even when a handler mutates; a batch is one event carrying all of them; nesting is counted and only the outermost end delivers; an unmatched end throws; a handler-caused loop is refused at `MaxEventStackSize` generations |
 | 4 | Per-operation dependencies: count, index, contents | A body that reads `Count` and `this[0]` reports two dependencies; a write to an item wakes the index reader and not the count reader; a move wakes only the indexes it spans; an insert at `p` wakes every watched index at or past `p` and none before it; a read outside a scope allocates nothing and registers nothing; a batch raises each affected entry once |
 | 5 | `CreateList` factories and disposal | The four overloads; disposal drops pending records, delivers the empty final event, and makes reads, mutations and registration throw while removal and a second dispose stay safe |
-| 6 | Tests | Section 8's claims, in `tests/features/Kolvir.Feature.Observables.Tests` |
+| 6 | Tests | Section 10's claims, in `tests/features/Kolvir.Feature.Observables.Tests` |
 | 7 | The demo page and the guide section | An **Observable list** page in `src/demo/Kolvir.Demo.App/Pages/` that renders a list from its records and shows a batch add as one notification, plus an `### Observable collections` passage in `DEVELOPER-GUIDE.md` |
+| 8 | The shared core: `ObservableChangeBatch<TChange>`, `ObservableKeyedDependencies<TKey>`, `ObservableShapeDependencies` | The list is rewritten onto the three shared types and its suite passes unchanged - which is the evidence that the core is the core, rather than the list plus two copies |
+| 9 | The set: interfaces, `ObservableSetChange<T>`, event arguments | The four types compile and are documented (section 6.1, 6.3) |
+| 10 | `ObservableSet<T>`: mutations, the four bulk operations, the three dependencies | Section 6.4's table row for row, and 6.2.4's dependencies exactly: a `Contains` reader is not woken by a change to another item, and a bulk operation that changes nothing raises nothing |
+| 11 | The dictionary: interfaces, `ObservableDictionaryChange<TKey, TValue>`, event arguments | The four types compile and are documented (section 7.1, 7.3) |
+| 12 | `ObservableDictionary<TKey, TValue>`: mutations, `TryAdd`, the three dependencies | Section 7.4's table row for row, and 7.2.4's dependencies exactly: a value write wakes the key's reader and not the structure reader, and an absent key read through `TryGetValue` is woken by the key appearing |
+| 13 | The demo pages and the guide for the set and the dictionary | A set page whose toggles re-render one chip each, and a dictionary page whose rows re-render one row each, both applying records to a mirror |
+| 14 | The two suites | Section 10's claims for both, beside the list's |
 
 Step 1 is a contract review and is worth stopping at: everything after it is implementation of the
 shape rather than of the idea. Step 4 is the one that decides how much of a list a change re-renders,
-and it is worth arriving at with the test names already written.
+and it is worth arriving at with the test names already written. Steps 9 and 11 are the same kind of
+stopping point for the other two, and neither is worth starting before step 8 exists - three copies of
+a delivery queue would be three chances for one of them to disagree about ordering.
 
-### 7.1 What else has to change
+### 9.1 What else has to change
 
 1. **`src/features/Kolvir.Feature.Observables/common/`** - one file per type, in the existing
    one-type-per-file arrangement, `common/` only: this is portable object-graph work over the BCL and
@@ -519,7 +883,7 @@ and it is worth arriving at with the test names already written.
 5. **`Kolvir.slnx`, the workflow and the test project** need nothing: the package and its suite
    already exist.
 
-## 8. Verification approach
+## 10. Verification approach
 
 Headless tests in `tests/features/Kolvir.Feature.Observables.Tests`, in the shape the other
 Observables tests already have - no window, no frame, no timing. The claims that get special
@@ -538,15 +902,23 @@ treatment:
 | **A throwing index read still subscribes** | `list[7]` over three items throws, and the run still reports index 7 among its dependencies; growing the list to eight then re-runs it, which is the only way an expression that is currently failing can recover |
 | **A batch is one wake-up per affected read** | A body reading indexes 0, 1 and 2 reports three dependencies, and three mutations delivered as one event wake each of them exactly once, however many records touched that index - three records that all touch index 1 raise it once, not three times |
 | **Nothing watched costs nothing to raise** | A mutation with no run in scope and no handler registered marks nothing, and the same mutation costs the same with ten thousand items as with ten; a read outside a run allocates nothing at all |
+| **A set's bulk operation is N records and one event** | `UnionWith` of three new items delivers once, with three `ItemAdded` records in the argument's order; `SymmetricExceptWith` of the set itself raises nothing at all; a bulk operation inside the caller's batch joins that batch instead of delivering an event of its own; and a replay of the records ends equal to the set |
+| **A set's `Contains` is its own dependency** | A body asking `Contains("a")` and `Contains("b")` is woken once when `a` is added and not at all when `c` is; a `Count` reader is woken by the bulk operation that changed the size, once for the whole event; `SetEquals` and the subset tests are woken by any change, including one that alters no size (8.5: records are what happened, not a diff) |
+| **The dictionary's key is its own address** | A body reading `dict["a"]` and `dict["b"]` is woken once per change to that key and not by a change to the other; `Count` and `Keys` readers are not woken by a value write; `TryGetValue` on an absent key reports a dependency and is woken when the key appears |
+| **A removal reports the value that was there** | `Remove(k)` records the value it removed; `Remove(pair)` with a mismatched value raises nothing and leaves the entry alone; a `Clear` of a non-empty dictionary is one record with nothing in it |
 | **Enumeration is a snapshot of the version, not of the contents** | Mutating during `foreach` throws `InvalidOperationException`; reading after it throws is fine; a `CopyTo` during a mutation is the same failure rather than a torn array |
 
-The demo page is the other half: it applies records to a mirrored list and asserts equality against the
-model's list on every frame, which is the fidelity claim proved by the consumer rather than by the
-producer.
+The demo pages are the other half: each applies records to a mirror and asserts equality against the
+model's own collection on every frame, which is the fidelity claim proved by the consumer rather than
+by the producer.
 
-## 9. Progress
+## 11. Progress
 
 | Step | State | Notes |
 | --- | --- | --- |
-| 0 | Done | This document: the contract, the decisions, the plan, and the open questions. Revised after review: 3.6 specifies a dependency per kind of read - count, index, contents - instead of one per list, which also settles open question 7 |
+| 0 | Done | This document: the contract, the decisions, the plan, and the open questions. Revised after review: 3.6 specifies a dependency per kind of read - count, index, contents - instead of one per list, which also settles open question 7. Extended after review: sections 6 and 7 are the set and the dictionary, and section 5 is the core they share |
 | 1 | Not started | |
+| 8 | Not started | The shared core, extracted once the list is behaving |
+| 9-10 | Not started | The set |
+| 11-12 | Not started | The dictionary |
+| 13-14 | Not started | The pages, the guide and the two suites |
