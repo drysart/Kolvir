@@ -38,9 +38,11 @@ Goals:
 - **Cheap when nothing is watching.** A mutation nobody is listening to builds no records and
   allocates nothing beyond the storage change; a batch is the only thing that collects
   unconditionally (section 3.10).
-- **Reads that can be depended on.** Reading the list publishes a dependency, so it plugs into
-  `CollectDependencies`, `ObservableExpression<T>` and the Virtual DOM component seam with no new
-  concept (section 3.6).
+- **Reads that can be depended on, at the granularity of what was read.** `Count`, `this[i]` and a
+  scan of the list are three different questions with three different answers, so each publishes its
+  own dependency and a change wakes only the readers whose answer it changes (section 3.6). That
+  plugs into `CollectDependencies`, `ObservableExpression<T>` and the Virtual DOM component seam with
+  no new concept.
 - **No new package and no new initialization.** It extends `Kolvir.Feature.Observables`; there is
   still nothing to register.
 
@@ -103,6 +105,10 @@ same trust model as the values: read-only is a compile-time promise, not a guard
 
 `IsReadOnly` is `false`, `ChangeBatchDepth` is 0 outside a batch, and both are ordinary members rather
 than anything clever.
+
+The list is not itself an `IObservableEventSource` (3.8). What it publishes instead is a dependency
+per kind of read - the count, an index, the contents - each of them internal and reachable only by
+making the read (3.6).
 
 ## 3. Decisions and why
 
@@ -198,27 +204,96 @@ uses it here and nowhere else (the list is not a set: it has no deduplication an
 that the comparer affects - `Contains` and `IndexOf` stay `EqualityComparer<T>.Default`, which is
 `IList<T>`'s contract, not ours to change).
 
-### 3.6 Reads publish a dependency, once per list to start
+### 3.6 Reads publish per-operation dependencies
 
-Every read that looks at the list publishes a dependency on it: `Count`, `this[i]`, enumeration,
-`Contains`, `IndexOf`, `CopyTo`. Any delivered change raises it - structure and item values alike.
+The list is not one dependency. A read of `Count` and a read of `this[3]` are different questions,
+and a change should answer exactly the ones it changes - not all of them, and not none of them:
 
-That is the coarse end of a ladder the existing machinery already supports, and the plan is to climb
-it rather than to design for it now:
+| Read | Depends on | Raised when |
+| --- | --- | --- |
+| `Count` | the count dependency | an add, a removal or a clear - never a write to an item, and never a move |
+| `this[i]` | the dependency for index `i` | the item that `i` would return may differ: a write at `i`, an add or removal at any `p <= i` (including one that brings `i` into range or takes it out), a move whose span covers `i`, a clear |
+| `GetEnumerator`, `Contains`, `IndexOf`, `CopyTo` | the contents dependency | any change at all |
 
-| Granularity | What a read depends on | Raised by | When |
+Why each row is the right question:
+
+- **`Count`** is a number only structure can change. A write to an item and a move both leave it
+  alone, so neither may wake a reader that asked only for the count - which is what makes a "12
+  items" label never re-render when a row is edited.
+- **`this[i]`** is about the item the caller would get back, not about the identity at that address
+  and not about the item it got before. An add at `p` shifts every index from `p` on, so every index
+  at or past `p` may now return a different item and every index before `p` returns exactly what it
+  did. A move changes only the indexes it spans. A clear changes all of them, and a write changes
+  one.
+- **The index dependency is published before the bounds check.** A read past the end throws, and a
+  throwing read is still a read: an expression `list[7]` over a three-item list has to re-run when
+  the list grows to eight, and it can only do that if it subscribed to index 7 on the way to
+  throwing. This is the rule the package already follows for a run that fails - a failed run still
+  yields what it reached (`OBSERVABLES.md` section 13). It also means an index that was in range and
+  is not any more is raised like any other, so a reader learns its answer became an exception.
+- **Enumeration and the scans** look at every item, so any change can change their answer, and they
+  take the one coarse dependency. It cannot be made finer without one dependency per item, which is
+  the O(n) subscription `OBSERVABLES.md` section 7 already ruled out - and unlike an index read, a
+  scan really does depend on every element.
+
+#### 3.6.1 What the dependencies are
+
+All internal, all reachable only through a read:
+
+| Dependency | Lives in | Created | Dropped |
 | --- | --- | --- | --- |
-| One source per list | the list | any change | **step 1**, this plan |
-| Structure + item values | structure: adds, removes, moves, clears; values: item changes | accordingly | later, if a rendered list needs it |
-| Structure + per-index | `this[i]` depends on the index and the structure | item change at `i`, or any structural change | later, if rows re-render too often |
+| count | a field on the list | with the list | never - it is one field |
+| contents | a field on the list | with the list | never |
+| index `i` | an entry in the list's own dictionary, keyed by the index | the first read of `i` inside a run | when its last handler goes, like a named key (`OBSERVABLES.md` section 3.2) |
 
-The ladder exists because correctness does not depend on climbing it - only the amount of work a
-re-render does. Step 1 is what makes a list usable at all; the finer steps are measured against the
-demo page before they earn their keys, which is the same discipline `OBSERVABLES.md` section 7 used
-when it said enumeration must not depend on every key.
+The index entry is the same instance for as long as anything watches it, which is what makes two
+reads of `this[3]` in one run one subscription: the scope de-duplicates by equality and the instance
+is canonical. It is a plain reference-equality source, so it needs no `Equals` of its own.
 
-A raise of that dependency is one `Observable.RaiseNamedEvent` per delivered event, not per record,
-so a batch is one wake-up.
+A read outside any run allocates nothing. Publishing is a null check on the scope field
+(`ReadScope.Publish`), and the index entry is only created when a scope exists, through an internal
+`ReadScope.IsActive` - so a model read in a test, a console host or a server costs exactly what it
+costs today.
+
+#### 3.6.2 What a change costs
+
+The watched set, not the list:
+
+- A change marks the entries it affects with a per-entry flag, and the delivery raises each marked
+  entry once. A batch of a hundred records touching one row wakes one reader; a batch that touches
+  nothing watched walks nothing.
+- Entries are marked from the records of the delivery rather than during the mutation, so a
+  subscription taken in the middle of a batch is answered by that batch's own delivery.
+- Marking is one pass over the watched entries per record: an add at `p` marks every entry whose
+  index is at or past `p`. The watched set is the rows on screen, not the list - ten thousand items
+  with twelve visible rows is twelve entries, and the insert into the storage is the expensive part
+  of that mutation either way.
+- A mutation with no run watching anything marks nothing and raises nothing.
+
+Which record marks what, which is the whole of the mapping and the whole of what the tests assert:
+
+| Record | count | contents | indexes marked |
+| --- | --- | --- | --- |
+| `ItemAdded` at `p` | yes | yes | every watched index at or past `p` |
+| `ItemRemoved` at `p` | yes | yes | every watched index at or past `p` |
+| `ItemChanged` at `i` | no | yes | `i`, if it is watched |
+| `ItemMoved` `p` -> `q` | no | yes | every watched index in `min(p, q)..max(p, q)` |
+| `ListCleared` | yes | yes | every watched index |
+
+A move marks the span rather than the two endpoints because the items in between shift: moving 1 to
+4 in `[a, b, c, d, e, f]` gives `[a, c, d, e, b, f]`, so indexes 1, 2, 3 and 4 all return a
+different item and 0 and 5 return the same ones.
+
+#### 3.6.3 Order, and the guard
+
+A delivery runs the typed handlers first and raises the dependencies afterwards, once for the whole
+event. Both see the same, already-mutated list, so the order decides only what a handler that opens
+its own batch sees - and "the listener that was told about this change, then the reads it
+invalidated" is the order that keeps a handler's own changes behind the event it is hearing about.
+
+Each of those raises is an ordinary raise and counts against `Observable.MaxEventStackSize` like any
+other, so a dependency whose re-run mutates the list again descends one level. The loop that does not
+descend - a handler adding an item for every item added - is what 3.7's generation count bounds.
 
 ### 3.7 Delivery goes through the depth guard, in generations
 
@@ -249,13 +324,14 @@ It is the wrong fit here, for a reason that shows up the moment you write the co
 - `IObservableEventSource.RaiseEvent()` is public and means "announce a change". On a list that
   invites a caller to fabricate a change that never happened, which no observer can apply to a copy.
   The list's equivalent is a mutation, and it already exists.
-- What a *dependency* needs from the list is exactly what `OBSERVABLES.md` section 7 planned:
-  `Observable.GetNamed(...)` over a key, raised by `Observable.RaiseNamedEvent(...)`. The list does not
-  have to be the source for a reader to depend on it (3.6).
+- There is no single "the list changed" question to be. A read of `Count` and a read of `this[3]` are
+  different dependencies (3.6), and one source raised by everything would have to be the coarse
+  notification this design exists to avoid - so the list would be a source that nothing useful should
+  subscribe to.
 
-So: typed handlers only, and the dependency half is a named key. That also keeps `Dispose` free of a
-"what does a raise with no records mean" question (3.9). 6.1 asks to confirm this, since it is the
-one place this design departs from the shape of the values.
+So: typed handlers for the changes, and a dependency per kind of read underneath them. That also
+keeps `Dispose` free of a "what does a raise with no records mean" question (3.9). 6.1 asks to
+confirm this, since it is the one place this design departs from the shape of the values.
 
 For the record, the mapping to `INotifyCollectionChanged` is close but not the same, which is why
 6.3 keeps interop out of step 1:
@@ -294,8 +370,7 @@ similar objects is worse than one extra documented case.
 ### 3.10 Cheap when nothing is watching
 
 - A mutation with no handlers and no open batch builds no arguments and allocates nothing: the record
-  is a struct that never exists, and the dependency raise is a lookup that does nothing when nobody
-  has registered on the key.
+  is a struct that never exists, and the dependency marking is a pass over an empty watched set.
 - A batch allocates one `List<ObservableListChange<T>>` when it begins, and appends a struct per
   mutation, whether or not anybody is listening - because a handler may subscribe in the middle of the
   batch and must then receive the whole batch, and because "the event describes what happened while
@@ -377,15 +452,16 @@ Which gives the siblings a shape to fit rather than a design to redo:
 | Collection | Interfaces | Record | Notes |
 | --- | --- | --- | --- |
 | List | `IReadOnlyObservableList<T>`, `IObservableList<T>` | 5 change types, one item | This document. `Move` is the only non-`IList<T>` operation |
-| Dictionary | `IReadOnlyObservableDictionary<TKey, TValue>`, `IObservableDictionary<TKey, TValue>` | Added / Removed / ValueChanged / Cleared, key + old/new value | No indexes at all, so the record carries the key; per-key dependencies are the natural granularity here and are already `GetNamed`'s shape |
+| Dictionary | `IReadOnlyObservableDictionary<TKey, TValue>`, `IObservableDictionary<TKey, TValue>` | Added / Removed / ValueChanged / Cleared, key + old/new value | No indexes at all, so the record carries the key. Its dependencies split the same three ways (3.6): a count, the contents, and a per-key one - and unlike an index, a change names the keys it touched, so `GetNamed` over the key is already the right shape there |
 | Set | `IReadOnlyObservableSet<T>`, `IObservableSet<T>` | Added / Removed / Cleared | The one collection where an equality comparer is part of the identity, and where a "changed" record has no meaning |
 | Derived views | `Filter`, `Select`, `Sort` over an `IReadOnlyObservableList<T>` | the view's own records, mapped from the source's | The hard one: an insert that the filter drops is no record, and a re-sort is a diff. These want the source's records as input, which is why the list's records carry old and new items |
 | Read-only wrapper | `AsReadOnly()` | passes the source's records through | What a model exposes when it wants to hand out the list without the write surface |
 
 Two things that must be settled for the dictionary and not for the list, and are therefore recorded
-here rather than designed here: whether a key's dependency and the dictionary's shape dependency are
-raised by one event or two, and whether a batch that ends with a key back at its original value still
-reports both changes (yes, by 3.3's ordering rule, unless 6.5 says otherwise).
+here rather than designed here: whether a key's dependency is raised inside the same delivered event
+that carries the record for it (the list's answer is yes - 3.6.3), and whether a batch that ends with
+a key back at its original value still reports both changes (yes, by 3.3's ordering rule, unless 6.5
+says otherwise).
 
 ## 6. Open questions - confirm before code
 
@@ -405,9 +481,10 @@ reports both changes (yes, by 3.3's ordering rule, unless 6.5 says otherwise).
    to know it may receive a net change rather than a history.
 6. **No `Sort` in step 1.** A sort could be reported as moves, but computing them is a diff, and the
    diff belongs with the derived views in section 5 rather than in the first version of the list.
-7. **The list's dependency key** - `(list, index)` tuples, or a small struct with a `Kind` field so
-   that structure, index and item-value dependencies are distinct without colliding. Step 1 needs one
-   key per list, so this can be deferred to whichever section-3.6 rung is climbed.
+7. **An index entry is dropped when its last watcher goes** (3.6.1), so a dependency set that has
+   been released is not something to register on again - the entry it named is detached, and a later
+   read makes a new one. The alternative is keeping an entry per index ever read, which grows with the
+   rows scrolled past rather than with the rows on screen.
 8. **The convenience token.** `BeginChangeBatch`/`EndChangeBatch` are the primitives; an
    `IDisposable EnterChangeBatch()` that pairs them is the shape a caller actually wants
    (`using var batch = list.EnterChangeBatch();`), including on an exception path. It is in the plan
@@ -420,14 +497,14 @@ reports both changes (yes, by 3.3's ordering rule, unless 6.5 says otherwise).
 | 1 | The two interfaces, `ObservableListChange<T>`, `ObservableListChangedEventArgs<T>` | All four compile, are documented, and nothing implements them yet - this is the reviewable shape of the contract |
 | 2 | `ObservableList<T>` storage and mutations | Every mutation in 3.4 produces the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove produce no event; enumeration throws when the list is mutated under it |
 | 3 | Delivery: queue, generations, batches | Records arrive in mutation order even when a handler mutates; a batch is one event carrying all of them; nesting is counted and only the outermost end delivers; an unmatched end throws; a handler-caused loop is refused at `MaxEventStackSize` generations |
-| 4 | Dependencies: one key per list | A read inside `CollectDependencies` reports one dependency; any change raises it, once per delivered event; a property read outside a scope still costs a null check |
+| 4 | Per-operation dependencies: count, index, contents | A body that reads `Count` and `this[0]` reports two dependencies; a write to an item wakes the index reader and not the count reader; a move wakes only the indexes it spans; an insert at `p` wakes every watched index at or past `p` and none before it; a read outside a scope allocates nothing and registers nothing; a batch raises each affected entry once |
 | 5 | `CreateList` factories and disposal | The four overloads; disposal drops pending records, delivers the empty final event, and makes reads, mutations and registration throw while removal and a second dispose stay safe |
 | 6 | Tests | Section 8's claims, in `tests/features/Kolvir.Feature.Observables.Tests` |
 | 7 | The demo page and the guide section | An **Observable list** page in `src/demo/Kolvir.Demo.App/Pages/` that renders a list from its records and shows a batch add as one notification, plus an `### Observable collections` passage in `DEVELOPER-GUIDE.md` |
-| 8 | The fine-grained dependency rung, if measured | The demo page shows row-level re-render granularity against the coarse version, and the ladder in 3.6 gets a row marked done |
 
 Step 1 is a contract review and is worth stopping at: everything after it is implementation of the
-shape rather than of the idea.
+shape rather than of the idea. Step 4 is the one that decides how much of a list a change re-renders,
+and it is worth arriving at with the test names already written.
 
 ### 7.1 What else has to change
 
@@ -457,7 +534,10 @@ treatment:
 | **A batch is one event with all the records** | Three mutations inside a batch deliver once, with three records in order; a nested batch delivers once at the outermost end; an unmatched `EndChangeBatch` throws and leaves the list usable |
 | **A loop is refused at the limit** | A handler that adds an item for every item added stops at `MaxEventStackSize` generations with an `InvalidOperationException` naming the limit, the list is left consistent, and an ordinary change afterwards still delivers - so the count was restored rather than left poisoned |
 | **Disposal is ordered** | A handler sees `IsDisposed` true during the final event, receives no records, and any read from there throws; a batch left open is dropped rather than delivered; removal and a second dispose stay safe afterwards |
-| **A read is a dependency, and one raise covers a batch** | A body that reads `Count` and `this[0]` reports one dependency on the list; a batch of three changes raises it once; a mutation outside a batch raises it once; a read outside a scope registers nothing |
+| **A read is exactly what it asked for** | A body that reads `Count`, `this[1]` and enumerates reports three dependencies, in that order. A write to item 1 wakes the reader of index 1 and not the reader of `Count`. A move wakes the reader of an index it spans and not one outside it. An insert at 2 wakes the readers of indexes 2 and above and none below. A clear wakes all three |
+| **A throwing index read still subscribes** | `list[7]` over three items throws, and the run still reports index 7 among its dependencies; growing the list to eight then re-runs it, which is the only way an expression that is currently failing can recover |
+| **A batch is one wake-up per affected read** | A body reading indexes 0, 1 and 2 reports three dependencies, and three mutations delivered as one event wake each of them exactly once, however many records touched that index - three records that all touch index 1 raise it once, not three times |
+| **Nothing watched costs nothing to raise** | A mutation with no run in scope and no handler registered marks nothing, and the same mutation costs the same with ten thousand items as with ten; a read outside a run allocates nothing at all |
 | **Enumeration is a snapshot of the version, not of the contents** | Mutating during `foreach` throws `InvalidOperationException`; reading after it throws is fine; a `CopyTo` during a mutation is the same failure rather than a torn array |
 
 The demo page is the other half: it applies records to a mirrored list and asserts equality against the
@@ -468,5 +548,5 @@ producer.
 
 | Step | State | Notes |
 | --- | --- | --- |
-| 0 | Done | This document: the contract, the decisions, the plan, and the open questions |
+| 0 | Done | This document: the contract, the decisions, the plan, and the open questions. Revised after review: 3.6 specifies a dependency per kind of read - count, index, contents - instead of one per list, which also settles open question 7 |
 | 1 | Not started | |
