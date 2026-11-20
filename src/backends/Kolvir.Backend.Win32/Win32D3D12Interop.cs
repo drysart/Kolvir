@@ -434,6 +434,9 @@ internal static unsafe class D3D12
     internal static int Present(IntPtr swapChain) =>
         ((delegate* unmanaged[Stdcall]<IntPtr, uint, uint, int>)(*(IntPtr**)swapChain)[SlotSwapChainPresent])(swapChain, 1, 0);
 
+    /// <summary><c>IID_IDXGIAdapter3</c>: the interface the memory query is answered on.</summary>
+    internal static readonly Guid Adapter3Interface = new("645967A4-1392-4310-A798-8053CE3E93FD");
+
     /// <summary><c>IID_ID3D12Resource</c>.</summary>
     internal static readonly Guid ResourceInterface = new("696442BE-A72E-4059-BC79-5B5C98040FAD");
 

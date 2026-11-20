@@ -5537,11 +5537,12 @@ kolvir-d3d12: video memory 61 MiB local in use of 22891 MiB, after the first fra
 The cache lines report what Skia holds and what it may hold; the memory lines are this process's own
 use of the adapter's local segment, taken through `IDXGIAdapter3::QueryVideoMemoryInfo` once the
 surface exists and again once a frame has been presented, so the difference between them is what the
-first submission costs. Task manager's dedicated figure is larger than that number because it adds the
-driver's and the compositor's own allocations to it, which no application can shrink. A diagnostic
-that goes quiet when it has nothing to say cannot be told apart from one that never ran, so an
-adapter that cannot answer prints its refusal instead: `video memory 0 MiB local in use of 0 MiB
-(0x00000000)`, which is what a software adapter reports.
+first submission costs. The adapter is queried for `IDXGIAdapter3` rather than assumed to be one:
+called on the wrong vtable the query answers `S_OK` and reports nothing. Task manager's dedicated
+figure is larger than that number because it adds the driver's and the compositor's own allocations to
+it, which no application can shrink. A diagnostic that goes quiet when it has nothing to say cannot be
+told apart from one that never ran, so an adapter that cannot answer says so: `video memory not
+reported (0x00000000)`, which is what a software adapter produces.
 
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop

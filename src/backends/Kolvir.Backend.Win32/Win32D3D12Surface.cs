@@ -30,12 +30,13 @@ internal sealed class Win32D3D12Probe : IWin32D3D12Probe
 /// </summary>
 internal sealed unsafe class Win32D3D12Device : IDisposable
 {
-    private Win32D3D12Device(IntPtr adapter, IntPtr device, IntPtr queue, string renderer)
+    private Win32D3D12Device(IntPtr adapter, IntPtr device, IntPtr queue, string renderer, bool reportsMemory)
     {
         _adapter = adapter;
         _device = device;
         _queue = queue;
         Renderer = renderer;
+        ReportsMemory = reportsMemory;
     }
 
     private IntPtr _adapter;
@@ -47,6 +48,9 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
     /// has to outlive the context rather than being released once the device exists.
     /// </summary>
     internal IntPtr Adapter => _adapter;
+
+    /// <summary>True when the adapter answered for <c>IDXGIAdapter3</c>, which carries the memory query.</summary>
+    internal bool ReportsMemory { get; }
 
     /// <summary>The <c>ID3D12Device</c>, which Skia wraps but does not own.</summary>
     internal IntPtr Device => _device;
@@ -111,7 +115,20 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
                 }
 
                 failure = string.Empty;
-                return new Win32D3D12Device(adapter, device, queue, Describe(description));
+
+                // The memory query lives on IDXGIAdapter3, and the adapter enumeration hands out an
+                // IDXGIAdapter1. They are the same object, but the interface is asked for rather than
+                // assumed: called on the wrong vtable the query answers S_OK and reports nothing.
+                IntPtr adapter3 = QueryInterface(adapter, Adapter3Interface);
+                bool reportsMemory = adapter3 != IntPtr.Zero;
+
+                if (reportsMemory)
+                {
+                    Release(ref adapter);
+                    adapter = adapter3;
+                }
+
+                return new Win32D3D12Device(adapter, device, queue, Describe(description), reportsMemory);
             }
             catch
             {
@@ -478,11 +495,23 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return;
         }
 
-        // Printed even when the query fails or reports no budget: a diagnostic that goes quiet when it
-        // has nothing to say leaves the reader unable to tell a missing line from a missing feature.
+        // Printed even when the query cannot answer: a diagnostic that goes quiet when it has nothing
+        // to say leaves the reader unable to tell a missing line from a missing feature.
+        if (!_device.ReportsMemory)
+        {
+            Win32GlTrace.Write($"kolvir-d3d12: video memory not reported (no IDXGIAdapter3), {where}");
+            return;
+        }
+
         int result = D3D12.GetVideoMemoryInfo(_device.Adapter, MemorySegmentLocal, out var info);
-        string detail = result < 0 || info.Budget == 0 ? $" (0x{result:X8})" : string.Empty;
-        Win32GlTrace.Write($"kolvir-d3d12: video memory {info.CurrentUsage / (1024 * 1024)} MiB local in use of {info.Budget / (1024 * 1024)} MiB{detail}, {where}");
+
+        if (result < 0 || info.Budget == 0)
+        {
+            Win32GlTrace.Write($"kolvir-d3d12: video memory not reported (0x{result:X8}), {where}");
+            return;
+        }
+
+        Win32GlTrace.Write($"kolvir-d3d12: video memory {info.CurrentUsage / (1024 * 1024)} MiB local in use of {info.Budget / (1024 * 1024)} MiB, {where}");
     }
 
     /// <summary>Reports what Skia is holding and what it may hold.</summary>
