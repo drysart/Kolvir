@@ -263,7 +263,22 @@ public sealed class Win32ApplicationBackend : IApplicationBackend
         services.AddSingleton(SystemTheme);
         services.AddSingleton(this);
         services.AddSingleton<IDialogService, Win32DialogService>();
+
+        // Over the CPU-only default the core registered: this backend can enumerate real GPUs.
+        services.AddSingleton(Acceleration);
+        services.AddSingleton<IGpuAccelerationService>(Acceleration);
     }
+
+    /// <summary>
+    /// What this process can draw with, shared by every window so that they all report into one answer.
+    /// </summary>
+    /// <remarks>
+    /// Windows are created outside the container - the application asks its backend for each one - so the
+    /// backend holds this rather than each window resolving its own copy. It is registered as a singleton
+    /// as well, so an application reaching <see cref="IGpuAccelerationService"/> through
+    /// <see cref="Application.Services"/> gets this same instance and sees what the windows report.
+    /// </remarks>
+    internal Win32GpuAccelerationService Acceleration { get; } = new();
 
     /// <inheritdoc />
     public IReadOnlyList<Screen> GetScreens()

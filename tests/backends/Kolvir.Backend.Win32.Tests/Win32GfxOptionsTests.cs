@@ -22,7 +22,7 @@ public sealed class Win32GfxOptionsTests
 
         public int Calls { get; private set; }
 
-        public Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure)
+        public Win32VulkanDevice? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             Calls++;
             _order.Add("vulkan");
@@ -39,7 +39,7 @@ public sealed class Win32GfxOptionsTests
 
         public int Calls { get; private set; }
 
-        public Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure)
+        public Win32D3D12Device? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             Calls++;
             _order.Add("d3d12");
@@ -190,5 +190,95 @@ public sealed class Win32GfxOptionsTests
         Assert.IsNull(surface);
         Assert.AreEqual(0, order.Count, "no probe is consulted");
         Assert.AreEqual("cpu (KOLVIR_GL_OPTIONS=cpu)", reason);
+    }
+
+    [TestMethod]
+    public void NoSavedChoiceLeavesTheBackendToPick()
+    {
+        // The saved setting is optional: without it the variable and the default order decide, exactly
+        // as they did before the setting existed.
+        Assert.IsNull(Win32GfxOptions.FromSelected(null));
+        Assert.IsNull(Win32GfxOptions.FromSelected(string.Empty));
+        Assert.IsNull(Win32GfxOptions.FromSelected("   "));
+    }
+
+    [TestMethod]
+    public void ASavedChoiceNamesOneFamilyOnly()
+    {
+        var choice = Win32GfxOptions.FromSelected("vulkan");
+
+        Assert.IsTrue(choice.HasValue);
+        Assert.AreEqual("vulkan", Names(choice.Value));
+        Assert.IsNull(choice.Value.DeviceKey, "no device was named, so the window picks one");
+    }
+
+    [TestMethod]
+    public void ASavedChoiceCarriesItsDevice()
+    {
+        var choice = Win32GfxOptions.FromSelected("d3d:10de-2504-1616");
+
+        Assert.IsTrue(choice.HasValue);
+        Assert.AreEqual("d3d", Names(choice.Value));
+        Assert.AreEqual("10de-2504-1616", choice.Value.DeviceKey);
+    }
+
+    [TestMethod]
+    public void ABareFamilyWordNamesNoDevice()
+    {
+        // "d3d" means whichever adapter the window would have picked, not "the first one": the tier then
+        // prefers the adapter that drives the display, as it always did.
+        var choice = Win32GfxOptions.FromSelected("d3d");
+
+        Assert.IsTrue(choice.HasValue);
+        Assert.IsNull(choice.Value.DeviceKey);
+    }
+
+    [TestMethod]
+    public void ASavedCpuChoiceIsTheCpuPath()
+    {
+        Assert.IsTrue(Win32GfxOptions.FromSelected("cpu")?.CpuOnly);
+    }
+
+    [TestMethod]
+    public void ASavedChoiceThisMachineCannotHonorIsTheCpuPath()
+    {
+        // Metal is a Mac's setting and a hand-edited word is nobody's: both are "not available here",
+        // and the answer to a request that cannot be honored is to stop accelerating.
+        Assert.IsTrue(Win32GfxOptions.FromSelected("metal")?.CpuOnly);
+        Assert.IsTrue(Win32GfxOptions.FromSelected("software")?.CpuOnly);
+    }
+
+    [TestMethod]
+    public void AChosenFamilyThatCannotBeBuiltDoesNotFallThrough()
+    {
+        List<string> order = [];
+        var gl = new RefusingGlProbe(order);
+        var vulkan = new RefusingVulkanProbe(order);
+        var d3d12 = new RefusingD3D12Probe(order);
+
+        var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxOptions.FromSelected("vulkan")!.Value,
+            hardwareAcceleration: true,
+            new IntPtr(1),
+            gl,
+            vulkan,
+            d3d12,
+            width: 800,
+            height: 600,
+            out var reason);
+
+        Assert.IsNull(surface);
+        CollectionAssert.AreEqual(new[] { "vulkan" }, order, "a chosen family is not replaced by another");
+        StringAssert.Contains(reason, "no physical devices", "the reason names what the chosen family said");
+    }
+
+    [TestMethod]
+    public void AVulkanPreferenceIsTriedFirstAndThenTheRest()
+    {
+        string[] keys = ["10de-2504-1616", "8086-46a6-0", "10de-2504-1617"];
+
+        CollectionAssert.AreEqual(new[] { 1, 0, 2 }, Win32VulkanDevice.PreferenceOrder(3, keys, "8086-46a6-0").ToArray());
+        CollectionAssert.AreEqual(new[] { 0, 1, 2 }, Win32VulkanDevice.PreferenceOrder(3, keys, preferredKey: null).ToArray());
+        CollectionAssert.AreEqual(new[] { 0, 1, 2 }, Win32VulkanDevice.PreferenceOrder(3, keys, "not-here").ToArray(), "a device this machine does not have");
     }
 }

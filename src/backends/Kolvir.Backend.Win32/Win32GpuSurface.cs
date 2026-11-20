@@ -46,6 +46,12 @@ internal interface IWin32GpuSurface : IDisposable
     /// <summary>The adapter this tier is drawing on, for the window's diagnostic line.</summary>
     string Renderer { get; }
 
+    /// <summary>
+    /// The GPU's identity within its family, which is what a <see cref="GpuAccelerationOption"/> device
+    /// suffix names. Empty when the family has one implicit device, which is the case for the GL tier.
+    /// </summary>
+    string DeviceKey { get; }
+
     /// <summary>Binds the drawing context to the calling (UI) thread, where the tier needs that.</summary>
     bool MakeCurrent();
 

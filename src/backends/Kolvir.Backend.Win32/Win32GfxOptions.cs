@@ -26,10 +26,11 @@ internal enum Win32GfxTier
 /// </remarks>
 internal readonly struct Win32GfxChoice
 {
-    private Win32GfxChoice(IReadOnlyList<Win32GfxTier> order, bool cpuOnly)
+    private Win32GfxChoice(IReadOnlyList<Win32GfxTier> order, bool cpuOnly, string? deviceKey = null)
     {
         Order = order;
         CpuOnly = cpuOnly;
+        DeviceKey = deviceKey;
     }
 
     /// <summary>The order to try, most preferred first. Empty when <see cref="CpuOnly"/> is set.</summary>
@@ -37,6 +38,12 @@ internal readonly struct Win32GfxChoice
 
     /// <summary>True when the value asked for the CPU path and nothing else.</summary>
     internal bool CpuOnly { get; }
+
+    /// <summary>
+    /// The identity of the GPU the choice named within its family, or null when it named none. Only the
+    /// first tier in <see cref="Order"/> sees it: a device identity belongs to the family that carried it.
+    /// </summary>
+    internal string? DeviceKey { get; }
 
     /// <summary>The order a window uses when nothing says otherwise.</summary>
     internal static Win32GfxChoice Default { get; } =
@@ -49,6 +56,12 @@ internal readonly struct Win32GfxChoice
     /// <param name="order">The tiers, most preferred first.</param>
     internal static Win32GfxChoice FromOrder(params Win32GfxTier[] order) =>
         order.Length == 0 ? Cpu : new(order, cpuOnly: false);
+
+    /// <summary>Builds a choice that names one family only, with an optional device inside it.</summary>
+    /// <param name="tier">The only tier to try.</param>
+    /// <param name="deviceKey">The GPU within that tier, or null for whichever the window would pick.</param>
+    internal static Win32GfxChoice Only(Win32GfxTier tier, string? deviceKey = null) =>
+        new([tier], cpuOnly: false, deviceKey);
 }
 
 /// <summary>
@@ -76,6 +89,52 @@ internal static class Win32GfxOptions
     /// <summary>Reads the process's environment once.</summary>
     internal static Win32GfxChoice FromEnvironment() =>
         Parse(Environment.GetEnvironmentVariable(VariableName));
+
+    /// <summary>
+    /// Reads the acceleration an application's user chose, as <see cref="ApplicationOptions.GfxAcceleration"/>
+    /// carries it.
+    /// </summary>
+    /// <param name="value">The saved value, or null when the application has no preference.</param>
+    /// <returns>
+    /// Null when there is no preference and the backend should pick for itself, which is what leaves
+    /// <c>KOLVIR_GL_OPTIONS</c> and the default order in charge. Otherwise a choice naming one family
+    /// only, so that a family that cannot be built leaves the window on the CPU path rather than
+    /// falling through to a different GPU API.
+    /// </returns>
+    /// <remarks>
+    /// A value this platform cannot honor - <c>metal</c> saved on a Mac and read here, or something
+    /// hand-edited into nonsense - is the CPU path for the same reason: the user asked for a specific
+    /// thing, and the honest answer when it is not here is to stop accelerating rather than to
+    /// substitute another API.
+    /// </remarks>
+    internal static Win32GfxChoice? FromSelected(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        if (!GpuAccelerationSyntax.TryParse(value, out var kind, out var deviceKey))
+        {
+            if (Win32GlTrace.IsEnabled)
+            {
+                Win32GlTrace.Write($"kolvir-gfx: ignoring unreadable acceleration '{value}'");
+            }
+
+            return Win32GfxChoice.Cpu;
+        }
+
+        return kind switch
+        {
+            GpuAccelerationKind.Cpu => Win32GfxChoice.Cpu,
+            GpuAccelerationKind.Direct3D12 => Win32GfxChoice.Only(Win32GfxTier.Direct3D12, deviceKey),
+            GpuAccelerationKind.Vulkan => Win32GfxChoice.Only(Win32GfxTier.Vulkan, deviceKey),
+            GpuAccelerationKind.OpenGl => Win32GfxChoice.Only(Win32GfxTier.OpenGl),
+
+            // Metal does not exist here: this machine cannot honor what was asked for.
+            _ => Win32GfxChoice.Cpu,
+        };
+    }
 
     /// <summary>Parses a value.</summary>
     /// <param name="value">The raw value, or null when the variable is not set.</param>

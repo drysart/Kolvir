@@ -23,7 +23,7 @@ public sealed class Win32VulkanTierTests
 
         public int Calls { get; private set; }
 
-        public Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure)
+        public Win32VulkanDevice? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             Calls++;
             _order.Add("vulkan");
@@ -67,7 +67,7 @@ public sealed class Win32VulkanTierTests
 
         public int Calls { get; private set; }
 
-        public Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure)
+        public Win32D3D12Device? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             Calls++;
             _order.Add("d3d12");

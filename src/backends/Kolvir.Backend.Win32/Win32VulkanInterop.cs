@@ -37,6 +37,8 @@ internal static unsafe class Vulkan
     internal const int StructureTypeCommandBufferBeginInfo = 42;
     internal const int StructureTypeImageMemoryBarrier = 45;
     internal const int StructureTypeSemaphoreCreateInfo = 9;
+    internal const int StructureTypePhysicalDeviceProperties2 = 1000059001;
+    internal const int StructureTypePhysicalDeviceIdProperties = 1000071004;
     internal const int FormatBgra8Unorm = 44;
     internal const int FormatBgra8Srgb = 50;
     internal const int FormatRgba8Unorm = 37;
@@ -91,6 +93,75 @@ internal static unsafe class Vulkan
         public IntPtr ppEnabledLayerNames;
         public uint enabledExtensionCount;
         public IntPtr ppEnabledExtensionNames;
+    }
+
+    /// <summary>
+    /// <c>VkPhysicalDeviceProperties2</c>: the version-1 properties with room for a <c>pNext</c> chain.
+    /// </summary>
+    /// <remarks>
+    /// <c>VkPhysicalDeviceProperties</c> is about 824 bytes - a struct this code only ever lets the
+    /// driver write, never walks - so the block after <c>pNext</c> is declared as storage. The two fields
+    /// read out of it by this project, the vendor and device ids, are the third and fourth words of that
+    /// block: the header puts <c>apiVersion</c> and <c>driverVersion</c> first. The device name is
+    /// deliberately not read from here, because the version-1 call already returns it and has been in
+    /// use since the tier was written.
+    /// </remarks>
+    [StructLayout(LayoutKind.Explicit, Size = 16 + 824)]
+    internal struct VkPhysicalDeviceProperties2
+    {
+        [FieldOffset(0)]
+        public int sType;
+
+        [FieldOffset(8)]
+        public IntPtr pNext;
+
+        [FieldOffset(16 + 8)]
+        public uint vendorID;
+
+        [FieldOffset(16 + 12)]
+        public uint deviceID;
+    }
+
+    /// <summary>
+    /// <c>VkPhysicalDeviceIDProperties</c>: the identities of one physical device.
+    /// </summary>
+    /// <remarks>
+    /// <c>deviceUUID</c> is the one that matters here: the header requires it to be immutable for a given
+    /// device across instances, processes, driver APIs, driver versions and system reboots, which is
+    /// exactly what a saved setting needs. <c>driverUUID</c> and <c>deviceLUID</c> are not used - the
+    /// first changes with the driver, and the second is only defined for the life of a boot session.
+    /// </remarks>
+    [StructLayout(LayoutKind.Explicit, Size = 64)]
+    internal struct VkPhysicalDeviceIdProperties
+    {
+        [FieldOffset(0)]
+        public int sType;
+
+        [FieldOffset(8)]
+        public IntPtr pNext;
+
+        /// <summary>The first eight bytes of <c>deviceUUID</c>.</summary>
+        [FieldOffset(16)]
+        public ulong deviceUuidLow;
+
+        /// <summary>The second eight bytes of <c>deviceUUID</c>.</summary>
+        [FieldOffset(24)]
+        public ulong deviceUuidHigh;
+
+        [FieldOffset(32)]
+        public ulong driverUuidLow;
+
+        [FieldOffset(40)]
+        public ulong driverUuidHigh;
+
+        [FieldOffset(48)]
+        public ulong deviceLUID;
+
+        [FieldOffset(56)]
+        public uint deviceNodeMask;
+
+        [FieldOffset(60)]
+        public int deviceLUIDValid;
     }
 
     [StructLayout(LayoutKind.Sequential)]

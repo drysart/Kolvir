@@ -664,6 +664,8 @@ internal sealed class Win32GlSurface : IWin32GpuSurface
 
     public string Renderer => _context.Renderer;
 
+    public string DeviceKey => string.Empty;
+
     internal int Width => _width;
 
     internal int Height => _height;
@@ -1117,6 +1119,18 @@ internal static class Win32Gfx
     private static readonly Win32GfxChoice EnvironmentChoice = Win32GfxOptions.FromEnvironment();
 
     /// <summary>
+    /// The choice a window uses when the application named none: the order <c>KOLVIR_GL_OPTIONS</c>
+    /// asks for, read once.
+    /// </summary>
+    internal static Win32GfxChoice DefaultChoice => EnvironmentChoice;
+
+    /// <summary>True when <c>KOLVIR_NO_VULKAN</c> keeps this process off the Vulkan tier.</summary>
+    internal static bool VulkanDisabled => Win32VulkanDisabled;
+
+    /// <summary>True when <c>KOLVIR_NO_D3D12</c> keeps this process off the Direct3D 12 tier.</summary>
+    internal static bool Direct3D12Disabled => Win32D3D12Disabled;
+
+    /// <summary>
     /// Picks the best tier the machine will give, in the order <c>KOLVIR_GL_OPTIONS</c> asks for.
     /// </summary>
     /// <remarks>
@@ -1216,7 +1230,7 @@ internal static class Win32Gfx
                     var failure = "d3d12: disabled by KOLVIR_NO_D3D12";
                     var d3d12 = Win32D3D12Disabled
                         ? null
-                        : Win32D3D12Surface.TryCreate(hwnd, d3d12Probe, width, height, out failure);
+                        : Win32D3D12Surface.TryCreate(hwnd, d3d12Probe, choice.DeviceKey, width, height, out failure);
 
                     if (d3d12 is not null)
                     {
@@ -1233,7 +1247,7 @@ internal static class Win32Gfx
                     var failure = "vulkan: disabled by KOLVIR_NO_VULKAN";
                     var vulkan = Win32VulkanDisabled
                         ? null
-                        : Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, width, height, out failure);
+                        : Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, choice.DeviceKey, width, height, out failure);
 
                     if (vulkan is not null)
                     {

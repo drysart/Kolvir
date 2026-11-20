@@ -149,6 +149,42 @@ public sealed class ApplicationOptions
     public bool GfxHardwareAcceleration { get; set; }
 
     /// <summary>
+    /// The acceleration the user chose, as one of the values
+    /// <see cref="IGpuAccelerationService"/> publishes: <c>d3d</c>, <c>d3d:10de-2504-1616</c>,
+    /// <c>vulkan</c>, <c>vulkan:8f4a37c2…</c>, <c>ogl</c>, <c>metal</c> or <c>cpu</c>. Null, the default,
+    /// asks the backend to pick for itself exactly as it always has.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is what a settings UI saves. Show the user <see cref="IGpuAccelerationService.Options"/>,
+    /// store the <see cref="GpuAccelerationOption.Value"/> of the row they picked, assign it here at the
+    /// next start, and select the row whose value matches
+    /// <see cref="IGpuAccelerationService.Current"/> when the window opens.
+    /// </para>
+    /// <para>
+    /// A value that names a family this machine cannot use - a setting carried over from another
+    /// machine, or a driver that has since stopped working - leaves the window on the CPU path rather
+    /// than falling through to the backend's own order. That is a deliberate difference from
+    /// <see cref="GfxHardwareAcceleration"/>: an explicit choice that cannot be honored is reported
+    /// rather than silently replaced by a different GPU API. A value that names a family the machine
+    /// does have is used even when only one of its GPUs is wanted and that GPU is missing: the request
+    /// falls back within the family to its remaining devices, and then to the CPU path.
+    /// </para>
+    /// <para>
+    /// Setting this to a family that draws on the GPU turns acceleration on, so it does not need
+    /// <see cref="GfxHardwareAcceleration"/> to agree. Setting it to <c>cpu</c> is the same request as
+    /// <see cref="GfxHardwareAcceleration"/> being false. When this is null, nothing else changes:
+    /// <c>KOLVIR_GL_OPTIONS</c>, <c>--no-hardware-acceleration</c> and the platform defaults all decide
+    /// as they did before.
+    /// </para>
+    /// <para>
+    /// The window reads this when it allocates its drawing surface, so assigning it later does not
+    /// affect windows that already exist.
+    /// </para>
+    /// </remarks>
+    public string? GfxAcceleration { get; set; }
+
+    /// <summary>
     /// The value <see cref="GfxHardwareAcceleration"/> takes before any explicit assignment: off on
     /// macOS, on elsewhere, and off everywhere for <c>--no-hardware-acceleration</c>.
     /// </summary>
