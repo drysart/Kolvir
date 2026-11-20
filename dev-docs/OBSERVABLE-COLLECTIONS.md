@@ -628,7 +628,7 @@ delivering one last empty event, and nothing allocated when nothing is watching.
 
 ```
 ObservableSetChangeType                        what a set change can be
-  ItemAdded, ItemRemoved, SetCleared
+  ItemAdded, ItemRemoved, SetCleared, UntrackedChanges
 
 ObservableSetChange<T>                         one change
   ObservableSetChangeType ChangeType { get; }
@@ -666,6 +666,12 @@ collection's own business: a named key compares by the key's own equality, while
 property of the set and not of the item. The entry table therefore lives in the set, keyed with the
 set's comparer.
 
+Because the entry table is a dictionary whose key is the item, a set's item type carries `notnull` -
+`CreateHashSet<T>()` and the class beneath it constrain it - so a set cannot hold null. `HashSet<T>`
+allows one, and a null item could not be an address: nothing could key an entry for it. That is a
+deliberate narrowing rather than an oversight, and it is the one place the observable set is stricter
+than the BCL one.
+
 #### 6.2.2 The bulk operations are implicitly batched
 
 `UnionWith`, `ExceptWith`, `IntersectWith` and `SymmetricExceptWith` change a number of items nobody
@@ -678,7 +684,10 @@ batch, so the observer gets one event with all of them in order:
   `EndChangeBatch` around the loop. Nested inside a caller's batch, the implicit one joins it rather
   than delivering an event of its own.
 - A bulk operation that changes nothing raises nothing at all: `UnionWith` of a subset, `ExceptWith` of
-  an empty set, `IntersectWith` of a superset, symmetric difference with the set itself.
+  an empty set, `IntersectWith` of a superset, symmetric difference with an empty set. Corrected after
+  review: an earlier draft said "symmetric difference with the set itself", which is the opposite - a
+  set's symmetric difference with itself is the empty set, so it empties the set and is reported as one
+  `SetCleared`.
 - A bulk operation that changes more items than the set's `MaxCollectionBatchSize` is capped exactly as
   a caller's batch would be (3.11): it delivers one `UntrackedChanges` record, and the reader re-reads
   the set. `UnionWith` of ten thousand new items is one record.
@@ -708,7 +717,7 @@ The scans read every item, so they take the contents dependency for the reason 3
 ### 6.3 API surface, in full
 
 ```csharp
-public enum ObservableSetChangeType { ItemAdded, ItemRemoved, SetCleared }
+public enum ObservableSetChangeType { ItemAdded, ItemRemoved, SetCleared, UntrackedChanges }
 
 public readonly struct ObservableSetChange<T>
 {
@@ -722,14 +731,47 @@ public sealed class ObservableSetChangedEventArgs<T> : EventArgs
     public IReadOnlyObservableSet<T> Set { get; }
 }
 
+public interface IReadOnlyObservableSet<T> : IReadOnlySet<T>, IDisposable
+{
+    bool IsDisposed { get; }
+    IEqualityComparer<T> Comparer { get; }
+    IDisposable AddObservableSetChangedHandler(Action<ObservableSetChangedEventArgs<T>> handler);
+    void RemoveObservableSetChangedHandler(Action<ObservableSetChangedEventArgs<T>> handler);
+}
+
+public interface IObservableSet<T> : IReadOnlyObservableSet<T>, ISet<T>
+{
+    new int Count { get; }                      // redeclared: two inherited Counts are ambiguous
+    new bool Contains(T item);                  // and so are seven set-algebra members - see below
+    new bool SetEquals(IEnumerable<T> other);
+    new bool IsSubsetOf(IEnumerable<T> other);
+    new bool IsSupersetOf(IEnumerable<T> other);
+    new bool IsProperSubsetOf(IEnumerable<T> other);
+    new bool IsProperSupersetOf(IEnumerable<T> other);
+    new bool Overlaps(IEnumerable<T> other);
+    int ChangeBatchDepth { get; }
+    int MaxCollectionBatchSize { get; set; }
+    void BeginChangeBatch();
+    void EndChangeBatch();
+}
+
 public static partial class Observable
 {
-    public static IObservableSet<T> CreateSet<T>();
-    public static IObservableSet<T> CreateSet<T>(IEqualityComparer<T>? comparer);
-    public static IObservableSet<T> CreateSet<T>(params ReadOnlySpan<T> items);
-    public static IObservableSet<T> CreateSet<T>(IEqualityComparer<T>? comparer, params ReadOnlySpan<T> items);
+    public static IObservableSet<T> CreateHashSet<T>() where T : notnull;
+    public static IObservableSet<T> CreateHashSet<T>(IEqualityComparer<T>? comparer) where T : notnull;
+    public static IObservableSet<T> CreateHashSet<T>(params ReadOnlySpan<T> items) where T : notnull;
+    public static IObservableSet<T> CreateHashSet<T>(IEqualityComparer<T>? comparer, params ReadOnlySpan<T> items) where T : notnull;
 }
 ```
+
+The concrete type is `ObservableHashSet<T>` and the factory is `CreateHashSet`, matching
+`ObservableList`/`CreateList`: the interface names the shape and the method names the implementation.
+
+**Eight redeclarations, and they are a language requirement rather than style.** `IReadOnlySet<T>` and
+`ISet<T>` each declare the same eight members - `Count`, `Contains`, `SetEquals`, `IsSubsetOf`,
+`IsSupersetOf`, `IsProperSubsetOf`, `IsProperSupersetOf`, `Overlaps` - so an interface inheriting both
+would make every one of those calls ambiguous through it. The list needed two of these (`Count` and the
+indexer) for the same reason; a set needs eight.
 
 ### 6.4 What each mutation raises
 
@@ -1049,7 +1091,7 @@ by the producer.
 | 5 | Done | The four `CreateList` overloads and the disposal order |
 | 6 | Done | 51 tests in three files - `ObservableListChangeTests`, `ObservableListDeliveryTests`, `ObservableListDependencyTests` - covering section 10's claims for the list, including a replay that reproduces the list from records alone, and the cap being each list's own |
 | 7 | Done | An **Observable list** page in the sample (`ObservableListPage`) - a line that reads only `Count`, a rows component, one child component per row reading a single index, and a copy built only from the records that says whether it still matches - plus an `### Observable collections` section in the developer guide. Rendering it headlessly (`--render ... --page observable-list`) is what caught the two things a first frame shows and a test does not: a child component with no `DataModel` renders the empty fragment, and a slot whose child the list removed keeps a disposed instance unless the parent prunes it |
-| 8 | Not started | The shared core, extracted once the list is behaving |
-| 9-10 | Not started | The set |
+| 8 | Done | The shared core, after the list was behaving: `ObservableChangeBatch<TChange, TArgs>` (the pending records, the batch depth, the capped event, the drain loop and the disposal), `ObservableShapeDependencies` (count and contents) and `ObservableKeyedDependencies<TKey>` (an entry per address, with the re-registration and adoption from step 4), behind the internal `IObservableChangeTarget<TChange, TArgs>`. The list was rewritten onto them and its 129 tests passed unchanged, which is the evidence the core is the core rather than the list plus two copies; what is left in the list is its items, its comparer, and which record invalidates which answer |
+| 9-10 | Done | `ObservableSetChangeType` (with `UntrackedChanges`), `ObservableSetChange<T>`, `ObservableSetChangedEventArgs<T>`, the two interfaces with their eight redeclarations, `ObservableSetDependencies<T>`, `ObservableHashSet<T>` and the four `CreateHashSet` overloads. 35 tests in three files cover section 10's claims for the set: one record per item with the bulk operations implicitly batched, removals before additions in a symmetric difference, the cap, disposal, and `Contains` as its own per-item dependency keyed by the set's comparer |
 | 11-12 | Not started | The dictionary |
-| 13-14 | Not started | The pages, the guide and the two suites |
+| 13-14 | Partly | The set's guide passage is written; the pages for the set and the dictionary, and the dictionary's suite, are not |

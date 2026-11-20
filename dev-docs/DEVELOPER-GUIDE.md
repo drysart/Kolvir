@@ -5223,6 +5223,50 @@ re-render while the size stays what it was. Press **Add five in a batch** and th
 event with five records. That line is also the fidelity check: the copy under it is built from the
 records alone and is compared with the list on every event.
 
+#### A set in a model
+
+`Observable.CreateHashSet<T>()` is the same contract for a collection whose question is "is this item in
+it". There is no index and no order, so a change can only add an item or take one away - and the address
+a read depends on is the item itself:
+
+```csharp
+internal sealed class TagFilter
+{
+    private readonly IObservableSet<string> _tags =
+        Observable.CreateHashSet(StringComparer.OrdinalIgnoreCase);
+
+    // Read-only and observable outside, writable only here. The comparer is the set's identity, so a
+    // consumer is handed it too: a mirror built with a different one would disagree about what is in.
+    public IReadOnlyObservableSet<string> Tags => _tags;
+
+    public void Toggle(string tag) => _tags.SymmetricExceptWith([tag]);
+}
+```
+
+A rendered toggle asks `Tags.Contains(tag)` about its own tag, and that is a dependency of its own:
+adding one tag wakes that tag's toggle and leaves the others alone, while the line reading `Count` moves
+once for the whole change. The four bulk operations are the interesting part, because they change a
+number of items nobody knows in advance - each reports one record per item inside an implicit batch, so
+an observer gets one event:
+
+| Call | What it raises |
+| --- | --- |
+| `Add` / `Remove` | one record, carrying the item |
+| `UnionWith` / `ExceptWith` / `IntersectWith` | one record per item that actually arrived or left |
+| `SymmetricExceptWith` | the removals, then the additions |
+| `Clear` | one record, carrying nothing |
+
+A call that changes nothing raises nothing at all: adding an item the comparer says is already there,
+removing one that is not, `UnionWith` of a subset, `IntersectWith` of a superset. And a bulk operation
+larger than `MaxCollectionBatchSize` is capped like any other batch - a union of ten thousand items is
+one `UntrackedChanges` record and one rescan.
+
+Two consequences worth knowing before you use it. **The item type is `notnull`**: the entry a toggle
+depends on is keyed by the item, so a set cannot hold null - the one place this set is stricter than
+`HashSet<T>`. And because `IReadOnlySet<T>` and `ISet<T>` declare the same eight members, the writable
+interface redeclares all of them (`Count`, `Contains` and the six set-algebra questions), so calling them
+through it is not ambiguous.
+
 ## Hardware acceleration (Windows)
 
 `ApplicationOptions.GfxHardwareAcceleration` is a `bool`: **true by default on Windows and
