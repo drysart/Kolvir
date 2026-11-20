@@ -80,7 +80,7 @@ internal static unsafe class D3D12
     private const int SlotRelease = 2;
     private const int SlotDeviceCreateCommandQueue = 8;
     private const int SlotAdapterGetDesc1 = 10;
-    private const int SlotAdapter3QueryVideoMemoryInfo = 13;
+    private const int SlotAdapter3QueryVideoMemoryInfo = 14;
     private const int SlotAdapterEnumOutputs = 7;
     private const int SlotOutputGetDesc = 7;
     private const int SlotFactoryEnumAdapters1 = 12;
@@ -482,9 +482,11 @@ internal static unsafe class D3D12
     /// <returns>The <c>HRESULT</c>; a software adapter may have no budget to report.</returns>
     internal static int GetVideoMemoryInfo(IntPtr adapter, int segment, out DxgiQueryVideoMemoryInfo info)
     {
-        var query = (delegate* unmanaged[Stdcall]<IntPtr, int, DxgiQueryVideoMemoryInfo*, int>)(*(IntPtr**)adapter)[SlotAdapter3QueryVideoMemoryInfo];
+        // NodeIndex comes first: the call is (node, segment, info), and a two-argument call lands on
+        // the routine before it in the table, which answers S_OK and writes nothing.
+        var query = (delegate* unmanaged[Stdcall]<IntPtr, uint, int, DxgiQueryVideoMemoryInfo*, int>)(*(IntPtr**)adapter)[SlotAdapter3QueryVideoMemoryInfo];
         DxgiQueryVideoMemoryInfo local = default;
-        int result = query(adapter, segment, &local);
+        int result = query(adapter, 0, segment, &local);
         info = local;
         return result;
     }
