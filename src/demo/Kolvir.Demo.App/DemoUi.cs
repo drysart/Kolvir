@@ -579,6 +579,8 @@ public sealed class DemoUi
         ("virtual-dom", "Virtual DOM", demo => new VirtualDomPage(demo)),
         ("observables", "Observables", demo => new ObservablesPage(demo)),
         ("observable-list", "Observable list", demo => new ObservableListPage(demo)),
+("observable-set", "Observable set", demo => new ObservableSetPage(demo)),
+("observable-dictionary", "Observable dictionary", demo => new ObservableDictionaryPage(demo)),
     };
 
     /// <summary>

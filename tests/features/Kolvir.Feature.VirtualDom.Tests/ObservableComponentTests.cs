@@ -337,6 +337,95 @@ public sealed class ObservableComponentTests
         Assert.AreEqual("a", labels[0].Text, "while the one beside it still carries what it had");
     }
 
+    [TestMethod]
+    public void AChipAskingOneMembershipQuestionRerendersOnlyWhenItsOwnItemMoves()
+    {
+        // The composition the Observable set page in the sample is built on: a parent renders one chip per
+        // tag from a constant list and reads nothing at all, and each chip asks Contains(its own tag). A
+        // tag arriving or leaving wakes exactly one chip, even though the size changed as well.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var tags = Observable.CreateHashSet("a", "b", "c");
+        var board = new ChipsPage { DataModel = tags };
+
+        using var mount = VirtualDomRuntime.Mount(host, board);
+        scene.Frame();
+
+        var boardRenders = board.Renders;
+
+        Assert.AreEqual(3, board.Chips.Count, "one chip per tag");
+        Assert.AreEqual("on a", Labels(mount)[0].Text);
+
+        tags.Remove("b");
+        scene.Frame();
+
+        Assert.AreEqual(boardRenders, board.Renders, "the board read nothing, so no change re-renders it");
+        Assert.AreEqual(1, board.Chips["a"].Renders, "a chip whose own tag stayed is not re-rendered");
+        Assert.AreEqual(2, board.Chips["b"].Renders, "only the chip whose tag left");
+        Assert.AreEqual(1, board.Chips["c"].Renders);
+        Assert.AreEqual("off b", Labels(mount)[1].Text, "and its control says so");
+
+        tags.Add("b");
+        scene.Frame();
+
+        Assert.AreEqual(3, board.Chips["b"].Renders);
+        Assert.AreEqual("on b", Labels(mount)[1].Text, "a tag arriving wakes the same one chip");
+
+        tags.Clear();
+        scene.Frame();
+
+        Assert.AreEqual(2, board.Chips["a"].Renders, "a clear is every chip's business");
+        Assert.AreEqual(4, board.Chips["b"].Renders);
+        Assert.AreEqual(2, board.Chips["c"].Renders);
+        Assert.AreEqual("off a", Labels(mount)[0].Text);
+    }
+
+    [TestMethod]
+    public void ARowReadingOneKeyRerendersForAValueWhileTheParentRendersForAKey()
+    {
+        // The composition the Observable dictionary page in the sample is built on, and the difference the
+        // three reads make: the parent reads the keys, a row reads its own key, and a value change moves
+        // neither the parent nor the row beside it.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var settings = Observable.CreateDictionary(
+            StringComparer.Ordinal,
+            new Dictionary<string, string> { ["theme"] = "dark", ["font"] = "segoe" });
+        var list = new KeyRowsPage { DataModel = settings };
+
+        using var mount = VirtualDomRuntime.Mount(host, list);
+        scene.Frame();
+
+        var listRenders = list.Renders;
+
+        Assert.AreEqual(2, list.Rows.Count, "one row per key");
+        Assert.AreEqual("theme=dark", Labels(mount)[0].Text);
+
+        settings["theme"] = "light";
+        scene.Frame();
+
+        Assert.AreEqual(listRenders, list.Renders, "the parent read the keys, which did not change");
+        Assert.AreEqual(2, list.Rows["theme"].Renders, "the row of the key that changed");
+        Assert.AreEqual(1, list.Rows["font"].Renders, "the row beside it is not re-rendered");
+        Assert.AreEqual("theme=light", Labels(mount)[0].Text);
+
+        settings["zoom"] = "1.5";
+        scene.Frame();
+
+        Assert.AreEqual(listRenders + 1, list.Renders, "a key arrived, which is what the parent read");
+        Assert.AreEqual(3, list.Rows.Count);
+        Assert.AreEqual("zoom=1.5", Labels(mount)[2].Text, "and the new key has a row of its own");
+
+        settings.Remove("font");
+        scene.Frame();
+
+        Assert.AreEqual(listRenders + 2, list.Renders, "a key left, which the parent read");
+        Assert.AreEqual(2, list.Rows.Count, "the row let go of its slot");
+        Assert.AreEqual(2, Labels(mount).Count, "and its control went with it");
+        Assert.AreEqual("theme=light", Labels(mount)[0].Text, "the rows that stayed carry their own values");
+        Assert.AreEqual("zoom=1.5", Labels(mount)[1].Text);
+    }
+
     private static List<Label> Labels(ComponentMount mount) =>
         ((Panel)mount.Root!).Controls.OfType<Label>().ToList();
 
@@ -391,6 +480,117 @@ public sealed class ObservableComponentTests
             Renders++;
 
             return new VLabel { Text = args.DataModel[Index] };
+        }
+    }
+
+    /// <summary>A board of chips over a constant list of tags, reading nothing itself.</summary>
+    private sealed class ChipsPage : ObservableComponent<IReadOnlyObservableSet<string>>
+    {
+        internal static readonly string[] Tags = ["a", "b", "c"];
+
+        private readonly Dictionary<string, ChipPage> _chips = [];
+
+        internal int Renders { get; private set; }
+
+        internal IReadOnlyDictionary<string, ChipPage> Chips => _chips;
+
+        protected override VNode RenderWithDataModel(RenderArgs<IReadOnlyObservableSet<string>> args)
+        {
+            Renders++;
+
+            var children = new List<VNode>();
+
+            foreach (var tag in Tags)
+            {
+                if (!_chips.TryGetValue(tag, out var chip))
+                {
+                    chip = new ChipPage();
+                    _chips.Add(tag, chip);
+                }
+
+                chip.DataModel = args.DataModel;
+                chip.Tag = tag;
+
+                children.Add(new VComponent(chip) { Key = tag });
+            }
+
+            return new VPanel { Dock = DockStyle.Fill, Children = children };
+        }
+    }
+
+    /// <summary>A chip that asks one membership question and reads nothing else.</summary>
+    private sealed class ChipPage : ObservableComponent<IReadOnlyObservableSet<string>>
+    {
+        internal int Renders { get; private set; }
+
+        internal string Tag { get; set; } = string.Empty;
+
+        protected override VNode RenderWithDataModel(RenderArgs<IReadOnlyObservableSet<string>> args)
+        {
+            Renders++;
+
+            return new VLabel { Text = $"{(args.DataModel.Contains(Tag) ? "on" : "off")} {Tag}" };
+        }
+    }
+
+    /// <summary>
+    /// A key list over a dictionary: it reads the keys, and each row it renders reads one of them. A key
+    /// that went away is dropped from the slots here, because re-mounting a disposed component is refused.
+    /// </summary>
+    private sealed class KeyRowsPage : ObservableComponent<IReadOnlyObservableDictionary<string, string>>
+    {
+        private readonly Dictionary<string, ValuePage> _rows = new(StringComparer.Ordinal);
+
+        internal int Renders { get; private set; }
+
+        internal IReadOnlyDictionary<string, ValuePage> Rows => _rows;
+
+        protected override VNode RenderWithDataModel(RenderArgs<IReadOnlyObservableDictionary<string, string>> args)
+        {
+            Renders++;
+
+            var keys = args.DataModel.Keys.ToArray();
+
+            foreach (var key in _rows.Keys.Except(keys, StringComparer.Ordinal).ToArray())
+            {
+                _rows.Remove(key);
+            }
+
+            var children = new List<VNode>(keys.Length);
+
+            foreach (var key in keys)
+            {
+                if (!_rows.TryGetValue(key, out var row))
+                {
+                    row = new ValuePage();
+                    _rows.Add(key, row);
+                }
+
+                row.DataModel = args.DataModel;
+                row.Key = key;
+
+                children.Add(new VComponent(row) { Key = key });
+            }
+
+            return new VPanel { Dock = DockStyle.Fill, Children = children };
+        }
+    }
+
+    /// <summary>A row that asks about one key with <c>TryGetValue</c>, the read the page is built on.</summary>
+    private sealed class ValuePage : ObservableComponent<IReadOnlyObservableDictionary<string, string>>
+    {
+        internal int Renders { get; private set; }
+
+        internal string Key { get; set; } = string.Empty;
+
+        protected override VNode RenderWithDataModel(RenderArgs<IReadOnlyObservableDictionary<string, string>> args)
+        {
+            Renders++;
+
+            return new VLabel
+            {
+                Text = args.DataModel.TryGetValue(Key, out var value) ? $"{Key}={value}" : $"{Key}=(removed)",
+            };
         }
     }
 

@@ -221,6 +221,14 @@ internal sealed class ObservableListPage : DemoPage
     /// inside one.</param>
     private void OnChanged(ObservableListChangedEventArgs<string> args)
     {
+        if (args.Changes.Count == 0)
+        {
+            // The final event a disposal delivers: the list is dead, so the copy cannot be compared with
+            // it any more - every read of it throws now.
+            _records.Text = "The list was disposed.";
+            return;
+        }
+
         _events++;
 
         // The copy is built from the records and nothing else: no read of the list is involved in
