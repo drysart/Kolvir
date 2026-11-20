@@ -13,7 +13,7 @@ publishes exactly like any other Kolvir application.
 
 Status of this document: living plan. Each step is independently buildable and verifiable, so work
 can stop after any step with the tree in a working state. Decisions are recorded in section 3 with
-their rationale; the steps in section 8 are the order of work; section 10 lists what is still open.
+their rationale; the steps in section 9 are the order of work; section 11 lists what is still open.
 
 ## 1. Goals and non-goals
 
@@ -31,7 +31,7 @@ Goals:
 Non-goals, for this plan:
 
 - A markup language. The design deliberately stays in C#; a XAML/JSX-like front end is a *later,
-  additive* option that would lower to the same node tree (section 9).
+  additive* option that would lower to the same node tree (section 10).
 - Two-way data binding. State lives in the component, `Render()` produces a tree, and events call
   back into the component. Binding expressions are a possible later layer, not a foundation.
 - A general-purpose serialization format for UI. The node tree is an in-memory description, not a
@@ -65,7 +65,7 @@ So there are two distinct problems hiding behind "is this AOT-safe", and they ha
 | Do we need it at all? | No, for the primary path. A source generator sees the type statically and emits direct property assignments, which root the setters with no annotations and no reflection. |
 
 The last row is the design: **the registration is a declaration the compiler consumes, not a call the
-runtime interprets.** That is the difference between the design we rejected (section 9) and the one
+runtime interprets.** That is the difference between the design we rejected (section 10) and the one
 adopted.
 
 One more consequence worth stating plainly: a registered control is *fully* retained - its constructor
@@ -86,7 +86,7 @@ manifest is expected to be short and per application rather than a library-wide 
 | Manifest is `partial` | Yes | It is the generator's write target: it emits one node class per registered control into the manifest's namespace, and later a generated runtime table or registration hook lands on the manifest itself without a base class or a second attribute. |
 | Where the generated node types live | One `V<Control>` class per registered control, in the **manifest's own namespace**, named by the attribute's `Name` when given | Nodes are ordinary classes a developer constructs with an object initializer, so a plain `using MyApp;` is all a view file needs. Separate namespaces per manifest give the multi-assembly story for free. |
 | What a node holds | One **tracked property per settable control property**: a value plus a was-set flag, behind an ordinary `{ get; set; }`-shaped property | This is the whole point of switching from parameters to properties (section 6.1): calling the setter *is* the record that a property was specified, so "omitted", "set to a value" and "set to `null`" are all distinguishable without a wrapper type, a sentinel, or a nullable annotation trick. |
-| How a property is omitted | By not assigning it: `new VLabel { }` sets nothing, `new VLabel { Text = "hi" }` sets one thing, `new VLabel { Text = null }` sets it to null | Falls straight out of the setter being the signal, and it is what removes `Specified<T>` from the public surface entirely (section 9 records the parameter-based design this replaced). |
+| How a property is omitted | By not assigning it: `new VLabel { }` sets nothing, `new VLabel { Text = "hi" }` sets one thing, `new VLabel { Text = null }` sets it to null | Falls straight out of the setter being the signal, and it is what removes `Specified<T>` from the public surface entirely (section 10 records the parameter-based design this replaced). |
 | Children | `IReadOnlyList<VNode> Children { get; init; } = []` on the `VNode` base, so `Children = [ a, ..more ]` gets collection expressions and spread | `init` rather than a get-only `List` because a collection *initializer* cannot express spread (`..more`), which is what a message list needs. The reconciler ignores children on a node whose control is not a container, and VD011 warns when one is set. |
 | What applying a node does | Generated `ApplyTo(Control)` and `PatchFrom(previous, Control)` members: direct typed assignments, no names, no dictionary, no `switch` on strings | The reconciler must patch a control without knowing its type. Generating the assignments per node type does that statically, and since the previous node is typed too, the diff is a field-by-field comparison rather than a lookup. |
 | What is diffed | The **previous node against the next node**, never the node against the control | The old values come from the tree we already hold, so nothing reads a control's current property state back out. That keeps `Control` free of any virtual-DOM awareness and avoids the hardest reflective cases (getter-only and private-setter properties). The one exception is the pristine snapshot below, read once per type rather than per diff. |
@@ -101,7 +101,7 @@ manifest is expected to be short and per application rather than a library-wide 
 | Reordering children | `ControlCollection.Move`, added to core for this | Added to `Kolvir` on rung 1 rather than worked around: `Remove` + `Insert` detaches and re-attaches the child, which re-reads enabled/displayed/appearance state for its subtree and re-runs `OnControlAdded`, so a keyed reorder would disturb exactly the state it exists to preserve. A general reorder primitive is worth having on its own terms and costs nothing to an application that does not call it. |
 | Reflective escape hatch | Available, but explicitly not the default: an annotated `Type`-taking registration, and unannotated overloads marked `[RequiresUnreferencedCode]` | The only case that genuinely needs it is a type supplied at run time - a plugin, or a control set read from configuration. Marking the unannotated overloads means an AOT build gets a warning instead of a post-trim crash. |
 | Renders are event-driven, and coalesced | `SetState` marks the component and asks for a frame; the marked components render once each at the start of the next frame a host draws | One `SetState` per keystroke is a flag, and a handler that changes five things costs one render and one tree update instead of five - so there is no layout thrashing to work around and no cost to "just change it again". The seam is `UiHost.AddFrameStartingHandler`, added to core for this (section 7.1): it is the one point where the tree can still change and still be drawn by the frame that is starting. |
-| Markup front end | Not in this plan | See section 9. Deciding it early would constrain the node model for no benefit; the node model is the stable ABI, and a markup generator can be added later behind it. |
+| Markup front end | Not in this plan | See section 10. Deciding it early would constrain the node model for no benefit; the node model is the stable ABI, and a markup generator can be added later behind it. |
 
 ## 4. What a developer writes
 
@@ -168,7 +168,7 @@ The three decisions that make it work:
 
 What this costs against the factory syntax considered earlier is verbosity: `new VLabel { Text = "hi" }`
 is longer than `Label(text: "hi")`. What it buys is unambiguous setters, no `Specified<T>` in the
-calling convention, no property-name strings anywhere, and a diff that compares typed fields. Section 9
+calling convention, no property-name strings anywhere, and a diff that compares typed fields. Section 10
 records the factory design this replaced.
 
 The generated surface follows the controls rather than being hand-designed, which is the same trade
@@ -236,7 +236,7 @@ Five things to notice:
   behind a tracked property - a value plus a was-set flag - but it never appears in a signature a
   developer writes, and its `Reset` member is gone, because absence already means "not assigned".
   This is what removed the public wrapper, the implicit operator, the nullable-conversion trap and
-  the CS0411 generic-inference note from the design (section 9).
+  the CS0411 generic-inference note from the design (section 10).
 - **The setter constructs a `Specified<T>` rather than relying on an implicit conversion, and there is
   no implicit conversion to rely on.** An assignment operator taking `T` is only applicable where the
   source converts to its parameter by a *standard* conversion, and for a nullable reference type
@@ -395,7 +395,7 @@ Text: `Label.Text` and `RichLabel.Text` are ordinary props, so they diff like an
 additionally supports inline controls, which are `VNode`s rather than props: a child `VNode` whose
 `NodeType` is a control in a `RichLabel` context is added through `AddInlineControl`. This is the one
 place where "children" and "props" interact, and it is decided by the parent's capability, not the
-child's type (section 10 lists it as the fiddliest part of the design).
+child's type (section 11 lists it as the fiddliest part of the design).
 
 ### 6.2 Fragments and the empty node
 
@@ -571,7 +571,155 @@ setter. Without that, `IComponent` would be a seam nothing outside the assembly 
 | **`Attach`/`Detach` are explicit implementations on `Component`.** | They belong to the mount's half, so `Component`'s own surface stays `Render` and `SetState` rather than growing two calls an application should never make. |
 | **`VComponent` and `Mount` take the interface.** | Otherwise a component with its own base class could be mounted but not composed, and composition is where the two halves of the design meet. |
 
-## 8. Steps
+## 8. The application level
+
+The control layer owns one window's body. The application layer owns the windows themselves, so an
+application whose window set follows a model is written the same way a control subtree is: derive a
+component, override `Render`, read the model, mutate it, and let the framework re-render. The only
+differences are that the node is a window descriptor and the top-level render returns a list of them.
+
+```csharp
+internal sealed class Shell : ApplicationComponent
+{
+    private readonly IObservableList<Document> _documents = Observable.CreateList<Document>();
+
+    protected override IReadOnlyList<ApplicationVNode> Render() =>
+    [
+        new VWindow
+        {
+            Key = "list",
+            Title = "Documents",
+            ClientSize = new SKSize(480f, 320f),
+            Content = new VComponent(_listPage),
+        },
+        .. _documents.Select(document => new VWindow
+        {
+            Key = document,
+            Title = document.Title.Value,
+            ClientSize = new SKSize(480f, 300f),
+            CloseRequested = _ => _documents.Remove(document),
+            Content = new VComponent(document.Page),
+        }),
+    ];
+}
+```
+
+The list page and each document's page are held with the model rather than constructed in `Render`,
+which is what keeps the child component's mount (and its controls) across the application's own
+re-renders; a new page instance in the same `Content` slot would be a different component and would be
+mounted fresh. `Render` runs inside the same collection scope `ObservableComponent` uses, so every observable value
+and named dependency the render reads subscribes it. The model can be any fields the component keeps;
+there is no `DataModel` property because an application is one component with one model, and the
+generic wrapper would only be ceremony. `Invalidate()` is the one render on the next frame that
+`SetState` is, and calling it from inside a render is refused the same way.
+
+| Piece | Shape | Purpose |
+| --- | --- | --- |
+| `ApplicationVNode` | Abstract base: `Key`, and nothing else today | The application description. Deliberately not a `VNode`. |
+| `VWindow` | `Title`, `ClientSize`, `Location`, `State`, `Resizable`, `TopMost`, `Icon`, `MenuBar`, `MinimumClientSize`, `MaximumClientSize` as tracked properties; `Content`; `CloseRequested` | One window, with the same omitted/set/unassigned distinction a control node has. |
+| `IApplicationComponent` | `IReadOnlyList<ApplicationVNode> Render()`, `Attach(ApplicationMount)`, `Detach(ApplicationMount)` | The mount's half of the protocol, exactly as `IComponent` is the control mount's half. |
+| `ApplicationComponent` | The interface, `Invalidate()`, and `IDisposable` | The supplied base class. |
+| `ApplicationMount` | `Invalidate()`, `Dispose()` | Owns the real windows and their content mounts. |
+| `VirtualDomRuntime.Mount(Application, IApplicationComponent)` | Returns an `ApplicationMount` | The application-level entry point; the two control-level overloads are untouched. |
+
+### 8.1 Why `ApplicationVNode` is not a `VNode`
+
+A `VNode` is a contract with the control reconciler: `NodeType`, `ApplyTo`, `PatchFrom`, and
+`Children`. A window has none of those in that form. `NodeType` would be a type that cannot be
+created, `ApplyTo` and `PatchFrom` would take a `Control` they can never receive, and `Children` is a
+list of control nodes rather than an owned-window list. Deriving would therefore ship four members
+whose only implementation is a throw.
+
+Keeping the hierarchies apart does something a run-time check cannot: a `VWindow` in a control tree
+and a `VLabel` in an application render are compile errors. It also means an application node can
+never be handed to `VirtualDomRuntime.Mount(Control, VNode)`, and a control node can never be
+mistaken for a window. The application reconciler is small enough that the separate base costs
+nothing, and it is the seam a tray-icon or menu-bar node will extend without disturbing the control
+contract.
+
+### 8.2 Identity, creation and patching
+
+Windows are matched by `VWindow.Key` first and then by position among the unkeyed ones - the same
+rule `Reconciler` applies to control children. Keys have to be unique among the windows one render
+returns, because a key identifies a window rather than merely decorating it; a duplicate is refused
+with a message that names it. A matched window keeps its OS `Window` instance, so a reorder moves the
+window in the render's list without recreating it, changing focus, changing geometry, or resetting the
+display state.
+
+A new window is created by constructing a `Window`, capturing its pristine property values, creating
+a fill `Panel` that becomes `Window.Content`, mounting `Content` into that panel, applying the
+properties this node assigned, and showing the window. Several new windows in one render all appear
+before the frame that asked for them is painted.
+
+Patching follows the control rule exactly: only a property whose tracked value changed is assigned, a
+property the previous node assigned and this one does not is restored to the pristine value captured
+from that window, and a property whose value is unchanged is not assigned at all. The last part is
+what keeps a user's resize or move from being snapped back by a render that repeats the size or
+position it originally asked for.
+
+The pristine values are captured per window rather than from a static snapshot, because a window's
+defaults are not wholly fixed: the icon and menu bar start from the application's options, and the
+size and location come from the backend. A window built from nothing is the authority on what it
+looked like before a node touched it.
+
+### 8.3 The control boundary
+
+`VWindow.Content` is the only place the two hierarchies meet. It is an ordinary `VNode`, and the
+mount reconciles it with `MountHandle`. It may also be a bare `VComponent`, which is mounted through
+the existing `Mount(Control, IComponent)` overload and keeps its own state and render count - so
+`Content = new VComponent(page)` works without a wrapper panel. The host panel is the same either way,
+so changing the content root from a control node to a component root and back is one mount disposed
+and the other started, not a second window.
+
+`MountHandle` still refuses a `VComponent` as its own root. That is unchanged and deliberate: a tree
+handle owns control nodes, and a component root is mounted by the component mount. The application
+mount is what chooses between the two overloads.
+
+### 8.4 Closing, and what the framework refuses
+
+A window disappears when a later render omits its node: the mount disposes the content mount and
+closes the window. That is the framework's own close and it never raises `CloseRequested`.
+
+A close the framework did not initiate - the platform's X button, or a direct `Window.Close()` - is
+always cancelled, and the node currently on screen has its `CloseRequested` handler invoked. Four
+consequences:
+
+| Rule | Why |
+| --- | --- |
+| **No handler means nothing happens.** | The window stays open, which is the only safe default: closing it would let a platform button destroy state the model still believes in. |
+| **The handler is read from the latest node.** | A render can replace the delegate, so a closure over current state is current without recreating the window. Reading the previous node would leave it holding last frame's document. |
+| **It runs outside a render.** | Changing the model and calling `Invalidate()` there is legal; the window closes when the render that follows omits it. |
+| **The application's own exit is let through.** | `Application.Exit()` closes every window through the same closing handler. Cancelling that would veto every exit, so `Application.IsExiting` is the one signal the handler consults: while it is true, the close belongs to the application shutdown and is allowed. |
+
+`Application.IsExiting` is a small addition to the core `Application` type for exactly this
+distinction. Without it the application level would either have to block `Exit()` forever or lose the
+rule that a native close can be refused.
+
+### 8.5 Batching, the first render, and empty output
+
+Application renders are coalesced like control renders: `Invalidate()` marks the mount and asks for a
+frame, and the marked mounts render once at the start of the next frame any host draws, through the
+same `UiHost.AddFrameStartingHandler` tick `RenderQueue` uses. Window creation, patching and closing
+therefore happen at a frame boundary, never inside a control reconcile pass and never inside a render.
+The queue is separate from `RenderQueue` but has the same two properties that matter: a disposed mount
+is forgotten before its turn, and a render that throws is reported to the application while the rest
+of the batch still runs.
+
+The first render is the exception, and it happens inside `Mount` before `Application.Run()`. It has to:
+with no window yet there is no host drawing a frame, and therefore no frame in which the first window
+could be created. For the same reason, a component whose first render yields no windows has nothing to
+request a frame from, so an application that will later open its first window has to make that window
+part of the first render. Empty output is otherwise ordinary: no windows, no special shutdown path,
+and `CheckShutdownMode` sees the last window close in the usual way.
+
+### 8.6 Owned windows
+
+An owned window - a `VWindow` whose owner is another `VWindow` - is not supported yet. There is no
+owner property today, so the shape is reserved rather than half-built: when it arrives it will be a
+property on the window node, with the owner matched like any other window, not a child node. This is
+a not-yet-supported boundary, not an illegal one.
+
+## 9. Steps
 
 | # | Step | Scope | Done when |
 | --- | --- | --- | --- |
@@ -589,7 +737,7 @@ setter. Without that, `IComponent` would be a seam nothing outside the assembly 
 Steps 1-6 are written against two hand-written node classes so the reconciler is complete and tested
 *before* the generator exists. The generator then replaces those classes without touching the
 reconciler, which is what keeps step 7 a codegen change rather than a redesign.
-### 8.1 Where the pieces live, and what else has to change
+### 9.1 Where the pieces live, and what else has to change
 
 Four projects:
 
@@ -644,7 +792,7 @@ Five things outside the new code that the feature cannot land without:
 5. **`pack-nuget` needs no change** - it globs `src/features/*/*.csproj`, and the layout checker only
    opens `lib/` and the dependency groups, so an extra `analyzers/` folder neither needs nor trips it.
    Verified by packing the feature locally and listing the `.nupkg`.
-## 9. Options considered and rejected
+## 10. Options considered and rejected
 
 | Option | Why not |
 | --- | --- |
@@ -652,14 +800,14 @@ Five things outside the new code that the feature cannot land without:
 | `[DynamicDependency]` on the registration method | Compile-time constants only. It cannot express "whatever the application passes to this call". |
 | String-named types and properties parsed at run time (a real DSL) | Property names as run-time strings need reflection the trimmer cannot see, are unverifiable until run time, and are slower. This is the one option that would make an AOT build genuinely unreliable. |
 | Factory methods with `Specified<T>` parameters - the design this replaced | AOT-clean and workable, but it put a wrapper in every call site to answer a question a setter answers for free, and it did not actually make `null` safe: three of its four parameter shapes were measured mishandling it (section 6.1). Switching to a class with tracked properties deleted the wrapper from the public surface, the property-name strings, the `VProp[]` and the hashed name dispatch, and made the diff a comparison of typed fields. Kept here because the wrapper's problems are the reason for the current shape, not an accident of it. |
-| Union types (C# 15 / .NET 11) as the three-state wrapper | Measured on SDK 11.0.100 against `net11.0`: a union with a non-nullable case, `union Prop(string, Absent, Reset)`, rejects `Take(null)` with **CS8625, still a warning**; with a nullable case (`string?`) `null` is silent, exactly as `Specified<string?>` is. The rule the compiler applies is "a null literal converted to a non-nullable reference type", which does not care whether the destination is a union case or an implicit operator, so a union changes the spelling and not the severity. Unions are otherwise a good fit - `union Prop<T>(T, Absent, Reset)` compiles, and "no case set" being the zero value is exactly the absent state with no inverted flag needed - but they need a `net11.0` leg in the package and buy nothing this design does not already have. Recorded as a revisit in section 10. |
-| Promoting CS8625/CS8604 to errors from the package's `buildTransitive` props | No code at all, and it covers more than a null-literal analyzer can, because the compiler's flow analysis already handles a possibly-null variable. Rejected because it would silently make every null-to-non-nullable in a referencing project an error - a policy an application should choose for itself, not inherit from adding a UI package. It stays a documented one-liner (section 10). |
+| Union types (C# 15 / .NET 11) as the three-state wrapper | Measured on SDK 11.0.100 against `net11.0`: a union with a non-nullable case, `union Prop(string, Absent, Reset)`, rejects `Take(null)` with **CS8625, still a warning**; with a nullable case (`string?`) `null` is silent, exactly as `Specified<string?>` is. The rule the compiler applies is "a null literal converted to a non-nullable reference type", which does not care whether the destination is a union case or an implicit operator, so a union changes the spelling and not the severity. Unions are otherwise a good fit - `union Prop<T>(T, Absent, Reset)` compiles, and "no case set" being the zero value is exactly the absent state with no inverted flag needed - but they need a `net11.0` leg in the package and buy nothing this design does not already have. Recorded as a revisit in section 11. |
+| Promoting CS8625/CS8604 to errors from the package's `buildTransitive` props | No code at all, and it covers more than a null-literal analyzer can, because the compiler's flow analysis already handles a possibly-null variable. Rejected because it would silently make every null-to-non-nullable in a referencing project an error - a policy an application should choose for itself, not inherit from adding a UI package. It stays a documented one-liner (section 11). |
 | `VNode.Of<T>(...)` generic factories, without a manifest or generator | AOT-safe (with an annotation on the type parameter) but verbose at every call site, and setting a property still needs a name/value pair. Acceptable as an internal primitive; rejected as the developer-facing syntax. |
 | Hand-written static factories (`V.Label(...)` written by a person) | Perfect AOT story, but every control's surface is maintained by hand and drifts from the control. Only worth it for types the generator cannot see. |
 | Lambda/builder closures (`V.Column(c => { c.Gap(8); })`) | Poor inference, awkward with LINQ, and it reads as imperative code rather than a description. |
 | A markup file compiled by a generator (XAML/JSX-like) | The only way to get a genuine markup feel, because C# has no macro system. A large, additive front end - parser, generator, diagnostics, editor story. Explicitly deferred, not rejected: it lowers to the same node tree, so it can be added later without touching anything below section 4. |
 
-## 10. Risks and open questions
+## 11. Risks and open questions
 
 - **Reordering a `RichLabel`'s inline controls does not reorder its text.** Inline content order lives
   in the label's span collection, not in `Controls`, so `ControlCollection.Move` on a `RichLabel`
@@ -728,7 +876,7 @@ Five things outside the new code that the feature cannot land without:
   mount's renders would break it - the same assumption the single-root handle made before fragments
   existed, and no worse, but now it covers several controls instead of one.
 
-## 11. Verification approach
+## 12. Verification approach
 
 Every step is checked with headless tests in `tests/features/Kolvir.Feature.VirtualDom.Tests`, which
 build a tree, mount it into a `HeadlessScene`, and inspect the resulting `Control` tree - the same
@@ -748,14 +896,14 @@ published application:
 | **A failure inside a frame stays inside it** | Four `CompositionTests` name the shapes a render can fail in, and each was confirmed to fail with its fix removed rather than merely pass with it: a render that throws in the middle of a batch is reported to the application and the components behind it in the same frame still render (without the per-entry catch, the one after it reports one render instead of two); the component that threw renders again on the next frame; a component whose *first* render throws can be mounted once it stops (without the detach, it is a `NullReferenceException` at the next `SetState`); and unmounting a subtree that holds a component below ordinary nodes disposes that component, so it stops rendering and can be mounted elsewhere (without the recursion, it renders a second time). |
 | **A `null` for a non-nullable property does not build** | `tests/generators/...Generators.Tests` runs the analyzer over a real compilation and asserts VD010 for a null literal, for a possibly-null variable, and for both under `#nullable disable`; and asserts nothing for a value, for a nullable property, and for `null!`. The end-to-end wiring - an analyzer arriving from the package and failing a build - was checked by hand: a `Children = [child]` on a `VLabel` in the feature suite stops its build with VD011. |
 | **AOT- and trim-clean** | Measured on Windows, `win-x64`: `dotnet publish -c Release -r win-x64 -p:PublishAot=true` of the sample succeeds and its `--render virtual-dom` output is **byte-for-byte identical** to the JIT build's (57,658 bytes for `--page virtual-dom` at the default window size, compared with `SequenceEqual`, and two JIT runs measured identical so the comparison is meaningful rather than lucky), so the generated node classes, the reconciler, the component layer, the composition path and the frame-drained render queue all survive native compilation unchanged. `Kolvir.Minimal`, which does not use the feature, publishes with **no virtual-DOM artifact at all** in its output. What this does *not* cover: the other two platforms, and a publish from the release workflow rather than a developer machine. |
-| **The generator does not get in a publish's way** | `PublishAot` is a global property and a `netstandard2.0` project cannot satisfy it, so a project reference to the generator fails an AOT publish with NETSDK1207 (section 8.1, item 4). The feature carries no such reference, and both the sample and the pack build the generator in a `dotnet build` child process, where the inheritance that causes it does not exist. Verified from a deleted generator `bin/` and `obj/`, because the first attempt - the `MSBuild` task with `RemoveProperties` - passed locally and then built the generator with no references at all on a clean machine. |
+| **The generator does not get in a publish's way** | `PublishAot` is a global property and a `netstandard2.0` project cannot satisfy it, so a project reference to the generator fails an AOT publish with NETSDK1207 (section 9.1, item 4). The feature carries no such reference, and both the sample and the pack build the generator in a `dotnet build` child process, where the inheritance that causes it does not exist. Verified from a deleted generator `bin/` and `obj/`, because the first attempt - the `MSBuild` task with `RemoveProperties` - passed locally and then built the generator with no references at all on a clean machine. |
 
 | **A fragment is inlined, and an empty one takes no room** | `FragmentTests` holds twelve cases (section 6.2): a fragment's children take its place among the parent's siblings by reference identity, nesting flattens, a root fragment owns one control per child and a root empty one owns none but takes what it is given later, an empty child component occupies no slot and appears in its own place when it has something to show, a grandchild component inside a fragment gets the right slot, a component that renders two nodes does not have its parent's sibling laid out over it, and the key and cycle refusals are asserted by message. The placement arithmetic was also seen failing with its fix removed: writing the index as `startIndex + i` instead of a running total breaks three of them. |
 
 The demo app gains a virtual-DOM card in the same shape as the existing feature cards, so the
 published-build render comparison covers the new code path automatically.
 
-## 12. Progress
+## 13. Progress
 
 | Step | State | Notes |
 | --- | --- | --- |
@@ -766,12 +914,22 @@ published-build render comparison covers the new code path automatically.
 | 5 | Done | Keyed matching plus `ControlCollection.Move`, from [#99](https://github.com/drysart/Kolvir/pull/99) and [#100](https://github.com/drysart/Kolvir/pull/100). Reversing a keyed list moves the controls instead of rebuilding them, proven by reference identity; keyed and unkeyed children mix without a keyed node ever being claimed positionally. |
 | 6 | Done | Generated `Click`-style event properties over the `AddXxxHandler`/`RemoveXxxHandler` pairs, with the attached delegate tracked so a changed handler detaches the old one. Same render subscribes once, and a handler the node stops setting is removed. `EventTests` holds the cases. |
 | 7 | Done | `src/generators/Kolvir.Feature.VirtualDom.Generators`: the incremental generator, `LeafNodeAttribute`, and `NullAndLeafAnalyzer` (VD010, VD011). The hand-written `VLabel`/`VNote`/`VButton`/`VPanel` are gone: the feature suite now consumes generated classes through an analyzer reference and its 26 tests pass unchanged, which is the point of step 7 having been deferred. A second suite, `tests/generators/...Generators.Tests`, holds 30 tests: the emission shape, VD001-VD005/VD007/VD012, VD010/VD011 with their false-positive cases, and the mirror-drift check over 14 real controls. The analyzer was also seen failing a real build (a `Children` on a `VLabel` in the feature suite stops it with VD011). Found and fixed on the way: an implicit conversion does not apply to a nullable reference type argument (section 5), and a file name derived from the namespace alone collided when one namespace held two manifests. |
-| 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, and the render queue drained at the start of the next frame through `UiHost.AddFrameStartingHandler` (added to core for it), so a handler that changes five things renders once. `Render` is one pass with no settling loop, and one that changes state is refused rather than iterated. One rule for the two states that have no tree to patch - a state change before the first mount or after `Dispose` does nothing, and the first render picks up what was stored in the meantime. Composition arrived with it as `VComponent` (section 7.2): a child component is a node, matched by instance, keyed when it can move, one mount per instance. 29 tests across `ComponentTests` and `CompositionTests`, including a click through the headless host that asserts nothing rendered until a frame, three state changes before a frame costing one render, a change made with no host at all that the first frame drains, a mount disposed by an earlier render in the same batch, a text box echo that is not a second render, and three levels of nesting. A review of the whole branch then found three ways a *failing* render could take the rest of the frame with it - no per-entry isolation in the drain, an unwinding that did not recurse below ordinary nodes, and an attach that outlived a first render that threw - all three fixed in the mount, the reconciler and the drain, each with a regression test confirmed to fail without its fix (sections 7.2 and 11). Section 7.1 records the four `SetState` decisions. The component layer also split into a protocol and an implementation - `IComponent` is what the mount needs, `Component` is what an application derives from - so the base class is replaceable without touching the mount (section 7.3). `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
+| 8 | Done | `Component` and `ComponentMount`: `Render`/`SetState`, the mount that owns the tree, and the render queue drained at the start of the next frame through `UiHost.AddFrameStartingHandler` (added to core for it), so a handler that changes five things renders once. `Render` is one pass with no settling loop, and one that changes state is refused rather than iterated. One rule for the two states that have no tree to patch - a state change before the first mount or after `Dispose` does nothing, and the first render picks up what was stored in the meantime. Composition arrived with it as `VComponent` (section 7.2): a child component is a node, matched by instance, keyed when it can move, one mount per instance. 29 tests across `ComponentTests` and `CompositionTests`, including a click through the headless host that asserts nothing rendered until a frame, three state changes before a frame costing one render, a change made with no host at all that the first frame drains, a mount disposed by an earlier render in the same batch, a text box echo that is not a second render, and three levels of nesting. A review of the whole branch then found three ways a *failing* render could take the rest of the frame with it - no per-entry isolation in the drain, an unwinding that did not recurse below ordinary nodes, and an attach that outlived a first render that threw - all three fixed in the mount, the reconciler and the drain, each with a regression test confirmed to fail without its fix (sections 7.2 and 12). Section 7.1 records the four `SetState` decisions. The component layer also split into a protocol and an implementation - `IComponent` is what the mount needs, `Component` is what an application derives from - so the base class is replaceable without touching the mount (section 7.3). `AddVirtualDom()` is deliberately absent - there is nothing to register until step 9. |
 | 9 | Not started | |
-| 10 | Done | A **Virtual DOM** card in the sample (`--page virtual-dom`), the `DEVELOPER-GUIDE.md` section, and the AOT verification measured rather than asserted: the `win-x64` published build renders the card byte-for-byte identically to the JIT build, and `Kolvir.Minimal` publishes with no virtual-DOM artifact. The work also found a real publish failure - `PublishAot` is global, a `netstandard2.0` generator cannot satisfy it, and a project reference therefore breaks `dotnet publish` for applications that never asked for a generator (section 8.1, item 4). |
+| 10 | Done | A **Virtual DOM** card in the sample (`--page virtual-dom`), the `DEVELOPER-GUIDE.md` section, and the AOT verification measured rather than asserted: the `win-x64` published build renders the card byte-for-byte identically to the JIT build, and `Kolvir.Minimal` publishes with no virtual-DOM artifact. The work also found a real publish failure - `PublishAot` is global, a `netstandard2.0` generator cannot satisfy it, and a project reference therefore breaks `dotnet publish` for applications that never asked for a generator (section 9.1, item 4). |
 
 Beyond the ten steps, `VFragment` (section 6.2) was added to close the gap section 11 of
 [`OBSERVABLES.md`](OBSERVABLES.md) recorded: a node that makes no control, so that a render can return
 several top-level nodes and `ObservableComponent.RenderWithNullModel` can default to showing nothing.
 That made a mount own a slice of its parent's children rather than one child, which is the only part
 of it that reaches code written before it - and the reason `Mounted.ControlCount` exists.
+
+The application level (section 8) is the later addition: `ApplicationVNode`, `VWindow`,
+`IApplicationComponent`, `ApplicationComponent`, `ApplicationMount` and
+`VirtualDomRuntime.Mount(Application, IApplicationComponent)`. It keeps the control reconciler
+untouched, reaches the control tree only through `VWindow.Content`, and renders through its own
+frame-drained queue. The demo is `src/demo/Kolvir.Demo.VirtualDom`, and its `--check` mode drives the
+open, native-close and rename flows through the headless host. That work also added
+`Application.IsExiting`, the one core member it needed: without it the mount's native-close rule would
+veto every `Application.Exit()`. `Kolvir.Minimal` on win-x64 publishes at 3,575,808 bytes before and
+after, so the delta against an application that does not reference the feature is 0.

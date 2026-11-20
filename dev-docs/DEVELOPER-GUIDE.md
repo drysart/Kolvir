@@ -4821,6 +4821,106 @@ with its own text box, its own Up/Down/Remove buttons and its own render count. 
 that row's count and leaves the list's alone; adding or moving raises the list's and leaves the
 untouched rows alone.
 
+#### An application, not just a window
+
+The component above owns one window's body. An **application component** owns the window set, and is
+written the same way: derive, override `Render`, read the model, mutate it, invalidate. The difference
+is that the render returns a list of `VWindow` descriptors:
+
+```csharp
+using Kolvir.Observables;
+using Kolvir.VirtualDom;
+
+internal sealed class DocumentApplication : ApplicationComponent
+{
+    private readonly IObservableList<Document> _documents = Observable.CreateList<Document>();
+    private readonly ListPage _listPage;
+    private int _nextId = 1;
+
+    public DocumentApplication() => _listPage = new ListPage(_documents);
+
+    protected override IReadOnlyList<ApplicationVNode> Render()
+    {
+        var count = _documents.Count;
+        var windows = new List<ApplicationVNode>
+        {
+            new VWindow
+            {
+                Key = "list",
+                Title = "Documents",
+                ClientSize = new SKSize(480f, 320f),
+                Content = new VComponent(_listPage),
+            },
+        };
+
+        for (int i = 0; i < count; i++)
+        {
+            var document = _documents[i];
+
+            windows.Add(new VWindow
+            {
+                Key = document,
+                Title = document.Title.Value,
+                ClientSize = new SKSize(480f, 300f),
+                CloseRequested = _ => _documents.Remove(document),
+                Content = new VComponent(document.Page),
+            });
+        }
+
+        return windows;
+    }
+
+    private void Open()
+    {
+        var id = _nextId++;
+        _documents.Add(new Document(id, $"Document {id}"));
+    }
+}
+```
+
+`Render` runs inside the same collection scope `ObservableComponent` uses, so the list and every title
+it read subscribe it. `Invalidate()` is the same one-render-at-the-next-frame primitive as `SetState`
+and is for a change no observable saw; the list above does not need it. Mount it once:
+
+```csharp
+using var application = new Application(KolvirBackend.CreateDefault(), options);
+using var windows = VirtualDomRuntime.Mount(application, new DocumentApplication());
+return application.Run();
+```
+
+What to know:
+
+- **The first render is at `Mount`.** It has to be: with no window there is no host drawing a frame,
+  so there is no frame in which the first window could appear. A component whose first render yields
+  no windows has nothing to request the next frame from, so give the first render at least one.
+- **Windows are matched by `Key`, then by position.** A keyed reorder moves the OS windows instead of
+  recreating them, so a user's move, resize, focus and display state survive. Keys have to be unique
+  among the windows one render returns.
+- **Only properties that changed are assigned.** Dropping a property restores the window's pristine
+  value; repeating the same assigned value is not re-applied, which is what keeps a user's resize from
+  being snapped back.
+- **`Content` is an ordinary control tree.** A plain node is mounted by the tree reconciler, and a bare
+  `VComponent` root is mounted by the component reconciler into the same host panel, so
+  `Content = new VComponent(page)` needs no wrapper. Changing the content root from one kind to the
+  other between renders replaces the mount, not the window.
+- **Hold the page instance, do not rebuild it in `Render`.** A `VComponent` is matched by its component
+  instance, so a new page in the same `Content` slot is a different component and is mounted fresh;
+  keeping the page with its document leaves the child's state and controls alone when the list
+  re-renders.
+- **A native close is refused, then offered to `CloseRequested`.** No handler means the window stays.
+  The handler is read from the latest node, so a closure over current state is current without
+  recreating the window. The window closes when a later render omits it.
+- **`Application.Exit()` is let through.** It closes windows through the same closing handler, and the
+  mount distinguishes it with `Application.IsExiting` rather than vetoing the application's shutdown.
+- **`ApplicationVNode` is not a `VNode`.** A window has no control to create or patch, and keeping the
+  hierarchies apart makes "a window in a control tree" and "a control in an application render" compile
+  errors rather than run-time refusals.
+
+`src/demo/Kolvir.Demo.VirtualDom` is the sample: a list window that opens documents, one keyed window
+per document, a close handled by `CloseRequested`, and a rename that changes one observable title and
+updates both the document's window and the list's readout. `--check` runs the same component on the
+headless backend and drives the open, close and rename flows through real controls and real frames.
+
 #### Writing your own component base class
 
 `Component` is one implementation of `IComponent`, and the mount only needs the interface:

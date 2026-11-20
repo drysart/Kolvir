@@ -173,6 +173,19 @@ public sealed partial class Application : IDisposable
     public bool IsRunning => _running;
 
     /// <summary>
+    /// True once <see cref="Exit()"/> has been asked for, until a window refuses that exit or the
+    /// application is torn down.
+    /// </summary>
+    /// <remarks>
+    /// A window's closing handler can refuse a close, and <see cref="Exit(int)"/> asks every open
+    /// window to close. A handler that refuses each of those closes would abort every exit, so a
+    /// handler that distinguishes a platform close from the application's own shutdown reads this
+    /// first: while it is true, the close belongs to <see cref="Exit(int)"/> and should be allowed.
+    /// A refusal resets it, because the application is still running at that point.
+    /// </remarks>
+    public bool IsExiting => _exitRequested;
+
+    /// <summary>
     /// True unless <see cref="ApplicationOptions.SingleInstance"/> is set and another process
     /// already owns the application, in which case this launch has been handed to that process.
     /// </summary>
