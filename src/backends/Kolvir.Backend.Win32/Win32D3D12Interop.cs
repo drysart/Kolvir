@@ -80,6 +80,7 @@ internal static unsafe class D3D12
     private const int SlotRelease = 2;
     private const int SlotDeviceCreateCommandQueue = 8;
     private const int SlotAdapterGetDesc1 = 10;
+    private const int SlotAdapter3QueryVideoMemoryInfo = 13;
     private const int SlotAdapterEnumOutputs = 7;
     private const int SlotOutputGetDesc = 7;
     private const int SlotFactoryEnumAdapters1 = 12;
@@ -457,6 +458,33 @@ internal static unsafe class D3D12
     /// </summary>
     internal static bool AllowSoftwareAdapter { get; set; } =
         Environment.GetEnvironmentVariable("KOLVIR_D3D12_ALLOW_SOFTWARE") == "1";
+
+    /// <summary><c>DXGI_QUERY_VIDEO_MEMORY_INFO</c>: what this process has in the segment.</summary>
+    internal struct DxgiQueryVideoMemoryInfo
+    {
+        public ulong Budget;
+        public ulong CurrentUsage;
+        public ulong AvailableForReservation;
+        public ulong CurrentReservation;
+    }
+
+    /// <summary>
+    /// Reads this process's usage of one memory segment. <c>CurrentUsage</c> is the process's own, which
+    /// is what makes this the number to print when a window's dedicated memory is being questioned:
+    /// task manager adds the driver's and the compositor's overhead to it.
+    /// </summary>
+    /// <param name="adapter">The adapter.</param>
+    /// <param name="segment">0 for local, 1 for non-local.</param>
+    /// <param name="info">The usage and the budget.</param>
+    /// <returns>The <c>HRESULT</c>; a software adapter may have no budget to report.</returns>
+    internal static int GetVideoMemoryInfo(IntPtr adapter, int segment, out DxgiQueryVideoMemoryInfo info)
+    {
+        var query = (delegate* unmanaged[Stdcall]<IntPtr, int, DxgiQueryVideoMemoryInfo*, int>)(*(IntPtr**)adapter)[SlotAdapter3QueryVideoMemoryInfo];
+        DxgiQueryVideoMemoryInfo local = default;
+        int result = query(adapter, segment, &local);
+        info = local;
+        return result;
+    }
 
     /// <summary>Reads an <c>DXGI_ADAPTER_DESC1</c>'s description into a managed string.</summary>
     internal static string Describe(DxgiAdapterDesc1 description)

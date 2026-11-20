@@ -298,6 +298,9 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         _height = height;
     }
 
+    /// <summary><c>DXGI_MEMORY_SEGMENT_GROUP_LOCAL</c>: the memory the adapter owns.</summary>
+    private const int MemorySegmentLocal = 0;
+
     private readonly Win32D3D12Device _device;
     private readonly uint _bufferCount;
     private IntPtr _factory;
@@ -307,6 +310,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
     private GRContext? _skia;
     private SKSurface? _retained;
     private bool _needsFull = true;
+    private bool _memoryTraced;
 
     public SKSurface? Surface => _retained;
 
@@ -392,6 +396,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             // read when a window's dedicated memory looks larger than its surfaces explain.
             surface._skia.GetResourceCacheUsage(out int resources, out long cached);
             Win32GlTrace.Write($"kolvir-d3d12: skia cache {resources} resources, {cached / (1024 * 1024)} MiB of {surface._skia.GetResourceCacheLimit() / (1024 * 1024)} MiB");
+            surface.TraceVideoMemory("with the surface built");
         }
 
         failure = string.Empty;
@@ -461,6 +466,28 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         failure = $"d3d12: no swap chain on {device.Renderer} ({string.Join(", ", refusals)})";
         Release(ref factory);
         return false;
+    }
+
+    /// <summary>
+    /// Reports this process's own use of the adapter's local memory. It is printed once the surface
+    /// exists and again after the first frame, because the difference between the two is what Skia's
+    /// first submission costs, and because the figure task manager shows has the driver's and the
+    /// compositor's overhead added to it.
+    /// </summary>
+    /// <param name="where">The moment the figure was taken.</param>
+    private void TraceVideoMemory(string where)
+    {
+        if (!Win32GlTrace.IsEnabled)
+        {
+            return;
+        }
+
+        if (D3D12.GetVideoMemoryInfo(_device.Adapter, MemorySegmentLocal, out var info) < 0 || info.Budget == 0)
+        {
+            return;
+        }
+
+        Win32GlTrace.Write($"kolvir-d3d12: video memory {info.CurrentUsage / (1024 * 1024)} MiB local in use of {info.Budget / (1024 * 1024)} MiB, {where}");
     }
 
     private bool CreateRetained()
@@ -575,6 +602,12 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         // general success case rather than being left to the catch-all.
         if (result == StatusOccluded || result >= 0)
         {
+            if (!_memoryTraced)
+            {
+                _memoryTraced = true;
+                TraceVideoMemory("after the first frame");
+            }
+
             return Win32PresentResult.Presented;
         }
 
