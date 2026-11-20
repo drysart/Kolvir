@@ -57,10 +57,14 @@
     <!-- Set to false to stop embedding the Skia native library, which puts
          libSkiaSharp.dll/libSkiaSharp.so back beside the executable. -->
     <EmbedSkiaSharpNative>true</EmbedSkiaSharpNative>
-    <!-- NativeAOT links with the MSVC toolset. When the MSVC environment is already initialized
-         (a Developer Command Prompt, or a step that called vcvars64.bat), use it directly instead of
-         the ILCompiler's vswhere-based discovery. -->
-    <IlcUseEnvironmentalTools Condition="'$(VCToolsInstallDir)' != '' or '$(VCINSTALLDIR)' != ''">true</IlcUseEnvironmentalTools>
+    <!-- NativeAOT links with the MSVC toolset. When the MSVC environment is already initialized for
+         x64 (a Developer Command Prompt, or a step that called vcvars64.bat), use it directly instead of
+         the ILCompiler's vswhere-based discovery. The architecture is part of the test: with this
+         property true the SDK skips findvcvarsall.bat entirely, so link.exe resolves its libraries from
+         the inherited LIB and INCLUDE, and an x86 environment linking a win-x64 image reports hundreds
+         of unresolved externals rather than an error about the toolchain. VSCMD_ARG_TGT_ARCH is set by
+         vcvars, so it also covers an environment that has VCINSTALLDIR but no working toolset in it. -->
+    <IlcUseEnvironmentalTools Condition="'$(VSCMD_ARG_TGT_ARCH)' == 'x64' and ('$(VCToolsInstallDir)' != '' or '$(VCINSTALLDIR)' != '')">true</IlcUseEnvironmentalTools>
   </PropertyGroup>
 
   <ItemGroup>

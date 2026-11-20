@@ -20,10 +20,18 @@
 		 global property reaches every project the publish touches: a class library that references
 		 Kolvir, or Kolvir itself in this repository, is then built with PublishAot set while
 		 having no runtime identifier and therefore no native assets to find. Only an application
-		 has anything to embed the library in. -->
+		 has anything to embed the library in.
+
+		 The runtime identifier is part of the test for the same reason, in the other direction: an
+		 application that carries PublishAot in its own property group - Kolvir.Minimal does - is an
+		 AOT build before it is a runtime-specific one, so its ordinary Release build, which is what
+		 an IDE builds before it publishes, has no runtime identifier and therefore no native assets
+		 either. The embed belongs to the publish, and the publish is the build that has a
+		 runtime identifier. -->
 	<_KolvirEmbedSkiaSharpNative
 		Condition="'$(_KolvirEmbedSkiaSharpNative)' == ''
 				   and '$(PublishAot)' == 'true'
+				   and '$(RuntimeIdentifier)' != ''
 				   and '$(EmbedSkiaSharpNative)' != 'false'
 				   and ('$(OutputType)' == 'Exe' or '$(OutputType)' == 'WinExe')
 				   and !$([MSBuild]::IsOSPlatform('osx'))">true</_KolvirEmbedSkiaSharpNative>
