@@ -70,13 +70,6 @@ public sealed class Gtk4SkiaView : IDisposable
     private readonly GLib.SourceFunc _notifyMetrics;
     private readonly GLib.SourceFunc _presentationSwap;
 
-    /// <summary>
-    /// Whether this view was created for a window that asked for acceleration. The option is a
-    /// window-creation decision, so it is read once: a window never switches back on after is has
-    /// fallen back, exactly as on Windows and macOS.
-    /// </summary>
-    private readonly bool _useHardwareAcceleration;
-
     private Gtk4GlSurface? _gl;
     private bool _glUnavailable;
     private bool _presentationSwapPending;
@@ -147,7 +140,6 @@ public sealed class Gtk4SkiaView : IDisposable
     internal Gtk4SkiaView(UiHost host, bool hardwareAcceleration)
     {
         Host = host;
-        _useHardwareAcceleration = hardwareAcceleration;
         _gfxReason = hardwareAcceleration ? "cpu (not created)" : "cpu (disabled)";
 
         if (!hardwareAcceleration)
@@ -188,17 +180,19 @@ public sealed class Gtk4SkiaView : IDisposable
         // for input exactly as it did before. GTK still snapshots - and so still renders - an area
         // that an opaque sibling covers, which is what lets the seam come up underneath the frame
         // the user is already looking at instead of showing an empty window while it tries.
-        if (!_glUnavailable)
-        {
-            _glArea = Gtk.GLArea.New();
-            _glArea.SetHexpand(true);
-            _glArea.SetVexpand(true);
-            _glArea.SetHasDepthBuffer(false);
-            _glArea.SetHasStencilBuffer(true);
-            _glArea.OnRender += OnGlRender;
-            _glArea.OnUnrealize += OnGlAreaUnrealize;
-            _root.Attach(_glArea, 0, 0, 1, 1);
-        }
+        //
+        // It is built even for a window that did not ask for acceleration, because a switch made while
+        // the window runs has to be able to turn it on. A hidden widget is never realized, so a window
+        // on the CPU path pays nothing for it until it is shown.
+        _glArea = Gtk.GLArea.New();
+        _glArea.SetHexpand(true);
+        _glArea.SetVexpand(true);
+        _glArea.SetHasDepthBuffer(false);
+        _glArea.SetHasStencilBuffer(true);
+        _glArea.OnRender += OnGlRender;
+        _glArea.OnUnrealize += OnGlAreaUnrealize;
+        _glArea.SetVisible(!_glUnavailable);
+        _root.Attach(_glArea, 0, 0, 1, 1);
 
         // The picture goes in before the drawing area so that the area, which receives input, stays
         // on top of it.
@@ -222,6 +216,86 @@ public sealed class Gtk4SkiaView : IDisposable
     internal string? GraphicsRenderer => _gl?.Renderer;
 
     /// <summary>
+    /// Makes this view draw with <paramref name="option"/> from now on.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened. Never null.</param>
+    /// <returns>True when the view is drawing with <paramref name="option"/> afterwards.</returns>
+    /// <remarks>
+    /// macOS and Windows rebuild something native here; GTK does not have to. Both tiers are already
+    /// children of the same grid - the <see cref="Gtk.GLArea"/> and the picture the CPU path draws
+    /// into - and which one is on top is a visibility flip the presentation swap already performs. So a
+    /// switch drops one Skia surface and builds the other, and the window, its controls and their state
+    /// are untouched. There is no transition to hide for the same reason: no window is shown again.
+    /// </remarks>
+    internal bool TrySwitchAcceleration(GpuAccelerationOption option, out string reason)
+    {
+        ArgumentNullException.ThrowIfNull(option);
+
+        if (option.Kind == GpuAccelerationKind.Cpu)
+        {
+            // The same path a failed seam takes, so the picture, the full repaint and the swap back are
+            // the ones every other fallback already uses.
+            DropToCpu("cpu (chosen)");
+            reason = "Now drawing on the CPU path.";
+            return true;
+        }
+
+        if (option.Kind != GpuAccelerationKind.OpenGl)
+        {
+            reason = $"{option.Name} cannot draw this window on Linux.";
+            return false;
+        }
+
+        if (_glArea is null)
+        {
+            reason = "This window has no GL area to draw through.";
+            return false;
+        }
+
+        _glUnavailable = false;
+        _gfxReason = "cpu (gl not up yet)";
+
+        // Shown from here on: the swap makes the area visible and asks it for a frame, which is what
+        // realizes it when the window had been on the CPU path.
+        SchedulePresentationSwap();
+
+        var width = _area.GetWidth();
+        var height = _area.GetHeight();
+        var scale = Math.Max(_area.ScaleFactor, 1);
+
+        if (!_glArea.GetRealized() || width <= 0 || height <= 0)
+        {
+            // A context cannot be made on a widget that has never been realized, so this window answers
+            // optimistically and the seam reports what really happened when it comes up on its first
+            // frame - the same way a window that had not been sized yet reports on its first paint.
+            _glArea.QueueRender();
+            reason = "Switching to OpenGL; the next frame reports what it built.";
+            return true;
+        }
+
+        _glArea.MakeCurrent();
+
+        // A surface cannot be replaced in place: the old one owns GPU resources that have to be given
+        // back while the context it was made on is still current, which it is right now.
+        _gl?.Dispose();
+        _gl = null;
+
+        TryCreateGl(_glArea, width, height, scale);
+
+        if (_gl is null)
+        {
+            // The window stays on the CPU path: the seam has already put the picture back and asked for
+            // a full frame, so the only thing left to say is why.
+            reason = $"Fell back to the CPU path: {_gfxReason}.";
+            return false;
+        }
+
+        reason = $"Now drawing with OpenGL: {_gl.Renderer}.";
+        return true;
+    }
+
+    /// <summary>
     /// Adds a handler that runs when <see cref="GraphicsPath"/> stops saying "not decided". The GL
     /// seam is chosen on the first render pass rather than when the window is created, so this is
     /// how a caller learns the outcome; a view that already knows it - because acceleration was
@@ -231,14 +305,16 @@ public sealed class Gtk4SkiaView : IDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
 
+        // Answering now is not instead of listening: a view that has already decided still reports
+        // every change after it, and a caller that attaches late - which a window starting on the CPU
+        // path does, because that decision is made on its first frame - would otherwise hear the first
+        // answer and nothing that comes after it.
         if (_gfxDecided)
         {
             handler(this);
         }
-        else
-        {
-            _graphicsPathChanged += handler;
-        }
+
+        _graphicsPathChanged += handler;
 
         return new HandlerToken<Action<object>>(RemoveGraphicsPathChangedHandler, handler);
     }
@@ -252,11 +328,8 @@ public sealed class Gtk4SkiaView : IDisposable
 
     private void MarkGraphicsPathDecided()
     {
-        if (_gfxDecided)
-        {
-            return;
-        }
-
+        // Every change, not just the first: a switch made while the window runs moves the path as well,
+        // and whatever is showing the answer in a settings list has to hear about that one too.
         _gfxDecided = true;
         _graphicsPathChanged?.Invoke(this);
     }

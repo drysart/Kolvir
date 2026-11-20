@@ -5477,6 +5477,21 @@ gfx: cpu (KOLVIR_GL_OPTIONS=cpu)
 `KOLVIR_NO_D3D12` and `KOLVIR_NO_VULKAN` still apply: they are hard offs for one tier, whereas
 `KOLVIR_GL_OPTIONS` chooses the order of the ones that remain.
 
+The variable is not Win32-only. Every backend honours it with the words it has - `d3d`, `vulkan` and
+`ogl` here, `metal` on macOS, `ogl` on Linux - so one command line takes a machine off its GPU
+everywhere:
+
+```
+KOLVIR_GL_OPTIONS=cpu KolvirDemoApp     # run this build without touching a GPU, on any platform
+```
+
+A backend ignores words that name a tier it does not have, so a value written for one platform neither
+enables nor disables anything on another: `KOLVIR_GL_OPTIONS=d3d` on a Mac is the same as leaving the
+variable unset, rather than being read as "no tier I know of, so use the CPU". `KOLVIR_NO_D3D12` and
+`KOLVIR_NO_VULKAN` stay Win32-only, because they exist to take one tier out of an enumeration that has
+three. As on Win32, the variable decides only when the application named nothing: an explicit
+`GfxAcceleration` wins over it, and a switch made while a window runs wins over both.
+
 The tier refuses a software adapter. WARP answers every call and then rasterizes on the CPU, which is
 slower than the DIB path the tier exists to beat, and the Basic Render Driver that a machine with no
 GPU exposes does not always set `DXGI_ADAPTER_FLAG_SOFTWARE` - so the adapter's description is checked
@@ -5720,18 +5735,126 @@ flip-model swap chain cannot cross adapters; the Vulkan tier tries the identifie
 first and moves on when it cannot present to the window. Either way the window ends up on a GPU rather
 than on nothing.
 
+### Switching while running: `TryApply`
+
+The same value can be applied without a restart, which is what a settings window wants: the user
+picks a row, the window changes what it draws with, and the content stays on screen.
+
+```csharp
+if (!acceleration.TryApply(option, out var reason))
+    status.Text = reason;          // the window is unchanged; this says why
+```
+
+`TryApply` has an overload taking the `Value` string directly, for a value read back from storage.
+Both return `false` with a sentence in `reason` when the window was *not* moved, and `Current` only
+changes on `true`, so a failed attempt leaves the picker agreeing with the window.
+
+The attempt is validated against `Options` before anything is touched, so a value this machine does
+not offer is refused with the same sentence the enumeration would have printed rather than rebuilding
+a surface to find out. After that the backend does the work per window: the GPU surface and its
+buffer are released, a new tier is built for the new choice, and the window is invalidated so the
+next paint goes through the new surface. That costs one surface rebuild per window - the same work
+`Resize` already does - so asking for the value a window already has rebuilds it rather than being
+free, which is harmless and keeps the backend from having to compare what a tier is made of.
+
+A refusal is not only "unavailable". If the requested family exists but the window could not be
+built on it - the case this machine hits, where `opengl32.dll` is present but there is no usable
+context - the switch reports `Fell back to the CPU path: ...` and returns `false`, because accepting
+it would have the window quietly drawing on the CPU while the picker claims OpenGL. Accelerated
+rows that a multi-GPU machine lists but cannot present to the window's display are the same story.
+
+A few more rules worth knowing:
+
+- **The window is replaced, not reused.** A swap chain keeps the window it presents on: releasing it
+  does not give that window its GDI output back - invalidating the window, a frame-changed window
+  position, a full `RedrawWindow` and a `DWMWA_CLOAK` round-trip were each measured against a real
+  flip-model chain and none of them restore it - and a WGL context leaves a pixel format on the
+  window's DC that can never be unset. An HWND with no history has neither problem, so a switch makes
+  a new window: same class, place, size, style and owner, with the popups owned by the old one closed,
+  the native teardowns released, and the drawing buffer and GPU surface rebuilt. The handle the
+  backend reports changes with it, so an application that cached `Window.Handle` has to read it again.
+  Anything a feature registered against the old handle hears about the swap through
+  `WindowPhase.NativeWindowRecreated` - the drop target is the one that exists today. A press that is
+  in flight ends first, with its release delivered through the normal mouse-up path, so the control
+  under the pointer is not left holding it.
+- **Neither transition is seen.** Windows 11 animates a window that appears and a window that goes,
+  and a switch wants neither. `DWMWA_TRANSITIONS_FORCEDISABLED` is the documented switch for it and it
+  works, provided the setting is in force *before* the show: it is applied to the replacement and left
+  in place until the window is up, and applied to the old window immediately before it is destroyed,
+  then cleared so minimising and restoring keep their animations. The trap is that a window must be
+  created hidden for this to mean anything - `GW_STYLE` reports `WS_VISIBLE` for any window on screen,
+  and `CreateWindowExW` shows a window whose style carries it, so a replacement built from the old
+  window's style is displayed, and animated, inside the call that creates it, and the `ShowWindow`
+  after it is a no-op. `RecreateWindow` therefore masks `WS_VISIBLE` off the copied style and leaves
+  the show to `RestorePresentation`, where the attribute already applies.
+- **A maximised window comes back with the size it had.** `GetWindowRect` reports the maximised
+  rectangle for a maximised window and somewhere off the bottom of the screen for a minimised one, so
+  a replacement created at those coordinates restores to full screen. The old window's
+  `WINDOWPLACEMENT` is read instead and put back on the replacement while it is still hidden:
+  `rcNormalPosition` is exactly the rectangle the window restores to, and `SetWindowPlacement` reads it
+  in the coordinates `GetWindowPlacement` wrote it in, so it goes back unchanged. Whether the window
+  was visible, maximised, minimised, active, foreground or holding the mouse capture is put back after
+  the show, with the replacement made active explicitly because a window that has just been created
+  does not take the focus by itself.
+- **Not on a child window**, which was the first thing tried: Direct3D 12 and Vulkan present through
+  flip-model swap chains, and a flip chain created on a child HWND builds and presents without ever
+  being composited, so the accelerated tiers need a top-level window.
+- **Thread affinity.** A window's GPU surface belongs to the thread that owns it, so `TryApply` must
+  be called from that thread - a UI event handler already is. The Win32 backend checks with
+  `GetWindowThreadProcessId` and refuses off-thread rather than tearing the surface down from under
+  the owner.
+- **Windows created later.** The applied choice is remembered and handed to windows created
+  afterwards, so a switch followed by a new window does not make the two disagree. It is kept apart
+  from `ApplicationOptions.GfxAcceleration`: the choice an application saved stays as it was saved,
+  and persisting the new one is the application's decision, made when it writes its own settings.
+
+A backend that cannot do this refuses by default with "This backend cannot change acceleration while
+it runs." - the base `GpuAccelerationService.ApplyCurrent` only says yes where it has been
+implemented - so a caller can offer the switch unconditionally and let the platform answer. All three
+backends answer yes now; what a switch costs differs, and so does what gets rebuilt.
+
+**macOS** is the cheap case: the Metal surface is a `CAMetalLayer` inside the content view, so a switch
+releases that layer and builds another underneath the same `NSWindow`. **Linux** is cheaper still:
+GTK4's two tiers are already children of the same grid - the `Gtk.GLArea` and the picture the CPU path
+draws into - so a switch drops one Skia surface, builds the other, and flips which child is visible,
+which is the swap the seam already performs when it comes up. On both, nothing about the window
+changes: not its identity, focus, place or controls, and no window is shown again, so there is no
+transition to suppress. The GL area is built even for a window that starts on the CPU path, hidden,
+because a hidden widget is never realized and so costs nothing until a switch turns the seam on; a
+window that had never been on GL answers optimistically and reports what it really built when the seam
+comes up on its next frame, since a context cannot be made on a widget GTK has not realized yet.
+
+**Windows** is the expensive case: a flip-model swap chain keeps the HWND it presents on, so the window
+itself has to be replaced, which is where the transitions setting, the `WINDOWPLACEMENT` and the
+`WindowPhase` notification come in (see above).
+
+All three report what a window actually built through the same service and honour the same
+`ApplicationOptions.GfxAcceleration` value at startup, so an application's settings page needs no
+platform case at all.
+
+A Metal value carries the device's registry id in hex - `metal:000000010000017f` - which is the only
+identity Metal reports for a device and survives a reboot. It is the same kind of thing as the Win32
+families' hardware identity, and for the same reason: an index into the enumeration moves when the
+list is reordered. GTK4 has nothing to choose between inside its one family - the GL context belongs to
+the area GTK made - so its value is the bare `ogl`.
+
+The sample exercises both: `--acceleration <value>` chooses at startup, `--apply-acceleration
+<value>` applies a switch once the first window exists (printing the result, which is how a script
+checks it without a screen; comma-separated values are applied in turn, which is how repeated
+switches are checked), and the **Graphics acceleration** page shows exactly this list -
+`--page graphics-acceleration`, kept last in the navigation so every earlier page keeps the position
+a screenshot script names. Selecting a row applies it there and then - the same `TryApply` the
+section above describes - prints its value under the list and copies it with one click, which is how
+a machine with more than one GPU can be checked: the value should name a card that stays the same
+across a reboot, and it should match what the window reports it is drawing with in the line below.
+
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in section 8 of
 [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 3,524,608 -> 3,575,808, so +51,200 bytes for the
-seam, the Win32 enumeration, the device identities and the startup setting together. No new native
-asset: DXGI, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll` are all asked through the same raw interop
-the tiers already use.
-
-The sample has a **Graphics acceleration** page that shows exactly this list - `--page
-graphics-acceleration`, kept last in the navigation so every earlier page keeps the position a
-screenshot script names. Selecting a row prints its value under the list and copies it with one click,
-which is how a machine with more than one GPU can be checked: the value should name a card that stays
-the same across a reboot, and it should match what the window reports it is drawing with in the line
-below.
+seam, the Win32 enumeration, the device identities and the startup setting together. The live switch
+adds nothing measurable on top: the same build measures 3,575,808, because the switch is a virtual
+method and a rebuilt surface rather than new code the trimmer has to keep - `Kolvir.Minimal` never
+calls it. No new native asset either: DXGI, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll` are all
+asked through the same raw interop the tiers already use.
 
 ## Hardware acceleration (macOS)
 

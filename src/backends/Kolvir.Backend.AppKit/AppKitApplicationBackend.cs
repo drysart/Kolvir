@@ -24,7 +24,7 @@ namespace Kolvir.Backend.AppKit;
 /// modal mode, so queued <see cref="Invoke"/> work keeps flowing while a dialog is open.
 /// </para>
 /// </remarks>
-public sealed class AppKitApplicationBackend : IApplicationBackend
+public sealed class AppKitApplicationBackend : IApplicationBackend, IAppKitAccelerationTarget
 {
     private Action<object>? _activated;
     private Action<object, SecondInstanceEventArgs>? _secondInstance;
@@ -302,6 +302,81 @@ public sealed class AppKitApplicationBackend : IApplicationBackend
         services.AddSingleton<ILauncher>(static provider => provider.GetRequiredService<AppKitLauncher>());
         services.AddSingleton(SystemTheme);
         services.AddSingleton<IDialogService, AppKitDialogService>();
+
+        // Over the CPU-only default the core registered: this backend can enumerate real GPUs, and it
+        // owns the windows a switch has to rebuild.
+        Acceleration = new AppKitGpuAccelerationService(this);
+        services.AddSingleton(Acceleration);
+        services.AddSingleton<IGpuAccelerationService>(Acceleration);
+    }
+
+    /// <summary>
+    /// What this process can draw with, shared by every window so that they all report into one answer.
+    /// </summary>
+    /// <remarks>
+    /// Windows are created outside the container - the application asks its backend for each one - so the
+    /// backend holds this rather than each window resolving its own copy. It is registered as a singleton
+    /// as well, so an application reaching <see cref="IGpuAccelerationService"/> through
+    /// <see cref="Application.Services"/> gets this same instance and sees what the windows report.
+    /// </remarks>
+    internal AppKitGpuAccelerationService Acceleration { get; private set; } = new();
+
+    /// <summary>
+    /// Switches every open window to <paramref name="option"/>, which is what a live change of
+    /// acceleration costs here: one rebuilt Metal layer per window.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened. Never null.</param>
+    /// <returns>True when every window is drawing with <paramref name="option"/> afterwards.</returns>
+    /// <remarks>
+    /// AppKit is not thread safe, and every window here belongs to the main thread, so this only works
+    /// when it is called from there - which is where a click handler runs. A window that refuses leaves
+    /// the refusal's sentence in <paramref name="reason"/> and the earlier windows switched; with no
+    /// window open at all the choice is simply recorded, and the next window starts with it.
+    /// </remarks>
+    bool IAppKitAccelerationTarget.Apply(GpuAccelerationOption option, out string reason)
+    {
+        AppKitWindowBackend[] windows;
+
+        lock (_windowsGate)
+        {
+            windows = [.. _windows];
+        }
+
+        if (windows.Length == 0)
+        {
+            reason = $"No window is open; {option.Name} will be used by the next one.";
+            return true;
+        }
+
+        if (!NSThread.IsMain)
+        {
+            reason = "Acceleration can only be switched from the main thread.";
+            return false;
+        }
+
+        reason = string.Empty;
+        var all = true;
+
+        foreach (var window in windows)
+        {
+            if (!window.TrySwitchAcceleration(option, out var windowReason))
+            {
+                all = false;
+
+                if (reason.Length == 0)
+                {
+                    reason = windowReason;
+                }
+            }
+        }
+
+        if (all)
+        {
+            reason = $"{windows.Length} window(s) now using {option.Name}.";
+        }
+
+        return all;
     }
 
     /// <inheritdoc />

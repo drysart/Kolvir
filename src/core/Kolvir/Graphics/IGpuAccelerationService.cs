@@ -51,4 +51,33 @@ public interface IGpuAccelerationService
 
     /// <summary>Raised when <see cref="Current"/> changes, so a settings list can follow it.</summary>
     event EventHandler? CurrentChanged;
+
+    /// <summary>
+    /// Switches every window to <paramref name="value"/> while the application runs, so a settings UI can
+    /// apply a choice without a restart.
+    /// </summary>
+    /// <param name="value">A value from <see cref="Options"/>, such as <c>d3d:10de-2504-1616</c>.</param>
+    /// <param name="reason">
+    /// One sentence saying what happened, whether or not it worked: the step that could not be built, or
+    /// that the choice is already in use. Never null.
+    /// </param>
+    /// <returns>
+    /// True when the requested choice is what the windows are drawing with afterwards. False when it could
+    /// not be honored - which includes the case where the family was built but a window fell back to the
+    /// CPU path, because a request that quietly turns into a different answer is the one thing a settings
+    /// UI must not show.
+    /// </returns>
+    /// <remarks>
+    /// Switching means building a new drawing surface, so it is not free: expect the window to miss a
+    /// frame or two, and nothing else to change. What is on screen is repainted, the controls and their
+    /// state are untouched, and <see cref="Current"/> follows whatever the windows actually built. A
+    /// backend that cannot do this while it runs refuses and leaves everything as it was.
+    /// </remarks>
+    bool TryApply(string? value, out string reason);
+
+    /// <summary>Switches every window to <paramref name="option"/>, which must be one of <see cref="Options"/>.</summary>
+    /// <param name="option">The choice, as a settings list holds it.</param>
+    /// <param name="reason">One sentence saying what happened. Never null.</param>
+    /// <returns>True when the choice is what the windows are drawing with afterwards.</returns>
+    bool TryApply(GpuAccelerationOption option, out string reason);
 }

@@ -116,6 +116,11 @@ internal static class Program
             // --no-hardware-acceleration is the off switch everywhere.
             GfxHardwareAcceleration = Array.IndexOf(args, "--no-hardware-acceleration") < 0,
 
+            // --acceleration names the value the graphics-acceleration page would save, so the startup
+            // path can be tried on a machine without editing the sample. It is the same string the page
+            // copies; --apply-acceleration is the live one.
+            GfxAcceleration = ArgumentValue(args, "--acceleration"),
+
             // The application-wide icon: the Dock tile on macOS, the taskbar and Alt-Tab on Windows,
             // and the default icon name for every GTK window. Windows also shows it in the title bar
             // because Window inherits this when it is created.
@@ -238,6 +243,22 @@ internal static class Program
             // captured headlessly.
             var partialDamage = Array.IndexOf(args, "--partial-damage") >= 0;
             window.AddShownHandler(_ => demo.StartBenchmark(partialDamage));
+        }
+
+        // --apply-acceleration switches the running window to a value the graphics-acceleration page
+        // would copy, which is how the live switch is driven without a pointer. Values separated by
+        // commas are applied in turn, which is what a switch that replaces the window needs in order to
+        // be checked more than once. Registered before the platform handlers below, so the gfx: line
+        // they print describes the tier that came up rather than the one the window opened with.
+        if (ArgumentValue(args, "--apply-acceleration") is { } acceleration)
+        {
+            window.AddShownHandler(_ =>
+            {
+                foreach (var value in acceleration.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    Console.WriteLine(demo.ApplyAcceleration(value));
+                }
+            });
         }
 
         // Opens the menus page's context menu as if the box had been right-clicked, which is what a

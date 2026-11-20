@@ -830,6 +830,34 @@ public sealed class DemoUi
     /// </remarks>
     private TPage FindPage<TPage>() where TPage : DemoPage => _pages.OfType<TPage>().First();
 
+    /// <summary>
+    /// Switches the running window to an acceleration value, which is what the graphics-acceleration page
+    /// does when a row is clicked and what <c>--apply-acceleration</c> calls.
+    /// </summary>
+    /// <param name="value">A value from the service, such as <c>cpu</c> or <c>d3d:10de-2504-1616</c>.</param>
+    /// <returns>One sentence saying what happened, for the status line and the console.</returns>
+    /// <remarks>
+    /// The service is resolved from the window rather than held, because a page is built before the window
+    /// exists and this is also reachable from the command line before anything has been drawn.
+    /// </remarks>
+    public string ApplyAcceleration(string value)
+    {
+        if (OwnerWindow is not { } window)
+        {
+            return "No window to switch.";
+        }
+
+        if (window.Services.GetService(typeof(IGpuAccelerationService)) is not IGpuAccelerationService service)
+        {
+            return "This application registered no IGpuAccelerationService.";
+        }
+
+        var applied = service.TryApply(value, out var reason);
+        var sentence = applied ? reason : $"Not applied - {reason}";
+        SetStatus(sentence);
+        return sentence;
+    }
+
     /// <summary>Tells the pages which presentation path produced what is on screen.</summary>
     /// <param name="path">The path the window is rendering through.</param>
     /// <param name="renderer">The backend's own name for its renderer, or null when it does not report one.</param>

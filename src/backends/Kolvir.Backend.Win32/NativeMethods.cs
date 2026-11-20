@@ -88,6 +88,9 @@ internal static class NativeMethods
     internal const int HtBottomRight = 17;
     internal const int SwShow = 5;
     internal const int SwShowNoActivate = 4;
+
+    /// <summary><c>SW_SHOWMINNOACTIVE</c>: minimised, without taking the foreground.</summary>
+    internal const int SwShowMinNoActive = 7;
     internal const int SwHide = 0;
     internal const uint SwpNoZOrder = 0x0004;
     internal const uint SwpNoActivate = 0x0010;
@@ -105,6 +108,14 @@ internal static class NativeMethods
 
     // Popup menu window.
     internal const uint WsPopup = 0x80000000;
+
+    /// <summary>
+    /// Set on every window that is on the screen. It comes back from <c>GW_STYLE</c>, and passing it to
+    /// <c>CreateWindowExW</c> shows the window during creation - which is how a window's opening
+    /// transition would start before anything could be said about transitions.
+    /// </summary>
+    internal const uint WsVisible = 0x10000000;
+
     internal const uint WsClipChildren = 0x02000000;
     internal const uint WsExToolWindow = 0x00000080;
     internal const uint WsExTopmost = 0x00000008;
@@ -301,6 +312,26 @@ internal static class NativeMethods
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    /// <summary>
+    /// The shape <c>GetWindowPlacement</c> and <c>SetWindowPlacement</c> exchange.
+    /// </summary>
+    /// <remarks>
+    /// <c>rcNormalPosition</c> is the rectangle the window restores to, in workspace coordinates, and it
+    /// is the only way to learn where a window belongs while it is maximised or minimised: for those
+    /// states <c>GetWindowRect</c> reports the maximised rectangle, or somewhere off the bottom of the
+    /// screen, and neither is the restored size.
+    /// </remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WINDOWPLACEMENT
+    {
+        public int length;
+        public int flags;
+        public int showCmd;
+        public POINT ptMinPosition;
+        public POINT ptMaxPosition;
+        public RECT rcNormalPosition;
     }
 
     /// <summary>
@@ -590,6 +621,18 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool InvalidateRect(IntPtr hwnd, ref RECT lpRect, bool bErase);
 
+    /// <summary>The thread that created <paramref name="hwnd"/>, which is the only one that may redraw it.</summary>
+    /// <param name="hwnd">The window.</param>
+    /// <param name="processId">The process that owns it, or zero when it is not wanted.</param>
+    /// <returns>The owning thread's id, or zero when the window does not exist.</returns>
+    [DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    /// <summary>The calling thread's id, for the check above.</summary>
+    /// <returns>The calling thread's id.</returns>
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+
     [DllImport("user32.dll")]
     internal static extern bool ValidateRect(IntPtr hwnd, IntPtr lpRect);
 
@@ -608,6 +651,15 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr SetCapture(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetCapture();
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    internal static extern bool IsWindowVisible(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     internal static extern bool ReleaseCapture();
@@ -715,6 +767,12 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr SetFocus(IntPtr hwnd);
 
+    [DllImport("user32.dll")]
+    internal static extern IntPtr SetActiveWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetActiveWindow();
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern IntPtr SetWindowLongPtrW(IntPtr hwnd, int index, IntPtr value);
 
@@ -738,6 +796,12 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern bool GetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
+
+    [DllImport("user32.dll")]
+    internal static extern bool SetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
 
     [DllImport("user32.dll")]
     internal static extern bool GetCursorPos(out POINT lpPoint);
@@ -1031,6 +1095,33 @@ internal static class NativeMethods
     private const int DwmwaCaptionColor = 35;
     internal const uint DwmColorDefault = 0xFFFFFFFF;
 
+    /// <summary><c>DWMWA_TRANSITIONS_FORCEDISABLED</c>: suppresses the show, hide and zoom animations.</summary>
+    private const int DwmwaTransitionsForceDisabled = 3;
+
+    /// <summary>
+    /// Suppresses, or restores, the system's transition animations for one window.
+    /// </summary>
+    /// <param name="hwnd">The window.</param>
+    /// <param name="disabled">True to suppress the animations, false to put them back.</param>
+    /// <returns>The <c>HRESULT</c> DWM answered with: zero when it accepted the setting.</returns>
+    /// <remarks>
+    /// DWM documents this as the switch that forcibly disables its transitions, and it is what keeps a
+    /// replacement window from animating in. Whether a particular build honours it is answered by the
+    /// <c>HRESULT</c> it returns, which is why that is handed back rather than a bool: a call that DWM
+    /// rejects is the difference between "the system ignored the setting" and "the setting was never
+    /// applied".
+    /// </remarks>
+    internal static int SetTransitionsDisabled(IntPtr hwnd, bool disabled)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return unchecked((int)0x80070057);
+        }
+
+        var value = disabled ? 1 : 0;
+        return DwmSetWindowAttribute(hwnd, DwmwaTransitionsForceDisabled, ref value, sizeof(int));
+    }
+
     /// <summary>Reads a REG_DWORD from HKEY_CURRENT_USER, or null when the value is absent.</summary>
     internal static uint? ReadUserDword(string subKey, string valueName)
     {
@@ -1125,8 +1216,7 @@ internal static class NativeMethods
             return DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int)) == 0;
         }
 
-        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)
-        {
+        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)        {
             colorRef = 0;
             if (hwnd == IntPtr.Zero)
             {

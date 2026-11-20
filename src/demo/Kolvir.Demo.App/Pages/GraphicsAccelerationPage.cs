@@ -15,10 +15,11 @@ namespace Kolvir.Demo;
 /// card rather than a position gets checked.
 /// </para>
 /// <para>
-/// Selecting a row changes nothing on screen: there is no live switch yet. The selection is what an
-/// application would hand to <see cref="ApplicationOptions.GfxAcceleration"/> at the next start, which
-/// is why the page also reports what the window is drawing with now - the two agreeing is the whole
-/// point of a saved setting.
+/// Selecting a row switches this window to it, live: the drawing surface is rebuilt, the UI is untouched
+/// and the window redraws through the new tier. Following the list is therefore enough to see a machine's
+/// paths change under the same content. The switch lasts for this run; the value is what an application
+/// saves to have it next time, and the two in-use lines below are the cross-check - the service's answer
+/// against the one the window itself reports.
 /// </para>
 /// </remarks>
 internal sealed class GraphicsAccelerationPage : DemoPage
@@ -36,8 +37,11 @@ internal sealed class GraphicsAccelerationPage : DemoPage
     private string _graphicsPath = "not reported yet";
     private string? _graphicsRenderer;
 
-    /// <summary>Set while the rows are being filled, so replacing them does not change the readouts.</summary>
-    private bool _filling;
+    /// <summary>
+    /// Set while the rows are being filled or the selection is being moved to follow the service, so that
+    /// replacing the rows or tracking a live change does not look like the user asking for a switch.
+    /// </summary>
+    private bool _syncing;
 
     /// <summary>Builds the page, once, for the life of the window.</summary>
     /// <param name="shell">The window the page is shown in.</param>
@@ -86,15 +90,16 @@ internal sealed class GraphicsAccelerationPage : DemoPage
         card.Controls.Add(Heading("Graphics acceleration"));
 
         card.Controls.Add(new Label(
-            "Every choice this machine offers, from IGpuAccelerationService. The value under the list is "
-            + "what an application saves: the family, then the card's hardware identity - vendor, device "
-            + "and subsystem ids on Direct3D 12, a device UUID on Vulkan - rather than its position in "
-            + "the enumeration, which shifts when a GPU is added or disabled. Selecting a row applies "
-            + "nothing; there is no live switch, so a saved value takes effect at the next start.")
+            "Every choice this machine offers, from IGpuAccelerationService. Selecting a row switches this "
+            + "window to it while it runs - the drawing surface is rebuilt, nothing else changes - so the "
+            + "same page can be seen on each path. The value under the list is what an application saves: "
+            + "the family, then the card's hardware identity rather than its position in the enumeration, "
+            + "which shifts when a GPU is added or disabled. A switch lasts for this run; passing the value "
+            + "back as ApplicationOptions.GfxAcceleration is what carries it to the next start.")
         {
             Dock = XDock.Top,
             AutoSize = false,
-            Height = 56f,
+            Height = 66f,
             WrapText = true,
             Font = Theme.CaptionFont,
             ForeColorRole = ThemeColor.MutedForeground,
@@ -113,7 +118,7 @@ internal sealed class GraphicsAccelerationPage : DemoPage
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };
 
-        _list.AddSelectedIndexChangedHandler(_ => ShowSelection());
+        _list.AddSelectedIndexChangedHandler(_ => OnSelectionChanged());
         card.Controls.Add(_list);
 
         card.Controls.Add(Caption("Selected value"));
@@ -184,7 +189,7 @@ internal sealed class GraphicsAccelerationPage : DemoPage
     /// <param name="service">The service to ask.</param>
     private void Populate(IGpuAccelerationService service)
     {
-        _filling = true;
+        _syncing = true;
 
         try
         {
@@ -204,7 +209,7 @@ internal sealed class GraphicsAccelerationPage : DemoPage
         }
         finally
         {
-            _filling = false;
+            _syncing = false;
         }
 
         ShowSelection();
@@ -226,22 +231,71 @@ internal sealed class GraphicsAccelerationPage : DemoPage
         }
     }
 
+    /// <summary>
+    /// A row was chosen: show its value, then ask the service for it.
+    /// </summary>
+    /// <remarks>
+    /// The selection is both the choice and the action, which is why the two readouts below exist to
+    /// follow it: a row that could not be honored puts the selection back on what is really in use, and
+    /// the status line says what stood in the way.
+    /// </remarks>
+    private void OnSelectionChanged()
+    {
+        if (_syncing)
+        {
+            return;
+        }
+
+        ShowSelection();
+        ApplySelected();
+    }
+
+    /// <summary>Switches the window to the selected row, or says why it could not.</summary>
+    private void ApplySelected()
+    {
+        if (_service is not { } service)
+        {
+            return;
+        }
+
+        var index = _list.SelectedIndex;
+
+        if (index < 0 || index >= _options.Count)
+        {
+            return;
+        }
+
+        _syncing = true;
+
+        try
+        {
+            var applied = service.TryApply(_options[index], out var reason);
+            SetStatus(applied ? reason : $"Not applied - {reason}");
+        }
+        finally
+        {
+            _syncing = false;
+        }
+
+        // A switch that had to fall back has already moved Current, and the row should follow it rather
+        // than keep naming something the window is not doing.
+        ShowCurrent();
+    }
+
     /// <summary>Shows the value of the selected row: the string an application would save.</summary>
     private void ShowSelection()
     {
         var index = _list.SelectedIndex;
 
-        if (_filling || index < 0 || index >= _options.Count)
+        if (index < 0 || index >= _options.Count)
         {
             return;
         }
 
-        var option = _options[index];
-        _valueLabel.Text = option.Value;
-        SetStatus($"Acceleration value: {option.Value}");
+        _valueLabel.Text = _options[index].Value;
     }
 
-    /// <summary>Shows what the service and the window each say is in use.</summary>
+    /// <summary>Shows what the service and the window each say is in use, and follows the service.</summary>
     private void ShowCurrent()
     {
         if (_service is not { } service)
@@ -256,12 +310,27 @@ internal sealed class GraphicsAccelerationPage : DemoPage
             ? $"{_graphicsPath} - {renderer}"
             : _graphicsPath;
 
-        // The window can report before the page has a selection of its own, and a report of a new tier
-        // is the moment the selected row should follow it.
-        if (_list.SelectedIndex < 0)
+        var index = _options.FindIndex(option => option == current);
+
+        if (index < 0 || index == _list.SelectedIndex)
         {
-            SelectCurrent();
+            return;
         }
+
+        // Moving the row to the live choice is not the user asking for a switch, so the handler stays out
+        // of the way; it is the page catching up with what the window did.
+        _syncing = true;
+
+        try
+        {
+            _list.SelectedIndex = index;
+        }
+        finally
+        {
+            _syncing = false;
+        }
+
+        ShowSelection();
     }
 
     private void CopyValue()
