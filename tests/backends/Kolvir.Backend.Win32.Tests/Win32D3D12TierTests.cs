@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Kolvir.Backend.Win32.Tests;
@@ -15,6 +16,15 @@ namespace Kolvir.Backend.Win32.Tests;
 [TestCategory("Platform.Win32")]
 public sealed class Win32D3D12TierTests
 {
+    [DllImport("user32.dll", EntryPoint = "CreateWindowExW", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr CreateWindowExW(uint exStyle, string className, string title, uint style, int x, int y, int width, int height, IntPtr parent, IntPtr menu, IntPtr instance, IntPtr parameter);
+
+    [DllImport("user32.dll", EntryPoint = "DestroyWindow")]
+    private static extern int DestroyWindow(IntPtr hwnd);
+
+    [DllImport("kernel32.dll", EntryPoint = "GetModuleHandleW", CharSet = CharSet.Unicode)]
+    private static extern IntPtr GetModuleHandle(string? name);
+
     private sealed class RefusingVulkanProbe : IWin32VulkanProbe
     {
         public Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure)
@@ -127,9 +137,9 @@ public sealed class Win32D3D12TierTests
     [TestMethod]
     public void TheAdapterThatDrivesTheWindowIsChosen()
     {
-        // A flip-model swap chain cannot cross adapters: with the window on the integrated GPU's
-        // output and the device on the discrete card, DXGI refuses it with DXGI_ERROR_INVALID_CALL.
-        // So the adapter is the one whose output holds the window, not simply the first enumerated.
+        // A flip-model swap chain cannot cross adapters, so a device on the discrete card cannot
+        // present to a window on the integrated GPU's output. The adapter is therefore the one whose
+        // output holds the window, not simply the first enumerated.
         Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([true, true]), "the first that drives it");
         Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, true]), "a later adapter can be the one");
         Assert.AreEqual(2, Win32D3D12Device.ChooseAdapterIndex([false, false, true]));
@@ -137,8 +147,51 @@ public sealed class Win32D3D12TierTests
         Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([]), "and an empty list still has a first");
     }
     [TestMethod]
+    public void ASwapChainIsAcceptedOnTheDefaultAdapter()
+    {
+        // The create call has no diagnostics of its own: DXGI answers DXGI_ERROR_INVALID_CALL for a
+        // description it will not take and names none of the fields it objected to. Every Windows
+        // machine has a default adapter, so this runs everywhere and fails if the description drifts -
+        // a transposed DXGI_ALPHA_MODE (STRAIGHT beside IGNORE) did exactly that.
+        Assert.IsTrue(D3D12.IsAvailable, "dxgi.dll and d3d12.dll are present");
+
+        IntPtr hwnd = CreateWindowExW(0, "STATIC", "kolvir d3d12", 0x00CF0000, 0, 0, 64, 64, IntPtr.Zero, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
+        Assert.AreNotEqual(IntPtr.Zero, hwnd, "the test window was created");
+
+        try
+        {
+            IntPtr factory = D3D12.CreateFactory1(out int factoryResult);
+            Assert.AreNotEqual(IntPtr.Zero, factory, $"the factory was created (0x{factoryResult:X8})");
+
+            IntPtr device = D3D12.CreateDevice(IntPtr.Zero, out int deviceResult);
+            IntPtr queue = device == IntPtr.Zero ? IntPtr.Zero : D3D12.CreateCommandQueue(device, out _);
+
+            if (queue == IntPtr.Zero)
+            {
+                // A machine with no Direct3D 12 runtime at all has nothing to say about the
+                // description; the probe test above is where that is reported.
+                Assert.Inconclusive($"no default device (0x{deviceResult:X8})");
+                return;
+            }
+
+            IntPtr swapChain = D3D12.CreateSwapChainForHwnd(factory, queue, hwnd, 64, 64, D3D12.SwapEffectFlipDiscard, 2, out int chainResult);
+            Assert.AreNotEqual(IntPtr.Zero, swapChain, $"the swap chain was created (0x{chainResult:X8})");
+
+            D3D12.Release(ref swapChain);
+            D3D12.Release(ref queue);
+            D3D12.Release(ref device);
+            D3D12.Release(ref factory);
+        }
+        finally
+        {
+            DestroyWindow(hwnd);
+        }
+    }
+
+    [TestMethod]
     public void TheProductionProbeAnswersOrSaysWhy()
-    {        // The interop's entry points are loaded and the adapter list walked for real, so this is what
+    {
+        // The interop's entry points are loaded and the adapter list walked for real, so this is what
         // catches a wrong export name or a mis-sized struct without needing a GPU in the machine.
         var device = Win32D3D12Probe.Instance.TryCreate(new IntPtr(1), out var failure);
 

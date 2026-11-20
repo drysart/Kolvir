@@ -49,8 +49,15 @@ internal static unsafe class D3D12
     /// <summary><c>DXGI_SWAP_EFFECT_FLIP_DISCARD</c>: what makes the resize path release its buffers.</summary>
     internal const int SwapEffectFlipDiscard = 4;
 
-    /// <summary><c>DXGI_ALPHA_MODE_IGNORE</c>.</summary>
-    internal const int AlphaModeIgnore = 2;
+    /// <summary><c>DXGI_SWAP_EFFECT_FLIP_SEQUENTIAL</c>: the older flip model, for a driver that
+    /// refuses the discard one.</summary>
+    internal const int SwapEffectFlipSequential = 3;
+
+    /// <summary>
+    /// <c>DXGI_ALPHA_MODE_IGNORE</c>. It is 3, not 2: 2 is <c>STRAIGHT</c>, which an HWND swap chain
+    /// does not accept, and DXGI answers the create call with <c>DXGI_ERROR_INVALID_CALL</c>.
+    /// </summary>
+    internal const int AlphaModeIgnore = 3;
 
     /// <summary><c>D3D12_COMMAND_LIST_TYPE_DIRECT</c>.</summary>
     internal const int CommandListTypeDirect = 0;
@@ -339,6 +346,8 @@ internal static unsafe class D3D12
     /// <param name="hwnd">The window.</param>
     /// <param name="width">The client width in pixels.</param>
     /// <param name="height">The client height in pixels.</param>
+    /// <param name="swapEffect">The <c>DXGI_SWAP_EFFECT</c> to ask for.</param>
+    /// <param name="bufferCount">How many back buffers to ask for.</param>
     /// <param name="result">The <c>HRESULT</c>.</param>
     /// <returns>The swap chain, or zero.</returns>
     internal static IntPtr CreateSwapChainForHwnd(
@@ -347,6 +356,8 @@ internal static unsafe class D3D12
         IntPtr hwnd,
         int width,
         int height,
+        int swapEffect,
+        uint bufferCount,
         out int result)
     {
         var create = (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, IntPtr, DxgiSwapChainDesc1*, IntPtr, IntPtr, IntPtr*, int>)(*(IntPtr**)factory)[SlotFactory2CreateSwapChainForHwnd];
@@ -358,12 +369,9 @@ internal static unsafe class D3D12
             Stereo = 0,
             SampleDesc = new DxgiSampleDesc { Count = 1, Quality = 0 },
             BufferUsage = UsageRenderTargetOutput,
-            // Two, not three: the same reason the Vulkan tier takes the driver's minimum. A third
-            // buffer lets a frame the display has not taken yet sit in the queue, and the uneven
-            // spacing that follows reads as a hitch however evenly the animation runs.
-            BufferCount = 2,
+            BufferCount = bufferCount,
             Scaling = ScalingStretch,
-            SwapEffect = SwapEffectFlipDiscard,
+            SwapEffect = swapEffect,
             AlphaMode = AlphaModeIgnore,
             Flags = 0,
         };

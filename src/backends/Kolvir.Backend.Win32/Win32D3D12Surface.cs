@@ -405,19 +405,41 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return false;
         }
 
-        swapChain = CreateSwapChainForHwnd(factory, device.Queue, hwnd, width, height, out var result);
+        // Both rungs are flip models: Direct3D 12 will not present through a bitblt swap chain, which
+        // DXGI refuses outright. The order is newest first, because the discard model is the one
+        // Windows composites with and the sequential model is only there for a driver that refuses it.
+        (int Effect, uint Buffers, string Name)[] ladder =
+        [
+            (SwapEffectFlipDiscard, 2, "flip-discard"),
+            (SwapEffectFlipSequential, 2, "flip-sequential"),
+        ];
 
-        if (swapChain == IntPtr.Zero)
+        List<string> refusals = [];
+
+        foreach (var (effect, buffers, name) in ladder)
         {
-            // Naming the adapter matters: a flip-model swap chain cannot cross adapters, so this is
-            // the failure a device made on the wrong GPU produces, and the name says which one it was.
-            failure = $"d3d12: no swap chain on {device.Renderer} (0x{result:X8})";
-            Release(ref factory);
-            return false;
+            int result = 0;
+            swapChain = CreateSwapChainForHwnd(factory, device.Queue, hwnd, width, height, effect, buffers, out result);
+
+            if (swapChain != IntPtr.Zero)
+            {
+                if (refusals.Count > 0 && Win32GlTrace.IsEnabled)
+                {
+                    Win32GlTrace.Write($"kolvir-d3d12: swap chain: {name} (after {string.Join(", ", refusals)})");
+                }
+
+                failure = string.Empty;
+                return true;
+            }
+
+            refusals.Add($"{name} 0x{result:X8}");
         }
 
-        failure = string.Empty;
-        return true;
+        // Naming the adapter matters: a flip-model swap chain cannot cross adapters, and the name says
+        // which one the device was made on when every effect was refused on it.
+        failure = $"d3d12: no swap chain on {device.Renderer} ({string.Join(", ", refusals)})";
+        Release(ref factory);
+        return false;
     }
 
     private bool CreateRetained()

@@ -5483,16 +5483,24 @@ GPU exposes does not always set `DXGI_ADAPTER_FLAG_SOFTWARE` - so the adapter's 
 as well as its flags.
 
 The device is made on the adapter that drives the display the window is on, not on the first one
-enumerated. A flip-model swap chain cannot cross adapters - DXGI refuses it with
-`DXGI_ERROR_INVALID_CALL` - so a hybrid machine whose window is on the integrated GPU's output would
-otherwise fail to create a swap chain for a device on the discrete card. `KOLVIR_GL_TRACE=1` prints
-every adapter and marks the one chosen, and the refusal names it, so a machine that still fails says
+enumerated. A flip-model swap chain cannot cross adapters, so a hybrid machine whose window is on the
+integrated GPU's output cannot present the frames a device on the discrete card drew. `KOLVIR_GL_TRACE=1`
+prints every adapter and marks the one chosen, and a refusal names it, so a machine that fails says
 which adapter it tried.
+
+Two things about the swap chain are requirements rather than preferences, and both were learned the
+hard way - a refusal from the create call is `DXGI_ERROR_INVALID_CALL`, which names neither:
+
+- **It has to be a flip model.** Direct3D 12 will not present through a bitblt swap chain, so the
+  ladder is `FLIP_DISCARD` and then `FLIP_SEQUENTIAL`; there is no third rung to fall back to.
+- **`AlphaMode` has to be `DXGI_ALPHA_MODE_IGNORE`, which is 3.** The neighbouring value, 2
+  (`STRAIGHT`), is refused, and because both are small integers a transposed constant is invisible in
+  the description until DXGI rejects the whole thing.
 
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
 dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
-section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,936,960, so +25,600
+section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,969,216, so +57,856
 bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
 shipped `libSkiaSharp.dll` already contains the Direct3D backend.
 
