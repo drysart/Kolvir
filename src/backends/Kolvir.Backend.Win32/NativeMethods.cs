@@ -88,9 +88,6 @@ internal static class NativeMethods
     internal const int HtBottomRight = 17;
     internal const int SwShow = 5;
     internal const int SwShowNoActivate = 4;
-
-    /// <summary><c>SW_SHOWMINNOACTIVE</c>: minimised, without taking the foreground.</summary>
-    internal const int SwShowMinNoActive = 7;
     internal const int SwHide = 0;
     internal const uint SwpNoZOrder = 0x0004;
     internal const uint SwpNoActivate = 0x0010;
@@ -625,15 +622,6 @@ internal static class NativeMethods
     internal static extern IntPtr SetCapture(IntPtr hwnd);
 
     [DllImport("user32.dll")]
-    internal static extern IntPtr GetCapture();
-
-    [DllImport("user32.dll")]
-    internal static extern IntPtr GetForegroundWindow();
-
-    [DllImport("user32.dll")]
-    internal static extern bool IsWindowVisible(IntPtr hwnd);
-
-    [DllImport("user32.dll")]
     internal static extern bool ReleaseCapture();
 
     [DllImport("user32.dll")]
@@ -762,6 +750,9 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern bool IsWindowVisible(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     internal static extern bool GetCursorPos(out POINT lpPoint);
@@ -1065,10 +1056,10 @@ internal static class NativeMethods
     /// <param name="disabled">True to suppress the animations, false to put them back.</param>
     /// <returns>True when DWM accepted the setting.</returns>
     /// <remarks>
-    /// A window that is created and then shown animates in: Windows 11 zooms it up from its centre,
-    /// which for a window that is only being replaced looks like the application is opening a second
-    /// time. Setting this on the replacement before it is shown keeps the transition off it, and it is
-    /// cleared again afterwards so the animations the user does ask for still happen.
+    /// Hiding and showing a window is what makes the compositor give it a visual again, and the system
+    /// would like to animate both halves of that. A window that is being repainted is being neither
+    /// opened nor closed, so both are turned off around the reset and put back afterwards, which is what
+    /// keeps the animations the user does ask for working.
     /// </remarks>
     internal static bool SetTransitionsDisabled(IntPtr hwnd, bool disabled)
     {
@@ -1175,7 +1166,8 @@ internal static class NativeMethods
             return DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int)) == 0;
         }
 
-        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)        {
+        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)
+        {
             colorRef = 0;
             if (hwnd == IntPtr.Zero)
             {

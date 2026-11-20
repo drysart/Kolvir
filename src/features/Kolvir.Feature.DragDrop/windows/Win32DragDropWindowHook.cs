@@ -16,10 +16,7 @@ namespace Kolvir.DragDrop;
 /// Registration happens at <see cref="WindowPhase.Shown"/> rather than
 /// <see cref="WindowPhase.Created"/>, because the window handle does not exist until the
 /// backend has shown the window. The revoke is left to the backend's own disposal, which is the
-/// only point that still runs when a window is disposed without being closed. A backend that replaces
-/// its native window - which is how acceleration is switched on Windows - raises
-/// <see cref="WindowPhase.NativeWindowRecreated"/>, and the target is registered again on the handle
-/// that replaced the old one.
+/// only point that still runs when a window is disposed without being closed.
 /// </para>
 /// </remarks>
 internal sealed class Win32DragDropWindowHook : IWin32WindowHook
@@ -34,19 +31,17 @@ internal sealed class Win32DragDropWindowHook : IWin32WindowHook
 
         switch (phase)
         {
-            case WindowPhase.Shown:
-                Register(window, backend);
-                break;
+            case WindowPhase.Shown when !_leases.ContainsKey(window):
+                var handle = backend.Handle;
+                var target = new Win32DropTarget(backend, DragDropRouter.For(window));
 
-            case WindowPhase.NativeWindowRecreated:
-                // The lease was registered on the handle the backend has just thrown away, so the target
-                // has to be registered again on the one that replaced it.
-                if (_leases.Remove(window, out var stale))
+                // A refusal here is not an error: the thread is not in a single-threaded apartment,
+                // or the window already has a target. The window then simply never sees a drop.
+                if (target.Register(handle))
                 {
-                    stale.Dispose();
+                    _leases[window] = backend.RegisterNativeTeardown(new Win32DropTargetLease(target, handle));
                 }
 
-                Register(window, backend);
                 break;
 
             case WindowPhase.Disposed:
@@ -58,27 +53,6 @@ internal sealed class Win32DragDropWindowHook : IWin32WindowHook
                 }
 
                 break;
-        }
-    }
-
-    /// <summary>Registers a window's drop target once, on whatever handle the backend has now.</summary>
-    /// <param name="window">The window the drags are routed to.</param>
-    /// <param name="backend">The native window.</param>
-    private void Register(Window window, Win32WindowBackend backend)
-    {
-        if (_leases.ContainsKey(window))
-        {
-            return;
-        }
-
-        var handle = backend.Handle;
-        var target = new Win32DropTarget(backend, DragDropRouter.For(window));
-
-        // A refusal here is not an error: the thread is not in a single-threaded apartment, or the
-        // window already has a target. The window then simply never sees a drop.
-        if (target.Register(handle))
-        {
-            _leases[window] = backend.RegisterNativeTeardown(new Win32DropTargetLease(target, handle));
         }
     }
 

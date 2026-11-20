@@ -5749,21 +5749,21 @@ rows that a multi-GPU machine lists but cannot present to the window's display a
 
 Two more rules worth knowing:
 
-- **The window is replaced, not reused.** A swap chain keeps the window it presents on: releasing it
-  does not give that window its GDI output back - invalidating the window, a frame-changed window
-  position, a full `RedrawWindow` and a `DWMWA_CLOAK` round-trip were each measured against a real
-  flip-model chain and none of them restore it - and a WGL context leaves a pixel format on the
-  window's DC that can never be unset. An HWND with no history has neither problem, so a switch makes
-  a new window: same class, place, size, style and owner, with the popups owned by the old one closed,
-  the native teardowns released, and the drawing buffer and GPU surface rebuilt. The new window is
-  painted while it is still hidden and only then shown, so what comes back on screen is the finished
-  frame. Whether the window was visible, maximised, minimised, foreground or holding the mouse capture
-  is put back afterwards. Anything a feature registered against the handle hears about it through
-  `WindowPhase.NativeWindowRecreated` - the drop target is the one that exists today - and the handle
-  the backend reports changes, so an application that cached `Window.Handle` has to read it again.
-  What a window cannot do on a child window, which was the first thing tried: Direct3D 12 and Vulkan
-  present through flip-model swap chains, and a flip chain created on a child HWND builds and presents
-  without ever being composited, so the accelerated tiers need a top-level window.
+- **The window is reclaimed, not reused as it stands.** Direct3D 12 and Vulkan present from their own
+  buffers, and when their swap chain goes away the window keeps showing its last frame: GDI painting
+  into it is simply not displayed, because the compositor still holds the swap chain's visual rather
+  than the window's redirection surface. Invalidating the window, a frame-changed window position, a
+  full `RedrawWindow` and a `DWMWA_CLOAK` round-trip were each measured against a real flip-model chain
+  and none of them bring it back; making the compositor build the window's visual again does, which
+  takes the window off the screen and puts it back. A switch therefore hides the window, paints the new
+  frame while it is hidden and shows it again, with the system's transitions turned off for that one
+  hide-and-show so it reads as a repaint rather than a window opening. It costs one compositor frame in
+  which the window is not drawn, and no black flash, because what comes back is already the finished
+  frame. Replacing the window outright - which was tried, since a fresh HWND has no history at all -
+  works, but Windows 11 animates both the window that appears and the one that goes, so it was dropped.
+  A press that is in flight when the switch happens is ended first, through the same path a real
+  release takes, so the application is never left holding a gesture on a window that has just been
+  repainted.
 - **Thread affinity.** A window's GPU surface belongs to the thread that owns it, so `TryApply` must
   be called from that thread - a UI event handler already is. The Win32 backend checks with
   `GetWindowThreadProcessId` and refuses off-thread rather than tearing the surface down from under

@@ -52,11 +52,4 @@ public enum WindowPhase
     /// backend has already been disposed.
     /// </summary>
     Disposed,
-
-    /// <summary>
-    /// The native window was replaced while this window stayed the same. The old handle is gone, so
-    /// anything a hook registered against it is gone too, and this is where it registers against the
-    /// new one. Raised after the replacement, with the new handle already live.
-    /// </summary>
-    NativeWindowRecreated,
 }

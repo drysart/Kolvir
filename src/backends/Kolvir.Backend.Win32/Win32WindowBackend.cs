@@ -56,9 +56,6 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <summary>Everything that asked to see this window's messages, empty unless a feature attached one.</summary>
     private readonly Win32MessageFilters _messageFilters = new();
 
-    /// <summary>The model's window, kept so a native window replacement can re-run its hooks.</summary>
-    private Window? _modelWindow;
-
     private string _title = string.Empty;
     private SKSize _clientSize = new(800f, 600f);
     private SKSize _minimumClientSize;
@@ -114,7 +111,7 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// is converted when the drag starts.</summary>
     private bool _pressActive;
 
-    /// <summary>The button the active press is holding, so a window swap can end it.</summary>
+    /// <summary>The button the active press is holding, so a switch can end it.</summary>
     private MouseButtons _pressButton;
     private int _pressClientX;
     private int _pressClientY;
@@ -1680,12 +1677,7 @@ public sealed class Win32WindowBackend : IWindowBackend
                 return IntPtr.Zero;
 
             case NativeMethods.WmDestroy:
-                // A window that is being replaced is not this window going away.
-                if (hwnd == _hwnd)
-                {
-                    _hwnd = IntPtr.Zero;
-                }
-
+                _hwnd = IntPtr.Zero;
                 return IntPtr.Zero;
         }
 
@@ -1780,6 +1772,12 @@ public sealed class Win32WindowBackend : IWindowBackend
 
             if (_skia is null || _memoryDc == IntPtr.Zero)
             {
+                if (Win32GlTrace.IsEnabled)
+                {
+                    Win32GlTrace.Write(
+                        $"paint skipped: no drawing surface (skia={_skia is not null} dc={_memoryDc != IntPtr.Zero})");
+                }
+
                 return;
             }
 
@@ -1858,6 +1856,13 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
 
         NativeMethods.BitBlt(hdc, left, top, right - left, bottom - top, _memoryDc, left, top, NativeMethods.SrcCopy);
+
+        if (Win32GlTrace.IsEnabled && _gpu is null)
+        {
+            // Names what GDI was actually asked to put on the window, which is the line that tells a
+            // window whose paints do not reach the screen apart from one that never painted.
+            Win32GlTrace.Write($"blit gdi {right - left}x{bottom - top} at {left},{top}");
+        }
     }
 
     /// <summary>Paints the part of the UI that changed into the drawing buffer.</summary>
@@ -2494,14 +2499,14 @@ public sealed class Win32WindowBackend : IWindowBackend
     }
 
     /// <summary>
-    /// Ends a press the application is still holding, because the window it began on is about to go.
+    /// Ends a press the application is still holding, before the window is repainted out from under it.
     /// </summary>
     /// <remarks>
     /// A switch can be triggered from inside a press - the row the user picked is underneath the pointer
-    /// - and replacing the window takes the capture and the button-up with it. Without this the
-    /// application keeps a press that never ends, which shows up as a list that goes on selecting
-    /// whatever the pointer passes over. The release is delivered at the pointer's current position, so
-    /// it ends where the user would expect it to.
+    /// - and the window that press began on is hidden and shown again in the middle of it. Without this
+    /// the application can be left holding a press that never ends, which shows up as a list that goes on
+    /// selecting whatever the pointer passes over. The release goes through the same path a real one
+    /// takes, at the pointer's current position, so it ends where the user would expect.
     /// </remarks>
     private void EndActiveGesture()
     {
@@ -2511,9 +2516,8 @@ public sealed class Win32WindowBackend : IWindowBackend
             InvalidateCaption();
         }
 
-        if (!_pressActive)
+        if (!_pressActive || _hwnd == IntPtr.Zero)
         {
-            NativeMethods.ReleaseCapture();
             return;
         }
 
@@ -2524,8 +2528,6 @@ public sealed class Win32WindowBackend : IWindowBackend
             point = new NativeMethods.POINT { X = _pressClientX, Y = _pressClientY };
         }
 
-        // The button up goes through the same path a real one does, so the application sees a release
-        // rather than a window disappearing from underneath it.
         OnMouseUp(new IntPtr((point.X & 0xFFFF) | ((point.Y & 0xFFFF) << 16)), _pressButton);
     }
 
@@ -2936,38 +2938,87 @@ public sealed class Win32WindowBackend : IWindowBackend
             return true;
         }
 
-        // Whatever the old tier presented through, the window it presented on goes with it: a swap chain
-        // keeps an HWND for good and a WGL context leaves its pixel format on the DC, so the new tier
-        // needs a window with no history. Rebuilding the window is what a replacement costs. A press that
-        // is in flight is ended first: the row being switched on is under the pointer, and the button-up
-        // would otherwise go to a window that no longer exists.
+        // A press that is in flight is ended first: the row being switched on is under the pointer, and
+        // the window it began on is about to be repainted out from under it.
         EndActiveGesture();
 
-        if (RecreateWindow() is not { } presentation)
-        {
-            reason = "The window could not be rebuilt for the switch.";
+        // The CPU buffer is the surface of last resort, so it is built before the old tier is let go:
+        // whatever the next step does, the window has something to paint into, and a machine that cannot
+        // make one keeps drawing through the surface it already has.
+        EnsureCpuBuffer(width, height);
 
-            // The old window is still there, so it keeps drawing: the buffer and the tier are rebuilt on
-            // it rather than leaving it with nothing.
-            _gpuUnavailable = false;
-            EnsureBuffer(width, height);
+        if (_skia is null || _memoryDc == IntPtr.Zero)
+        {
+            reason = "The window's CPU drawing surface could not be rebuilt.";
             return false;
         }
+
+        if (Win32GlTrace.IsEnabled)
+        {
+            Win32GlTrace.Write(
+                $"switch to={(choice.CpuOnly ? "cpu" : string.Join("+", choice.Order))} size={width}x{height} from={_gpu?.Tier ?? "cpu"}");
+        }
+
+        // A swap chain cannot become a WGL context, and a WGL context cannot become a DIB, so the old
+        // tier goes before the new one is built. The buffer above is what keeps the window drawing while
+        // that happens.
+        var released = _gpu?.Tier;
+        ReleaseGpu();
 
         _selectedAcceleration = choice;
         _useHardwareAcceleration = !choice.CpuOnly;
         _gpuUnavailable = choice.CpuOnly;
         _gfxReason = choice.CpuOnly ? "cpu (chosen)" : "cpu (not started)";
 
-        EnsureBuffer(width, height);
-        UpdateHostSize();
+        if (!choice.CpuOnly)
+        {
+            var gpu = Win32Gfx.TryCreateAccelerated(
+                choice,
+                hardwareAcceleration: true,
+                _hwnd,
+                Win32GlProbe.Instance,
+                Win32VulkanProbe.Instance,
+                Win32D3D12Probe.Instance,
+                width,
+                height,
+                out var buildReason);
 
-        // The frame on screen belonged to the window that was just thrown away, so the new one is
-        // painted before it is shown: what comes back on screen is the finished frame, not a blank.
+            _gfxReason = buildReason;
+
+            if (gpu is not null)
+            {
+                ReleaseBuffer();
+                _gpu = gpu;
+            }
+            else
+            {
+                _gpuUnavailable = true;
+            }
+        }
+
+        _bufferWidth = width;
+        _bufferHeight = height;
+        _bufferGeneration++;
+
+        // The visual DWM holds for the window belongs to the swap chain that just went away, and it keeps
+        // covering whatever GDI draws. Nothing short of taking the window off the screen clears it, so
+        // that is what happens - but only when the incoming tier does not present through a swap chain of
+        // its own, which is the case where the stale visual is what would be seen.
+        if (IsSwapChain(released) && !IsSwapChain(_gpu?.Tier))
+        {
+            RepaintThroughNewVisual();
+        }
+
+        // The frame on screen was drawn with the old surface, so ask for a full repaint through the new
+        // one rather than leaving whatever the compositor still holds.
         Invalidate();
-        NativeMethods.UpdateWindow(_hwnd);
-        RestorePresentation(presentation);
         ReportAcceleration();
+
+        if (Win32GlTrace.IsEnabled)
+        {
+            Win32GlTrace.Write(
+                $"switch built={_gpu?.Tier ?? "cpu"} skia={_skia is not null} dc={_memoryDc != IntPtr.Zero} reason=\"{_gfxReason}\"");
+        }
 
         if (!choice.CpuOnly && _gpu is null)
         {
@@ -2979,200 +3030,67 @@ public sealed class Win32WindowBackend : IWindowBackend
         return true;
     }
 
-    /// <summary>How a window was being shown, so a replacement can be put back the same way.</summary>
-    /// <param name="Previous">The window being replaced, still alive until the new one is on screen.</param>
-    /// <param name="Visible">Whether the window was on the screen.</param>
-    /// <param name="Maximized">Whether it was maximised.</param>
-    /// <param name="Minimized">Whether it was minimised.</param>
-    /// <param name="Foreground">Whether it had the foreground.</param>
-    /// <param name="Captured">Whether it held the mouse capture.</param>
-    private readonly record struct WindowPresentation(
-        IntPtr Previous,
-        bool Visible,
-        bool Maximized,
-        bool Minimized,
-        bool Foreground,
-        bool Captured);
-
+    /// <summary>True when a tier presents through a swap chain of its own.</summary>
+    /// <param name="tier">The tier's name, or null for the CPU path.</param>
+    /// <remarks>
+    /// Both swap chain tiers take the window over completely: they present from their own buffers rather
+    /// than through the window's redirection surface, which is what makes the difference.
+    /// </remarks>
+    private static bool IsSwapChain(string? tier) => tier is "d3d12" or "vulkan";
     /// <summary>
-    /// Replaces the native window with a new, hidden one that carries no presentation history.
+    /// Puts the window back on the screen through a freshly built visual, so that GDI output reaches it
+    /// again after a swap chain has been released from it.
     /// </summary>
-    /// <returns>How the old window was being shown, or null when it could not be replaced.</returns>
     /// <remarks>
     /// <para>
-    /// This is the only way to take a window back from a swap chain. Once Direct3D 12 or Vulkan has
-    /// presented through an HWND, releasing the chain does not give that window its GDI output back -
-    /// invalidating it, a frame-changed window position, a full <c>RedrawWindow</c> and a
-    /// <c>DWMWA_CLOAK</c> round-trip were all measured and none of them restore it - and a WGL context
-    /// leaves a pixel format on the window's DC that can never be unset. A new HWND has neither.
+    /// A window that has presented through a swap chain keeps showing that chain's last frame, and its
+    /// GDI output stops arriving: every blit lands in a redirection surface the compositor is no longer
+    /// reading. Releasing the swap chain does not hand the redirection surface back - invalidating the
+    /// window, a frame-changed window position, a full <c>RedrawWindow</c> and a DWM cloak were all tried
+    /// and all leave it stale - but taking the window off the screen and putting it back does, because
+    /// that is what makes DWM build the window's visual again from the window itself.
     /// </para>
     /// <para>
-    /// Everything bound to the old handle lets go while it still exists: popups owned by it, the native
-    /// teardowns features registered, the GPU surface and the drawing buffer. The new window is made at
-    /// the same place, size, style and owner, and is left hidden: the caller builds the new surface and
-    /// puts the first frame into it before <see cref="RestorePresentation"/> shows the window again, so
-    /// what the user sees come back is the finished frame. Hooks hear about it through
-    /// <see cref="WindowPhase.NativeWindowRecreated"/>, which is where anything that registered against
-    /// the old handle registers against the new one.
+    /// The window is painted while it is hidden, so the frame that comes back is the finished one rather
+    /// than the class background. What this costs is one compositor frame in which the window is not
+    /// drawn, which is the same flicker as a window that has just been moved onto the screen.
     /// </para>
     /// </remarks>
-    private WindowPresentation? RecreateWindow()
+    private void RepaintThroughNewVisual()
     {
-        if (_hwnd == IntPtr.Zero)
+        // A window that is not on the screen has no visual to drop, and showing it here would be a
+        // surprise nobody asked for: a hidden or minimised window just gets painted where it is.
+        if (NativeMethods.IsIconic(_hwnd) || !NativeMethods.IsWindowVisible(_hwnd))
         {
-            return null;
+            return;
         }
 
-        var previous = _hwnd;
-
-        var bounds = default(NativeMethods.RECT);
-        NativeMethods.GetWindowRect(previous, out bounds);
-
-        var presentation = new WindowPresentation(
-            previous,
-            NativeMethods.IsWindowVisible(previous),
-            NativeMethods.IsZoomed(previous),
-            NativeMethods.IsIconic(previous),
-            NativeMethods.GetForegroundWindow() == previous,
-            NativeMethods.GetCapture() == previous);
-
-        var style = (uint)NativeMethods.GetWindowLongPtrW(previous, NativeMethods.GwlStyle).ToInt64();
-
-        // What was layered onto the old window comes off while the old window still exists.
-        Win32PopupWindow.DismissForOwner(previous);
-        ReleaseNativeTeardowns();
-        ReleaseGpu();
-        ReleaseBuffer();
-
-        // Cleared first so the messages that arrive while the replacement is being created - and the
-        // destroy that follows it - are not taken for this window's own.
-        _hwnd = IntPtr.Zero;
-
-        var width = Math.Max(bounds.Right - bounds.Left, 1);
-        var height = Math.Max(bounds.Bottom - bounds.Top, 1);
-
-        var replacement = NativeMethods.CreateWindowExW(
-            0,
-            _className,
-            _title,
-            style,
-            bounds.Left,
-            bounds.Top,
-            width,
-            height,
-            OwnerHandle,
-            IntPtr.Zero,
-            _moduleHandle,
-            IntPtr.Zero);
-
-        if (replacement == IntPtr.Zero)
-        {
-            // The old window is untouched and still works, so the switch is refused rather than
-            // leaving the window with no surface at all; the caller rebuilds what was released.
-            _hwnd = previous;
-            return null;
-        }
-
-        _hwnd = replacement;
-
-        _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
-
-        // A replacement that animated in would look like the application opening a second time, so the
-        // transition is turned off for it and it is composed behind the window it replaces: it is
-        // positioned and shown *behind* the outgoing window, which is opaque and covers it, and only
-        // after it has been painted is that window destroyed. What the user sees is the same window,
-        // with the new tier underneath it.
+        // Hiding and showing a window is what makes the compositor build its visual again, and the
+        // system would like to animate both halves of that. Neither is wanted here: the window is being
+        // repainted, not opened or closed.
         NativeMethods.SetTransitionsDisabled(_hwnd, true);
 
-        NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
-        ApplyWindowColors();
-        ApplyIcon();
+        NativeMethods.ShowWindow(_hwnd, NativeMethods.SwHide);
 
-        // The presenters were built around the old handle, so they are rebuilt around the new one.
-        ContextMenuPresenter.Current = _useMenus
-            ? new MenuPresenter()
-            : new Win32ContextMenuPresenter(_hwnd, LogicalToScreen);
+        // The frame is painted while the window is off the screen, so what comes back is finished
+        // rather than the class background.
+        NativeMethods.InvalidateRect(_hwnd, IntPtr.Zero, false);
+        NativeMethods.UpdateWindow(_hwnd);
+
+        NativeMethods.SetWindowPos(
+            _hwnd,
+            IntPtr.Zero,
+            0,
+            0,
+            0,
+            0,
+            NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+
+        NativeMethods.SetTransitionsDisabled(_hwnd, false);
 
         if (Win32GlTrace.IsEnabled)
         {
-            Win32GlTrace.Write($"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {width}x{height}");
-        }
-
-        return presentation;
-    }
-
-    /// <summary>
-    /// Puts a replaced window on the screen the way the one it replaced was being shown, and then retires
-    /// the old one.
-    /// </summary>
-    /// <param name="presentation">What <see cref="RecreateWindow"/> recorded.</param>
-    /// <remarks>
-    /// The new window is shown <em>behind</em> the one it replaces, which is still on the screen and still
-    /// opaque: the opening transition happens there, where it cannot be seen, and the frame it draws is
-    /// hidden until the old window is destroyed. What the user sees is the same window throughout, with
-    /// the new tier underneath it.
-    /// </remarks>
-    private void RestorePresentation(WindowPresentation presentation)
-    {
-        if (presentation.Visible)
-        {
-            NativeMethods.SetWindowPos(
-                _hwnd,
-                presentation.Previous,
-                0,
-                0,
-                0,
-                0,
-                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
-
-            if (presentation.Maximized)
-            {
-                NativeMethods.ShowWindow(_hwnd, NativeMethods.SwMaximize);
-
-                // Maximising may have taken the window over the one it replaces, so it is put back behind.
-                NativeMethods.SetWindowPos(
-                    _hwnd,
-                    presentation.Previous,
-                    0,
-                    0,
-                    0,
-                    0,
-                    NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
-            }
-            else if (presentation.Minimized)
-            {
-                NativeMethods.ShowWindow(_hwnd, NativeMethods.SwShowMinNoActive);
-            }
-
-            // The frame is painted while the old window still covers it, so the swap has nothing to
-            // catch up on.
-            NativeMethods.UpdateWindow(_hwnd);
-        }
-
-        if (presentation.Previous != IntPtr.Zero)
-        {
-            NativeMethods.DestroyWindow(presentation.Previous);
-        }
-
-        ApplyTopMost();
-
-        if (presentation.Captured)
-        {
-            NativeMethods.SetCapture(_hwnd);
-        }
-
-        if (presentation.Foreground)
-        {
-            NativeMethods.SetForegroundWindow(_hwnd);
-        }
-
-        // The window is on the screen with its first frame in it, so the transitions the user does ask
-        // for go back on: minimising and restoring it should behave like any other window.
-        NativeMethods.SetTransitionsDisabled(_hwnd, false);
-
-        if (_modelWindow is { } model)
-        {
-            RunWindowHooks(WindowPhase.NativeWindowRecreated, model);
+            Win32GlTrace.Write("presentation reset: the swap chain's visual was dropped and the window repainted");
         }
     }
 
@@ -3345,10 +3263,6 @@ public sealed class Win32WindowBackend : IWindowBackend
     public void RunWindowHooks(WindowPhase phase, Window window)
     {
         ArgumentNullException.ThrowIfNull(window);
-
-        // Remembered so that a native window replacement can re-run the hooks itself: the model's
-        // window is the same object across a replacement, only the handle under it changed.
-        _modelWindow = window;
 
         foreach (var hook in window.Services.GetServices<IWin32WindowHook>())
         {
