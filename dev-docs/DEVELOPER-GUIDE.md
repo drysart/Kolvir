@@ -5757,12 +5757,14 @@ Two more rules worth knowing:
   a new window: same class, place, size, style and owner, with the popups owned by the old one closed,
   the native teardowns released, and the drawing buffer and GPU surface rebuilt. The new window is
   painted while it is still hidden and only then shown, so what comes back on screen is the finished
-  frame. Both halves of the swap are kept behind an opaque window: the replacement is shown behind the
-  window it replaces, so the opening transition happens where it cannot be seen, and it is brought in
-  front - a z-order change is not animated - before the old window is destroyed, so the closing
-  transition happens behind it. Whether the window was visible, maximised, minimised, active,
-  foreground or holding the mouse capture is put back afterwards, with the replacement made active
-  explicitly because a window that has just been created does not take the focus by itself. Anything a
+    frame. Windows 11 animates a window that appears and a window that goes, and neither is wanted here,
+    so the replacement is created and shown thirty thousand pixels above the screen - where the opening
+    transition is spent with nothing to see it against - and then moved to the place the old window
+    occupies, a move not being animated. It is painted there, raised above the old window, the
+    composition is flushed, and only then is the old window destroyed, so the closing transition happens
+    behind an opaque window. Whether the window was visible, maximised, minimised, active, foreground or
+    holding the mouse capture is put back afterwards, with the replacement made active explicitly
+    because a window that has just been created does not take the focus by itself. Anything a
   feature registered against the handle hears about it through `WindowPhase.NativeWindowRecreated` -
   the drop target is the one that exists today - and the handle the backend reports changes, so an
   application that cached `Window.Handle` has to read it again.

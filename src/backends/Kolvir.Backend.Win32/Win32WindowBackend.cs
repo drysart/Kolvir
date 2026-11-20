@@ -2981,6 +2981,10 @@ public sealed class Win32WindowBackend : IWindowBackend
 
     /// <summary>How a window was being shown, so a replacement can be put back the same way.</summary>
     /// <param name="Previous">The window being replaced, still alive until the new one is on screen.</param>
+    /// <param name="Left">The old window's screen x, which is where the replacement belongs.</param>
+    /// <param name="Top">The old window's screen y.</param>
+    /// <param name="Width">The old window's width.</param>
+    /// <param name="Height">The old window's height.</param>
     /// <param name="Visible">Whether the window was on the screen.</param>
     /// <param name="Maximized">Whether it was maximised.</param>
     /// <param name="Minimized">Whether it was minimised.</param>
@@ -2989,6 +2993,10 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <param name="Captured">Whether it held the mouse capture.</param>
     private readonly record struct WindowPresentation(
         IntPtr Previous,
+        int Left,
+        int Top,
+        int Width,
+        int Height,
         bool Visible,
         bool Maximized,
         bool Minimized,
@@ -3032,6 +3040,10 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         var presentation = new WindowPresentation(
             previous,
+            bounds.Left,
+            bounds.Top,
+            Math.Max(bounds.Right - bounds.Left, 1),
+            Math.Max(bounds.Bottom - bounds.Top, 1),
             NativeMethods.IsWindowVisible(previous),
             NativeMethods.IsZoomed(previous),
             NativeMethods.IsIconic(previous),
@@ -3051,18 +3063,18 @@ public sealed class Win32WindowBackend : IWindowBackend
         // destroy that follows it - are not taken for this window's own.
         _hwnd = IntPtr.Zero;
 
-        var width = Math.Max(bounds.Right - bounds.Left, 1);
-        var height = Math.Max(bounds.Bottom - bounds.Top, 1);
-
+        // Created off the screens, above the old window's own column so nothing about its DPI changes:
+        // the opening transition happens where there is nothing to see it against, and moving a window
+        // into place afterwards is not animated.
         var replacement = NativeMethods.CreateWindowExW(
             0,
             _className,
             _title,
             style,
-            bounds.Left,
-            bounds.Top,
-            width,
-            height,
+            presentation.Left,
+            presentation.Top - OffScreenOffset,
+            presentation.Width,
+            presentation.Height,
             OwnerHandle,
             IntPtr.Zero,
             _moduleHandle,
@@ -3080,11 +3092,8 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
 
-        // A replacement that animated in would look like the application opening a second time, so the
-        // transition is turned off for it and it is composed behind the window it replaces: it is
-        // positioned and shown *behind* the outgoing window, which is opaque and covers it, and only
-        // after it has been painted is that window destroyed. What the user sees is the same window,
-        // with the new tier underneath it.
+        // The replacement is off the screens, so the system may animate it in on show without anybody
+        // seeing it; the transitions are turned off as well, for the systems that honour that.
         NativeMethods.SetTransitionsDisabled(_hwnd, true);
 
         NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
@@ -3098,11 +3107,19 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         if (Win32GlTrace.IsEnabled)
         {
-            Win32GlTrace.Write($"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {width}x{height}");
+            Win32GlTrace.Write(
+                $"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {presentation.Width}x{presentation.Height}, off screen until it is ready");
         }
 
         return presentation;
     }
+
+    /// <summary>How far off the screens a replacement window waits before it takes the old one's place.</summary>
+    /// <remarks>
+    /// Far enough that no monitor reaches it, and applied along y so the x coordinate - and therefore the
+    /// monitor and DPI the window is created on - is the one it will be shown on.
+    /// </remarks>
+    private const int OffScreenOffset = 30_000;
 
     /// <summary>
     /// Puts a replaced window on the screen the way the one it replaced was being shown, and then retires
@@ -3111,10 +3128,11 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <param name="presentation">What <see cref="RecreateWindow"/> recorded.</param>
     /// <remarks>
     /// <para>
-    /// Both halves of the swap are hidden behind an opaque window. The replacement is shown <em>behind</em>
-    /// the window it replaces, so the opening transition happens where it cannot be seen; once it has been
-    /// painted it is brought in front - a z-order change is not animated - and only then is the old window
-    /// destroyed, so the closing transition happens behind the new window instead of in front of it.
+    /// The replacement is shown while it is still off the screens, so the path that the system animates
+    /// for an opening window is travelled where nobody can see it, and it is then moved to the place the
+    /// old window occupies - a move is not animated. Once it is there and painted, it is raised above the
+    /// old window, the composition is flushed, and only then is the old window destroyed, so the closing
+    /// transition happens behind an opaque window rather than in front of it.
     /// </para>
     /// <para>
     /// What the user sees is the same window throughout, with the new tier underneath it.
@@ -3124,42 +3142,41 @@ public sealed class Win32WindowBackend : IWindowBackend
     {
         if (presentation.Visible)
         {
+            // Shown where nothing can see it, so the opening transition is spent off the screens.
             NativeMethods.SetWindowPos(
                 _hwnd,
-                presentation.Previous,
+                IntPtr.Zero,
                 0,
                 0,
                 0,
                 0,
-                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+
+            NativeMethods.UpdateWindow(_hwnd);
+
+            // Moved into the old window's place, which is not animated, and painted there before anything
+            // is asked to look at it.
+            NativeMethods.SetWindowPos(
+                _hwnd,
+                IntPtr.Zero,
+                presentation.Left,
+                presentation.Top,
+                presentation.Width,
+                presentation.Height,
+                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
 
             if (presentation.Maximized)
             {
                 NativeMethods.ShowWindow(_hwnd, NativeMethods.SwMaximize);
-
-                // Maximising may have taken the window over the one it replaces, so it is put back behind.
-                NativeMethods.SetWindowPos(
-                    _hwnd,
-                    presentation.Previous,
-                    0,
-                    0,
-                    0,
-                    0,
-                    NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
             }
             else if (presentation.Minimized)
             {
                 NativeMethods.ShowWindow(_hwnd, NativeMethods.SwShowMinNoActive);
             }
 
-            // The frame is painted while the old window still covers it, so the swap has nothing to
-            // catch up on.
             NativeMethods.UpdateWindow(_hwnd);
 
-            // Composed before anything else happens, so the window that is about to be destroyed is never
-            // the one on the screen with nothing behind it.
-            NativeMethods.DwmFlush();
-
+            // Above the window it replaces, so what is destroyed next goes behind it.
             NativeMethods.SetWindowPos(
                 _hwnd,
                 IntPtr.Zero,
@@ -3168,6 +3185,10 @@ public sealed class Win32WindowBackend : IWindowBackend
                 0,
                 0,
                 NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
+
+            // Composed before anything else happens, so the window that is about to be destroyed is never
+            // the one on the screen with nothing behind it.
+            NativeMethods.DwmFlush();
         }
 
         if (presentation.Previous != IntPtr.Zero)
