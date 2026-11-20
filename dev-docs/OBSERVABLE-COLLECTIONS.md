@@ -658,7 +658,7 @@ IObservableSet<T> : IReadOnlyObservableSet<T>, ISet<T>
 A set's `Contains`, `Add`'s "already there", `Remove` and every set-algebra operation mean what the
 comparer says they mean: two items it calls equal are *the same item*. So `Comparer` is on the read
 surface - a consumer mirroring the set has to build its mirror with the same comparer or it will
-disagree about what is in it - and it is what the per-item dependencies are keyed by. `CreateSet<T>()`
+disagree about what is in it - and it is what the per-item dependencies are keyed by. `CreateHashSet<T>()`
 without one uses `EqualityComparer<T>.Default`.
 
 This is also where `Observable.GetNamed` stops being usable, and the reason 3.6.1 said entries are the
@@ -1023,7 +1023,7 @@ Which record marks what:
 | 7 | The demo page and the guide section | An **Observable list** page in `src/demo/Kolvir.Demo.App/Pages/` that renders a list from its records and shows a batch add as one notification, plus an `### Observable collections` passage in `DEVELOPER-GUIDE.md` |
 | 8 | The shared core: `ObservableChangeBatch<TChange>`, `ObservableKeyedDependencies<TKey>`, `ObservableShapeDependencies` | The list is rewritten onto the three shared types and its suite passes unchanged - which is the evidence that the core is the core, rather than the list plus two copies |
 | 9 | The set: interfaces, `ObservableSetChange<T>`, event arguments | The four types compile and are documented (section 6.1, 6.3) |
-| 10 | `ObservableSet<T>`: mutations, the four bulk operations, the three dependencies | Section 6.4's table row for row, and 6.2.4's dependencies exactly: a `Contains` reader is not woken by a change to another item, and a bulk operation that changes nothing raises nothing |
+| 10 | `ObservableHashSet<T>`: mutations, the four bulk operations, the three dependencies | Section 6.4's table row for row, and 6.2.4's dependencies exactly: a `Contains` reader is not woken by a change to another item, and a bulk operation that changes nothing raises nothing |
 | 11 | The dictionary: interfaces, `ObservableDictionaryChange<TKey, TValue>`, event arguments | The four types compile and are documented (section 7.1, 7.3) |
 | 12 | `ObservableDictionary<TKey, TValue>`: mutations, `TryAdd`, the three dependencies | Section 7.4's table row for row, and 7.2.4's dependencies exactly: a value write wakes the key's reader and not the structure reader, and an absent key read through `TryGetValue` is woken by the key appearing |
 | 13 | The demo pages and the guide for the set and the dictionary | A set page whose toggles re-render one chip each, and a dictionary page whose rows re-render one row each, both applying records to a mirror |
