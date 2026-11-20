@@ -3058,6 +3058,15 @@ public sealed class Win32WindowBackend : IWindowBackend
         var style = (uint)NativeMethods.GetWindowLongPtrW(previous, NativeMethods.GwlStyle).ToInt64()
             & ~NativeMethods.WsVisible;
 
+        // A maximised window reports the maximised rectangle from GetWindowRect, and a minimised one
+        // reports somewhere off the bottom of the screen: neither is where the window belongs when it is
+        // restored, so replacing one of those without the placement below leaves the replacement
+        // restoring to the size it was maximised to rather than the size it had.
+        var placement = default(NativeMethods.WINDOWPLACEMENT);
+        placement.length = Marshal.SizeOf<NativeMethods.WINDOWPLACEMENT>();
+        var placed = (presentation.Maximized || presentation.Minimized)
+            && NativeMethods.GetWindowPlacement(previous, ref placement);
+
         // What was layered onto the old window comes off while the old window still exists.
         Win32PopupWindow.DismissForOwner(previous);
         ReleaseNativeTeardowns();
@@ -3096,6 +3105,17 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
 
+        if (placed)
+        {
+            // Applied while the window is hidden, so it sets the rectangle the window restores to
+            // without displaying anything: the show still belongs to RestorePresentation, where the
+            // transitions setting applies. rcNormalPosition is in the coordinates SetWindowPlacement
+            // reads, so it goes back in unchanged.
+            placement.showCmd = NativeMethods.SwHide;
+            placement.flags = 0;
+            NativeMethods.SetWindowPlacement(_hwnd, ref placement);
+        }
+
         // Set before the window is ever shown, which is the state the docs describe it being read in.
         var transitions = NativeMethods.SetTransitionsDisabled(_hwnd, true);
         NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
@@ -3109,8 +3129,12 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         if (Win32GlTrace.IsEnabled)
         {
+            var restore = placed
+                ? $"restore {placement.rcNormalPosition.Right - placement.rcNormalPosition.Left}x{placement.rcNormalPosition.Bottom - placement.rcNormalPosition.Top} kept"
+                : "restore rect untouched";
+
             Win32GlTrace.Write(
-                $"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {presentation.Width}x{presentation.Height}, created hidden={!NativeMethods.IsWindowVisible(_hwnd)}, transitions disabled -> 0x{transitions:X8}");
+                $"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {presentation.Width}x{presentation.Height}, created hidden={!NativeMethods.IsWindowVisible(_hwnd)}, transitions disabled -> 0x{transitions:X8}, {restore}");
         }
 
         return presentation;

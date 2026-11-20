@@ -315,6 +315,26 @@ internal static class NativeMethods
     }
 
     /// <summary>
+    /// The shape <c>GetWindowPlacement</c> and <c>SetWindowPlacement</c> exchange.
+    /// </summary>
+    /// <remarks>
+    /// <c>rcNormalPosition</c> is the rectangle the window restores to, in workspace coordinates, and it
+    /// is the only way to learn where a window belongs while it is maximised or minimised: for those
+    /// states <c>GetWindowRect</c> reports the maximised rectangle, or somewhere off the bottom of the
+    /// screen, and neither is the restored size.
+    /// </remarks>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct WINDOWPLACEMENT
+    {
+        public int length;
+        public int flags;
+        public int showCmd;
+        public POINT ptMinPosition;
+        public POINT ptMaxPosition;
+        public RECT rcNormalPosition;
+    }
+
+    /// <summary>
     /// The <c>lParam</c> of <c>WM_NCCALCSIZE</c> when <c>wParam</c> is TRUE.
     /// </summary>
     /// <remarks>
@@ -776,6 +796,12 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool IsIconic(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern bool GetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
+
+    [DllImport("user32.dll")]
+    internal static extern bool SetWindowPlacement(IntPtr hwnd, ref WINDOWPLACEMENT placement);
 
     [DllImport("user32.dll")]
     internal static extern bool GetCursorPos(out POINT lpPoint);
