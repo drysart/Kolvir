@@ -5078,6 +5078,127 @@ placeholder, a "not loaded" line - which is a decision about that component rath
 The sample's **Observables** page is this in miniature: a card that renders an observable model, four
 ordinary buttons above it that change that model, and a render count on the card that moves once per
 frame no matter how many values a click changed.
+### Observable collections
+
+`IObservableList<T>` is the collection half of the same idea: an `IList<T>` that reports every change as
+a record an observer can replay, and that publishes a dependency per kind of read rather than one per
+list. Reading `Count`, reading `list[3]` and enumerating are three different questions, so a change
+wakes only the readers whose answer it changed. The design, the alternatives it rejects and the plan
+for the set and the dictionary are in [`OBSERVABLE-COLLECTIONS.md`](OBSERVABLE-COLLECTIONS.md).
+
+#### A list in a model
+
+`CreateList` hands back the only writable view, on the same principle as `CreateValue`: the owner keeps
+it, everything else sees the read-only interface.
+
+```csharp
+internal sealed class TaskList
+{
+    private readonly IObservableList<string> _tasks = Observable.CreateList<string>();
+
+    public IReadOnlyObservableList<string> Tasks => _tasks;   // read and watch, but not write
+
+    public void Add(string task) => _tasks.Add(task);
+    public void Rename(int index, string text) => _tasks[index] = text;
+}
+```
+
+Five records, and which members each one fills in:
+
+| Record | Carries | Raised by |
+| --- | --- | --- |
+| `ItemAdded` | `NewIndex`, `NewItem` | `Add`, `Insert` |
+| `ItemRemoved` | `OldIndex`, `OldItem` | `RemoveAt`, `Remove` |
+| `ItemMoved` | both indexes, and the item on both sides | `Move` |
+| `ItemChanged` | the index, the old item and the new one | `this[i] = value` |
+| `ListCleared` | nothing | `Clear` of a non-empty list |
+
+Three rules, and they are the whole of a change:
+
+- **A move is a move.** One record with both indexes, not a removal and an addition, because an observer
+  that gets a move can shift a row instead of rebuilding it. `Move` follows
+  `ObservableCollection<T>`: moving 0 to 2 in `[a, b, c]` gives `[b, c, a]`.
+- **A call that changed nothing raises nothing.** Writing an equal item over itself, clearing an empty
+  list, removing an item that is not there and moving an item to where it already is all leave the
+  handlers alone, and an index out of range throws without recording anything - a failed mutation is
+  not a change anybody could replay.
+- **A clear is one record.** The list is empty and the record says so; the observer that cared about the
+  contents already had them. That is what keeps undo a different object, with its own copy.
+
+#### Replaying the records
+
+The contract is one sentence: apply the records in the order given, each against the state the one
+before it left, and the copy equals the list. An observer therefore needs no knowledge of the list
+beyond the record type:
+
+```csharp
+private void OnChanged(ObservableListChangedEventArgs<string> args)
+{
+    foreach (var change in args.Changes)
+    {
+        switch (change.ChangeType)
+        {
+            case ObservableListChangeType.ItemAdded:
+                _copy.Insert(change.NewIndex!.Value, change.NewItem!);
+                break;
+            case ObservableListChangeType.ItemRemoved:
+                _copy.RemoveAt(change.OldIndex!.Value);
+                break;
+            case ObservableListChangeType.ItemMoved:
+                _copy.RemoveAt(change.OldIndex!.Value);
+                _copy.Insert(change.NewIndex!.Value, change.NewItem!);
+                break;
+            case ObservableListChangeType.ItemChanged:
+                _copy[change.NewIndex!.Value] = change.NewItem!;
+                break;
+            default:
+                _copy.Clear();
+                break;
+        }
+    }
+}
+```
+
+An index shift is implied rather than reported: an insert at 0 does not also report the items behind it,
+because the observer is applying records rather than patching items by address. Two consequences worth
+knowing: the records of one event must be applied in order (the library delivers them in that order and
+never out of it, even when a handler changes the list itself), and a value type's absent item reads as
+`default` rather than a nullable, so a handler switches on `ChangeType` rather than testing the item.
+
+#### Batches
+
+`BeginChangeBatch` and `EndChangeBatch` suppress notifications, not changes: everything between them is
+recorded in order and delivered as one event. Nested batches deliver once, at the outermost end, and a
+batch that collected nothing delivers nothing. A library that mutates on someone else's behalf can read
+`ChangeBatchDepth` to see whether a batch is already open.
+
+Delivery is never nested, which is why a handler may change the list it is hearing about: the new
+records are queued and delivered after the event being delivered, so every observer sees the same
+history in the same order. A chain of such deliveries is refused at `Observable.MaxEventStackSize`
+generations rather than growing the stack, on the same principle as a raise loop.
+
+#### What a read depends on
+
+| Read | Woken by |
+| --- | --- |
+| `Count` | an add, a removal or a clear - never an item write, never a move |
+| `this[i]` | the item that index would return changing: a write there, an add or removal at any index at or past it, a move that spans it, a clear |
+| enumeration, `Contains`, `IndexOf`, `CopyTo` | any change at all, because they read every item |
+
+An index read publishes before the range check, so a read that throws is still a read: an expression
+`list[7]` over three items is re-run when the list grows to eight. An index that several runs watch is
+one entry, created on the first read inside a run and dropped when its last handler goes, so the table
+holds the rows on screen rather than every index ever read.
+
+#### The sample page
+
+The sample's **Observable list** page is the layer in miniature. Three components read the same list
+differently: one line reads `Count`, one component renders the rows, and each row is its own child
+component reading a single index. Press **Rename row 1** and only that row's render count moves - the
+count line and the other rows keep theirs. Press **Move first to last** and the rows the move crossed
+re-render while the size stays what it was. Press **Add five in a batch** and the record line reads one
+event with five records. That line is also the fidelity check: the copy under it is built from the
+records alone and is compared with the list on every event.
 
 ## Hardware acceleration (Windows)
 

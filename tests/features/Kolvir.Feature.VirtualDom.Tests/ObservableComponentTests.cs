@@ -304,8 +304,95 @@ public sealed class ObservableComponentTests
         Assert.ThrowsExactly<ObjectDisposedException>(() => VirtualDomRuntime.Mount(host, page));
     }
 
+    [TestMethod]
+    public void AChildComponentRerendersFromItsOwnReadWithoutTheParentRendering()
+    {
+        // The composition the Observable list page in the sample is built on: a parent renders one child
+        // per index, and each child reads only its own index. So a write to one item re-renders that
+        // child and nothing else - not the parent, which read the size, and not the other rows.
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+        var list = Observable.CreateList("a", "b", "c");
+        var rows = new RowsPage { DataModel = list };
+
+        using var mount = VirtualDomRuntime.Mount(host, rows);
+        scene.Frame();
+
+        var parentRenders = rows.Renders;
+        var firstRenders = rows.Rows[0].Renders;
+        var secondRenders = rows.Rows[1].Renders;
+
+        Assert.AreEqual(3, rows.Rows.Count, "one child per item");
+
+        list[1] = "changed";
+        scene.Frame();
+
+        Assert.AreEqual(parentRenders, rows.Renders, "the parent read the size, which did not change");
+        Assert.AreEqual(firstRenders, rows.Rows[0].Renders, "a row nobody touched is not re-rendered");
+        Assert.AreEqual(secondRenders + 1, rows.Rows[1].Renders, "only the row whose item changed");
+
+        var labels = Labels(mount);
+
+        Assert.AreEqual("changed", labels[1].Text, "and its control carries the new item");
+        Assert.AreEqual("a", labels[0].Text, "while the one beside it still carries what it had");
+    }
+
     private static List<Label> Labels(ComponentMount mount) =>
         ((Panel)mount.Root!).Controls.OfType<Label>().ToList();
+
+    /// <summary>
+    /// A parent that renders one child per index and reads nothing but the size, the shape the
+    /// Observable list page uses.
+    /// </summary>
+    private sealed class RowsPage : ObservableComponent<IReadOnlyObservableList<string>>
+    {
+        private readonly Dictionary<int, RowPage> _rows = [];
+
+        internal int Renders { get; private set; }
+
+        internal IReadOnlyDictionary<int, RowPage> Rows => _rows;
+
+        protected override VNode RenderWithDataModel(RenderArgs<IReadOnlyObservableList<string>> args)
+        {
+            Renders++;
+
+            var count = args.DataModel.Count;
+            var children = new List<VNode>();
+
+            for (var index = 0; index < count; index++)
+            {
+                if (!_rows.TryGetValue(index, out var row))
+                {
+                    row = new RowPage();
+                    _rows.Add(index, row);
+                }
+
+                // The parent hands the model down: a child has no idea where it is mounted, and one with
+                // no model renders the empty fragment its base class supplies.
+                row.DataModel = args.DataModel;
+                row.Index = index;
+
+                children.Add(new VComponent(row) { Key = index });
+            }
+
+            return new VPanel { Dock = DockStyle.Fill, Children = children };
+        }
+    }
+
+    /// <summary>A row that reads one index, which is the read the whole arrangement hangs on.</summary>
+    private sealed class RowPage : ObservableComponent<IReadOnlyObservableList<string>>
+    {
+        internal int Renders { get; private set; }
+
+        internal int Index { get; set; }
+
+        protected override VNode RenderWithDataModel(RenderArgs<IReadOnlyObservableList<string>> args)
+        {
+            Renders++;
+
+            return new VLabel { Text = args.DataModel[Index] };
+        }
+    }
 
     /// <summary>A model whose state is observable, which is the whole reason the seam exists.</summary>
     private sealed class PageModel

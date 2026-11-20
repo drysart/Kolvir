@@ -946,7 +946,7 @@ by the producer.
 | 4 | Done | `ObservableListDependencies<T>` and `ObservableDependency`: the count and contents are fields, an index entry is created by a read inside a run and dropped when its last handler goes (`ReadScope.IsActive` keeps a cold read from allocating), and marking is a pass over the watched entries. A write wakes its index and not the count; an insert wakes the indexes at or past it; a move wakes its span; a clear wakes all; a batch raises each once; a read past the end is still a read |
 | 5 | Done | The four `CreateList` overloads and the disposal order |
 | 6 | Done | 41 tests in three files - `ObservableListChangeTests`, `ObservableListDeliveryTests`, `ObservableListDependencyTests` - covering section 10's claims for the list, including a replay that reproduces the list from records alone |
-| 7 | Not started | The demo page and the guide passage |
+| 7 | Done | An **Observable list** page in the sample (`ObservableListPage`) - a line that reads only `Count`, a rows component, one child component per row reading a single index, and a copy built only from the records that says whether it still matches - plus an `### Observable collections` section in the developer guide. Rendering it headlessly (`--render ... --page observable-list`) is what caught the two things a first frame shows and a test does not: a child component with no `DataModel` renders the empty fragment, and a slot whose child the list removed keeps a disposed instance unless the parent prunes it |
 | 8 | Not started | The shared core, extracted once the list is behaving |
 | 9-10 | Not started | The set |
 | 11-12 | Not started | The dictionary |
