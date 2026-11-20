@@ -67,12 +67,18 @@ public sealed class Win32WindowBackend : IWindowBackend
     private WindowState _state = WindowState.Normal;
     private MenuBar? _menuBar;
     private readonly bool _useMenus;
-    private readonly bool _useHardwareAcceleration;
 
     /// <summary>
-    /// The acceleration the application's user chose, or null when the backend picks for itself.
+    /// True when this window may draw through a GPU tier. Mutable because a switch can turn it on or off
+    /// while the window runs; the window's drawing surface is rebuilt either way.
     /// </summary>
-    private readonly Win32GfxChoice? _selectedAcceleration;
+    private bool _useHardwareAcceleration;
+
+    /// <summary>
+    /// The acceleration the application's user chose, or null when the backend picks for itself. Mutable
+    /// for the same reason: <see cref="TrySwitchAcceleration"/> replaces it and rebuilds the surface.
+    /// </summary>
+    private Win32GfxChoice? _selectedAcceleration;
 
     private Icon? _icon;
     private IntPtr _bigIcon;
@@ -171,8 +177,12 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         // A saved choice replaces the order the backend would have picked for itself, and carries its
         // own answer to "accelerate at all": asking for a GPU family is asking for acceleration, and
-        // asking for the CPU path is the same request as turning the option off. Null leaves both alone.
-        _selectedAcceleration = Win32GfxOptions.FromSelected(application.Application?.Options.GfxAcceleration);
+        // asking for the CPU path is the same request as turning the option off. What the service holds
+        // wins over the option because a switch made while an earlier window was open has to carry over
+        // to the next one; with nothing switched the service has nothing to say and the option decides,
+        // just as it did before a switch existed.
+        _selectedAcceleration = Win32GfxOptions.FromSelected(
+            application.Acceleration.Requested ?? application.Application?.Options.GfxAcceleration);
 
         if (_selectedAcceleration is { } selected)
         {
@@ -2828,6 +2838,92 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// the tier is lost.
     /// </summary>
     private void ReportAcceleration() => _application.Acceleration.Report(_gpu);
+
+    /// <summary>
+    /// Rebuilds this window's drawing surface so that it uses <paramref name="choice"/> from now on.
+    /// </summary>
+    /// <param name="choice">The tier to build, or the CPU path.</param>
+    /// <param name="reason">One sentence saying what happened, filled in on success and on refusal.</param>
+    /// <returns>True when the window is drawing with what was asked for afterwards.</returns>
+    /// <remarks>
+    /// <para>
+    /// The old surface is dropped and a new one built at the current framebuffer size, which is the only
+    /// way to change tiers: a swap chain cannot become a WGL context, and a WGL context cannot become a
+    /// DIB. Everything above this line - the controls, their state, the retained damage - is untouched,
+    /// so the window keeps looking like itself and merely misses the frames the rebuild takes.
+    /// </para>
+    /// <para>
+    /// A request that cannot be honored is reported as a refusal even though the window is left working:
+    /// it is drawn on the CPU path, which is not what was asked for. That is the honest answer for a
+    /// caller that is about to show the user what they chose.
+    /// </para>
+    /// </remarks>
+    internal bool TrySwitchAcceleration(Win32GfxChoice choice, out string reason)
+    {
+        if (_hwnd == IntPtr.Zero)
+        {
+            reason = "The window does not exist yet.";
+            return false;
+        }
+
+        if (!OnOwningThread())
+        {
+            reason = "Acceleration can only be switched from the thread that owns the window.";
+            return false;
+        }
+
+        int width = _bufferWidth;
+        int height = _bufferHeight;
+
+        if (width <= 0 || height <= 0)
+        {
+            // Nothing has been sized yet, so there is no surface to replace and nothing to contradict the
+            // choice: the first paint builds it. The answer is optimistic for that reason alone - a later
+            // paint that cannot build the tier falls back and reports it through ReportAcceleration.
+            _selectedAcceleration = choice;
+            _useHardwareAcceleration = !choice.CpuOnly;
+            _gpuUnavailable = choice.CpuOnly;
+            reason = string.Empty;
+            return true;
+        }
+
+        ReleaseGpu();
+        ReleaseBuffer();
+
+        _selectedAcceleration = choice;
+        _useHardwareAcceleration = !choice.CpuOnly;
+        _gpuUnavailable = choice.CpuOnly;
+        _gfxReason = choice.CpuOnly ? "cpu (chosen)" : "cpu (not started)";
+
+        EnsureBuffer(width, height);
+
+        // The frame on screen was drawn with the old surface, so ask for a full repaint through the new
+        // one rather than leaving whatever the compositor still holds.
+        Invalidate();
+
+        if (!choice.CpuOnly && _gpu is null)
+        {
+            reason = $"Fell back to the CPU path: {_gfxReason}.";
+            return false;
+        }
+
+        reason = _gpu is null ? "Now drawing on the CPU path." : $"Now drawing with {_gpu.Tier}.";
+        return true;
+    }
+
+    /// <summary>True when the calling thread is the one that created this window.</summary>
+    /// <remarks>
+    /// A Win32 window belongs to the thread that made it, and so does its drawing surface: rebuilding it
+    /// from anywhere else is a violation of that rule rather than something to work around.
+    /// </remarks>
+    private bool OnOwningThread()
+    {
+        // The thread id is the call's return value; the out parameter is the *process* id, which is the
+        // kind of thing worth saying out loud, because comparing that one to the calling thread's id is a
+        // check that compiles, runs, and always says no.
+        var ownerThread = NativeMethods.GetWindowThreadProcessId(_hwnd, out _);
+        return ownerThread != 0 && ownerThread == NativeMethods.GetCurrentThreadId();
+    }
 
     private void EnsureCpuBuffer(int width, int height)
     {

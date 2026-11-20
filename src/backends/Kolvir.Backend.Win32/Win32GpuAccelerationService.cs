@@ -3,6 +3,22 @@ using static Kolvir.Backend.Win32.D3D12;
 namespace Kolvir.Backend.Win32;
 
 /// <summary>
+/// What a switch asks the application to do: rebuild every window's drawing surface.
+/// </summary>
+/// <remarks>
+/// The service knows what the machine offers and which choice is in use; the application backend owns the
+/// windows. This is the seam between them, so the service never has to know what a window is.
+/// </remarks>
+internal interface IWin32AccelerationTarget
+{
+    /// <summary>Switches every open window to <paramref name="option"/>.</summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened. Never null.</param>
+    /// <returns>True when the windows are drawing with <paramref name="option"/> afterwards.</returns>
+    bool Apply(GpuAccelerationOption option, out string reason);
+}
+
+/// <summary>
 /// The Win32 answer to <see cref="IGpuAccelerationService"/>: Direct3D 12, Vulkan and OpenGL, each with
 /// the GPUs that can actually serve it, and the CPU path underneath.
 /// </summary>
@@ -30,6 +46,46 @@ internal sealed class Win32GpuAccelerationService : GpuAccelerationService
 
     /// <summary>The name a settings list shows for the OpenGL family.</summary>
     private const string OpenGlName = "OpenGL";
+
+    private readonly IWin32AccelerationTarget? _target;
+
+    /// <summary>Creates the service a Win32 application resolves.</summary>
+    /// <param name="target">
+    /// What actually rebuilds the windows, or null when there is nothing to switch - the case a test or a
+    /// backend built outside an application reaches.
+    /// </param>
+    internal Win32GpuAccelerationService(IWin32AccelerationTarget? target = null) => _target = target;
+
+    /// <summary>
+    /// The value a window created from now on should use, or null when nothing has been switched and the
+    /// application's own option decides.
+    /// </summary>
+    /// <remarks>
+    /// This is deliberately not <see cref="IGpuAccelerationService.Current"/>: Current is what a window
+    /// actually built, which starts on the CPU path because nothing has drawn yet and may be the CPU path
+    /// because the requested tier failed. What a new window needs is the request, not its outcome.
+    /// </remarks>
+    internal string? Requested { get; private set; }
+
+    /// <inheritdoc />
+    protected override bool ApplyCurrent(GpuAccelerationOption option, out string reason)
+    {
+        if (_target is null)
+        {
+            reason = "This application has no windows that can be switched.";
+            return false;
+        }
+
+        if (!_target.Apply(option, out reason))
+        {
+            return false;
+        }
+
+        // Only a switch that took becomes what the next window asks for: a request that had to fall back
+        // leaves the old value in place, so a second window does not inherit a failure.
+        Requested = option.Value;
+        return true;
+    }
 
     /// <inheritdoc />
     protected override IReadOnlyList<GpuAccelerationType> Enumerate()

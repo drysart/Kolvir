@@ -277,6 +277,107 @@ public sealed class GpuAccelerationTests
         Assert.AreEqual(1, service.EnumerationCount);
     }
 
+    [TestMethod]
+    public void ABackendThatCannotSwitchRefusesAndChangesNothing()
+    {
+        // The default answer, and the honest one for a backend whose drawing surface is chosen when the
+        // window is created: a call that reports success and does nothing is the failure mode to avoid.
+        var service = new NoSwitchAccelerationService(
+            new GpuAccelerationType(GpuAccelerationKind.Vulkan, "Vulkan", [new GpuAccelerationDevice(FirstCard, "GPU")]));
+
+        Assert.IsFalse(service.TryApply("vulkan", out var reason));
+        StringAssert.Contains(reason, "cannot change acceleration while it runs");
+        Assert.AreEqual("cpu", service.Current.Value);
+    }
+
+    [TestMethod]
+    public void ApplyingAValueThisMachineDoesNotOfferIsRefusedBeforeAnythingIsBuilt()
+    {
+        var service = new TestAccelerationService(
+            new GpuAccelerationType(GpuAccelerationKind.Vulkan, "Vulkan", [new GpuAccelerationDevice(FirstCard, "GPU")]))
+        {
+            ApplyResult = true,
+        };
+
+        Assert.IsFalse(service.TryApply($"d3d:{FirstCard}", out var reason));
+        StringAssert.Contains(reason, "not an acceleration this machine offers");
+        Assert.AreEqual(0, service.Applied.Count, "nothing is handed to the backend");
+
+        Assert.IsFalse(service.TryApply((string?)null, out _));
+        Assert.IsFalse(service.TryApply("   ", out _));
+    }
+
+    [TestMethod]
+    public void ApplyingAChoiceTheBackendBuildsMovesCurrent()
+    {
+        var service = new TestAccelerationService(
+            new GpuAccelerationType(GpuAccelerationKind.Vulkan, "Vulkan", [new GpuAccelerationDevice(FirstCard, "GPU")]))
+        {
+            ApplyResult = true,
+            ApplyReason = "switched",
+        };
+
+        var raised = 0;
+        service.CurrentChanged += (_, _) => raised++;
+
+        Assert.IsTrue(service.TryApply("vulkan", out var reason));
+        Assert.AreEqual($"vulkan:{FirstCard}", service.Current.Value);
+        Assert.AreEqual(1, raised);
+        CollectionAssert.AreEqual(new[] { $"vulkan:{FirstCard}" }, service.Applied.ToArray());
+        Assert.AreEqual("switched", reason, "the backend's own sentence is what a caller shows");
+    }
+
+    [TestMethod]
+    public void ABackendWithNothingToSayGetsASentence()
+    {
+        // A reason is filled in rather than left blank: the caller puts it in front of a user.
+        var service = new TestAccelerationService(
+            new GpuAccelerationType(GpuAccelerationKind.Vulkan, "Vulkan", [new GpuAccelerationDevice(FirstCard, "GPU")]))
+        {
+            ApplyResult = true,
+            ApplyReason = string.Empty,
+        };
+
+        Assert.IsTrue(service.TryApply("vulkan", out var reason));
+        StringAssert.Contains(reason, "Now using");
+    }
+
+    [TestMethod]
+    public void ABackendThatReportsTheTierItselfIsNotOverruled()
+    {
+        // This is the fallback case: the window was asked for Vulkan, could not build it, and reported the
+        // CPU path. The service must keep that answer rather than award itself the thing it asked for.
+        var service = new TestAccelerationService(
+            new GpuAccelerationType(GpuAccelerationKind.Vulkan, "Vulkan", [new GpuAccelerationDevice(FirstCard, "GPU")]))
+        {
+            ApplyResult = false,
+            ReportOnApply = "cpu",
+        };
+
+        Assert.IsFalse(service.TryApply("vulkan", out var reason));
+        Assert.AreEqual("cpu", service.Current.Value);
+        StringAssert.Contains(reason, "fell back");
+    }
+
+    [TestMethod]
+    public void ARefusedSwitchLeavesCurrentWhereItWas()
+    {
+        var service = new TestAccelerationService(
+            new GpuAccelerationType(GpuAccelerationKind.Vulkan, "Vulkan", [new GpuAccelerationDevice(FirstCard, "GPU")]))
+        {
+            ApplyResult = true,
+        };
+
+        Assert.IsTrue(service.TryApply("vulkan", out _));
+
+        service.ApplyResult = false;
+        service.ApplyReason = "the driver refused";
+
+        Assert.IsFalse(service.TryApply("cpu", out var reason));
+        Assert.AreEqual("the driver refused", reason);
+        Assert.AreEqual($"vulkan:{FirstCard}", service.Current.Value, "nothing changed, so nothing is reported");
+    }
+
     private static void AssertParses(string value, GpuAccelerationKind kind, string? deviceKey)
     {
         Assert.IsTrue(GpuAccelerationSyntax.TryParse(value, out var parsed, out var key), value);
@@ -285,11 +386,32 @@ public sealed class GpuAccelerationTests
     }
 
     /// <summary>
-    /// A service over a fixed list, with the reporting the backends do exposed for the tests.
+    /// A service whose backend does not switch at all, so the default refusal is what is under test.
+    /// </summary>
+    private sealed class NoSwitchAccelerationService(params GpuAccelerationType[] types) : GpuAccelerationService
+    {
+        protected override IReadOnlyList<GpuAccelerationType> Enumerate() => types;
+    }
+
+    /// <summary>
+    /// A service over a fixed list, with the reporting the backends do exposed for the tests, and a
+    /// switch whose outcome the test decides.
     /// </summary>
     private sealed class TestAccelerationService(params GpuAccelerationType[] types) : GpuAccelerationService
     {
         public int EnumerationCount { get; private set; }
+
+        /// <summary>Whether the pretend backend builds what it was asked for.</summary>
+        public bool ApplyResult { get; set; }
+
+        /// <summary>The sentence a refusing backend gives.</summary>
+        public string ApplyReason { get; set; } = "fell back";
+
+        /// <summary>What the pretend backend reports after applying, or null to report nothing.</summary>
+        public string? ReportOnApply { get; set; }
+
+        /// <summary>The choices the pretend backend was handed, in order.</summary>
+        public List<string> Applied { get; } = [];
 
         public bool Report(string? value) => ReportCurrent(value);
 
@@ -297,6 +419,19 @@ public sealed class GpuAccelerationTests
         {
             EnumerationCount++;
             return types;
+        }
+
+        protected override bool ApplyCurrent(GpuAccelerationOption option, out string reason)
+        {
+            Applied.Add(option.Value);
+
+            if (ReportOnApply is { } reported)
+            {
+                ReportCurrent(reported);
+            }
+
+            reason = ApplyReason;
+            return ApplyResult;
         }
     }
 }

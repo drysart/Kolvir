@@ -23,7 +23,7 @@ namespace Kolvir.Backend.Win32;
 /// trimming and NativeAOT safe.
 /// </para>
 /// </remarks>
-public sealed class Win32ApplicationBackend : IApplicationBackend
+public sealed class Win32ApplicationBackend : IApplicationBackend, IWin32AccelerationTarget
 {
     private Action<object, SecondInstanceEventArgs>? _secondInstance;
     private const string MessageWindowClass = "Kolvir.MessageWindow";
@@ -264,7 +264,9 @@ public sealed class Win32ApplicationBackend : IApplicationBackend
         services.AddSingleton(this);
         services.AddSingleton<IDialogService, Win32DialogService>();
 
-        // Over the CPU-only default the core registered: this backend can enumerate real GPUs.
+        // Over the CPU-only default the core registered: this backend can enumerate real GPUs, and it
+        // owns the windows a switch has to rebuild.
+        Acceleration = new Win32GpuAccelerationService(this);
         services.AddSingleton(Acceleration);
         services.AddSingleton<IGpuAccelerationService>(Acceleration);
     }
@@ -278,7 +280,68 @@ public sealed class Win32ApplicationBackend : IApplicationBackend
     /// as well, so an application reaching <see cref="IGpuAccelerationService"/> through
     /// <see cref="Application.Services"/> gets this same instance and sees what the windows report.
     /// </remarks>
-    internal Win32GpuAccelerationService Acceleration { get; } = new();
+    internal Win32GpuAccelerationService Acceleration { get; private set; } = new();
+
+    /// <summary>
+    /// Switches every open window to <paramref name="option"/>, which is what a live change of acceleration
+    /// costs: one rebuilt drawing surface per window.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened. Never null.</param>
+    /// <returns>True when every window is drawing with <paramref name="option"/> afterwards.</returns>
+    /// <remarks>
+    /// Windows are rebuilt one at a time and on their own thread: a Win32 window belongs to the thread that
+    /// created it, so this only works when it is called from that thread - which is where a click handler
+    /// runs. A window that refuses leaves the refusal's sentence in <paramref name="reason"/> and the
+    /// earlier windows switched; with no window open at all the choice is simply recorded, and the next
+    /// window starts with it.
+    /// </remarks>
+    bool IWin32AccelerationTarget.Apply(GpuAccelerationOption option, out string reason)
+    {
+        if (_windows.Count == 0)
+        {
+            reason = $"No window is open; {option.Name} will be used by the next one.";
+            return true;
+        }
+
+        var choice = option.Kind == GpuAccelerationKind.Cpu
+            ? Win32GfxChoice.Cpu
+            : Win32GfxChoice.Only(TierOf(option.Kind), option.Device?.Key);
+
+        reason = string.Empty;
+        var all = true;
+
+        // A copy: a window that closes itself while it is being switched must not resize the list under
+        // the loop.
+        foreach (var window in _windows.ToArray())
+        {
+            if (!window.TrySwitchAcceleration(choice, out var windowReason))
+            {
+                all = false;
+
+                if (reason.Length == 0)
+                {
+                    reason = windowReason;
+                }
+            }
+        }
+
+        if (all)
+        {
+            reason = $"{_windows.Count} window(s) now using {option.Name}.";
+        }
+
+        return all;
+    }
+
+    /// <summary>Which tier serves a family, which is the only part of a choice a window understands.</summary>
+    /// <param name="kind">The family.</param>
+    private static Win32GfxTier TierOf(GpuAccelerationKind kind) => kind switch
+    {
+        GpuAccelerationKind.Direct3D12 => Win32GfxTier.Direct3D12,
+        GpuAccelerationKind.Vulkan => Win32GfxTier.Vulkan,
+        _ => Win32GfxTier.OpenGl,
+    };
 
     /// <inheritdoc />
     public IReadOnlyList<Screen> GetScreens()

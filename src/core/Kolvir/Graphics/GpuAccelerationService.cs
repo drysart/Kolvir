@@ -104,6 +104,82 @@ public abstract class GpuAccelerationService : IGpuAccelerationService
         return false;
     }
 
+    /// <inheritdoc />
+    public bool TryApply(string? value, out string reason)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            reason = "No acceleration was named.";
+            return false;
+        }
+
+        if (!TryFindOption(value, out var option) || option is null)
+        {
+            reason = $"\"{value}\" is not an acceleration this machine offers.";
+            return false;
+        }
+
+        return TryApply(option, out reason);
+    }
+
+    /// <inheritdoc />
+    public bool TryApply(GpuAccelerationOption option, out string reason)
+    {
+        ArgumentNullException.ThrowIfNull(option);
+
+        // The argument may be a copy from a list built earlier, so it is matched on its value rather than
+        // on identity: what matters is that this machine really offers it.
+        if (!TryFindOption(option.Value, out var known) || known is null)
+        {
+            reason = $"\"{option.Value}\" is not an acceleration this machine offers.";
+            return false;
+        }
+
+        var before = Current;
+
+        if (!ApplyCurrent(known, out reason))
+        {
+            // A refusal leaves everything as it was: nothing was built, and nothing is reported, so
+            // Current still names what is on screen.
+            reason = string.IsNullOrWhiteSpace(reason) ? "The switch was refused." : reason;
+            return false;
+        }
+
+        // A window that built the requested tier has already reported it, so this only has work to do
+        // when there was no window to ask, or when the backend applies silently.
+        if (ReferenceEquals(Current, before))
+        {
+            ReportCurrent(known.Value);
+        }
+
+        if (string.IsNullOrWhiteSpace(reason))
+        {
+            reason = $"Now using {known.Name}.";
+        }
+
+        return true;
+    }
+
+    /// <summary>
+    /// Rebuilds what the windows draw through, so that they use <paramref name="option"/> from now on.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened, filled in on success and on refusal.</param>
+    /// <returns>
+    /// True when the windows are drawing with <paramref name="option"/> afterwards. A backend that cannot
+    /// switch while it runs returns false without touching anything.
+    /// </returns>
+    /// <remarks>
+    /// The default refuses, which is the honest answer for a backend whose drawing surface is chosen when
+    /// the window is created and cannot be replaced: the alternative is a call that reports success and
+    /// changes nothing.
+    /// </remarks>
+    protected virtual bool ApplyCurrent(GpuAccelerationOption option, out string reason)
+    {
+        reason = "This backend cannot change acceleration while it runs.";
+        return false;
+    }
+
     /// <summary>
     /// Records the choice a window actually built, which is what <see cref="Current"/> reports.
     /// </summary>

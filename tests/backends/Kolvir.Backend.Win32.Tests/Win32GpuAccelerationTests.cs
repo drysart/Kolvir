@@ -139,6 +139,69 @@ public sealed class Win32GpuAccelerationTests
         Assert.AreEqual(60, Marshal.OffsetOf<Vulkan.VkPhysicalDeviceIdProperties>("deviceLUIDValid").ToInt32());
     }
 
+    [TestMethod]
+    public void ALiveSwitchNeedsAWindowAndSaysSoWhenThereIsNone()
+    {
+        // The service is built outside an application here, which is the case a test reaches: it can list
+        // the machine's options but has nothing to rebuild, so it refuses rather than pretending.
+        var service = new Win32GpuAccelerationService();
+
+        Assert.IsFalse(service.TryApply("cpu", out var reason));
+        StringAssert.Contains(reason, "no windows that can be switched");
+    }
+
+    [TestMethod]
+    public void ASwitchIsCarriedToTheNextWindowOnlyWhenItTook()
+    {
+        var target = new RecordingTarget { Result = true };
+        var service = new Win32GpuAccelerationService(target);
+
+        Assert.IsNull(service.Requested, "nothing has switched, so the application's option decides");
+
+        if (!service.Types.Any(type => type.Kind == GpuAccelerationKind.OpenGl))
+        {
+            Assert.Inconclusive("this machine has no OpenGL driver to switch to");
+        }
+
+        // A request the target honors becomes what every window created afterwards asks for.
+        Assert.IsTrue(service.TryApply("ogl", out _));
+        Assert.AreEqual("ogl", service.Requested);
+        Assert.AreEqual("ogl", target.Last?.Value);
+    }
+
+    [TestMethod]
+    public void AFailedSwitchLeavesTheRequestAlone()
+    {
+        var target = new RecordingTarget { Result = false, Reason = "the tier fell over" };
+        var service = new Win32GpuAccelerationService(target);
+
+        if (!service.Types.Any(type => type.Kind == GpuAccelerationKind.OpenGl))
+        {
+            Assert.Inconclusive("this machine has no OpenGL driver to switch to");
+        }
+
+        Assert.IsFalse(service.TryApply("ogl", out var reason));
+        Assert.AreEqual("the tier fell over", reason);
+        Assert.IsNull(service.Requested, "a window opened later keeps the choice that worked");
+    }
+
+    /// <summary>A target that records what it was asked for and answers as the test decides.</summary>
+    private sealed class RecordingTarget : IWin32AccelerationTarget
+    {
+        public bool Result { get; set; }
+
+        public string Reason { get; set; } = string.Empty;
+
+        public GpuAccelerationOption? Last { get; private set; }
+
+        public bool Apply(GpuAccelerationOption option, out string reason)
+        {
+            Last = option;
+            reason = Reason;
+            return Result;
+        }
+    }
+
     /// <summary>A tier that reports a name and a device index and draws nothing.</summary>
     private sealed class FakeSurface(string tier, string deviceKey) : IWin32GpuSurface
     {

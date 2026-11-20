@@ -5720,18 +5720,66 @@ flip-model swap chain cannot cross adapters; the Vulkan tier tries the identifie
 first and moves on when it cannot present to the window. Either way the window ends up on a GPU rather
 than on nothing.
 
+### Switching while running: `TryApply`
+
+The same value can be applied without a restart, which is what a settings window wants: the user
+picks a row, the window changes what it draws with, and the content stays on screen.
+
+```csharp
+if (!acceleration.TryApply(option, out var reason))
+    status.Text = reason;          // the window is unchanged; this says why
+```
+
+`TryApply` has an overload taking the `Value` string directly, for a value read back from storage.
+Both return `false` with a sentence in `reason` when the window was *not* moved, and `Current` only
+changes on `true`, so a failed attempt leaves the picker agreeing with the window.
+
+The attempt is validated against `Options` before anything is touched, so a value this machine does
+not offer is refused with the same sentence the enumeration would have printed rather than rebuilding
+a surface to find out. After that the backend does the work per window: the GPU surface and its
+buffer are released, a new tier is built for the new choice, and the window is invalidated so the
+next paint goes through the new surface. That costs one surface rebuild per window - the same work
+`Resize` already does - and nothing at all when the value is already in use.
+
+A refusal is not only "unavailable". If the requested family exists but the window could not be
+built on it - the case this machine hits, where `opengl32.dll` is present but there is no usable
+context - the switch reports `Fell back to the CPU path: ...` and returns `false`, because accepting
+it would have the window quietly drawing on the CPU while the picker claims OpenGL. Accelerated
+rows that a multi-GPU machine lists but cannot present to the window's display are the same story.
+
+Two more rules worth knowing:
+
+- **Thread affinity.** A window's GPU surface belongs to the thread that owns it, so `TryApply` must
+  be called from that thread - a UI event handler already is. The Win32 backend checks with
+  `GetWindowThreadProcessId` and refuses off-thread rather than tearing the surface down from under
+  the owner.
+- **Windows created later.** The applied choice is remembered and handed to windows created
+  afterwards, so a switch followed by a new window does not make the two disagree. It is kept apart
+  from `ApplicationOptions.GfxAcceleration`: the choice an application saved stays as it was saved,
+  and persisting the new one is the application's decision, made when it writes its own settings.
+
+A backend that cannot do this refuses by default with "This backend cannot change acceleration while
+it runs." - the base `GpuAccelerationService.ApplyCurrent` only says yes where it has been
+implemented - so a caller can offer the switch unconditionally and let the platform answer. On this
+branch the Win32 backend answers yes; Linux GTK4 needs an unrealize/realize cycle around the
+`EGLSurface` and macOS needs a `CAMetalLayer` replacement, neither of which is done yet.
+
+The sample exercises both: `--acceleration <value>` chooses at startup, `--apply-acceleration
+<value>` applies a switch once the first window exists (printing the result, which is how a script
+checks it without a screen), and the **Graphics acceleration** page shows exactly this list -
+`--page graphics-acceleration`, kept last in the navigation so every earlier page keeps the position
+a screenshot script names. Selecting a row applies it there and then - the same `TryApply` the
+section above describes - prints its value under the list and copies it with one click, which is how
+a machine with more than one GPU can be checked: the value should name a card that stays the same
+across a reboot, and it should match what the window reports it is drawing with in the line below.
+
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in section 8 of
 [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 3,524,608 -> 3,575,808, so +51,200 bytes for the
-seam, the Win32 enumeration, the device identities and the startup setting together. No new native
-asset: DXGI, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll` are all asked through the same raw interop
-the tiers already use.
-
-The sample has a **Graphics acceleration** page that shows exactly this list - `--page
-graphics-acceleration`, kept last in the navigation so every earlier page keeps the position a
-screenshot script names. Selecting a row prints its value under the list and copies it with one click,
-which is how a machine with more than one GPU can be checked: the value should name a card that stays
-the same across a reboot, and it should match what the window reports it is drawing with in the line
-below.
+seam, the Win32 enumeration, the device identities and the startup setting together. The live switch
+adds nothing measurable on top: the same build measures 3,575,808, because the switch is a virtual
+method and a rebuilt surface rather than new code the trimmer has to keep - `Kolvir.Minimal` never
+calls it. No new native asset either: DXGI, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll` are all
+asked through the same raw interop the tiers already use.
 
 ## Hardware acceleration (macOS)
 

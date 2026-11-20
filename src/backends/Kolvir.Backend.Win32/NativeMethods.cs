@@ -590,6 +590,18 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool InvalidateRect(IntPtr hwnd, ref RECT lpRect, bool bErase);
 
+    /// <summary>The thread that created <paramref name="hwnd"/>, which is the only one that may redraw it.</summary>
+    /// <param name="hwnd">The window.</param>
+    /// <param name="processId">The process that owns it, or zero when it is not wanted.</param>
+    /// <returns>The owning thread's id, or zero when the window does not exist.</returns>
+    [DllImport("user32.dll")]
+    internal static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    /// <summary>The calling thread's id, for the check above.</summary>
+    /// <returns>The calling thread's id.</returns>
+    [DllImport("kernel32.dll")]
+    internal static extern uint GetCurrentThreadId();
+
     [DllImport("user32.dll")]
     internal static extern bool ValidateRect(IntPtr hwnd, IntPtr lpRect);
 
