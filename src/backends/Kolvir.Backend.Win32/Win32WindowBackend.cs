@@ -56,6 +56,9 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <summary>Everything that asked to see this window's messages, empty unless a feature attached one.</summary>
     private readonly Win32MessageFilters _messageFilters = new();
 
+    /// <summary>The model's window, kept so a native window replacement can re-run its hooks.</summary>
+    private Window? _modelWindow;
+
     private string _title = string.Empty;
     private SKSize _clientSize = new(800f, 600f);
     private SKSize _minimumClientSize;
@@ -1674,7 +1677,12 @@ public sealed class Win32WindowBackend : IWindowBackend
                 return IntPtr.Zero;
 
             case NativeMethods.WmDestroy:
-                _hwnd = IntPtr.Zero;
+                // A window that is being replaced is not this window going away.
+                if (hwnd == _hwnd)
+                {
+                    _hwnd = IntPtr.Zero;
+                }
+
                 return IntPtr.Zero;
         }
 
@@ -2887,8 +2895,19 @@ public sealed class Win32WindowBackend : IWindowBackend
             return true;
         }
 
-        ReleaseGpu();
-        ReleaseBuffer();
+        // Whatever the old tier presented through, the window it presented on goes with it: a swap chain
+        // keeps an HWND for good and a WGL context leaves its pixel format on the DC, so the new tier
+        // needs a window with no history. Rebuilding the window is what a replacement costs.
+        if (RecreateWindow() is not { } presentation)
+        {
+            reason = "The window could not be rebuilt for the switch.";
+
+            // The old window is still there, so it keeps drawing: the buffer and the tier are rebuilt on
+            // it rather than leaving it with nothing.
+            _gpuUnavailable = false;
+            EnsureBuffer(width, height);
+            return false;
+        }
 
         _selectedAcceleration = choice;
         _useHardwareAcceleration = !choice.CpuOnly;
@@ -2896,10 +2915,14 @@ public sealed class Win32WindowBackend : IWindowBackend
         _gfxReason = choice.CpuOnly ? "cpu (chosen)" : "cpu (not started)";
 
         EnsureBuffer(width, height);
+        UpdateHostSize();
 
-        // The frame on screen was drawn with the old surface, so ask for a full repaint through the new
-        // one rather than leaving whatever the compositor still holds.
+        // The frame on screen belonged to the window that was just thrown away, so the new one is
+        // painted before it is shown: what comes back on screen is the finished frame, not a blank.
         Invalidate();
+        NativeMethods.UpdateWindow(_hwnd);
+        RestorePresentation(presentation);
+        ReportAcceleration();
 
         if (!choice.CpuOnly && _gpu is null)
         {
@@ -2909,6 +2932,149 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         reason = _gpu is null ? "Now drawing on the CPU path." : $"Now drawing with {_gpu.Tier}.";
         return true;
+    }
+
+    /// <summary>How a window was being shown, so a replacement can be put back the same way.</summary>
+    /// <param name="Visible">Whether the window was on the screen.</param>
+    /// <param name="Maximized">Whether it was maximised.</param>
+    /// <param name="Minimized">Whether it was minimised.</param>
+    /// <param name="Foreground">Whether it had the foreground.</param>
+    /// <param name="Captured">Whether it held the mouse capture.</param>
+    private readonly record struct WindowPresentation(bool Visible, bool Maximized, bool Minimized, bool Foreground, bool Captured);
+
+    /// <summary>
+    /// Replaces the native window with a new, hidden one that carries no presentation history.
+    /// </summary>
+    /// <returns>How the old window was being shown, or null when it could not be replaced.</returns>
+    /// <remarks>
+    /// <para>
+    /// This is the only way to take a window back from a swap chain. Once Direct3D 12 or Vulkan has
+    /// presented through an HWND, releasing the chain does not give that window its GDI output back -
+    /// invalidating it, a frame-changed window position, a full <c>RedrawWindow</c> and a
+    /// <c>DWMWA_CLOAK</c> round-trip were all measured and none of them restore it - and a WGL context
+    /// leaves a pixel format on the window's DC that can never be unset. A new HWND has neither.
+    /// </para>
+    /// <para>
+    /// Everything bound to the old handle lets go while it still exists: popups owned by it, the native
+    /// teardowns features registered, the GPU surface and the drawing buffer. The new window is made at
+    /// the same place, size, style and owner, and is left hidden: the caller builds the new surface and
+    /// puts the first frame into it before <see cref="RestorePresentation"/> shows the window again, so
+    /// what the user sees come back is the finished frame. Hooks hear about it through
+    /// <see cref="WindowPhase.NativeWindowRecreated"/>, which is where anything that registered against
+    /// the old handle registers against the new one.
+    /// </para>
+    /// </remarks>
+    private WindowPresentation? RecreateWindow()
+    {
+        if (_hwnd == IntPtr.Zero)
+        {
+            return null;
+        }
+
+        var previous = _hwnd;
+
+        var bounds = default(NativeMethods.RECT);
+        NativeMethods.GetWindowRect(previous, out bounds);
+
+        var presentation = new WindowPresentation(
+            NativeMethods.IsWindowVisible(previous),
+            NativeMethods.IsZoomed(previous),
+            NativeMethods.IsIconic(previous),
+            NativeMethods.GetForegroundWindow() == previous,
+            NativeMethods.GetCapture() == previous);
+
+        var style = (uint)NativeMethods.GetWindowLongPtrW(previous, NativeMethods.GwlStyle).ToInt64();
+
+        // What was layered onto the old window comes off while the old window still exists.
+        Win32PopupWindow.DismissForOwner(previous);
+        ReleaseNativeTeardowns();
+        ReleaseGpu();
+        ReleaseBuffer();
+
+        // Cleared first so the messages that arrive while the replacement is being created - and the
+        // destroy that follows it - are not taken for this window's own.
+        _hwnd = IntPtr.Zero;
+
+        var width = Math.Max(bounds.Right - bounds.Left, 1);
+        var height = Math.Max(bounds.Bottom - bounds.Top, 1);
+
+        var replacement = NativeMethods.CreateWindowExW(
+            0,
+            _className,
+            _title,
+            style,
+            bounds.Left,
+            bounds.Top,
+            width,
+            height,
+            OwnerHandle,
+            IntPtr.Zero,
+            _moduleHandle,
+            IntPtr.Zero);
+
+        if (replacement == IntPtr.Zero)
+        {
+            // The old window is untouched and still works, so the switch is refused rather than
+            // leaving the window with no surface at all; the caller rebuilds what was released.
+            _hwnd = previous;
+            return null;
+        }
+
+        _hwnd = replacement;
+        NativeMethods.DestroyWindow(previous);
+
+        _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
+
+        NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
+        ApplyWindowColors();
+        ApplyIcon();
+
+        // The presenters were built around the old handle, so they are rebuilt around the new one.
+        ContextMenuPresenter.Current = _useMenus
+            ? new MenuPresenter()
+            : new Win32ContextMenuPresenter(_hwnd, LogicalToScreen);
+
+        if (Win32GlTrace.IsEnabled)
+        {
+            Win32GlTrace.Write($"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {width}x{height}");
+        }
+
+        return presentation;
+    }
+
+    /// <summary>Shows a replaced window the way the one it replaced was being shown.</summary>
+    /// <param name="presentation">What <see cref="RecreateWindow"/> recorded.</param>
+    private void RestorePresentation(WindowPresentation presentation)
+    {
+        if (presentation.Visible)
+        {
+            var show = presentation.Minimized
+                ? NativeMethods.SwShowMinNoActive
+                : presentation.Maximized
+                    ? NativeMethods.SwMaximize
+                    : presentation.Foreground
+                        ? NativeMethods.SwShow
+                        : NativeMethods.SwShowNoActivate;
+
+            NativeMethods.ShowWindow(_hwnd, show);
+        }
+
+        ApplyTopMost();
+
+        if (presentation.Captured)
+        {
+            NativeMethods.SetCapture(_hwnd);
+        }
+
+        if (presentation.Foreground)
+        {
+            NativeMethods.SetForegroundWindow(_hwnd);
+        }
+
+        if (_modelWindow is { } model)
+        {
+            RunWindowHooks(WindowPhase.NativeWindowRecreated, model);
+        }
     }
 
     /// <summary>True when the calling thread is the one that created this window.</summary>
@@ -3080,6 +3246,10 @@ public sealed class Win32WindowBackend : IWindowBackend
     public void RunWindowHooks(WindowPhase phase, Window window)
     {
         ArgumentNullException.ThrowIfNull(window);
+
+        // Remembered so that a native window replacement can re-run the hooks itself: the model's
+        // window is the same object across a replacement, only the handle under it changed.
+        _modelWindow = window;
 
         foreach (var hook in window.Services.GetServices<IWin32WindowHook>())
         {

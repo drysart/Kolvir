@@ -88,6 +88,9 @@ internal static class NativeMethods
     internal const int HtBottomRight = 17;
     internal const int SwShow = 5;
     internal const int SwShowNoActivate = 4;
+
+    /// <summary><c>SW_SHOWMINNOACTIVE</c>: minimised, without taking the foreground.</summary>
+    internal const int SwShowMinNoActive = 7;
     internal const int SwHide = 0;
     internal const uint SwpNoZOrder = 0x0004;
     internal const uint SwpNoActivate = 0x0010;
@@ -620,6 +623,15 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern IntPtr SetCapture(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetCapture();
+
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    internal static extern bool IsWindowVisible(IntPtr hwnd);
 
     [DllImport("user32.dll")]
     internal static extern bool ReleaseCapture();

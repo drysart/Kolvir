@@ -246,12 +246,19 @@ internal static class Program
         }
 
         // --apply-acceleration switches the running window to a value the graphics-acceleration page
-        // would copy, which is how the live switch is driven without a pointer. Registered before the
-        // platform handlers below, so the gfx: line they print describes the tier that came up rather
-        // than the one the window opened with.
+        // would copy, which is how the live switch is driven without a pointer. Values separated by
+        // commas are applied in turn, which is what a switch that replaces the window needs in order to
+        // be checked more than once. Registered before the platform handlers below, so the gfx: line
+        // they print describes the tier that came up rather than the one the window opened with.
         if (ArgumentValue(args, "--apply-acceleration") is { } acceleration)
         {
-            window.AddShownHandler(_ => Console.WriteLine(demo.ApplyAcceleration(acceleration)));
+            window.AddShownHandler(_ =>
+            {
+                foreach (var value in acceleration.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+                {
+                    Console.WriteLine(demo.ApplyAcceleration(value));
+                }
+            });
         }
 
         // Opens the menus page's context menu as if the box had been right-clicked, which is what a

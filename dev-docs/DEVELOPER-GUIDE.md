@@ -5749,6 +5749,21 @@ rows that a multi-GPU machine lists but cannot present to the window's display a
 
 Two more rules worth knowing:
 
+- **The window is replaced, not reused.** A swap chain keeps the window it presents on: releasing it
+  does not give that window its GDI output back - invalidating the window, a frame-changed window
+  position, a full `RedrawWindow` and a `DWMWA_CLOAK` round-trip were each measured against a real
+  flip-model chain and none of them restore it - and a WGL context leaves a pixel format on the
+  window's DC that can never be unset. An HWND with no history has neither problem, so a switch makes
+  a new window: same class, place, size, style and owner, with the popups owned by the old one closed,
+  the native teardowns released, and the drawing buffer and GPU surface rebuilt. The new window is
+  painted while it is still hidden and only then shown, so what comes back on screen is the finished
+  frame. Whether the window was visible, maximised, minimised, foreground or holding the mouse capture
+  is put back afterwards. Anything a feature registered against the handle hears about it through
+  `WindowPhase.NativeWindowRecreated` - the drop target is the one that exists today - and the handle
+  the backend reports changes, so an application that cached `Window.Handle` has to read it again.
+  What a window cannot do on a child window, which was the first thing tried: Direct3D 12 and Vulkan
+  present through flip-model swap chains, and a flip chain created on a child HWND builds and presents
+  without ever being composited, so the accelerated tiers need a top-level window.
 - **Thread affinity.** A window's GPU surface belongs to the thread that owns it, so `TryApply` must
   be called from that thread - a UI event handler already is. The Win32 backend checks with
   `GetWindowThreadProcessId` and refuses off-thread rather than tearing the surface down from under
@@ -5766,7 +5781,8 @@ branch the Win32 backend answers yes; Linux GTK4 needs an unrealize/realize cycl
 
 The sample exercises both: `--acceleration <value>` chooses at startup, `--apply-acceleration
 <value>` applies a switch once the first window exists (printing the result, which is how a script
-checks it without a screen), and the **Graphics acceleration** page shows exactly this list -
+checks it without a screen; comma-separated values are applied in turn, which is how repeated
+switches are checked), and the **Graphics acceleration** page shows exactly this list -
 `--page graphics-acceleration`, kept last in the navigation so every earlier page keeps the position
 a screenshot script names. Selecting a row applies it there and then - the same `TryApply` the
 section above describes - prints its value under the list and copies it with one click, which is how
