@@ -5512,6 +5512,14 @@ Presenting has two of its own, and both showed up as a window that opened, drew 
   writes its answer through a register that holds garbage, which is an access violation on the first
   present. The counts the tier uses, `Present` 8, `GetBuffer` 9, `ResizeBuffers` 13, all carry the
   same shift.
+- **Nothing bounds the queue unless the tier does.** A window that repaints on every mouse move
+  submits frames far faster than a display shows them, and DXGI accepts every one: the picture on
+  screen becomes the oldest queued frame. On a 240 Hz panel that was eight frames behind the pointer
+  while `draw` read 0.12ms and `present` 1.79ms, because both are the CPU's side of a frame the GPU
+  was still working through. The chain asks for
+  `DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` and caps itself to one frame, and where a
+  driver refuses the flag - as one NVIDIA driver does, reporting `unpaced` - the tier waits for its
+  own submitted work instead, which is a stricter bound and needs nothing from DXGI.
 - **The per-frame `GRBackendTexture` has to be disposed.** It is not a value: it holds a reference on
   the back buffer it wraps, so a wrapper dropped on the floor keeps DXGI from reallocating the chain
   and `ResizeBuffers` answers `DXGI_ERROR_INVALID_CALL`. The surface disposes it as soon as the
@@ -5525,11 +5533,11 @@ WARP answers every call and then rasterizes on the CPU.
 Memory is the one number that surprises people on this tier, so it is worth writing down. A window
 1280x820 at scale 2 is 2560x1640, which is 16.0 MiB per full-size BGRA8 surface: the three swap
 chain buffers and the retained surface the backend draws into are 64 MiB and are not optional.
-Everything
-above that is Skia's resource cache, which a Direct3D context is given 256 MiB of by default - it is
-where the frame's upload buffers and the wrappers made for the back buffers live, and left alone it
-fills to a large fraction of that ceiling. The tier sets the limit to six full-size surfaces, with
-a 96 MiB floor - enough for the retained surface and three chain buffers, and far below the default.
+Everything above that is Skia's resource cache, which a Direct3D context is given 256 MiB of by
+default and which the tier leaves alone. Capping it was tried and undone: four full-size surfaces are
+live before a single glyph atlas, so a limit tight enough to be worth setting evicts what the next
+frame needs and pays a re-upload per frame - a drag that lags while every CPU-side figure stays
+healthy. The Vulkan tier keeps the default too, which is what makes the two comparable.
 
 With `KOLVIR_GL_TRACE=1` four lines say what the tier is holding, so a figure in task manager can be
 argued with rather than guessed at:
