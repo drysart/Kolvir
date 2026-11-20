@@ -112,7 +112,7 @@ public sealed class CloseDuringPaintTests
     }
 
     [TestMethod]
-    public void AClientSizeAssignedDuringAFrameIsAppliedAfterIt()
+    public void AClientSizeAssignedToAShownWindowDuringAFrameIsAppliedAfterIt()
     {
         using var scene = HeadlessScene.Create(new Panel { Dock = DockStyle.Fill }, 100f, 80f);
         var backend = (HeadlessApplicationBackend)scene.Backend;
@@ -134,19 +134,56 @@ public sealed class CloseDuringPaintTests
             Assert.AreEqual(80f, scene.WindowBackend.ClientSize.Height, 0.01f);
         });
 
+        scene.RunWhileShown(() =>
+        {
+            scene.Paint();
+
+            Assert.IsTrue(resized);
+            Assert.AreEqual(100f, scene.WindowBackend.ClientSize.Width, 0.01f,
+                "the size waits for a loop turn outside the paint");
+            Assert.AreEqual(200f, scene.Window.ClientSize.Width, 0.01f,
+                "the window reports the size it was assigned");
+
+            backend.DrainPending();
+
+            Assert.AreEqual(200f, scene.WindowBackend.ClientSize.Width, 0.01f,
+                "the deferred turn applied the size");
+            Assert.AreEqual(120f, scene.WindowBackend.ClientSize.Height, 0.01f);
+
+            scene.Application.Exit();
+        });
+    }
+
+    [TestMethod]
+    public void AWindowCreatedDuringAPaintTakesItsGeometryImmediately()
+    {
+        using var scene = HeadlessScene.Create(new Panel { Dock = DockStyle.Fill }, 100f, 80f);
+
+        Window? created = null;
+
+        using var token = UiHost.AddFrameStartingHandler(host =>
+        {
+            if (created is not null || !ReferenceEquals(host, scene.Host))
+            {
+                return;
+            }
+
+            created = new Window("created", new Panel { Dock = DockStyle.Fill });
+            created.ClientSize = new SKSize(240f, 140f);
+            created.Location = new SKPoint(30f, 40f);
+        });
+
         scene.Paint();
 
-        Assert.IsTrue(resized);
-        Assert.AreEqual(100f, scene.WindowBackend.ClientSize.Width, 0.01f,
-            "the size waits for a loop turn outside the paint");
-        Assert.AreEqual(200f, scene.Window.ClientSize.Width, 0.01f,
-            "the window reports the size it was assigned");
+        Assert.IsNotNull(created, "the frame created the window");
+        var window = created!;
 
-        backend.DrainPending();
+        Assert.AreEqual(new SKSize(240f, 140f), window.Backend.ClientSize,
+            "a window with no surface yet takes its assigned size immediately");
+        Assert.AreEqual(new SKPoint(30f, 40f), window.Backend.Location,
+            "and its assigned location immediately");
 
-        Assert.AreEqual(200f, scene.WindowBackend.ClientSize.Width, 0.01f,
-            "the deferred turn applied the size");
-        Assert.AreEqual(120f, scene.WindowBackend.ClientSize.Height, 0.01f);
+        window.Dispose();
     }
 
     [TestMethod]

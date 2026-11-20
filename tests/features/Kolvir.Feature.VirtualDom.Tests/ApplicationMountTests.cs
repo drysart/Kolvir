@@ -99,6 +99,59 @@ public sealed class ApplicationMountTests
     }
 
     [TestMethod]
+    public void AWindowCreatedByAFrameHasItsAssignedGeometryWhenTheFrameReturns()
+    {
+        var component = new TestApplicationComponent(_ => [Window("list", key: "list")]);
+        using var scene = ApplicationScene.Create(component);
+
+        var list = scene.Window("list");
+        bool sampled = false;
+        SKSize? paintedSize = null;
+        SKPoint? paintedLocation = null;
+
+        using var token = list.Host.AddFramePaintedHandler(_ =>
+        {
+            if (sampled)
+            {
+                return;
+            }
+
+            sampled = true;
+
+            if (scene.Windows.FirstOrDefault(window => window.Title == "doc") is { } created)
+            {
+                paintedSize = created.Backend.ClientSize;
+                paintedLocation = created.Backend.Location;
+            }
+        });
+
+        component.Renderer = _ =>
+        [
+            Window("list", key: "list"),
+            new VWindow
+            {
+                Key = "doc",
+                Title = "doc",
+                ClientSize = new SKSize(240f, 140f),
+                Location = new SKPoint(50f, 60f),
+                Content = new VLabel { Text = "doc" },
+            },
+        ];
+
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.IsTrue(sampled, "the frame that created the window was painted");
+        Assert.AreEqual(new SKSize(240f, 140f), paintedSize,
+            "the window created inside the paint is sized before the paint returns");
+        Assert.AreEqual(new SKPoint(50f, 60f), paintedLocation,
+            "and it is placed before the paint returns");
+        var doc = scene.Window("doc");
+        Assert.AreEqual(new SKSize(240f, 140f), doc.ClientSize, "no deferred resize is still pending");
+        Assert.AreEqual(new SKPoint(50f, 60f), doc.Location, "and the location is the one the render assigned");
+    }
+
+    [TestMethod]
     public void AnEmptyRenderMakesNoWindows()
     {
         var component = new TestApplicationComponent(_ => []);
