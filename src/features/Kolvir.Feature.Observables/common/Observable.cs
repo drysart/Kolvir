@@ -44,6 +44,28 @@ public static partial class Observable
     /// </remarks>
     public static IObservableMutableValue<T> CreateValue<T>(T initialValue) => new ObservableValue<T>(initialValue);
 
+    /// <summary>
+    /// How many records one event may carry before it stops describing the changes and says so instead.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A batch collects a record per change, and a caller is free to make a great many of them between
+    /// <see cref="IObservableList{T}.BeginChangeBatch"/> and
+    /// <see cref="IObservableList{T}.EndChangeBatch"/> - a bulk load, a refresh, a loop over a file. Past
+    /// this many, the records are dropped and the event carries one
+    /// <see cref="ObservableListChangeType.UntrackedChanges"/> record instead, which tells an observer to
+    /// re-read the collection rather than replay what it was given.
+    /// </para>
+    /// <para>
+    /// The trade is explicit and it is the caller's to avoid: fidelity up to this many changes per
+    /// event, and one rescan beyond it. Fifty is the point where replaying the records stops being
+    /// cheaper for an observer than reading the list again, and it is a constant rather than a property
+    /// because it decides what a *consumer* has to be prepared for, which is not something one
+    /// application should be able to change for another's handlers.
+    /// </para>
+    /// </remarks>
+    public const int MaxBatchRecords = 50;
+
     /// <summary>Records that the caller now depends on <paramref name="source"/>.</summary>
     /// <param name="source">The source that was read.</param>
     /// <remarks>

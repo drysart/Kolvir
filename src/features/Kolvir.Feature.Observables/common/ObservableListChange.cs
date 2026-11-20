@@ -118,6 +118,17 @@ public readonly struct ObservableListChange<T>
     public static ObservableListChange<T> Clear() =>
         new(ObservableListChangeType.ListCleared, null, default, null, default);
 
+    /// <summary>Changes happened that this event does not describe, so re-read the list.</summary>
+    /// <returns>A record that carries nothing.</returns>
+    /// <remarks>
+    /// The last record of a batch that grew past <see cref="Observable.MaxBatchRecords"/>: the collected
+    /// records are dropped and this is delivered in their place, so an observer that was keeping a copy
+    /// has to take the list's word for what it holds rather than its own. It is the one record that
+    /// cannot be applied, which is why it is a kind of its own rather than an empty batch.
+    /// </remarks>
+    public static ObservableListChange<T> Untracked() =>
+        new(ObservableListChangeType.UntrackedChanges, null, default, null, default);
+
     /// <summary>What happened, in words, for a diagnostic.</summary>
     /// <returns>One line naming the kind and what the kind carries.</returns>
     public override string ToString() => ChangeType switch
@@ -126,6 +137,7 @@ public readonly struct ObservableListChange<T>
         ObservableListChangeType.ItemRemoved => $"removed {OldItem} from {OldIndex}",
         ObservableListChangeType.ItemMoved => $"moved {NewItem} from {OldIndex} to {NewIndex}",
         ObservableListChangeType.ItemChanged => $"changed the item at {NewIndex} from {OldItem} to {NewItem}",
-        _ => "cleared the list",
+        ObservableListChangeType.ListCleared => "cleared the list",
+        _ => "changed in ways this event did not track - re-read the list",
     };
 }

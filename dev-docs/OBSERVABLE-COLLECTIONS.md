@@ -29,16 +29,20 @@ section sign, and "<-" rather than an arrow.
 
 Goals:
 
-- **Full fidelity.** An observer that began from the same contents and receives every event can
-  reconstruct the collection exactly, without ever reading it. That is a contract, not an aspiration: every
-  change is reported, indexes are positions as of that moment, and delivery order is the order the
-  changes happened in.
+- **Full fidelity, up to a stated bound.** An observer that began from the same contents and receives
+  every event can reconstruct the collection exactly, without ever reading it. That is a contract, not
+  an aspiration: every change is reported, positions are as of that moment, and delivery order is the
+  order the changes happened in. The bound is one event: it carries at most
+  `Observable.MaxBatchRecords` records, and a batch that would carry more says so with an
+  `UntrackedChanges` record that means "re-read the collection". A batch of a million changes should
+  cost an observer one rescan, not a million queued records (3.11).
 - **Granularity enough to do minimal work.** A move is one record. Setting an item is one record
   with the old and the new item. An insert is one record with an index. Nothing is reported as
   "everything changed" except an actual `Clear` - in any of the three collections.
 - **Batches for the caller's sake, not the observer's.** `BeginChangeBatch`/`EndChangeBatch` turn N
-  mutations into one notification while keeping every record, in order. The observer is called once
-  instead of N times and loses nothing.
+  mutations into one notification while keeping every record, in order, up to the cap that keeps one
+  event worth reading (3.11). The observer is called once instead of N times and loses nothing it could
+  have used.
 - **Cheap when nothing is watching.** A mutation nobody is listening to builds no records and
   allocates nothing beyond the storage change; a batch is the only thing that collects
   unconditionally (section 3.10).
@@ -143,6 +147,7 @@ to be interpreted case by case:
 | `ItemMoved` | where it was | the item | where it is now | the item | `Move` |
 | `ItemChanged` | the index | what was there | the same index | what is there now | `this[i] = value` |
 | `ListCleared` | - | - | - | - | `Clear` of a non-empty list |
+| `UntrackedChanges` | - | - | - | - | a batch that grew past `Observable.MaxBatchRecords`, delivered in place of what it collected (3.11) |
 
 Two details that follow from the table rather than from taste:
 
@@ -164,8 +169,10 @@ the type count for a struct that is discarded in a frame's time; 8.2 keeps the q
 
 Every index is the index that item had (or has) **at that moment**, not at the end of the batch. So
 the fidelity contract is one sentence: *apply the records to a copy of the list in the order given,
-each against the state left by the one before it, and the result equals the list.* Nothing in the
-contract allows an observer to reorder, and nothing requires it to understand the list.
+each against the state left by the one before it, and the result equals the list* - with one record
+that opts out of it. `UntrackedChanges` is not a change but an admission that the event stopped
+describing them (3.11), so an observer that sees it rebuilds its copy by reading the list. Nothing in
+the contract allows an observer to reorder, and nothing requires it to understand the list.
 
 The consequence worth naming: an index shift that a change causes is *implied*, not reported. Insert
 at 0 and every item that was there has shifted one along, and no record says so. That is deliberate -
@@ -298,6 +305,7 @@ Which record marks what, which is the whole of the mapping and the whole of what
 | `ItemChanged` at `i` | no | yes | `i`, if it is watched |
 | `ItemMoved` `p` -> `q` | no | yes | every watched index in `min(p, q)..max(p, q)` |
 | `ListCleared` | yes | yes | every watched index, with no bound - the one conservative case |
+| `UntrackedChanges` | yes | yes | every watched index - it does not say what changed, so everything may have |'
 
 The bounds are what stop an index read that was already past the end from being woken by growth that
 does not reach it: an insert at 7 does not make index 12 answerable, so a reader watching 12 waits for
@@ -354,7 +362,7 @@ the same way, so a render whose re-run changes the list again descends and is bo
 
 **A long flat drain is still unbounded.** The depth returns to where it started after every delivery,
 so a chain of two hundred handler-caused changes - each a delivery of the same list - completes, and a
-batch of a thousand records is one delivery. Both are tested, and both are the point: the guard counts
+batch is one delivery however much it collected (up to its cap, 3.11). Both are tested, and both are the point: the guard counts
 nesting, not work.
 ### 3.8 The list is not an `IObservableEventSource`, and why
 
@@ -416,15 +424,52 @@ similar objects is worse than one extra documented case.
 
 - A mutation with no handlers and no open batch builds no arguments and allocates nothing: the record
   is a struct that never exists, and the dependency marking is a pass over an empty watched set.
-- A batch allocates one `List<ObservableListChange<T>>` when it begins, and appends a struct per
-  mutation, whether or not anybody is listening - because a handler may subscribe in the middle of the
-  batch and must then receive the whole batch, and because "the event describes what happened while
-  the batch was open" is a simpler rule than "what happened since the last subscriber arrived". A
-  batch is an explicit statement that many changes are coming, so its cost is not the hot path.
+- A batch appends a struct per mutation up to `Observable.MaxBatchRecords`, whether or not anybody is
+  listening - because a handler may subscribe in the middle of the batch and must then receive the whole
+  batch, and because "the event describes what happened while the batch was open" is a simpler rule than
+  "what happened since the last subscriber arrived". Past the cap it is one record and no further
+  appends (3.11), so a bulk load's memory is bounded by the same constant as its event.
 - Enumeration is a struct enumerator over the list's own storage, with a version stamp so that
   mutating during enumeration throws `InvalidOperationException` - the `List<T>` behaviour, kept
   because a mutation during a render is a bug worth failing.
 
+### 3.11 The batch cap, and `UntrackedChanges`
+
+A batch collects a record per change, and nothing in the API bounds how many changes a caller makes
+between `BeginChangeBatch` and `EndChangeBatch` - a bulk load, a refresh, a loop over a file. Held to
+full fidelity, a hundred thousand changes would mean a hundred thousand records in one event and a
+hundred thousand replay steps for every observer, which is worse for everyone than reading the list
+again. So an event carries at most **`Observable.MaxBatchRecords` (50) records**:
+
+- **Past the cap, the records are dropped and replaced.** When a collected batch reaches one record
+  more than the cap, the records it holds are thrown away and a single
+  `ObservableListChangeType.UntrackedChanges` record takes their place. Not appended to, replacing:
+  fifty islands of detail followed by "and more" is fifty records nobody will apply and one that
+  invalidates all of them.
+- **Once that has happened, nothing more is queued.** Every later change in the same batch is already
+  covered by the record that says "changes happened", so the batch stays at one record however long the
+  loop runs. That is what keeps a bulk load's cost bounded rather than merely capped.
+- **`UntrackedChanges` is not a change, and observers must treat it as a rescan signal.** It carries
+  nothing - there is nothing truthful to carry - and it is the one record that cannot be applied to a
+  copy. An observer that sees it drops its copy and reads the list. A dependency reader is woken for
+  everything (3.6.2): the size, the contents and every watched index, because the event does not say
+  which of them moved.
+- **The cap is a constant, not a property.** It decides what a *consumer* must be prepared for, and one
+  application should not be able to change what another's handlers may be handed. It is also not
+  `MaxEventStackSize`, which counts nesting (3.7) and has nothing to do with how many changes an event
+  describes.
+- **The cap applies wherever records accumulate, not only inside a batch.** Outside a batch a mutation
+  is delivered on its own, so the case that matters is the drain: a handler that makes many changes has
+  them delivered as the event after the one it is hearing, and that event is capped the same way.
+- **Delivery order is untouched.** The cap changes what an event says, never when it says it: a capped
+  batch is still one event, still after the changes it describes, still delivered once to every
+  handler, and a batch smaller than the cap still replays exactly.
+
+What this costs is worth stating plainly, because it is the one place the design trades a guarantee
+away: **fidelity is now bounded by the cap.** An observer whose copy must be exact in the presence of
+huge batches has to handle `UntrackedChanges` by re-reading, and nothing about a record stream can save
+it from that - which is the point of having a record that says so rather than a stream that quietly
+stops matching.
 ## 4. The list: API surface, in full
 
 ```csharp
@@ -547,7 +592,8 @@ last watcher goes rather than kept per address ever read.
 The simplest of the three: no index, no value, so a change can only add an item or take one away, and
 the only interesting decision is what the four bulk operations of `ISet<T>` do to a record stream.
 
-Sections 3.1 to 3.5, 3.7, 3.9 and 3.10 apply unchanged - one record per change as a readonly struct,
+Sections 3.1 to 3.5, 3.7, 3.9, 3.10 and 3.11 apply unchanged - one record per change as a readonly
+struct,
 addresses as of the moment of the change, delivery in the order of the changes through a queue rather
 than a recursive raise, no limit on how much one drain delivers, disposal dropping pending records and
 delivering one last empty event, and nothing allocated when nothing is watching.
@@ -606,6 +652,9 @@ batch, so the observer gets one event with all of them in order:
   than delivering an event of its own.
 - A bulk operation that changes nothing raises nothing at all: `UnionWith` of a subset, `ExceptWith` of
   an empty set, `IntersectWith` of a superset, symmetric difference with the set itself.
+- A bulk operation that changes more items than `Observable.MaxBatchRecords` is capped exactly as a
+  caller's batch would be (3.11): it delivers one `UntrackedChanges` record, and the reader re-reads the
+  set. `UnionWith` of ten thousand new items is one record.
 
 #### 6.2.3 There is no `ItemChanged`, and no order
 
@@ -691,7 +740,7 @@ Which record marks what:
 The keyed collection: identity is the key, the payload is the value, and there is no index. Its record
 carries what an observer needs to replay it - which key, and what the value was and is.
 
-Sections 3.1 to 3.5, 3.7, 3.9 and 3.10 apply unchanged, as section 6 says of them.
+Sections 3.1 to 3.5, 3.7, 3.9, 3.10 and 3.11 apply unchanged, as section 6 says of them.
 
 ### 7.1 The type model
 
@@ -894,7 +943,7 @@ Which record marks what:
 | --- | --- | --- |
 | 1 | The two interfaces, `ObservableListChange<T>`, `ObservableListChangedEventArgs<T>` | All four compile, are documented, and nothing implements them yet - this is the reviewable shape of the contract |
 | 2 | `ObservableList<T>` storage and mutations | Every mutation in 3.4 produces the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove produce no event; enumeration throws when the list is mutated under it |
-| 3 | Delivery: queue and batches | Records arrive in mutation order even when a handler mutates; a batch is one event carrying all of them, however many there are; nesting is counted and only the outermost end delivers; an unmatched end throws; a flat chain of handler-caused deliveries to the same list is unbounded, while a delivery re-entered from a handler - through a disposal, or through another list's drain - is counted against `MaxEventStackSize` and refused at the limit (3.7) |
+| 3 | Delivery: queue and batches | Records arrive in mutation order even when a handler mutates; a batch is one event carrying its records up to `MaxBatchRecords` and one `UntrackedChanges` record past that, with nothing queued after it; nesting is counted and only the outermost end delivers; an unmatched end throws; a flat chain of handler-caused deliveries to the same list is unbounded, while a delivery re-entered from a handler - through a disposal, or through another list's drain - is counted against `MaxEventStackSize` and refused at the limit (3.7) |
 | 4 | Per-operation dependencies: count, index, contents | A body that reads `Count` and `this[0]` reports two dependencies; a write to an item wakes the index reader and not the count reader; a move wakes only the indexes it spans; an insert at `p` wakes every watched index at or past `p` and none before it; a read outside a scope allocates nothing and registers nothing; a batch raises each affected entry once |
 | 5 | `CreateList` factories and disposal | The four overloads; disposal drops pending records, delivers the empty final event, and makes reads, mutations and registration throw while removal and a second dispose stay safe |
 | 6 | Tests | Section 10's claims, in `tests/features/Kolvir.Feature.Observables.Tests` |
@@ -939,11 +988,12 @@ treatment:
 | **Nothing that changed nothing raises** | An equal item write, a clear of an empty list, a move from an index to itself, and a remove that found nothing each leave the handler uncalled, and each is asserted to leave the list unchanged too |
 | **Order survives a handler that mutates** | A handler of the first event adds an item; the second handler records the events it saw, and the assertion is that it saw both events, in the order the changes happened, with the first one's records intact |
 | **A batch is one event with all the records** | Three mutations inside a batch deliver once, with three records in order; a nested batch delivers once at the outermost end; an unmatched `EndChangeBatch` throws and leaves the list usable |
-| **The guard counts nesting, not work** | A batch of a thousand changes is one event carrying a thousand records; a terminating cascade of two hundred handler-caused deliveries to the same list completes and the list holds what the handler built, with nothing refused and no records dropped. A chain that *does* nest is refused at `MaxEventStackSize`: a handler that changes another list (whose drain then runs in its frame), a handler that disposes a list (whose final event runs in its frame), and a render whose re-run changes the list - and after the refusal an ordinary change still delivers, so the depth was restored |
+| **The guard counts nesting, not work** | A terminating cascade of two hundred handler-caused deliveries to the same list completes and the list holds what the handler built, with nothing refused and no records dropped. A chain that *does* nest is refused at `MaxEventStackSize`: a handler that changes another list (whose drain then runs in its frame), a handler that disposes a list (whose final event runs in its frame), and a render whose re-run changes the list - and after the refusal an ordinary change still delivers, so the depth was restored |
 | **Disposal is ordered** | A handler sees `IsDisposed` true during the final event, receives no records, and any read from there throws; a batch left open is dropped rather than delivered; removal and a second dispose stay safe afterwards |
 | **A read is exactly what it asked for** | A body that reads `Count`, `this[1]` and enumerates reports three dependencies, in that order. A write to item 1 wakes the reader of index 1 and not the reader of `Count`. A move wakes the reader of an index it spans and not one outside it. An insert at 2 wakes the readers of indexes 2 and above and none below. A clear wakes all three |
 | **A throwing index read still subscribes** | `list[7]` over three items throws, and the run still reports index 7 among its dependencies; growing the list to eight then re-runs it, which is the only way an expression that is currently failing can recover |
 | **A batch is one wake-up per affected read** | A body reading indexes 0, 1 and 2 reports three dependencies, and three mutations delivered as one event wake each of them exactly once, however many records touched that index - three records that all touch index 1 raise it once, not three times |
+| **The batch cap trades fidelity for a bounded event** | Fifty records in a batch arrive as fifty; the fifty-first mutation replaces them with one `UntrackedChanges` record, and no later change in that batch is queued - five hundred changes still arrive as one record. The same cap applies to an event accumulated during a drain. The list itself holds every change regardless, an `UntrackedChanges` event wakes the count, the contents and every watched index, and an observer's copy is rebuilt by re-reading - which is what the demo page shows happening |
 | **Nothing watched costs nothing to raise** | A mutation with no run in scope and no handler registered marks nothing, and the same mutation costs the same with ten thousand items as with ten; a read outside a run allocates nothing at all |
 | **A set's bulk operation is N records and one event** | `UnionWith` of three new items delivers once, with three `ItemAdded` records in the argument's order; `SymmetricExceptWith` of the set itself raises nothing at all; a bulk operation inside the caller's batch joins that batch instead of delivering an event of its own; and a replay of the records ends equal to the set |
 | **A set's `Contains` is its own dependency** | A body asking `Contains("a")` and `Contains("b")` is woken once when `a` is added and not at all when `c` is; a `Count` reader is woken by the bulk operation that changed the size, once for the whole event; `SetEquals` and the subset tests are woken by any change, including one that alters no size (8.5: records are what happened, not a diff) |
@@ -962,7 +1012,7 @@ by the producer.
 | 0 | Done | This document: the contract, the decisions, the plan, and the open questions. Revised after review: 3.6 specifies a dependency per kind of read - count, index, contents - instead of one per list, which also settles open question 7. Extended after review: sections 6 and 7 are the set and the dictionary, and section 5 is the core they share |
 | 1 | Done | The two interfaces, `ObservableListChangeType`, `ObservableListChange<T>` with its five `Create*` factories, and `ObservableListChangedEventArgs<T>` - all documented, CS1591 clean, and pointing at the sections that decide them |
 | 2 | Done | `ObservableList<T>` over a `List<T>`: every mutation in 3.4 raises the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove raise nothing; an out-of-range mutation throws without recording; enumeration is the storage's own, so mutating under it throws |
-| 3 | Done | Delivery is a queue rather than a recursive raise: a handler's own change is delivered after the event it is hearing, a batch is one event with every record in order, nesting delivers once at the outermost end, and an unmatched end throws. Nothing bounds the drain - revised after review: an earlier version counted deliveries against `MaxEventStackSize` in the loop, which is a stack-depth guard and has nothing to say about a flat loop; the dispatch itself *is* counted, because a handler can re-enter a delivery through a disposal or through another list. Disposal drops what a batch had not delivered, delivers one empty event, and then throws |
+| 3 | Done | The batch cap and `UntrackedChanges` were added after review, and they are the one place fidelity is bounded on purpose (3.11): past `MaxBatchRecords` a batch drops what it collected, delivers the one record that means "re-read the list", and queues nothing more. Delivery is a queue rather than a recursive raise: a handler's own change is delivered after the event it is hearing, a batch is one event with every record in order, nesting delivers once at the outermost end, and an unmatched end throws. Nothing bounds the drain - revised after review: an earlier version counted deliveries against `MaxEventStackSize` in the loop, which is a stack-depth guard and has nothing to say about a flat loop; the dispatch itself *is* counted, because a handler can re-enter a delivery through a disposal or through another list. Disposal drops what a batch had not delivered, delivers one empty event, and then throws |
 | 4 | Done | `ObservableListDependencies<T>` and `ObservableDependency`: the count and contents are fields, an index entry is created by a read inside a run and dropped when its last handler goes (`ReadScope.IsActive` keeps a cold read from allocating), and marking is a pass over the watched entries. A write wakes its index and not the count; an insert wakes the indexes at or past it; a move wakes its span; a clear wakes all; a batch raises each once; a read past the end is still a read |
 | 5 | Done | The four `CreateList` overloads and the disposal order |
 | 6 | Done | 41 tests in three files - `ObservableListChangeTests`, `ObservableListDeliveryTests`, `ObservableListDependencyTests` - covering section 10's claims for the list, including a replay that reproduces the list from records alone |

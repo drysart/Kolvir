@@ -85,18 +85,19 @@ internal sealed class ObservableListDependencies<T>
     /// </remarks>
     internal void Mark(ReadOnlySpan<ObservableListChange<T>> records, int count)
     {
-        var cleared = false;
+        var everything = false;
 
         foreach (var record in records)
         {
-            cleared |= record.ChangeType == ObservableListChangeType.ListCleared;
+            everything |= record.ChangeType is ObservableListChangeType.ListCleared
+                or ObservableListChangeType.UntrackedChanges;
         }
 
-        if (cleared)
+        if (everything)
         {
-            // A clear destroys the count the records began with, and everything in range changed, so
-            // this is the one case that marks every watched index - including, conservatively, the few
-            // that were already past the end.
+            // A clear destroys the count the records began with, and an untracked event does not say what
+            // it did at all - so both mark every watched index, including, conservatively, the few that
+            // were already past the end.
             MarkShape();
             MarkEveryIndex();
             return;

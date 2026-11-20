@@ -350,7 +350,19 @@ internal sealed class ObservableList<T> : IObservableList<T>
 
     private void Record(in ObservableListChange<T> change)
     {
-        _pending.Add(change);
+        // A pending event that has already given up on detail needs nothing appended to it: one
+        // UntrackedChanges record tells the observer to re-read the list, and it says that whatever came
+        // before it in this batch. That is what keeps a bulk load from growing this list without bound.
+        if (_pending.Count != 1 || _pending[0].ChangeType != ObservableListChangeType.UntrackedChanges)
+        {
+            _pending.Add(change);
+
+            if (_pending.Count > Observable.MaxBatchRecords)
+            {
+                _pending.Clear();
+                _pending.Add(ObservableListChange<T>.Untracked());
+            }
+        }
 
         // Inside a batch the records wait for the outermost end; inside a delivery they wait for the
         // event being delivered to finish, which is what keeps the observer's history in order.

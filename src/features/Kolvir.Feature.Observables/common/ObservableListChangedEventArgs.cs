@@ -8,8 +8,16 @@ namespace Kolvir.Observables;
 /// <para>
 /// <see cref="Changes"/> is length 1 for a mutation outside a batch and N for a batch, and the records
 /// are in the order the changes happened - a batch collapses the notifications, never the records, so an
-/// observer loses nothing by being called once instead of N times
-/// (dev-docs/OBSERVABLE-COLLECTIONS.md section 3.3).
+/// observer is told everything it would have been told N times over
+/// (dev-docs/OBSERVABLE-COLLECTIONS.md section 3.3) - and never more than
+/// <see cref="Observable.MaxBatchRecords"/> of them (section 3.11).
+/// </para>
+/// <para>
+/// It is never longer than <see cref="Observable.MaxBatchRecords"/>. A batch that would have exceeded
+/// that drops what it collected and delivers a single
+/// <see cref="ObservableListChangeType.UntrackedChanges"/> record, which is the one record that cannot
+/// be applied to a copy: an observer treats it as "re-read the whole list"
+/// (section 3.11).
 /// </para>
 /// <para>
 /// A disposed list delivers one last event with no changes at all, which is how a registrant that only

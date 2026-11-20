@@ -214,6 +214,45 @@ public sealed class ObservableListDependencyTests
     }
 
     [TestMethod]
+    public void AnUntrackedEventWakesEveryReader()
+    {
+        // An event that does not say what changed has to assume everything did - including the size,
+        // which may well be where the batch went wrong, and the indexes past the end, which are cheap to
+        // wake and impossible to rule out.
+        using var list = Observable.CreateList("a", "b");
+        var wakes = new List<string>();
+
+        using var count = Observable.CollectDependencies(() => { _ = list.Count; }, _ => wakes.Add("count"));
+
+        using var contents = Observable.CollectDependencies(
+            () =>
+            {
+                foreach (var item in list)
+                {
+                    _ = item;
+                }
+            },
+            _ => wakes.Add("contents"));
+
+        using var first = Observable.CollectDependencies(() => { _ = list[0]; }, _ => wakes.Add("0"));
+        using var second = Observable.CollectDependencies(() => { _ = list[1]; }, _ => wakes.Add("1"));
+        using var past = Observable.CollectDependencies(() => { _ = list[5]; }, _ => wakes.Add("5"));
+
+        list.BeginChangeBatch();
+
+        for (var index = 0; index <= Observable.MaxBatchRecords; index++)
+        {
+            list.Add("x");
+        }
+
+        list.EndChangeBatch();
+
+        CollectionAssert.AreEquivalent(
+            new[] { "count", "contents", "0", "1", "5" },
+            wakes,
+            "every reader is woken once, whether or not its own answer actually changed");
+    }
+    [TestMethod]
     public void AReaderIsWokenByEveryChangeAndNotOnlyTheFirst()
     {
         // The mark that keeps one delivery to one raise per entry is per delivery: a flag left set after

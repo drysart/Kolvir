@@ -128,27 +128,123 @@ public sealed class ObservableListDeliveryTests
     }
 
     [TestMethod]
-    public void ABatchOfManyRecordsIsOneEvent()
+    public void ABatchUpToTheLimitKeepsEveryRecord()
     {
-        // A batch is one notification however much it collected: the records are the payload, not the
-        // notifications, and nothing counts them against a limit meant for stack depth.
+        // The records are the payload of one event, so the batch size is what decides whether an
+        // observer replays or rescans - not how many notifications it gets.
         using var list = Observable.CreateList<int>();
-        var sizes = new List<int>();
+        var events = new List<IReadOnlyList<ObservableListChange<int>>>();
 
-        list.AddObservableListChangedHandler(args => sizes.Add(args.Changes.Count));
+        list.AddObservableListChangedHandler(args => events.Add([.. args.Changes]));
 
         list.BeginChangeBatch();
 
-        for (var index = 0; index < 1000; index++)
+        for (var index = 0; index < Observable.MaxBatchRecords; index++)
         {
             list.Add(index);
         }
 
         list.EndChangeBatch();
 
-        Assert.AreEqual(1, sizes.Count, "a thousand changes, one event");
-        Assert.AreEqual(1000, sizes[0], "carrying a thousand records");
-        Assert.AreEqual(1000, list.Count, "and every one of them applied");
+        Assert.AreEqual(1, events.Count, "fifty changes, one event");
+        Assert.AreEqual(Observable.MaxBatchRecords, events[0].Count, "carrying all fifty records");
+        Assert.AreEqual(Observable.MaxBatchRecords, list.Count, "and every one of them applied");
+    }
+
+    [TestMethod]
+    public void ABatchPastTheLimitBecomesOneUntrackedRecord()
+    {
+        // One record too many is where replaying stops being cheaper than re-reading, so the batch drops
+        // what it collected and says only that things changed.
+        using var list = Observable.CreateList<int>();
+        var events = new List<IReadOnlyList<ObservableListChange<int>>>();
+
+        list.AddObservableListChangedHandler(args => events.Add([.. args.Changes]));
+
+        list.BeginChangeBatch();
+
+        for (var index = 0; index < Observable.MaxBatchRecords + 1; index++)
+        {
+            list.Add(index);
+        }
+
+        list.EndChangeBatch();
+
+        Assert.AreEqual(1, events.Count, "still one event");
+        Assert.AreEqual(1, events[0].Count, "carrying one record rather than fifty-one");
+        Assert.AreEqual(
+            ObservableListChangeType.UntrackedChanges,
+            events[0][0].ChangeType,
+            "and that record says the change was not tracked");
+        Assert.AreEqual(Observable.MaxBatchRecords + 1, list.Count, "the list itself is complete");
+    }
+
+    [TestMethod]
+    public void ABatchThatGaveUpTracksNothingAfterwards()
+    {
+        // Once the event says "re-read the list", every later change in the same batch is already
+        // covered by it, so none of them is queued.
+        using var list = Observable.CreateList<int>();
+        var events = new List<IReadOnlyList<ObservableListChange<int>>>();
+
+        list.AddObservableListChangedHandler(args => events.Add([.. args.Changes]));
+
+        list.BeginChangeBatch();
+
+        for (var index = 0; index < 500; index++)
+        {
+            list.Add(index);
+        }
+
+        list.RemoveAt(0);
+        list.Clear();
+        list.Add(1);
+
+        list.EndChangeBatch();
+
+        Assert.AreEqual(1, events.Count, "one event");
+        Assert.AreEqual(1, events[0].Count, "with the one record it gave up at, and nothing after it");
+        Assert.AreEqual(ObservableListChangeType.UntrackedChanges, events[0][0].ChangeType);
+        CollectionAssert.AreEqual(new[] { 1 }, list.ToArray(), "while the list did everything it was told");
+    }
+
+    [TestMethod]
+    public void ADrainThatWouldCarryTooManyRecordsGivesUpToo()
+    {
+        // The same cap applies where records accumulate outside a batch: a handler that makes many
+        // changes has them delivered as one event after the one it is hearing.
+        using var list = Observable.CreateList<int>();
+        var events = new List<IReadOnlyList<ObservableListChange<int>>>();
+        var acted = false;
+
+        list.AddObservableListChangedHandler(args =>
+        {
+            events.Add([.. args.Changes]);
+
+            // Once only: a handler that made a batch on every event it heard would be an infinite flat
+            // loop, which is the handler's bug and not something the drain bounds (section 3.7).
+            if (args.Changes.Count == 0 || acted)
+            {
+                return;
+            }
+
+            acted = true;
+
+            list.BeginChangeBatch();
+
+            for (var index = 0; index < Observable.MaxBatchRecords + 5; index++)
+            {
+                list.Add(index);
+            }
+
+            list.EndChangeBatch();
+        });
+
+        list.Add(-1);
+
+        Assert.AreEqual(2, events.Count, "the change, then the batch the handler made");
+        Assert.AreEqual(1, events[1].Count, "which gave up on detail");
+        Assert.AreEqual(ObservableListChangeType.UntrackedChanges, events[1][0].ChangeType);
     }
 
     [TestMethod]

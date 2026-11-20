@@ -180,6 +180,23 @@ internal sealed class ObservableListPage : DemoPage
             SetStatus("Five changes, one notification: read the record count on the line above.");
         });
 
+        var tooMany = Action("Add sixty in a batch");
+        tooMany.AddClickHandler(_ =>
+        {
+            _tasks.BeginChangeBatch();
+
+            for (var index = 0; index < 60; index++)
+            {
+                _serial++;
+                _tasks.Add($"Bulk {_serial}");
+            }
+
+            _tasks.EndChangeBatch();
+            SetStatus(
+                $"Sixty changes in one batch, which is more than {Observable.MaxBatchRecords} records - so "
+                + "the event says only that things changed, and the copy rescans the list.");
+        });
+
         row.Controls.Add(add);
         row.Controls.Add(insert);
         row.Controls.Add(rename);
@@ -187,6 +204,7 @@ internal sealed class ObservableListPage : DemoPage
         row.Controls.Add(remove);
         row.Controls.Add(clear);
         row.Controls.Add(batch);
+        row.Controls.Add(tooMany);
         return row;
     }
 
@@ -228,8 +246,15 @@ internal sealed class ObservableListPage : DemoPage
                     _mirror[change.NewIndex!.Value] = change.NewItem!;
                     break;
 
-                default:
+                case ObservableListChangeType.ListCleared:
                     _mirror.Clear();
+                    break;
+
+                default:
+                    // UntrackedChanges: the batch was too big to describe, so the copy cannot be patched
+                    // and is rebuilt from the list - the one record an observer cannot replay.
+                    _mirror.Clear();
+                    _mirror.AddRange(_tasks);
                     break;
             }
         }

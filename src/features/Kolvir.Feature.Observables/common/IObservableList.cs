@@ -36,6 +36,14 @@ namespace Kolvir.Observables;
 /// <b>Batches suppress notifications, not changes.</b> Between <see cref="BeginChangeBatch"/> and
 /// <see cref="EndChangeBatch"/> the list changes as usual and collects every record; the outermost end
 /// delivers them all in one event, in order. Batches nest, and only the outermost end delivers.
+/// <para>
+/// A batch is capped at <see cref="Observable.MaxBatchRecords"/> records, because a caller is free to
+/// loop a bulk load through it and an event that describes a hundred thousand changes is no more useful
+/// to an observer than a rescan and far more expensive to carry. Past the cap the collected records are
+/// dropped and the event carries one <see cref="ObservableListChangeType.UntrackedChanges"/> record
+/// instead, which tells the observer to re-read the list; every change after that one, in the same
+/// batch, is covered by it and is not queued.
+/// </para>
 /// </para>
 /// </remarks>
 public interface IObservableList<T> : IReadOnlyObservableList<T>, IList<T>

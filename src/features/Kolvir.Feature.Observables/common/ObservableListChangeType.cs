@@ -25,4 +25,15 @@ public enum ObservableListChangeType
 
     /// <summary>Every item was removed at once. The record carries nothing.</summary>
     ListCleared,
+
+    /// <summary>
+    /// Changes happened, and this event is not telling you which ones.
+    /// </summary>
+    /// <remarks>
+    /// The one record that is not a description of a change but an admission about the stream: an event
+    /// carries at most <see cref="Observable.MaxBatchRecords"/> records, and a batch that would have
+    /// carried more drops what it collected and delivers this instead. An observer treats it as "re-read
+    /// the whole list" - it is the only record that cannot be applied to a copy.
+    /// </remarks>
+    UntrackedChanges,
 }
