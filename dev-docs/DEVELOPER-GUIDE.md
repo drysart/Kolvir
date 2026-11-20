@@ -5482,6 +5482,13 @@ slower than the DIB path the tier exists to beat, and the Basic Render Driver th
 GPU exposes does not always set `DXGI_ADAPTER_FLAG_SOFTWARE` - so the adapter's description is checked
 as well as its flags.
 
+The device is made on the adapter that drives the display the window is on, not on the first one
+enumerated. A flip-model swap chain cannot cross adapters - DXGI refuses it with
+`DXGI_ERROR_INVALID_CALL` - so a hybrid machine whose window is on the integrated GPU's output would
+otherwise fail to create a swap chain for a device on the discrete card. `KOLVIR_GL_TRACE=1` prints
+every adapter and marks the one chosen, and the refusal names it, so a machine that still fails says
+which adapter it tried.
+
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
 dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in

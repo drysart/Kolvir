@@ -125,6 +125,18 @@ public sealed class Win32D3D12TierTests
         Assert.IsFalse(D3D12.IsSoftwareAdapter(0, "AMD Radeon RX 7900 XTX"));
     }
     [TestMethod]
+    public void TheAdapterThatDrivesTheWindowIsChosen()
+    {
+        // A flip-model swap chain cannot cross adapters: with the window on the integrated GPU's
+        // output and the device on the discrete card, DXGI refuses it with DXGI_ERROR_INVALID_CALL.
+        // So the adapter is the one whose output holds the window, not simply the first enumerated.
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([true, true]), "the first that drives it");
+        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, true]), "a later adapter can be the one");
+        Assert.AreEqual(2, Win32D3D12Device.ChooseAdapterIndex([false, false, true]));
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([false, false]), "nothing claims the window: keep the old behaviour");
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([]), "and an empty list still has a first");
+    }
+    [TestMethod]
     public void TheProductionProbeAnswersOrSaysWhy()
     {        // The interop's entry points are loaded and the adapter list walked for real, so this is what
         // catches a wrong export name or a mis-sized struct without needing a GPU in the machine.

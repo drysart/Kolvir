@@ -73,6 +73,8 @@ internal static unsafe class D3D12
     private const int SlotRelease = 2;
     private const int SlotDeviceCreateCommandQueue = 8;
     private const int SlotAdapterGetDesc1 = 10;
+    private const int SlotAdapterEnumOutputs = 7;
+    private const int SlotOutputGetDesc = 7;
     private const int SlotFactoryEnumAdapters1 = 12;
     private const int SlotFactory2CreateSwapChainForHwnd = 15;
     private const int SlotSwapChainPresent = 8;
@@ -257,6 +259,77 @@ internal static unsafe class D3D12
         return result == 0 ? queue : IntPtr.Zero;
     }
 
+    /// <summary>Enumerates one of an adapter's outputs.</summary>
+    /// <param name="adapter">The adapter.</param>
+    /// <param name="index">Which output, from zero.</param>
+    /// <returns>The output, or zero when there are no more.</returns>
+    internal static IntPtr EnumOutputs(IntPtr adapter, uint index)
+    {
+        var enumerate = (delegate* unmanaged[Stdcall]<IntPtr, uint, IntPtr*, int>)(*(IntPtr**)adapter)[SlotAdapterEnumOutputs];
+        IntPtr output = IntPtr.Zero;
+        return enumerate(adapter, index, &output) == 0 ? output : IntPtr.Zero;
+    }
+
+    /// <summary>Fills in an output's description.</summary>
+    /// <returns>False when the call failed.</returns>
+    internal static bool GetOutputDesc(IntPtr output, out DxgiOutputDesc description)
+    {
+        var get = (delegate* unmanaged[Stdcall]<IntPtr, DxgiOutputDesc*, int>)(*(IntPtr**)output)[SlotOutputGetDesc];
+        description = default;
+        DxgiOutputDesc local;
+
+        if (get(output, &local) != 0)
+        {
+            return false;
+        }
+
+        description = local;
+        return true;
+    }
+
+    /// <summary>
+    /// True when an output's desktop rectangle contains <paramref name="x"/> and
+    /// <paramref name="y"/>.
+    /// </summary>
+    internal static bool Contains(in DxgiOutputDesc output, int x, int y) =>
+        output.AttachedToDesktop != 0
+        && x >= output.Left && x < output.Right
+        && y >= output.Top && y < output.Bottom;
+
+    /// <summary>The window's rectangle in desktop coordinates.</summary>
+    /// <returns>False when the window handle is not a window.</returns>
+    internal static bool TryGetWindowRect(IntPtr hwnd, out RECT rect)
+    {
+        rect = default;
+        return GetWindowRectEntry(hwnd, out rect);
+    }
+
+    [DllImport("user32.dll", EntryPoint = "GetWindowRect", SetLastError = true)]
+    private static extern bool GetWindowRectEntry(IntPtr hwnd, out RECT rect);
+
+    /// <summary><c>RECT</c>.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct RECT
+    {
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+    }
+
+    /// <summary><c>DXGI_OUTPUT_DESC</c>: the desktop rectangle and whether the output is in use.</summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct DxgiOutputDesc
+    {
+        public fixed char DeviceName[32];
+        public int Left;
+        public int Top;
+        public int Right;
+        public int Bottom;
+        public int AttachedToDesktop;
+        public int Rotation;
+        public IntPtr Monitor;
+    }
     /// <summary><c>IID_ID3D12CommandQueue</c>.</summary>
     internal static readonly Guid CommandQueueInterface = new("0EC870A6-5D7E-4C22-8CFC-5BAAE07616ED");
 

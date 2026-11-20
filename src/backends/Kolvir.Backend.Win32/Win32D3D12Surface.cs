@@ -20,7 +20,7 @@ internal sealed class Win32D3D12Probe : IWin32D3D12Probe
     internal static Win32D3D12Probe Instance { get; } = new();
 
     public Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure) =>
-        Win32D3D12Device.TryCreate(out failure);
+        Win32D3D12Device.TryCreate(hwnd, out failure);
 }
 
 /// <summary>
@@ -58,11 +58,17 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
     internal string Renderer { get; }
 
     /// <summary>
-    /// Picks a hardware adapter, creates a device for it and one direct queue. A software adapter is
-    /// refused: WARP would answer every call successfully and then draw on the CPU, which is slower
-    /// than the DIB path this tier exists to beat.
+    /// Picks an adapter, creates a device for it and one direct queue.
     /// </summary>
-    internal static Win32D3D12Device? TryCreate(out string failure)
+    /// <remarks>
+    /// The adapter is the one that drives the display the window is on, not simply the first one
+    /// enumerated. A flip-model swap chain cannot cross adapters - DXGI refuses it with
+    /// <c>DXGI_ERROR_INVALID_CALL</c>, which is what a hybrid machine produces when the window is on
+    /// the integrated GPU's output and the device was made on the discrete card. Software adapters are
+    /// refused as well: WARP answers every call successfully and then draws on the CPU, which is
+    /// slower than the DIB path this tier exists to beat.
+    /// </remarks>
+    internal static Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure)
     {
         if (!IsAvailable)
         {
@@ -80,7 +86,7 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
 
         try
         {
-            if (!TryPickAdapter(factory, out var adapter, out var description, out failure))
+            if (!TryPickAdapter(factory, hwnd, out var adapter, out var description, out failure))
             {
                 return null;
             }
@@ -121,6 +127,7 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
 
     private static bool TryPickAdapter(
         IntPtr factory,
+        IntPtr hwnd,
         out IntPtr adapter,
         out DxgiAdapterDesc1 description,
         out string failure)
@@ -129,36 +136,128 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
         description = default;
         failure = "d3d12: no hardware adapter";
 
-        // The first adapter that is not software: cards are enumerated ahead of WARP, and a machine
-        // whose only adapter is software has nothing this tier can use.
-        for (uint index = 0; index < 8; index++)
-        {
-            IntPtr candidate = EnumAdapters1(factory, index);
+        List<(IntPtr Adapter, DxgiAdapterDesc1 Description)> candidates = [];
 
-            if (candidate == IntPtr.Zero)
+        try
+        {
+            for (uint index = 0; index < 16; index++)
+            {
+                IntPtr candidate = EnumAdapters1(factory, index);
+
+                if (candidate == IntPtr.Zero)
+                {
+                    break;
+                }
+
+                if (!GetAdapterDesc1(candidate, out var candidateDescription) ||
+                    IsSoftwareAdapter(candidateDescription.Flags, Describe(candidateDescription)))
+                {
+                    Release(ref candidate);
+                    continue;
+                }
+
+                candidates.Add((candidate, candidateDescription));
+            }
+
+            if (candidates.Count == 0)
             {
                 return false;
             }
 
-            if (!GetAdapterDesc1(candidate, out var candidateDescription))
+            int chosen = ChooseAdapterIndex(candidates.Select(candidate => DrivesWindow(candidate.Adapter, hwnd)).ToArray());
+            (adapter, description) = candidates[chosen];
+
+            if (Win32GlTrace.IsEnabled)
             {
-                Release(ref candidate);
-                continue;
+                for (var index = 0; index < candidates.Count; index++)
+                {
+                    Win32GlTrace.Write($"kolvir-d3d12: adapter {index}: {Describe(candidates[index].Description)}"
+                        + (index == chosen ? " (chosen)" : string.Empty));
+                }
             }
 
-            if (IsSoftwareAdapter(candidateDescription.Flags, Describe(candidateDescription)))
-            {
-                Release(ref candidate);
-                continue;
-            }
-
-            adapter = candidate;
-            description = candidateDescription;
-            failure = string.Empty;
+            candidates.RemoveAt(chosen);
             return true;
+        }
+        finally
+        {
+            // Everything not handed back is released here: the chosen adapter is in `adapter` by now.
+            foreach (var (candidate, _) in candidates)
+            {
+                IntPtr released = candidate;
+                Release(ref released);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Which candidate to use: the first one that drives the display the window is on, and otherwise
+    /// the first one at all - a window on a display no enumerated adapter claims is a machine whose
+    /// adapter list this code cannot reason about, and trying the first is what it did before.
+    /// </summary>
+    /// <param name="drivesWindow">One flag per hardware adapter, in enumeration order.</param>
+    /// <remarks>
+    /// The choice is a pure function of the flags so that a machine with the window on a different
+    /// adapter than the first one can be tested without such a machine.
+    /// </remarks>
+    internal static int ChooseAdapterIndex(IReadOnlyList<bool> drivesWindow)
+    {
+        for (var index = 0; index < drivesWindow.Count; index++)
+        {
+            if (drivesWindow[index])
+            {
+                return index;
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool DrivesWindow(IntPtr adapter, IntPtr hwnd)
+    {
+        if (!WindowCentre(hwnd, out var centre))
+        {
+            return false;
+        }
+
+        return AdapterDrivesPoint(adapter, centre.X, centre.Y);
+    }
+
+    private static bool AdapterDrivesPoint(IntPtr adapter, int x, int y)
+    {
+        for (uint index = 0; index < 8; index++)
+        {
+            IntPtr output = EnumOutputs(adapter, index);
+
+            if (output == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            bool drives = GetOutputDesc(output, out var description) && Contains(description, x, y);
+            IntPtr released = output;
+            Release(ref released);
+
+            if (drives)
+            {
+                return true;
+            }
         }
 
         return false;
+    }
+
+    private static bool WindowCentre(IntPtr hwnd, out (int X, int Y) centre)
+    {
+        centre = default;
+
+        if (!TryGetWindowRect(hwnd, out var rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top)
+        {
+            return false;
+        }
+
+        centre = ((rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2);
+        return true;
     }
 
     public void Dispose()
@@ -310,7 +409,9 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
         if (swapChain == IntPtr.Zero)
         {
-            failure = $"d3d12: no swap chain (0x{result:X8})";
+            // Naming the adapter matters: a flip-model swap chain cannot cross adapters, so this is
+            // the failure a device made on the wrong GPU produces, and the name says which one it was.
+            failure = $"d3d12: no swap chain on {device.Renderer} (0x{result:X8})";
             Release(ref factory);
             return false;
         }
