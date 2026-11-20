@@ -22,6 +22,7 @@ public sealed class UiHost
 
     /// <summary>Handlers that run at the start of every frame any host draws.</summary>
     private static Action<UiHost>? _frameStarting;
+    private static int _paintDepth;
     private Window? _window;
     private IDisposable? _windowShownToken;
     private IDisposable? _windowClosedToken;
@@ -140,6 +141,24 @@ public sealed class UiHost
         ArgumentNullException.ThrowIfNull(handler);
         _frameStarting -= handler;
     }
+
+    /// <summary>True while any host is inside <see cref="Paint"/>.</summary>
+    /// <remarks>
+    /// <para>
+    /// A backend owns the surface it hands to <see cref="Paint"/> and keeps using it after the call
+    /// returns - it presents or restores the canvas there. Destroying a window during that call
+    /// disposes the surface the backend is still holding, which is a native use-after-free rather
+    /// than a managed exception. A frame-starting handler is the ordinary way to ask for a close, and
+    /// it runs inside the paint, so teardown reads this and defers itself to the next loop turn.
+    /// </para>
+    /// <para>
+    /// Static and counted: a paint is a process-wide UI-thread operation, a nested paint still holds
+    /// the outer surface, and a handler that closes a different window must not tear down while any
+    /// paint is in flight. It is false outside <see cref="Paint"/>, which is where the deferred work
+    /// runs.
+    /// </para>
+    /// </remarks>
+    public static bool IsPainting => Volatile.Read(ref _paintDepth) > 0;
 
     /// <summary>Adds a handler that runs when the control under the pointer requests a different cursor.</summary>
     public IDisposable AddCursorChangedHandler(Action<object> handler)
@@ -641,6 +660,22 @@ public sealed class UiHost
     {
         ArgumentNullException.ThrowIfNull(canvas);
 
+        // Counted rather than boolean: a backend can paint from inside a paint (a GPU surface that
+        // failed and re-enters through the software path), and the outer surface is still held while
+        // the inner one runs. IsPainting must stay true for the whole stack.
+        Interlocked.Increment(ref _paintDepth);
+        try
+        {
+            return PaintCore(canvas, full);
+        }
+        finally
+        {
+            Interlocked.Decrement(ref _paintDepth);
+        }
+    }
+
+    private SKRectI PaintCore(SKCanvas canvas, bool full)
+    {
         // Whatever a frame-starting handler changes is laid out and drawn by this frame: it runs before
         // the layout pass and before the dirty region is taken. That is what makes it the place for
         // work that has been deferred to "the next frame" - a virtual-DOM render, for instance.
