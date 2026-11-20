@@ -139,7 +139,7 @@ public sealed class ObservableListDeliveryTests
 
         list.BeginChangeBatch();
 
-        for (var index = 0; index < Observable.MaxBatchRecords; index++)
+        for (var index = 0; index < Observable.Default.MaxCollectionBatchSize; index++)
         {
             list.Add(index);
         }
@@ -147,8 +147,8 @@ public sealed class ObservableListDeliveryTests
         list.EndChangeBatch();
 
         Assert.AreEqual(1, events.Count, "fifty changes, one event");
-        Assert.AreEqual(Observable.MaxBatchRecords, events[0].Count, "carrying all fifty records");
-        Assert.AreEqual(Observable.MaxBatchRecords, list.Count, "and every one of them applied");
+        Assert.AreEqual(Observable.Default.MaxCollectionBatchSize, events[0].Count, "carrying all fifty records");
+        Assert.AreEqual(Observable.Default.MaxCollectionBatchSize, list.Count, "and every one of them applied");
     }
 
     [TestMethod]
@@ -163,7 +163,7 @@ public sealed class ObservableListDeliveryTests
 
         list.BeginChangeBatch();
 
-        for (var index = 0; index < Observable.MaxBatchRecords + 1; index++)
+        for (var index = 0; index < Observable.Default.MaxCollectionBatchSize + 1; index++)
         {
             list.Add(index);
         }
@@ -176,7 +176,7 @@ public sealed class ObservableListDeliveryTests
             ObservableListChangeType.UntrackedChanges,
             events[0][0].ChangeType,
             "and that record says the change was not tracked");
-        Assert.AreEqual(Observable.MaxBatchRecords + 1, list.Count, "the list itself is complete");
+        Assert.AreEqual(Observable.Default.MaxCollectionBatchSize + 1, list.Count, "the list itself is complete");
     }
 
     [TestMethod]
@@ -232,7 +232,7 @@ public sealed class ObservableListDeliveryTests
 
             list.BeginChangeBatch();
 
-            for (var index = 0; index < Observable.MaxBatchRecords + 5; index++)
+            for (var index = 0; index < Observable.Default.MaxCollectionBatchSize + 5; index++)
             {
                 list.Add(index);
             }
@@ -245,6 +245,79 @@ public sealed class ObservableListDeliveryTests
         Assert.AreEqual(2, events.Count, "the change, then the batch the handler made");
         Assert.AreEqual(1, events[1].Count, "which gave up on detail");
         Assert.AreEqual(ObservableListChangeType.UntrackedChanges, events[1][0].ChangeType);
+    }
+
+    [TestMethod]
+    public void AListUsesItsOwnCapAndNotTheDefault()
+    {
+        // The cap is copied from the default when the list is created, so tuning one list's observers
+        // leaves every other list alone - which is the whole reason it is a property on the list rather
+        // than a setting.
+        using var small = Observable.CreateList<int>();
+        var smallEvents = new List<int>();
+        small.AddObservableListChangedHandler(args => smallEvents.Add(args.Changes.Count));
+
+        using var ordinary = Observable.CreateList<int>();
+        var ordinaryEvents = new List<int>();
+        ordinary.AddObservableListChangedHandler(args => ordinaryEvents.Add(args.Changes.Count));
+
+        small.MaxCollectionBatchSize = 3;
+
+        foreach (var list in new IObservableList<int>[] { small, ordinary })
+        {
+            list.BeginChangeBatch();
+
+            for (var index = 0; index < 4; index++)
+            {
+                list.Add(index);
+            }
+
+            list.EndChangeBatch();
+        }
+
+        Assert.AreEqual(1, smallEvents[0], "the tuned list gave up after three records");
+        Assert.AreEqual(4, ordinaryEvents[0], "while the one nobody tuned kept every record");
+    }
+
+    [TestMethod]
+    public void ACapCanBeRaisedOnOneListWithoutTouchingAnother()
+    {
+        // An owner whose observers can afford to replay more than the default should be able to say so,
+        // and saying it on one list must not change what another list's handlers are handed.
+        var generousCap = Observable.Default.MaxCollectionBatchSize + 10;
+
+        using var generous = Observable.CreateList<int>();
+        var events = new List<int>();
+
+        generous.MaxCollectionBatchSize = generousCap;
+        generous.AddObservableListChangedHandler(args => events.Add(args.Changes.Count));
+
+        generous.BeginChangeBatch();
+
+        for (var index = 0; index < generousCap; index++)
+        {
+            generous.Add(index);
+        }
+
+        generous.EndChangeBatch();
+
+        Assert.AreEqual(1, events.Count, "one event");
+        Assert.AreEqual(generousCap, events[0], "carrying every record, because this list's cap decided it");
+    }
+
+    [TestMethod]
+    public void ACapBelowOneIsRefused()
+    {
+        // Zero would cap every event at nothing, which is another way of saying "never describe a
+        // change" - and a caller who wants that should not register the handler.
+        using var list = Observable.CreateList<int>();
+
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => list.MaxCollectionBatchSize = 0);
+        Assert.ThrowsExactly<ArgumentOutOfRangeException>(() => list.MaxCollectionBatchSize = -1);
+        Assert.AreEqual(
+            Observable.Default.MaxCollectionBatchSize,
+            list.MaxCollectionBatchSize,
+            "and the value it had stands");
     }
 
     [TestMethod]

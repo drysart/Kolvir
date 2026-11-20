@@ -240,7 +240,7 @@ public sealed class ObservableListDependencyTests
 
         list.BeginChangeBatch();
 
-        for (var index = 0; index <= Observable.MaxBatchRecords; index++)
+        for (var index = 0; index <= Observable.Default.MaxCollectionBatchSize; index++)
         {
             list.Add("x");
         }

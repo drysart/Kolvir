@@ -37,7 +37,7 @@ namespace Kolvir.Observables;
 /// <see cref="EndChangeBatch"/> the list changes as usual and collects every record; the outermost end
 /// delivers them all in one event, in order. Batches nest, and only the outermost end delivers.
 /// <para>
-/// A batch is capped at <see cref="Observable.MaxBatchRecords"/> records, because a caller is free to
+/// A batch is capped at <see cref="MaxCollectionBatchSize"/> records, because a caller is free to
 /// loop a bulk load through it and an event that describes a hundred thousand changes is no more useful
 /// to an observer than a rescan and far more expensive to carry. Past the cap the collected records are
 /// dropped and the event carries one <see cref="ObservableListChangeType.UntrackedChanges"/> record
@@ -84,6 +84,30 @@ public interface IObservableList<T> : IReadOnlyObservableList<T>, IList<T>
     /// anything.
     /// </remarks>
     int ChangeBatchDepth { get; }
+
+    /// <summary>How many records one event from this list may carry before it stops describing them.</summary>
+    /// <value>
+    /// <see cref="Observable.Default.MaxCollectionBatchSize"/> for a list that has not been changed,
+    /// and whatever was last assigned for one that has.
+    /// </value>
+    /// <exception cref="ArgumentOutOfRangeException">The value is less than one, which would cap every
+    /// event at nothing and make every batch a rescan.</exception>
+    /// <remarks>
+    /// <para>
+    /// The list owns this, and it is copied from the default when the list is created: setting it here
+    /// tunes this list's observers, and changing <see cref="Observable.Default.MaxCollectionBatchSize"/>
+    /// tunes the ones lists created afterwards will have. A batch that would carry more than this many
+    /// records is delivered as one <see cref="ObservableListChangeType.UntrackedChanges"/> record
+    /// instead.
+    /// </para>
+    /// <para>
+    /// Settable at any time. It is consulted when a record is appended rather than when a batch begins,
+    /// so a list that lowers it mid-batch gives up on that batch's detail at the next change, and one
+    /// that raises it cannot recover records already dropped. It publishes no dependency and raises
+    /// nothing: it is configuration, not state an observer reflects.
+    /// </para>
+    /// </remarks>
+    int MaxCollectionBatchSize { get; set; }
 
     /// <summary>Starts a batch, which stops the list delivering until it ends.</summary>
     /// <exception cref="ObjectDisposedException">The list is disposed.</exception>

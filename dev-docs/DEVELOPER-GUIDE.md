@@ -5177,12 +5177,17 @@ recorded in order and delivered as one event. Nested batches deliver once, at th
 batch that collected nothing delivers nothing. A library that mutates on someone else's behalf can read
 `ChangeBatchDepth` to see whether a batch is already open.
 
-An event carries at most fifty records (`Observable.MaxBatchRecords`). A batch that would carry more
-drops the records it collected and delivers a single `UntrackedChanges` record, and queues nothing after
-it - a bulk load of ten thousand items costs one record and one rescan rather than ten thousand records
-nobody will replay. `UntrackedChanges` is the one record that cannot be applied to a copy: an observer
-that sees it rebuilds the copy from the list. Everything smaller replays exactly, which is the trade in
-one sentence.
+An event carries at most fifty records by default. A batch that would carry more drops the records it
+collected and delivers a single `UntrackedChanges` record, and queues nothing after it - a bulk load of
+ten thousand items costs one record and one rescan rather than ten thousand records nobody will replay.
+`UntrackedChanges` is the one record that cannot be applied to a copy: an observer that sees it rebuilds
+the copy from the list. Everything smaller replays exactly, which is the trade in one sentence.
+
+That fifty is `Observable.Default.MaxCollectionBatchSize`, so it is where a collection created
+afterwards starts - and the collection copies it when it is created rather than reading it, because the
+cap decides what that collection's observers have to be prepared for. Set
+`IObservableList<T>.MaxCollectionBatchSize` on the list whose observers can afford to replay more (or
+must be held to less); it is that list's alone, and a value below one is refused.
 
 Delivery is never nested, which is why a handler may change the list it is hearing about: the new
 records are queued and delivered after the event being delivered, so every observer sees the same

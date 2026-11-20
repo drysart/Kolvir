@@ -193,7 +193,7 @@ internal sealed class ObservableListPage : DemoPage
 
             _tasks.EndChangeBatch();
             SetStatus(
-                $"Sixty changes in one batch, which is more than {Observable.MaxBatchRecords} records - so "
+                $"Sixty changes in one batch, which is more than {Observable.Default.MaxCollectionBatchSize} records - so "
                 + "the event says only that things changed, and the copy rescans the list.");
         });
 

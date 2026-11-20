@@ -39,6 +39,10 @@ internal sealed class ObservableList<T> : IObservableList<T>
     private bool _isDelivering;
     private int _batchDepth;
 
+    // Copied from the default rather than read from it, so a list keeps the cap it was created with
+    // and one list's owner can tune its own observers without touching anybody else's.
+    private int _maxCollectionBatchSize = Observable.Default.MaxCollectionBatchSize;
+
     /// <summary>Creates an empty list.</summary>
     /// <param name="comparer">What decides that a write changed an item, or null for the type's own.</param>
     internal ObservableList(IEqualityComparer<T>? comparer)
@@ -67,6 +71,24 @@ internal sealed class ObservableList<T> : IObservableList<T>
 
     /// <inheritdoc/>
     public int ChangeBatchDepth => _batchDepth;
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// Set it alongside the state it belongs to, before the first change, or per batch if a caller
+    /// knows what it is doing. It is checked when a record is appended and not when a batch begins, so
+    /// lowering it below a batch's current length turns that batch into an
+    /// <see cref="ObservableListChangeType.UntrackedChanges"/> one at the next change, and raising it
+    /// afterwards cannot recover records that were already dropped.
+    /// </remarks>
+    public int MaxCollectionBatchSize
+    {
+        get => _maxCollectionBatchSize;
+        set
+        {
+            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
+            _maxCollectionBatchSize = value;
+        }
+    }
 
     /// <inheritdoc/>
     /// <remarks>Publishes the count dependency: raised by an add, a removal or a clear, and by nothing
@@ -357,7 +379,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
         {
             _pending.Add(change);
 
-            if (_pending.Count > Observable.MaxBatchRecords)
+            if (_pending.Count > _maxCollectionBatchSize)
             {
                 _pending.Clear();
                 _pending.Add(ObservableListChange<T>.Untracked());

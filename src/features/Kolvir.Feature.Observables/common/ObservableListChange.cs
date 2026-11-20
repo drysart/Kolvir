@@ -121,10 +121,11 @@ public readonly struct ObservableListChange<T>
     /// <summary>Changes happened that this event does not describe, so re-read the list.</summary>
     /// <returns>A record that carries nothing.</returns>
     /// <remarks>
-    /// The last record of a batch that grew past <see cref="Observable.MaxBatchRecords"/>: the collected
-    /// records are dropped and this is delivered in their place, so an observer that was keeping a copy
-    /// has to take the list's word for what it holds rather than its own. It is the one record that
-    /// cannot be applied, which is why it is a kind of its own rather than an empty batch.
+    /// The last record of a batch that grew past the list's
+    /// <see cref="IObservableList{T}.MaxCollectionBatchSize"/>: the collected records are dropped and
+    /// this is delivered in their place, so an observer that was keeping a copy has to take the list's
+    /// word for what it holds rather than its own. It is the one record that cannot be applied, which is
+    /// why it is a kind of its own rather than an empty batch.
     /// </remarks>
     public static ObservableListChange<T> Untracked() =>
         new(ObservableListChangeType.UntrackedChanges, null, default, null, default);
