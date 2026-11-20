@@ -32,6 +32,7 @@ internal sealed class ObservableSetPage : DemoPage
 
     private readonly IReadOnlyObservableSet<string> _readOnly;
     private readonly SummaryLine _summary = new();
+    private readonly ContentsView _contents = new();
     private readonly ChipBoard _board = new();
     private readonly HashSet<string> _mirror = new(StringComparer.OrdinalIgnoreCase);
     private readonly Label _records;
@@ -57,23 +58,32 @@ internal sealed class ObservableSetPage : DemoPage
         card.Controls.Add(Note(
             "An IObservableSet<T> publishes a dependency per kind of read. A chip asks Contains(its own "
             + "tag) and nothing else, so toggling one tag re-renders that chip - the count line above and "
-            + "the other chips keep their render counts. The line under the buttons is a copy built only "
-            + "from the records."));
+            + "the other chips keep their render counts. The contents line asked for everything, so it "
+            + "re-renders on every change and is where items the chips do not ask about show up. The line "
+            + "under the buttons is a copy built only from the records."));
 
-        card.Controls.Add(Actions());
+        foreach (var row in Actions())
+        {
+            card.Controls.Add(row);
+        }
 
         var summaryHost = Host(22f);
         card.Controls.Add(summaryHost);
 
         card.Controls.Add(_records);
 
+        var contentsHost = Host(96f);
+        card.Controls.Add(contentsHost);
+
         var boardHost = Host(0f);
         card.Controls.Add(boardHost);
 
         _summary.DataModel = _readOnly;
+        _contents.DataModel = _readOnly;
         _board.DataModel = _readOnly;
 
         VirtualDomRuntime.Mount(summaryHost, _summary);
+        VirtualDomRuntime.Mount(contentsHost, _contents);
         VirtualDomRuntime.Mount(boardHost, _board);
 
         _tags.AddObservableSetChangedHandler(OnChanged);
@@ -91,10 +101,13 @@ internal sealed class ObservableSetPage : DemoPage
     };
 
     /// <summary>The page's own controls: plain buttons that change the set.</summary>
-    /// <returns>A row of them, docked to the top of the card.</returns>
-    private Panel Actions()
+    /// <returns>Three rows of them - the per-item toggles, the set algebra, and the batch cap - each
+    /// docked to the top of the card, so a narrow window stacks them instead of clipping them.</returns>
+    private Panel[] Actions()
     {
-        var row = ButtonRow();
+        var items = ButtonRow();
+        var algebra = ButtonRow();
+        var cap = ButtonRow();
 
         var toggleRust = Action("Toggle rust");
         toggleRust.AddClickHandler(_ =>
@@ -166,17 +179,22 @@ internal sealed class ObservableSetPage : DemoPage
 
             SetStatus(
                 $"More than {_tags.MaxCollectionBatchSize} records, so the event says only that things "
-                + "changed and the copy rescans the set.");
+                + "changed: the copy rescans the set, and every chip re-renders although no chip's own "
+                + "answer changed.");
         });
 
-        row.Controls.Add(toggleRust);
-        row.Controls.Add(toggleGtk);
-        row.Controls.Add(two);
-        row.Controls.Add(removeTwo);
-        row.Controls.Add(everything);
-        row.Controls.Add(clear);
-        row.Controls.Add(sixty);
-        return row;
+        // One row per kind of change, so a narrow window stacks the buttons instead of clipping them.
+        items.Controls.Add(toggleRust);
+        items.Controls.Add(toggleGtk);
+
+        algebra.Controls.Add(two);
+        algebra.Controls.Add(removeTwo);
+        algebra.Controls.Add(everything);
+        algebra.Controls.Add(clear);
+
+        cap.Controls.Add(sixty);
+
+        return [items, algebra, cap];
     }
 
     private static Button Action(string text) => new(text)
@@ -258,7 +276,63 @@ internal sealed class ObservableSetPage : DemoPage
                 AutoSize = false,
                 Font = Theme.CaptionFont,
                 ForeColorRole = ThemeColor.MutedForeground,
-                Text = $"{count} of {Tags.Length} tag(s) on - this line has rendered {_renders} time(s), on the size alone",
+                Text = $"Count is {count} - this line has rendered {_renders} time(s), on the size alone",
+            };
+        }
+    }
+
+    /// <summary>
+    /// Everything in the set, which is the third kind of read: the contents. Enumeration asks for every
+    /// item, so this re-renders on every change - and it is where an item no chip asks about can be seen.
+    /// </summary>
+    private sealed class ContentsView : ObservableComponent<IReadOnlyObservableSet<string>>
+    {
+        private int _renders;
+
+        protected override VNode RenderWithDataModel(RenderArgs<IReadOnlyObservableSet<string>> args)
+        {
+            _renders++;
+
+            // The one read: everything.
+            var items = args.DataModel.ToArray();
+
+            // Enough to see what the bulk buttons added without letting a second click push the chips off
+            // the card.
+            const int shown = 80;
+            var listed = items.Length <= shown
+                ? string.Join(", ", items)
+                : string.Join(", ", items.Take(shown)) + $", and {items.Length - shown} more";
+
+            return new VPanel
+            {
+                Dock = XDock.Fill,
+                BackColor = null,
+                Border = Border.None,
+                Padding = new Thickness(0f),
+                Children =
+                [
+                    new VLabel
+                    {
+                        Dock = XDock.Top,
+                        AutoSize = false,
+                        Height = 18f,
+                        Font = Theme.CaptionFont,
+                        ForeColorRole = ThemeColor.MutedForeground,
+                        Text = $"the contents: {items.Length} item(s) - this line asked for all of them, "
+                            + $"so it has rendered {_renders} time(s)",
+                        Margin = new Thickness(0f, 2f, 0f, 2f),
+                    },
+                    new VLabel
+                    {
+                        Dock = XDock.Fill,
+                        AutoSize = false,
+                        WrapText = true,
+                        TextAlign = ContentAlignment.TopLeft,
+                        Font = Theme.DefaultFont,
+                        ForeColorRole = ThemeColor.Foreground,
+                        Text = listed,
+                    },
+                ],
             };
         }
     }
@@ -282,7 +356,8 @@ internal sealed class ObservableSetPage : DemoPage
                     Height = 18f,
                     Font = Theme.CaptionFont,
                     ForeColorRole = ThemeColor.MutedForeground,
-                    Text = "five chips, each reading only its own tag - the board itself has rendered once",
+                    Text = "the five known tags - one chip each, asking only about itself; the board has "
+                        + "rendered once",
                     Margin = new Thickness(0f, 2f, 0f, 4f),
                 },
             };

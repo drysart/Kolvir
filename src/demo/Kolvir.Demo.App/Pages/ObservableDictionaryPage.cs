@@ -67,7 +67,10 @@ internal sealed class ObservableDictionaryPage : DemoPage
             + "only its row re-renders; add or remove a key and the key list moves too. The line under the "
             + "buttons is a copy built only from the records."));
 
-        card.Controls.Add(Actions());
+        foreach (var row in Actions())
+        {
+            card.Controls.Add(row);
+        }
 
         var structureHost = Host(22f);
         card.Controls.Add(structureHost);
@@ -98,10 +101,13 @@ internal sealed class ObservableDictionaryPage : DemoPage
     };
 
     /// <summary>The page's own controls: plain buttons that change the dictionary.</summary>
-    /// <returns>A row of them, docked to the top of the card.</returns>
-    private Panel Actions()
+    /// <returns>Three rows of them - the value edits, the key edits, and the wholesale ones - each docked
+    /// to the top of the card, so a narrow window stacks them instead of clipping them.</returns>
+    private Panel[] Actions()
     {
-        var row = ButtonRow();
+        var values = ButtonRow();
+        var keys = ButtonRow();
+        var wholesale = ButtonRow();
 
         var edit = Action("Edit theme");
         edit.AddClickHandler(_ =>
@@ -182,14 +188,18 @@ internal sealed class ObservableDictionaryPage : DemoPage
                 + "changed and the copy rescans the dictionary.");
         });
 
-        row.Controls.Add(edit);
-        row.Controls.Add(editAll);
-        row.Controls.Add(add);
-        row.Controls.Add(remove);
-        row.Controls.Add(tryAdd);
-        row.Controls.Add(clear);
-        row.Controls.Add(sixty);
-        return row;
+        // One row per kind of change, so a narrow window stacks the buttons instead of clipping them.
+        values.Controls.Add(edit);
+        values.Controls.Add(editAll);
+
+        keys.Controls.Add(add);
+        keys.Controls.Add(remove);
+        keys.Controls.Add(tryAdd);
+
+        wholesale.Controls.Add(clear);
+        wholesale.Controls.Add(sixty);
+
+        return [values, keys, wholesale];
     }
 
     private static Button Action(string text) => new(text)
