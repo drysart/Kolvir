@@ -65,3 +65,76 @@ internal readonly struct Gtk4GfxChoice
         return kind == GpuAccelerationKind.OpenGl ? Gl : Cpu;
     }
 }
+
+/// <summary>
+/// Reads <c>KOLVIR_GL_OPTIONS</c>, the process-wide variable that restricts which tiers a window may
+/// use without an application option and without a rebuild.
+/// </summary>
+/// <remarks>
+/// <para>
+/// The same variable the Win32 backend honours, with the words this platform has: <c>ogl</c> for the GL
+/// seam and <c>cpu</c> for the CPU path. It exists so an A/B against acceleration needs no setting, no
+/// rebuild and no change to the application - <c>KOLVIR_GL_OPTIONS=cpu</c> runs this build without
+/// touching a GPU.
+/// </para>
+/// <para>
+/// It takes the place the application option has when the application names none, so an explicit
+/// <see cref="ApplicationOptions.GfxAcceleration"/> still wins. A value with nothing recognizable in it
+/// - including this platform's sibling words <c>d3d</c> and <c>metal</c> - says nothing at all and
+/// leaves the backend's own default in charge, rather than being read as a request for the CPU path: a
+/// variable tuned for one platform must not silently disable another.
+/// </para>
+/// </remarks>
+internal static class Gtk4GfxOptions
+{
+    /// <summary>The variable the process is configured with.</summary>
+    internal const string VariableName = "KOLVIR_GL_OPTIONS";
+
+    /// <summary>Reads the process's environment once.</summary>
+    internal static Gtk4GfxChoice? FromEnvironment() =>
+        Parse(Environment.GetEnvironmentVariable(VariableName));
+
+    /// <summary>Parses a value of <see cref="VariableName"/>.</summary>
+    /// <param name="value">The raw value, or null when the variable is not set.</param>
+    /// <returns>
+    /// The choice the value asks for, or null when it asks for nothing this platform understands.
+    /// </returns>
+    internal static Gtk4GfxChoice? Parse(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value))
+        {
+            return null;
+        }
+
+        var sawOpenGl = false;
+        var sawCpu = false;
+
+        foreach (var entry in value.Split(',', StringSplitOptions.TrimEntries))
+        {
+            switch (entry.ToLowerInvariant())
+            {
+                case "ogl":
+                    sawOpenGl = true;
+                    break;
+
+                case "cpu":
+                    sawCpu = true;
+                    break;
+
+                // A tier this platform does not have, or a typo: ignored, so one stray word does not
+                // throw the rest away.
+                default:
+                    break;
+            }
+        }
+
+        if (sawOpenGl)
+        {
+            // `cpu` beside a tier is ignored, exactly as it is on Win32: a list that names a tier is
+            // asking for acceleration.
+            return Gtk4GfxChoice.Gl;
+        }
+
+        return sawCpu ? Gtk4GfxChoice.Cpu : null;
+    }
+}

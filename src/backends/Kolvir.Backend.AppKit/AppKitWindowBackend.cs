@@ -833,11 +833,14 @@ public sealed class AppKitWindowBackend : IWindowBackend
         // already applied there. A saved acceleration value replaces that answer, exactly as it does
         // on Windows: asking for a GPU family is asking for acceleration, and asking for the CPU path
         // is the same request as turning the option off. What the service holds wins over both,
-        // because a switch made while an earlier window was open has to carry over to the next one.
+        // because a switch made while an earlier window was open has to carry over to the next one,
+        // and KOLVIR_GL_OPTIONS decides when the application named nothing at all - the same order of
+        // precedence the Win32 backend uses.
         var useHardwareAcceleration = _application.Application?.Options.GfxHardwareAcceleration ?? false;
 
         var choice = AppKitGfxChoice.FromSelected(
-            _application.Acceleration.Requested ?? _application.Application?.Options.GfxAcceleration);
+            _application.Acceleration.Requested ?? _application.Application?.Options.GfxAcceleration)
+            ?? AppKitGfxOptions.FromEnvironment();
 
         if (choice is { } selected)
         {

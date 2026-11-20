@@ -1108,11 +1108,13 @@ public sealed class Gtk4WindowBackend : IWindowBackend
         // Read once, the way the menu choice is, and then overridden by the acceleration value below:
         // asking for a GPU family is asking for acceleration, and asking for the CPU path is the same as
         // turning the option off. What the service holds wins over both, because a switch made while an
-        // earlier window was open has to carry over to the next one.
+        // earlier window was open has to carry over to the next one, and KOLVIR_GL_OPTIONS decides when
+        // the application named nothing at all - the same order of precedence the Win32 backend uses.
         var useHardwareAcceleration = _application.Application?.Options.GfxHardwareAcceleration ?? false;
 
         var choice = Gtk4GfxChoice.FromSelected(
-            _application.Acceleration.Requested ?? _application.Application?.Options.GfxAcceleration);
+            _application.Acceleration.Requested ?? _application.Application?.Options.GfxAcceleration)
+            ?? Gtk4GfxOptions.FromEnvironment();
 
         if (choice is { } selected)
         {

@@ -5477,6 +5477,21 @@ gfx: cpu (KOLVIR_GL_OPTIONS=cpu)
 `KOLVIR_NO_D3D12` and `KOLVIR_NO_VULKAN` still apply: they are hard offs for one tier, whereas
 `KOLVIR_GL_OPTIONS` chooses the order of the ones that remain.
 
+The variable is not Win32-only. Every backend honours it with the words it has - `d3d`, `vulkan` and
+`ogl` here, `metal` on macOS, `ogl` on Linux - so one command line takes a machine off its GPU
+everywhere:
+
+```
+KOLVIR_GL_OPTIONS=cpu KolvirDemoApp     # run this build without touching a GPU, on any platform
+```
+
+A backend ignores words that name a tier it does not have, so a value written for one platform neither
+enables nor disables anything on another: `KOLVIR_GL_OPTIONS=d3d` on a Mac is the same as leaving the
+variable unset, rather than being read as "no tier I know of, so use the CPU". `KOLVIR_NO_D3D12` and
+`KOLVIR_NO_VULKAN` stay Win32-only, because they exist to take one tier out of an enumeration that has
+three. As on Win32, the variable decides only when the application named nothing: an explicit
+`GfxAcceleration` wins over it, and a switch made while a window runs wins over both.
+
 The tier refuses a software adapter. WARP answers every call and then rasterizes on the CPU, which is
 slower than the DIB path the tier exists to beat, and the Basic Render Driver that a machine with no
 GPU exposes does not always set `DXGI_ADAPTER_FLAG_SOFTWARE` - so the adapter's description is checked
