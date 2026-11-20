@@ -56,6 +56,7 @@ public sealed partial class Application : IDisposable
     private bool _runCalled;
     private bool _primaryInstance = true;
     private bool _tornDown;
+    private bool _teardownScheduled;
 
     /// <summary>Creates the application with default <see cref="ApplicationOptions"/>.</summary>
     /// <param name="backend">The platform half. The application owns it and shuts it down.</param>
@@ -924,6 +925,21 @@ public sealed partial class Application : IDisposable
             return;
         }
 
+        // Disposing the application from a frame-starting handler would otherwise tear down the
+        // windows whose surface is being painted. The whole teardown moves to the loop turn, the
+        // same rule a single window close follows.
+        if (UiHost.IsPainting)
+        {
+            if (!_teardownScheduled)
+            {
+                _teardownScheduled = true;
+                Backend.Invoke(TearDown, synchronous: false);
+            }
+
+            return;
+        }
+
+        _teardownScheduled = false;
         _tornDown = true;
         _running = false;
         Theme.RemoveChangedHandler(OnThemeChanged);
