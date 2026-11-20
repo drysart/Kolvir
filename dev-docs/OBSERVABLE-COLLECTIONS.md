@@ -187,7 +187,8 @@ delivered:
 - Every delivery in that run is a whole event with its own records, so a consumer that only wants to
   count changes still sees each one, and a consumer that applies records never has to look ahead.
 
-The queue is also why such a chain is not a depth problem: it is flat, so nothing bounds it (3.7).
+The queue is also why such a chain is not a depth problem: a change to the list being delivered is
+flat, so nothing bounds how many of them a drain makes (3.7).
 
 ### 3.4 What each mutation raises
 
@@ -317,44 +318,44 @@ its own batch sees - and "the listener that was told about this change, then the
 invalidated" is the order that keeps a handler's own changes behind the event it is hearing about.
 
 Each of those raises is an ordinary raise and counts against `Observable.MaxEventStackSize` like any
-other, so a dependency handler whose re-run changes the list again does descend a level and is bounded
-with any other loop. A *typed* handler that changes the list does not descend, and nothing bounds it -
-which is right, and 3.7 says why.
+other, so a dependency handler whose re-run changes the list again does descend a level. The typed
+dispatch itself is counted too, because a handler can re-enter a delivery - by disposing a list, or by
+changing a different one - while a change to the list being delivered only ever queues. 3.7 is the
+whole of that distinction.
 
-### 3.7 Nothing bounds the drain, and that is deliberate
+### 3.7 What the depth guard does and does not cover
 
 `OBSERVABLES.md` section 3.8 bounds recursion with `Observable.MaxEventStackSize`, and it is worth
-being exact about what that guard is for: **stack depth**. It exists because a raise calls a handler
-that may write and raise again, so each step is one more frame, and enough frames kill the process
-with no report at all. Three things follow for a list, and they are the whole of this section.
+being exact about what that guard is for: **stack depth**. A step calls a handler or runs a function,
+the handler may step again, and enough steps kill the process with no report at all. Everything below
+follows from asking, for each thing a list does, whether it is one more frame.
 
-**The stack still grows where it grew before.** A typed handler does not re-enter the delivery - its
-change is queued (3.3) - so the drain is flat. But the dependency raises that follow a delivery are
-ordinary raises, and a dependency handler that changes the list again does descend, exactly as it does
-for a value. That path keeps the existing guard, unchanged and unshared: this section adds no second
-counter, and a loop through a dependency is refused the way `OBSERVABLES.md` describes. The one other
-nesting is `Dispose` called from inside a handler, which delivers the final event in that handler's
-frame; that cannot recurse without a fresh list per level, so it is bounded by how many lists a
-handler holds rather than by anything here.
+**A change to the list being delivered is not one.** It is queued (3.3), so the drain is a loop:
+`while (pending) deliver`. Nothing bounds that loop, and nothing should. A handler that adds an item
+for every item added never leaves the loop, so it never consumes a frame - there is no stack to
+protect - and a limit on how many deliveries a drain may make would be a *work* budget wearing a depth
+guard's name: arbitrary in its number, and refusing a legitimate cascade longer than the number picked.
+Refusing one could only be done badly too, since the records already applied cannot be taken back.
+A handler that never stops changing things is an ordinary infinite loop in application code, the kind
+`while (true)` is, and the library does not catch those either.
 
-**A flat loop has nothing to overflow, so a depth limit must not pretend to cover it.** A handler that
-adds one item for every item added never leaves the `while` in the drain, so it never consumes another
-frame. There is no stack to protect, and turning that into an exception at some count of deliveries
-would be a *work* limit wearing a depth guard's name: it would be arbitrary (why fifty? why not five
-hundred?), it would reject a legitimate cascade longer than the number picked, and refusing it would
-mean either discarding records an observer was promised or leaving the list and its observers
-disagreeing about what happened.
+**A delivery call is one, and it is counted.** The queue flattens changes to *this* list and nothing
+else, so a dispatch can still be re-entered:
 
-**A handler that never stops is application code's infinite loop, and the library does not catch those
-either.** `while (true)` in a handler hangs a single-threaded UI exactly as this would, and nothing in
-this package turns that into an exception. What the library owes the application is a *correct* queue:
-every change delivered once, in the order it happened, to everyone. It does not owe it a work budget,
-and a budget here would be a behaviour a caller could trip over while doing something reasonable.
+- a handler that **disposes** a list raises that list's final event inside its own frame;
+- a handler that changes a **different** list starts *that* list's drain inside its own frame, because
+  the other list has no drain in progress to queue into - and its handler can do the same again.
 
-So the drain is `while (pending) deliver`, with no limit of any kind. The measurement that matters is
-that a thousand-record batch is one delivery - one event, a thousand records, nothing counted - and
-that a terminating cascade of two hundred handler-caused deliveries completes without being refused.
+Those nest, one frame per hop, and a chain of them is exactly the stack overflow the guard exists to
+prevent. So every dispatch of a list's event - the ordinary one, and the final empty one a disposal
+delivers - enters the evaluation depth as one step, and the step past `MaxEventStackSize` is refused
+with the same exception a raise loop gets. The dependency raises at the end of a delivery are counted
+the same way, so a render whose re-run changes the list again descends and is bounded too.
 
+**A long flat drain is still unbounded.** The depth returns to where it started after every delivery,
+so a chain of two hundred handler-caused changes - each a delivery of the same list - completes, and a
+batch of a thousand records is one delivery. Both are tested, and both are the point: the guard counts
+nesting, not work.
 ### 3.8 The list is not an `IObservableEventSource`, and why
 
 The obvious move is to derive the list interfaces from `IObservableEventSource`, the way a value does.
@@ -893,7 +894,7 @@ Which record marks what:
 | --- | --- | --- |
 | 1 | The two interfaces, `ObservableListChange<T>`, `ObservableListChangedEventArgs<T>` | All four compile, are documented, and nothing implements them yet - this is the reviewable shape of the contract |
 | 2 | `ObservableList<T>` storage and mutations | Every mutation in 3.4 produces the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove produce no event; enumeration throws when the list is mutated under it |
-| 3 | Delivery: queue and batches | Records arrive in mutation order even when a handler mutates; a batch is one event carrying all of them, however many there are; nesting is counted and only the outermost end delivers; an unmatched end throws; a chain of handler-caused deliveries is unbounded, because it is a flat loop and `MaxEventStackSize` is a stack-depth guard (3.7) |
+| 3 | Delivery: queue and batches | Records arrive in mutation order even when a handler mutates; a batch is one event carrying all of them, however many there are; nesting is counted and only the outermost end delivers; an unmatched end throws; a flat chain of handler-caused deliveries to the same list is unbounded, while a delivery re-entered from a handler - through a disposal, or through another list's drain - is counted against `MaxEventStackSize` and refused at the limit (3.7) |
 | 4 | Per-operation dependencies: count, index, contents | A body that reads `Count` and `this[0]` reports two dependencies; a write to an item wakes the index reader and not the count reader; a move wakes only the indexes it spans; an insert at `p` wakes every watched index at or past `p` and none before it; a read outside a scope allocates nothing and registers nothing; a batch raises each affected entry once |
 | 5 | `CreateList` factories and disposal | The four overloads; disposal drops pending records, delivers the empty final event, and makes reads, mutations and registration throw while removal and a second dispose stay safe |
 | 6 | Tests | Section 10's claims, in `tests/features/Kolvir.Feature.Observables.Tests` |
@@ -938,7 +939,7 @@ treatment:
 | **Nothing that changed nothing raises** | An equal item write, a clear of an empty list, a move from an index to itself, and a remove that found nothing each leave the handler uncalled, and each is asserted to leave the list unchanged too |
 | **Order survives a handler that mutates** | A handler of the first event adds an item; the second handler records the events it saw, and the assertion is that it saw both events, in the order the changes happened, with the first one's records intact |
 | **A batch is one event with all the records** | Three mutations inside a batch deliver once, with three records in order; a nested batch delivers once at the outermost end; an unmatched `EndChangeBatch` throws and leaves the list usable |
-| **Nothing bounds a drain** | A batch of a thousand changes is one event carrying a thousand records; a terminating cascade of two hundred handler-caused deliveries completes and the list holds what the handler built, with nothing refused and no records dropped. A loop through a *dependency* - a render whose re-run changes the list - is still refused at `MaxEventStackSize`, because that one really does nest frames |
+| **The guard counts nesting, not work** | A batch of a thousand changes is one event carrying a thousand records; a terminating cascade of two hundred handler-caused deliveries to the same list completes and the list holds what the handler built, with nothing refused and no records dropped. A chain that *does* nest is refused at `MaxEventStackSize`: a handler that changes another list (whose drain then runs in its frame), a handler that disposes a list (whose final event runs in its frame), and a render whose re-run changes the list - and after the refusal an ordinary change still delivers, so the depth was restored |
 | **Disposal is ordered** | A handler sees `IsDisposed` true during the final event, receives no records, and any read from there throws; a batch left open is dropped rather than delivered; removal and a second dispose stay safe afterwards |
 | **A read is exactly what it asked for** | A body that reads `Count`, `this[1]` and enumerates reports three dependencies, in that order. A write to item 1 wakes the reader of index 1 and not the reader of `Count`. A move wakes the reader of an index it spans and not one outside it. An insert at 2 wakes the readers of indexes 2 and above and none below. A clear wakes all three |
 | **A throwing index read still subscribes** | `list[7]` over three items throws, and the run still reports index 7 among its dependencies; growing the list to eight then re-runs it, which is the only way an expression that is currently failing can recover |
@@ -961,7 +962,7 @@ by the producer.
 | 0 | Done | This document: the contract, the decisions, the plan, and the open questions. Revised after review: 3.6 specifies a dependency per kind of read - count, index, contents - instead of one per list, which also settles open question 7. Extended after review: sections 6 and 7 are the set and the dictionary, and section 5 is the core they share |
 | 1 | Done | The two interfaces, `ObservableListChangeType`, `ObservableListChange<T>` with its five `Create*` factories, and `ObservableListChangedEventArgs<T>` - all documented, CS1591 clean, and pointing at the sections that decide them |
 | 2 | Done | `ObservableList<T>` over a `List<T>`: every mutation in 3.4 raises the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove raise nothing; an out-of-range mutation throws without recording; enumeration is the storage's own, so mutating under it throws |
-| 3 | Done | Delivery is a queue rather than a recursive raise: a handler's own change is delivered after the event it is hearing, a batch is one event with every record in order, nesting delivers once at the outermost end, and an unmatched end throws. Nothing bounds the drain - revised after review: an earlier version counted deliveries against `MaxEventStackSize`, which is a stack-depth guard and has nothing to say about a flat loop, and which would have refused a legitimate cascade. Disposal drops what a batch had not delivered, delivers one empty event, and then throws |
+| 3 | Done | Delivery is a queue rather than a recursive raise: a handler's own change is delivered after the event it is hearing, a batch is one event with every record in order, nesting delivers once at the outermost end, and an unmatched end throws. Nothing bounds the drain - revised after review: an earlier version counted deliveries against `MaxEventStackSize` in the loop, which is a stack-depth guard and has nothing to say about a flat loop; the dispatch itself *is* counted, because a handler can re-enter a delivery through a disposal or through another list. Disposal drops what a batch had not delivered, delivers one empty event, and then throws |
 | 4 | Done | `ObservableListDependencies<T>` and `ObservableDependency`: the count and contents are fields, an index entry is created by a read inside a run and dropped when its last handler goes (`ReadScope.IsActive` keeps a cold read from allocating), and marking is a pass over the watched entries. A write wakes its index and not the count; an insert wakes the indexes at or past it; a move wakes its span; a clear wakes all; a batch raises each once; a read past the end is still a read |
 | 5 | Done | The four `CreateList` overloads and the disposal order |
 | 6 | Done | 41 tests in three files - `ObservableListChangeTests`, `ObservableListDeliveryTests`, `ObservableListDependencyTests` - covering section 10's claims for the list, including a replay that reproduces the list from records alone |

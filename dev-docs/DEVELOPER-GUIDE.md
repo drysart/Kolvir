@@ -5174,12 +5174,13 @@ batch that collected nothing delivers nothing. A library that mutates on someone
 
 Delivery is never nested, which is why a handler may change the list it is hearing about: the new
 records are queued and delivered after the event being delivered, so every observer sees the same
-history in the same order. The queue is flat, so nothing bounds how many deliveries one change can
-lead to - a batch of a thousand records is still one delivery, and a terminating cascade of
-handler-caused changes simply runs to its end. `Observable.MaxEventStackSize` is a stack-depth guard,
-and a loop that never nests frames is caught by neither it nor anything else: a handler that never
-stops is an ordinary infinite loop in application code. A loop that *does* nest - a render whose
-re-run changes the list again - is bounded exactly as a raise loop always was.
+history in the same order. So a chain of changes to the same list is flat and nothing bounds it: a
+batch of a thousand records is still one delivery, and a terminating cascade simply runs to its end.
+A *delivery* can still be re-entered, though - a handler that disposes a list raises that list's final
+event in its own frame, and one that changes a different list starts that list's drain there - so each
+dispatch counts as one step against `Observable.MaxEventStackSize`, like a raise, and a chain of them
+is refused at the limit. A handler that never stops changing the same list is an ordinary infinite
+loop in application code, and `MaxEventStackSize` is not a work budget: it counts nesting.
 
 #### What a read depends on
 

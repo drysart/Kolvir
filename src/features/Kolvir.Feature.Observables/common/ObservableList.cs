@@ -327,9 +327,14 @@ internal sealed class ObservableList<T> : IObservableList<T>
             {
                 var final = new ObservableListChangedEventArgs<T>(this, []);
 
-                foreach (var handler in handlers)
+                // A dispatch like any other, and counted like one: it is reached from a handler often
+                // enough that it is one of the two ways a delivery nests.
+                using (Observable.EnterDelivery(this))
                 {
-                    handler(final);
+                    foreach (var handler in handlers)
+                    {
+                        handler(final);
+                    }
                 }
             }
         }
@@ -363,13 +368,18 @@ internal sealed class ObservableList<T> : IObservableList<T>
     /// one already running, which is what preserves the order.
     /// </para>
     /// <para>
-    /// Nothing here is bounded, and it should not be: a flat loop cannot exhaust the stack, so
-    /// <see cref="Observable.MaxEventStackSize"/> - a guard against a stack overflow - has nothing to
-    /// say about it. A handler that changes the list it is hearing about is doing real work every time
-    /// round, and a chain of them ends when the handler stops changing things, which is the handler's
-    /// business and not this loop's. A handler that never stops is an ordinary infinite loop in
-    /// application code, the kind <c>while (true)</c> is, and inventing a work limit here would only
-    /// turn it into an exception that discards changes an observer was promised.
+    /// The loop itself is unbounded, and it should be: a handler that changes the list it is hearing
+    /// about costs a queue entry, not a frame, so a chain of them cannot exhaust the stack -
+    /// <see cref="Observable.MaxEventStackSize"/> has nothing to say about a loop that never descends.
+    /// Such a handler is doing real work every time round and ends when it stops changing things; one
+    /// that never stops is an ordinary infinite loop in application code, the kind <c>while (true)</c>
+    /// is, and a work limit here would only turn it into an exception that discards changes an observer
+    /// was promised.
+    /// </para>
+    /// <para>
+    /// The dispatch each iteration makes is a different matter, and it is counted - see
+    /// <see cref="Deliver"/>, because a delivery can be re-entered even when a change to this list
+    /// cannot.
     /// </para>
     /// </remarks>
     private void Drain()
@@ -420,9 +430,17 @@ internal sealed class ObservableList<T> : IObservableList<T>
 
         // The handlers first, then the reads they invalidated: a handler is the listener this change is
         // being reported to, and a dependency raise is the consequence of it.
-        foreach (var handler in handlers)
+        //
+        // Counted against the evaluation depth, because this dispatch can be re-entered even though a
+        // change to *this* list is queued: a handler that disposes a list raises that list's final
+        // event inside this frame, and one that changes a different list starts that list's drain
+        // here. Those nest, so they are stack, and a chain of them is what the guard is for.
+        using (Observable.EnterDelivery(this))
         {
-            handler(args);
+            foreach (var handler in handlers)
+            {
+                handler(args);
+            }
         }
 
         _dependencies.Mark(records, count);

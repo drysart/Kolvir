@@ -182,6 +182,56 @@ public sealed class ObservableListDeliveryTests
         Assert.AreEqual(200, list[0], "two hundred deliveries in one drain, none of them refused");
     }
     [TestMethod]
+    public void ANestedDispatchIsRefusedAtMaxEventStackSize()
+    {
+        // A change to the list being delivered is queued, so it is flat - but a delivery can still be
+        // re-entered from a handler that changes a different list, or that disposes one. Those nest on
+        // the stack, which is exactly what the guard is for.
+        var previous = Observable.MaxEventStackSize;
+        Observable.MaxEventStackSize = 5;
+
+        try
+        {
+            var refused = Assert.ThrowsExactly<InvalidOperationException>(
+                () => Nest(),
+                "a chain of deliveries that each start another one is refused rather than overflowing");
+
+            StringAssert.Contains(
+                refused.Message,
+                "MaxEventStackSize",
+                "and the message names the limit, which is the thing a caller can change");
+        }
+        finally
+        {
+            Observable.MaxEventStackSize = previous;
+        }
+
+        // Flat again once the chain unwound: a delivery of this list's own is an ordinary one.
+        using var list = Observable.CreateList(1);
+        var delivered = 0;
+        list.AddObservableListChangedHandler(_ => delivered++);
+        list.Add(2);
+
+        Assert.AreEqual(1, delivered, "the depth was restored rather than left poisoned");
+
+        static void Nest()
+        {
+            var fresh = Observable.CreateList<int>();
+
+            fresh.AddObservableListChangedHandler(args =>
+            {
+                if (args.Changes.Count == 0)
+                {
+                    return;
+                }
+
+                Nest();
+            });
+
+            fresh.Add(1);
+        }
+    }
+    [TestMethod]
     public void DisposalDeliversOneEmptyEventAndThenThrows()
     {
         var list = Observable.CreateList("a");

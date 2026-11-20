@@ -120,7 +120,24 @@ public static partial class Observable
     internal static EvaluationToken EnterColdRead(IObservableEventSource expression) =>
         Enter(expression, "A cold read");
 
-    private static EvaluationToken Enter(IObservableEventSource source, string step)
+    /// <summary>
+    /// Counts one level for a collection delivering an event to its handlers, for as long as the
+    /// caller's scope runs.
+    /// </summary>
+    /// <param name="collection">What is delivering, which is what a refusal names.</param>
+    /// <remarks>
+    /// A delivery is not a source, so it cannot go through <see cref="RaiseToHandlers"/> - and it is
+    /// counted here because it can still be re-entered: a handler that disposes a collection raises
+    /// that collection's final event inside this frame, and a handler that changes a *different*
+    /// collection starts that one's drain inside this frame too. Those nest, so they are depth, and the
+    /// guard is what stops a chain of them from exhausting the stack. A handler that changes the list
+    /// it is hearing about does <em>not</em> nest - that change is queued - which is why a long flat
+    /// drain is not refused by this.
+    /// </remarks>
+    internal static EvaluationToken EnterDelivery(object collection) =>
+        Enter(collection, "A collection change");
+
+    private static EvaluationToken Enter(object source, string step)
     {
         // Once a chain has overrun, everything still unwinding through it is on a stack that has already
         // been declared too deep. A handler that catches the refusal - or a collector that turns a throwing
@@ -145,7 +162,7 @@ public static partial class Observable
         return new EvaluationToken(previousDepth);
     }
 
-    private static InvalidOperationException Overflowed(IObservableEventSource source, string step) =>
+    private static InvalidOperationException Overflowed(object source, string step) =>
         new($"{step} nested past Observable.MaxEventStackSize ({_maxEventStackSize}), at {source}. Every "
             + "step of a chain like this runs inside the one before it, so a chain that keeps growing is "
             + "a loop: a handler that writes something the chain depends on, or an expression whose "

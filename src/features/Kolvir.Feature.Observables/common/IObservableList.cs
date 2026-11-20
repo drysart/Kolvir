@@ -26,9 +26,11 @@ namespace Kolvir.Observables;
 /// <b>Delivery is ordered, never nested.</b> A change made from inside a handler is queued and
 /// delivered after the event that handler is hearing, so two handlers never see records out of order -
 /// which matters because an observer applies them in sequence and out of order they would corrupt its
-/// copy. The queue is also why a chain of such changes is not a depth problem: it is a flat loop, so
-/// nothing here is bounded and <see cref="Observable.MaxEventStackSize"/> does not apply to it
-/// (section 3.7).
+/// copy. The queue is also why changing the list being delivered is not a depth problem: a change to it
+/// is queued, so a chain of them is flat and nothing bounds how many a drain delivers. The delivery
+/// *call* is a different matter and is counted against <see cref="Observable.MaxEventStackSize"/>,
+/// because a handler can re-enter one - by disposing a list, or by changing a different one, whose own
+/// drain then runs inside that handler's frame (section 3.7).
 /// </para>
 /// <para>
 /// <b>Batches suppress notifications, not changes.</b> Between <see cref="BeginChangeBatch"/> and
