@@ -113,6 +113,9 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// landed in client coordinates - the move loop wants the same point in screen coordinates, which
     /// is converted when the drag starts.</summary>
     private bool _pressActive;
+
+    /// <summary>The button the active press is holding, so a window swap can end it.</summary>
+    private MouseButtons _pressButton;
     private int _pressClientX;
     private int _pressClientY;
 
@@ -2459,6 +2462,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         // entered from inside one. WM_LBUTTONDOWN carries client coordinates; they are converted to
         // screen coordinates when the drag starts, which is the frame the move loop expects.
         _pressActive = true;
+        _pressButton = button;
         _pressClientX = NativeMethods.LowWord(lParam);
         _pressClientY = NativeMethods.HighWord(lParam);
 
@@ -2484,8 +2488,45 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
 
         _pressActive = false;
+        _pressButton = MouseButtons.None;
         _host.ProcessMouseUp(ToLogical(lParam), button, CurrentModifiers());
         NativeMethods.ReleaseCapture();
+    }
+
+    /// <summary>
+    /// Ends a press the application is still holding, because the window it began on is about to go.
+    /// </summary>
+    /// <remarks>
+    /// A switch can be triggered from inside a press - the row the user picked is underneath the pointer
+    /// - and replacing the window takes the capture and the button-up with it. Without this the
+    /// application keeps a press that never ends, which shows up as a list that goes on selecting
+    /// whatever the pointer passes over. The release is delivered at the pointer's current position, so
+    /// it ends where the user would expect it to.
+    /// </remarks>
+    private void EndActiveGesture()
+    {
+        if (_pressedCaption >= 0)
+        {
+            _pressedCaption = -1;
+            InvalidateCaption();
+        }
+
+        if (!_pressActive)
+        {
+            NativeMethods.ReleaseCapture();
+            return;
+        }
+
+        var point = default(NativeMethods.POINT);
+
+        if (!NativeMethods.GetCursorPos(out point) || !NativeMethods.ScreenToClient(_hwnd, ref point))
+        {
+            point = new NativeMethods.POINT { X = _pressClientX, Y = _pressClientY };
+        }
+
+        // The button up goes through the same path a real one does, so the application sees a release
+        // rather than a window disappearing from underneath it.
+        OnMouseUp(new IntPtr((point.X & 0xFFFF) | ((point.Y & 0xFFFF) << 16)), _pressButton);
     }
 
     /// <summary>
@@ -2897,7 +2938,11 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         // Whatever the old tier presented through, the window it presented on goes with it: a swap chain
         // keeps an HWND for good and a WGL context leaves its pixel format on the DC, so the new tier
-        // needs a window with no history. Rebuilding the window is what a replacement costs.
+        // needs a window with no history. Rebuilding the window is what a replacement costs. A press that
+        // is in flight is ended first: the row being switched on is under the pointer, and the button-up
+        // would otherwise go to a window that no longer exists.
+        EndActiveGesture();
+
         if (RecreateWindow() is not { } presentation)
         {
             reason = "The window could not be rebuilt for the switch.";
@@ -2935,12 +2980,19 @@ public sealed class Win32WindowBackend : IWindowBackend
     }
 
     /// <summary>How a window was being shown, so a replacement can be put back the same way.</summary>
+    /// <param name="Previous">The window being replaced, still alive until the new one is on screen.</param>
     /// <param name="Visible">Whether the window was on the screen.</param>
     /// <param name="Maximized">Whether it was maximised.</param>
     /// <param name="Minimized">Whether it was minimised.</param>
     /// <param name="Foreground">Whether it had the foreground.</param>
     /// <param name="Captured">Whether it held the mouse capture.</param>
-    private readonly record struct WindowPresentation(bool Visible, bool Maximized, bool Minimized, bool Foreground, bool Captured);
+    private readonly record struct WindowPresentation(
+        IntPtr Previous,
+        bool Visible,
+        bool Maximized,
+        bool Minimized,
+        bool Foreground,
+        bool Captured);
 
     /// <summary>
     /// Replaces the native window with a new, hidden one that carries no presentation history.
@@ -2977,6 +3029,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         NativeMethods.GetWindowRect(previous, out bounds);
 
         var presentation = new WindowPresentation(
+            previous,
             NativeMethods.IsWindowVisible(previous),
             NativeMethods.IsZoomed(previous),
             NativeMethods.IsIconic(previous),
@@ -3021,16 +3074,15 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
 
         _hwnd = replacement;
-        NativeMethods.DestroyWindow(previous);
 
         _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
 
-        // A replacement that animated in would look like the application opening a second time. Two
-        // things are done about it: the transition is turned off for the window, and the window stays
-        // cloaked - out of composition, with no visual to animate - until it is on the screen with the
-        // first frame already painted into it.
+        // A replacement that animated in would look like the application opening a second time, so the
+        // transition is turned off for it and it is composed behind the window it replaces: it is
+        // positioned and shown *behind* the outgoing window, which is opaque and covers it, and only
+        // after it has been painted is that window destroyed. What the user sees is the same window,
+        // with the new tier underneath it.
         NativeMethods.SetTransitionsDisabled(_hwnd, true);
-        NativeMethods.SetCloaked(_hwnd, true);
 
         NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
         ApplyWindowColors();
@@ -3049,25 +3101,58 @@ public sealed class Win32WindowBackend : IWindowBackend
         return presentation;
     }
 
-    /// <summary>Shows a replaced window the way the one it replaced was being shown.</summary>
+    /// <summary>
+    /// Puts a replaced window on the screen the way the one it replaced was being shown, and then retires
+    /// the old one.
+    /// </summary>
     /// <param name="presentation">What <see cref="RecreateWindow"/> recorded.</param>
+    /// <remarks>
+    /// The new window is shown <em>behind</em> the one it replaces, which is still on the screen and still
+    /// opaque: the opening transition happens there, where it cannot be seen, and the frame it draws is
+    /// hidden until the old window is destroyed. What the user sees is the same window throughout, with
+    /// the new tier underneath it.
+    /// </remarks>
     private void RestorePresentation(WindowPresentation presentation)
     {
         if (presentation.Visible)
         {
-            var show = presentation.Minimized
-                ? NativeMethods.SwShowMinNoActive
-                : presentation.Maximized
-                    ? NativeMethods.SwMaximize
-                    : presentation.Foreground
-                        ? NativeMethods.SwShow
-                        : NativeMethods.SwShowNoActivate;
+            NativeMethods.SetWindowPos(
+                _hwnd,
+                presentation.Previous,
+                0,
+                0,
+                0,
+                0,
+                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
 
-            NativeMethods.ShowWindow(_hwnd, show);
+            if (presentation.Maximized)
+            {
+                NativeMethods.ShowWindow(_hwnd, NativeMethods.SwMaximize);
+
+                // Maximising may have taken the window over the one it replaces, so it is put back behind.
+                NativeMethods.SetWindowPos(
+                    _hwnd,
+                    presentation.Previous,
+                    0,
+                    0,
+                    0,
+                    0,
+                    NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
+            }
+            else if (presentation.Minimized)
+            {
+                NativeMethods.ShowWindow(_hwnd, NativeMethods.SwShowMinNoActive);
+            }
+
+            // The frame is painted while the old window still covers it, so the swap has nothing to
+            // catch up on.
+            NativeMethods.UpdateWindow(_hwnd);
         }
 
-        // Painted before the cloak comes off, so the first thing composed is the finished frame.
-        NativeMethods.UpdateWindow(_hwnd);
+        if (presentation.Previous != IntPtr.Zero)
+        {
+            NativeMethods.DestroyWindow(presentation.Previous);
+        }
 
         ApplyTopMost();
 
@@ -3081,10 +3166,8 @@ public sealed class Win32WindowBackend : IWindowBackend
             NativeMethods.SetForegroundWindow(_hwnd);
         }
 
-        // The window is on the screen with its first frame already in it, so it can join the composition
-        // with nothing to animate, and the transitions the user does ask for go back on: minimising and
-        // restoring it should behave like any other window.
-        NativeMethods.SetCloaked(_hwnd, false);
+        // The window is on the screen with its first frame in it, so the transitions the user does ask
+        // for go back on: minimising and restoring it should behave like any other window.
         NativeMethods.SetTransitionsDisabled(_hwnd, false);
 
         if (_modelWindow is { } model)
