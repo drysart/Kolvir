@@ -132,6 +132,44 @@ public sealed class Gtk4WindowBackend : IWindowBackend
     public string? GraphicsRenderer => _view?.GraphicsRenderer;
 
     /// <summary>
+    /// Rebuilds this window's presentation so that it draws with <paramref name="option"/> from now on.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened, filled in on success and on refusal.</param>
+    /// <returns>True when the window is drawing with <paramref name="option"/> afterwards.</returns>
+    /// <remarks>
+    /// Nothing native is rebuilt: both tiers are already children of the same grid, so a switch drops one
+    /// Skia surface and builds the other. The window, its controls and their state are untouched.
+    /// </remarks>
+    internal bool TrySwitchAcceleration(GpuAccelerationOption option, out string reason)
+    {
+        if (_view is null || _window is null)
+        {
+            reason = "The window does not exist yet.";
+            return false;
+        }
+
+        if (!_view.TrySwitchAcceleration(option, out reason))
+        {
+            // The seam has already fallen back and the picture is painting: what is wrong is that the
+            // window is not doing what was asked, so the refusal is the answer and Current follows the
+            // fallback rather than the request.
+            ReportAcceleration();
+            return false;
+        }
+
+        ReportAcceleration();
+        return true;
+    }
+
+    /// <summary>
+    /// Tells <see cref="IGpuAccelerationService"/> what this window is drawing with, so an application's
+    /// settings list can show the live choice. Called when the drawing surface is decided and whenever
+    /// it changes.
+    /// </summary>
+    private void ReportAcceleration() => _application.Acceleration.Report(_view);
+
+    /// <summary>
     /// Adds a handler that runs once <see cref="GraphicsPath"/> has stopped saying
     /// <c>cpu (not created)</c>.
     /// </summary>
@@ -166,7 +204,13 @@ public sealed class Gtk4WindowBackend : IWindowBackend
         _view?.RemoveGraphicsPathChangedHandler(handler);
     }
 
-    private void OnViewGraphicsPathChanged(object sender) => _graphicsPathChanged?.Invoke(this);
+    private void OnViewGraphicsPathChanged(object sender)
+    {
+        // Whatever the path became - the first decision, or a switch made while the window runs - the
+        // service reports it, so a settings list follows the window rather than the request.
+        ReportAcceleration();
+        _graphicsPathChanged?.Invoke(this);
+    }
 
     /// <inheritdoc />
     public Screen? Screen => _window is null
@@ -1061,9 +1105,19 @@ public sealed class Gtk4WindowBackend : IWindowBackend
         window.Resizable = _resizable;
         window.SetDefaultSize(ToPixels(_clientSize.Width), ToPixels(_clientSize.Height));
 
-        // Read once, the way the menu choice is: the option is a window-creation decision, and the
-        // view cannot switch back to GL after it has presented through the CPU texture.
+        // Read once, the way the menu choice is, and then overridden by the acceleration value below:
+        // asking for a GPU family is asking for acceleration, and asking for the CPU path is the same as
+        // turning the option off. What the service holds wins over both, because a switch made while an
+        // earlier window was open has to carry over to the next one.
         var useHardwareAcceleration = _application.Application?.Options.GfxHardwareAcceleration ?? false;
+
+        var choice = Gtk4GfxChoice.FromSelected(
+            _application.Acceleration.Requested ?? _application.Application?.Options.GfxAcceleration);
+
+        if (choice is { } selected)
+        {
+            useHardwareAcceleration = !selected.CpuOnly;
+        }
 
         var view = new Gtk4SkiaView(_host, useHardwareAcceleration);
 

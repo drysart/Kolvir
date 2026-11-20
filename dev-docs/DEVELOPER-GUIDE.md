@@ -5739,7 +5739,8 @@ not offer is refused with the same sentence the enumeration would have printed r
 a surface to find out. After that the backend does the work per window: the GPU surface and its
 buffer are released, a new tier is built for the new choice, and the window is invalidated so the
 next paint goes through the new surface. That costs one surface rebuild per window - the same work
-`Resize` already does - and nothing at all when the value is already in use.
+`Resize` already does - so asking for the value a window already has rebuilds it rather than being
+free, which is harmless and keeps the backend from having to compare what a tier is made of.
 
 A refusal is not only "unavailable". If the requested family exists but the window could not be
 built on it - the case this machine hits, where `opengl32.dll` is present but there is no usable
@@ -5794,24 +5795,33 @@ A few more rules worth knowing:
 
 A backend that cannot do this refuses by default with "This backend cannot change acceleration while
 it runs." - the base `GpuAccelerationService.ApplyCurrent` only says yes where it has been
-implemented - so a caller can offer the switch unconditionally and let the platform answer. The Win32
-and AppKit backends answer yes; Linux GTK4 still refuses, because its `EGLSurface` has to be released
-and rebuilt around realising and unrealising the widget, which is not done yet.
+implemented - so a caller can offer the switch unconditionally and let the platform answer. All three
+backends answer yes now; what a switch costs differs, and so does what gets rebuilt.
 
-**What a switch costs differs by platform, and so does what is rebuilt.** macOS is the cheap case: the
-Metal surface is a `CAMetalLayer` inside the content view, so a switch releases that layer and builds
-another underneath the same `NSWindow`. Nothing about the window changes - not its identity, focus,
-place or controls - and no window is shown again, so there is no transition to suppress. Windows is
-the expensive case: a flip-model swap chain keeps the HWND it presents on, so the window itself has to
-be replaced, which is where the transitions setting, the `WINDOWPLACEMENT` and the `WindowPhase`
-notification come in (see above). Both platforms report what a window actually built through the same
-service, and both honour the same `ApplicationOptions.GfxAcceleration` value at startup, so an
-application's settings page needs no platform case at all.
+**macOS** is the cheap case: the Metal surface is a `CAMetalLayer` inside the content view, so a switch
+releases that layer and builds another underneath the same `NSWindow`. **Linux** is cheaper still:
+GTK4's two tiers are already children of the same grid - the `Gtk.GLArea` and the picture the CPU path
+draws into - so a switch drops one Skia surface, builds the other, and flips which child is visible,
+which is the swap the seam already performs when it comes up. On both, nothing about the window
+changes: not its identity, focus, place or controls, and no window is shown again, so there is no
+transition to suppress. The GL area is built even for a window that starts on the CPU path, hidden,
+because a hidden widget is never realized and so costs nothing until a switch turns the seam on; a
+window that had never been on GL answers optimistically and reports what it really built when the seam
+comes up on its next frame, since a context cannot be made on a widget GTK has not realized yet.
+
+**Windows** is the expensive case: a flip-model swap chain keeps the HWND it presents on, so the window
+itself has to be replaced, which is where the transitions setting, the `WINDOWPLACEMENT` and the
+`WindowPhase` notification come in (see above).
+
+All three report what a window actually built through the same service and honour the same
+`ApplicationOptions.GfxAcceleration` value at startup, so an application's settings page needs no
+platform case at all.
 
 A Metal value carries the device's registry id in hex - `metal:000000010000017f` - which is the only
 identity Metal reports for a device and survives a reboot. It is the same kind of thing as the Win32
 families' hardware identity, and for the same reason: an index into the enumeration moves when the
-list is reordered.
+list is reordered. GTK4 has nothing to choose between inside its one family - the GL context belongs to
+the area GTK made - so its value is the bare `ogl`.
 
 The sample exercises both: `--acceleration <value>` chooses at startup, `--apply-acceleration
 <value>` applies a switch once the first window exists (printing the result, which is how a script

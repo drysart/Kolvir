@@ -22,7 +22,7 @@ namespace Kolvir.Backend.Gtk4;
 /// last window was destroyed, which would defeat <see cref="ShutdownMode.OnExplicitShutdown"/>.
 /// </para>
 /// </remarks>
-public sealed class Gtk4ApplicationBackend : IApplicationBackend
+public sealed class Gtk4ApplicationBackend : IApplicationBackend, IGtk4AccelerationTarget
 {
     private Action<object>? _activated;
     private Action<object, SecondInstanceEventArgs>? _secondInstance;
@@ -312,6 +312,82 @@ public sealed class Gtk4ApplicationBackend : IApplicationBackend
         services.AddSingleton<ILauncher>(static provider => provider.GetRequiredService<Gtk4Launcher>());
         services.AddSingleton(SystemTheme);
         services.AddSingleton<IDialogService, Gtk4DialogService>();
+
+        // Over the CPU-only default the core registered: this backend can offer the GL seam, and it owns
+        // the windows a switch has to rebuild.
+        Acceleration = new Gtk4GpuAccelerationService(this);
+        services.AddSingleton(Acceleration);
+        services.AddSingleton<IGpuAccelerationService>(Acceleration);
+    }
+
+    /// <summary>
+    /// What this process can draw with, shared by every window so that they all report into one answer.
+    /// </summary>
+    /// <remarks>
+    /// Windows are created outside the container - the application asks its backend for each one - so the
+    /// backend holds this rather than each window resolving its own copy. It is registered as a singleton
+    /// as well, so an application reaching <see cref="IGpuAccelerationService"/> through
+    /// <see cref="Application.Services"/> gets this same instance and sees what the windows report.
+    /// </remarks>
+    internal Gtk4GpuAccelerationService Acceleration { get; private set; } = new();
+
+    /// <summary>
+    /// Switches every open window to <paramref name="option"/>, which is what a live change of
+    /// acceleration costs here: one Skia surface dropped and another built, with no widget rebuilt.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened. Never null.</param>
+    /// <returns>True when every window is drawing with <paramref name="option"/> afterwards.</returns>
+    /// <remarks>
+    /// GTK is not thread safe and every widget here belongs to the thread that runs the main loop, so this
+    /// only works when it is called from there - which is where a click handler runs. A window that
+    /// refuses leaves the refusal's sentence in <paramref name="reason"/> and the earlier windows
+    /// switched; with no window open at all the choice is simply recorded, and the next window starts
+    /// with it.
+    /// </remarks>
+    bool IGtk4AccelerationTarget.Apply(GpuAccelerationOption option, out string reason)
+    {
+        Gtk4WindowBackend[] windows;
+
+        lock (_windowsGate)
+        {
+            windows = [.. _windows];
+        }
+
+        if (windows.Length == 0)
+        {
+            reason = $"No window is open; {option.Name} will be used by the next one.";
+            return true;
+        }
+
+        if (_uiThreadId != Environment.CurrentManagedThreadId)
+        {
+            reason = "Acceleration can only be switched from the thread that runs the main loop.";
+            return false;
+        }
+
+        reason = string.Empty;
+        var all = true;
+
+        foreach (var window in windows)
+        {
+            if (!window.TrySwitchAcceleration(option, out var windowReason))
+            {
+                all = false;
+
+                if (reason.Length == 0)
+                {
+                    reason = windowReason;
+                }
+            }
+        }
+
+        if (all)
+        {
+            reason = $"{windows.Length} window(s) now using {option.Name}.";
+        }
+
+        return all;
     }
 
     /// <inheritdoc />
