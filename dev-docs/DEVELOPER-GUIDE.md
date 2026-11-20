@@ -4834,6 +4834,7 @@ using Kolvir.VirtualDom;
 internal sealed class DocumentApplication : ApplicationComponent
 {
     private readonly IObservableList<Document> _documents = Observable.CreateList<Document>();
+    private readonly IObservableMutableValue<int> _geometryRevision = Observable.CreateValue(0);
     private readonly ListPage _listPage;
     private int _nextId = 1;
 
@@ -4842,6 +4843,7 @@ internal sealed class DocumentApplication : ApplicationComponent
     protected override IReadOnlyList<ApplicationVNode> Render()
     {
         var count = _documents.Count;
+        var geometryRevision = _geometryRevision.Value;
         var windows = new List<ApplicationVNode>
         {
             new VWindow
@@ -4862,6 +4864,8 @@ internal sealed class DocumentApplication : ApplicationComponent
                 Key = document,
                 Title = document.Title.Value,
                 ClientSize = new SKSize(480f, 300f),
+                Location = document.Location,
+                GeometryToken = geometryRevision,
                 CloseRequested = _ => _documents.Remove(document),
                 Content = new VComponent(document.Page),
             });
@@ -4873,8 +4877,14 @@ internal sealed class DocumentApplication : ApplicationComponent
     private void Open()
     {
         var id = _nextId++;
-        _documents.Add(new Document(id, $"Document {id}"));
+
+        // The position belongs to the document, not to its index in the list: closing an earlier
+        // document must not walk every later window somewhere else.
+        var location = new SKPoint(160f + ((id - 1) * 28f), 60f + ((id - 1) * 28f));
+        _documents.Add(new Document(id, $"Document {id}", location));
     }
+
+    private void Tidy() => _geometryRevision.Value++;
 }
 ```
 
@@ -4899,6 +4909,14 @@ What to know:
 - **Only properties that changed are assigned.** Dropping a property restores the window's pristine
   value; repeating the same assigned value is not re-applied, which is what keeps a user's resize from
   being snapped back.
+- **Assigned geometry yields to the user until `GeometryToken` changes.** `ClientSize`, `Location`,
+  `State`, `MinimumClientSize` and `MaximumClientSize` are a suggestion while the token stays the
+  same: move or resize a window and ordinary renders leave it alone. When the token differs from the
+  previous render, every geometry property the node assigns is re-applied even though its value did
+  not change - that is the "tidy windows" / "reset layout" action. Use any stable object or a
+  monotonically increasing counter; incrementing `_geometryRevision.Value` in the example is the
+  whole mechanism. The token affects only geometry, and withdrawing an assignment still restores the
+  pristine value.
 - **`Content` is an ordinary control tree.** A plain node is mounted by the tree reconciler, and a bare
   `VComponent` root is mounted by the component reconciler into the same host panel, so
   `Content = new VComponent(page)` needs no wrapper. Changing the content root from one kind to the
@@ -4917,9 +4935,10 @@ What to know:
   errors rather than run-time refusals.
 
 `src/demo/Kolvir.Demo.VirtualDom` is the sample: a list window that opens documents, one keyed window
-per document, a close handled by `CloseRequested`, and a rename that changes one observable title and
-updates both the document's window and the list's readout. `--check` runs the same component on the
-headless backend and drives the open, close and rename flows through real controls and real frames.
+per document, a close handled by `CloseRequested`, a rename that changes one observable title and
+updates both the document's window and the list's readout, and a "Tidy windows" action that bumps the
+geometry token after the user has moved a window. `--check` runs the same component on the headless
+backend and drives the open, close, rename and tidy flows through real controls and real frames.
 
 #### Writing your own component base class
 

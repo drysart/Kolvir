@@ -72,6 +72,17 @@ internal static class HeadlessCheck
         Console.WriteLine($"after rename: {Titles(application)}");
         Console.WriteLine($"readout: {Readout(list)}");
 
+        var assignedLocation = first.Location;
+        first.Location = new SKPoint(900f, 900f);
+
+        Check(first.Location != assignedLocation, "the move should take before tidy");
+        Click(list, "tidy");
+        Paint(list);
+
+        first = Find(application, "Document 1 renamed 1 - document");
+        Check(first.Location == assignedLocation, "Tidy should put the document back where the model assigned it");
+        Console.WriteLine("after tidy: the moved document returned to its assigned position");
+
         Click(list, "quit");
 
         Check(application.Windows.Count == 0, "Quit should close every window");

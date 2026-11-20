@@ -252,6 +252,155 @@ public sealed class ApplicationMountTests
     }
 
     [TestMethod]
+    public void AChangedGeometryTokenReappliesAssignedGeometry()
+    {
+        object token = 0;
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                ClientSize = new SKSize(300f, 200f),
+                Location = new SKPoint(10f, 20f),
+                State = WindowState.Normal,
+                MinimumClientSize = new SKSize(200f, 120f),
+                MaximumClientSize = new SKSize(900f, 700f),
+                GeometryToken = token,
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+
+        window.ClientSize = new SKSize(420f, 280f);
+        window.Location = new SKPoint(400f, 300f);
+        window.State = WindowState.Minimized;
+        window.MinimumClientSize = new SKSize(100f, 80f);
+        window.MaximumClientSize = new SKSize(1000f, 800f);
+
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(new SKSize(420f, 280f), window.ClientSize,
+            "an unchanged token leaves a user resize alone");
+        Assert.AreEqual(new SKPoint(400f, 300f), window.Location,
+            "and a user move alone");
+        Assert.AreEqual(WindowState.Minimized, window.State);
+        Assert.AreEqual(new SKSize(100f, 80f), window.MinimumClientSize);
+        Assert.AreEqual(new SKSize(1000f, 800f), window.MaximumClientSize);
+
+        token = 1;
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(new SKSize(300f, 200f), window.ClientSize,
+            "a changed token re-applies the assigned size even though it did not change");
+        Assert.AreEqual(new SKPoint(10f, 20f), window.Location,
+            "and the assigned location");
+        Assert.AreEqual(WindowState.Normal, window.State,
+            "and the assigned state");
+        Assert.AreEqual(new SKSize(200f, 120f), window.MinimumClientSize,
+            "and the assigned minimum");
+        Assert.AreEqual(new SKSize(900f, 700f), window.MaximumClientSize,
+            "and the assigned maximum");
+    }
+
+    [TestMethod]
+    public void AGeometryTokenDoesNotReapplyUnassignedGeometry()
+    {
+        object token = 0;
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                ClientSize = new SKSize(300f, 200f),
+                Location = new SKPoint(10f, 20f),
+                GeometryToken = token,
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+
+        window.State = WindowState.Minimized;
+        window.MinimumClientSize = new SKSize(111f, 222f);
+        window.MaximumClientSize = new SKSize(333f, 444f);
+
+        token = 1;
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(WindowState.Minimized, window.State,
+            "a token change does not re-apply a state the node does not assign");
+        Assert.AreEqual(new SKSize(111f, 222f), window.MinimumClientSize,
+            "nor a minimum the node does not assign");
+        Assert.AreEqual(new SKSize(333f, 444f), window.MaximumClientSize,
+            "nor a maximum the node does not assign");
+    }
+
+    [TestMethod]
+    public void WithdrawingGeometryRestoresPristineValueWithOrWithoutATokenChange()
+    {
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                ClientSize = new SKSize(300f, 200f),
+                Location = new SKPoint(10f, 20f),
+                GeometryToken = 0,
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+
+        window.ClientSize = new SKSize(420f, 280f);
+        window.Location = new SKPoint(400f, 300f);
+
+        component.Renderer = _ => [new VWindow { Key = "one", GeometryToken = 0 }];
+
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(default(SKSize), window.ClientSize,
+            "withdrawing an assignment restores the pristine size when the token is unchanged");
+        Assert.AreEqual(default(SKPoint), window.Location,
+            "and the pristine location when the token is unchanged");
+
+        component.Renderer = _ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                ClientSize = new SKSize(300f, 200f),
+                Location = new SKPoint(10f, 20f),
+                GeometryToken = 0,
+            },
+        ];
+
+        component.Invalidate();
+        scene.Frame();
+
+        window.ClientSize = new SKSize(420f, 280f);
+        window.Location = new SKPoint(400f, 300f);
+
+        component.Renderer = _ => [new VWindow { Key = "one", GeometryToken = 1 }];
+
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(default(SKSize), window.ClientSize,
+            "a token change still restores a withdrawn size");
+        Assert.AreEqual(default(SKPoint), window.Location,
+            "and a withdrawn location");
+    }
+
+    [TestMethod]
     public void AnUnassignedPropertyRestoresThePristineValue()
     {
         var component = new TestApplicationComponent(_ =>

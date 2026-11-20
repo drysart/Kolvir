@@ -12,7 +12,8 @@ namespace Kolvir.VirtualDom;
 /// property that a previous render assigned and this one does not is restored to the value the
 /// <see cref="Window"/> had when it was created. That is what keeps a user's resize from being
 /// snapped back by a render that repeats the size it asked for: an unchanged assignment is not applied
-/// again.
+/// again. Assigned geometry is a suggestion until <see cref="GeometryToken"/> changes, then it is a
+/// command.
 /// </para>
 /// <para>
 /// <see cref="Content"/> is the one place the application hierarchy meets the control hierarchy. It is
@@ -120,6 +121,30 @@ public sealed class VWindow : ApplicationVNode
         set => _maximumClientSize = new Specified<SKSize>(value);
     }
 
+    /// <summary>
+    /// Changes when this render wants to take the window's geometry back from the user.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// By default assigned geometry is a suggestion: a render that repeats the same
+    /// <see cref="ClientSize"/>, <see cref="Location"/>, <see cref="State"/>,
+    /// <see cref="MinimumClientSize"/> or <see cref="MaximumClientSize"/> does not re-apply it, so a
+    /// user who dragged or resized the window keeps that arrangement. When this token differs from
+    /// the previous render's token, every geometry property this node assigns is applied again even
+    /// though its value is unchanged - the suggestion becomes a command. An unchanged token applies
+    /// nothing.
+    /// </para>
+    /// <para>
+    /// The token is compared the way <see cref="ApplicationVNode.Key"/> is, with
+    /// <see cref="object.Equals(object)"/>, so a stable object, a string, or a monotonically
+    /// increasing counter all work. A counter is the usual choice: increment it from a "tidy
+    /// windows" or "reset layout" action. Only geometry is affected; content and every other
+    /// property keep the ordinary changed-value rule. An assignment that is withdrawn still restores
+    /// the window's pristine value, whether the token changed or not.
+    /// </para>
+    /// </remarks>
+    public object? GeometryToken { get; init; }
+
     /// <summary>The window's body, reconciled by the control mount.</summary>
     /// <remarks>
     /// A plain <see cref="VNode"/> is mounted through the tree reconciler. A bare
@@ -207,24 +232,50 @@ public sealed class VWindow : ApplicationVNode
     /// <param name="pristine">What the window's properties were before any node touched them.</param>
     internal void PatchFrom(VWindow previous, Window window, in WindowPristine pristine)
     {
+        // A changed token turns the assigned geometry from a suggestion into a command: every value
+        // the node assigns is applied even when it equals the previous render's value, while a
+        // property neither node assigns is still left alone.
+        bool reapplyGeometry = !object.Equals(GeometryToken, previous.GeometryToken);
+
         if (!_title.Equals(previous._title))
         {
             window.Title = _title.IsSpecified ? _title.Value : pristine.Title;
         }
 
-        if (!_clientSize.Equals(previous._clientSize))
+        if (reapplyGeometry || !_clientSize.Equals(previous._clientSize))
         {
-            window.ClientSize = _clientSize.IsSpecified ? _clientSize.Value : pristine.ClientSize;
+            if (_clientSize.IsSpecified)
+            {
+                window.ClientSize = _clientSize.Value;
+            }
+            else if (previous._clientSize.IsSpecified)
+            {
+                window.ClientSize = pristine.ClientSize;
+            }
         }
 
-        if (!_location.Equals(previous._location))
+        if (reapplyGeometry || !_location.Equals(previous._location))
         {
-            window.Location = _location.IsSpecified ? _location.Value : pristine.Location;
+            if (_location.IsSpecified)
+            {
+                window.Location = _location.Value;
+            }
+            else if (previous._location.IsSpecified)
+            {
+                window.Location = pristine.Location;
+            }
         }
 
-        if (!_state.Equals(previous._state))
+        if (reapplyGeometry || !_state.Equals(previous._state))
         {
-            window.State = _state.IsSpecified ? _state.Value : pristine.State;
+            if (_state.IsSpecified)
+            {
+                window.State = _state.Value;
+            }
+            else if (previous._state.IsSpecified)
+            {
+                window.State = pristine.State;
+            }
         }
 
         if (!_resizable.Equals(previous._resizable))
@@ -247,18 +298,28 @@ public sealed class VWindow : ApplicationVNode
             window.MenuBar = _menuBar.IsSpecified ? _menuBar.Value : pristine.MenuBar;
         }
 
-        if (!_minimumClientSize.Equals(previous._minimumClientSize))
+        if (reapplyGeometry || !_minimumClientSize.Equals(previous._minimumClientSize))
         {
-            window.MinimumClientSize = _minimumClientSize.IsSpecified
-                ? _minimumClientSize.Value
-                : pristine.MinimumClientSize;
+            if (_minimumClientSize.IsSpecified)
+            {
+                window.MinimumClientSize = _minimumClientSize.Value;
+            }
+            else if (previous._minimumClientSize.IsSpecified)
+            {
+                window.MinimumClientSize = pristine.MinimumClientSize;
+            }
         }
 
-        if (!_maximumClientSize.Equals(previous._maximumClientSize))
+        if (reapplyGeometry || !_maximumClientSize.Equals(previous._maximumClientSize))
         {
-            window.MaximumClientSize = _maximumClientSize.IsSpecified
-                ? _maximumClientSize.Value
-                : pristine.MaximumClientSize;
+            if (_maximumClientSize.IsSpecified)
+            {
+                window.MaximumClientSize = _maximumClientSize.Value;
+            }
+            else if (previous._maximumClientSize.IsSpecified)
+            {
+                window.MaximumClientSize = pristine.MaximumClientSize;
+            }
         }
     }
 }

@@ -13,12 +13,15 @@ namespace Kolvir.Demo.VirtualDom;
 /// <see cref="ApplicationComponent"/>, reads its model in <see cref="Render"/>, and the collection
 /// scope makes every value it read a subscription. Adding a document opens its window, removing one
 /// closes its window, and changing a title re-titles both the document's window and the list's
-/// readout - all through ordinary observable changes and one render per frame.
+/// readout - all through ordinary observable changes and one render per frame. "Tidy windows"
+/// increments the geometry token, which is the one way a render may take back a position or size the
+/// user changed.
 /// </remarks>
 internal sealed class DocumentApplication : ApplicationComponent
 {
     private readonly IObservableList<DocumentModel> _documents = Observable.CreateList<DocumentModel>();
     private readonly Dictionary<DocumentModel, DocumentPage> _pages = [];
+    private readonly IObservableMutableValue<int> _geometryToken = Observable.CreateValue(0);
     private int _nextId = 1;
     private int _renames;
 
@@ -27,6 +30,7 @@ internal sealed class DocumentApplication : ApplicationComponent
     protected override IReadOnlyList<ApplicationVNode> Render()
     {
         var count = _documents.Count;
+        var geometryToken = _geometryToken.Value;
         var windows = new List<ApplicationVNode>(count + 1)
         {
             new VWindow
@@ -43,12 +47,15 @@ internal sealed class DocumentApplication : ApplicationComponent
         {
             var document = _documents[i];
 
+            // The same geometry is assigned on every render. The default patch rule leaves a user's
+            // move and resize alone; incrementing the token is what asks for it back.
             windows.Add(new VWindow
             {
                 Key = document,
                 Title = $"{document.Title.Value} - document",
                 ClientSize = new SKSize(480f, 300f),
-                Location = new SKPoint(160f + (i * 28f), 60f + (i * 28f)),
+                Location = document.Location,
+                GeometryToken = geometryToken,
                 CloseRequested = _ => Remove(document),
                 Content = new VComponent(_pages[document]),
             });
@@ -110,6 +117,15 @@ internal sealed class DocumentApplication : ApplicationComponent
                 },
                 new VButton
                 {
+                    Id = "tidy",
+                    Dock = DockStyle.Top,
+                    AutoSize = true,
+                    Enabled = count > 0,
+                    Text = "Tidy windows",
+                    Click = _ => TidyWindows(),
+                },
+                new VButton
+                {
                     Id = "quit",
                     Dock = DockStyle.Top,
                     AutoSize = true,
@@ -122,7 +138,11 @@ internal sealed class DocumentApplication : ApplicationComponent
 
     private void AddDocument()
     {
-        var document = new DocumentModel(_nextId, $"Document {_nextId}");
+        var offset = (_nextId - 1) * 28f;
+        var document = new DocumentModel(
+            _nextId,
+            $"Document {_nextId}",
+            new SKPoint(160f + offset, 60f + offset));
         _nextId++;
 
         // The page is kept with the document so a render of the list reuses the same component
@@ -130,6 +150,9 @@ internal sealed class DocumentApplication : ApplicationComponent
         _pages.Add(document, new DocumentPage(document, Rename, Remove));
         _documents.Add(document);
     }
+
+    /// <summary>Re-asserts every document window's assigned geometry after a user has moved it.</summary>
+    private void TidyWindows() => _geometryToken.Value++;
 
     private void RenameFirst()
     {

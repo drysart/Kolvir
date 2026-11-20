@@ -582,25 +582,33 @@ differences are that the node is a window descriptor and the top-level render re
 internal sealed class Shell : ApplicationComponent
 {
     private readonly IObservableList<Document> _documents = Observable.CreateList<Document>();
+    private readonly IObservableMutableValue<int> _geometryRevision = Observable.CreateValue(0);
 
-    protected override IReadOnlyList<ApplicationVNode> Render() =>
-    [
-        new VWindow
-        {
-            Key = "list",
-            Title = "Documents",
-            ClientSize = new SKSize(480f, 320f),
-            Content = new VComponent(_listPage),
-        },
-        .. _documents.Select(document => new VWindow
-        {
-            Key = document,
-            Title = document.Title.Value,
-            ClientSize = new SKSize(480f, 300f),
-            CloseRequested = _ => _documents.Remove(document),
-            Content = new VComponent(document.Page),
-        }),
-    ];
+    protected override IReadOnlyList<ApplicationVNode> Render()
+    {
+        var geometryRevision = _geometryRevision.Value;
+
+        return
+        [
+            new VWindow
+            {
+                Key = "list",
+                Title = "Documents",
+                ClientSize = new SKSize(480f, 320f),
+                Content = new VComponent(_listPage),
+            },
+            .. _documents.Select(document => new VWindow
+            {
+                Key = document,
+                Title = document.Title.Value,
+                ClientSize = new SKSize(480f, 300f),
+                Location = document.Location,
+                GeometryToken = geometryRevision,
+                CloseRequested = _ => _documents.Remove(document),
+                Content = new VComponent(document.Page),
+            }),
+        ];
+    }
 }
 ```
 
@@ -616,7 +624,7 @@ generic wrapper would only be ceremony. `Invalidate()` is the one render on the 
 | Piece | Shape | Purpose |
 | --- | --- | --- |
 | `ApplicationVNode` | Abstract base: `Key`, and nothing else today | The application description. Deliberately not a `VNode`. |
-| `VWindow` | `Title`, `ClientSize`, `Location`, `State`, `Resizable`, `TopMost`, `Icon`, `MenuBar`, `MinimumClientSize`, `MaximumClientSize` as tracked properties; `Content`; `CloseRequested` | One window, with the same omitted/set/unassigned distinction a control node has. |
+| `VWindow` | `Title`, `ClientSize`, `Location`, `State`, `Resizable`, `TopMost`, `Icon`, `MenuBar`, `MinimumClientSize`, `MaximumClientSize` as tracked properties; `GeometryToken`; `Content`; `CloseRequested` | One window, with the same omitted/set/unassigned distinction a control node has. |
 | `IApplicationComponent` | `IReadOnlyList<ApplicationVNode> Render()`, `Attach(ApplicationMount)`, `Detach(ApplicationMount)` | The mount's half of the protocol, exactly as `IComponent` is the control mount's half. |
 | `ApplicationComponent` | The interface, `Invalidate()`, and `IDisposable` | The supplied base class. |
 | `ApplicationMount` | `Invalidate()`, `Dispose()` | Owns the real windows and their content mounts. |
@@ -656,6 +664,19 @@ property the previous node assigned and this one does not is restored to the pri
 from that window, and a property whose value is unchanged is not assigned at all. The last part is
 what keeps a user's resize or move from being snapped back by a render that repeats the size or
 position it originally asked for.
+
+Assigned geometry is therefore a suggestion, not an ongoing command: a render that keeps assigning
+the same `ClientSize`, `Location`, `State`, `MinimumClientSize` or `MaximumClientSize` leaves a
+window where the user put it. `VWindow.GeometryToken` is how an application asks for the geometry
+back. When the token differs from the previous render's token, every one of those five properties the
+node assigns is applied again even though its value did not change; when the token is unchanged,
+nothing is re-applied. The token is compared with `object.Equals`, the same way `VWindow.Key` is, so
+a stable object, a string, or a monotonically increasing counter all work. A counter is the usual
+choice for a "tidy windows" or "reset layout" action, because incrementing it is the statement "take
+the assigned geometry back now"; the demo's "Tidy windows" button does exactly that. Only geometry
+answers to the token: `Title`, `Resizable`, `TopMost`, `Icon`, `MenuBar` and `Content` keep the
+ordinary changed-value rule. An assignment that is withdrawn still restores the pristine value,
+whether the token changed or not.
 
 The pristine values are captured per window rather than from a static snapshot, because a window's
 defaults are not wholly fixed: the icon and menu bar start from the application's options, and the
