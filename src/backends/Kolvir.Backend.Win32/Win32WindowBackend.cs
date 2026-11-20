@@ -3051,7 +3051,12 @@ public sealed class Win32WindowBackend : IWindowBackend
             NativeMethods.GetActiveWindow() == previous,
             NativeMethods.GetCapture() == previous);
 
-        var style = (uint)NativeMethods.GetWindowLongPtrW(previous, NativeMethods.GwlStyle).ToInt64();
+        // A visible window reports WS_VISIBLE in its style, and CreateWindowExW shows a window that
+        // carries it - which runs the opening transition during creation, before the transitions
+        // setting further down could apply to it. The replacement is created hidden instead, and shown
+        // by RestorePresentation, so the setting is in force by the time the window is displayed.
+        var style = (uint)NativeMethods.GetWindowLongPtrW(previous, NativeMethods.GwlStyle).ToInt64()
+            & ~NativeMethods.WsVisible;
 
         // What was layered onto the old window comes off while the old window still exists.
         Win32PopupWindow.DismissForOwner(previous);
@@ -3093,7 +3098,6 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         // Set before the window is ever shown, which is the state the docs describe it being read in.
         var transitions = NativeMethods.SetTransitionsDisabled(_hwnd, true);
-
         NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
         ApplyWindowColors();
         ApplyIcon();
@@ -3106,7 +3110,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         if (Win32GlTrace.IsEnabled)
         {
             Win32GlTrace.Write(
-                $"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {presentation.Width}x{presentation.Height}, transitions disabled -> 0x{transitions:X8}");
+                $"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {presentation.Width}x{presentation.Height}, created hidden={!NativeMethods.IsWindowVisible(_hwnd)}, transitions disabled -> 0x{transitions:X8}");
         }
 
         return presentation;

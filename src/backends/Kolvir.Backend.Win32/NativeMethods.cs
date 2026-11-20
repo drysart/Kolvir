@@ -108,6 +108,14 @@ internal static class NativeMethods
 
     // Popup menu window.
     internal const uint WsPopup = 0x80000000;
+
+    /// <summary>
+    /// Set on every window that is on the screen. It comes back from <c>GW_STYLE</c>, and passing it to
+    /// <c>CreateWindowExW</c> shows the window during creation - which is how a window's opening
+    /// transition would start before anything could be said about transitions.
+    /// </summary>
+    internal const uint WsVisible = 0x10000000;
+
     internal const uint WsClipChildren = 0x02000000;
     internal const uint WsExToolWindow = 0x00000080;
     internal const uint WsExTopmost = 0x00000008;
