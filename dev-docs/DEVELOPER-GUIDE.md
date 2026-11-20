@@ -5579,7 +5579,7 @@ was made with, because a chain that fell to the two-buffer rung behaves differen
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
 dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
-section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,975,360, so +64,000
+section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,982,016, so +70,656
 bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
 shipped `libSkiaSharp.dll` already contains the Direct3D backend.
 
