@@ -3025,6 +3025,10 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
 
+        // A replacement that animated in would look like the application opening a second time, so the
+        // transition is turned off for it here and put back once it is on the screen.
+        NativeMethods.SetTransitionsDisabled(_hwnd, true);
+
         NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
         ApplyWindowColors();
         ApplyIcon();
@@ -3070,6 +3074,10 @@ public sealed class Win32WindowBackend : IWindowBackend
         {
             NativeMethods.SetForegroundWindow(_hwnd);
         }
+
+        // The window is on the screen, so the transitions the user does ask for go back on: minimising
+        // and restoring it should animate like any other window.
+        NativeMethods.SetTransitionsDisabled(_hwnd, false);
 
         if (_modelWindow is { } model)
         {

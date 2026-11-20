@@ -1055,6 +1055,32 @@ internal static class NativeMethods
     private const int DwmwaCaptionColor = 35;
     internal const uint DwmColorDefault = 0xFFFFFFFF;
 
+    /// <summary><c>DWMWA_TRANSITIONS_FORCEDISABLED</c>: suppresses the show, hide and zoom animations.</summary>
+    private const int DwmwaTransitionsForceDisabled = 3;
+
+    /// <summary>
+    /// Suppresses, or restores, the system's transition animations for one window.
+    /// </summary>
+    /// <param name="hwnd">The window.</param>
+    /// <param name="disabled">True to suppress the animations, false to put them back.</param>
+    /// <returns>True when DWM accepted the setting.</returns>
+    /// <remarks>
+    /// A window that is created and then shown animates in: Windows 11 zooms it up from its centre,
+    /// which for a window that is only being replaced looks like the application is opening a second
+    /// time. Setting this on the replacement before it is shown keeps the transition off it, and it is
+    /// cleared again afterwards so the animations the user does ask for still happen.
+    /// </remarks>
+    internal static bool SetTransitionsDisabled(IntPtr hwnd, bool disabled)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var value = disabled ? 1 : 0;
+        return DwmSetWindowAttribute(hwnd, DwmwaTransitionsForceDisabled, ref value, sizeof(int)) == 0;
+    }
+
     /// <summary>Reads a REG_DWORD from HKEY_CURRENT_USER, or null when the value is absent.</summary>
     internal static uint? ReadUserDword(string subKey, string valueName)
     {
@@ -1149,8 +1175,7 @@ internal static class NativeMethods
             return DwmSetWindowAttribute(hwnd, attribute, ref value, sizeof(int)) == 0;
         }
 
-        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)
-        {
+        private static bool TryGetDwmColor(IntPtr hwnd, int attribute, out uint colorRef)        {
             colorRef = 0;
             if (hwnd == IntPtr.Zero)
             {
