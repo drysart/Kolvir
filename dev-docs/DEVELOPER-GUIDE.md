@@ -5267,6 +5267,47 @@ depends on is keyed by the item, so a set cannot hold null - the one place this 
 interface redeclares all of them (`Count`, `Contains` and the six set-algebra questions), so calling them
 through it is not ambiguous.
 
+#### A dictionary in a model
+
+`Observable.CreateDictionary<TKey, TValue>()` is the keyed collection: identity is the key, the payload
+is the value, and there is no index. Its read is three questions rather than two, because a dictionary
+has a structure as well as contents:
+
+| Read | Depends on | Woken by |
+| --- | --- | --- |
+| `Count`, `Keys` | the structure | a key added, a key removed, a clear |
+| `this[k]`, `TryGetValue(k)`, `ContainsKey(k)` | that key | the key arriving, leaving, or its value changing |
+| `Values`, enumeration, `Contains(pair)`, `CopyTo` | the contents | any change at all |
+
+```csharp
+internal sealed class Settings
+{
+    private readonly IObservableDictionary<string, string> _values =
+        Observable.CreateDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyObservableDictionary<string, string> Values => _values;
+
+    // Add-or-replace, in one call that says which it did by raising ItemAdded or ItemChanged.
+    public void Set(string name, string value) => _values[name] = value;
+}
+```
+
+A row renders `Values.TryGetValue(row.Key, out var value)` and is woken by exactly its own key: a change
+to another row leaves it alone, and a value written beside a key that stayed wakes that row and the
+`Values` reader and *not* `Count`. A key that is not there is worth remembering through `TryGetValue` and
+`ContainsKey`, which publish before they answer - so an expression reading a key that has not arrived yet
+is re-run when it does. The indexer is the exception: reading an absent key throws and publishes nothing,
+because a key that is gone is not an address to depend on.
+
+The records are `ItemAdded` (key and value), `ItemRemoved` (key and the value it had), `ItemChanged` (key
+and both values, raised only when the new value differs) and `DictionaryCleared` (nothing). `TryAdd` is on
+the writable interface because `IDictionary<,>` has no add-if-absent: `Add` throws on a present key and
+the indexer replaces. `Remove(KeyValuePair)` is conditional, as its interface says - a key whose value
+differs from the pair's is left alone and nothing is raised.
+
+`ContainsKey` is over-raised on purpose: presence and value are one entry to everyone who holds it, so a
+value change wakes a `ContainsKey` reader too. That costs a re-run, never a wrong answer.
+
 ## Hardware acceleration (Windows)
 
 `ApplicationOptions.GfxHardwareAcceleration` is a `bool`: **true by default on Windows and

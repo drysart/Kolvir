@@ -815,11 +815,11 @@ Sections 3.1 to 3.5, 3.7, 3.9, 3.10 and 3.11 apply unchanged, as section 6 says 
 
 ```
 ObservableDictionaryChangeType                 what a dictionary change can be
-  ItemAdded, ItemRemoved, ItemChanged, DictionaryCleared
+  ItemAdded, ItemRemoved, ItemChanged, DictionaryCleared, UntrackedChanges
 
 ObservableDictionaryChange<TKey, TValue>       one change
   ObservableDictionaryChangeType ChangeType { get; }
-  TKey Key { get; }
+  TKey? Key { get; }
   TValue? OldValue { get; }
   TValue? NewValue { get; }
 
@@ -901,12 +901,12 @@ Two notes on that table:
 ### 7.3 API surface, in full
 
 ```csharp
-public enum ObservableDictionaryChangeType { ItemAdded, ItemRemoved, ItemChanged, DictionaryCleared }
+public enum ObservableDictionaryChangeType { ItemAdded, ItemRemoved, ItemChanged, DictionaryCleared, UntrackedChanges }
 
 public readonly struct ObservableDictionaryChange<TKey, TValue>
 {
     public ObservableDictionaryChangeType ChangeType { get; }
-    public TKey Key { get; }
+    public TKey? Key { get; }                   // default for a record that names no key
     public TValue? OldValue { get; }
     public TValue? NewValue { get; }
 }
@@ -917,16 +917,48 @@ public sealed class ObservableDictionaryChangedEventArgs<TKey, TValue> : EventAr
     public IReadOnlyObservableDictionary<TKey, TValue> Dictionary { get; }
 }
 
+public interface IReadOnlyObservableDictionary<TKey, TValue> : IReadOnlyDictionary<TKey, TValue>, IDisposable
+{
+    bool IsDisposed { get; }
+    IEqualityComparer<TKey> Comparer { get; }
+    IDisposable AddObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler);
+    void RemoveObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler);
+}
+
+public interface IObservableDictionary<TKey, TValue>
+    : IReadOnlyObservableDictionary<TKey, TValue>, IDictionary<TKey, TValue>
+{
+    new int Count { get; }                      // redeclared: the two inherited shapes collide
+    new TValue this[TKey key] { get; set; }     // get-only on one side, settable on the other
+    new ICollection<TKey> Keys { get; }         // and spelled with two different types
+    new ICollection<TValue> Values { get; }
+    new bool ContainsKey(TKey key);
+    new bool TryGetValue(TKey key, out TValue value);
+    int ChangeBatchDepth { get; }
+    int MaxCollectionBatchSize { get; set; }
+    void BeginChangeBatch();
+    void EndChangeBatch();
+    bool TryAdd(TKey key, TValue value);
+}
+
 public static partial class Observable
 {
     public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>() where TKey : notnull;
     public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>(IEqualityComparer<TKey>? comparer) where TKey : notnull;
     public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>(IEnumerable<KeyValuePair<TKey, TValue>> items) where TKey : notnull;
-    public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>(IEnumerable<KeyValuePair<TKey, TValue>> items, IEqualityComparer<TKey>? comparer) where TKey : notnull;
+    public static IObservableDictionary<TKey, TValue> CreateDictionary<TKey, TValue>(IEqualityComparer<TKey>? comparer, IEnumerable<KeyValuePair<TKey, TValue>> items) where TKey : notnull;
 }
 ```
 
-`TKey : notnull` is `IDictionary<TKey, TValue>`'s own constraint, so the factories carry it.
+`TKey : notnull` is `IDictionary<TKey, TValue>`'s own constraint, so the factories carry it. The comparer
+comes first in the four-argument overload, as it does in `CreateList` and `CreateHashSet` - corrected
+after review, where this section had it second.
+
+**Six redeclarations**, for the reason the list needed two and the set eight: a dictionary's two shapes
+overlap the most. `Count`, `ContainsKey` and `TryGetValue` are the same member declared twice; the indexer
+is get-only in one and settable in the other; and `Keys`/`Values` are `IEnumerable<T>` in the read-only
+interface and `ICollection<T>` in the writable one. The implementation answers the narrower spelling
+explicitly, because an interface implementation has to match the member's type exactly.
 
 ### 7.4 What each mutation raises
 
@@ -955,6 +987,7 @@ Which record marks what:
 | `ItemRemoved` with `k` | yes | yes | `k` |
 | `ItemChanged` with `k` | no | yes | `k` |
 | `DictionaryCleared` | yes | yes | every watched key |
+| `UntrackedChanges` | yes | yes | every watched key |
 
 ### 7.5 What is left for a later pass
 
@@ -1093,5 +1126,5 @@ by the producer.
 | 7 | Done | An **Observable list** page in the sample (`ObservableListPage`) - a line that reads only `Count`, a rows component, one child component per row reading a single index, and a copy built only from the records that says whether it still matches - plus an `### Observable collections` section in the developer guide. Rendering it headlessly (`--render ... --page observable-list`) is what caught the two things a first frame shows and a test does not: a child component with no `DataModel` renders the empty fragment, and a slot whose child the list removed keeps a disposed instance unless the parent prunes it |
 | 8 | Done | The shared core, after the list was behaving: `ObservableChangeBatch<TChange, TArgs>` (the pending records, the batch depth, the capped event, the drain loop and the disposal), `ObservableShapeDependencies` (count and contents) and `ObservableKeyedDependencies<TKey>` (an entry per address, with the re-registration and adoption from step 4), behind the internal `IObservableChangeTarget<TChange, TArgs>`. The list was rewritten onto them and its 129 tests passed unchanged, which is the evidence the core is the core rather than the list plus two copies; what is left in the list is its items, its comparer, and which record invalidates which answer |
 | 9-10 | Done | `ObservableSetChangeType` (with `UntrackedChanges`), `ObservableSetChange<T>`, `ObservableSetChangedEventArgs<T>`, the two interfaces with their eight redeclarations, `ObservableSetDependencies<T>`, `ObservableHashSet<T>` and the four `CreateHashSet` overloads. 35 tests in three files cover section 10's claims for the set: one record per item with the bulk operations implicitly batched, removals before additions in a symmetric difference, the cap, disposal, and `Contains` as its own per-item dependency keyed by the set's comparer |
-| 11-12 | Not started | The dictionary |
-| 13-14 | Partly | The set's guide passage is written; the pages for the set and the dictionary, and the dictionary's suite, are not |
+| 11-12 | Done | `ObservableDictionaryChangeType` (with `UntrackedChanges`), `ObservableDictionaryChange<TKey, TValue>` with the old and new value, `ObservableDictionaryChangedEventArgs<TKey, TValue>`, the two interfaces with their six redeclarations and `TryAdd`, `ObservableDictionaryDependencies<TKey, TValue>`, `ObservableDictionary<TKey, TValue>` and the four `CreateDictionary` overloads. 34 tests cover section 10's claims: the record table row for row - `TryAdd`, the conditional pair removal and the indexer's add-or-change included - a replay, the cap, disposal, and the three reads, where an `ItemChanged` wakes the key and the contents and leaves the structure alone |
+| 13-14 | Partly | The guide passages for the set and the dictionary are written; the pages for both are not, and the third suite is the dictionary's own |
