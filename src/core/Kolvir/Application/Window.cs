@@ -42,6 +42,10 @@ public sealed partial class Window : IDisposable
     private bool _isShown;
     private bool _shownRaised;
     private bool _isClosed;
+    private bool _closeDeferred;
+    private bool _tornDown;
+    private SKSize? _pendingClientSize;
+    private bool _clientSizeDeferred;
 
     /// <summary>Creates an untitled window with no content.</summary>
     /// <exception cref="InvalidOperationException">No <see cref="Application"/> exists yet.</exception>
@@ -199,14 +203,58 @@ public sealed partial class Window : IDisposable
     /// the backend last reported. Setting it marks the size as explicit, which stops the window
     /// from sizing itself to <see cref="Content"/>.
     /// </summary>
+    /// <remarks>
+    /// A size assigned while a host is painting is applied on the next loop turn. Resizing is also a
+    /// surface reallocation, and a backend that reallocates during the paint frees the surface its
+    /// paint path is still using - the same hazard a close has. The window keeps its current size for
+    /// the frame being drawn and takes the new one immediately after it.
+    /// </remarks>
     public SKSize ClientSize
     {
-        get => Backend.ClientSize;
+        get => _pendingClientSize ?? Backend.ClientSize;
         set
         {
             _clientSizeSet = true;
+
+            if (UiHost.IsPainting)
+            {
+                _pendingClientSize = value;
+
+                if (!_clientSizeDeferred)
+                {
+                    _clientSizeDeferred = true;
+                    _application.BeginInvoke(ApplyDeferredClientSize);
+                }
+
+                return;
+            }
+
+            _pendingClientSize = null;
             Backend.ClientSize = value;
         }
+    }
+
+    private void ApplyDeferredClientSize()
+    {
+        _clientSizeDeferred = false;
+
+        if (_pendingClientSize is not { } size || _isClosed)
+        {
+            _pendingClientSize = null;
+            return;
+        }
+
+        // The loop turn can arrive inside the paint that deferred it, so it waits for a turn that
+        // is not: the size is a surface reallocation, not bookkeeping.
+        if (UiHost.IsPainting)
+        {
+            _clientSizeDeferred = true;
+            _application.BeginInvoke(ApplyDeferredClientSize);
+            return;
+        }
+
+        _pendingClientSize = null;
+        Backend.ClientSize = size;
     }
 
     /// <summary>Smallest client area the user may drag the window to, in logical pixels.</summary>
@@ -594,18 +642,55 @@ public sealed partial class Window : IDisposable
     /// added by
     /// <see cref="AddClosedHandler"/> run.
     /// </summary>
+    /// <remarks>
+    /// The window becomes closed at once, but a close asked for from a frame-starting handler
+    /// finishes its native teardown on the next loop turn: the host is inside
+    /// <see cref="UiHost.Paint"/> and the backend is still holding the surface it handed there.
+    /// </remarks>
     public void Close() => RequestClose();
 
     /// <summary>Closes the window and releases its service scope. Idempotent.</summary>
+    /// <remarks>
+    /// A close asked for while a host is painting cannot finish there: the backend's paint path is
+    /// still holding the surface it handed to <see cref="UiHost.Paint"/>, and disposing the backend
+    /// frees that surface underneath it. The window becomes closed immediately - no further frames
+    /// are wanted for it - and the native teardown runs on the next loop turn, outside every paint.
+    /// </remarks>
     public void Dispose()
     {
         if (_isClosed)
         {
+            // The pending turn is the normal path; a caller that disposes again from outside a
+            // paint is asking for the teardown now, and the queued turn then finds it already done.
+            if (_closeDeferred && !UiHost.IsPainting)
+            {
+                _closeDeferred = false;
+                TearDown();
+            }
+
             return;
         }
 
         _isClosed = true;
         _isShown = false;
+
+        if (UiHost.IsPainting)
+        {
+            QueueTeardown();
+            return;
+        }
+
+        TearDown();
+    }
+
+    private void TearDown()
+    {
+        if (_tornDown)
+        {
+            return;
+        }
+
+        _tornDown = true;
 
         // Owned windows go with their owner, the way a Windows owner destroys its owned windows.
         // No platform does this for us - AppKit only orders children out, and an HWND owner keeps
@@ -637,6 +722,33 @@ public sealed partial class Window : IDisposable
         // the last point at which a hook can reach other scoped services.
         RaisePhase(WindowPhase.Disposed);
         _scope.Dispose();
+    }
+
+    private void QueueTeardown()
+    {
+        if (_closeDeferred)
+        {
+            return;
+        }
+
+        _closeDeferred = true;
+        _application.BeginInvoke(RunDeferredTeardown);
+    }
+
+    private void RunDeferredTeardown()
+    {
+        _closeDeferred = false;
+
+        // The loop turn can itself be inside a paint if a backend pumps messages from one. The
+        // invariant is that teardown never runs between Paint starting and returning, so a turn
+        // that arrives too early asks for another one rather than breaking it.
+        if (UiHost.IsPainting)
+        {
+            QueueTeardown();
+            return;
+        }
+
+        TearDown();
     }
 
     /// <summary>Called by <see cref="Application.Run()"/> for a window shown before the loop started.</summary>
