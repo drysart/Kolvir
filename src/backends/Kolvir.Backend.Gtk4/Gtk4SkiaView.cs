@@ -305,14 +305,16 @@ public sealed class Gtk4SkiaView : IDisposable
     {
         ArgumentNullException.ThrowIfNull(handler);
 
+        // Answering now is not instead of listening: a view that has already decided still reports
+        // every change after it, and a caller that attaches late - which a window starting on the CPU
+        // path does, because that decision is made on its first frame - would otherwise hear the first
+        // answer and nothing that comes after it.
         if (_gfxDecided)
         {
             handler(this);
         }
-        else
-        {
-            _graphicsPathChanged += handler;
-        }
+
+        _graphicsPathChanged += handler;
 
         return new HandlerToken<Action<object>>(RemoveGraphicsPathChangedHandler, handler);
     }
