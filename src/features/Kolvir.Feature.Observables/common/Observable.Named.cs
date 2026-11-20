@@ -1,4 +1,4 @@
-﻿namespace Kolvir.Observables;
+namespace Kolvir.Observables;
 
 /// <summary>
 /// The named dependencies: one key, a handle that names it, and a way to raise a key nobody has a handle

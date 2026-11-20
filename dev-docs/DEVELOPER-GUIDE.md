@@ -5078,6 +5078,235 @@ placeholder, a "not loaded" line - which is a decision about that component rath
 The sample's **Observables** page is this in miniature: a card that renders an observable model, four
 ordinary buttons above it that change that model, and a render count on the card that moves once per
 frame no matter how many values a click changed.
+### Observable collections
+
+`IObservableList<T>` is the collection half of the same idea: an `IList<T>` that reports every change as
+a record an observer can replay, and that publishes a dependency per kind of read rather than one per
+list. Reading `Count`, reading `list[3]` and enumerating are three different questions, so a change
+wakes only the readers whose answer it changed. The design, the alternatives it rejects and the plan
+for the set and the dictionary are in [`OBSERVABLE-COLLECTIONS.md`](OBSERVABLE-COLLECTIONS.md).
+
+#### A list in a model
+
+`CreateList` hands back the only writable view, on the same principle as `CreateValue`: the owner keeps
+it, everything else sees the read-only interface.
+
+```csharp
+internal sealed class TaskList
+{
+    private readonly IObservableList<string> _tasks = Observable.CreateList<string>();
+
+    public IReadOnlyObservableList<string> Tasks => _tasks;   // read and watch, but not write
+
+    public void Add(string task) => _tasks.Add(task);
+    public void Rename(int index, string text) => _tasks[index] = text;
+}
+```
+
+Five records, and which members each one fills in:
+
+| Record | Carries | Raised by |
+| --- | --- | --- |
+| `ItemAdded` | `NewIndex`, `NewItem` | `Add`, `Insert` |
+| `ItemRemoved` | `OldIndex`, `OldItem` | `RemoveAt`, `Remove` |
+| `ItemMoved` | both indexes, and the item on both sides | `Move` |
+| `ItemChanged` | the index, the old item and the new one | `this[i] = value` |
+| `ListCleared` | nothing | `Clear` of a non-empty list |
+
+Three rules, and they are the whole of a change:
+
+- **A move is a move.** One record with both indexes, not a removal and an addition, because an observer
+  that gets a move can shift a row instead of rebuilding it. `Move` follows
+  `ObservableCollection<T>`: moving 0 to 2 in `[a, b, c]` gives `[b, c, a]`.
+- **A call that changed nothing raises nothing.** Writing an equal item over itself, clearing an empty
+  list, removing an item that is not there and moving an item to where it already is all leave the
+  handlers alone, and an index out of range throws without recording anything - a failed mutation is
+  not a change anybody could replay.
+- **A clear is one record.** The list is empty and the record says so; the observer that cared about the
+  contents already had them. That is what keeps undo a different object, with its own copy.
+
+#### Replaying the records
+
+The contract is one sentence: apply the records in the order given, each against the state the one
+before it left, and the copy equals the list. An observer therefore needs no knowledge of the list
+beyond the record type:
+
+```csharp
+private void OnChanged(ObservableListChangedEventArgs<string> args)
+{
+    foreach (var change in args.Changes)
+    {
+        switch (change.ChangeType)
+        {
+            case ObservableListChangeType.ItemAdded:
+                _copy.Insert(change.NewIndex!.Value, change.NewItem!);
+                break;
+            case ObservableListChangeType.ItemRemoved:
+                _copy.RemoveAt(change.OldIndex!.Value);
+                break;
+            case ObservableListChangeType.ItemMoved:
+                _copy.RemoveAt(change.OldIndex!.Value);
+                _copy.Insert(change.NewIndex!.Value, change.NewItem!);
+                break;
+            case ObservableListChangeType.ItemChanged:
+                _copy[change.NewIndex!.Value] = change.NewItem!;
+                break;
+            case ObservableListChangeType.ListCleared:
+                _copy.Clear();
+                break;
+            default:
+                // UntrackedChanges: the batch was too big to describe, so rebuild from the list.
+                _copy.Clear();
+                _copy.AddRange(list);
+                break;
+        }
+    }
+}
+```
+
+An index shift is implied rather than reported: an insert at 0 does not also report the items behind it,
+because the observer is applying records rather than patching items by address. Two consequences worth
+knowing: the records of one event must be applied in order (the library delivers them in that order and
+never out of it, even when a handler changes the list itself), and a value type's absent item reads as
+`default` rather than a nullable, so a handler switches on `ChangeType` rather than testing the item.
+
+#### Batches
+
+`BeginChangeBatch` and `EndChangeBatch` suppress notifications, not changes: everything between them is
+recorded in order and delivered as one event. Nested batches deliver once, at the outermost end, and a
+batch that collected nothing delivers nothing. A library that mutates on someone else's behalf can read
+`ChangeBatchDepth` to see whether a batch is already open.
+
+An event carries at most fifty records by default. A batch that would carry more drops the records it
+collected and delivers a single `UntrackedChanges` record, and queues nothing after it - a bulk load of
+ten thousand items costs one record and one rescan rather than ten thousand records nobody will replay.
+`UntrackedChanges` is the one record that cannot be applied to a copy: an observer that sees it rebuilds
+the copy from the list. Everything smaller replays exactly, which is the trade in one sentence.
+
+That fifty is `Observable.Default.MaxCollectionBatchSize`, so it is where a collection created
+afterwards starts - and the collection copies it when it is created rather than reading it, because the
+cap decides what that collection's observers have to be prepared for. Set
+`IObservableList<T>.MaxCollectionBatchSize` on the list whose observers can afford to replay more (or
+must be held to less); it is that list's alone, and a value below one is refused.
+
+Delivery is never nested, which is why a handler may change the list it is hearing about: the new
+records are queued and delivered after the event being delivered, so every observer sees the same
+history in the same order. So a chain of changes to the same list is flat and nothing bounds it: a
+batch of a thousand records is still one delivery, and a terminating cascade simply runs to its end.
+A *delivery* can still be re-entered, though - a handler that disposes a list raises that list's final
+event in its own frame, and one that changes a different list starts that list's drain there - so each
+dispatch counts as one step against `Observable.MaxEventStackSize`, like a raise, and a chain of them
+is refused at the limit. A handler that never stops changing the same list is an ordinary infinite
+loop in application code, and `MaxEventStackSize` is not a work budget: it counts nesting.
+
+#### What a read depends on
+
+| Read | Woken by |
+| --- | --- |
+| `Count` | an add, a removal or a clear - never an item write, never a move |
+| `this[i]` | the item that index would return changing: a write there, an add or removal at any index at or past it, a move that spans it, a clear |
+| enumeration, `Contains`, `IndexOf`, `CopyTo` | any change at all, because they read every item |
+
+An index read publishes before the range check, so a read that throws is still a read: an expression
+`list[7]` over three items is re-run when the list grows to eight. An index that several runs watch is
+one entry, created on the first read inside a run and dropped when its last handler goes, so the table
+holds the rows on screen rather than every index ever read. A source that is kept and watched again
+puts its entry back, so registering on one you held onto is ordinary rather than a mistake.
+
+#### The sample page
+
+The sample's **Observable list** page is the layer in miniature. Three components read the same list
+differently: one line reads `Count`, one component renders the rows, and each row is its own child
+component reading a single index. Press **Rename row 1** and only that row's render count moves - the
+count line and the other rows keep theirs. Press **Move first to last** and the rows the move crossed
+re-render while the size stays what it was. Press **Add five in a batch** and the record line reads one
+event with five records. That line is also the fidelity check: the copy under it is built from the
+records alone and is compared with the list on every event.
+
+#### A set in a model
+
+`Observable.CreateHashSet<T>()` is the same contract for a collection whose question is "is this item in
+it". There is no index and no order, so a change can only add an item or take one away - and the address
+a read depends on is the item itself:
+
+```csharp
+internal sealed class TagFilter
+{
+    private readonly IObservableSet<string> _tags =
+        Observable.CreateHashSet(StringComparer.OrdinalIgnoreCase);
+
+    // Read-only and observable outside, writable only here. The comparer is the set's identity, so a
+    // consumer is handed it too: a mirror built with a different one would disagree about what is in.
+    public IReadOnlyObservableSet<string> Tags => _tags;
+
+    public void Toggle(string tag) => _tags.SymmetricExceptWith([tag]);
+}
+```
+
+A rendered toggle asks `Tags.Contains(tag)` about its own tag, and that is a dependency of its own:
+adding one tag wakes that tag's toggle and leaves the others alone, while the line reading `Count` moves
+once for the whole change. The four bulk operations are the interesting part, because they change a
+number of items nobody knows in advance - each reports one record per item inside an implicit batch, so
+an observer gets one event:
+
+| Call | What it raises |
+| --- | --- |
+| `Add` / `Remove` | one record, carrying the item |
+| `UnionWith` / `ExceptWith` / `IntersectWith` | one record per item that actually arrived or left |
+| `SymmetricExceptWith` | the removals, then the additions |
+| `Clear` | one record, carrying nothing |
+
+A call that changes nothing raises nothing at all: adding an item the comparer says is already there,
+removing one that is not, `UnionWith` of a subset, `IntersectWith` of a superset. And a bulk operation
+larger than `MaxCollectionBatchSize` is capped like any other batch - a union of ten thousand items is
+one `UntrackedChanges` record and one rescan.
+
+Two consequences worth knowing before you use it. **The item type is `notnull`**: the entry a toggle
+depends on is keyed by the item, so a set cannot hold null - the one place this set is stricter than
+`HashSet<T>`. And because `IReadOnlySet<T>` and `ISet<T>` declare the same eight members, the writable
+interface redeclares all of them (`Count`, `Contains` and the six set-algebra questions), so calling them
+through it is not ambiguous.
+
+#### A dictionary in a model
+
+`Observable.CreateDictionary<TKey, TValue>()` is the keyed collection: identity is the key, the payload
+is the value, and there is no index. Its read is three questions rather than two, because a dictionary
+has a structure as well as contents:
+
+| Read | Depends on | Woken by |
+| --- | --- | --- |
+| `Count`, `Keys` | the structure | a key added, a key removed, a clear |
+| `this[k]`, `TryGetValue(k)`, `ContainsKey(k)` | that key | the key arriving, leaving, or its value changing |
+| `Values`, enumeration, `Contains(pair)`, `CopyTo` | the contents | any change at all |
+
+```csharp
+internal sealed class Settings
+{
+    private readonly IObservableDictionary<string, string> _values =
+        Observable.CreateDictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+    public IReadOnlyObservableDictionary<string, string> Values => _values;
+
+    // Add-or-replace, in one call that says which it did by raising ItemAdded or ItemChanged.
+    public void Set(string name, string value) => _values[name] = value;
+}
+```
+
+A row renders `Values.TryGetValue(row.Key, out var value)` and is woken by exactly its own key: a change
+to another row leaves it alone, and a value written beside a key that stayed wakes that row and the
+`Values` reader and *not* `Count`. A key that is not there is worth remembering through `TryGetValue` and
+`ContainsKey`, which publish before they answer - so an expression reading a key that has not arrived yet
+is re-run when it does. The indexer is the exception: reading an absent key throws and publishes nothing,
+because a key that is gone is not an address to depend on.
+
+The records are `ItemAdded` (key and value), `ItemRemoved` (key and the value it had), `ItemChanged` (key
+and both values, raised only when the new value differs) and `DictionaryCleared` (nothing). `TryAdd` is on
+the writable interface because `IDictionary<,>` has no add-if-absent: `Add` throws on a present key and
+the indexer replaces. `Remove(KeyValuePair)` is conditional, as its interface says - a key whose value
+differs from the pair's is left alone and nothing is raised.
+
+`ContainsKey` is over-raised on purpose: presence and value are one entry to everyone who holds it, so a
+value change wakes a `ContainsKey` reader too. That costs a re-run, never a wrong answer.
 
 ## Hardware acceleration (Windows)
 

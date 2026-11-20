@@ -1,4 +1,4 @@
-﻿using System.Diagnostics;
+using System.Diagnostics;
 using System.Globalization;
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
@@ -578,6 +578,9 @@ public sealed class DemoUi
         ("audio", "Audio", demo => new AudioPage(demo)),
         ("virtual-dom", "Virtual DOM", demo => new VirtualDomPage(demo)),
         ("observables", "Observables", demo => new ObservablesPage(demo)),
+        ("observable-list", "Observable list", demo => new ObservableListPage(demo)),
+("observable-set", "Observable set", demo => new ObservableSetPage(demo)),
+("observable-dictionary", "Observable dictionary", demo => new ObservableDictionaryPage(demo)),
     };
 
     /// <summary>

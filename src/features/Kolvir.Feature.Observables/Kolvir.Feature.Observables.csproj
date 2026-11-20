@@ -19,7 +19,7 @@
          same way whether it did or not. There is no reflection here at all - a dependency set is the
          observables a function actually read, which the code learns by being told, not by looking. -->
     <IsAotCompatible>true</IsAotCompatible>
-    <Description>Change notification for Kolvir data models: values, expressions and named dependencies that a component can watch, with no reference to Kolvir itself.</Description>
+    <Description>Change notification for Kolvir data models: values, expressions, named dependencies and observable collections (lists, sets and dictionaries) whose changes are reported as replayable records, with no reference to Kolvir itself.</Description>
   </PropertyGroup>
 
   <!-- Deliberately no reference to Kolvir. This package is a data-model library over the BCL, which is
