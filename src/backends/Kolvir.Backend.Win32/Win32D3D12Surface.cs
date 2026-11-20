@@ -371,11 +371,27 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return null;
         }
 
+        // Skia hands a Direct3D context a 256 MiB resource cache by default, and that cache is where
+        // the frame's upload buffers and the wrappers for the back buffers live, so it decides how
+        // much dedicated memory the tier costs. A window composites one image a frame: three
+        // full-size surfaces, with a 64 MiB floor for the smaller ones, is what it needs.
+        long surfaceBytes = (long)width * height * 4;
+        surface._skia.SetResourceCacheLimit(Math.Max(64L * 1024 * 1024, surfaceBytes * 3));
+
         if (!surface.CreateRetained())
         {
             failure = "d3d12: no retained surface";
             surface.Dispose();
             return null;
+        }
+
+        if (Win32GlTrace.IsEnabled)
+        {
+            // What the context is holding, and what it is allowed to hold: a Direct3D backend keeps
+            // upload buffers and the wrappers it made for the back buffers, so this is the number to
+            // read when a window's dedicated memory looks larger than its surfaces explain.
+            surface._skia.GetResourceCacheUsage(out int resources, out long cached);
+            Win32GlTrace.Write($"kolvir-d3d12: skia cache {resources} resources, {cached / (1024 * 1024)} MiB of {surface._skia.GetResourceCacheLimit() / (1024 * 1024)} MiB");
         }
 
         failure = string.Empty;

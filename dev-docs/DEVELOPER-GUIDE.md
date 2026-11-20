@@ -5516,6 +5516,19 @@ Presenting has two of its own, and both showed up as a window that opened, drew 
 machine with no GPU, which is how the present path is covered in the tests, and it is a poor default:
 WARP answers every call and then rasterizes on the CPU.
 
+Memory is the one number that surprises people on this tier, so it is worth writing down. A window
+1280x820 at scale 2 is 2560x1640, which is 16.0 MiB per full-size BGRA8 surface: the two swap chain
+buffers and the retained surface the backend draws into are 48 MiB and are not optional. Everything
+above that is Skia's resource cache, which a Direct3D context is given 256 MiB of by default - it is
+where the frame's upload buffers and the wrappers made for the back buffers live, and left alone it
+fills to a large fraction of that ceiling. The tier sets the limit to three full-size surfaces, with
+a 64 MiB floor, which is what a window that composites one image a frame actually needs. With
+`KOLVIR_GL_TRACE=1` the startup line reports what the cache holds and what it may hold:
+
+```
+kolvir-d3d12: skia cache 0 resources, 0 MiB of 64 MiB
+```
+
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
 dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
