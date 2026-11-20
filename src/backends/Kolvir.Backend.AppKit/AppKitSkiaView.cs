@@ -56,11 +56,12 @@ internal sealed class AppKitSkiaView : NSView
     private static readonly string[] DragTypes = [FileUrlType, PlainTextType];
 
     private readonly UiHost _host;
-    private readonly bool _useHardwareAcceleration;
+    private bool _useHardwareAcceleration;
 
     private NSTrackingArea? _trackingArea;
     private bool _tracksPointerInBackgroundWindow;
     private AppKitMetalSurface? _metal;
+    private string? _deviceKey;
     private string _gfxReason = "cpu (not created)";
     private bool _metalUnavailable;
     private SKBitmap? _bitmap;
@@ -95,12 +96,18 @@ internal sealed class AppKitSkiaView : NSView
     /// True to try the Metal tiers before the CPU <c>CGImage</c> path. Popup windows leave this
     /// false, which is the equivalent of the Win32 backend keeping its popups on the DIB.
     /// </param>
-    public AppKitSkiaView(UiHost host, bool hardwareAcceleration = false)
+    /// <param name="deviceKey">
+    /// The identity of the Metal device to draw on, or null for whichever the system picks. A key that
+    /// names no device here leaves the view on the CPU path rather than quietly drawing on the default:
+    /// the application asked for a particular GPU.
+    /// </param>
+    public AppKitSkiaView(UiHost host, bool hardwareAcceleration = false, string? deviceKey = null)
     {
         ArgumentNullException.ThrowIfNull(host);
 
         _host = host;
         _useHardwareAcceleration = hardwareAcceleration;
+        _deviceKey = deviceKey;
 
         if (!hardwareAcceleration)
         {
@@ -191,6 +198,65 @@ internal sealed class AppKitSkiaView : NSView
 
     /// <summary>The Metal device name when <see cref="GraphicsPath"/> is <c>metal</c>, else null.</summary>
     internal string? GraphicsRenderer => _metal?.Renderer;
+
+    /// <summary>
+    /// The identity of the Metal device this view draws on, or null when it is on the CPU path.
+    /// </summary>
+    internal string? MetalDeviceKey => _metal?.DeviceKey;
+
+    /// <summary>
+    /// Makes this view draw with <paramref name="option"/> from now on, rebuilding only what the
+    /// presentation is made of.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened. Never null.</param>
+    /// <returns>True when the view is drawing with <paramref name="option"/> afterwards.</returns>
+    /// <remarks>
+    /// Unlike Windows there is nothing to take back from a swap chain: the Metal surface is a sublayer of
+    /// this view's backing layer, so a switch releases one layer and builds another underneath the same
+    /// window. The window, the controls and their state are untouched, so a switch here costs a frame
+    /// rather than a window - and the window is never shown again, which is what makes it invisible.
+    /// </remarks>
+    internal bool TrySwitchAcceleration(GpuAccelerationOption option, out string reason)
+    {
+        ArgumentNullException.ThrowIfNull(option);
+
+        if (option.Kind == GpuAccelerationKind.Cpu)
+        {
+            DropMetal("cpu (chosen)");
+
+            // Told apart from a failure: this is the answer the user picked, not one to recover from, so
+            // the frame path is switched off rather than left free to bring Metal back.
+            _useHardwareAcceleration = false;
+            _deviceKey = null;
+            reason = "Now drawing on the CPU path.";
+            return true;
+        }
+
+        if (option.Kind != GpuAccelerationKind.Metal)
+        {
+            reason = $"{option.Name} cannot draw this window on macOS.";
+            return false;
+        }
+
+        ReleaseMetal();
+        _useHardwareAcceleration = true;
+        _metalUnavailable = false;
+        _deviceKey = option.Device?.Key;
+
+        TryCreateMetal(Bounds, BackingScaleOf());
+
+        if (_metal is null)
+        {
+            // The window stays on the CPU path: reporting success would leave a settings list naming a
+            // card that is drawing nothing.
+            reason = $"Fell back to the CPU path: {_gfxReason}.";
+            return false;
+        }
+
+        reason = $"Now drawing with Metal: {_metal.Renderer}.";
+        return true;
+    }
 
     /// <summary>
     /// Builds the Metal stack once the view has its window and backing scale, so the presentation
@@ -373,7 +439,7 @@ internal sealed class AppKitSkiaView : NSView
         var height = Math.Max((int)Math.Round(bounds.Height) * scale, 1);
         var frame = new CGRect(0, 0, bounds.Width, bounds.Height);
 
-        var metal = AppKitMetalSurface.TryCreate(hostLayer, frame, width, height, scale, out var reason);
+        var metal = AppKitMetalSurface.TryCreate(hostLayer, frame, width, height, scale, _deviceKey, out var reason);
 
         _gfxReason = reason;
 
@@ -497,13 +563,22 @@ internal sealed class AppKitSkiaView : NSView
     /// </summary>
     private void DropMetal(string reason)
     {
-        _metal?.Dispose();
-        _metal = null;
+        ReleaseMetal();
         _metalUnavailable = true;
         _gfxReason = reason;
+        Trace($"gfx: {reason}");
+    }
+
+    /// <summary>
+    /// Gives up the Metal surface and asks for a frame, without deciding anything about why - a switch
+    /// to another tier wants to build again straight away, and a failure wants to stay on the CPU path.
+    /// </summary>
+    private void ReleaseMetal()
+    {
+        _metal?.Dispose();
+        _metal = null;
         _bufferGeneration++;
         NeedsDisplay = true;
-        Trace($"gfx: {reason}");
     }
 
     /// <summary>

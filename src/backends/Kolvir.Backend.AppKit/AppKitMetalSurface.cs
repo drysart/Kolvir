@@ -110,6 +110,121 @@ internal sealed class AppKitMetalSurface : IDisposable
     /// <summary>The Metal device's name, for the demo's one-line diagnostic.</summary>
     internal string Renderer => _device.Name ?? "metal";
 
+    /// <summary>
+    /// The identity of the device this surface draws on, in the form a value carries: the registry id as
+    /// hex, which is the one identity Metal reports for a device.
+    /// </summary>
+    internal string DeviceKey => KeyOf(_device);
+
+    /// <summary>
+    /// Every Metal device this machine can draw on, with the identity a value carries for it. The
+    /// system default comes first, which is the one a window uses when nothing picks.
+    /// </summary>
+    /// <remarks>
+    /// A Mac with one GPU - every Apple silicon machine - answers with one device, so the second
+    /// level of the acceleration list is a single row. An Intel Mac with a discrete GPU answers with
+    /// both, which is the case the hierarchy exists for. The identity is the device's registry id in
+    /// hex: it names the same card after a reboot, and unlike an index it does not move when the list
+    /// is reordered - see <see cref="GpuAccelerationSyntax"/> for why that matters.
+    /// </remarks>
+    internal static IReadOnlyList<GpuAccelerationDevice> EnumerateDevices()
+    {
+        List<GpuAccelerationDevice> devices = [];
+        HashSet<string> seen = [];
+
+        foreach (var device in Devices())
+        {
+            try
+            {
+                var key = KeyOf(device);
+
+                if (seen.Add(key))
+                {
+                    devices.Add(new GpuAccelerationDevice(key, device.Name ?? "Metal"));
+                }
+            }
+            catch (Exception exception)
+            {
+                // A device that cannot even be asked its name cannot be described to the user, so it
+                // is not offered at all rather than offered as a blank row.
+                AppKitMetalTrace.Write($"device skipped: {exception.GetType().Name}");
+            }
+        }
+
+        return devices;
+    }
+
+    /// <summary>
+    /// The devices this machine reports, the system default first and duplicates removed by identity.
+    /// </summary>
+    private static List<IMTLDevice> Devices()
+    {
+        List<IMTLDevice> devices = [];
+        HashSet<string> seen = [];
+
+        try
+        {
+            if (MTLDevice.SystemDefault is { } systemDefault)
+            {
+                devices.Add(systemDefault);
+                seen.Add(KeyOf(systemDefault));
+            }
+        }
+        catch (Exception exception)
+        {
+            AppKitMetalTrace.Write($"system device threw {exception.GetType().Name}");
+        }
+
+        try
+        {
+            // The low-power and high-power halves of an Intel Mac are two entries here; on Apple
+            // silicon this is the same device the system already named.
+            foreach (var device in MTLDevice.GetAllDevices())
+            {
+                if (device is null || !seen.Add(KeyOf(device)))
+                {
+                    continue;
+                }
+
+                devices.Add(device);
+            }
+        }
+        catch (Exception exception)
+        {
+            AppKitMetalTrace.Write($"device list threw {exception.GetType().Name}");
+        }
+
+        return devices;
+    }
+
+    /// <summary>
+    /// The identity a value carries for <paramref name="device"/>: its registry id as hex.
+    /// </summary>
+    /// <remarks>
+    /// A device that reports no registry id - a virtualised GPU can - would give every such device the
+    /// same key, so the name is folded in instead. Two physically identical cards behind that fallback
+    /// share a key, which is documented rather than hidden: it is still a stable way to name one.
+    /// </remarks>
+    private static string KeyOf(IMTLDevice device)
+    {
+        var registry = device.RegistryId;
+
+        if (registry != 0)
+        {
+            return registry.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
+        }
+
+        // FNV-1a over the name, which is the only other thing a device reports that is stable.
+        var hash = 14695981039346656037UL;
+
+        foreach (var character in device.Name ?? string.Empty)
+        {
+            hash = (hash ^ character) * 1099511628211UL;
+        }
+
+        return hash.ToString("x16", System.Globalization.CultureInfo.InvariantCulture);
+    }
+
     /// <summary>The retained offscreen surface, or null when the direct tier is live.</summary>
     internal SKSurface? Surface => _offscreen;
 
@@ -144,6 +259,32 @@ internal sealed class AppKitMetalSurface : IDisposable
         int width,
         int height,
         int scale,
+        out string reason) =>
+        TryCreate(hostLayer, frame, width, height, scale, deviceKey: null, out reason);
+
+    /// <summary>
+    /// Builds the stack on one named device, which is what a window that was told which GPU to use
+    /// asks for.
+    /// </summary>
+    /// <param name="hostLayer">The view's backing layer, which receives the Metal sublayer.</param>
+    /// <param name="frame">The view's bounds in logical points, which sizes the sublayer.</param>
+    /// <param name="width">The drawable width in physical pixels.</param>
+    /// <param name="height">The drawable height in physical pixels.</param>
+    /// <param name="scale">The backing scale, so the sublayer covers the same logical area.</param>
+    /// <param name="deviceKey">
+    /// The identity of the device to draw on, or null for the system default. A key that names no
+    /// device on this machine fails rather than quietly using the default: the caller asked for a
+    /// particular GPU, and drawing on a different one while reporting success is the answer a settings
+    /// list must never be given.
+    /// </param>
+    /// <param name="reason">A one-line diagnostic naming the path taken or the failing step.</param>
+    internal static AppKitMetalSurface? TryCreate(
+        CALayer? hostLayer,
+        CGRect frame,
+        int width,
+        int height,
+        int scale,
+        string? deviceKey,
         out string reason)
     {
         if (hostLayer is null)
@@ -156,7 +297,9 @@ internal sealed class AppKitMetalSurface : IDisposable
 
         try
         {
-            device = MTLDevice.SystemDefault;
+            device = deviceKey is null
+                ? MTLDevice.SystemDefault
+                : Devices().Find(candidate => KeyOf(candidate) == deviceKey);
         }
         catch (Exception exception)
         {
@@ -166,11 +309,14 @@ internal sealed class AppKitMetalSurface : IDisposable
 
         if (device is null)
         {
-            reason = "cpu (no metal device)";
+            reason = deviceKey is null
+                ? "cpu (no metal device)"
+                : $"cpu (no metal device {deviceKey})";
+
             return null;
         }
 
-        AppKitMetalTrace.Write($"device: {device.Name ?? "unknown"}");
+        AppKitMetalTrace.Write($"device: {device.Name ?? "unknown"} ({KeyOf(device)})");
 
         IMTLCommandQueue? queue;
 

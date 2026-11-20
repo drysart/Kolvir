@@ -5747,7 +5747,7 @@ context - the switch reports `Fell back to the CPU path: ...` and returns `false
 it would have the window quietly drawing on the CPU while the picker claims OpenGL. Accelerated
 rows that a multi-GPU machine lists but cannot present to the window's display are the same story.
 
-Two more rules worth knowing:
+A few more rules worth knowing:
 
 - **The window is replaced, not reused.** A swap chain keeps the window it presents on: releasing it
   does not give that window its GDI output back - invalidating the window, a frame-changed window
@@ -5755,22 +5755,34 @@ Two more rules worth knowing:
   flip-model chain and none of them restore it - and a WGL context leaves a pixel format on the
   window's DC that can never be unset. An HWND with no history has neither problem, so a switch makes
   a new window: same class, place, size, style and owner, with the popups owned by the old one closed,
-  the native teardowns released, and the drawing buffer and GPU surface rebuilt. The new window is
-  painted while it is still hidden and only then shown, so what comes back on screen is the finished
-    frame. Windows 11 animates a window that appears and a window that goes, and neither is wanted here,
-    so the replacement is created and shown thirty thousand pixels above the screen - where the opening
-    transition is spent with nothing to see it against - and then moved to the place the old window
-    occupies, a move not being animated. It is painted there, raised above the old window, the
-    composition is flushed, and only then is the old window destroyed, so the closing transition happens
-    behind an opaque window. Whether the window was visible, maximised, minimised, active, foreground or
-    holding the mouse capture is put back afterwards, with the replacement made active explicitly
-    because a window that has just been created does not take the focus by itself. Anything a
-  feature registered against the handle hears about it through `WindowPhase.NativeWindowRecreated` -
-  the drop target is the one that exists today - and the handle the backend reports changes, so an
-  application that cached `Window.Handle` has to read it again.
-  What a window cannot do on a child window, which was the first thing tried: Direct3D 12 and Vulkan
-  present through flip-model swap chains, and a flip chain created on a child HWND builds and presents
-  without ever being composited, so the accelerated tiers need a top-level window.
+  the native teardowns released, and the drawing buffer and GPU surface rebuilt. The handle the
+  backend reports changes with it, so an application that cached `Window.Handle` has to read it again.
+  Anything a feature registered against the old handle hears about the swap through
+  `WindowPhase.NativeWindowRecreated` - the drop target is the one that exists today. A press that is
+  in flight ends first, with its release delivered through the normal mouse-up path, so the control
+  under the pointer is not left holding it.
+- **Neither transition is seen.** Windows 11 animates a window that appears and a window that goes,
+  and a switch wants neither. `DWMWA_TRANSITIONS_FORCEDISABLED` is the documented switch for it and it
+  works, provided the setting is in force *before* the show: it is applied to the replacement and left
+  in place until the window is up, and applied to the old window immediately before it is destroyed,
+  then cleared so minimising and restoring keep their animations. The trap is that a window must be
+  created hidden for this to mean anything - `GW_STYLE` reports `WS_VISIBLE` for any window on screen,
+  and `CreateWindowExW` shows a window whose style carries it, so a replacement built from the old
+  window's style is displayed, and animated, inside the call that creates it, and the `ShowWindow`
+  after it is a no-op. `RecreateWindow` therefore masks `WS_VISIBLE` off the copied style and leaves
+  the show to `RestorePresentation`, where the attribute already applies.
+- **A maximised window comes back with the size it had.** `GetWindowRect` reports the maximised
+  rectangle for a maximised window and somewhere off the bottom of the screen for a minimised one, so
+  a replacement created at those coordinates restores to full screen. The old window's
+  `WINDOWPLACEMENT` is read instead and put back on the replacement while it is still hidden:
+  `rcNormalPosition` is exactly the rectangle the window restores to, and `SetWindowPlacement` reads it
+  in the coordinates `GetWindowPlacement` wrote it in, so it goes back unchanged. Whether the window
+  was visible, maximised, minimised, active, foreground or holding the mouse capture is put back after
+  the show, with the replacement made active explicitly because a window that has just been created
+  does not take the focus by itself.
+- **Not on a child window**, which was the first thing tried: Direct3D 12 and Vulkan present through
+  flip-model swap chains, and a flip chain created on a child HWND builds and presents without ever
+  being composited, so the accelerated tiers need a top-level window.
 - **Thread affinity.** A window's GPU surface belongs to the thread that owns it, so `TryApply` must
   be called from that thread - a UI event handler already is. The Win32 backend checks with
   `GetWindowThreadProcessId` and refuses off-thread rather than tearing the surface down from under
@@ -5782,9 +5794,24 @@ Two more rules worth knowing:
 
 A backend that cannot do this refuses by default with "This backend cannot change acceleration while
 it runs." - the base `GpuAccelerationService.ApplyCurrent` only says yes where it has been
-implemented - so a caller can offer the switch unconditionally and let the platform answer. On this
-branch the Win32 backend answers yes; Linux GTK4 needs an unrealize/realize cycle around the
-`EGLSurface` and macOS needs a `CAMetalLayer` replacement, neither of which is done yet.
+implemented - so a caller can offer the switch unconditionally and let the platform answer. The Win32
+and AppKit backends answer yes; Linux GTK4 still refuses, because its `EGLSurface` has to be released
+and rebuilt around realising and unrealising the widget, which is not done yet.
+
+**What a switch costs differs by platform, and so does what is rebuilt.** macOS is the cheap case: the
+Metal surface is a `CAMetalLayer` inside the content view, so a switch releases that layer and builds
+another underneath the same `NSWindow`. Nothing about the window changes - not its identity, focus,
+place or controls - and no window is shown again, so there is no transition to suppress. Windows is
+the expensive case: a flip-model swap chain keeps the HWND it presents on, so the window itself has to
+be replaced, which is where the transitions setting, the `WINDOWPLACEMENT` and the `WindowPhase`
+notification come in (see above). Both platforms report what a window actually built through the same
+service, and both honour the same `ApplicationOptions.GfxAcceleration` value at startup, so an
+application's settings page needs no platform case at all.
+
+A Metal value carries the device's registry id in hex - `metal:000000010000017f` - which is the only
+identity Metal reports for a device and survives a reboot. It is the same kind of thing as the Win32
+families' hardware identity, and for the same reason: an index into the enumeration moves when the
+list is reordered.
 
 The sample exercises both: `--acceleration <value>` chooses at startup, `--apply-acceleration
 <value>` applies a switch once the first window exists (printing the result, which is how a script

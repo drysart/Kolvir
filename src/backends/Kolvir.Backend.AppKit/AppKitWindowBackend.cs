@@ -97,6 +97,51 @@ public sealed class AppKitWindowBackend : IWindowBackend
     /// </summary>
     public string? GraphicsRenderer => _view?.GraphicsRenderer;
 
+    /// <summary>
+    /// Rebuilds this window's presentation so that it draws with <paramref name="option"/> from now on.
+    /// </summary>
+    /// <param name="option">The choice, already known to be one this machine offers.</param>
+    /// <param name="reason">One sentence saying what happened, filled in on success and on refusal.</param>
+    /// <returns>True when the window is drawing with <paramref name="option"/> afterwards.</returns>
+    /// <remarks>
+    /// The window itself is not touched: on macOS the accelerated path is a layer inside the content
+    /// view, so a switch releases one layer and builds another. Nothing above the drawing surface -
+    /// the controls, their state, the window's place and focus - is affected, and no window is shown
+    /// again, so there is no transition to hide.
+    /// </remarks>
+    internal bool TrySwitchAcceleration(GpuAccelerationOption option, out string reason)
+    {
+        if (_view is null || _window is null)
+        {
+            reason = "The window does not exist yet.";
+            return false;
+        }
+
+        if (!NSThread.IsMain)
+        {
+            reason = "Acceleration can only be switched from the main thread.";
+            return false;
+        }
+
+        if (!_view.TrySwitchAcceleration(option, out reason))
+        {
+            // The view has already fallen back to the CPU path, and it is still drawing: what is wrong is
+            // that the window is not doing what was asked, so the refusal is reported rather than hidden.
+            ReportAcceleration();
+            return false;
+        }
+
+        ReportAcceleration();
+        return true;
+    }
+
+    /// <summary>
+    /// Tells <see cref="IGpuAccelerationService"/> what this window is drawing with, so an application's
+    /// settings list can show the live choice. Called when the drawing surface is decided and whenever
+    /// it changes.
+    /// </summary>
+    private void ReportAcceleration() => _application.Acceleration.Report(_view);
+
     /// <inheritdoc />
     public float ScaleFactor => _scale;
 
@@ -782,14 +827,24 @@ public sealed class AppKitWindowBackend : IWindowBackend
         window.ReleaseWhenClosed(false);
         window.Delegate = _delegate;
 
-        // The same application option the Win32 backend honours. Its platform default is off on
+        // The same application options the Win32 backend honours. Its platform default is off on
         // macOS (Metal is slower on light text-heavy pages and much faster on image-heavy ones, so
         // the application decides), and an explicit assignment or --no-hardware-acceleration is
-        // already applied there. Resolved once, when the window is created, because the
-        // presentation choice does not change while a window is open.
+        // already applied there. A saved acceleration value replaces that answer, exactly as it does
+        // on Windows: asking for a GPU family is asking for acceleration, and asking for the CPU path
+        // is the same request as turning the option off. What the service holds wins over both,
+        // because a switch made while an earlier window was open has to carry over to the next one.
         var useHardwareAcceleration = _application.Application?.Options.GfxHardwareAcceleration ?? false;
 
-        var view = new AppKitSkiaView(_host, useHardwareAcceleration)
+        var choice = AppKitGfxChoice.FromSelected(
+            _application.Acceleration.Requested ?? _application.Application?.Options.GfxAcceleration);
+
+        if (choice is { } selected)
+        {
+            useHardwareAcceleration = !selected.CpuOnly;
+        }
+
+        var view = new AppKitSkiaView(_host, useHardwareAcceleration, choice?.DeviceKey)
         {
             AutoresizingMask = NSViewResizingMask.WidthSizable | NSViewResizingMask.HeightSizable,
         };
@@ -808,6 +863,10 @@ public sealed class AppKitWindowBackend : IWindowBackend
         // The layer and backing scale exist now, so the presentation path can be decided before
         // the window reports itself shown and the demo prints its one line.
         view.PrepareGraphics();
+
+        // Whatever the view ended up drawing with is what the service reports, so a settings list that
+        // opens after the window is told the truth rather than the request.
+        ReportAcceleration();
 
         // A context menu is anchored to the view that shows it, so it can only be built now.
         _presenter = _useMenus
