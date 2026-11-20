@@ -5210,7 +5210,8 @@ loop in application code, and `MaxEventStackSize` is not a work budget: it count
 An index read publishes before the range check, so a read that throws is still a read: an expression
 `list[7]` over three items is re-run when the list grows to eight. An index that several runs watch is
 one entry, created on the first read inside a run and dropped when its last handler goes, so the table
-holds the rows on screen rather than every index ever read.
+holds the rows on screen rather than every index ever read. A source that is kept and watched again
+puts its entry back, so registering on one you held onto is ordinary rather than a mistake.
 
 #### The sample page
 

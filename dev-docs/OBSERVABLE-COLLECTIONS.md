@@ -272,11 +272,20 @@ All internal, all reachable only through a read:
 | --- | --- | --- | --- |
 | count | a field on the list | with the list | never - it is one field |
 | contents | a field on the list | with the list | never |
-| index `i` | an entry in the list's own dictionary, keyed by the index | the first read of `i` inside a run | when its last handler goes, like a named key (`OBSERVABLES.md` section 3.2) |
+| index `i` | an entry in the list's own dictionary, keyed by the index | the first read of `i` inside a run | when its last handler goes, like a named key (`OBSERVABLES.md` section 3.2) - and put back by the entry itself as soon as something watches it again |
 
 The index entry is the same instance for as long as anything watches it, which is what makes two
 reads of `this[3]` in one run one subscription: the scope de-duplicates by equality and the instance
 is canonical. It is a plain reference-equality source, so it needs no `Equals` of its own.
+
+**Dropped is not dead.** The entry is told when it goes from unwatched to watched as well as the other
+way, because a caller can keep one - a run reports the sources it read, and `IObservableEventSource` is
+public - and register on it again later. Its first handler puts it back in the dictionary, and an entry
+that comes back to find the index held by a newer one adopts that one: every handler moves to the entry
+that returned, so a change raises all of them, and the adopted entry is left forwarding so the tokens
+its readers still hold unregister from the right place. Without that pair of rules a source that
+outlived its release would accept handlers and never be marked - silent in the worst way, because the
+reader looks subscribed and is never woken.
 
 A read outside any run allocates nothing. Publishing is a null check on the scope field
 (`ReadScope.Publish`), and the index entry is only created when a scope exists, through an internal
@@ -575,7 +584,8 @@ The three collections name them differently - a list's address is an index, a se
 dictionary's is a key, and a dictionary's shape is its key set rather than its count - but the split,
 the reasons and the code are the same. The address is the one that earns the work: it is what lets a
 row re-render without re-rendering the list, and it is why an address dependency is dropped when its
-last watcher goes rather than kept per address ever read.
+last watcher goes rather than kept per address ever read - put back by the entry itself when something
+watches it again (3.6.1).
 
 The batch policy is shared too, and it is the one piece of behaviour that is not per collection: every
 collection caps one event at its own `MaxCollectionBatchSize`, copied from
@@ -930,10 +940,13 @@ Which record marks what:
    to know it may receive a net change rather than a history.
 6. **No `Sort` in step 1.** A sort could be reported as moves, but computing them is a diff, and the
    diff belongs with the derived views in section 5 rather than in the first version of the list.
-7. **An index entry is dropped when its last watcher goes** (3.6.1), so a dependency set that has
-   been released is not something to register on again - the entry it named is detached, and a later
-   read makes a new one. The alternative is keeping an entry per index ever read, which grows with the
-   rows scrolled past rather than with the rows on screen.
+7. **An index entry is dropped when its last watcher goes** (3.6.1), and a source that is watched
+   again puts it back. Corrected after review: the earlier version said a released dependency set was
+   "not something to register on again", which is a rule nothing enforces - `IObservableEventSource` is
+   public and a run reports the sources it read, so a caller can hold one and register on it whenever it
+   likes. Keeping an entry per index ever read instead would grow with the rows scrolled past rather
+   than with the rows on screen, so the drop stays and the entry re-registers itself, adopting whichever
+   entry took the index meanwhile.
 8. **The convenience token.** `BeginChangeBatch`/`EndChangeBatch` are the primitives; an
    `IDisposable EnterChangeBatch()` that pairs them is the shape a caller actually wants
    (`using var batch = list.EnterChangeBatch();`), including on an exception path. It is in the plan
@@ -962,7 +975,7 @@ Which record marks what:
 | 1 | The two interfaces, `ObservableListChange<T>`, `ObservableListChangedEventArgs<T>` | All four compile, are documented, and nothing implements them yet - this is the reviewable shape of the contract |
 | 2 | `ObservableList<T>` storage and mutations | Every mutation in 3.4 produces the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove produce no event; enumeration throws when the list is mutated under it |
 | 3 | Delivery: queue and batches | Records arrive in mutation order even when a handler mutates; a batch is one event carrying its records up to the list's `MaxCollectionBatchSize` and one `UntrackedChanges` record past that, with nothing queued after it; a list's cap is its own and does not move another list's; nesting is counted and only the outermost end delivers; an unmatched end throws; a flat chain of handler-caused deliveries to the same list is unbounded, while a delivery re-entered from a handler - through a disposal, or through another list's drain - is counted against `MaxEventStackSize` and refused at the limit (3.7) |
-| 4 | Per-operation dependencies: count, index, contents | A body that reads `Count` and `this[0]` reports two dependencies; a write to an item wakes the index reader and not the count reader; a move wakes only the indexes it spans; an insert at `p` wakes every watched index at or past `p` and none before it; a read outside a scope allocates nothing and registers nothing; a batch raises each affected entry once |
+| 4 | Per-operation dependencies: count, index, contents | A body that reads `Count` and `this[0]` reports two dependencies; a write to an item wakes the index reader and not the count reader; a move wakes only the indexes it spans; an insert at `p` wakes every watched index at or past `p` and none before it; a read outside a scope allocates nothing and registers nothing; a batch raises each affected entry once; a source that outlived its release is put back in the table when something watches it again, adopting any entry that took its index meanwhile |
 | 5 | `CreateList` factories and disposal | The four overloads; disposal drops pending records, delivers the empty final event, and makes reads, mutations and registration throw while removal and a second dispose stay safe |
 | 6 | Tests | Section 10's claims, in `tests/features/Kolvir.Feature.Observables.Tests` |
 | 7 | The demo page and the guide section | An **Observable list** page in `src/demo/Kolvir.Demo.App/Pages/` that renders a list from its records and shows a batch add as one notification, plus an `### Observable collections` passage in `DEVELOPER-GUIDE.md` |
@@ -1010,6 +1023,7 @@ treatment:
 | **Disposal is ordered** | A handler sees `IsDisposed` true during the final event, receives no records, and any read from there throws; a batch left open is dropped rather than delivered; removal and a second dispose stay safe afterwards |
 | **A read is exactly what it asked for** | A body that reads `Count`, `this[1]` and enumerates reports three dependencies, in that order. A write to item 1 wakes the reader of index 1 and not the reader of `Count`. A move wakes the reader of an index it spans and not one outside it. An insert at 2 wakes the readers of indexes 2 and above and none below. A clear wakes all three |
 | **A throwing index read still subscribes** | `list[7]` over three items throws, and the run still reports index 7 among its dependencies; growing the list to eight then re-runs it, which is the only way an expression that is currently failing can recover |
+| **A kept source is watched again, not stranded** | A run's dependency is kept past the disposal that released it and registered on directly: a change to that index wakes it. So does the harder order - the kept one registered on after a later read had made a second entry for the index - and the reader whose entry was adopted keeps hearing until its own run is disposed, after which the entry still raises the one that came back |
 | **A batch is one wake-up per affected read** | A body reading indexes 0, 1 and 2 reports three dependencies, and three mutations delivered as one event wake each of them exactly once, however many records touched that index - three records that all touch index 1 raise it once, not three times |
 | **The batch cap trades fidelity for a bounded event** | Fifty records in a batch arrive as fifty; the fifty-first mutation replaces them with one `UntrackedChanges` record, and no later change in that batch is queued - five hundred changes still arrive as one record. The same cap applies to an event accumulated during a drain. The list itself holds every change regardless, an `UntrackedChanges` event wakes the count, the contents and every watched index, and an observer's copy is rebuilt by re-reading - which is what the demo page shows happening |
 | **Nothing watched costs nothing to raise** | A mutation with no run in scope and no handler registered marks nothing, and the same mutation costs the same with ten thousand items as with ten; a read outside a run allocates nothing at all |
@@ -1031,7 +1045,7 @@ by the producer.
 | 1 | Done | The two interfaces, `ObservableListChangeType`, `ObservableListChange<T>` with its five `Create*` factories, and `ObservableListChangedEventArgs<T>` - all documented, CS1591 clean, and pointing at the sections that decide them |
 | 2 | Done | `ObservableList<T>` over a `List<T>`: every mutation in 3.4 raises the record its row names and nothing else; an equal write, an empty clear, a same-index move and a failed remove raise nothing; an out-of-range mutation throws without recording; enumeration is the storage's own, so mutating under it throws |
 | 3 | Done | The batch cap and `UntrackedChanges` were added after review, and they are the one place fidelity is bounded on purpose (3.11): past the list's `MaxCollectionBatchSize` a batch drops what it collected, delivers the one record that means "re-read the list", and queues nothing more. Delivery is a queue rather than a recursive raise: a handler's own change is delivered after the event it is hearing, a batch is one event with every record in order, nesting delivers once at the outermost end, and an unmatched end throws. Nothing bounds the drain - revised after review: an earlier version counted deliveries against `MaxEventStackSize` in the loop, which is a stack-depth guard and has nothing to say about a flat loop; the dispatch itself *is* counted, because a handler can re-enter a delivery through a disposal or through another list. Disposal drops what a batch had not delivered, delivers one empty event, and then throws. Revised a second time after review: the cap is not a package constant but a property of each list, `MaxCollectionBatchSize`, copied from `Observable.Default.MaxCollectionBatchSize` when the list is created, so an owner tunes its own list's observers and no other list's |
-| 4 | Done | `ObservableListDependencies<T>` and `ObservableDependency`: the count and contents are fields, an index entry is created by a read inside a run and dropped when its last handler goes (`ReadScope.IsActive` keeps a cold read from allocating), and marking is a pass over the watched entries. A write wakes its index and not the count; an insert wakes the indexes at or past it; a move wakes its span; a clear wakes all; a batch raises each once; a read past the end is still a read |
+| 4 | Done | `ObservableListDependencies<T>` and `ObservableDependency`: the count and contents are fields, an index entry is created by a read inside a run and dropped when its last handler goes (`ReadScope.IsActive` keeps a cold read from allocating), and marking is a pass over the watched entries. A write wakes its index and not the count; an insert wakes the indexes at or past it; a move wakes its span; a clear wakes all; a batch raises each once; a read past the end is still a read. Revised after review: the entry is told when it goes from unwatched to watched as well as the other way, so a source a caller kept is put back in the table when it is registered on again - and one that finds its index held by a newer entry adopts it, because both have readers and only one entry can be marked |
 | 5 | Done | The four `CreateList` overloads and the disposal order |
 | 6 | Done | 51 tests in three files - `ObservableListChangeTests`, `ObservableListDeliveryTests`, `ObservableListDependencyTests` - covering section 10's claims for the list, including a replay that reproduces the list from records alone, and the cap being each list's own |
 | 7 | Done | An **Observable list** page in the sample (`ObservableListPage`) - a line that reads only `Count`, a rows component, one child component per row reading a single index, and a copy built only from the records that says whether it still matches - plus an `### Observable collections` section in the developer guide. Rendering it headlessly (`--render ... --page observable-list`) is what caught the two things a first frame shows and a test does not: a child component with no `DataModel` renders the empty fragment, and a slot whose child the list removed keeps a disposed instance unless the parent prunes it |

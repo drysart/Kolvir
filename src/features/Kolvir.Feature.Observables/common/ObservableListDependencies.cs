@@ -14,7 +14,8 @@ namespace Kolvir.Observables;
 /// with the list and never dropped. An index entry is created by the first read of that index inside a
 /// run and dropped when its last handler goes, so the table holds the rows on screen rather than every
 /// index ever read - the same rule the named-dependency table uses, applied to a key space the list
-/// owns.
+/// owns. Dropped is not gone, though: a source a caller kept is put back by the entry itself as soon as
+/// something watches it again, and one that finds the index taken adopts the entry that took it.
 /// </para>
 /// <para>
 /// A change marks what it invalidated and the delivery raises each marked source once, so a batch of a
@@ -205,6 +206,12 @@ internal sealed class ObservableListDependencies<T>
     {
         _count.Clear();
         _contents.Clear();
+
+        foreach (var dependency in _indexes.Values)
+        {
+            dependency.Clear();
+        }
+
         _indexes.Clear();
         _marked.Clear();
 
@@ -212,6 +219,15 @@ internal sealed class ObservableListDependencies<T>
         _contentsMarked = false;
     }
 
+    /// <summary>The entry for <paramref name="index"/>, created when nothing holds that index yet.</summary>
+    /// <param name="index">The index that was read.</param>
+    /// <remarks>
+    /// The entry is not put in the table here: it is made first, because the callbacks need to name it,
+    /// and then it registers itself the moment something watches it - which is what lets a source a
+    /// caller kept be watched again after this table dropped it (see
+    /// <see cref="ObservableDependency.Adopt"/>). Nothing is watching it yet, so it arrives unwatched and
+    /// arrives through <see cref="Acquire"/>.
+    /// </remarks>
     private ObservableDependency GetIndexDependency(int index)
     {
         if (_indexes.TryGetValue(index, out var dependency))
@@ -219,12 +235,43 @@ internal sealed class ObservableListDependencies<T>
             return dependency;
         }
 
-        dependency = new ObservableDependency(
-            $"index {index} of an observable list",
-            () => _indexes.Remove(index));
+        ObservableDependency? entry = null;
 
-        _indexes.Add(index, dependency);
-        return dependency;
+        entry = new ObservableDependency(
+            $"index {index} of an observable list",
+            onWatched: () => Acquire(index, entry!),
+            onReleased: () => ReleaseEntry(index, entry!));
+
+        return entry;
+    }
+
+    /// <summary>Puts an entry back in the table, because something has started watching it again.</summary>
+    /// <param name="index">The index it answers for.</param>
+    /// <param name="dependency">The entry that gained its first handler.</param>
+    private void Acquire(int index, ObservableDependency dependency)
+    {
+        if (_indexes.TryGetValue(index, out var current) && !ReferenceEquals(current, dependency))
+        {
+            // A read made a second entry for this index while the first was dropped but still held. Both
+            // have readers and only one can hold the row, so the one coming back takes it and adopts the
+            // other rather than leaving it subscribed to an entry nothing marks.
+            dependency.Adopt(current);
+        }
+
+        _indexes[index] = dependency;
+    }
+
+    /// <summary>Drops an entry, because nothing is watching it any more.</summary>
+    /// <param name="index">The index it answered for.</param>
+    /// <param name="dependency">The entry that lost its last handler.</param>
+    private void ReleaseEntry(int index, ObservableDependency dependency)
+    {
+        // By identity as well as by key: an entry that was already replaced must not take its
+        // successor's row away when its last handler goes.
+        if (_indexes.TryGetValue(index, out var current) && ReferenceEquals(current, dependency))
+        {
+            _indexes.Remove(index);
+        }
     }
 
     private void MarkShape()

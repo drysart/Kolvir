@@ -299,4 +299,56 @@ public sealed class ObservableListDependencyTests
 
         Assert.AreEqual(1, run.Dependencies.Count, "and the first read inside a run is still one dependency");
     }
+
+    [TestMethod]
+    public void ASourceWatchedAgainAfterItWasReleasedIsWokenAgain()
+    {
+        // A run reports the sources it read, and IObservableEventSource is public, so a caller may keep
+        // one and register on it later. Dropping the entry when its last handler goes must not leave a
+        // kept source subscribed to something the list no longer marks.
+        using var list = Observable.CreateList("a", "b");
+
+        var run = Observable.CollectDependencies(() => { _ = list[1]; }, _ => { });
+        var source = run.Dependencies[0];
+
+        run.Dispose();          // the entry is released here, and this is the only reference left to it
+
+        var wakes = 0;
+        using var again = source.AddObservableEventRaisedHandler(_ => wakes++);
+
+        list[1] = "z";
+
+        Assert.AreEqual(1, wakes, "the list takes the entry back when something watches it again");
+    }
+
+    [TestMethod]
+    public void ASourceThatComesBackDoesNotSilenceTheReaderItFoundInPlace()
+    {
+        // The awkward order: a source is kept past its release, a later read makes a second entry for the
+        // same index, and then the kept one is watched again. Both have readers, and only one entry can
+        // hold the index - so the one that comes back takes it and adopts the other rather than leaving
+        // either reader subscribed to an entry that is never marked.
+        using var list = Observable.CreateList("a", "b");
+
+        var keptRun = Observable.CollectDependencies(() => { _ = list[0]; }, _ => { });
+        var kept = keptRun.Dependencies[0];
+        keptRun.Dispose();
+
+        var keptWakes = 0;
+        var laterWakes = 0;
+        var later = Observable.CollectDependencies(() => { _ = list[0]; }, _ => laterWakes++);
+
+        using var again = kept.AddObservableEventRaisedHandler(_ => keptWakes++);
+
+        list[0] = "z";
+
+        Assert.AreEqual(1, keptWakes, "the source that came back is woken");
+        Assert.AreEqual(1, laterWakes, "and so is the reader whose entry it adopted");
+
+        later.Dispose();
+        list[0] = "y";
+
+        Assert.AreEqual(2, keptWakes, "the adopted reader letting go does not take the entry with it");
+        Assert.AreEqual(1, laterWakes, "and it has stopped hearing, as a disposed run should");
+    }
 }
