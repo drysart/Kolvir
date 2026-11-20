@@ -69,6 +69,11 @@ public sealed class Win32WindowBackend : IWindowBackend
     private readonly bool _useMenus;
     private readonly bool _useHardwareAcceleration;
 
+    /// <summary>
+    /// The acceleration the application's user chose, or null when the backend picks for itself.
+    /// </summary>
+    private readonly Win32GfxChoice? _selectedAcceleration;
+
     private Icon? _icon;
     private IntPtr _bigIcon;
     private IntPtr _smallIcon;
@@ -164,10 +169,20 @@ public sealed class Win32WindowBackend : IWindowBackend
         // surface cannot switch between GL and the DIB after the window has allocated one.
         _useHardwareAcceleration = application.Application?.Options.GfxHardwareAcceleration ?? false;
 
+        // A saved choice replaces the order the backend would have picked for itself, and carries its
+        // own answer to "accelerate at all": asking for a GPU family is asking for acceleration, and
+        // asking for the CPU path is the same request as turning the option off. Null leaves both alone.
+        _selectedAcceleration = Win32GfxOptions.FromSelected(application.Application?.Options.GfxAcceleration);
+
+        if (_selectedAcceleration is { } selected)
+        {
+            _useHardwareAcceleration = !selected.CpuOnly;
+        }
+
         if (!_useHardwareAcceleration)
         {
             _gpuUnavailable = true;
-            _gfxReason = "cpu (disabled)";
+            _gfxReason = _selectedAcceleration is { CpuOnly: true } ? "cpu (chosen)" : "cpu (disabled)";
         }
     }
 
@@ -2777,6 +2792,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         else if (_useHardwareAcceleration && !_gpuUnavailable)
         {
             var gpu = Win32Gfx.TryCreateAccelerated(
+                _selectedAcceleration ?? Win32Gfx.DefaultChoice,
                 hardwareAcceleration: true,
                 _hwnd,
                 Win32GlProbe.Instance,
@@ -2795,6 +2811,7 @@ public sealed class Win32WindowBackend : IWindowBackend
                 _bufferWidth = width;
                 _bufferHeight = height;
                 _bufferGeneration++;
+                ReportAcceleration();
                 return;
             }
 
@@ -2802,7 +2819,15 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
 
         EnsureCpuBuffer(width, height);
+        ReportAcceleration();
     }
+
+    /// <summary>
+    /// Tells <see cref="IGpuAccelerationService"/> what this window is drawing with, so an application's
+    /// settings list can show the live choice. Called when the drawing surface is decided and whenever
+    /// the tier is lost.
+    /// </summary>
+    private void ReportAcceleration() => _application.Acceleration.Report(_gpu);
 
     private void EnsureCpuBuffer(int width, int height)
     {
@@ -2894,6 +2919,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         // The CPU buffer may be gone (it was released when the accelerated tier took over), so rebuild
         // it at the current framebuffer size before anything paints again.
         EnsureCpuBuffer(width, height);
+        ReportAcceleration();
 
         if (invalidate)
         {

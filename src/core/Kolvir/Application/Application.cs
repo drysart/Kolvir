@@ -100,6 +100,10 @@ public sealed partial class Application : IDisposable
         services.AddSingleton(options);
         services.AddScoped<WindowAccessor>();
 
+        // The CPU path is always available, so an application can ask what acceleration exists before
+        // any backend has said anything, and a backend that offers more registers over the top of this.
+        services.AddSingleton<IGpuAccelerationService>(static _ => new CpuGpuAccelerationService());
+
         backend.RegisterServices(services);
         options.ConfigureServices?.Invoke(services);
 

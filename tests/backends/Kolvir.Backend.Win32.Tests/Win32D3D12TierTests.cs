@@ -28,7 +28,7 @@ public sealed class Win32D3D12TierTests
 
     private sealed class RefusingVulkanProbe : IWin32VulkanProbe
     {
-        public Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure)
+        public Win32VulkanDevice? TryCreate(IntPtr hwnd, int deviceIndex, out string failure)
         {
             failure = "no vulkan loader";
             return null;
@@ -45,7 +45,7 @@ public sealed class Win32D3D12TierTests
 
         public int Calls { get; private set; }
 
-        public Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure)
+        public Win32D3D12Device? TryCreate(IntPtr hwnd, int deviceIndex, out string failure)
         {
             Calls++;
             _order.Add("d3d12");
@@ -257,7 +257,7 @@ public sealed class Win32D3D12TierTests
     {
         // The interop's entry points are loaded and the adapter list walked for real, so this is what
         // catches a wrong export name or a mis-sized struct without needing a GPU in the machine.
-        var device = Win32D3D12Probe.Instance.TryCreate(new IntPtr(1), out var failure);
+        var device = Win32D3D12Probe.Instance.TryCreate(new IntPtr(1), -1, out var failure);
 
         if (device is null)
         {

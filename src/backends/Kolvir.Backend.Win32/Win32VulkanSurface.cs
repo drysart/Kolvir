@@ -7,7 +7,14 @@ namespace Kolvir.Backend.Win32;
 internal interface IWin32VulkanProbe
 {
     /// <summary>Builds the device stack, or returns null with the step that failed.</summary>
-    Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure);
+    /// <param name="hwnd">The window that will present.</param>
+    /// <param name="deviceIndex">
+    /// The physical device to prefer, or -1 for the first one that can present to the window. A
+    /// preference is honored only when that device can present: the window falls back to another one
+    /// rather than losing the tier.
+    /// </param>
+    /// <param name="failure">The step that failed.</param>
+    Win32VulkanDevice? TryCreate(IntPtr hwnd, int deviceIndex, out string failure);
 }
 
 /// <summary>The production probe: the real loader, instance, surface and device.</summary>
@@ -19,8 +26,8 @@ internal sealed class Win32VulkanProbe : IWin32VulkanProbe
 
     internal static Win32VulkanProbe Instance { get; } = new();
 
-    public Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure) =>
-        Win32VulkanDevice.TryCreate(hwnd, out failure);
+    public Win32VulkanDevice? TryCreate(IntPtr hwnd, int deviceIndex, out string failure) =>
+        Win32VulkanDevice.TryCreate(hwnd, deviceIndex, out failure);
 }
 
 /// <summary>
@@ -40,7 +47,8 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
         IntPtr fence,
         IntPtr renderSemaphore,
         uint family,
-        string renderer)
+        string renderer,
+        int deviceIndex)
     {
         _loader = loader;
         Instance = instance;
@@ -52,6 +60,7 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
         RenderSemaphore = renderSemaphore;
         Family = family;
         Renderer = renderer;
+        DeviceIndex = deviceIndex;
     }
 
     private readonly VulkanLoader _loader;
@@ -79,26 +88,32 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
     /// <summary>The adapter's name, so a screenshot says which GPU produced its numbers.</summary>
     internal string Renderer { get; }
 
+    /// <summary>
+    /// The chosen physical device's index in the loader's enumeration, which is what a device suffix on
+    /// an acceleration value names.
+    /// </summary>
+    internal int DeviceIndex { get; }
+
     internal IntPtr InstanceProc(string name) => _loader.InstanceProc(Instance, name);
 
     internal IntPtr DeviceProc(string name) => _loader.DeviceProc(Device, Instance, name);
 
-    internal static Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure)
+    /// <summary>
+    /// Creates the Vulkan instance every device stack starts from, with the two surface extensions.
+    /// </summary>
+    /// <param name="loader">The loaded runtime.</param>
+    /// <param name="failure">The step that failed.</param>
+    /// <returns>The instance, or <see cref="IntPtr.Zero"/> with <paramref name="failure"/> set.</returns>
+    private static IntPtr CreateInstance(VulkanLoader loader, out string failure)
     {
-        var loader = VulkanLoader.TryLoad();
-
-        if (loader is null)
-        {
-            failure = "no vulkan-1.dll";
-            return null;
-        }
+        failure = string.Empty;
 
         var getInstanceProc = loader.InstanceProc(IntPtr.Zero, "vkCreateInstance");
 
         if (getInstanceProc == IntPtr.Zero)
         {
-            failure = "no vkCreateInstance";
-            return null;
+            failure = "vulkan: no vkCreateInstance";
+            return IntPtr.Zero;
         }
 
         // The surface extensions are the only ones needed to describe a window to Vulkan.
@@ -135,14 +150,37 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
             if (result == ErrorIncompatibleDriver)
             {
                 failure = $"vulkan: no driver installed ({result})";
-                return null;
+                return IntPtr.Zero;
             }
 
             if (result != 0)
             {
                 failure = $"vulkan: vkCreateInstance {result}";
-                return null;
+                return IntPtr.Zero;
             }
+        }
+
+        return instance;
+    }
+
+    internal static Win32VulkanDevice? TryCreate(IntPtr hwnd, out string failure) =>
+        TryCreate(hwnd, -1, out failure);
+
+    internal static Win32VulkanDevice? TryCreate(IntPtr hwnd, int deviceIndex, out string failure)
+    {
+        var loader = VulkanLoader.TryLoad();
+
+        if (loader is null)
+        {
+            failure = "no vulkan-1.dll";
+            return null;
+        }
+
+        IntPtr instance = CreateInstance(loader, out failure);
+
+        if (instance == IntPtr.Zero)
+        {
+            return null;
         }
 
         var createSurface = (delegate* unmanaged<IntPtr, VkWin32SurfaceCreateInfoKhr*, IntPtr, IntPtr*, int>)loader.InstanceProc(instance, "vkCreateWin32SurfaceKHR");
@@ -170,7 +208,7 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
             return null;
         }
 
-        if (!SelectPhysicalDevice(loader, instance, surface, out var physical, out var family, out var renderer, out failure))
+        if (!SelectPhysicalDevice(loader, instance, surface, deviceIndex, out var physical, out var family, out var renderer, out var chosen, out failure))
         {
             DestroyInstance(loader, instance);
             return null;
@@ -238,21 +276,25 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
         }
 
         failure = string.Empty;
-        return new Win32VulkanDevice(loader, instance, physical, device, queue, surface, fence, renderSemaphore, family, renderer);
+        return new Win32VulkanDevice(loader, instance, physical, device, queue, surface, fence, renderSemaphore, family, renderer, chosen);
     }
 
     private static bool SelectPhysicalDevice(
         VulkanLoader loader,
         IntPtr instance,
         IntPtr surface,
+        int preferred,
         out IntPtr physical,
         out uint family,
         out string renderer,
+        out int chosen,
         out string failure)
     {
         physical = IntPtr.Zero;
         family = 0;
         renderer = string.Empty;
+        chosen = 0;
+        failure = string.Empty;
 
         var enumerate = (delegate* unmanaged<IntPtr, uint*, IntPtr*, int>)loader.InstanceProc(instance, "vkEnumeratePhysicalDevices");
         uint count = 0;
@@ -279,8 +321,10 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
         // a stackalloc inside a loop is not recovered until the frame returns.
         byte* properties = stackalloc byte[1024];
 
-        foreach (var device in devices)
+        foreach (var index in PreferenceOrder(devices.Length, preferred))
         {
+            var device = devices[index];
+
             getProperties(device, properties);
 
             uint familyCount = 0;
@@ -314,7 +358,7 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
                     physical = device;
                     family = i;
                     renderer = new string((sbyte*)(properties + 20));
-                    failure = string.Empty;
+                    chosen = index;
                     return true;
                 }
             }
@@ -322,6 +366,124 @@ internal sealed unsafe class Win32VulkanDevice : IDisposable
 
         failure = "vulkan: no device can present to this window";
         return false;
+    }
+
+    /// <summary>
+    /// The order to try physical devices in: the preferred one first when it exists, then the rest in
+    /// enumeration order. A preference that is out of range - a saved setting from a machine with more
+    /// GPUs - leaves the plain order alone.
+    /// </summary>
+    /// <param name="count">How many devices there are.</param>
+    /// <param name="preferred">The device to try first, or -1 for none.</param>
+    internal static IReadOnlyList<int> PreferenceOrder(int count, int preferred)
+    {
+        if (preferred < 0 || preferred >= count)
+        {
+            return [.. Enumerable.Range(0, count)];
+        }
+
+        List<int> order = [preferred];
+
+        for (var index = 0; index < count; index++)
+        {
+            if (index != preferred)
+            {
+                order.Add(index);
+            }
+        }
+
+        return order;
+    }
+
+    /// <summary>
+    /// The physical devices this machine's Vulkan runtime can see, keeping only those with a graphics
+    /// queue family. Each device keeps the loader's own index, which is what a device suffix names.
+    /// </summary>
+    /// <remarks>
+    /// Presenting to a window is not tested here: that needs a window, and an application can ask what
+    /// acceleration exists before it has one. A device that can draw but cannot present is dropped by
+    /// the window and reported through <see cref="IGpuAccelerationService.Current"/>.
+    /// </remarks>
+    internal static IReadOnlyList<GpuAccelerationDevice> EnumerateDevices()
+    {
+        var loader = VulkanLoader.TryLoad();
+
+        if (loader is null)
+        {
+            return [];
+        }
+
+        IntPtr instance = CreateInstance(loader, out _);
+
+        if (instance == IntPtr.Zero)
+        {
+            return [];
+        }
+
+        try
+        {
+            var enumerate = (delegate* unmanaged<IntPtr, uint*, IntPtr*, int>)loader.InstanceProc(instance, "vkEnumeratePhysicalDevices");
+            uint count = 0;
+
+            if (enumerate == null || enumerate(instance, &count, null) != 0 || count == 0)
+            {
+                return [];
+            }
+
+            IntPtr[] devices = new IntPtr[count];
+
+            fixed (IntPtr* buffer = devices)
+            {
+                enumerate(instance, &count, buffer);
+            }
+
+            var getProperties = (delegate* unmanaged<IntPtr, byte*, void>)loader.InstanceProc(instance, "vkGetPhysicalDeviceProperties");
+            var getFamilies = (delegate* unmanaged<IntPtr, uint*, VkQueueFamilyProperties*, void>)loader.InstanceProc(instance, "vkGetPhysicalDeviceQueueFamilyProperties");
+            byte* properties = stackalloc byte[1024];
+            List<GpuAccelerationDevice> found = [];
+
+            for (var index = 0; index < devices.Length; index++)
+            {
+                uint familyCount = 0;
+                getFamilies(devices[index], &familyCount, null);
+
+                if (familyCount == 0)
+                {
+                    continue;
+                }
+
+                var families = new VkQueueFamilyProperties[familyCount];
+                var usable = false;
+
+                fixed (VkQueueFamilyProperties* familyPtrs = families)
+                {
+                    getFamilies(devices[index], &familyCount, familyPtrs);
+
+                    for (uint i = 0; i < familyCount; i++)
+                    {
+                        if ((familyPtrs[i].queueFlags & QueueFlagGraphics) != 0)
+                        {
+                            usable = true;
+                            break;
+                        }
+                    }
+                }
+
+                if (!usable)
+                {
+                    continue;
+                }
+
+                getProperties(devices[index], properties);
+                found.Add(new GpuAccelerationDevice(index, new string((sbyte*)(properties + 20))));
+            }
+
+            return found;
+        }
+        finally
+        {
+            DestroyInstance(loader, instance);
+        }
     }
 
     private static void DestroyDevice(VulkanLoader loader, IntPtr device, IntPtr instance)
@@ -428,6 +590,8 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
 
     public string Renderer => _device.Renderer;
 
+    public int DeviceIndex => _device.DeviceIndex;
+
     public bool MakeCurrent() => true;
 
     public bool TakeNeedsFull()
@@ -452,9 +616,25 @@ internal sealed unsafe class Win32VulkanSurface : IWin32GpuSurface
         IWin32VulkanProbe probe,
         int width,
         int height,
+        out string failure) =>
+        TryCreate(hwnd, probe, -1, width, height, out failure);
+
+    /// <summary>Builds the whole stack or nothing, on a preferred physical device when one is named.</summary>
+    /// <param name="hwnd">The window that will present.</param>
+    /// <param name="probe">The device stack's source.</param>
+    /// <param name="deviceIndex">The physical device to prefer, or -1 for the first that can present.</param>
+    /// <param name="width">The framebuffer width in physical pixels.</param>
+    /// <param name="height">The framebuffer height in physical pixels.</param>
+    /// <param name="failure">The step that failed.</param>
+    internal static Win32VulkanSurface? TryCreate(
+        IntPtr hwnd,
+        IWin32VulkanProbe probe,
+        int deviceIndex,
+        int width,
+        int height,
         out string failure)
     {
-        var device = probe.TryCreate(hwnd, out failure);
+        var device = probe.TryCreate(hwnd, deviceIndex, out failure);
 
         if (device is null)
         {
