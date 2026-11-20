@@ -5524,25 +5524,29 @@ where the frame's upload buffers and the wrappers made for the back buffers live
 fills to a large fraction of that ceiling. The tier sets the limit to three full-size surfaces, with
 a 64 MiB floor, which is what a window that composites one image a frame actually needs.
 
-With `KOLVIR_GL_TRACE=1` three lines say what the tier is holding, so a figure in task manager can be
+With `KOLVIR_GL_TRACE=1` four lines say what the tier is holding, so a figure in task manager can be
 argued with rather than guessed at:
 
 ```
-kolvir-d3d12: skia cache 0 resources, 0 MiB of 64 MiB
+kolvir-d3d12: skia cache 0 resources, 0 MiB of 64 MiB, with the surface built
 kolvir-d3d12: video memory 52 MiB local in use of 22891 MiB, with the surface built
+kolvir-d3d12: skia cache 6 resources, 4 MiB of 64 MiB, after the first frame
 kolvir-d3d12: video memory 61 MiB local in use of 22891 MiB, after the first frame
 ```
 
-The cache line reports what Skia holds and what it may hold. The memory lines are this process's own
+The cache lines report what Skia holds and what it may hold; the memory lines are this process's own
 use of the adapter's local segment, taken through `IDXGIAdapter3::QueryVideoMemoryInfo` once the
-surface exists and again once a frame has been presented - the difference between them is what the
+surface exists and again once a frame has been presented, so the difference between them is what the
 first submission costs. Task manager's dedicated figure is larger than that number because it adds the
-driver's and the compositor's own allocations to it, which no application can shrink.
+driver's and the compositor's own allocations to it, which no application can shrink. A diagnostic
+that goes quiet when it has nothing to say cannot be told apart from one that never ran, so an
+adapter that cannot answer prints its refusal instead: `video memory 0 MiB local in use of 0 MiB
+(0x00000000)`, which is what a software adapter reports.
 
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
 dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
-section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,974,848, so +63,488
+section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,975,360, so +64,000
 bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
 shipped `libSkiaSharp.dll` already contains the Direct3D backend.
 

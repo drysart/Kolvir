@@ -391,11 +391,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
         if (Win32GlTrace.IsEnabled)
         {
-            // What the context is holding, and what it is allowed to hold: a Direct3D backend keeps
-            // upload buffers and the wrappers it made for the back buffers, so this is the number to
-            // read when a window's dedicated memory looks larger than its surfaces explain.
-            surface._skia.GetResourceCacheUsage(out int resources, out long cached);
-            Win32GlTrace.Write($"kolvir-d3d12: skia cache {resources} resources, {cached / (1024 * 1024)} MiB of {surface._skia.GetResourceCacheLimit() / (1024 * 1024)} MiB");
+            surface.TraceCache("with the surface built");
             surface.TraceVideoMemory("with the surface built");
         }
 
@@ -482,12 +478,24 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return;
         }
 
-        if (D3D12.GetVideoMemoryInfo(_device.Adapter, MemorySegmentLocal, out var info) < 0 || info.Budget == 0)
+        // Printed even when the query fails or reports no budget: a diagnostic that goes quiet when it
+        // has nothing to say leaves the reader unable to tell a missing line from a missing feature.
+        int result = D3D12.GetVideoMemoryInfo(_device.Adapter, MemorySegmentLocal, out var info);
+        string detail = result < 0 || info.Budget == 0 ? $" (0x{result:X8})" : string.Empty;
+        Win32GlTrace.Write($"kolvir-d3d12: video memory {info.CurrentUsage / (1024 * 1024)} MiB local in use of {info.Budget / (1024 * 1024)} MiB{detail}, {where}");
+    }
+
+    /// <summary>Reports what Skia is holding and what it may hold.</summary>
+    /// <param name="where">The moment the figure was taken.</param>
+    private void TraceCache(string where)
+    {
+        if (!Win32GlTrace.IsEnabled || _skia is null)
         {
             return;
         }
 
-        Win32GlTrace.Write($"kolvir-d3d12: video memory {info.CurrentUsage / (1024 * 1024)} MiB local in use of {info.Budget / (1024 * 1024)} MiB, {where}");
+        _skia.GetResourceCacheUsage(out int resources, out long cached);
+        Win32GlTrace.Write($"kolvir-d3d12: skia cache {resources} resources, {cached / (1024 * 1024)} MiB of {_skia.GetResourceCacheLimit() / (1024 * 1024)} MiB, {where}");
     }
 
     private bool CreateRetained()
@@ -605,6 +613,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             if (!_memoryTraced)
             {
                 _memoryTraced = true;
+                TraceCache("after the first frame");
                 TraceVideoMemory("after the first frame");
             }
 
