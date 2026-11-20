@@ -5437,15 +5437,45 @@ window allocates its surface.
 ### The Direct3D 12 tier (Windows)
 
 The window has a third accelerated path beside Vulkan and WGL: a flip-model DXGI swap chain with a Skia
-context on the device and command queue that outlive it. The order is Vulkan, then Direct3D 12, then
-GL. Both swap chain tiers lead because their resize path releases - `ResizeBuffers` reallocates the
-buffers rather than keeping a drawable per size the window has ever had - and Direct3D 12 sits behind
-Vulkan only because Vulkan is the tier that shipped first and therefore has the exposure. Moving one
-above the other is a reordering of two blocks in `Win32Gfx.TryCreateAccelerated`.
+context on the device and command queue that outlive it. Both swap chain tiers lead the order because
+their resize path releases - `ResizeBuffers` reallocates the buffers rather than keeping a drawable per
+size the window has ever had.
 
 Set `KOLVIR_NO_D3D12=1` to keep the window off it, which is what makes an A/B against Vulkan possible
 on one machine. It takes the same spellings as `KOLVIR_NO_VULKAN` and is read once, for the same
 reason.
+
+### Choosing the order: `KOLVIR_GL_OPTIONS`
+
+The default order is Direct3D 12, then Vulkan, then GL. Direct3D 12 leads because it is the native API
+on this platform, needs no Vulkan runtime of its own, and resizes the way Vulkan does.
+
+Set `KOLVIR_GL_OPTIONS` to reorder the tiers, restrict them, or ask for the CPU path, without
+rebuilding:
+
+```
+KOLVIR_GL_OPTIONS=vulkan,d3d,ogl     # try Vulkan first, then Direct3D 12, then GL
+KOLVIR_GL_OPTIONS=ogl                # only GL; the swap chain tiers are never asked
+KOLVIR_GL_OPTIONS=cpu                # no acceleration at all
+```
+
+The words are `d3d`, `vulkan` and `ogl`, case-insensitive, tried in the order written; a tier left out
+is not tried, and if none of the listed tiers can be built the window falls back to its DIB. `cpu` has
+to stand alone - a list that names a tier is asking for acceleration, so a `cpu` entry beside one is
+ignored. Anything else is ignored too, including a repeated tier, which keeps its first place: the
+variable orders the real tiers rather than validating a config file, and one stray word should not
+throw the rest away. A value with nothing recognizable in it leaves the default order in place.
+
+The diagnostic line names every tier that was tried, in the order they were tried, so the effect of the
+variable is visible in `gfx:`:
+
+```
+gfx: cpu (d3d12: no hardware adapter; no vulkan loader; gdi: no wgl context (error 2000))
+gfx: cpu (KOLVIR_GL_OPTIONS=cpu)
+```
+
+`KOLVIR_NO_D3D12` and `KOLVIR_NO_VULKAN` still apply: they are hard offs for one tier, whereas
+`KOLVIR_GL_OPTIONS` chooses the order of the ones that remain.
 
 The tier refuses a software adapter. WARP answers every call and then rasterizes on the CPU, which is
 slower than the DIB path the tier exists to beat, and the Basic Render Driver that a machine with no

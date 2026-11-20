@@ -83,6 +83,7 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             gl,
@@ -94,10 +95,10 @@ public sealed class Win32VulkanTierTests
 
         Assert.IsNull(surface, "neither tier produces a surface without a driver");
         CollectionAssert.AreEqual(
-            new[] { "vulkan", "d3d12", "gl" },
+            new[] { "d3d12", "vulkan", "gl" },
             order,
             "GL is only asked once the two swap chain tiers have refused");
-        Assert.AreEqual("cpu (vkCreateInstance failed (-9); d3d12: no hardware adapter; no wgl context (error 0))", reason);
+        Assert.AreEqual("cpu (d3d12: no hardware adapter; vkCreateInstance failed (-9); no wgl context (error 0))", reason);
     }
 
     [TestMethod]
@@ -108,6 +109,7 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: false,
             new IntPtr(1),
             gl,
@@ -131,6 +133,7 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             IntPtr.Zero,
             gl,
@@ -154,6 +157,7 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             gl,
@@ -177,6 +181,7 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order) { FlavorFailure = "gdi: no wgl context (error 0)" };
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             gl,
@@ -187,6 +192,6 @@ public sealed class Win32VulkanTierTests
             out var reason);
 
         Assert.IsNull(surface);
-        Assert.AreEqual("cpu (no vulkan loader; d3d12: no hardware adapter; gdi: no wgl context (error 0))", reason);
+        Assert.AreEqual("cpu (d3d12: no hardware adapter; no vulkan loader; gdi: no wgl context (error 0))", reason);
     }
 }

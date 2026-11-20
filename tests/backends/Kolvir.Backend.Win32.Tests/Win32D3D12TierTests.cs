@@ -67,12 +67,13 @@ public sealed class Win32D3D12TierTests
     }
 
     [TestMethod]
-    public void D3d12IsAskedAfterVulkanAndBeforeGl()
+    public void D3d12IsAskedFirstByDefault()
     {
         List<string> order = [];
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             gl,
@@ -86,8 +87,8 @@ public sealed class Win32D3D12TierTests
         CollectionAssert.AreEqual(
             new[] { "d3d12", "gl" },
             order,
-            "Direct3D 12 is asked before GL, and GL only once it has refused");
-        Assert.AreEqual("cpu (no vulkan loader; d3d12: no hardware adapter; no wgl context (error 0))", reason);
+            "Direct3D 12 leads the default order, and GL is asked once the swap chain tiers have refused");
+        Assert.AreEqual("cpu (d3d12: no hardware adapter; no vulkan loader; no wgl context (error 0))", reason);
     }
 
     [TestMethod]
@@ -97,6 +98,7 @@ public sealed class Win32D3D12TierTests
         var d3d12 = new RecordingD3D12Probe(order) { Failure = "d3d12: no device (0x887A0004)" };
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             new RecordingGlProbe(order),
