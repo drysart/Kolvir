@@ -15,12 +15,11 @@ namespace Kolvir.Observables;
 /// <see cref="IReadOnlyObservableList{T}"/>, so the class itself is not part of the contract.
 /// </para>
 /// <para>
-/// Three pieces of state beyond the items. <see cref="_pending"/> holds records that have not been
+/// Two pieces of state beyond the items. <see cref="_pending"/> holds records that have not been
 /// delivered: the open batch's, or a handler-caused change waiting for the delivery that is running to
 /// finish. <see cref="_isDelivering"/> says a delivery is in progress, which is what makes a change
-/// from inside a handler queue rather than nest. The count of deliveries in the drain is the loop
-/// guard, and it is a local of the drain rather than a field because a drain cannot nest - there is
-/// only ever one in flight (dev-docs/OBSERVABLE-COLLECTIONS.md section 3.7).
+/// from inside a handler queue rather than nest - and that queue is what keeps the chain flat, which is
+/// why nothing here needs a depth limit (dev-docs/OBSERVABLE-COLLECTIONS.md section 3.7).
 /// </para>
 /// <para>
 /// The storage is a <see cref="List{T}"/>, so its enumerator is the version-checked one: mutating during
@@ -358,9 +357,20 @@ internal sealed class ObservableList<T> : IObservableList<T>
 
     /// <summary>Delivers what is pending, one event at a time, until nothing is left.</summary>
     /// <remarks>
+    /// <para>
     /// A loop rather than a recursion, so a handler that changes the list costs a queue entry and not a
     /// stack frame. A drain started from inside a drain returns immediately and leaves the work to the
     /// one already running, which is what preserves the order.
+    /// </para>
+    /// <para>
+    /// Nothing here is bounded, and it should not be: a flat loop cannot exhaust the stack, so
+    /// <see cref="Observable.MaxEventStackSize"/> - a guard against a stack overflow - has nothing to
+    /// say about it. A handler that changes the list it is hearing about is doing real work every time
+    /// round, and a chain of them ends when the handler stops changing things, which is the handler's
+    /// business and not this loop's. A handler that never stops is an ordinary infinite loop in
+    /// application code, the kind <c>while (true)</c> is, and inventing a work limit here would only
+    /// turn it into an exception that discards changes an observer was promised.
+    /// </para>
     /// </remarks>
     private void Drain()
     {
@@ -371,26 +381,10 @@ internal sealed class ObservableList<T> : IObservableList<T>
 
         _isDelivering = true;
 
-        // Generation zero is the change that started this drain. Each event a handler causes is one
-        // deeper, so a chain that reaches the limit is a loop rather than a cascade: the counter is
-        // per drain and not per event, because a delivery's own frames are behind it by the time it
-        // runs - the queue is what keeps them from nesting (section 3.3).
-        var generations = 0;
-
         try
         {
             while (_pending.Count > 0)
             {
-                if (generations >= Observable.MaxEventStackSize)
-                {
-                    // The chain is abandoned rather than delivered: what is still pending is one more
-                    // step of a loop, and delivering it after the refusal would hand observers records
-                    // from a chain that was declared broken.
-                    _pending.Clear();
-                    throw Overflowed();
-                }
-
-                generations++;
                 Deliver();
             }
         }
@@ -435,13 +429,6 @@ internal sealed class ObservableList<T> : IObservableList<T>
         _dependencies.Raise();
     }
 
-    private InvalidOperationException Overflowed() =>
-        new($"A list change nested past Observable.MaxEventStackSize ({Observable.MaxEventStackSize}) "
-            + $"generations, at {this}. A change made from inside a handler is delivered after the event "
-            + "that handler is hearing, so a chain that keeps growing is a loop: a handler that changes "
-            + "the list it was told about, one item for every item. The rest of the chain is abandoned "
-            + "rather than delivered - fix the handler, or raise MaxEventStackSize if that depth is "
-            + "legitimate.");
 
     private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_isDisposed, this);
 

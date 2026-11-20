@@ -128,48 +128,59 @@ public sealed class ObservableListDeliveryTests
     }
 
     [TestMethod]
-    public void ALoopIsRefusedAtMaxEventStackSizeGenerations()
+    public void ABatchOfManyRecordsIsOneEvent()
     {
-        var previous = Observable.MaxEventStackSize;
-        Observable.MaxEventStackSize = 5;
+        // A batch is one notification however much it collected: the records are the payload, not the
+        // notifications, and nothing counts them against a limit meant for stack depth.
+        using var list = Observable.CreateList<int>();
+        var sizes = new List<int>();
 
-        try
+        list.AddObservableListChangedHandler(args => sizes.Add(args.Changes.Count));
+
+        list.BeginChangeBatch();
+
+        for (var index = 0; index < 1000; index++)
         {
-            using var list = Observable.CreateList<int>();
-
-            // One item for every item: each delivery causes the next, so the chain never ends.
-            list.AddObservableListChangedHandler(args =>
-            {
-                if (args.Changes.Count > 0
-                    && args.Changes[0].ChangeType == ObservableListChangeType.ItemAdded
-                    && args.Changes[0].NewItem < 100)
-                {
-                    list.Add(args.Changes[0].NewItem + 1);
-                }
-            });
-
-            var refused = Assert.ThrowsExactly<InvalidOperationException>(
-                () => list.Add(0),
-                "a loop is refused rather than delivered until the process runs out of something");
-
-            StringAssert.Contains(
-                refused.Message,
-                "MaxEventStackSize",
-                "and the message names the limit, which is the thing a caller can change");
-
-            Observable.MaxEventStackSize = 50;
-            var delivered = 0;
-            list.AddObservableListChangedHandler(_ => delivered++);
-            list.Add(101);
-
-            Assert.IsTrue(delivered > 0, "an ordinary change afterwards still delivers, so nothing was poisoned");
+            list.Add(index);
         }
-        finally
-        {
-            Observable.MaxEventStackSize = previous;
-        }
+
+        list.EndChangeBatch();
+
+        Assert.AreEqual(1, sizes.Count, "a thousand changes, one event");
+        Assert.AreEqual(1000, sizes[0], "carrying a thousand records");
+        Assert.AreEqual(1000, list.Count, "and every one of them applied");
     }
 
+    [TestMethod]
+    public void AChainOfHandlerCausedDeliveriesIsNotLimited()
+    {
+        // A handler that changes the list it is hearing about is doing real work every time round, and
+        // delivery is a queue, not a recursion - so the chain is flat and there is nothing to bound. Only
+        // the handler decides when it stops, and a handler-induced chain deeper than MaxEventStackSize is
+        // ordinary: fifty is a stack-depth figure, not a work budget.
+        using var list = Observable.CreateList(0);
+
+        list.AddObservableListChangedHandler(args =>
+        {
+            // The disposal event carries no records and arrives after the list is dead, so a handler
+            // that reads the list checks first - the same rule every handler in these tests follows.
+            if (args.Changes.Count == 0)
+            {
+                return;
+            }
+
+            var value = list[0];
+
+            if (value < 200)
+            {
+                list[0] = value + 1;
+            }
+        });
+
+        list[0] = 1;
+
+        Assert.AreEqual(200, list[0], "two hundred deliveries in one drain, none of them refused");
+    }
     [TestMethod]
     public void DisposalDeliversOneEmptyEventAndThenThrows()
     {
