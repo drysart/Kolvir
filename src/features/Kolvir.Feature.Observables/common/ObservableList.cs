@@ -1,12 +1,10 @@
 using System.Collections;
-using System.Collections.Immutable;
-using System.Runtime.InteropServices;
 
 namespace Kolvir.Observables;
 
 /// <summary>
-/// The one implementation of an observable list: storage, a handler list, the records in flight and a
-/// dead flag.
+/// The one implementation of an observable list: storage, and the batch that carries its records to the
+/// handlers.
 /// </summary>
 /// <typeparam name="T">The type of the items.</typeparam>
 /// <remarks>
@@ -15,11 +13,11 @@ namespace Kolvir.Observables;
 /// <see cref="IReadOnlyObservableList{T}"/>, so the class itself is not part of the contract.
 /// </para>
 /// <para>
-/// Two pieces of state beyond the items. <see cref="_pending"/> holds records that have not been
-/// delivered: the open batch's, or a handler-caused change waiting for the delivery that is running to
-/// finish. <see cref="_isDelivering"/> says a delivery is in progress, which is what makes a change
-/// from inside a handler queue rather than nest - and that queue is what keeps the chain flat, which is
-/// why nothing here needs a depth limit (dev-docs/OBSERVABLE-COLLECTIONS.md section 3.7).
+/// Everything about how a change reaches a handler - the queue, the batches, the cap, disposal - is
+/// <see cref="ObservableChangeBatch{TChange, TArgs}"/>, and everything about what a read depends on is
+/// <see cref="ObservableListDependencies{T}"/>. What is left here is what a list is: the items, the
+/// comparer that decides whether a write changed one, and the record each mutation raises
+/// (dev-docs/OBSERVABLE-COLLECTIONS.md sections 3.4 and 5).
 /// </para>
 /// <para>
 /// The storage is a <see cref="List{T}"/>, so its enumerator is the version-checked one: mutating during
@@ -27,21 +25,13 @@ namespace Kolvir.Observables;
 /// version of its own.
 /// </para>
 /// </remarks>
-internal sealed class ObservableList<T> : IObservableList<T>
+internal sealed class ObservableList<T>
+    : IObservableList<T>, IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>
 {
     private readonly List<T> _items;
     private readonly IEqualityComparer<T> _comparer;
     private readonly ObservableListDependencies<T> _dependencies = new();
-    private readonly List<ObservableListChange<T>> _pending = [];
-
-    private ImmutableArray<Action<ObservableListChangedEventArgs<T>>> _handlers = [];
-    private bool _isDisposed;
-    private bool _isDelivering;
-    private int _batchDepth;
-
-    // Copied from the default rather than read from it, so a list keeps the cap it was created with
-    // and one list's owner can tune its own observers without touching anybody else's.
-    private int _maxCollectionBatchSize = Observable.Default.MaxCollectionBatchSize;
+    private readonly ObservableChangeBatch<ObservableListChange<T>, ObservableListChangedEventArgs<T>> _batch;
 
     /// <summary>Creates an empty list.</summary>
     /// <param name="comparer">What decides that a write changed an item, or null for the type's own.</param>
@@ -57,10 +47,11 @@ internal sealed class ObservableList<T> : IObservableList<T>
     {
         _items = [.. items];
         _comparer = comparer ?? EqualityComparer<T>.Default;
+        _batch = new(this);
     }
 
     /// <inheritdoc/>
-    public bool IsDisposed => _isDisposed;
+    public bool IsDisposed => _batch.IsDisposed;
 
     /// <inheritdoc/>
     /// <remarks>
@@ -70,24 +61,13 @@ internal sealed class ObservableList<T> : IObservableList<T>
     public bool IsReadOnly => false;
 
     /// <inheritdoc/>
-    public int ChangeBatchDepth => _batchDepth;
+    public int ChangeBatchDepth => _batch.ChangeBatchDepth;
 
     /// <inheritdoc/>
-    /// <remarks>
-    /// Set it alongside the state it belongs to, before the first change, or per batch if a caller
-    /// knows what it is doing. It is checked when a record is appended and not when a batch begins, so
-    /// lowering it below a batch's current length turns that batch into an
-    /// <see cref="ObservableListChangeType.UntrackedChanges"/> one at the next change, and raising it
-    /// afterwards cannot recover records that were already dropped.
-    /// </remarks>
     public int MaxCollectionBatchSize
     {
-        get => _maxCollectionBatchSize;
-        set
-        {
-            ArgumentOutOfRangeException.ThrowIfNegativeOrZero(value);
-            _maxCollectionBatchSize = value;
-        }
+        get => _batch.MaxCollectionBatchSize;
+        set => _batch.MaxCollectionBatchSize = value;
     }
 
     /// <inheritdoc/>
@@ -133,7 +113,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
             }
 
             _items[index] = value;
-            Record(ObservableListChange<T>.Change(index, oldItem, value));
+            _batch.Record(ObservableListChange<T>.Change(index, oldItem, value));
         }
     }
 
@@ -143,7 +123,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
         ThrowIfDisposed();
 
         _items.Add(item);
-        Record(ObservableListChange<T>.Add(_items.Count - 1, item));
+        _batch.Record(ObservableListChange<T>.Add(_items.Count - 1, item));
     }
 
     /// <inheritdoc/>
@@ -154,7 +134,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
         ArgumentOutOfRangeException.ThrowIfGreaterThan(index, _items.Count);
 
         _items.Insert(index, item);
-        Record(ObservableListChange<T>.Add(index, item));
+        _batch.Record(ObservableListChange<T>.Add(index, item));
     }
 
     /// <inheritdoc/>
@@ -166,7 +146,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
         var item = _items[index];
 
         _items.RemoveAt(index);
-        Record(ObservableListChange<T>.Remove(index, item));
+        _batch.Record(ObservableListChange<T>.Remove(index, item));
     }
 
     /// <inheritdoc/>
@@ -188,7 +168,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
         var stored = _items[index];
 
         _items.RemoveAt(index);
-        Record(ObservableListChange<T>.Remove(index, stored));
+        _batch.Record(ObservableListChange<T>.Remove(index, stored));
         return true;
     }
 
@@ -205,7 +185,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
         }
 
         _items.Clear();
-        Record(ObservableListChange<T>.Clear());
+        _batch.Record(ObservableListChange<T>.Clear());
     }
 
     /// <inheritdoc/>
@@ -227,7 +207,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
         _items.RemoveAt(oldIndex);
         _items.Insert(newIndex, item);
 
-        Record(ObservableListChange<T>.Move(oldIndex, newIndex, item));
+        _batch.Record(ObservableListChange<T>.Move(oldIndex, newIndex, item));
     }
 
     /// <inheritdoc/>
@@ -279,7 +259,7 @@ internal sealed class ObservableList<T> : IObservableList<T>
     {
         ThrowIfDisposed();
 
-        _batchDepth++;
+        _batch.BeginChangeBatch();
     }
 
     /// <inheritdoc/>
@@ -287,30 +267,15 @@ internal sealed class ObservableList<T> : IObservableList<T>
     {
         ThrowIfDisposed();
 
-        if (_batchDepth == 0)
-        {
-            throw new InvalidOperationException(
-                "EndChangeBatch was called with no batch open. A batch is begun and ended by the same "
-                + "caller, in that order, and nesting is counted rather than ignored.");
-        }
-
-        _batchDepth--;
-
-        if (_batchDepth == 0 && _pending.Count > 0)
-        {
-            Drain();
-        }
+        _batch.EndChangeBatch();
     }
 
     /// <inheritdoc/>
     public IDisposable AddObservableListChangedHandler(Action<ObservableListChangedEventArgs<T>> handler)
     {
-        ThrowIfDisposed();
         ArgumentNullException.ThrowIfNull(handler);
 
-        // Copy-on-write, which is what makes a delivery a snapshot without copying it.
-        _handlers = _handlers.Add(handler);
-        return new HandlerRegistration<T>(this, handler);
+        return _batch.AddHandler(handler);
     }
 
     /// <inheritdoc/>
@@ -318,208 +283,50 @@ internal sealed class ObservableList<T> : IObservableList<T>
     {
         ArgumentNullException.ThrowIfNull(handler);
 
-        _handlers = _handlers.Remove(handler);
+        _batch.RemoveHandler(handler);
     }
 
-    /// <inheritdoc/>
-    /// <remarks>
-    /// Dead first, so a handler that reads the list here gets <see cref="ObjectDisposedException"/>
-    /// rather than a last state that will never change again; then the changes that had not been
-    /// delivered are dropped, because they describe a list nobody may read; then one last event with no
-    /// changes, which is how a registrant learns to let go; then the handler lists and the dependency
-    /// subscriptions are dropped, in a <c>finally</c>, because a leak is the one outcome this method
-    /// exists to prevent.
-    /// </remarks>
-    public void Dispose()
-    {
-        if (_isDisposed)
-        {
-            return;
-        }
-
-        _isDisposed = true;
-        _pending.Clear();
-        _batchDepth = 0;
-
-        try
-        {
-            var handlers = _handlers;
-
-            if (!handlers.IsEmpty)
-            {
-                var final = new ObservableListChangedEventArgs<T>(this, []);
-
-                // A dispatch like any other, and counted like one: it is reached from a handler often
-                // enough that it is one of the two ways a delivery nests.
-                using (Observable.EnterDelivery(this))
-                {
-                    foreach (var handler in handlers)
-                    {
-                        handler(final);
-                    }
-                }
-            }
-        }
-        finally
-        {
-            _handlers = [];
-            _dependencies.Release();
-        }
-    }
+    /// <summary>
+    /// Ends the list's life: pending records are dropped, one last empty event says so, and every
+    /// subscription is let go.
+    /// </summary>
+    public void Dispose() => _batch.Dispose();
 
     /// <summary>What this list is, for a diagnostic.</summary>
     public override string ToString() => $"an observable list of {typeof(T).Name}";
 
-    private void Record(in ObservableListChange<T> change)
-    {
-        // A pending event that has already given up on detail needs nothing appended to it: one
-        // UntrackedChanges record tells the observer to re-read the list, and it says that whatever came
-        // before it in this batch. That is what keeps a bulk load from growing this list without bound.
-        if (_pending.Count != 1 || _pending[0].ChangeType != ObservableListChangeType.UntrackedChanges)
-        {
-            _pending.Add(change);
+    /// <inheritdoc/>
+    int IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>.Size =>
+        _items.Count;
 
-            if (_pending.Count > _maxCollectionBatchSize)
-            {
-                _pending.Clear();
-                _pending.Add(ObservableListChange<T>.Untracked());
-            }
-        }
+    /// <inheritdoc/>
+    ObservableListChange<T> IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>.Untracked =>
+        ObservableListChange<T>.Untracked();
 
-        // Inside a batch the records wait for the outermost end; inside a delivery they wait for the
-        // event being delivered to finish, which is what keeps the observer's history in order.
-        if (_batchDepth == 0)
-        {
-            Drain();
-        }
-    }
+    /// <inheritdoc/>
+    bool IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>.IsUntracked(
+        in ObservableListChange<T> change) =>
+        change.ChangeType == ObservableListChangeType.UntrackedChanges;
 
-    /// <summary>Delivers what is pending, one event at a time, until nothing is left.</summary>
-    /// <remarks>
-    /// <para>
-    /// A loop rather than a recursion, so a handler that changes the list costs a queue entry and not a
-    /// stack frame. A drain started from inside a drain returns immediately and leaves the work to the
-    /// one already running, which is what preserves the order.
-    /// </para>
-    /// <para>
-    /// The loop itself is unbounded, and it should be: a handler that changes the list it is hearing
-    /// about costs a queue entry, not a frame, so a chain of them cannot exhaust the stack -
-    /// <see cref="Observable.MaxEventStackSize"/> has nothing to say about a loop that never descends.
-    /// Such a handler is doing real work every time round and ends when it stops changing things; one
-    /// that never stops is an ordinary infinite loop in application code, the kind <c>while (true)</c>
-    /// is, and a work limit here would only turn it into an exception that discards changes an observer
-    /// was promised.
-    /// </para>
-    /// <para>
-    /// The dispatch each iteration makes is a different matter, and it is counted - see
-    /// <see cref="Deliver"/>, because a delivery can be re-entered even when a change to this list
-    /// cannot.
-    /// </para>
-    /// </remarks>
-    private void Drain()
-    {
-        if (_isDelivering || _pending.Count == 0)
-        {
-            return;
-        }
+    /// <inheritdoc/>
+    ObservableListChangedEventArgs<T>
+        IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>.CreateArgs(
+            IReadOnlyList<ObservableListChange<T>> changes) =>
+        new(this, changes);
 
-        _isDelivering = true;
+    /// <inheritdoc/>
+    void IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>.Mark(
+        IReadOnlyList<ObservableListChange<T>> changes,
+        int size) =>
+        _dependencies.Mark(changes, size);
 
-        try
-        {
-            while (_pending.Count > 0)
-            {
-                Deliver();
-            }
-        }
-        finally
-        {
-            _isDelivering = false;
-        }
-    }
-
-    private void Deliver()
-    {
-        var handlers = _handlers;
-
-        // Taken before any handler runs: it is the size the records being delivered left behind, and a
-        // handler's own change belongs to the next event, so counting it here would put the wrong bound
-        // on an index read.
-        var count = _items.Count;
-
-        if (handlers.IsEmpty)
-        {
-            // Nobody to tell, but the dependencies still have to know: a render that reads this list is
-            // watching one of them and not the event.
-            _dependencies.Mark(CollectionsMarshal.AsSpan(_pending), count);
-            _pending.Clear();
-            _dependencies.Raise();
-            return;
-        }
-
-        var records = _pending.ToArray();
-        _pending.Clear();
-
-        var args = new ObservableListChangedEventArgs<T>(this, records);
-
-        // The handlers first, then the reads they invalidated: a handler is the listener this change is
-        // being reported to, and a dependency raise is the consequence of it.
-        //
-        // Counted against the evaluation depth, because this dispatch can be re-entered even though a
-        // change to *this* list is queued: a handler that disposes a list raises that list's final
-        // event inside this frame, and one that changes a different list starts that list's drain
-        // here. Those nest, so they are stack, and a chain of them is what the guard is for.
-        using (Observable.EnterDelivery(this))
-        {
-            foreach (var handler in handlers)
-            {
-                handler(args);
-            }
-        }
-
-        _dependencies.Mark(records, count);
+    /// <inheritdoc/>
+    void IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>.RaiseDependencies() =>
         _dependencies.Raise();
-    }
 
+    /// <inheritdoc/>
+    void IObservableChangeTarget<ObservableListChange<T>, ObservableListChangedEventArgs<T>>.ReleaseDependencies() =>
+        _dependencies.Release();
 
-    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_isDisposed, this);
-
-    /// <summary>The token that unregisters one typed handler, and nothing else.</summary>
-    /// <typeparam name="TItem">The type of the list's items.</typeparam>
-    /// <remarks>
-    /// A second token type because <see cref="HandlerRegistration"/> is for an
-    /// <see cref="IObservableEventSource"/>, which a list is not (section 3.8). It behaves the same
-    /// way: it releases both references on the first dispose, so a token that outlives its list holds
-    /// neither, and it stays safe to dispose after the list.
-    /// </remarks>
-    private sealed class HandlerRegistration<TItem> : IDisposable
-    {
-        private IReadOnlyObservableList<TItem>? _list;
-        private Action<ObservableListChangedEventArgs<TItem>>? _handler;
-
-        internal HandlerRegistration(
-            IReadOnlyObservableList<TItem> list,
-            Action<ObservableListChangedEventArgs<TItem>> handler)
-        {
-            _list = list;
-            _handler = handler;
-        }
-
-        /// <inheritdoc/>
-        public void Dispose()
-        {
-            var list = _list;
-            var handler = _handler;
-
-            if (list is null || handler is null)
-            {
-                return;
-            }
-
-            _list = null;
-            _handler = null;
-
-            list.RemoveObservableListChangedHandler(handler);
-        }
-    }
+    private void ThrowIfDisposed() => ObjectDisposedException.ThrowIf(_batch.IsDisposed, this);
 }
