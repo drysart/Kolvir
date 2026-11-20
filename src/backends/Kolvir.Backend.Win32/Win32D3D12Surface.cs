@@ -548,10 +548,18 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         double presents = _statsPresents * 1000.0 / window;
         double count = Math.Max(1, _statsPresents);
 
+        // Waited for on the GPU once a second, because every other figure here is the CPU's side of
+        // the frame: Skia submits asynchronously, so a window whose GPU work takes longer than the
+        // display's refresh looks free from the CPU while its frames arrive late. This is the number
+        // that says whether the tier is waiting for the display or for the card.
+        long gpuStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        _skia?.Submit(synchronous: true);
+        double gpu = Milliseconds(System.Diagnostics.Stopwatch.GetTimestamp() - gpuStarted);
+
         Win32GlTrace.Write(
             string.Create(
                 System.Globalization.CultureInfo.InvariantCulture,
-                $"d3d12 {presents:F1} presents/s  draw {Milliseconds(_statsDraw) / count:F2}/{Milliseconds(_statsWorstDraw):F2}ms  present {Milliseconds(_statsPresent) / count:F2}/{Milliseconds(_statsWorstPresent):F2}ms  buffers {_bufferCount}{(_frameLatency == IntPtr.Zero ? ", unpaced" : string.Empty)}"));
+                $"d3d12 {presents:F1} presents/s  draw {Milliseconds(_statsDraw) / count:F2}/{Milliseconds(_statsWorstDraw):F2}ms  present {Milliseconds(_statsPresent) / count:F2}/{Milliseconds(_statsWorstPresent):F2}ms  gpu {gpu:F2}ms  buffers {_bufferCount}{(_frameLatency == IntPtr.Zero ? ", unpaced" : string.Empty)}"));
 
         _statsStarted = now;
         _statsPresents = 0;
