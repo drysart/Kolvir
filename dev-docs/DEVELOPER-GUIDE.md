@@ -5538,7 +5538,10 @@ The cache lines report what Skia holds and what it may hold; the memory lines ar
 use of the adapter's local segment, taken through `IDXGIAdapter3::QueryVideoMemoryInfo` once the
 surface exists and again once a frame has been presented, so the difference between them is what the
 first submission costs - 32 MiB even on a machine with no GPU at all, which is Skia's upload buffer
-and command allocators rather than the window's surfaces. The adapter is queried for `IDXGIAdapter3`
+and command allocators rather than the window's surfaces. The lines repeat every sixty frames, so a
+figure that climbs is a leak and a figure that settles is the cost of the backend: two hundred and
+forty frames of a software adapter hold at 32 MiB from the first one, which is how the warm-up was
+told apart from a leak on real hardware. The adapter is queried for `IDXGIAdapter3`
 rather than assumed to be one, and the query is `(node, segment, out info)`: called one entry early it
 answers `S_OK` and writes nothing, which reads exactly like a discrete GPU reporting no memory. Task manager's dedicated
 figure is larger than that number because it adds the driver's and the compositor's own allocations to

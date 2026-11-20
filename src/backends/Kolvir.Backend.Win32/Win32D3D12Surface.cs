@@ -328,6 +328,10 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
     private SKSurface? _retained;
     private bool _needsFull = true;
     private bool _memoryTraced;
+    private int _frames;
+
+    /// <summary>How often the trace repeats the memory figures, in frames.</summary>
+    private const int TraceFrameInterval = 60;
 
     public SKSurface? Surface => _retained;
 
@@ -639,11 +643,20 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         // general success case rather than being left to the catch-all.
         if (result == StatusOccluded || result >= 0)
         {
+            _frames++;
+
             if (!_memoryTraced)
             {
                 _memoryTraced = true;
                 TraceCache("after the first frame");
                 TraceVideoMemory("after the first frame");
+            }
+            else if (_frames % TraceFrameInterval == 0)
+            {
+                // A figure that keeps climbing is a leak and a figure that settles is the cost of the
+                // backend, so the trace is repeated slowly for as long as the window runs.
+                TraceCache($"after {_frames} frames");
+                TraceVideoMemory($"after {_frames} frames");
             }
 
             return Win32PresentResult.Presented;
