@@ -49,7 +49,9 @@ internal sealed class ApplicationScene : IDisposable
     /// <remarks>
     /// The frame is the moment deferred work happens, so a test draws one between changing state and
     /// asserting. One host is enough because the application queue is process-wide; painting every
-    /// window would only repeat an empty drain.
+    /// window would only repeat an empty drain. The headless backend has no message loop, so the
+    /// turn that follows the frame - where a close asked for during the paint completes - is drained
+    /// explicitly rather than left for a pump that never runs.
     /// </remarks>
     public void Frame()
     {
@@ -61,6 +63,11 @@ internal sealed class ApplicationScene : IDisposable
             Math.Max(1, (int)MathF.Round(window.ClientSize.Height))));
 
         window.Host.Paint(surface.Canvas);
+
+        if (_application.Backend is HeadlessApplicationBackend backend)
+        {
+            backend.DrainPending();
+        }
     }
 
     /// <summary>Finds the open window whose title is <paramref name="title"/>.</summary>

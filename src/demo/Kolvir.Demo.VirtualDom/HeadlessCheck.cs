@@ -120,6 +120,14 @@ internal static class HeadlessCheck
             Math.Max(1, (int)MathF.Round(window.ClientSize.Height))));
 
         window.Host.Paint(surface.Canvas);
+
+        // A close the frame asked for is deferred until no paint is in progress. The headless
+        // backend has no message loop to turn, so the harness turns it explicitly: this is the
+        // turn that would follow the frame on a desktop.
+        if (window.Application.Backend is HeadlessApplicationBackend backend)
+        {
+            backend.DrainPending();
+        }
     }
 
     private static void Check(bool condition, string message)
