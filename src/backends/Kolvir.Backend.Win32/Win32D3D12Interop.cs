@@ -46,6 +46,12 @@ internal static unsafe class D3D12
     /// <summary><c>DXGI_SCALING_STRETCH</c>: the window's client area is already the size DXGI is asked for.</summary>
     internal const int ScalingStretch = 0;
 
+    /// <summary>
+    /// <c>DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT</c>: the chain hands out a handle that is
+    /// signalled when it can take another frame, which is what paces the window to the display.
+    /// </summary>
+    internal const uint SwapChainFlagFrameLatencyWaitable = 0x100;
+
     /// <summary><c>DXGI_SWAP_EFFECT_FLIP_DISCARD</c>: what makes the resize path release its buffers.</summary>
     internal const int SwapEffectFlipDiscard = 4;
 
@@ -89,6 +95,8 @@ internal static unsafe class D3D12
     private const int SlotSwapChainGetBuffer = 9;
     private const int SlotSwapChainResizeBuffers = 13;
     private const int SlotSwapChain3GetCurrentBackBufferIndex = 36;
+    private const int SlotSwapChain2SetMaximumFrameLatency = 31;
+    private const int SlotSwapChain2GetFrameLatencyWaitableObject = 33;
 
     private static readonly IntPtr D3D12Library = LoadLibrary("d3d12.dll");
     private static readonly IntPtr DxgiLibrary = LoadLibrary("dxgi.dll");
@@ -349,6 +357,7 @@ internal static unsafe class D3D12
     /// <param name="height">The client height in pixels.</param>
     /// <param name="swapEffect">The <c>DXGI_SWAP_EFFECT</c> to ask for.</param>
     /// <param name="bufferCount">How many back buffers to ask for.</param>
+    /// <param name="flags">The <c>DXGI_SWAP_CHAIN_FLAG</c> values to ask for.</param>
     /// <param name="result">The <c>HRESULT</c>.</param>
     /// <returns>The swap chain, or zero.</returns>
     internal static IntPtr CreateSwapChainForHwnd(
@@ -359,6 +368,7 @@ internal static unsafe class D3D12
         int height,
         int swapEffect,
         uint bufferCount,
+        uint flags,
         out int result)
     {
         var create = (delegate* unmanaged[Stdcall]<IntPtr, IntPtr, IntPtr, DxgiSwapChainDesc1*, IntPtr, IntPtr, IntPtr*, int>)(*(IntPtr**)factory)[SlotFactory2CreateSwapChainForHwnd];
@@ -374,7 +384,7 @@ internal static unsafe class D3D12
             Scaling = ScalingStretch,
             SwapEffect = swapEffect,
             AlphaMode = AlphaModeIgnore,
-            Flags = 0,
+            Flags = flags,
         };
 
         IntPtr created = IntPtr.Zero;
@@ -433,6 +443,25 @@ internal static unsafe class D3D12
     /// <summary>Presents the current buffer, waiting for the display.</summary>
     internal static int Present(IntPtr swapChain) =>
         ((delegate* unmanaged[Stdcall]<IntPtr, uint, uint, int>)(*(IntPtr**)swapChain)[SlotSwapChainPresent])(swapChain, 1, 0);
+
+    /// <summary>
+    /// Caps how many frames the chain may have queued. Left alone, a window that repaints on every
+    /// mouse move runs several frames ahead of the display and the picture it shows is the oldest of
+    /// them - which is felt as the drag lagging behind the pointer.
+    /// </summary>
+    /// <param name="swapChain">The swap chain.</param>
+    /// <param name="latency">The number of frames, which is 1 for a window that follows input.</param>
+    /// <returns>The <c>HRESULT</c>.</returns>
+    internal static int SetMaximumFrameLatency(IntPtr swapChain, uint latency) =>
+        ((delegate* unmanaged[Stdcall]<IntPtr, uint, int>)(*(IntPtr**)swapChain)[SlotSwapChain2SetMaximumFrameLatency])(swapChain, latency);
+
+    /// <summary>
+    /// The handle a flip chain signals when it can take another frame. Only a chain created with
+    /// <see cref="SwapChainFlagFrameLatencyWaitable"/> has one.
+    /// </summary>
+    /// <returns>The waitable handle, or zero.</returns>
+    internal static IntPtr GetFrameLatencyWaitableObject(IntPtr swapChain) =>
+        ((delegate* unmanaged[Stdcall]<IntPtr, IntPtr>)(*(IntPtr**)swapChain)[SlotSwapChain2GetFrameLatencyWaitableObject])(swapChain);
 
     /// <summary><c>IID_IDXGIAdapter3</c>: the interface the memory query is answered on.</summary>
     internal static readonly Guid Adapter3Interface = new("645967A4-1392-4310-A798-8053CE3E93FD");

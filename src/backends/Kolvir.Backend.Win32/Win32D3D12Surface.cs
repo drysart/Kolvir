@@ -305,12 +305,13 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
 /// </remarks>
 internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 {
-    private Win32D3D12Surface(Win32D3D12Device device, IntPtr factory, IntPtr swapChain, uint bufferCount, int width, int height)
+    private Win32D3D12Surface(Win32D3D12Device device, IntPtr factory, IntPtr swapChain, uint bufferCount, IntPtr frameLatency, int width, int height)
     {
         _device = device;
         _factory = factory;
         _swapChain = swapChain;
         _bufferCount = bufferCount;
+        _frameLatency = frameLatency;
         _width = width;
         _height = height;
     }
@@ -320,6 +321,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
     private readonly Win32D3D12Device _device;
     private readonly uint _bufferCount;
+    private readonly IntPtr _frameLatency;
     private IntPtr _factory;
     private IntPtr _swapChain;
     private int _width;
@@ -381,13 +383,13 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return null;
         }
 
-        if (!CreateSwapChain(device, hwnd, width, height, out var factory, out var swapChain, out var bufferCount, out failure))
+        if (!CreateSwapChain(device, hwnd, width, height, out var factory, out var swapChain, out var bufferCount, out var frameLatency, out failure))
         {
             device.Dispose();
             return null;
         }
 
-        var surface = new Win32D3D12Surface(device, factory, swapChain, bufferCount, width, height);
+        var surface = new Win32D3D12Surface(device, factory, swapChain, bufferCount, frameLatency, width, height);
 
         surface._skia = GRContext.CreateDirect3D(new GRD3DBackendContext
         {
@@ -436,10 +438,12 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         out IntPtr factory,
         out IntPtr swapChain,
         out uint bufferCount,
+        out IntPtr frameLatency,
         out string failure)
     {
         swapChain = IntPtr.Zero;
         bufferCount = 0;
+        frameLatency = IntPtr.Zero;
         factory = CreateFactory1(out var factoryResult);
 
         if (factory == IntPtr.Zero)
@@ -469,24 +473,38 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
         List<string> refusals = [];
 
-        foreach (var (effect, buffers, name) in ladder)
+        // The waitable object is asked for first because it is what lets the window pace itself to the
+        // display, and a chain that cannot be made with it is still a usable chain, just a laggier one.
+        foreach (uint flags in (ReadOnlySpan<uint>)[SwapChainFlagFrameLatencyWaitable, 0])
         {
-            int result = 0;
-            swapChain = CreateSwapChainForHwnd(factory, device.Queue, hwnd, width, height, effect, buffers, out result);
-
-            if (swapChain != IntPtr.Zero)
+            foreach (var (effect, buffers, name) in ladder)
             {
-                bufferCount = buffers;
-                if (refusals.Count > 0 && Win32GlTrace.IsEnabled)
+                int result = 0;
+                swapChain = CreateSwapChainForHwnd(factory, device.Queue, hwnd, width, height, effect, buffers, flags, out result);
+
+                if (swapChain != IntPtr.Zero)
                 {
-                    Win32GlTrace.Write($"kolvir-d3d12: swap chain: {name} (after {string.Join(", ", refusals)})");
+                    bufferCount = buffers;
+                    bool paced = flags != 0;
+
+                    if (paced)
+                    {
+                        SetMaximumFrameLatency(swapChain, 1);
+                        frameLatency = GetFrameLatencyWaitableObject(swapChain);
+                        paced = frameLatency != IntPtr.Zero;
+                    }
+
+                    if (refusals.Count > 0 && Win32GlTrace.IsEnabled)
+                    {
+                        Win32GlTrace.Write($"kolvir-d3d12: swap chain: {name} (after {string.Join(", ", refusals)})");
+                    }
+
+                    failure = string.Empty;
+                    return true;
                 }
 
-                failure = string.Empty;
-                return true;
+                refusals.Add($"{name}{(flags == 0 ? ", unflagged" : string.Empty)} 0x{result:X8}");
             }
-
-            refusals.Add($"{name} 0x{result:X8}");
         }
 
         // Naming the adapter matters: a flip-model swap chain cannot cross adapters, and the name says
@@ -533,7 +551,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         Win32GlTrace.Write(
             string.Create(
                 System.Globalization.CultureInfo.InvariantCulture,
-                $"d3d12 {presents:F1} presents/s  draw {Milliseconds(_statsDraw) / count:F2}/{Milliseconds(_statsWorstDraw):F2}ms  present {Milliseconds(_statsPresent) / count:F2}/{Milliseconds(_statsWorstPresent):F2}ms  buffers {_bufferCount}"));
+                $"d3d12 {presents:F1} presents/s  draw {Milliseconds(_statsDraw) / count:F2}/{Milliseconds(_statsWorstDraw):F2}ms  present {Milliseconds(_statsPresent) / count:F2}/{Milliseconds(_statsWorstPresent):F2}ms  buffers {_bufferCount}{(_frameLatency == IntPtr.Zero ? ", unpaced" : string.Empty)}"));
 
         _statsStarted = now;
         _statsPresents = 0;
@@ -650,6 +668,16 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return Win32PresentResult.RetryDirect;
         }
 
+        // The chain signals this handle when it can take another frame. Waiting here is what stops the
+        // window running ahead of the display: without it a repaint on every mouse move queues frames
+        // faster than they are shown, and the picture on screen is the oldest of them rather than the
+        // newest. A timeout is not a failure - a minimised or occluded window may never signal - so the
+        // frame is drawn anyway and the present decides what happens next.
+        if (_frameLatency != IntPtr.Zero)
+        {
+            NativeMethods.WaitForSingleObject(_frameLatency, 1000);
+        }
+
         int index = GetCurrentBackBufferIndex(_swapChain);
         IntPtr resource = GetBuffer(_swapChain, index);
 
@@ -740,6 +768,12 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         _skia?.Submit(synchronous: true);
         _skia?.Dispose();
         _skia = null;
+        // The handle belongs to the caller, so it is closed here rather than left to the chain.
+        if (_frameLatency != IntPtr.Zero)
+        {
+            NativeMethods.CloseHandle(_frameLatency);
+        }
+
         Release(ref _swapChain);
         Release(ref _factory);
         _device.Dispose();
