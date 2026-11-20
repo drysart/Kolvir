@@ -405,13 +405,10 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return null;
         }
 
-        // Skia hands a Direct3D context a 256 MiB resource cache by default, and that cache is where
-        // the frame's upload buffers and the wrappers for the back buffers live, so it decides how
-        // much dedicated memory the tier costs. A window composites one image a frame: six full-size
-        // surfaces, with a 96 MiB floor - enough for the retained surface and three chain buffers
-        // without leaving the cache so tight that it evicts what the next frame needs.
-        long surfaceBytes = (long)width * height * 4;
-        surface._skia.SetResourceCacheLimit(Math.Max(96L * 1024 * 1024, surfaceBytes * 6));
+        // Skia gives a Direct3D context a 256 MiB resource cache and the tier leaves it there. Capping
+        // it looked like a memory saving and was not: four full-size surfaces are live before a single
+        // glyph atlas, so a tight limit evicts what the next frame needs and pays a re-upload per
+        // frame. The Vulkan tier keeps the default, which is also what makes the two comparable.
 
         if (!surface.CreateRetained())
         {
@@ -737,7 +734,10 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             {
                 if (snapshot is not null)
                 {
-                    frame.Canvas.DrawImage(snapshot, 0f, 0f, new SKSamplingOptions(SKFilterMode.Nearest), null);
+                    // Src, not the default SrcOver: the image covers the back buffer and is opaque, so
+                    // blending would only make the card read the destination for every pixel.
+                    using var paint = new SKPaint { BlendMode = SKBlendMode.Src };
+                    frame.Canvas.DrawImage(snapshot, 0f, 0f, new SKSamplingOptions(SKFilterMode.Nearest), paint);
                 }
             }
 
