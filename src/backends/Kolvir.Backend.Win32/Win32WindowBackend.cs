@@ -2779,6 +2779,7 @@ public sealed class Win32WindowBackend : IWindowBackend
                 _hwnd,
                 Win32GlProbe.Instance,
                 Win32VulkanProbe.Instance,
+                Win32D3D12Probe.Instance,
                 width,
                 height,
                 out var reason);

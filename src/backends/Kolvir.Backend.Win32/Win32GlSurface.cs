@@ -1097,18 +1097,37 @@ internal static class Win32Gfx
         };
 
     /// <summary>
-    /// Picks the best tier the machine will give, which is Vulkan first and GL after it.
+    /// Set <c>KOLVIR_NO_D3D12</c> to keep the window off the Direct3D 12 tier, for comparing it
+    /// against the others on one machine. It takes the same spellings as <c>KOLVIR_NO_VULKAN</c>, and
+    /// is read once for the same reason: a run cannot change its mind halfway through a window.
+    /// </summary>
+    private static readonly bool Win32D3D12Disabled = ResolveD3D12Disabled();
+
+    private static bool ResolveD3D12Disabled() =>
+        Environment.GetEnvironmentVariable("KOLVIR_NO_D3D12")?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "0" or "false" or "no" or "off" => false,
+            _ => true,
+        };
+
+    /// <summary>
+    /// Picks the best tier the machine will give, which is Vulkan first, Direct3D 12 after it, and GL
+    /// after that.
     /// </summary>
     /// <remarks>
-    /// Vulkan leads because its resize path is the one that releases: the swap chain is destroyed and
-    /// rebuilt, so a window that changes size does not accumulate a drawable per size the way a WGL
-    /// window does on some drivers. GL follows because it is what the backend had, and the window
-    /// still falls back to its DIB when neither can be built.
+    /// The two leading tiers lead for the same reason: their resize path releases, so a window that
+    /// changes size does not accumulate a drawable per size the way a WGL window does on some drivers.
+    /// Vulkan holds the top place because it is what shipped first and is therefore the path with the
+    /// most exposure; Direct3D 12 sits behind it because it needs no Vulkan ICD of its own, which is
+    /// the gap this tier was added to close. GL follows because it is what the backend had, and the
+    /// window still falls back to its DIB when none of the three can be built.
     /// </remarks>
     /// <param name="hardwareAcceleration">The application option, read once when the window exists.</param>
     /// <param name="hwnd">The window's native handle.</param>
     /// <param name="glProbe">The GL context probe; the production one is <see cref="Win32GlProbe"/>.</param>
     /// <param name="vulkanProbe">The Vulkan device probe; the production one is <see cref="Win32VulkanProbe"/>.</param>
+    /// <param name="d3d12Probe">The Direct3D 12 device probe; the production one is
+    /// <see cref="Win32D3D12Probe"/>.</param>
     /// <param name="width">The framebuffer width in physical pixels.</param>
     /// <param name="height">The framebuffer height in physical pixels.</param>
     /// <param name="reason">A one-line diagnostic naming the path taken.</param>
@@ -1117,6 +1136,7 @@ internal static class Win32Gfx
         IntPtr hwnd,
         IWin32GlProbe glProbe,
         IWin32VulkanProbe vulkanProbe,
+        IWin32D3D12Probe d3d12Probe,
         int width,
         int height,
         out string reason)
@@ -1151,6 +1171,17 @@ internal static class Win32Gfx
             return vulkan;
         }
 
+        var d3d12Reason = "d3d12: disabled by KOLVIR_NO_D3D12";
+        var d3d12 = Win32D3D12Disabled
+            ? null
+            : Win32D3D12Surface.TryCreate(hwnd, d3d12Probe, width, height, out d3d12Reason);
+
+        if (d3d12 is not null)
+        {
+            reason = $"d3d12: {d3d12.Renderer}";
+            return d3d12;
+        }
+
         var gl = TryCreate(hardwareAcceleration, hwnd, glProbe, width, height, out var glReason);
 
         if (gl is not null)
@@ -1159,10 +1190,10 @@ internal static class Win32Gfx
             return gl;
         }
 
-        // Both failed: keep what each said, so the diagnostic line names every attempt.
+        // All three failed: keep what each said, so the diagnostic line names every attempt.
         reason = glReason.StartsWith("cpu (", StringComparison.Ordinal)
-            ? $"cpu ({vulkanReason}; {glReason[5..^1]})"
-            : $"cpu ({vulkanReason})";
+            ? $"cpu ({vulkanReason}; {d3d12Reason}; {glReason[5..^1]})"
+            : $"cpu ({vulkanReason}; {d3d12Reason})";
 
         return null;
     }

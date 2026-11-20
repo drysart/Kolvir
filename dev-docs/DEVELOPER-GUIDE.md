@@ -5412,14 +5412,14 @@ The rules the implementation follows:
   that loses its device drops to the same DIB. Each step is named, so a screenshot says which tier
   is live.
 
-`Win32WindowBackend.GraphicsPath` reports `vulkan: <device>`, `gl` or `cpu (...)` with the reason,
-and `GraphicsRenderer`
+`Win32WindowBackend.GraphicsPath` reports `vulkan: <device>`, `d3d12: <adapter>`, `gl` or `cpu (...)`
+with the reason, and `GraphicsRenderer`
 reports the GL vendor and device, or the Vulkan device name. The reason names the failing step
 rather than a generic
 "no context", for example:
 
 ```
-gfx: cpu (no physical devices; no gl interface; gdi: no wgl context (error 2000))
+gfx: cpu (no physical devices; d3d12: no hardware adapter; no gl interface; gdi: no wgl context (error 2000))
 ```
 
 Set `KOLVIR_GL_TRACE=1` to print every probe attempt, the chosen flavour and format number, the
@@ -5433,6 +5433,36 @@ and the worst of each.
 Set `KOLVIR_NO_VULKAN=1` to take the WGL tier on a machine that has Vulkan, which is the only way to
 compare the two on one box. It is a diagnostic, not a preference: the tier is chosen once, when the
 window allocates its surface.
+
+### The Direct3D 12 tier (Windows)
+
+The window has a third accelerated path beside Vulkan and WGL: a flip-model DXGI swap chain with a Skia
+context on the device and command queue that outlive it. The order is Vulkan, then Direct3D 12, then
+GL. Both swap chain tiers lead because their resize path releases - `ResizeBuffers` reallocates the
+buffers rather than keeping a drawable per size the window has ever had - and Direct3D 12 sits behind
+Vulkan only because Vulkan is the tier that shipped first and therefore has the exposure. Moving one
+above the other is a reordering of two blocks in `Win32Gfx.TryCreateAccelerated`.
+
+Set `KOLVIR_NO_D3D12=1` to keep the window off it, which is what makes an A/B against Vulkan possible
+on one machine. It takes the same spellings as `KOLVIR_NO_VULKAN` and is read once, for the same
+reason.
+
+The tier refuses a software adapter. WARP answers every call and then rasterizes on the CPU, which is
+slower than the DIB path the tier exists to beat, and the Basic Render Driver that a machine with no
+GPU exposes does not always set `DXGI_ADAPTER_FLAG_SOFTWARE` - so the adapter's description is checked
+as well as its flags.
+
+It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
+way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
+dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
+section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,936,960, so +25,600
+bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
+shipped `libSkiaSharp.dll` already contains the Direct3D backend.
+
+The tests pin the tier order, the diagnostic line and the software-adapter refusal, and the production
+probe is exercised for real (the libraries load, the adapter list is walked). What they cannot cover is
+a frame: a swap chain, a Skia context on it and a present need a machine with a Direct3D 12 GPU, so the
+first run on hardware should be read off the `gfx:` line.
 
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
 section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
