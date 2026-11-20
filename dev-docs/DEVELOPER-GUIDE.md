@@ -5537,8 +5537,10 @@ kolvir-d3d12: video memory 61 MiB local in use of 22891 MiB, after the first fra
 The cache lines report what Skia holds and what it may hold; the memory lines are this process's own
 use of the adapter's local segment, taken through `IDXGIAdapter3::QueryVideoMemoryInfo` once the
 surface exists and again once a frame has been presented, so the difference between them is what the
-first submission costs. The adapter is queried for `IDXGIAdapter3` rather than assumed to be one:
-called on the wrong vtable the query answers `S_OK` and reports nothing. Task manager's dedicated
+first submission costs - 32 MiB even on a machine with no GPU at all, which is Skia's upload buffer
+and command allocators rather than the window's surfaces. The adapter is queried for `IDXGIAdapter3`
+rather than assumed to be one, and the query is `(node, segment, out info)`: called one entry early it
+answers `S_OK` and writes nothing, which reads exactly like a discrete GPU reporting no memory. Task manager's dedicated
 figure is larger than that number because it adds the driver's and the compositor's own allocations to
 it, which no application can shrink. A diagnostic that goes quiet when it has nothing to say cannot be
 told apart from one that never ran, so an adapter that cannot answer says so: `video memory not
