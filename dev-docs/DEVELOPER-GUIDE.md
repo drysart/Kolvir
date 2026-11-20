@@ -5726,6 +5726,13 @@ seam, the Win32 enumeration, the device identities and the startup setting toget
 asset: DXGI, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll` are all asked through the same raw interop
 the tiers already use.
 
+The sample has a **Graphics acceleration** page that shows exactly this list - `--page
+graphics-acceleration`, kept last in the navigation so every earlier page keeps the position a
+screenshot script names. Selecting a row prints its value under the list and copies it with one click,
+which is how a machine with more than one GPU can be checked: the value should name a card that stays
+the same across a reboot, and it should match what the window reports it is drawing with in the line
+below.
+
 ## Hardware acceleration (macOS)
 
 `ApplicationOptions.GfxHardwareAcceleration` is the same `bool` as Windows, with the same

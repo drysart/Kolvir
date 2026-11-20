@@ -580,7 +580,11 @@ public sealed class DemoUi
         ("observables", "Observables", demo => new ObservablesPage(demo)),
         ("observable-list", "Observable list", demo => new ObservableListPage(demo)),
 ("observable-set", "Observable set", demo => new ObservableSetPage(demo)),
-("observable-dictionary", "Observable dictionary", demo => new ObservableDictionaryPage(demo)),
+        ("observable-dictionary", "Observable dictionary", demo => new ObservableDictionaryPage(demo)),
+
+        // Kept last in the table so that every page above it keeps the position a screenshot script
+        // names with --page <position>.
+        ("graphics-acceleration", "Graphics acceleration", demo => new GraphicsAccelerationPage(demo)),
     };
 
     /// <summary>
@@ -826,11 +830,18 @@ public sealed class DemoUi
     /// </remarks>
     private TPage FindPage<TPage>() where TPage : DemoPage => _pages.OfType<TPage>().First();
 
-    /// <summary>Tells the measured-rendering page which presentation path produced what is on screen.</summary>
+    /// <summary>Tells the pages which presentation path produced what is on screen.</summary>
     /// <param name="path">The path the window is rendering through.</param>
     /// <param name="renderer">The backend's own name for its renderer, or null when it does not report one.</param>
-    public void SetGraphicsInfo(string path, string? renderer) =>
+    /// <remarks>
+    /// Two pages want this: the measured-rendering page, whose numbers mean nothing without it, and the
+    /// graphics-acceleration page, which shows it beside the choice the service says is in use.
+    /// </remarks>
+    public void SetGraphicsInfo(string path, string? renderer)
+    {
         FindPage<MeasuredRenderingPage>().SetGraphicsInfo(path, renderer);
+        FindPage<GraphicsAccelerationPage>().SetGraphicsInfo(path, renderer);
+    }
 
     /// <summary>Gives the zoom page the scale the application is asking the backend for.</summary>
     /// <param name="scale">The scale, as a multiplier over logical pixels.</param>
