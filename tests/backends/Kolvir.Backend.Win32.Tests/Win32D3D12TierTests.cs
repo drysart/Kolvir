@@ -187,7 +187,7 @@ public sealed class Win32D3D12TierTests
                 return;
             }
 
-            IntPtr swapChain = D3D12.CreateSwapChainForHwnd(factory, queue, hwnd, 64, 64, D3D12.SwapEffectFlipDiscard, 2, out int chainResult);
+            IntPtr swapChain = D3D12.CreateSwapChainForHwnd(factory, queue, hwnd, 64, 64, D3D12.SwapEffectFlipDiscard, 2, 0, out int chainResult);
             Assert.AreNotEqual(IntPtr.Zero, swapChain, $"the swap chain was created (0x{chainResult:X8})");
 
             D3D12.Release(ref swapChain);
