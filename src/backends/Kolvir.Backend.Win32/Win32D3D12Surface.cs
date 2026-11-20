@@ -330,6 +330,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
     private SKSurface? _retained;
     private bool _needsFull = true;
     private bool _memoryTraced;
+    private bool _targetTraced;
     private int _frames;
 
     private long _statsStarted = -1;
@@ -714,37 +715,57 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             // and Skia transitions it itself for the duration of the drawing it is asked to do. The
             // wrapper is disposed as soon as the surface has been made from it, because it holds a
             // reference on the buffer and DXGI will not reallocate a chain that still has one.
-            using var texture = new GRBackendTexture(_width, _height, new GRD3DTextureResourceInfo
+            var info = new GRD3DTextureResourceInfo
             {
                 Resource = resource,
                 ResourceState = ResourceStatePresent,
                 Format = (uint)FormatBgra8Unorm,
                 SampleCount = 1,
                 LevelCount = 1,
-            });
+            };
 
-            using var frame = SKSurface.Create(skia, texture, GRSurfaceOrigin.TopLeft, 1, SKColorType.Bgra8888);
+            // A render target, not a texture: it is what the buffer is, and a texture wrapper leaves
+            // Skia to decide the buffer cannot be drawn into directly. The texture route is kept as a
+            // fallback because a context that will not accept the render target should still present.
+            using var renderTarget = new GRBackendRenderTarget(_width, _height, info);
+            SKSurface? frame = SKSurface.Create(skia, renderTarget, GRSurfaceOrigin.TopLeft, SKColorType.Bgra8888);
+            using var texture = frame is null ? new GRBackendTexture(_width, _height, info) : null;
+
+            if (frame is null)
+            {
+                frame = SKSurface.Create(skia, texture!, GRSurfaceOrigin.TopLeft, 1, SKColorType.Bgra8888);
+            }
 
             if (frame is null)
             {
                 return Win32PresentResult.RetryDirect;
             }
 
-            using (var snapshot = retained.Snapshot())
+            using (frame)
             {
-                if (snapshot is not null)
+                if (!_targetTraced && Win32GlTrace.IsEnabled)
                 {
-                    // Src, not the default SrcOver: the image covers the back buffer and is opaque, so
-                    // blending would only make the card read the destination for every pixel.
-                    using var paint = new SKPaint { BlendMode = SKBlendMode.Src };
-                    frame.Canvas.DrawImage(snapshot, 0f, 0f, new SKSamplingOptions(SKFilterMode.Nearest), paint);
+                    _targetTraced = true;
+                    Win32GlTrace.Write($"kolvir-d3d12: presenting through a {(texture is null ? "render target" : "texture")}");
                 }
-            }
 
-            // Submitted rather than waited on: the CPU's job is to record the next frame, and the
-            // present call is where DXGI applies the pacing.
-            skia.Flush();
-            skia.Submit(synchronous: false);
+                using (var snapshot = retained.Snapshot())
+                {
+                    if (snapshot is not null)
+                    {
+                        // Src, not the default SrcOver: the image covers the back buffer and is
+                        // opaque, so blending would only make the card read the destination for
+                        // every pixel.
+                        using var paint = new SKPaint { BlendMode = SKBlendMode.Src };
+                        frame.Canvas.DrawImage(snapshot, 0f, 0f, new SKSamplingOptions(SKFilterMode.Nearest), paint);
+                    }
+                }
+
+                // Submitted rather than waited on: the CPU's job is to record the next frame, and the
+                // present call is where DXGI applies the pacing.
+                skia.Flush();
+                skia.Submit(synchronous: false);
+            }
         }
         finally
         {
