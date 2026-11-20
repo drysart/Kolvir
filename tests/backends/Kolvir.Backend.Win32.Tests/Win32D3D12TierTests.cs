@@ -1,4 +1,5 @@
 using System.Runtime.InteropServices;
+using SkiaSharp;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
 namespace Kolvir.Backend.Win32.Tests;
@@ -128,12 +129,24 @@ public sealed class Win32D3D12TierTests
     {
         // The Basic Render Driver is what a machine with no GPU reports, and it does not always set
         // the software flag: a tier that accepted it would rasterize on the CPU and be slower than the
-        // DIB path it replaced.
-        Assert.IsTrue(D3D12.IsSoftwareAdapter(D3D12.AdapterFlagSoftware, "NVIDIA GeForce RTX 4090"));
-        Assert.IsTrue(D3D12.IsSoftwareAdapter(0, "Microsoft Basic Render Driver"));
-        Assert.IsFalse(D3D12.IsSoftwareAdapter(0, "NVIDIA GeForce RTX 4090"));
-        Assert.IsFalse(D3D12.IsSoftwareAdapter(0, "AMD Radeon RX 7900 XTX"));
+        // DIB path it replaced. The diagnostic switch that lets it through for the frame test below
+        // is cleared here so this test does not depend on the order the two run in.
+        bool allowing = D3D12.AllowSoftwareAdapter;
+        D3D12.AllowSoftwareAdapter = false;
+
+        try
+        {
+            Assert.IsTrue(D3D12.IsSoftwareAdapter(D3D12.AdapterFlagSoftware, "NVIDIA GeForce RTX 4090"));
+            Assert.IsTrue(D3D12.IsSoftwareAdapter(0, "Microsoft Basic Render Driver"));
+            Assert.IsFalse(D3D12.IsSoftwareAdapter(0, "NVIDIA GeForce RTX 4090"));
+            Assert.IsFalse(D3D12.IsSoftwareAdapter(0, "AMD Radeon RX 7900 XTX"));
+        }
+        finally
+        {
+            D3D12.AllowSoftwareAdapter = allowing;
+        }
     }
+
     [TestMethod]
     public void TheAdapterThatDrivesTheWindowIsChosen()
     {
@@ -184,6 +197,57 @@ public sealed class Win32D3D12TierTests
         }
         finally
         {
+            DestroyWindow(hwnd);
+        }
+    }
+
+    [TestMethod]
+    public void FramesAndResizesOnTheDefaultAdapter()
+    {
+        // The whole surface on a software adapter: a real device, a real flip swap chain and a real
+        // Skia context, driven for a few frames and then resized. Two faults that only a live chain
+        // shows up in are pinned here - GetCurrentBackBufferIndex at the wrong vtable slot (an access
+        // violation on the first present) and the per-frame texture wrapper holding a reference on the
+        // back buffer, which DXGI answers a resize with DXGI_ERROR_INVALID_CALL.
+        Assert.IsTrue(D3D12.IsAvailable, "dxgi.dll and d3d12.dll are present");
+
+        IntPtr hwnd = CreateWindowExW(0, "STATIC", "kolvir d3d12 frames", 0x00CF0000, 0, 0, 320, 200, IntPtr.Zero, IntPtr.Zero, GetModuleHandle(null), IntPtr.Zero);
+        Assert.AreNotEqual(IntPtr.Zero, hwnd, "the test window was created");
+
+        bool allowing = D3D12.AllowSoftwareAdapter;
+        D3D12.AllowSoftwareAdapter = true;
+
+        try
+        {
+            var surface = Win32D3D12Surface.TryCreate(hwnd, Win32D3D12Probe.Instance, 320, 200, out var failure);
+
+            if (surface is null)
+            {
+                Assert.Inconclusive(failure);
+                return;
+            }
+
+            try
+            {
+                Assert.AreEqual("d3d12", surface.Tier);
+
+                for (int frame = 0; frame < 5; frame++)
+                {
+                    surface.Surface!.Canvas.Clear(new SKColor((byte)(frame * 20), 40, 90));
+                    Assert.AreEqual(Win32PresentResult.Presented, surface.Present(), $"frame {frame} was presented");
+                }
+
+                Assert.IsTrue(surface.Resize(360, 220), "the chain resizes after frames have been presented");
+                Assert.AreEqual(Win32PresentResult.Presented, surface.Present(), "and presents again at the new size");
+            }
+            finally
+            {
+                surface.Dispose();
+            }
+        }
+        finally
+        {
+            D3D12.AllowSoftwareAdapter = allowing;
             DestroyWindow(hwnd);
         }
     }

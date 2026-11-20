@@ -5497,17 +5497,39 @@ hard way - a refusal from the create call is `DXGI_ERROR_INVALID_CALL`, which na
   (`STRAIGHT`), is refused, and because both are small integers a transposed constant is invisible in
   the description until DXGI rejects the whole thing.
 
+Presenting has two of its own, and both showed up as a window that opened, drew nothing and died:
+
+- **`GetCurrentBackBufferIndex` is slot 36, not 37.** Every DXGI interface carries one more method
+  before `IDXGIFactory`'s enumeration than the headers suggest - `IDXGIObject` is 4 slots here, which
+  is why `EnumAdapters1` sits at 12 - and the swap chain's slots shift with it. Slot 37 is
+  `CheckColorSpaceSupport`: called with no arguments it returns a `UINT` the caller never gets and
+  writes its answer through a register that holds garbage, which is an access violation on the first
+  present. The counts the tier uses, `Present` 8, `GetBuffer` 9, `ResizeBuffers` 13, all carry the
+  same shift.
+- **The per-frame `GRBackendTexture` has to be disposed.** It is not a value: it holds a reference on
+  the back buffer it wraps, so a wrapper dropped on the floor keeps DXGI from reallocating the chain
+  and `ResizeBuffers` answers `DXGI_ERROR_INVALID_CALL`. The surface disposes it as soon as the
+  `SKSurface` has been made from it, drains the queue and purges Skia's resource cache before it
+  resizes.
+
+`KOLVIR_D3D12_ALLOW_SOFTWARE=1` lets the tier build on a software adapter. It is a diagnostic for a
+machine with no GPU, which is how the present path is covered in the tests, and it is a poor default:
+WARP answers every call and then rasterizes on the CPU.
+
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
 dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
-section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,969,216, so +57,856
+section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,971,264, so +59,904
 bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
 shipped `libSkiaSharp.dll` already contains the Direct3D backend.
 
 The tests pin the tier order, the diagnostic line and the software-adapter refusal, and the production
-probe is exercised for real (the libraries load, the adapter list is walked). What they cannot cover is
-a frame: a swap chain, a Skia context on it and a present need a machine with a Direct3D 12 GPU, so the
-first run on hardware should be read off the `gfx:` line.
+probe is exercised for real (the libraries load, the adapter list is walked). The present path is
+covered too, on the software adapter the diagnostic switch admits: a window, a flip swap chain, a Skia
+context, five frames, a resize and a frame at the new size. That is what catches a wrong slot or a
+leaked buffer reference without a GPU in the machine - both faults it was written for appeared exactly
+there. What it still cannot prove is speed: how a real GPU presents is read off the `gfx:` line and the
+**Measured rendering** page.
 
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
 section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):

@@ -288,16 +288,18 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
 /// </remarks>
 internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 {
-    private Win32D3D12Surface(Win32D3D12Device device, IntPtr factory, IntPtr swapChain, int width, int height)
+    private Win32D3D12Surface(Win32D3D12Device device, IntPtr factory, IntPtr swapChain, uint bufferCount, int width, int height)
     {
         _device = device;
         _factory = factory;
         _swapChain = swapChain;
+        _bufferCount = bufferCount;
         _width = width;
         _height = height;
     }
 
     private readonly Win32D3D12Device _device;
+    private readonly uint _bufferCount;
     private IntPtr _factory;
     private IntPtr _swapChain;
     private int _width;
@@ -347,13 +349,13 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return null;
         }
 
-        if (!CreateSwapChain(device, hwnd, width, height, out var factory, out var swapChain, out failure))
+        if (!CreateSwapChain(device, hwnd, width, height, out var factory, out var swapChain, out var bufferCount, out failure))
         {
             device.Dispose();
             return null;
         }
 
-        var surface = new Win32D3D12Surface(device, factory, swapChain, width, height);
+        var surface = new Win32D3D12Surface(device, factory, swapChain, bufferCount, width, height);
 
         surface._skia = GRContext.CreateDirect3D(new GRD3DBackendContext
         {
@@ -387,9 +389,11 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         int height,
         out IntPtr factory,
         out IntPtr swapChain,
+        out uint bufferCount,
         out string failure)
     {
         swapChain = IntPtr.Zero;
+        bufferCount = 0;
         factory = CreateFactory1(out var factoryResult);
 
         if (factory == IntPtr.Zero)
@@ -423,6 +427,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
             if (swapChain != IntPtr.Zero)
             {
+                bufferCount = buffers;
                 if (refusals.Count > 0 && Win32GlTrace.IsEnabled)
                 {
                     Win32GlTrace.Write($"kolvir-d3d12: swap chain: {name} (after {string.Join(", ", refusals)})");
@@ -474,15 +479,18 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
         // Every reference to a back buffer has to be gone before DXGI will resize, and the queue has to
         // have finished with them, so the work is drained here rather than left running behind a
-        // resize that would fail with DXGI_ERROR_INVALID_CALL.
+        // resize that would fail with DXGI_ERROR_INVALID_CALL. The cache is emptied after the drain for
+        // the same reason: a wrapper Skia kept from a frame counts as a live reference on its buffer.
         DropRetainedBuffer();
         _skia?.Flush();
         _skia?.Submit(synchronous: true);
+        _skia?.PurgeResources();
 
-        int result = ResizeBuffers(_swapChain, width, height);
+        int result = ResizeBuffers(_swapChain, _bufferCount, width, height);
 
         if (result < 0)
         {
+            Win32GlTrace.Write($"kolvir-d3d12: resize to {width}x{height} refused (0x{result:X8})");
             return false;
         }
 
@@ -509,8 +517,10 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         try
         {
             // PRESENT, not RENDER_TARGET: DXGI hands the buffer back in the state it was presented in,
-            // and Skia transitions it itself for the duration of the drawing it is asked to do.
-            var texture = new GRBackendTexture(_width, _height, new GRD3DTextureResourceInfo
+            // and Skia transitions it itself for the duration of the drawing it is asked to do. The
+            // wrapper is disposed as soon as the surface has been made from it, because it holds a
+            // reference on the buffer and DXGI will not reallocate a chain that still has one.
+            using var texture = new GRBackendTexture(_width, _height, new GRD3DTextureResourceInfo
             {
                 Resource = resource,
                 ResourceState = ResourceStatePresent,

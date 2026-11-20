@@ -87,7 +87,7 @@ internal static unsafe class D3D12
     private const int SlotSwapChainPresent = 8;
     private const int SlotSwapChainGetBuffer = 9;
     private const int SlotSwapChainResizeBuffers = 13;
-    private const int SlotSwapChain3GetCurrentBackBufferIndex = 37;
+    private const int SlotSwapChain3GetCurrentBackBufferIndex = 36;
 
     private static readonly IntPtr D3D12Library = LoadLibrary("d3d12.dll");
     private static readonly IntPtr DxgiLibrary = LoadLibrary("dxgi.dll");
@@ -402,13 +402,14 @@ internal static unsafe class D3D12
 
     /// <summary>Resizes a swap chain's buffers.</summary>
     /// <param name="swapChain">The swap chain.</param>
+    /// <param name="bufferCount">The buffer count to keep, which a flip-model chain insists on.</param>
     /// <param name="width">The new width.</param>
     /// <param name="height">The new height.</param>
     /// <returns>The <c>HRESULT</c>.</returns>
-    internal static int ResizeBuffers(IntPtr swapChain, int width, int height)
+    internal static int ResizeBuffers(IntPtr swapChain, uint bufferCount, int width, int height)
     {
         var resize = (delegate* unmanaged[Stdcall]<IntPtr, uint, uint, uint, int, uint, int>)(*(IntPtr**)swapChain)[SlotSwapChainResizeBuffers];
-        return resize(swapChain, 0, (uint)width, (uint)height, FormatBgra8Unorm, 0);
+        return resize(swapChain, bufferCount, (uint)width, (uint)height, FormatBgra8Unorm, 0);
     }
 
     /// <summary>Gets the buffer a flip-model swap chain wants drawn into next.</summary>
@@ -444,8 +445,18 @@ internal static unsafe class D3D12
     /// <param name="flags">The adapter's <c>DXGI_ADAPTER_DESC1.Flags</c>.</param>
     /// <param name="renderer">The adapter's description.</param>
     internal static bool IsSoftwareAdapter(uint flags, string renderer) =>
-        (flags & AdapterFlagSoftware) != 0
-        || renderer.StartsWith("Microsoft Basic Render", StringComparison.OrdinalIgnoreCase);
+        !AllowSoftwareAdapter
+        && ((flags & AdapterFlagSoftware) != 0
+            || renderer.StartsWith("Microsoft Basic Render", StringComparison.OrdinalIgnoreCase));
+
+    /// <summary>
+    /// Lets a software adapter through, which is a diagnostic and not a preference: WARP answers every
+    /// call and rasterizes on the CPU, so it is slower than the DIB path the tier exists to beat. It is
+    /// how the tier is exercised on a machine with no GPU - the tests set it - and
+    /// <c>KOLVIR_D3D12_ALLOW_SOFTWARE=1</c> turns it on for a window that has to prove a frame.
+    /// </summary>
+    internal static bool AllowSoftwareAdapter { get; set; } =
+        Environment.GetEnvironmentVariable("KOLVIR_D3D12_ALLOW_SOFTWARE") == "1";
 
     /// <summary>Reads an <c>DXGI_ADAPTER_DESC1</c>'s description into a managed string.</summary>
     internal static string Describe(DxgiAdapterDesc1 description)
