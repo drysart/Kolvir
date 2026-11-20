@@ -489,9 +489,14 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
                     if (paced)
                     {
-                        SetMaximumFrameLatency(swapChain, 1);
+                        int latencyResult = SetMaximumFrameLatency(swapChain, 1);
                         frameLatency = GetFrameLatencyWaitableObject(swapChain);
                         paced = frameLatency != IntPtr.Zero;
+
+                        if (Win32GlTrace.IsEnabled)
+                        {
+                            Win32GlTrace.Write($"kolvir-d3d12: frame latency: set 0x{latencyResult:X8}, waitable 0x{frameLatency:X}");
+                        }
                     }
 
                     if (refusals.Count > 0 && Win32GlTrace.IsEnabled)
@@ -671,7 +676,10 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
     public Win32PresentResult Present()
     {
-        if (_skia is null || _retained is null || _swapChain == IntPtr.Zero)
+        GRContext? skia = _skia;
+        SKSurface? retained = _retained;
+
+        if (skia is null || retained is null || _swapChain == IntPtr.Zero)
         {
             return Win32PresentResult.RetryDirect;
         }
@@ -684,6 +692,13 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         if (_frameLatency != IntPtr.Zero)
         {
             NativeMethods.WaitForSingleObject(_frameLatency, 1000);
+        }
+        else
+        {
+            // The chain would not give up its waitable handle, so the queue is bounded the other way:
+            // waiting for the work already submitted means at most one frame is in flight either side
+            // of the queue, which is the property that keeps a drag attached to the pointer.
+            skia.Submit(synchronous: true);
         }
 
         int index = GetCurrentBackBufferIndex(_swapChain);
@@ -711,14 +726,14 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
                 LevelCount = 1,
             });
 
-            using var frame = SKSurface.Create(_skia, texture, GRSurfaceOrigin.TopLeft, 1, SKColorType.Bgra8888);
+            using var frame = SKSurface.Create(skia, texture, GRSurfaceOrigin.TopLeft, 1, SKColorType.Bgra8888);
 
             if (frame is null)
             {
                 return Win32PresentResult.RetryDirect;
             }
 
-            using (var snapshot = _retained.Snapshot())
+            using (var snapshot = retained.Snapshot())
             {
                 if (snapshot is not null)
                 {
@@ -728,8 +743,8 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
             // Submitted rather than waited on: the CPU's job is to record the next frame, and the
             // present call is where DXGI applies the pacing.
-            _skia.Flush();
-            _skia.Submit(synchronous: false);
+            skia.Flush();
+            skia.Submit(synchronous: false);
         }
         finally
         {
