@@ -745,9 +745,6 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr GetActiveWindow();
 
-    [DllImport("dwmapi.dll")]
-    internal static extern int DwmFlush();
-
     [DllImport("user32.dll", CharSet = CharSet.Unicode, SetLastError = true)]
     internal static extern IntPtr SetWindowLongPtrW(IntPtr hwnd, int index, IntPtr value);
 
@@ -1072,22 +1069,23 @@ internal static class NativeMethods
     /// </summary>
     /// <param name="hwnd">The window.</param>
     /// <param name="disabled">True to suppress the animations, false to put them back.</param>
-    /// <returns>True when DWM accepted the setting.</returns>
+    /// <returns>The <c>HRESULT</c> DWM answered with: zero when it accepted the setting.</returns>
     /// <remarks>
-    /// A window that is created and then shown animates in: Windows 11 zooms it up from its centre,
-    /// which for a window that is only being replaced looks like the application is opening a second
-    /// time. Setting this on the replacement before it is shown keeps the transition off it, and it is
-    /// cleared again afterwards so the animations the user does ask for still happen.
+    /// DWM documents this as the switch that forcibly disables its transitions, and it is what keeps a
+    /// replacement window from animating in. Whether a particular build honours it is answered by the
+    /// <c>HRESULT</c> it returns, which is why that is handed back rather than a bool: a call that DWM
+    /// rejects is the difference between "the system ignored the setting" and "the setting was never
+    /// applied".
     /// </remarks>
-    internal static bool SetTransitionsDisabled(IntPtr hwnd, bool disabled)
+    internal static int SetTransitionsDisabled(IntPtr hwnd, bool disabled)
     {
         if (hwnd == IntPtr.Zero)
         {
-            return false;
+            return unchecked((int)0x80070057);
         }
 
         var value = disabled ? 1 : 0;
-        return DwmSetWindowAttribute(hwnd, DwmwaTransitionsForceDisabled, ref value, sizeof(int)) == 0;
+        return DwmSetWindowAttribute(hwnd, DwmwaTransitionsForceDisabled, ref value, sizeof(int));
     }
 
     /// <summary>Reads a REG_DWORD from HKEY_CURRENT_USER, or null when the value is absent.</summary>

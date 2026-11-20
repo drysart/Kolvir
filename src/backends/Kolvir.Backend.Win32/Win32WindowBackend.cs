@@ -3063,16 +3063,15 @@ public sealed class Win32WindowBackend : IWindowBackend
         // destroy that follows it - are not taken for this window's own.
         _hwnd = IntPtr.Zero;
 
-        // Created off the screens, above the old window's own column so nothing about its DPI changes:
-        // the opening transition happens where there is nothing to see it against, and moving a window
-        // into place afterwards is not animated.
+        // Created where the old window is, so the only thing that could show a transition is the window
+        // being shown - which is what the transitions setting below is for.
         var replacement = NativeMethods.CreateWindowExW(
             0,
             _className,
             _title,
             style,
             presentation.Left,
-            presentation.Top - OffScreenOffset,
+            presentation.Top,
             presentation.Width,
             presentation.Height,
             OwnerHandle,
@@ -3092,9 +3091,8 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
 
-        // The replacement is off the screens, so the system may animate it in on show without anybody
-        // seeing it; the transitions are turned off as well, for the systems that honour that.
-        NativeMethods.SetTransitionsDisabled(_hwnd, true);
+        // Set before the window is ever shown, which is the state the docs describe it being read in.
+        var transitions = NativeMethods.SetTransitionsDisabled(_hwnd, true);
 
         NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
         ApplyWindowColors();
@@ -3108,18 +3106,11 @@ public sealed class Win32WindowBackend : IWindowBackend
         if (Win32GlTrace.IsEnabled)
         {
             Win32GlTrace.Write(
-                $"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {presentation.Width}x{presentation.Height}, off screen until it is ready");
+                $"window replaced: 0x{previous:X} -> 0x{_hwnd:X} at {presentation.Width}x{presentation.Height}, transitions disabled -> 0x{transitions:X8}");
         }
 
         return presentation;
     }
-
-    /// <summary>How far off the screens a replacement window waits before it takes the old one's place.</summary>
-    /// <remarks>
-    /// Far enough that no monitor reaches it, and applied along y so the x coordinate - and therefore the
-    /// monitor and DPI the window is created on - is the one it will be shown on.
-    /// </remarks>
-    private const int OffScreenOffset = 30_000;
 
     /// <summary>
     /// Puts a replaced window on the screen the way the one it replaced was being shown, and then retires
@@ -3127,73 +3118,38 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// </summary>
     /// <param name="presentation">What <see cref="RecreateWindow"/> recorded.</param>
     /// <remarks>
-    /// <para>
-    /// The replacement is shown while it is still off the screens, so the path that the system animates
-    /// for an opening window is travelled where nobody can see it, and it is then moved to the place the
-    /// old window occupies - a move is not animated. Once it is there and painted, it is raised above the
-    /// old window, the composition is flushed, and only then is the old window destroyed, so the closing
-    /// transition happens behind an opaque window rather than in front of it.
-    /// </para>
-    /// <para>
-    /// What the user sees is the same window throughout, with the new tier underneath it.
-    /// </para>
+    /// The replacement has already had DWM's transitions forcibly disabled, so showing it should not
+    /// animate; the setting is left in place until the window is up, and then put back so the animations
+    /// the user does ask for - minimising, restoring - behave as usual. The window that is being replaced
+    /// has its transitions disabled too, immediately before it is destroyed, so its close does not
+    /// animate either.
     /// </remarks>
     private void RestorePresentation(WindowPresentation presentation)
     {
         if (presentation.Visible)
         {
-            // Shown where nothing can see it, so the opening transition is spent off the screens.
-            NativeMethods.SetWindowPos(
-                _hwnd,
-                IntPtr.Zero,
-                0,
-                0,
-                0,
-                0,
-                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate | NativeMethods.SwpShowWindow);
+            var show = presentation.Minimized
+                ? NativeMethods.SwShowMinNoActive
+                : presentation.Maximized
+                    ? NativeMethods.SwMaximize
+                    : presentation.Foreground
+                        ? NativeMethods.SwShow
+                        : NativeMethods.SwShowNoActivate;
 
+            NativeMethods.ShowWindow(_hwnd, show);
             NativeMethods.UpdateWindow(_hwnd);
-
-            // Moved into the old window's place, which is not animated, and painted there before anything
-            // is asked to look at it.
-            NativeMethods.SetWindowPos(
-                _hwnd,
-                IntPtr.Zero,
-                presentation.Left,
-                presentation.Top,
-                presentation.Width,
-                presentation.Height,
-                NativeMethods.SwpNoZOrder | NativeMethods.SwpNoActivate);
-
-            if (presentation.Maximized)
-            {
-                NativeMethods.ShowWindow(_hwnd, NativeMethods.SwMaximize);
-            }
-            else if (presentation.Minimized)
-            {
-                NativeMethods.ShowWindow(_hwnd, NativeMethods.SwShowMinNoActive);
-            }
-
-            NativeMethods.UpdateWindow(_hwnd);
-
-            // Above the window it replaces, so what is destroyed next goes behind it.
-            NativeMethods.SetWindowPos(
-                _hwnd,
-                IntPtr.Zero,
-                0,
-                0,
-                0,
-                0,
-                NativeMethods.SwpNoMove | NativeMethods.SwpNoSize | NativeMethods.SwpNoActivate);
-
-            // Composed before anything else happens, so the window that is about to be destroyed is never
-            // the one on the screen with nothing behind it.
-            NativeMethods.DwmFlush();
         }
 
         if (presentation.Previous != IntPtr.Zero)
         {
+            // The outgoing window is told the same thing, so its close is not animated either.
+            var closing = NativeMethods.SetTransitionsDisabled(presentation.Previous, true);
             NativeMethods.DestroyWindow(presentation.Previous);
+
+            if (Win32GlTrace.IsEnabled)
+            {
+                Win32GlTrace.Write($"window retired: transitions disabled -> 0x{closing:X8}");
+            }
         }
 
         ApplyTopMost();
