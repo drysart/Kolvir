@@ -330,6 +330,13 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
     private bool _memoryTraced;
     private int _frames;
 
+    private long _statsStarted = -1;
+    private int _statsPresents;
+    private long _statsDraw;
+    private long _statsPresent;
+    private long _statsWorstDraw;
+    private long _statsWorstPresent;
+
     /// <summary>How often the trace repeats the memory figures, in frames.</summary>
     private const int TraceFrameInterval = 60;
 
@@ -398,10 +405,11 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
         // Skia hands a Direct3D context a 256 MiB resource cache by default, and that cache is where
         // the frame's upload buffers and the wrappers for the back buffers live, so it decides how
-        // much dedicated memory the tier costs. A window composites one image a frame: three
-        // full-size surfaces, with a 64 MiB floor for the smaller ones, is what it needs.
+        // much dedicated memory the tier costs. A window composites one image a frame: six full-size
+        // surfaces, with a 96 MiB floor - enough for the retained surface and three chain buffers
+        // without leaving the cache so tight that it evicts what the next frame needs.
         long surfaceBytes = (long)width * height * 4;
-        surface._skia.SetResourceCacheLimit(Math.Max(64L * 1024 * 1024, surfaceBytes * 3));
+        surface._skia.SetResourceCacheLimit(Math.Max(96L * 1024 * 1024, surfaceBytes * 6));
 
         if (!surface.CreateRetained())
         {
@@ -447,13 +455,16 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return false;
         }
 
-        // Both rungs are flip models: Direct3D 12 will not present through a bitblt swap chain, which
-        // DXGI refuses outright. The order is newest first, because the discard model is the one
-        // Windows composites with and the sequential model is only there for a driver that refuses it.
+        // Three back buffers, which is what the Vulkan tier gets from the driver's own minimum and what
+        // makes a drag feel attached to the pointer: with two, the CPU cannot record the next frame
+        // while the compositor holds the last one, so a repaint waits a whole refresh behind input.
+        // Both rungs are flip models - Direct3D 12 will not present through a bitblt swap chain - and
+        // the last rung asks for two buffers for a driver that will not give three.
         (int Effect, uint Buffers, string Name)[] ladder =
         [
-            (SwapEffectFlipDiscard, 2, "flip-discard"),
-            (SwapEffectFlipSequential, 2, "flip-sequential"),
+            (SwapEffectFlipDiscard, 3, "flip-discard"),
+            (SwapEffectFlipSequential, 3, "flip-sequential"),
+            (SwapEffectFlipDiscard, 2, "flip-discard, two buffers"),
         ];
 
         List<string> refusals = [];
@@ -484,6 +495,55 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         Release(ref factory);
         return false;
     }
+
+    /// <summary>Reports what a second of presents cost, in the same shape the Vulkan tier uses.</summary>
+    /// <param name="drawTicks">Time spent drawing, flushing and submitting the frame.</param>
+    /// <param name="presentTicks">Time spent inside the present call.</param>
+    private void ReportTimings(long drawTicks, long presentTicks)
+    {
+        if (!Win32GlTrace.IsEnabled)
+        {
+            return;
+        }
+
+        _statsPresents++;
+        _statsDraw += drawTicks;
+        _statsPresent += presentTicks;
+        _statsWorstDraw = Math.Max(_statsWorstDraw, drawTicks);
+        _statsWorstPresent = Math.Max(_statsWorstPresent, presentTicks);
+
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        if (_statsStarted < 0)
+        {
+            _statsStarted = now;
+            return;
+        }
+
+        double window = Milliseconds(now - _statsStarted);
+
+        if (window < 1000.0)
+        {
+            return;
+        }
+
+        double presents = _statsPresents * 1000.0 / window;
+        double count = Math.Max(1, _statsPresents);
+
+        Win32GlTrace.Write(
+            string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"d3d12 {presents:F1} presents/s  draw {Milliseconds(_statsDraw) / count:F2}/{Milliseconds(_statsWorstDraw):F2}ms  present {Milliseconds(_statsPresent) / count:F2}/{Milliseconds(_statsWorstPresent):F2}ms  buffers {_bufferCount}"));
+
+        _statsStarted = now;
+        _statsPresents = 0;
+        _statsDraw = 0;
+        _statsPresent = 0;
+        _statsWorstDraw = 0;
+        _statsWorstPresent = 0;
+    }
+
+    private static double Milliseconds(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
 
     /// <summary>
     /// Reports this process's own use of the adapter's local memory. It is printed once the surface
@@ -598,6 +658,8 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return Win32PresentResult.Lost;
         }
 
+        long drawStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+
         try
         {
             // PRESENT, not RENDER_TARGET: DXGI hands the buffer back in the state it was presented in,
@@ -638,12 +700,16 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             Release(ref resource);
         }
 
+        long drawnAt = System.Diagnostics.Stopwatch.GetTimestamp();
         int result = D3D12.Present(_swapChain);
+        long presentTicks = System.Diagnostics.Stopwatch.GetTimestamp() - drawnAt;
+
         // DXGI_STATUS_OCCLUDED is a success code for a hidden window, so it is checked before the
         // general success case rather than being left to the catch-all.
         if (result == StatusOccluded || result >= 0)
         {
             _frames++;
+            ReportTimings(drawnAt - drawStarted, presentTicks);
 
             if (!_memoryTraced)
             {

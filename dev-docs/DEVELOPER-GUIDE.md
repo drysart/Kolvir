@@ -5492,7 +5492,13 @@ Two things about the swap chain are requirements rather than preferences, and bo
 hard way - a refusal from the create call is `DXGI_ERROR_INVALID_CALL`, which names neither:
 
 - **It has to be a flip model.** Direct3D 12 will not present through a bitblt swap chain, so the
-  ladder is `FLIP_DISCARD` and then `FLIP_SEQUENTIAL`; there is no third rung to fall back to.
+  ladder is `FLIP_DISCARD` and then `FLIP_SEQUENTIAL`, with a final `FLIP_DISCARD` at two buffers for
+  a driver that will not give three.
+- **Three back buffers, not two.** Two is the minimum a flip chain accepts and it is not enough to
+  stay attached to the pointer: with two, the CPU cannot record the next frame while the compositor
+  holds the last one, so a repaint driven by a drag waits a whole refresh behind the mouse. The
+  Vulkan tier gets three because that is the driver's minimum, and the two tiers have to feel the
+  same.
 - **`AlphaMode` has to be `DXGI_ALPHA_MODE_IGNORE`, which is 3.** The neighbouring value, 2
   (`STRAIGHT`), is refused, and because both are small integers a transposed constant is invisible in
   the description until DXGI rejects the whole thing.
@@ -5517,12 +5523,13 @@ machine with no GPU, which is how the present path is covered in the tests, and 
 WARP answers every call and then rasterizes on the CPU.
 
 Memory is the one number that surprises people on this tier, so it is worth writing down. A window
-1280x820 at scale 2 is 2560x1640, which is 16.0 MiB per full-size BGRA8 surface: the two swap chain
-buffers and the retained surface the backend draws into are 48 MiB and are not optional. Everything
+1280x820 at scale 2 is 2560x1640, which is 16.0 MiB per full-size BGRA8 surface: the three swap
+chain buffers and the retained surface the backend draws into are 64 MiB and are not optional.
+Everything
 above that is Skia's resource cache, which a Direct3D context is given 256 MiB of by default - it is
 where the frame's upload buffers and the wrappers made for the back buffers live, and left alone it
-fills to a large fraction of that ceiling. The tier sets the limit to three full-size surfaces, with
-a 64 MiB floor, which is what a window that composites one image a frame actually needs.
+fills to a large fraction of that ceiling. The tier sets the limit to six full-size surfaces, with
+a 96 MiB floor - enough for the retained surface and three chain buffers, and far below the default.
 
 With `KOLVIR_GL_TRACE=1` four lines say what the tier is holding, so a figure in task manager can be
 argued with rather than guessed at:
@@ -5548,6 +5555,18 @@ figure is larger than that number because it adds the driver's and the composito
 it, which no application can shrink. A diagnostic that goes quiet when it has nothing to say cannot be
 told apart from one that never ran, so an adapter that cannot answer says so: `video memory not
 reported (0x00000000)`, which is what a software adapter produces.
+
+The tier also reports its frame pacing, in the shape the Vulkan tier uses, once a second while
+`KOLVIR_GL_TRACE=1`:
+
+```
+kolvir-gl: d3d12 58.4 presents/s  draw 1.31/4.02ms  present 15.72/17.10ms  buffers 3
+```
+
+`draw` is the time spent drawing, flushing and submitting; `present` is the time inside the present
+call, which is where the display's pacing appears - a present that sits at one refresh interval means
+the tier is waiting for the display rather than for anything it did. `buffers` is the count the chain
+was made with, because a chain that fell to the two-buffer rung behaves differently under a drag.
 
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
