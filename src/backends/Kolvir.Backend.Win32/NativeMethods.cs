@@ -1058,6 +1058,33 @@ internal static class NativeMethods
     /// <summary><c>DWMWA_TRANSITIONS_FORCEDISABLED</c>: suppresses the show, hide and zoom animations.</summary>
     private const int DwmwaTransitionsForceDisabled = 3;
 
+    /// <summary><c>DWMWA_CLOAK</c>: keeps a window out of composition entirely.</summary>
+    private const int DwmwaCloak = 13;
+
+    /// <summary>
+    /// Cloaks a window, or takes the cloak off it.
+    /// </summary>
+    /// <param name="hwnd">The window.</param>
+    /// <param name="cloaked">True to keep it out of composition, false to let it back in.</param>
+    /// <returns>True when DWM accepted the setting.</returns>
+    /// <remarks>
+    /// A cloaked window has no visual, so there is nothing for the compositor to animate: showing it
+    /// while cloaked and taking the cloak off afterwards is how a window appears on the screen with no
+    /// opening transition, which <c>DWMWA_TRANSITIONS_FORCEDISABLED</c> no longer buys on Windows 11.
+    /// Painting into a cloaked window is allowed - the frame is drawn into its redirection surface and
+    /// composed the moment the cloak comes off.
+    /// </remarks>
+    internal static bool SetCloaked(IntPtr hwnd, bool cloaked)
+    {
+        if (hwnd == IntPtr.Zero)
+        {
+            return false;
+        }
+
+        var value = cloaked ? 1 : 0;
+        return DwmSetWindowAttribute(hwnd, DwmwaCloak, ref value, sizeof(int)) == 0;
+    }
+
     /// <summary>
     /// Suppresses, or restores, the system's transition animations for one window.
     /// </summary>

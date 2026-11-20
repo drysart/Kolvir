@@ -3025,9 +3025,12 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         _scale = ScaleOf(NativeMethods.GetDpiForWindow(_hwnd));
 
-        // A replacement that animated in would look like the application opening a second time, so the
-        // transition is turned off for it here and put back once it is on the screen.
+        // A replacement that animated in would look like the application opening a second time. Two
+        // things are done about it: the transition is turned off for the window, and the window stays
+        // cloaked - out of composition, with no visual to animate - until it is on the screen with the
+        // first frame already painted into it.
         NativeMethods.SetTransitionsDisabled(_hwnd, true);
+        NativeMethods.SetCloaked(_hwnd, true);
 
         NativeMethods.SetDarkTitleBar(_hwnd, Theme.IsDarkMode);
         ApplyWindowColors();
@@ -3063,6 +3066,9 @@ public sealed class Win32WindowBackend : IWindowBackend
             NativeMethods.ShowWindow(_hwnd, show);
         }
 
+        // Painted before the cloak comes off, so the first thing composed is the finished frame.
+        NativeMethods.UpdateWindow(_hwnd);
+
         ApplyTopMost();
 
         if (presentation.Captured)
@@ -3075,8 +3081,10 @@ public sealed class Win32WindowBackend : IWindowBackend
             NativeMethods.SetForegroundWindow(_hwnd);
         }
 
-        // The window is on the screen, so the transitions the user does ask for go back on: minimising
-        // and restoring it should animate like any other window.
+        // The window is on the screen with its first frame already in it, so it can join the composition
+        // with nothing to animate, and the transitions the user does ask for go back on: minimising and
+        // restoring it should behave like any other window.
+        NativeMethods.SetCloaked(_hwnd, false);
         NativeMethods.SetTransitionsDisabled(_hwnd, false);
 
         if (_modelWindow is { } model)
