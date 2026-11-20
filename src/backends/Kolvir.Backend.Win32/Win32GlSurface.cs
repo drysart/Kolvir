@@ -664,7 +664,7 @@ internal sealed class Win32GlSurface : IWin32GpuSurface
 
     public string Renderer => _context.Renderer;
 
-    public int DeviceIndex => 0;
+    public string DeviceKey => string.Empty;
 
     internal int Width => _width;
 
@@ -1230,7 +1230,7 @@ internal static class Win32Gfx
                     var failure = "d3d12: disabled by KOLVIR_NO_D3D12";
                     var d3d12 = Win32D3D12Disabled
                         ? null
-                        : Win32D3D12Surface.TryCreate(hwnd, d3d12Probe, choice.DeviceIndex, width, height, out failure);
+                        : Win32D3D12Surface.TryCreate(hwnd, d3d12Probe, choice.DeviceKey, width, height, out failure);
 
                     if (d3d12 is not null)
                     {
@@ -1247,7 +1247,7 @@ internal static class Win32Gfx
                     var failure = "vulkan: disabled by KOLVIR_NO_VULKAN";
                     var vulkan = Win32VulkanDisabled
                         ? null
-                        : Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, choice.DeviceIndex, width, height, out failure);
+                        : Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, choice.DeviceKey, width, height, out failure);
 
                     if (vulkan is not null)
                     {

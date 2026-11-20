@@ -78,7 +78,7 @@ public abstract class GpuAccelerationService : IGpuAccelerationService
     /// <summary>
     /// Reads a value back into the option it names.
     /// </summary>
-    /// <param name="value">A value such as <c>d3d:1</c>, or a value saved from an earlier run.</param>
+    /// <param name="value">A value such as <c>d3d:10de-2504-1616</c>, or one saved from an earlier run.</param>
     /// <param name="option">The matching option, or null when nothing matches.</param>
     /// <returns>
     /// False when the value names no family, or names a device this machine does not list - which is
@@ -108,7 +108,7 @@ public abstract class GpuAccelerationService : IGpuAccelerationService
     /// Records the choice a window actually built, which is what <see cref="Current"/> reports.
     /// </summary>
     /// <param name="value">
-    /// The value the window is drawing with, such as <c>d3d:1</c> or <c>cpu</c>. Null, empty, or a
+    /// The value the window is drawing with, such as <c>d3d:10de-2504-1616</c> or <c>cpu</c>. Null, empty, or a
     /// malformed value means the window fell back to the CPU path, and is recorded as such; a value that
     /// parses but is not one of this machine's options is ignored, because the window is then on a path
     /// the service never listed and reporting it would leave a settings list with nothing to select.

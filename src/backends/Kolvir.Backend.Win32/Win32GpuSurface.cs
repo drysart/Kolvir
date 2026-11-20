@@ -47,11 +47,10 @@ internal interface IWin32GpuSurface : IDisposable
     string Renderer { get; }
 
     /// <summary>
-    /// The GPU's index within its family's enumeration, which is what a
-    /// <see cref="GpuAccelerationOption"/> device suffix names. 0 when the family has one implicit
-    /// device, which is the case for the GL tier.
+    /// The GPU's identity within its family, which is what a <see cref="GpuAccelerationOption"/> device
+    /// suffix names. Empty when the family has one implicit device, which is the case for the GL tier.
     /// </summary>
-    int DeviceIndex { get; }
+    string DeviceKey { get; }
 
     /// <summary>Binds the drawing context to the calling (UI) thread, where the tier needs that.</summary>
     bool MakeCurrent();

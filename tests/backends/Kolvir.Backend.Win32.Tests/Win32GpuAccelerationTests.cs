@@ -1,3 +1,4 @@
+using System.Runtime.InteropServices;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SkiaSharp;
 
@@ -49,7 +50,7 @@ public sealed class Win32GpuAccelerationTests
             Assert.IsFalse(string.IsNullOrWhiteSpace(option.Name), option.Value);
 
             // A saved setting has to survive the round trip, or the choice a user makes is lost.
-            Assert.AreEqual(option.Value, GpuAccelerationSyntax.Format(option.Kind, option.Device?.Index ?? 0));
+            Assert.AreEqual(option.Value, GpuAccelerationSyntax.Format(option.Kind, option.Device?.Key));
         }
     }
 
@@ -73,7 +74,7 @@ public sealed class Win32GpuAccelerationTests
 
         for (var index = 0; index < d3d.Devices.Count; index++)
         {
-            Assert.AreEqual(index, d3d.Devices[index].Index, "devices are numbered in enumeration order");
+            Assert.IsTrue(GpuAccelerationSyntax.IsDeviceKey(d3d.Devices[index].Key), "every device carries an identity");
             Assert.IsFalse(string.IsNullOrWhiteSpace(d3d.Devices[index].Name), "an adapter has a description");
         }
     }
@@ -91,7 +92,7 @@ public sealed class Win32GpuAccelerationTests
         var raised = 0;
         service.CurrentChanged += (_, _) => raised++;
 
-        using var surface = new FakeSurface("gl", deviceIndex: 0);
+        using var surface = new FakeSurface("gl", deviceKey: string.Empty);
         service.Report(surface);
 
         Assert.AreEqual("ogl", service.Current.Value);
@@ -120,8 +121,26 @@ public sealed class Win32GpuAccelerationTests
         Assert.AreEqual(GpuAccelerationKind.Cpu, Win32GpuAccelerationService.KindOf("cpu"));
     }
 
+    [TestMethod]
+    public void TheVulkanIdentityStructsMatchTheHeaders()
+    {
+        // A hand-written struct that is a byte off corrupts the driver's write rather than failing, so
+        // the two layouts the device identity is read out of are pinned against vulkan_core.h. Offsets
+        // follow the header exactly: VkPhysicalDeviceProperties2 is sType, pNext, then the 824-byte
+        // VkPhysicalDeviceProperties, whose own order is apiVersion, driverVersion, vendorID, deviceID.
+        Assert.AreEqual(16 + 824, Marshal.SizeOf<Vulkan.VkPhysicalDeviceProperties2>());
+        Assert.AreEqual(24, Marshal.OffsetOf<Vulkan.VkPhysicalDeviceProperties2>("vendorID").ToInt32());
+        Assert.AreEqual(28, Marshal.OffsetOf<Vulkan.VkPhysicalDeviceProperties2>("deviceID").ToInt32());
+
+        Assert.AreEqual(64, Marshal.SizeOf<Vulkan.VkPhysicalDeviceIdProperties>());
+        Assert.AreEqual(16, Marshal.OffsetOf<Vulkan.VkPhysicalDeviceIdProperties>("deviceUuidLow").ToInt32());
+        Assert.AreEqual(24, Marshal.OffsetOf<Vulkan.VkPhysicalDeviceIdProperties>("deviceUuidHigh").ToInt32());
+        Assert.AreEqual(48, Marshal.OffsetOf<Vulkan.VkPhysicalDeviceIdProperties>("deviceLUID").ToInt32());
+        Assert.AreEqual(60, Marshal.OffsetOf<Vulkan.VkPhysicalDeviceIdProperties>("deviceLUIDValid").ToInt32());
+    }
+
     /// <summary>A tier that reports a name and a device index and draws nothing.</summary>
-    private sealed class FakeSurface(string tier, int deviceIndex) : IWin32GpuSurface
+    private sealed class FakeSurface(string tier, string deviceKey) : IWin32GpuSurface
     {
         public SKSurface? Surface => null;
 
@@ -133,7 +152,7 @@ public sealed class Win32GpuAccelerationTests
 
         public string Renderer => "fake";
 
-        public int DeviceIndex { get; } = deviceIndex;
+        public string DeviceKey { get; } = deviceKey;
 
         public bool TakeNeedsFull() => false;
 

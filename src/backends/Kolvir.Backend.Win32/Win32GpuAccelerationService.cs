@@ -17,7 +17,7 @@ namespace Kolvir.Backend.Win32;
 /// </para>
 /// <para>
 /// The lists are the families' own enumeration order, and a device's index in its family is what the
-/// device suffix on a value names: <c>d3d:1</c> is the second hardware adapter DXGI lists.
+/// device suffix on a value names: <c>d3d:10de-2504-1616</c> is the adapter with that PCI identity.
 /// </para>
 /// </remarks>
 internal sealed class Win32GpuAccelerationService : GpuAccelerationService
@@ -78,7 +78,7 @@ internal sealed class Win32GpuAccelerationService : GpuAccelerationService
         }
 
         var kind = KindOf(surface.Tier);
-        var value = GpuAccelerationSyntax.Format(kind, surface.DeviceIndex);
+        var value = GpuAccelerationSyntax.Format(kind, surface.DeviceKey);
 
         // The tier may have fallen back to a device the enumeration did not list - an adapter that
         // could not make a device when it was asked, or one that arrived since. Reporting the family's
@@ -135,7 +135,7 @@ internal sealed class Win32GpuAccelerationService : GpuAccelerationService
                         continue;
                     }
 
-                    adapters.Add(new GpuAccelerationDevice(adapters.Count, Describe(description)));
+                    adapters.Add(new GpuAccelerationDevice(AdapterKey(description), Describe(description)));
                 }
                 finally
                 {

@@ -5,26 +5,34 @@ namespace Kolvir;
 /// "Direct3D 12" or "Vulkan".
 /// </summary>
 /// <remarks>
-/// <see cref="Index"/> is the device's place in its family's enumeration, and it is what the
-/// device suffix on a <see cref="GpuAccelerationOption.Value"/> refers to. It is not an adapter
-/// handle or a Vulkan device handle: those belong to the backend and mean nothing to an application.
+/// <see cref="Key"/> is what makes a saved setting mean the same card next time. It is an identity the
+/// backend's own API reports - the adapter's vendor, device and subsystem ids on Direct3D 12, the device
+/// UUID on Vulkan - rather than a position, because both APIs enumerate in an order they make no promise
+/// about; see <see cref="GpuAccelerationSyntax"/> for why that matters.
 /// </remarks>
 public sealed class GpuAccelerationDevice
 {
     /// <summary>Describes one GPU.</summary>
-    /// <param name="index">The device's index within its family, counting from 0.</param>
+    /// <param name="key">The device identity, as the family's backend reports it.</param>
     /// <param name="name">The name to show a user, such as the driver's name for the adapter.</param>
-    public GpuAccelerationDevice(int index, string name)
+    public GpuAccelerationDevice(string key, string name)
     {
-        ArgumentOutOfRangeException.ThrowIfNegative(index);
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
 
-        Index = index;
+        if (!GpuAccelerationSyntax.IsDeviceKey(key))
+        {
+            throw new ArgumentException($"'{key}' is not a device identity.", nameof(key));
+        }
+
+        Key = key.ToLowerInvariant();
         Name = name;
     }
 
-    /// <summary>The device's index within its family, counting from 0.</summary>
-    public int Index { get; }
+    /// <summary>
+    /// The device identity: the same across reboots, driver updates and the GPU being moved, and
+    /// different between two physically identical cards.
+    /// </summary>
+    public string Key { get; }
 
     /// <summary>The name to show a user, such as the driver's name for the adapter.</summary>
     public string Name { get; }

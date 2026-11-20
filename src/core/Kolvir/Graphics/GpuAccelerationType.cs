@@ -7,12 +7,13 @@ namespace Kolvir;
 /// <remarks>
 /// <para>
 /// A family with devices gives one <see cref="GpuAccelerationOption"/> per device, so a machine with
-/// two GPUs exposes <c>d3d</c> and <c>d3d:1</c>. A family with no devices - OpenGL and the CPU path
-/// have nothing to choose between - gives exactly one option, whose value is the bare family word.
+/// two GPUs exposes two <c>d3d</c> choices distinguished by hardware identity. A family with no devices
+/// - OpenGL and the CPU path have nothing to choose between - gives exactly one option, whose value is
+/// the bare family word.
 /// </para>
 /// <para>
-/// <see cref="Name"/> is what a settings list shows above the devices, so it is a sentence fragment
-/// rather than an identifier: "Direct3D 12", "No GPU acceleration".
+/// <see cref="Name"/> is what a settings list shows above the devices, so it is a name rather than an
+/// identifier: "Direct3D 12", "No GPU acceleration".
 /// </para>
 /// </remarks>
 public sealed class GpuAccelerationType
@@ -23,8 +24,7 @@ public sealed class GpuAccelerationType
     /// <param name="kind">The family.</param>
     /// <param name="name">The name to show a user, such as "Direct3D 12".</param>
     /// <param name="devices">
-    /// The GPUs that can serve this family, in the family's own enumeration order, or null when the
-    /// family has nothing to choose between.
+    /// The GPUs that can serve this family, or null when the family has nothing to choose between.
     /// </param>
     public GpuAccelerationType(
         GpuAccelerationKind kind,
@@ -60,10 +60,10 @@ public sealed class GpuAccelerationType
     /// <summary>The name to show a user, such as "Direct3D 12".</summary>
     public string Name { get; }
 
-    /// <summary>The GPUs that can serve this family, in the family's own enumeration order.</summary>
+    /// <summary>The GPUs that can serve this family, in the backend's own enumeration order.</summary>
     public IReadOnlyList<GpuAccelerationDevice> Devices { get; }
 
-    /// <summary>True when there is more than nothing to show under this family in a settings list.</summary>
+    /// <summary>True when there is something to show under this family in a settings list.</summary>
     public bool HasDevices => Devices.Count > 0;
 
     /// <summary>Every fully-resolved choice this family offers, in device order.</summary>
@@ -73,14 +73,14 @@ public sealed class GpuAccelerationType
     public static GpuAccelerationType Cpu { get; } = new(GpuAccelerationKind.Cpu, "No GPU acceleration");
 
     /// <summary>Reads a family back out of the value one of its options carries.</summary>
-    /// <param name="value">The value, such as <c>d3d:1</c>.</param>
+    /// <param name="value">The value, such as <c>d3d:10de-2504-1616</c>.</param>
     /// <param name="option">The matching option.</param>
-    /// <returns>False when the value names no family, or names a device this family does not have.</returns>
+    /// <returns>False when the value names another family, or a device this one does not list.</returns>
     public bool TryFindOption(string? value, out GpuAccelerationOption? option)
     {
         option = null;
 
-        if (!GpuAccelerationSyntax.TryParse(value, out var kind, out var deviceIndex) || kind != Kind)
+        if (!GpuAccelerationSyntax.TryParse(value, out var kind, out var deviceKey) || kind != Kind)
         {
             return false;
         }
@@ -91,13 +91,24 @@ public sealed class GpuAccelerationType
             return true;
         }
 
-        if (deviceIndex >= Devices.Count)
+        if (deviceKey is null)
         {
-            return false;
+            // The bare family word names the family's first device, which is the only reading that keeps
+            // a hand-written value meaning something.
+            option = _options[0];
+            return true;
         }
 
-        option = _options[deviceIndex];
-        return true;
+        foreach (var candidate in _options)
+        {
+            if (candidate.Device?.Key == deviceKey)
+            {
+                option = candidate;
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <inheritdoc />

@@ -150,9 +150,9 @@ public sealed class ApplicationOptions
 
     /// <summary>
     /// The acceleration the user chose, as one of the values
-    /// <see cref="IGpuAccelerationService"/> publishes: <c>d3d</c>, <c>d3d:1</c>, <c>vulkan</c>,
-    /// <c>vulkan:1</c>, <c>ogl</c>, <c>metal</c> or <c>cpu</c>. Null, the default, asks the backend to
-    /// pick for itself exactly as it always has.
+    /// <see cref="IGpuAccelerationService"/> publishes: <c>d3d</c>, <c>d3d:10de-2504-1616</c>,
+    /// <c>vulkan</c>, <c>vulkan:8f4a37c2…</c>, <c>ogl</c>, <c>metal</c> or <c>cpu</c>. Null, the default,
+    /// asks the backend to pick for itself exactly as it always has.
     /// </summary>
     /// <remarks>
     /// <para>

@@ -5641,15 +5641,39 @@ application saves and what `Current` returns:
 | `Value` | Meaning |
 | --- | --- |
 | `cpu` | no GPU acceleration |
-| `d3d`, `d3d:1` | Direct3D 12, on the first hardware adapter or the second |
-| `vulkan`, `vulkan:1` | Vulkan, on the first or second physical device |
+| `d3d` | Direct3D 12, on whichever adapter the window would pick for itself |
+| `d3d:10de-2504-1616` | Direct3D 12, on the adapter whose vendor, device and subsystem ids are those |
+| `vulkan` | Vulkan, on whichever physical device the window would pick |
+| `vulkan:8f4a37c2…` | Vulkan, on the physical device with that device UUID |
 | `ogl` | OpenGL, which has one implicit device |
 | `metal` | Metal, on macOS |
 
-A bare family word means that family's first device, so `d3d` and `d3d:0` are the same choice and
-`Format` writes the bare word for it. The parser is forgiving on the way in - `d3d12`, `direct3d`,
-`gl`, `opengl` and `mtl` all read as their family, because a hand-edited setting is not worth a
-crash - and strict on the way out, so what an application saves stays canonical.
+**The device part is an identity, not a position**, and that is deliberate. Both APIs enumerate their
+devices in an order they promise nothing about: numbers shift when an eGPU is plugged in, an adapter
+is disabled, a driver update reorders the list, or a laptop switches between its integrated and
+discrete GPU. A setting saved as "device 1" would then quietly name a different card - and would still
+name *something*, so nothing anywhere would report the mistake. What each family uses instead:
+
+| Family | Identity | Stable across |
+| --- | --- | --- |
+| Direct3D 12 | `vendorId-deviceId-subSysId` from `DXGI_ADAPTER_DESC1` | reboots, driver updates, the card being moved |
+| Vulkan | `deviceUUID` from `VkPhysicalDeviceIDProperties` | reboots, driver updates, instances and processes; the header requires it to be immutable for a given device |
+
+Two things are deliberately *not* used. `LUID` - DXGI's `AdapterLuid` and Vulkan's `deviceLUID` are the
+same value for the same card on Windows, which makes them the right key for correlating one GPU across
+the two families *within a run*, but a LUID is only defined for the life of a boot session, so a saved
+setting would stop naming anything at the next restart. And the enumeration order itself, for the
+reason above. The one thing a PCI identity cannot do is tell two physically identical cards apart; a
+driver that reports an all-zero `deviceUUID` falls back to `vendorID-deviceID` and inherits the same
+limitation.
+
+None of this is meant to be read by a person - `option.Name` is what a settings row shows - so the
+format is chosen for stability and round-tripping. Reading is lenient about the family word
+(`d3d12`, `direct3d`, `gl`, `opengl`, `mtl` all read as their family) and strict about the identity:
+hex digits in dash-separated groups, no whitespace, no ambiguous separators.
+
+A bare family word means that family's first device, so a hand-written `d3d` is the same as
+`d3d:<the first adapter's identity>`.
 
 Nothing that cannot be used is listed. Direct3D 12 is asked for its hardware adapters and each one
 gets a device and a command queue before it is offered; Vulkan is asked for its physical devices and
@@ -5661,7 +5685,7 @@ enumeration runs once, on the first read, and can take a few milliseconds: it op
 to ask what devices exist.
 
 `Current` is what a window is actually drawing with. It starts on `cpu`, and each window reports the
-tier it built - and the CPU path when a tier is lost - so a settings list can show the live choice
+identity it built - and the CPU path when a tier is lost - so a settings list can show the live choice
 and follow `CurrentChanged`. It is always one of `Options`: a window that fell back to a device the
 enumeration did not list reports its family's first device instead, because a row with nothing to
 select is worse than a slightly coarse one.
@@ -5673,7 +5697,7 @@ the next start. The property is optional: left null, every backend picks for its
 before, with `KOLVIR_GL_OPTIONS` and the default order in charge.
 
 ```csharp
-options.GfxAcceleration = settings.SavedAcceleration;   // e.g. "vulkan:1", or null for no preference
+options.GfxAcceleration = settings.SavedAcceleration;   // e.g. "d3d:10de-2504-1616", or null
 ```
 
 The rules, in the order the Win32 backend applies them:
@@ -5681,8 +5705,8 @@ The rules, in the order the Win32 backend applies them:
 - **A family the machine has** is the only one tried. If it cannot be built - a driver that has
   stopped working - the window goes to its DIB rather than falling through to another GPU API. An
   explicit choice that cannot be honored is reported, not silently replaced.
-- **A device the family does not have**, such as a saved `vulkan:3` read on a machine with two GPUs,
-  falls back within the family: the other devices are tried in enumeration order.
+- **A device the family does not have**, such as a saved identity read on a machine where that card
+  has been removed, falls back within the family: the other devices are tried in enumeration order.
 - **A family this platform does not have** - `metal` read on Windows - is the CPU path, for the same
   reason.
 - **A value that is not a family at all** is the CPU path too, and `KOLVIR_GL_TRACE=1` names the value
@@ -5690,15 +5714,17 @@ The rules, in the order the Win32 backend applies them:
 - Naming an accelerated family turns acceleration on, so the property does not need
   `GfxHardwareAcceleration` to agree; `cpu` is the same request as that option being false.
 
-A device index is honored only where the tier can honor it. The Direct3D 12 tier prefers the named
-adapter but passes over it when it does not drive the window's display, because a flip-model swap
-chain cannot cross adapters; the Vulkan tier tries the named physical device first and moves on when
-it cannot present to the window. Either way the window ends up on a GPU rather than on nothing.
+A chosen device is honored only where the tier can honor it. The Direct3D 12 tier prefers the adapter
+with that identity but passes over it when it does not drive the window's display, because a
+flip-model swap chain cannot cross adapters; the Vulkan tier tries the identified physical device
+first and moves on when it cannot present to the window. Either way the window ends up on a GPU rather
+than on nothing.
 
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in section 8 of
-[FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 3,524,608 -> 3,566,592, so +41,984 bytes for the
-seam, the Win32 enumeration and the startup setting together. No new native asset: DXGI, `d3d12.dll`,
-`vulkan-1.dll` and `opengl32.dll` are all asked through the same raw interop the tiers already use.
+[FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 3,524,608 -> 3,575,808, so +51,200 bytes for the
+seam, the Win32 enumeration, the device identities and the startup setting together. No new native
+asset: DXGI, `d3d12.dll`, `vulkan-1.dll` and `opengl32.dll` are all asked through the same raw interop
+the tiers already use.
 
 ## Hardware acceleration (macOS)
 

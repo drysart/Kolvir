@@ -22,7 +22,7 @@ public sealed class Win32GfxOptionsTests
 
         public int Calls { get; private set; }
 
-        public Win32VulkanDevice? TryCreate(IntPtr hwnd, int deviceIndex, out string failure)
+        public Win32VulkanDevice? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             Calls++;
             _order.Add("vulkan");
@@ -39,7 +39,7 @@ public sealed class Win32GfxOptionsTests
 
         public int Calls { get; private set; }
 
-        public Win32D3D12Device? TryCreate(IntPtr hwnd, int deviceIndex, out string failure)
+        public Win32D3D12Device? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             Calls++;
             _order.Add("d3d12");
@@ -209,17 +209,28 @@ public sealed class Win32GfxOptionsTests
 
         Assert.IsTrue(choice.HasValue);
         Assert.AreEqual("vulkan", Names(choice.Value));
-        Assert.AreEqual(-1, choice.Value.DeviceIndex, "no device was named, so the window picks one");
+        Assert.IsNull(choice.Value.DeviceKey, "no device was named, so the window picks one");
     }
 
     [TestMethod]
     public void ASavedChoiceCarriesItsDevice()
     {
-        var choice = Win32GfxOptions.FromSelected("d3d:1");
+        var choice = Win32GfxOptions.FromSelected("d3d:10de-2504-1616");
 
         Assert.IsTrue(choice.HasValue);
         Assert.AreEqual("d3d", Names(choice.Value));
-        Assert.AreEqual(1, choice.Value.DeviceIndex);
+        Assert.AreEqual("10de-2504-1616", choice.Value.DeviceKey);
+    }
+
+    [TestMethod]
+    public void ABareFamilyWordNamesNoDevice()
+    {
+        // "d3d" means whichever adapter the window would have picked, not "the first one": the tier then
+        // prefers the adapter that drives the display, as it always did.
+        var choice = Win32GfxOptions.FromSelected("d3d");
+
+        Assert.IsTrue(choice.HasValue);
+        Assert.IsNull(choice.Value.DeviceKey);
     }
 
     [TestMethod]
@@ -262,21 +273,12 @@ public sealed class Win32GfxOptionsTests
     }
 
     [TestMethod]
-    public void AChosenDeviceIsPreferredOnlyWhenItDrivesTheWindow()
-    {
-        // A flip-model swap chain cannot cross adapters, so a preferred adapter that does not drive the
-        // display is passed over rather than losing the tier entirely.
-        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([true, true], preferred: 1), "preferred, and it drives the window");
-        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([true, false], preferred: 1), "preferred, but it does not drive the window");
-        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, true], preferred: -1), "no preference, so the one that drives it");
-        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, false], preferred: 1), "nothing drives it, so the preference is still tried");
-    }
-
-    [TestMethod]
     public void AVulkanPreferenceIsTriedFirstAndThenTheRest()
     {
-        CollectionAssert.AreEqual(new[] { 1, 0, 2 }, Win32VulkanDevice.PreferenceOrder(3, 1).ToArray());
-        CollectionAssert.AreEqual(new[] { 0, 1, 2 }, Win32VulkanDevice.PreferenceOrder(3, -1).ToArray());
-        CollectionAssert.AreEqual(new[] { 0, 1 }, Win32VulkanDevice.PreferenceOrder(2, 5).ToArray(), "a device index from a bigger machine");
+        string[] keys = ["10de-2504-1616", "8086-46a6-0", "10de-2504-1617"];
+
+        CollectionAssert.AreEqual(new[] { 1, 0, 2 }, Win32VulkanDevice.PreferenceOrder(3, keys, "8086-46a6-0").ToArray());
+        CollectionAssert.AreEqual(new[] { 0, 1, 2 }, Win32VulkanDevice.PreferenceOrder(3, keys, preferredKey: null).ToArray());
+        CollectionAssert.AreEqual(new[] { 0, 1, 2 }, Win32VulkanDevice.PreferenceOrder(3, keys, "not-here").ToArray(), "a device this machine does not have");
     }
 }

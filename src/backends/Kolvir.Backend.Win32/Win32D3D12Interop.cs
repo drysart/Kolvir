@@ -535,4 +535,20 @@ internal static unsafe class D3D12
 
         return length == 0 ? "unknown adapter" : new string(text, 0, length);
     }
+
+    /// <summary>
+    /// The adapter's hardware identity: vendor, device and subsystem ids, in the form a saved
+    /// acceleration choice carries.
+    /// </summary>
+    /// <param name="description">The adapter's description.</param>
+    /// <remarks>
+    /// These three fields come from the card's PCI identity, so they survive reboots, driver updates and
+    /// the adapter being moved to another slot, and two physically identical cards report the same
+    /// triple. That last point is the one thing this cannot do that an <c>LUID</c> can - but a LUID is
+    /// only defined for the life of a boot session, so a setting saved with one would stop naming
+    /// anything at the next restart. The enumeration order is not used for identity at all: it shifts
+    /// whenever a GPU is added, removed or disabled.
+    /// </remarks>
+    internal static string AdapterKey(DxgiAdapterDesc1 description) =>
+        $"{description.VendorId:x}-{description.DeviceId:x}-{description.SubSystemId:x}";
 }

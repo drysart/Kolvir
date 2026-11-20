@@ -8,13 +8,13 @@ internal interface IWin32D3D12Probe
 {
     /// <summary>Builds the device stack, or returns null with the step that failed.</summary>
     /// <param name="hwnd">The window that will present.</param>
-    /// <param name="adapterIndex">
-    /// The hardware adapter to prefer, or -1 to pick the one that drives the window. A preference is
-    /// honored only when that adapter drives the window's display: a flip-model swap chain cannot cross
-    /// adapters, so a preferred adapter that does not is passed over rather than failing.
+    /// <param name="adapterKey">
+    /// The hardware identity of the adapter to prefer, or null to pick the one that drives the window. A
+    /// preference is honored only when that adapter drives the window's display: a flip-model swap chain
+    /// cannot cross adapters, so a preferred adapter that does not is passed over rather than failing.
     /// </param>
     /// <param name="failure">The step that failed.</param>
-    Win32D3D12Device? TryCreate(IntPtr hwnd, int adapterIndex, out string failure);
+    Win32D3D12Device? TryCreate(IntPtr hwnd, string? adapterKey, out string failure);
 }
 
 /// <summary>The production probe: the real DXGI factory, adapter, device and command queue.</summary>
@@ -26,8 +26,8 @@ internal sealed class Win32D3D12Probe : IWin32D3D12Probe
 
     internal static Win32D3D12Probe Instance { get; } = new();
 
-    public Win32D3D12Device? TryCreate(IntPtr hwnd, int adapterIndex, out string failure) =>
-        Win32D3D12Device.TryCreate(hwnd, adapterIndex, out failure);
+    public Win32D3D12Device? TryCreate(IntPtr hwnd, string? adapterKey, out string failure) =>
+        Win32D3D12Device.TryCreate(hwnd, adapterKey, out failure);
 }
 
 /// <summary>
@@ -37,14 +37,14 @@ internal sealed class Win32D3D12Probe : IWin32D3D12Probe
 /// </summary>
 internal sealed unsafe class Win32D3D12Device : IDisposable
 {
-    private Win32D3D12Device(IntPtr adapter, IntPtr device, IntPtr queue, string renderer, bool reportsMemory, int adapterIndex)
+    private Win32D3D12Device(IntPtr adapter, IntPtr device, IntPtr queue, string renderer, bool reportsMemory, string adapterKey)
     {
         _adapter = adapter;
         _device = device;
         _queue = queue;
         Renderer = renderer;
         ReportsMemory = reportsMemory;
-        AdapterIndex = adapterIndex;
+        AdapterKey = adapterKey;
     }
 
     private IntPtr _adapter;
@@ -70,10 +70,10 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
     internal string Renderer { get; }
 
     /// <summary>
-    /// The adapter's index among the machine's hardware adapters, in DXGI's enumeration order, which
-    /// is what a device suffix on an acceleration value names.
+    /// The adapter's hardware identity - vendor, device and subsystem ids - which is what a device
+    /// suffix on an acceleration value names.
     /// </summary>
-    internal int AdapterIndex { get; }
+    internal string AdapterKey { get; }
 
     /// <summary>
     /// Picks an adapter, creates a device for it and one direct queue.
@@ -86,7 +86,7 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
     /// refused as well: WARP answers every call successfully and then draws on the CPU, which is
     /// slower than the DIB path this tier exists to beat.
     /// </remarks>
-    internal static Win32D3D12Device? TryCreate(IntPtr hwnd, int adapterIndex, out string failure)
+    internal static Win32D3D12Device? TryCreate(IntPtr hwnd, string? adapterKey, out string failure)
     {
         if (!IsAvailable)
         {
@@ -104,7 +104,7 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
 
         try
         {
-            if (!TryPickAdapter(factory, hwnd, adapterIndex, out var adapter, out var description, out var chosen, out failure))
+            if (!TryPickAdapter(factory, hwnd, adapterKey, out var adapter, out var description, out var chosenKey, out failure))
             {
                 return null;
             }
@@ -142,7 +142,7 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
                     adapter = adapter3;
                 }
 
-                return new Win32D3D12Device(adapter, device, queue, Describe(description), reportsMemory, chosen);
+                return new Win32D3D12Device(adapter, device, queue, Describe(description), reportsMemory, chosenKey);
             }
             catch
             {
@@ -159,15 +159,15 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
     private static bool TryPickAdapter(
         IntPtr factory,
         IntPtr hwnd,
-        int preferred,
+        string? preferredKey,
         out IntPtr adapter,
         out DxgiAdapterDesc1 description,
-        out int chosen,
+        out string chosenKey,
         out string failure)
     {
         adapter = IntPtr.Zero;
         description = default;
-        chosen = 0;
+        chosenKey = string.Empty;
         failure = "d3d12: no hardware adapter";
 
         List<(IntPtr Adapter, DxgiAdapterDesc1 Description)> candidates = [];
@@ -198,14 +198,16 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
                 return false;
             }
 
-            chosen = ChooseAdapterIndex(candidates.Select(candidate => DrivesWindow(candidate.Adapter, hwnd)).ToArray(), preferred);
+            string[] keys = candidates.Select(candidate => AdapterKey(candidate.Description)).ToArray();
+            var chosen = ChooseAdapterIndex(candidates.Select(candidate => DrivesWindow(candidate.Adapter, hwnd)).ToArray(), keys, preferredKey);
             (adapter, description) = candidates[chosen];
+            chosenKey = keys[chosen];
 
             if (Win32GlTrace.IsEnabled)
             {
                 for (var index = 0; index < candidates.Count; index++)
                 {
-                    Win32GlTrace.Write($"kolvir-d3d12: adapter {index}: {Describe(candidates[index].Description)}"
+                    Win32GlTrace.Write($"kolvir-d3d12: adapter {index}: {keys[index]}: {Describe(candidates[index].Description)}"
                         + (index == chosen ? " (chosen)" : string.Empty));
                 }
             }
@@ -225,28 +227,44 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
     }
 
     /// <summary>
-    /// Which candidate to use: the preferred one when it drives the display the window is on,
-    /// otherwise the first candidate that does, and otherwise the preferred one or the first at all - a
-    /// window on a display no enumerated adapter claims is a machine whose adapter list this code
-    /// cannot reason about, and trying something is what it did before.
+    /// Which candidate to use: the one with the preferred identity when it drives the display the window
+    /// is on, otherwise the first candidate that does, and otherwise the preferred identity or the first
+    /// at all - a window on a display no enumerated adapter claims is a machine whose adapter list this
+    /// code cannot reason about, and trying something is what it did before.
     /// </summary>
     /// <param name="drivesWindow">One flag per hardware adapter, in enumeration order.</param>
-    /// <param name="preferred">
-    /// The adapter the application asked for, or -1 for no preference. A flip-model swap chain cannot
-    /// cross adapters, so a preferred adapter that does not drive the window is passed over: the window
-    /// would otherwise lose the tier entirely rather than use the GPU in front of it.
+    /// <param name="keys">One hardware identity per adapter, in the same order.</param>
+    /// <param name="preferredKey">
+    /// The adapter identity the application asked for, or null for no preference. A flip-model swap chain
+    /// cannot cross adapters, so a preferred adapter that does not drive the window is passed over: the
+    /// window would otherwise lose the tier entirely rather than use the GPU in front of it.
     /// </param>
     /// <remarks>
-    /// The choice is a pure function of the flags so that a machine with the window on a different
-    /// adapter than the first one can be tested without such a machine.
+    /// The choice is a pure function of the flags and identities so that a machine with the window on a
+    /// different adapter than the first one can be tested without such a machine.
     /// </remarks>
-    internal static int ChooseAdapterIndex(IReadOnlyList<bool> drivesWindow, int preferred = -1)
+    internal static int ChooseAdapterIndex(
+        IReadOnlyList<bool> drivesWindow,
+        IReadOnlyList<string> keys,
+        string? preferredKey = null)
     {
-        var wanted = preferred >= 0 && preferred < drivesWindow.Count;
+        var wanted = -1;
 
-        if (wanted && drivesWindow[preferred])
+        if (preferredKey is not null)
         {
-            return preferred;
+            for (var index = 0; index < keys.Count; index++)
+            {
+                if (string.Equals(keys[index], preferredKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    wanted = index;
+                    break;
+                }
+            }
+        }
+
+        if (wanted >= 0 && wanted < drivesWindow.Count && drivesWindow[wanted])
+        {
+            return wanted;
         }
 
         for (var index = 0; index < drivesWindow.Count; index++)
@@ -257,7 +275,7 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
             }
         }
 
-        return wanted ? preferred : 0;
+        return wanted >= 0 ? wanted : 0;
     }
 
     private static bool DrivesWindow(IntPtr adapter, IntPtr hwnd)
@@ -383,7 +401,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
     public string Renderer => _device.Renderer;
 
-    public int DeviceIndex => _device.AdapterIndex;
+    public string DeviceKey => _device.AdapterKey;
 
     public bool MakeCurrent() => true;
 
@@ -408,24 +426,24 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
         int width,
         int height,
         out string failure) =>
-        TryCreate(hwnd, probe, -1, width, height, out failure);
+        TryCreate(hwnd, probe, adapterKey: null, width, height, out failure);
 
     /// <summary>Builds the whole stack or nothing, on a preferred adapter when one is named.</summary>
     /// <param name="hwnd">The window that will present.</param>
     /// <param name="probe">The device stack's source.</param>
-    /// <param name="adapterIndex">The adapter to prefer, or -1 for the one that drives the window.</param>
+    /// <param name="adapterKey">The adapter identity to prefer, or null for the one that drives the window.</param>
     /// <param name="width">The framebuffer width in physical pixels.</param>
     /// <param name="height">The framebuffer height in physical pixels.</param>
     /// <param name="failure">The step that failed.</param>
     internal static Win32D3D12Surface? TryCreate(
         IntPtr hwnd,
         IWin32D3D12Probe probe,
-        int adapterIndex,
+        string? adapterKey,
         int width,
         int height,
         out string failure)
     {
-        var device = probe.TryCreate(hwnd, adapterIndex, out failure);
+        var device = probe.TryCreate(hwnd, adapterKey, out failure);
 
         if (device is null)
         {

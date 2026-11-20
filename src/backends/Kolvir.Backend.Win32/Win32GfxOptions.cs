@@ -26,11 +26,11 @@ internal enum Win32GfxTier
 /// </remarks>
 internal readonly struct Win32GfxChoice
 {
-    private Win32GfxChoice(IReadOnlyList<Win32GfxTier> order, bool cpuOnly, int deviceIndex = -1)
+    private Win32GfxChoice(IReadOnlyList<Win32GfxTier> order, bool cpuOnly, string? deviceKey = null)
     {
         Order = order;
         CpuOnly = cpuOnly;
-        DeviceIndex = deviceIndex;
+        DeviceKey = deviceKey;
     }
 
     /// <summary>The order to try, most preferred first. Empty when <see cref="CpuOnly"/> is set.</summary>
@@ -40,10 +40,10 @@ internal readonly struct Win32GfxChoice
     internal bool CpuOnly { get; }
 
     /// <summary>
-    /// The GPU the choice named within its family, or -1 when it named none. Only the first tier in
-    /// <see cref="Order"/> sees it: a device index belongs to the family that carried it.
+    /// The identity of the GPU the choice named within its family, or null when it named none. Only the
+    /// first tier in <see cref="Order"/> sees it: a device identity belongs to the family that carried it.
     /// </summary>
-    internal int DeviceIndex { get; }
+    internal string? DeviceKey { get; }
 
     /// <summary>The order a window uses when nothing says otherwise.</summary>
     internal static Win32GfxChoice Default { get; } =
@@ -59,9 +59,9 @@ internal readonly struct Win32GfxChoice
 
     /// <summary>Builds a choice that names one family only, with an optional device inside it.</summary>
     /// <param name="tier">The only tier to try.</param>
-    /// <param name="deviceIndex">The GPU within that tier, or -1 for whichever the window would pick.</param>
-    internal static Win32GfxChoice Only(Win32GfxTier tier, int deviceIndex = -1) =>
-        new([tier], cpuOnly: false, deviceIndex);
+    /// <param name="deviceKey">The GPU within that tier, or null for whichever the window would pick.</param>
+    internal static Win32GfxChoice Only(Win32GfxTier tier, string? deviceKey = null) =>
+        new([tier], cpuOnly: false, deviceKey);
 }
 
 /// <summary>
@@ -114,7 +114,7 @@ internal static class Win32GfxOptions
             return null;
         }
 
-        if (!GpuAccelerationSyntax.TryParse(value, out var kind, out var deviceIndex))
+        if (!GpuAccelerationSyntax.TryParse(value, out var kind, out var deviceKey))
         {
             if (Win32GlTrace.IsEnabled)
             {
@@ -124,16 +124,11 @@ internal static class Win32GfxOptions
             return Win32GfxChoice.Cpu;
         }
 
-        // A bare family word is "whichever GPU the window would pick", not "device 0": the difference
-        // matters to a tier that would otherwise try the first device before the one that drives the
-        // display. The suffix is the only thing that names a device.
-        var preferred = value.Contains(':', StringComparison.Ordinal) ? deviceIndex : -1;
-
         return kind switch
         {
             GpuAccelerationKind.Cpu => Win32GfxChoice.Cpu,
-            GpuAccelerationKind.Direct3D12 => Win32GfxChoice.Only(Win32GfxTier.Direct3D12, preferred),
-            GpuAccelerationKind.Vulkan => Win32GfxChoice.Only(Win32GfxTier.Vulkan, preferred),
+            GpuAccelerationKind.Direct3D12 => Win32GfxChoice.Only(Win32GfxTier.Direct3D12, deviceKey),
+            GpuAccelerationKind.Vulkan => Win32GfxChoice.Only(Win32GfxTier.Vulkan, deviceKey),
             GpuAccelerationKind.OpenGl => Win32GfxChoice.Only(Win32GfxTier.OpenGl),
 
             // Metal does not exist here: this machine cannot honor what was asked for.

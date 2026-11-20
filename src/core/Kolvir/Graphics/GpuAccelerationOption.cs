@@ -5,10 +5,12 @@ namespace Kolvir;
 /// and one of its GPUs.
 /// </summary>
 /// <remarks>
-/// <see cref="Value"/> is the whole point of this type. It is the string an application saves when
-/// the user picks a row, passes back through <see cref="ApplicationOptions.GfxAcceleration"/> at the
-/// next startup, and compares against <see cref="IGpuAccelerationService.Current"/> to see which row
-/// to show as selected. <see cref="Name"/> is the other half: what the row says.
+/// <see cref="Value"/> is the whole point of this type. It is the string an application saves when the
+/// user picks a row, passes back through <see cref="ApplicationOptions.GfxAcceleration"/> at the next
+/// startup, and compares against <see cref="IGpuAccelerationService.Current"/> to see which row to show
+/// as selected. Because the device part is a hardware identity rather than a position, that saved string
+/// keeps naming the same card after a reboot, a driver update or a second GPU being installed.
+/// <see cref="Name"/> is the other half: what the row says.
 /// </remarks>
 public sealed class GpuAccelerationOption : IEquatable<GpuAccelerationOption>
 {
@@ -16,7 +18,7 @@ public sealed class GpuAccelerationOption : IEquatable<GpuAccelerationOption>
     {
         Type = type;
         Device = device;
-        Value = GpuAccelerationSyntax.Format(type.Kind, device?.Index ?? 0);
+        Value = GpuAccelerationSyntax.Format(type.Kind, device?.Key);
         Name = device is null ? type.Name : $"{type.Name}: {device.Name}";
     }
 
@@ -32,7 +34,9 @@ public sealed class GpuAccelerationOption : IEquatable<GpuAccelerationOption>
     /// <summary>What a settings row says, such as "Direct3D 12: NVIDIA GeForce RTX 5090".</summary>
     public string Name { get; }
 
-    /// <summary>The machine-readable value, such as <c>d3d:1</c>; see <see cref="GpuAccelerationSyntax"/>.</summary>
+    /// <summary>
+    /// The machine-readable value, such as <c>d3d:10de-2504-1616</c>; see <see cref="GpuAccelerationSyntax"/>.
+    /// </summary>
     public string Value { get; }
 
     /// <inheritdoc />

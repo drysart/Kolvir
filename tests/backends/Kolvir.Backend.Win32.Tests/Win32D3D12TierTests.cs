@@ -28,7 +28,7 @@ public sealed class Win32D3D12TierTests
 
     private sealed class RefusingVulkanProbe : IWin32VulkanProbe
     {
-        public Win32VulkanDevice? TryCreate(IntPtr hwnd, int deviceIndex, out string failure)
+        public Win32VulkanDevice? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             failure = "no vulkan loader";
             return null;
@@ -45,7 +45,7 @@ public sealed class Win32D3D12TierTests
 
         public int Calls { get; private set; }
 
-        public Win32D3D12Device? TryCreate(IntPtr hwnd, int deviceIndex, out string failure)
+        public Win32D3D12Device? TryCreate(IntPtr hwnd, string? deviceKey, out string failure)
         {
             Calls++;
             _order.Add("d3d12");
@@ -153,12 +153,29 @@ public sealed class Win32D3D12TierTests
         // A flip-model swap chain cannot cross adapters, so a device on the discrete card cannot
         // present to a window on the integrated GPU's output. The adapter is therefore the one whose
         // output holds the window, not simply the first enumerated.
-        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([true, true]), "the first that drives it");
-        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, true]), "a later adapter can be the one");
-        Assert.AreEqual(2, Win32D3D12Device.ChooseAdapterIndex([false, false, true]));
-        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([false, false]), "nothing claims the window: keep the old behaviour");
-        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([]), "and an empty list still has a first");
+        string[] keys = ["8086-46a6-0", "10de-2504-1616", "10de-2504-1617"];
+
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([true, true], keys), "the first that drives it");
+        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, true], keys), "a later adapter can be the one");
+        Assert.AreEqual(2, Win32D3D12Device.ChooseAdapterIndex([false, false, true], keys));
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([false, false], keys), "nothing claims the window: keep the old behaviour");
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([], []), "and an empty list still has a first");
     }
+
+    [TestMethod]
+    public void AChosenAdapterIsPickedByIdentityNotByPosition()
+    {
+        // The identities are what a saved setting carries, so they are what decides - whatever order the
+        // machine happens to enumerate its adapters in today.
+        string[] keys = ["8086-46a6-0", "10de-2504-1616"];
+
+        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([true, true], keys, preferredKey: "10de-2504-1616"));
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([true, false], keys, preferredKey: "10de-2504-1616"), "it does not drive the window, so the one that does");
+        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, true], keys, preferredKey: "10de-2504-1616"));
+        Assert.AreEqual(0, Win32D3D12Device.ChooseAdapterIndex([true, true], keys, preferredKey: "not-here"), "a card this machine does not have");
+        Assert.AreEqual(1, Win32D3D12Device.ChooseAdapterIndex([false, false], keys, preferredKey: "10de-2504-1616"), "nothing drives it, so the preference is still tried");
+    }
+
     [TestMethod]
     public void ASwapChainIsAcceptedOnTheDefaultAdapter()
     {
@@ -257,7 +274,7 @@ public sealed class Win32D3D12TierTests
     {
         // The interop's entry points are loaded and the adapter list walked for real, so this is what
         // catches a wrong export name or a mis-sized struct without needing a GPU in the machine.
-        var device = Win32D3D12Probe.Instance.TryCreate(new IntPtr(1), -1, out var failure);
+        var device = Win32D3D12Probe.Instance.TryCreate(new IntPtr(1), adapterKey: null, out var failure);
 
         if (device is null)
         {
