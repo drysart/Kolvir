@@ -4,9 +4,10 @@ namespace Kolvir.Backend.Win32.Tests;
 
 /// <summary>
 /// The order the window asks for its tiers in. Vulkan leads because a rebuilt swap chain is what
-/// keeps a resized window from accumulating a drawable per size; GL follows because it is what the
-/// backend had before, and the DIB follows that. Only the refusals are reachable without a driver,
-/// which is enough to pin the order and the diagnostic line the log gets.
+/// keeps a resized window from accumulating a drawable per size; Direct3D 12 follows it with the same
+/// property and no Vulkan dependency of its own; GL follows because it is what the backend had before,
+/// and the DIB follows that. Only the refusals are reachable without a driver, which is enough to pin
+/// the order and the diagnostic line the log gets.
 /// </summary>
 [TestClass]
 [TestCategory("Platform.Win32")]
@@ -56,28 +57,48 @@ public sealed class Win32VulkanTierTests
         }
     }
 
+    private sealed class RecordingD3D12Probe : IWin32D3D12Probe
+    {
+        private readonly List<string> _order;
+
+        public RecordingD3D12Probe(List<string> order) => _order = order;
+
+        public string Failure { get; set; } = "d3d12: no hardware adapter";
+
+        public int Calls { get; private set; }
+
+        public Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure)
+        {
+            Calls++;
+            _order.Add("d3d12");
+            failure = Failure;
+            return null;
+        }
+    }
     [TestMethod]
-    public void VulkanIsTriedBeforeGl()
+    public void TheTiersAreTriedInOrder()
     {
         List<string> order = [];
         var vulkan = new RecordingVulkanProbe(order);
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             gl,
             vulkan,
+            new RecordingD3D12Probe(order),
             width: 800,
             height: 600,
             out var reason);
 
         Assert.IsNull(surface, "neither tier produces a surface without a driver");
         CollectionAssert.AreEqual(
-            new[] { "vulkan", "gl" },
+            new[] { "d3d12", "vulkan", "gl" },
             order,
-            "GL is only asked once Vulkan has refused");
-        Assert.AreEqual("cpu (vkCreateInstance failed (-9); no wgl context (error 0))", reason);
+            "GL is only asked once the two swap chain tiers have refused");
+        Assert.AreEqual("cpu (d3d12: no hardware adapter; vkCreateInstance failed (-9); no wgl context (error 0))", reason);
     }
 
     [TestMethod]
@@ -88,10 +109,12 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: false,
             new IntPtr(1),
             gl,
             vulkan,
+            new RecordingD3D12Probe(order),
             width: 800,
             height: 600,
             out var reason);
@@ -110,10 +133,12 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             IntPtr.Zero,
             gl,
             vulkan,
+            new RecordingD3D12Probe(order),
             width: 800,
             height: 600,
             out var reason);
@@ -132,10 +157,12 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order);
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             gl,
             vulkan,
+            new RecordingD3D12Probe(order),
             width: 0,
             height: 600,
             out var reason);
@@ -154,15 +181,17 @@ public sealed class Win32VulkanTierTests
         var gl = new RecordingGlProbe(order) { FlavorFailure = "gdi: no wgl context (error 0)" };
 
         var surface = Win32Gfx.TryCreateAccelerated(
+            Win32GfxChoice.Default,
             hardwareAcceleration: true,
             new IntPtr(1),
             gl,
             vulkan,
+            new RecordingD3D12Probe(order),
             width: 800,
             height: 600,
             out var reason);
 
         Assert.IsNull(surface);
-        Assert.AreEqual("cpu (no vulkan loader; gdi: no wgl context (error 0))", reason);
+        Assert.AreEqual("cpu (d3d12: no hardware adapter; no vulkan loader; gdi: no wgl context (error 0))", reason);
     }
 }

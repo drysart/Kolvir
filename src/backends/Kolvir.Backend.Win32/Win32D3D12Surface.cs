@@ -1,0 +1,825 @@
+using SkiaSharp;
+using static Kolvir.Backend.Win32.D3D12;
+
+namespace Kolvir.Backend.Win32;
+
+/// <summary>Creates the Direct3D 12 device stack for a window, or says why it cannot.</summary>
+internal interface IWin32D3D12Probe
+{
+    /// <summary>Builds the device stack, or returns null with the step that failed.</summary>
+    Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure);
+}
+
+/// <summary>The production probe: the real DXGI factory, adapter, device and command queue.</summary>
+internal sealed class Win32D3D12Probe : IWin32D3D12Probe
+{
+    private Win32D3D12Probe()
+    {
+    }
+
+    internal static Win32D3D12Probe Instance { get; } = new();
+
+    public Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure) =>
+        Win32D3D12Device.TryCreate(hwnd, out failure);
+}
+
+/// <summary>
+/// The Direct3D objects that live as long as the window does: the device and the direct command queue
+/// Skia submits through. The swap chain does not live here - it belongs to the surface, because it is
+/// the thing that changes size - so this type stays out of the drawing path.
+/// </summary>
+internal sealed unsafe class Win32D3D12Device : IDisposable
+{
+    private Win32D3D12Device(IntPtr adapter, IntPtr device, IntPtr queue, string renderer, bool reportsMemory)
+    {
+        _adapter = adapter;
+        _device = device;
+        _queue = queue;
+        Renderer = renderer;
+        ReportsMemory = reportsMemory;
+    }
+
+    private IntPtr _adapter;
+    private IntPtr _device;
+    private IntPtr _queue;
+
+    /// <summary>
+    /// The <c>IDXGIAdapter1</c> the device was made on. Skia reads it for the adapter's LUID, so it
+    /// has to outlive the context rather than being released once the device exists.
+    /// </summary>
+    internal IntPtr Adapter => _adapter;
+
+    /// <summary>True when the adapter answered for <c>IDXGIAdapter3</c>, which carries the memory query.</summary>
+    internal bool ReportsMemory { get; }
+
+    /// <summary>The <c>ID3D12Device</c>, which Skia wraps but does not own.</summary>
+    internal IntPtr Device => _device;
+
+    /// <summary>The <c>ID3D12CommandQueue</c> Skia submits and the swap chain presents from.</summary>
+    internal IntPtr Queue => _queue;
+
+    /// <summary>The adapter's description, for the window's diagnostic line.</summary>
+    internal string Renderer { get; }
+
+    /// <summary>
+    /// Picks an adapter, creates a device for it and one direct queue.
+    /// </summary>
+    /// <remarks>
+    /// The adapter is the one that drives the display the window is on, not simply the first one
+    /// enumerated. A flip-model swap chain cannot cross adapters - DXGI refuses it with
+    /// <c>DXGI_ERROR_INVALID_CALL</c>, which is what a hybrid machine produces when the window is on
+    /// the integrated GPU's output and the device was made on the discrete card. Software adapters are
+    /// refused as well: WARP answers every call successfully and then draws on the CPU, which is
+    /// slower than the DIB path this tier exists to beat.
+    /// </remarks>
+    internal static Win32D3D12Device? TryCreate(IntPtr hwnd, out string failure)
+    {
+        if (!IsAvailable)
+        {
+            failure = "d3d12: no d3d12/dxgi";
+            return null;
+        }
+
+        IntPtr factory = CreateFactory1(out var factoryResult);
+
+        if (factory == IntPtr.Zero)
+        {
+            failure = $"d3d12: no dxgi factory (0x{factoryResult:X8})";
+            return null;
+        }
+
+        try
+        {
+            if (!TryPickAdapter(factory, hwnd, out var adapter, out var description, out failure))
+            {
+                return null;
+            }
+
+            try
+            {
+                IntPtr device = CreateDevice(adapter, out var deviceResult);
+
+                if (device == IntPtr.Zero)
+                {
+                    failure = $"d3d12: no device (0x{deviceResult:X8})";
+                    return null;
+                }
+
+                IntPtr queue = CreateCommandQueue(device, out var queueResult);
+
+                if (queue == IntPtr.Zero)
+                {
+                    Release(ref device);
+                    failure = $"d3d12: no command queue (0x{queueResult:X8})";
+                    return null;
+                }
+
+                failure = string.Empty;
+
+                // The memory query lives on IDXGIAdapter3, and the adapter enumeration hands out an
+                // IDXGIAdapter1. They are the same object, but the interface is asked for rather than
+                // assumed: called on the wrong vtable the query answers S_OK and reports nothing.
+                IntPtr adapter3 = QueryInterface(adapter, Adapter3Interface);
+                bool reportsMemory = adapter3 != IntPtr.Zero;
+
+                if (reportsMemory)
+                {
+                    Release(ref adapter);
+                    adapter = adapter3;
+                }
+
+                return new Win32D3D12Device(adapter, device, queue, Describe(description), reportsMemory);
+            }
+            catch
+            {
+                Release(ref adapter);
+                throw;
+            }
+        }
+        finally
+        {
+            Release(ref factory);
+        }
+    }
+
+    private static bool TryPickAdapter(
+        IntPtr factory,
+        IntPtr hwnd,
+        out IntPtr adapter,
+        out DxgiAdapterDesc1 description,
+        out string failure)
+    {
+        adapter = IntPtr.Zero;
+        description = default;
+        failure = "d3d12: no hardware adapter";
+
+        List<(IntPtr Adapter, DxgiAdapterDesc1 Description)> candidates = [];
+
+        try
+        {
+            for (uint index = 0; index < 16; index++)
+            {
+                IntPtr candidate = EnumAdapters1(factory, index);
+
+                if (candidate == IntPtr.Zero)
+                {
+                    break;
+                }
+
+                if (!GetAdapterDesc1(candidate, out var candidateDescription) ||
+                    IsSoftwareAdapter(candidateDescription.Flags, Describe(candidateDescription)))
+                {
+                    Release(ref candidate);
+                    continue;
+                }
+
+                candidates.Add((candidate, candidateDescription));
+            }
+
+            if (candidates.Count == 0)
+            {
+                return false;
+            }
+
+            int chosen = ChooseAdapterIndex(candidates.Select(candidate => DrivesWindow(candidate.Adapter, hwnd)).ToArray());
+            (adapter, description) = candidates[chosen];
+
+            if (Win32GlTrace.IsEnabled)
+            {
+                for (var index = 0; index < candidates.Count; index++)
+                {
+                    Win32GlTrace.Write($"kolvir-d3d12: adapter {index}: {Describe(candidates[index].Description)}"
+                        + (index == chosen ? " (chosen)" : string.Empty));
+                }
+            }
+
+            candidates.RemoveAt(chosen);
+            return true;
+        }
+        finally
+        {
+            // Everything not handed back is released here: the chosen adapter is in `adapter` by now.
+            foreach (var (candidate, _) in candidates)
+            {
+                IntPtr released = candidate;
+                Release(ref released);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Which candidate to use: the first one that drives the display the window is on, and otherwise
+    /// the first one at all - a window on a display no enumerated adapter claims is a machine whose
+    /// adapter list this code cannot reason about, and trying the first is what it did before.
+    /// </summary>
+    /// <param name="drivesWindow">One flag per hardware adapter, in enumeration order.</param>
+    /// <remarks>
+    /// The choice is a pure function of the flags so that a machine with the window on a different
+    /// adapter than the first one can be tested without such a machine.
+    /// </remarks>
+    internal static int ChooseAdapterIndex(IReadOnlyList<bool> drivesWindow)
+    {
+        for (var index = 0; index < drivesWindow.Count; index++)
+        {
+            if (drivesWindow[index])
+            {
+                return index;
+            }
+        }
+
+        return 0;
+    }
+
+    private static bool DrivesWindow(IntPtr adapter, IntPtr hwnd)
+    {
+        if (!WindowCentre(hwnd, out var centre))
+        {
+            return false;
+        }
+
+        return AdapterDrivesPoint(adapter, centre.X, centre.Y);
+    }
+
+    private static bool AdapterDrivesPoint(IntPtr adapter, int x, int y)
+    {
+        for (uint index = 0; index < 8; index++)
+        {
+            IntPtr output = EnumOutputs(adapter, index);
+
+            if (output == IntPtr.Zero)
+            {
+                return false;
+            }
+
+            bool drives = GetOutputDesc(output, out var description) && Contains(description, x, y);
+            IntPtr released = output;
+            Release(ref released);
+
+            if (drives)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool WindowCentre(IntPtr hwnd, out (int X, int Y) centre)
+    {
+        centre = default;
+
+        if (!TryGetWindowRect(hwnd, out var rect) || rect.Right <= rect.Left || rect.Bottom <= rect.Top)
+        {
+            return false;
+        }
+
+        centre = ((rect.Left + rect.Right) / 2, (rect.Top + rect.Bottom) / 2);
+        return true;
+    }
+
+    public void Dispose()
+    {
+        // The queue goes first: it holds the device alive while any of its work is outstanding.
+        Release(ref _queue);
+        Release(ref _device);
+        Release(ref _adapter);
+    }
+}
+
+/// <summary>
+/// The Direct3D 12 tier: a flip-model swap chain per window and a Skia context built on the device and
+/// queue that outlive it.
+/// </summary>
+/// <remarks>
+/// <para>
+/// It answers the interface the way the Vulkan tier does, and for the same reason: Direct3D 12 has no
+/// default framebuffer to wrap either, so the window paints into a retained GPU texture that this tier
+/// draws into whichever swap chain buffer DXGI hands out. The host cannot tell which of the two it is
+/// in front of.
+/// </para>
+/// <para>
+/// Resizing is <c>ResizeBuffers</c> on the same swap chain, which is why this tier leads with the
+/// Vulkan one over GL: the buffers are released and reallocated rather than a drawable being kept per
+/// size the window has ever had.
+/// </para>
+/// </remarks>
+internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
+{
+    private Win32D3D12Surface(Win32D3D12Device device, IntPtr factory, IntPtr swapChain, uint bufferCount, IntPtr frameLatency, int width, int height)
+    {
+        _device = device;
+        _factory = factory;
+        _swapChain = swapChain;
+        _bufferCount = bufferCount;
+        _frameLatency = frameLatency;
+        _width = width;
+        _height = height;
+    }
+
+    /// <summary><c>DXGI_MEMORY_SEGMENT_GROUP_LOCAL</c>: the memory the adapter owns.</summary>
+    private const int MemorySegmentLocal = 0;
+
+    private readonly Win32D3D12Device _device;
+    private readonly uint _bufferCount;
+    private readonly IntPtr _frameLatency;
+    private IntPtr _factory;
+    private IntPtr _swapChain;
+    private int _width;
+    private int _height;
+    private GRContext? _skia;
+    private SKSurface? _retained;
+    private bool _needsFull = true;
+    private bool _memoryTraced;
+    private bool _targetTraced;
+    private int _frames;
+
+    private long _statsStarted = -1;
+    private int _statsPresents;
+    private long _statsDraw;
+    private long _statsPresent;
+    private long _statsWorstDraw;
+    private long _statsWorstPresent;
+
+    /// <summary>How often the trace repeats the memory figures, in frames.</summary>
+    private const int TraceFrameInterval = 60;
+
+    public SKSurface? Surface => _retained;
+
+    public bool HasRetainedBuffer => _retained is not null;
+
+    public bool NeedsFullRepaint => _needsFull;
+
+    public string Tier => "d3d12";
+
+    public string Renderer => _device.Renderer;
+
+    public bool MakeCurrent() => true;
+
+    public bool TakeNeedsFull()
+    {
+        bool needed = _needsFull;
+        _needsFull = false;
+        return needed;
+    }
+
+    public void DropRetainedBuffer()
+    {
+        _retained?.Dispose();
+        _retained = null;
+        _needsFull = true;
+    }
+
+    /// <summary>Builds the whole stack or nothing: swap chain, Skia context and retained surface.</summary>
+    internal static Win32D3D12Surface? TryCreate(
+        IntPtr hwnd,
+        IWin32D3D12Probe probe,
+        int width,
+        int height,
+        out string failure)
+    {
+        var device = probe.TryCreate(hwnd, out failure);
+
+        if (device is null)
+        {
+            return null;
+        }
+
+        if (!CreateSwapChain(device, hwnd, width, height, out var factory, out var swapChain, out var bufferCount, out var frameLatency, out failure))
+        {
+            device.Dispose();
+            return null;
+        }
+
+        var surface = new Win32D3D12Surface(device, factory, swapChain, bufferCount, frameLatency, width, height);
+
+        surface._skia = GRContext.CreateDirect3D(new GRD3DBackendContext
+        {
+            Adapter = device.Adapter,
+            Device = device.Device,
+            Queue = device.Queue,
+        });
+
+        if (surface._skia is null)
+        {
+            failure = "d3d12: no skia context";
+            surface.Dispose();
+            return null;
+        }
+
+        // Skia gives a Direct3D context a 256 MiB resource cache and the tier leaves it there. Capping
+        // it looked like a memory saving and was not: four full-size surfaces are live before a single
+        // glyph atlas, so a tight limit evicts what the next frame needs and pays a re-upload per
+        // frame. The Vulkan tier keeps the default, which is also what makes the two comparable.
+
+        if (!surface.CreateRetained())
+        {
+            failure = "d3d12: no retained surface";
+            surface.Dispose();
+            return null;
+        }
+
+        if (Win32GlTrace.IsEnabled)
+        {
+            surface.TraceCache("with the surface built");
+            surface.TraceVideoMemory("with the surface built");
+        }
+
+        failure = string.Empty;
+        return surface;
+    }
+
+    private static bool CreateSwapChain(
+        Win32D3D12Device device,
+        IntPtr hwnd,
+        int width,
+        int height,
+        out IntPtr factory,
+        out IntPtr swapChain,
+        out uint bufferCount,
+        out IntPtr frameLatency,
+        out string failure)
+    {
+        swapChain = IntPtr.Zero;
+        bufferCount = 0;
+        frameLatency = IntPtr.Zero;
+        factory = CreateFactory1(out var factoryResult);
+
+        if (factory == IntPtr.Zero)
+        {
+            failure = $"d3d12: no dxgi factory (0x{factoryResult:X8})";
+            return false;
+        }
+
+        if (width <= 0 || height <= 0)
+        {
+            failure = "d3d12: window has no client area";
+            Release(ref factory);
+            return false;
+        }
+
+        // Three back buffers, which is what the Vulkan tier gets from the driver's own minimum and what
+        // makes a drag feel attached to the pointer: with two, the CPU cannot record the next frame
+        // while the compositor holds the last one, so a repaint waits a whole refresh behind input.
+        // Both rungs are flip models - Direct3D 12 will not present through a bitblt swap chain - and
+        // the last rung asks for two buffers for a driver that will not give three.
+        (int Effect, uint Buffers, string Name)[] ladder =
+        [
+            (SwapEffectFlipDiscard, 3, "flip-discard"),
+            (SwapEffectFlipSequential, 3, "flip-sequential"),
+            (SwapEffectFlipDiscard, 2, "flip-discard, two buffers"),
+        ];
+
+        List<string> refusals = [];
+
+        // The waitable object is asked for first because it is what lets the window pace itself to the
+        // display, and a chain that cannot be made with it is still a usable chain, just a laggier one.
+        foreach (uint flags in (ReadOnlySpan<uint>)[SwapChainFlagFrameLatencyWaitable, 0])
+        {
+            foreach (var (effect, buffers, name) in ladder)
+            {
+                int result = 0;
+                swapChain = CreateSwapChainForHwnd(factory, device.Queue, hwnd, width, height, effect, buffers, flags, out result);
+
+                if (swapChain != IntPtr.Zero)
+                {
+                    bufferCount = buffers;
+                    bool paced = flags != 0;
+
+                    if (paced)
+                    {
+                        int latencyResult = SetMaximumFrameLatency(swapChain, 1);
+                        frameLatency = GetFrameLatencyWaitableObject(swapChain);
+                        paced = frameLatency != IntPtr.Zero;
+
+                        if (Win32GlTrace.IsEnabled)
+                        {
+                            Win32GlTrace.Write($"kolvir-d3d12: frame latency: set 0x{latencyResult:X8}, waitable 0x{frameLatency:X}");
+                        }
+                    }
+
+                    if (refusals.Count > 0 && Win32GlTrace.IsEnabled)
+                    {
+                        Win32GlTrace.Write($"kolvir-d3d12: swap chain: {name} (after {string.Join(", ", refusals)})");
+                    }
+
+                    failure = string.Empty;
+                    return true;
+                }
+
+                refusals.Add($"{name}{(flags == 0 ? ", unflagged" : string.Empty)} 0x{result:X8}");
+            }
+        }
+
+        // Naming the adapter matters: a flip-model swap chain cannot cross adapters, and the name says
+        // which one the device was made on when every effect was refused on it.
+        failure = $"d3d12: no swap chain on {device.Renderer} ({string.Join(", ", refusals)})";
+        Release(ref factory);
+        return false;
+    }
+
+    /// <summary>Reports what a second of presents cost, in the same shape the Vulkan tier uses.</summary>
+    /// <param name="drawTicks">Time spent drawing, flushing and submitting the frame.</param>
+    /// <param name="presentTicks">Time spent inside the present call.</param>
+    private void ReportTimings(long drawTicks, long presentTicks)
+    {
+        if (!Win32GlTrace.IsEnabled)
+        {
+            return;
+        }
+
+        _statsPresents++;
+        _statsDraw += drawTicks;
+        _statsPresent += presentTicks;
+        _statsWorstDraw = Math.Max(_statsWorstDraw, drawTicks);
+        _statsWorstPresent = Math.Max(_statsWorstPresent, presentTicks);
+
+        long now = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        if (_statsStarted < 0)
+        {
+            _statsStarted = now;
+            return;
+        }
+
+        double window = Milliseconds(now - _statsStarted);
+
+        if (window < 1000.0)
+        {
+            return;
+        }
+
+        double presents = _statsPresents * 1000.0 / window;
+        double count = Math.Max(1, _statsPresents);
+
+        // Waited for on the GPU once a second, because every other figure here is the CPU's side of
+        // the frame: Skia submits asynchronously, so a window whose GPU work takes longer than the
+        // display's refresh looks free from the CPU while its frames arrive late. This is the number
+        // that says whether the tier is waiting for the display or for the card.
+        long gpuStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+        _skia?.Submit(synchronous: true);
+        double gpu = Milliseconds(System.Diagnostics.Stopwatch.GetTimestamp() - gpuStarted);
+
+        Win32GlTrace.Write(
+            string.Create(
+                System.Globalization.CultureInfo.InvariantCulture,
+                $"d3d12 {presents:F1} presents/s  draw {Milliseconds(_statsDraw) / count:F2}/{Milliseconds(_statsWorstDraw):F2}ms  present {Milliseconds(_statsPresent) / count:F2}/{Milliseconds(_statsWorstPresent):F2}ms  gpu {gpu:F2}ms  buffers {_bufferCount}{(_frameLatency == IntPtr.Zero ? ", unpaced" : string.Empty)}"));
+
+        _statsStarted = now;
+        _statsPresents = 0;
+        _statsDraw = 0;
+        _statsPresent = 0;
+        _statsWorstDraw = 0;
+        _statsWorstPresent = 0;
+    }
+
+    private static double Milliseconds(long ticks) => ticks * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+
+    /// <summary>
+    /// Reports this process's own use of the adapter's local memory. It is printed once the surface
+    /// exists and again after the first frame, because the difference between the two is what Skia's
+    /// first submission costs, and because the figure task manager shows has the driver's and the
+    /// compositor's overhead added to it.
+    /// </summary>
+    /// <param name="where">The moment the figure was taken.</param>
+    private void TraceVideoMemory(string where)
+    {
+        if (!Win32GlTrace.IsEnabled)
+        {
+            return;
+        }
+
+        // Printed even when the query cannot answer: a diagnostic that goes quiet when it has nothing
+        // to say leaves the reader unable to tell a missing line from a missing feature.
+        if (!_device.ReportsMemory)
+        {
+            Win32GlTrace.Write($"kolvir-d3d12: video memory not reported (no IDXGIAdapter3), {where}");
+            return;
+        }
+
+        int result = D3D12.GetVideoMemoryInfo(_device.Adapter, MemorySegmentLocal, out var info);
+
+        if (result < 0 || info.Budget == 0)
+        {
+            Win32GlTrace.Write($"kolvir-d3d12: video memory not reported (0x{result:X8}), {where}");
+            return;
+        }
+
+        Win32GlTrace.Write($"kolvir-d3d12: video memory {info.CurrentUsage / (1024 * 1024)} MiB local in use of {info.Budget / (1024 * 1024)} MiB, {where}");
+    }
+
+    /// <summary>Reports what Skia is holding and what it may hold.</summary>
+    /// <param name="where">The moment the figure was taken.</param>
+    private void TraceCache(string where)
+    {
+        if (!Win32GlTrace.IsEnabled || _skia is null)
+        {
+            return;
+        }
+
+        _skia.GetResourceCacheUsage(out int resources, out long cached);
+        Win32GlTrace.Write($"kolvir-d3d12: skia cache {resources} resources, {cached / (1024 * 1024)} MiB of {_skia.GetResourceCacheLimit() / (1024 * 1024)} MiB, {where}");
+    }
+
+    private bool CreateRetained()
+    {
+        _retained?.Dispose();
+        _retained = null;
+
+        if (_skia is null || _width <= 0 || _height <= 0)
+        {
+            return false;
+        }
+
+        // Unbudgeted on purpose, for the same reason the Vulkan tier keeps its retained texture that
+        // way: this texture is the frame, so it must not be discarded under memory pressure.
+        _retained = SKSurface.Create(_skia, false, new SKImageInfo(_width, _height, SKColorType.Bgra8888, SKAlphaType.Premul), 1, GRSurfaceOrigin.TopLeft);
+        _needsFull = true;
+        return _retained is not null;
+    }
+
+    public bool Resize(int width, int height)
+    {
+        if (width <= 0 || height <= 0)
+        {
+            return false;
+        }
+
+        if (_skia is not null && _retained is not null && _width == width && _height == height)
+        {
+            _needsFull = true;
+            return true;
+        }
+
+        // Every reference to a back buffer has to be gone before DXGI will resize, and the queue has to
+        // have finished with them, so the work is drained here rather than left running behind a
+        // resize that would fail with DXGI_ERROR_INVALID_CALL. The cache is emptied after the drain for
+        // the same reason: a wrapper Skia kept from a frame counts as a live reference on its buffer.
+        DropRetainedBuffer();
+        _skia?.Flush();
+        _skia?.Submit(synchronous: true);
+        _skia?.PurgeResources();
+
+        int result = ResizeBuffers(_swapChain, _bufferCount, width, height);
+
+        if (result < 0)
+        {
+            Win32GlTrace.Write($"kolvir-d3d12: resize to {width}x{height} refused (0x{result:X8})");
+            return false;
+        }
+
+        _width = width;
+        _height = height;
+        return CreateRetained();
+    }
+
+    public Win32PresentResult Present()
+    {
+        GRContext? skia = _skia;
+        SKSurface? retained = _retained;
+
+        if (skia is null || retained is null || _swapChain == IntPtr.Zero)
+        {
+            return Win32PresentResult.RetryDirect;
+        }
+
+        // The chain signals this handle when it can take another frame. Waiting here is what stops the
+        // window running ahead of the display: without it a repaint on every mouse move queues frames
+        // faster than they are shown, and the picture on screen is the oldest of them rather than the
+        // newest. A timeout is not a failure - a minimised or occluded window may never signal - so the
+        // frame is drawn anyway and the present decides what happens next.
+        if (_frameLatency != IntPtr.Zero)
+        {
+            NativeMethods.WaitForSingleObject(_frameLatency, 1000);
+        }
+        else
+        {
+            // The chain would not give up its waitable handle, so the queue is bounded the other way:
+            // waiting for the work already submitted means at most one frame is in flight either side
+            // of the queue, which is the property that keeps a drag attached to the pointer.
+            skia.Submit(synchronous: true);
+        }
+
+        int index = GetCurrentBackBufferIndex(_swapChain);
+        IntPtr resource = GetBuffer(_swapChain, index);
+
+        if (resource == IntPtr.Zero)
+        {
+            return Win32PresentResult.Lost;
+        }
+
+        long drawStarted = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        try
+        {
+            // PRESENT, not RENDER_TARGET: DXGI hands the buffer back in the state it was presented in,
+            // and Skia transitions it itself for the duration of the drawing it is asked to do. The
+            // wrapper is disposed as soon as the surface has been made from it, because it holds a
+            // reference on the buffer and DXGI will not reallocate a chain that still has one.
+            var info = new GRD3DTextureResourceInfo
+            {
+                Resource = resource,
+                ResourceState = ResourceStatePresent,
+                Format = (uint)FormatBgra8Unorm,
+                SampleCount = 1,
+                LevelCount = 1,
+            };
+
+            // A render target, not a texture: it is what the buffer is, and a texture wrapper leaves
+            // Skia to decide the buffer cannot be drawn into directly. The texture route is kept as a
+            // fallback because a context that will not accept the render target should still present.
+            using var renderTarget = new GRBackendRenderTarget(_width, _height, info);
+            SKSurface? frame = SKSurface.Create(skia, renderTarget, GRSurfaceOrigin.TopLeft, SKColorType.Bgra8888);
+            using var texture = frame is null ? new GRBackendTexture(_width, _height, info) : null;
+
+            if (frame is null)
+            {
+                frame = SKSurface.Create(skia, texture!, GRSurfaceOrigin.TopLeft, 1, SKColorType.Bgra8888);
+            }
+
+            if (frame is null)
+            {
+                return Win32PresentResult.RetryDirect;
+            }
+
+            using (frame)
+            {
+                if (!_targetTraced && Win32GlTrace.IsEnabled)
+                {
+                    _targetTraced = true;
+                    Win32GlTrace.Write($"kolvir-d3d12: presenting through a {(texture is null ? "render target" : "texture")}");
+                }
+
+                using (var snapshot = retained.Snapshot())
+                {
+                    if (snapshot is not null)
+                    {
+                        // Src, not the default SrcOver: the image covers the back buffer and is
+                        // opaque, so blending would only make the card read the destination for
+                        // every pixel.
+                        using var paint = new SKPaint { BlendMode = SKBlendMode.Src };
+                        frame.Canvas.DrawImage(snapshot, 0f, 0f, new SKSamplingOptions(SKFilterMode.Nearest), paint);
+                    }
+                }
+
+                // Submitted rather than waited on: the CPU's job is to record the next frame, and the
+                // present call is where DXGI applies the pacing.
+                skia.Flush();
+                skia.Submit(synchronous: false);
+            }
+        }
+        finally
+        {
+            Release(ref resource);
+        }
+
+        long drawnAt = System.Diagnostics.Stopwatch.GetTimestamp();
+        int result = D3D12.Present(_swapChain);
+        long presentTicks = System.Diagnostics.Stopwatch.GetTimestamp() - drawnAt;
+
+        // DXGI_STATUS_OCCLUDED is a success code for a hidden window, so it is checked before the
+        // general success case rather than being left to the catch-all.
+        if (result == StatusOccluded || result >= 0)
+        {
+            _frames++;
+            ReportTimings(drawnAt - drawStarted, presentTicks);
+
+            if (!_memoryTraced)
+            {
+                _memoryTraced = true;
+                TraceCache("after the first frame");
+                TraceVideoMemory("after the first frame");
+            }
+            else if (_frames % TraceFrameInterval == 0)
+            {
+                // A figure that keeps climbing is a leak and a figure that settles is the cost of the
+                // backend, so the trace is repeated slowly for as long as the window runs.
+                TraceCache($"after {_frames} frames");
+                TraceVideoMemory($"after {_frames} frames");
+            }
+
+            return Win32PresentResult.Presented;
+        }
+
+        return Win32PresentResult.Lost;
+    }
+
+    public void Dispose()
+    {
+        // Same order as a resize, and for the same reason: the buffers cannot go while a frame is
+        // still referencing them, and Skia's context holds the ones it drew into.
+        DropRetainedBuffer();
+        _skia?.Flush();
+        _skia?.Submit(synchronous: true);
+        _skia?.Dispose();
+        _skia = null;
+        // The handle belongs to the caller, so it is closed here rather than left to the chain.
+        if (_frameLatency != IntPtr.Zero)
+        {
+            NativeMethods.CloseHandle(_frameLatency);
+        }
+
+        Release(ref _swapChain);
+        Release(ref _factory);
+        _device.Dispose();
+    }
+}

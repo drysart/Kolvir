@@ -1097,18 +1097,41 @@ internal static class Win32Gfx
         };
 
     /// <summary>
-    /// Picks the best tier the machine will give, which is Vulkan first and GL after it.
+    /// Set <c>KOLVIR_NO_D3D12</c> to keep the window off the Direct3D 12 tier, for comparing it
+    /// against the others on one machine. It takes the same spellings as <c>KOLVIR_NO_VULKAN</c>, and
+    /// is read once for the same reason: a run cannot change its mind halfway through a window.
+    /// </summary>
+    private static readonly bool Win32D3D12Disabled = ResolveD3D12Disabled();
+
+    private static bool ResolveD3D12Disabled() =>
+        Environment.GetEnvironmentVariable("KOLVIR_NO_D3D12")?.Trim().ToLowerInvariant() switch
+        {
+            null or "" or "0" or "false" or "no" or "off" => false,
+            _ => true,
+        };
+
+    /// <summary>
+    /// The order <c>KOLVIR_GL_OPTIONS</c> asks for, read once: the tiers a window may use and which it
+    /// should prefer, or a request for the CPU path. Unset, it is every tier, Direct3D 12 first.
+    /// </summary>
+    private static readonly Win32GfxChoice EnvironmentChoice = Win32GfxOptions.FromEnvironment();
+
+    /// <summary>
+    /// Picks the best tier the machine will give, in the order <c>KOLVIR_GL_OPTIONS</c> asks for.
     /// </summary>
     /// <remarks>
-    /// Vulkan leads because its resize path is the one that releases: the swap chain is destroyed and
-    /// rebuilt, so a window that changes size does not accumulate a drawable per size the way a WGL
-    /// window does on some drivers. GL follows because it is what the backend had, and the window
-    /// still falls back to its DIB when neither can be built.
+    /// The default order is Direct3D 12, then Vulkan, then GL. The two swap chain tiers lead because
+    /// their resize path releases, so a window that changes size does not accumulate a drawable per
+    /// size the way a WGL window does on some drivers; Direct3D 12 leads among them because it is the
+    /// native API and needs no Vulkan runtime of its own. GL follows because it is what the backend
+    /// had, and the window still falls back to its DIB when none of the three can be built.
     /// </remarks>
     /// <param name="hardwareAcceleration">The application option, read once when the window exists.</param>
     /// <param name="hwnd">The window's native handle.</param>
     /// <param name="glProbe">The GL context probe; the production one is <see cref="Win32GlProbe"/>.</param>
     /// <param name="vulkanProbe">The Vulkan device probe; the production one is <see cref="Win32VulkanProbe"/>.</param>
+    /// <param name="d3d12Probe">The Direct3D 12 device probe; the production one is
+    /// <see cref="Win32D3D12Probe"/>.</param>
     /// <param name="width">The framebuffer width in physical pixels.</param>
     /// <param name="height">The framebuffer height in physical pixels.</param>
     /// <param name="reason">A one-line diagnostic naming the path taken.</param>
@@ -1117,6 +1140,40 @@ internal static class Win32Gfx
         IntPtr hwnd,
         IWin32GlProbe glProbe,
         IWin32VulkanProbe vulkanProbe,
+        IWin32D3D12Probe d3d12Probe,
+        int width,
+        int height,
+        out string reason) =>
+        TryCreateAccelerated(
+            EnvironmentChoice,
+            hardwareAcceleration,
+            hwnd,
+            glProbe,
+            vulkanProbe,
+            d3d12Probe,
+            width,
+            height,
+            out reason);
+
+    /// <summary>
+    /// Picks the best tier of those <paramref name="choice"/> names, in the order it names them.
+    /// </summary>
+    /// <param name="choice">The order to try, and whether the CPU path was asked for.</param>
+    /// <param name="hardwareAcceleration">The application option, read once when the window exists.</param>
+    /// <param name="hwnd">The window's native handle.</param>
+    /// <param name="glProbe">The GL context probe.</param>
+    /// <param name="vulkanProbe">The Vulkan device probe.</param>
+    /// <param name="d3d12Probe">The Direct3D 12 device probe.</param>
+    /// <param name="width">The framebuffer width in physical pixels.</param>
+    /// <param name="height">The framebuffer height in physical pixels.</param>
+    /// <param name="reason">A one-line diagnostic naming the path taken.</param>
+    internal static IWin32GpuSurface? TryCreateAccelerated(
+        Win32GfxChoice choice,
+        bool hardwareAcceleration,
+        IntPtr hwnd,
+        IWin32GlProbe glProbe,
+        IWin32VulkanProbe vulkanProbe,
+        IWin32D3D12Probe d3d12Probe,
         int width,
         int height,
         out string reason)
@@ -1127,7 +1184,13 @@ internal static class Win32Gfx
             return null;
         }
 
-        // The cheap refusals are decided once here, before either tier pays for a window probe.
+        if (choice.CpuOnly)
+        {
+            reason = $"cpu ({Win32GfxOptions.VariableName}=cpu)";
+            return null;
+        }
+
+        // The cheap refusals are decided once here, before any tier pays for a window probe.
         if (hwnd == IntPtr.Zero)
         {
             reason = "cpu (no window)";
@@ -1140,29 +1203,69 @@ internal static class Win32Gfx
             return null;
         }
 
-        var vulkanReason = "vulkan: disabled by KOLVIR_NO_VULKAN";
-        var vulkan = Win32VulkanDisabled
-            ? null
-            : Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, width, height, out vulkanReason);
+        // What each attempt said, in the order they were asked, so the diagnostic line names every
+        // refusal rather than only the last one.
+        List<string> attempts = [];
 
-        if (vulkan is not null)
+        foreach (var tier in choice.Order)
         {
-            reason = $"vulkan: {vulkan.Renderer}";
-            return vulkan;
+            switch (tier)
+            {
+                case Win32GfxTier.Direct3D12:
+                {
+                    var failure = "d3d12: disabled by KOLVIR_NO_D3D12";
+                    var d3d12 = Win32D3D12Disabled
+                        ? null
+                        : Win32D3D12Surface.TryCreate(hwnd, d3d12Probe, width, height, out failure);
+
+                    if (d3d12 is not null)
+                    {
+                        reason = $"d3d12: {d3d12.Renderer}";
+                        return d3d12;
+                    }
+
+                    attempts.Add(failure);
+                    break;
+                }
+
+                case Win32GfxTier.Vulkan:
+                {
+                    var failure = "vulkan: disabled by KOLVIR_NO_VULKAN";
+                    var vulkan = Win32VulkanDisabled
+                        ? null
+                        : Win32VulkanSurface.TryCreate(hwnd, vulkanProbe, width, height, out failure);
+
+                    if (vulkan is not null)
+                    {
+                        reason = $"vulkan: {vulkan.Renderer}";
+                        return vulkan;
+                    }
+
+                    attempts.Add(failure);
+                    break;
+                }
+
+                case Win32GfxTier.OpenGl:
+                {
+                    var gl = TryCreate(hardwareAcceleration, hwnd, glProbe, width, height, out var failure);
+
+                    if (gl is not null)
+                    {
+                        reason = failure;
+                        return gl;
+                    }
+
+                    // The GL helper reports its refusal the way the window used to: wrapped in the
+                    // "cpu (...)" the caller is building here.
+                    attempts.Add(failure.StartsWith("cpu (", StringComparison.Ordinal) ? failure[5..^1] : failure);
+                    break;
+                }
+            }
         }
 
-        var gl = TryCreate(hardwareAcceleration, hwnd, glProbe, width, height, out var glReason);
-
-        if (gl is not null)
-        {
-            reason = glReason;
-            return gl;
-        }
-
-        // Both failed: keep what each said, so the diagnostic line names every attempt.
-        reason = glReason.StartsWith("cpu (", StringComparison.Ordinal)
-            ? $"cpu ({vulkanReason}; {glReason[5..^1]})"
-            : $"cpu ({vulkanReason})";
+        reason = attempts.Count == 0
+            ? "cpu (no tier was asked for)"
+            : $"cpu ({string.Join("; ", attempts)})";
 
         return null;
     }

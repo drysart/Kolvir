@@ -1856,11 +1856,13 @@ public sealed class Win32WindowBackend : IWindowBackend
             full = true;
         }
 
+        long paintStarted = System.Diagnostics.Stopwatch.GetTimestamp();
         var area = PaintHost(surface, full);
 
         if (Win32GlTrace.IsEnabled)
         {
-            Win32GlTrace.Write($"render full={full} area={area.Width}x{area.Height} scale={_scale}");
+            double elapsed = (System.Diagnostics.Stopwatch.GetTimestamp() - paintStarted) * 1000.0 / System.Diagnostics.Stopwatch.Frequency;
+            Win32GlTrace.Write($"render full={full} area={area.Width}x{area.Height} scale={_scale} {elapsed:F2}ms");
         }
 
         // GL submit and swap happen in OnPaint, after the host has finished the frame.
@@ -2779,6 +2781,7 @@ public sealed class Win32WindowBackend : IWindowBackend
                 _hwnd,
                 Win32GlProbe.Instance,
                 Win32VulkanProbe.Instance,
+                Win32D3D12Probe.Instance,
                 width,
                 height,
                 out var reason);

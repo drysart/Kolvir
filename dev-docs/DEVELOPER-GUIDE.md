@@ -5412,14 +5412,14 @@ The rules the implementation follows:
   that loses its device drops to the same DIB. Each step is named, so a screenshot says which tier
   is live.
 
-`Win32WindowBackend.GraphicsPath` reports `vulkan: <device>`, `gl` or `cpu (...)` with the reason,
-and `GraphicsRenderer`
+`Win32WindowBackend.GraphicsPath` reports `vulkan: <device>`, `d3d12: <adapter>`, `gl` or `cpu (...)`
+with the reason, and `GraphicsRenderer`
 reports the GL vendor and device, or the Vulkan device name. The reason names the failing step
 rather than a generic
 "no context", for example:
 
 ```
-gfx: cpu (no physical devices; no gl interface; gdi: no wgl context (error 2000))
+gfx: cpu (no physical devices; d3d12: no hardware adapter; no gl interface; gdi: no wgl context (error 2000))
 ```
 
 Set `KOLVIR_GL_TRACE=1` to print every probe attempt, the chosen flavour and format number, the
@@ -5433,6 +5433,163 @@ and the worst of each.
 Set `KOLVIR_NO_VULKAN=1` to take the WGL tier on a machine that has Vulkan, which is the only way to
 compare the two on one box. It is a diagnostic, not a preference: the tier is chosen once, when the
 window allocates its surface.
+
+### The Direct3D 12 tier (Windows)
+
+The window has a third accelerated path beside Vulkan and WGL: a flip-model DXGI swap chain with a Skia
+context on the device and command queue that outlive it. Both swap chain tiers lead the order because
+their resize path releases - `ResizeBuffers` reallocates the buffers rather than keeping a drawable per
+size the window has ever had.
+
+Set `KOLVIR_NO_D3D12=1` to keep the window off it, which is what makes an A/B against Vulkan possible
+on one machine. It takes the same spellings as `KOLVIR_NO_VULKAN` and is read once, for the same
+reason.
+
+### Choosing the order: `KOLVIR_GL_OPTIONS`
+
+The default order is Direct3D 12, then Vulkan, then GL. Direct3D 12 leads because it is the native API
+on this platform, needs no Vulkan runtime of its own, and resizes the way Vulkan does.
+
+Set `KOLVIR_GL_OPTIONS` to reorder the tiers, restrict them, or ask for the CPU path, without
+rebuilding:
+
+```
+KOLVIR_GL_OPTIONS=vulkan,d3d,ogl     # try Vulkan first, then Direct3D 12, then GL
+KOLVIR_GL_OPTIONS=ogl                # only GL; the swap chain tiers are never asked
+KOLVIR_GL_OPTIONS=cpu                # no acceleration at all
+```
+
+The words are `d3d`, `vulkan` and `ogl`, case-insensitive, tried in the order written; a tier left out
+is not tried, and if none of the listed tiers can be built the window falls back to its DIB. `cpu` has
+to stand alone - a list that names a tier is asking for acceleration, so a `cpu` entry beside one is
+ignored. Anything else is ignored too, including a repeated tier, which keeps its first place: the
+variable orders the real tiers rather than validating a config file, and one stray word should not
+throw the rest away. A value with nothing recognizable in it leaves the default order in place.
+
+The diagnostic line names every tier that was tried, in the order they were tried, so the effect of the
+variable is visible in `gfx:`:
+
+```
+gfx: cpu (d3d12: no hardware adapter; no vulkan loader; gdi: no wgl context (error 2000))
+gfx: cpu (KOLVIR_GL_OPTIONS=cpu)
+```
+
+`KOLVIR_NO_D3D12` and `KOLVIR_NO_VULKAN` still apply: they are hard offs for one tier, whereas
+`KOLVIR_GL_OPTIONS` chooses the order of the ones that remain.
+
+The tier refuses a software adapter. WARP answers every call and then rasterizes on the CPU, which is
+slower than the DIB path the tier exists to beat, and the Basic Render Driver that a machine with no
+GPU exposes does not always set `DXGI_ADAPTER_FLAG_SOFTWARE` - so the adapter's description is checked
+as well as its flags.
+
+The device is made on the adapter that drives the display the window is on, not on the first one
+enumerated. A flip-model swap chain cannot cross adapters, so a hybrid machine whose window is on the
+integrated GPU's output cannot present the frames a device on the discrete card drew. `KOLVIR_GL_TRACE=1`
+prints every adapter and marks the one chosen, and a refusal names it, so a machine that fails says
+which adapter it tried.
+
+Two things about the swap chain are requirements rather than preferences, and both were learned the
+hard way - a refusal from the create call is `DXGI_ERROR_INVALID_CALL`, which names neither:
+
+- **It has to be a flip model.** Direct3D 12 will not present through a bitblt swap chain, so the
+  ladder is `FLIP_DISCARD` and then `FLIP_SEQUENTIAL`, with a final `FLIP_DISCARD` at two buffers for
+  a driver that will not give three.
+- **Three back buffers, not two.** Two is the minimum a flip chain accepts and it is not enough to
+  stay attached to the pointer: with two, the CPU cannot record the next frame while the compositor
+  holds the last one, so a repaint driven by a drag waits a whole refresh behind the mouse. The
+  Vulkan tier gets three because that is the driver's minimum, and the two tiers have to feel the
+  same.
+- **`AlphaMode` has to be `DXGI_ALPHA_MODE_IGNORE`, which is 3.** The neighbouring value, 2
+  (`STRAIGHT`), is refused, and because both are small integers a transposed constant is invisible in
+  the description until DXGI rejects the whole thing.
+
+Presenting has two of its own, and both showed up as a window that opened, drew nothing and died:
+
+- **`GetCurrentBackBufferIndex` is slot 36, not 37.** Every DXGI interface carries one more method
+  before `IDXGIFactory`'s enumeration than the headers suggest - `IDXGIObject` is 4 slots here, which
+  is why `EnumAdapters1` sits at 12 - and the swap chain's slots shift with it. Slot 37 is
+  `CheckColorSpaceSupport`: called with no arguments it returns a `UINT` the caller never gets and
+  writes its answer through a register that holds garbage, which is an access violation on the first
+  present. The counts the tier uses, `Present` 8, `GetBuffer` 9, `ResizeBuffers` 13, all carry the
+  same shift.
+- **Nothing bounds the queue unless the tier does.** A window that repaints on every mouse move
+  submits frames far faster than a display shows them, and DXGI accepts every one: the picture on
+  screen becomes the oldest queued frame. On a 240 Hz panel that was eight frames behind the pointer
+  while `draw` read 0.12ms and `present` 1.79ms, because both are the CPU's side of a frame the GPU
+  was still working through. The chain asks for
+  `DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT` and caps itself to one frame, and where a
+  driver refuses the flag - as one NVIDIA driver does, reporting `unpaced` - the tier waits for its
+  own submitted work instead, which is a stricter bound and needs nothing from DXGI.
+- **The per-frame `GRBackendTexture` has to be disposed.** It is not a value: it holds a reference on
+  the back buffer it wraps, so a wrapper dropped on the floor keeps DXGI from reallocating the chain
+  and `ResizeBuffers` answers `DXGI_ERROR_INVALID_CALL`. The surface disposes it as soon as the
+  `SKSurface` has been made from it, drains the queue and purges Skia's resource cache before it
+  resizes.
+
+`KOLVIR_D3D12_ALLOW_SOFTWARE=1` lets the tier build on a software adapter. It is a diagnostic for a
+machine with no GPU, which is how the present path is covered in the tests, and it is a poor default:
+WARP answers every call and then rasterizes on the CPU.
+
+Memory is the one number that surprises people on this tier, so it is worth writing down. A window
+1280x820 at scale 2 is 2560x1640, which is 16.0 MiB per full-size BGRA8 surface: the three swap
+chain buffers and the retained surface the backend draws into are 64 MiB and are not optional.
+Everything above that is Skia's resource cache, which a Direct3D context is given 256 MiB of by
+default and which the tier leaves alone. Capping it was tried and undone: four full-size surfaces are
+live before a single glyph atlas, so a limit tight enough to be worth setting evicts what the next
+frame needs and pays a re-upload per frame - a drag that lags while every CPU-side figure stays
+healthy. The Vulkan tier keeps the default too, which is what makes the two comparable.
+
+With `KOLVIR_GL_TRACE=1` four lines say what the tier is holding, so a figure in task manager can be
+argued with rather than guessed at:
+
+```
+kolvir-d3d12: skia cache 0 resources, 0 MiB of 64 MiB, with the surface built
+kolvir-d3d12: video memory 52 MiB local in use of 22891 MiB, with the surface built
+kolvir-d3d12: skia cache 6 resources, 4 MiB of 64 MiB, after the first frame
+kolvir-d3d12: video memory 61 MiB local in use of 22891 MiB, after the first frame
+```
+
+The cache lines report what Skia holds and what it may hold; the memory lines are this process's own
+use of the adapter's local segment, taken through `IDXGIAdapter3::QueryVideoMemoryInfo` once the
+surface exists and again once a frame has been presented, so the difference between them is what the
+first submission costs - 32 MiB even on a machine with no GPU at all, which is Skia's upload buffer
+and command allocators rather than the window's surfaces. The lines repeat every sixty frames, so a
+figure that climbs is a leak and a figure that settles is the cost of the backend: two hundred and
+forty frames of a software adapter hold at 32 MiB from the first one, which is how the warm-up was
+told apart from a leak on real hardware. The adapter is queried for `IDXGIAdapter3`
+rather than assumed to be one, and the query is `(node, segment, out info)`: called one entry early it
+answers `S_OK` and writes nothing, which reads exactly like a discrete GPU reporting no memory. Task manager's dedicated
+figure is larger than that number because it adds the driver's and the compositor's own allocations to
+it, which no application can shrink. A diagnostic that goes quiet when it has nothing to say cannot be
+told apart from one that never ran, so an adapter that cannot answer says so: `video memory not
+reported (0x00000000)`, which is what a software adapter produces.
+
+The tier also reports its frame pacing, in the shape the Vulkan tier uses, once a second while
+`KOLVIR_GL_TRACE=1`:
+
+```
+kolvir-gl: d3d12 58.4 presents/s  draw 1.31/4.02ms  present 15.72/17.10ms  buffers 3
+```
+
+`draw` is the time spent drawing, flushing and submitting; `present` is the time inside the present
+call, which is where the display's pacing appears - a present that sits at one refresh interval means
+the tier is waiting for the display rather than for anything it did. `buffers` is the count the chain
+was made with, because a chain that fell to the two-buffer rung behaves differently under a drag.
+
+It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
+way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
+dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
+section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,982,016, so +70,656
+bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
+shipped `libSkiaSharp.dll` already contains the Direct3D backend.
+
+The tests pin the tier order, the diagnostic line and the software-adapter refusal, and the production
+probe is exercised for real (the libraries load, the adapter list is walked). The present path is
+covered too, on the software adapter the diagnostic switch admits: a window, a flip swap chain, a Skia
+context, five frames, a resize and a frame at the new size. That is what catches a wrong slot or a
+leaked buffer reference without a GPU in the machine - both faults it was written for appeared exactly
+there. What it still cannot prove is speed: how a real GPU presents is read off the `gfx:` line and the
+**Measured rendering** page.
 
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
 section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
