@@ -19,11 +19,13 @@ public sealed class HeadlessWindowBackend : IWindowBackend
     private Action<object>? _activated;
     private Action<object>? _deactivated;
     private Action<object>? _clientSizeChanged;
+    private Action<object>? _locationChanged;
     private Action<object>? _scaleChanged;
     private Action<object>? _stateChanged;
     private readonly Screen _screen;
     private MenuBar? _menuBar;
     private SKSize _clientSize;
+    private SKPoint _location;
     private SKSize _minimumClientSize;
     private SKSize _maximumClientSize = new(float.PositiveInfinity, float.PositiveInfinity);
     private WindowState _state;
@@ -94,7 +96,25 @@ public sealed class HeadlessWindowBackend : IWindowBackend
     }
 
     /// <inheritdoc />
-    public SKPoint Location { get; set; }
+    /// <remarks>
+    /// A real change is announced through <see cref="AddLocationChangedHandler"/>. Assigning the
+    /// same position again is not a move and raises nothing, which is what lets a test distinguish
+    /// a genuine move from a render repeating what it already asked for.
+    /// </remarks>
+    public SKPoint Location
+    {
+        get => _location;
+        set
+        {
+            if (_location == value)
+            {
+                return;
+            }
+
+            _location = value;
+            _locationChanged?.Invoke(this);
+        }
+    }
 
     /// <inheritdoc />
     public bool Resizable { get; set; } = true;
@@ -344,6 +364,21 @@ public sealed class HeadlessWindowBackend : IWindowBackend
     {
         ArgumentNullException.ThrowIfNull(handler);
         _clientSizeChanged -= handler;
+    }
+
+    /// <inheritdoc />
+    public IDisposable AddLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged += handler;
+        return new HandlerToken<Action<object>>(RemoveLocationChangedHandler, handler);
+    }
+
+    /// <inheritdoc />
+    public void RemoveLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged -= handler;
     }
 
     /// <inheritdoc />
