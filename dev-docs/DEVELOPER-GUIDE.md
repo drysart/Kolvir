@@ -3346,6 +3346,33 @@ platform, **Window -> Topmost** and **Window -> Owned Window** add the menu item
 the `--topmost` / `--owned` command-line flags work everywhere (Windows has no menu bar yet). The
 status line reports activation changes.
 
+### Window move, size and state notifications
+
+`Window` reports the things a user does to its frame: `AddClientSizeChangedHandler` for a resize,
+`AddLocationChangedHandler` for a move, `AddStateChangedHandler` for minimize, maximize and restore,
+and `AddScaleChangedHandler` when the window moves to a display with a different scale factor. Each
+handler is told the `Window` and reads the new value from it - `ClientSize`, `Location`, `State` -
+rather than receiving a copy:
+
+```csharp
+window.AddLocationChangedHandler(_ => layout.Save(window.Location));
+window.AddClientSizeChangedHandler(_ => layout.Save(window.ClientSize));
+```
+
+Move reporting is the part that is not uniform, because the platforms do not expose it equally:
+
+| Backend | What `LocationChanged` reports |
+| --- | --- |
+| Windows | `WM_MOVE`, de-duplicated against the last position reported |
+| macOS | The window's did-move notification, de-duplicated the same way |
+| GTK4 | **Never fires.** GTK 4 has no supported move signal, and Wayland does not expose a surface position at all, so the backend does not guess one |
+| Headless | A real `Location` change, which is what lets a deterministic test drive the handler |
+
+On GTK4 use `Location` only for a value you assigned or read at the moment you need it; do not wait
+for a move notification that will not arrive. The handler reports what the platform observed, not
+who asked for the move; an application that echoes its own assignments back into its model needs to
+account for that.
+
 ### Chromeless windows
 
 A borderless window hands its caption to the application: the platform keeps its shadow, its rounded
@@ -6375,8 +6402,9 @@ loop and the platform-wide services; `IWindowBackend` owns one native window and
    `ProcessKeyDown/Up`, `ProcessTextInput` and `ProcessContextMenu`, dividing coordinates by the
    scale factor. There is no tick to forward: a control that needs time runs its own timer.
 5. Run the `Shown`, `CloseRequested`, `Closed`, `Activated`, `Deactivated`, `ClientSizeChanged`,
-   `ScaleChanged` and `StateChanged` handlers; the model forwards each to the matching
-   `Window` method.
+   `LocationChanged`, `ScaleChanged` and `StateChanged` handlers; the model forwards each to the
+   matching `Window` method. `LocationChanged` is optional only where the platform cannot report a
+   position at all - GTK4 and Wayland - and must never be faked from an assignment.
 6. `RegisterServices` adds the platform services to MEDI's `IServiceCollection` - the clipboard, the
    system theme, the dialog service and the context menu presenter. Doing it through one hook
    instead of a `Create*` member per service keeps adding a service from breaking every backend, and

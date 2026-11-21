@@ -31,6 +31,7 @@ public sealed class Gtk4WindowBackend : IWindowBackend
     private Action<object>? _activated;
     private Action<object>? _deactivated;
     private Action<object>? _clientSizeChanged;
+    private Action<object>? _locationChanged;
     private Action<object>? _scaleChanged;
     private Action<object>? _stateChanged;
     private readonly Gtk4ApplicationBackend _application;
@@ -1056,6 +1057,25 @@ public sealed class Gtk4WindowBackend : IWindowBackend
     {
         ArgumentNullException.ThrowIfNull(handler);
         _clientSizeChanged -= handler;
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// GTK 4 has no supported surface-position notification, and Wayland does not expose a surface
+    /// position at all. The handler is stored so the contract is uniform, but nothing raises it here.
+    /// </remarks>
+    public IDisposable AddLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged += handler;
+        return new HandlerToken<Action<object>>(RemoveLocationChangedHandler, handler);
+    }
+
+    /// <inheritdoc />
+    public void RemoveLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged -= handler;
     }
 
     /// <inheritdoc />

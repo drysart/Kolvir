@@ -30,6 +30,7 @@ public sealed class AppKitWindowBackend : IWindowBackend
     private Action<object>? _activated;
     private Action<object>? _deactivated;
     private Action<object>? _clientSizeChanged;
+    private Action<object>? _locationChanged;
     private Action<object>? _scaleChanged;
     private Action<object>? _stateChanged;
     private readonly AppKitApplicationBackend _application;
@@ -46,6 +47,8 @@ public sealed class AppKitWindowBackend : IWindowBackend
     private SKSize _minimumClientSize;
     private SKSize _maximumClientSize;
     private SKPoint? _location;
+    private SKPoint? _reportedLocation;
+    private bool _locationEventsEnabled;
     private bool _resizable = true;
     private bool _topMost;
     private IWindowBackend? _owner;
@@ -695,6 +698,21 @@ public sealed class AppKitWindowBackend : IWindowBackend
     }
 
     /// <inheritdoc />
+    public IDisposable AddLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged += handler;
+        return new HandlerToken<Action<object>>(RemoveLocationChangedHandler, handler);
+    }
+
+    /// <inheritdoc />
+    public void RemoveLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged -= handler;
+    }
+
+    /// <inheritdoc />
     public IDisposable AddScaleChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -907,6 +925,10 @@ public sealed class AppKitWindowBackend : IWindowBackend
 
         window.MakeKeyAndOrderFront(null!);
         window.MakeFirstResponder(_view);
+
+        // AppKit's own placement is not a move the application made; from here on it is.
+        _reportedLocation = Location;
+        _locationEventsEnabled = true;
 
         // -[NSApplication activate] does nothing unless the application is already frontmost, so a
         // window shown by a background process would never become active. The running-application
@@ -1240,6 +1262,31 @@ public sealed class AppKitWindowBackend : IWindowBackend
 
             _backend._clientSizeChanged?.Invoke(_backend);
             _backend.RaiseStateChangedIfNeeded();
+        }
+
+        public override void DidMove(NSNotification notification)
+        {
+            if (_backend._window is null || _backend._disposed)
+            {
+                return;
+            }
+
+            var location = _backend.Location;
+
+            if (!_backend._locationEventsEnabled)
+            {
+                // The framework's own placement, not a move the application made.
+                _backend._reportedLocation = location;
+                return;
+            }
+
+            if (_backend._reportedLocation == location)
+            {
+                return;
+            }
+
+            _backend._reportedLocation = location;
+            _backend._locationChanged?.Invoke(_backend);
         }
 
         /// <summary>

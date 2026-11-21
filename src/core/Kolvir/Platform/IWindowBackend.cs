@@ -307,6 +307,26 @@ public interface IWindowBackend : IDisposable
     /// <summary>Removes a handler that <see cref="AddClientSizeChangedHandler"/> added.</summary>
     void RemoveClientSizeChangedHandler(Action<object> handler);
 
+    /// <summary>Adds a handler that runs when the window's screen position changes.</summary>
+    /// <remarks>
+    /// <para>
+    /// Windows raises it from the native move message and macOS from the window's did-move
+    /// notification. The headless backend raises it when <see cref="Location"/> changes, so a test
+    /// can drive the same handler without a display. Read <see cref="Location"/> in the handler for
+    /// the new position rather than reconstructing it from the event.
+    /// </para>
+    /// <para>
+    /// GTK4 has no supported surface-position notification: GTK 4 does not expose a move signal,
+    /// and Wayland does not expose a surface position at all. The handler therefore never fires on
+    /// GTK4, on X11 or on Wayland, and a caller must not infer a position from <see cref="Location"/>
+    /// assignments it made itself.
+    /// </para>
+    /// </remarks>
+    IDisposable AddLocationChangedHandler(Action<object> handler);
+
+    /// <summary>Removes a handler that <see cref="AddLocationChangedHandler"/> added.</summary>
+    void RemoveLocationChangedHandler(Action<object> handler);
+
     /// <summary>Adds a handler that runs when the window moves to a display with a different scale factor.</summary>
     IDisposable AddScaleChangedHandler(Action<object> handler);
 
