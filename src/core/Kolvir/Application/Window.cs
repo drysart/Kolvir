@@ -206,10 +206,13 @@ public sealed partial class Window : IDisposable
     /// from sizing itself to <see cref="Content"/>.
     /// </summary>
     /// <remarks>
-    /// A size assigned while a host is painting is applied on the next loop turn. Resizing is also a
-    /// surface reallocation, and a backend that reallocates during the paint frees the surface its
-    /// paint path is still using - the same hazard a close has. The window keeps its current size for
-    /// the frame being drawn and takes the new one immediately after it.
+    /// A size assigned to a window that is already on screen while a host is painting is applied on
+    /// the next loop turn. Resizing is also a surface reallocation, and a backend that reallocates
+    /// during the paint frees the surface its paint path is still using - the same hazard a close
+    /// has. The window keeps its current size for the frame being drawn and takes the new one
+    /// immediately after it. A window that has never been shown has no surface to protect: it takes
+    /// the size at once, so a window created and configured by a render inside a paint is created
+    /// where and at the size the render asked for.
     /// </remarks>
     public SKSize ClientSize
     {
@@ -218,7 +221,7 @@ public sealed partial class Window : IDisposable
         {
             _clientSizeSet = true;
 
-            if (UiHost.IsPainting)
+            if (_isShown && UiHost.IsPainting)
             {
                 _pendingClientSize = value;
 

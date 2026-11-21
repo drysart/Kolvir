@@ -18,6 +18,7 @@
   </Folder>
   <Folder Name="/src/demo/">
     <Project Path="src/demo/Kolvir.Demo.App/Kolvir.Demo.App.csproj" />
+    <Project Path="src/demo/Kolvir.Demo.VirtualDom/Kolvir.Demo.VirtualDom.csproj" />
     <Project Path="src/demo/Kolvir.Minimal/Kolvir.Minimal.csproj" />
   </Folder>
   <Folder Name="/src/features/">
