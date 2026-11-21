@@ -34,7 +34,9 @@
     "globalMetadata": {
       "_appTitle": "Kolvir",
       "_appName": "Kolvir",
-      "_disableContribution": true
+      "_disableContribution": true,
+      "_disableToc": false,
+      "_disableBreadcrumb": true
     }
   }
 }

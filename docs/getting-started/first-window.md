@@ -17,6 +17,14 @@ Linux.
 
 ## 2. Replace Program.cs
 
+Put these three usings at the top of the file, and the method below inside `Program`:
+
+```csharp
+using Kolvir;
+using Kolvir.Backend;
+using SkiaSharp;
+```
+
 ```csharp
 [STAThread]
 private static int Main()
@@ -34,13 +42,8 @@ private static int Main()
 }
 ```
 
-Add these three lines above the class:
-
-```csharp
-using Kolvir;
-using Kolvir.Backend;
-using SkiaSharp;
-```
+`[STAThread]` matters on Windows: the system's file dialogs do not return on a multi-threaded
+apartment. It is ignored on the other two systems.
 
 ## 3. Run it
 
@@ -50,9 +53,10 @@ dotnet run
 
 You should see:
 
-- a window titled **Hello**, 480 by 240 logical pixels, centred on the display it opens on;
-- the text **Hello, Kolvir.** at the left of the window, vertically centred, in the system font and
-  the palette's foreground colour;
+- a window titled **Hello**, 480 by 240 logical pixels;
+- the text **Hello, Kolvir.** at the left of the window, vertically centred, in the application's
+  font (the system's, unless `ApplicationOptions.FontFamily` says otherwise) and the palette's
+  foreground colour;
 - a working title bar with minimise, maximise and close, and the window resizing with its content
   following.
 

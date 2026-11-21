@@ -152,6 +152,14 @@ internal static class NavigationFile
             }
 
             var children = Build(entry.Items!, repository, out int childPages);
+
+            // A group whose pages are all still unwritten is a group with nothing to open; it takes
+            // its place in the navigation in the phase that writes them.
+            if (children.Count == 0)
+            {
+                continue;
+            }
+
             pages += childPages;
             items.Add(new TocItem { Name = entry.Title, Items = children });
         }

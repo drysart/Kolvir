@@ -7,7 +7,7 @@ you build for, and what the window looks like once it is up.
 | --- | --- | --- | --- |
 | Target framework | `net10.0-windows` | `net10.0-macos` | `net10.0` |
 | Besides the .NET 10 SDK | nothing | the macOS workload and Xcode | the GTK 4 runtime |
-| Build it on | any machine | a Mac | any machine |
+| Build it on | Windows, or any machine with `EnableWindowsTargeting` | a Mac | any machine |
 | Output | an executable | an `.app` bundle | an executable |
 
 ## Windows
@@ -16,10 +16,10 @@ you build for, and what the window looks like once it is up.
 dotnet run
 ```
 
-The window appears with the system's title bar and frame. Two things need Windows 11 (build 22000 or
-later): recolouring the caption strip with `Window.CaptionColor`, and the system's own popup menus
-with `MenuPresentation.Native`. On Windows 10 those requests are refused or fall back; ask first with
-`Window.ChromeCapabilities`, and see the [platform matrix](../reference/platform-matrix.md).
+The window appears with the system's title bar and frame. Recolouring the caption strip with
+`Window.CaptionColor` needs Windows 11 (build 22000 or later); on Windows 10 that request throws
+`NotSupportedException`, so ask first with `Window.ChromeCapabilities` and see the
+[platform matrix](../reference/platform-matrix.md).
 
 **Per-monitor DPI.** Add an application manifest so the window scales per monitor rather than relying
 on bitmap stretching:
@@ -116,7 +116,7 @@ backend.LastWindow!.SavePng("hello.png");
 ```
 
 Add `using Kolvir.Backend.Headless;` beside the other usings. The run returns as soon as the window
-has been laid out and painted, and the image is the same one the window would show.
+has been laid out and painted, and the image is the same control tree the window would show.
 
 ## Publishing
 
@@ -134,5 +134,3 @@ Publish for each system you ship for, from a machine that can build it:
 ```bash
 dotnet publish -c Release -r linux-x64
 ```
-
-NativeAOT, trimming and the bundle layout each system expects are covered under Shipping.

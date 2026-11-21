@@ -130,10 +130,15 @@ Numbered so a later phase can cite them.
    `YamlDotNet` reference in the docs tool only: nothing is hand-parsed and nothing is added to a
    shipped package.
 
+   One entry uses `include: controls` instead of `items`, and the tool expands it from the control
+   map. That is what keeps the list of controls in one place: the grouped reference cannot list a
+   control the map does not have, or miss one it does.
+
    `planned: true` is what lets the real tree be recorded now, while the guides are written in phase
    2. The tool skips a planned entry with a notice, and fails when a planned entry's file exists (the
    marker was forgotten) or when an unplanned entry's file is missing (a page was dropped). So the
-   navigation is one file that cannot lie in either direction.
+   navigation is one file that cannot lie in either direction, and a group whose pages are all
+   unwritten is left out of the built navigation rather than published empty.
 
 8. **The generator reads the XML file and the compiled library.** The tool references `Kolvir` as a
    project, so it reads the same assembly and the same XML file the packages ship, resolves member
@@ -238,11 +243,16 @@ documentation tool may do and what a shipped library may not.
 Two behaviours of the pinned generator are worth writing down, because both were found by trying them
 rather than from its documentation:
 
-- the search index and the table of contents are produced only when `build.postProcessors` names
-  `ExtractSearchIndex` and the generated `toc.yml` is part of `build.content`; a Markdown-only content
-  glob builds pages with no navigation and no search;
+- the search index is produced only when `build.postProcessors` names `ExtractSearchIndex`, and the
+  table of contents only when the generated `toc.yml` is part of `build.content`; the sidebar then
+  needs `_disableToc: false` in `globalMetadata`, because the template's default is a page with no
+  navigation at all;
 - a broken relative link or a missing image is a warning, so the build passes `--warningsAsErrors` to
   turn them into failures.
+
+One option is set for the opposite reason: `_disableBreadcrumb: true`. The template derives the trail
+from the single root navigation, and for a generated control page it produces a trail that names the
+wrong parent. The sidebar already says where a page sits.
 
 ## 6. Migration map
 

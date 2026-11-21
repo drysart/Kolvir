@@ -3,8 +3,8 @@
 ## What you need
 
 - The .NET 10 SDK. Kolvir targets `net10.0`, and a platform target framework on Windows and macOS.
-- A desktop to run on: Windows, macOS, or Linux with GTK 4 installed. A build needs none of that; a
-  window does.
+- A desktop to run on: Windows, macOS, or Linux with a GTK 4 runtime installed. A build needs none of
+  that; a window does.
 
 ## Add the packages
 
@@ -34,8 +34,9 @@ application that never references it does not carry it.
 
 ## The project file
 
-A project builds exactly one target framework per operating system, because the macOS target
-framework needs a workload that only macOS supplies:
+A project builds exactly one target framework per operating system: the macOS target framework needs
+a workload that only a Mac supplies, and one portable target framework would build a Linux binary on a
+Mac. Keep all three lines:
 
 ```xml
 <PropertyGroup>
