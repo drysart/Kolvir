@@ -1,0 +1,149 @@
+# The guide's navigation: one file, at the root of docs/.
+#
+# `title` is what the sidebar shows and `href` is the page, relative to docs/. A group has `items`
+# instead of an `href`. `planned: true` marks a page the plan has named and this phase has not written
+# yet: it is left out of the built navigation, and the build fails if the page exists (the marker was
+# forgotten) or if an unplanned page does not (a page was dropped).
+#
+# `include: controls` expands the generated control reference, so the list of controls lives in the
+# generator's map rather than being copied here.
+
+- title: Home
+  href: index.md
+
+- title: Getting started
+  items:
+    - title: Install
+      href: getting-started/install.md
+    - title: Your first window
+      href: getting-started/first-window.md
+    - title: Your first layout
+      href: getting-started/first-layout.md
+      planned: true
+    - title: Run it on each platform
+      href: getting-started/run-on-each-platform.md
+
+- title: Concepts
+  items:
+    - title: How the pieces fit together
+      href: concepts/architecture.md
+    - title: The layout model
+      href: concepts/layout-model.md
+      planned: true
+    - title: What gets painted
+      href: concepts/painting.md
+      planned: true
+    - title: Appearance and the palette
+      href: concepts/appearance.md
+      planned: true
+    - title: Input and focus
+      href: concepts/input-focus.md
+      planned: true
+
+- title: Guides
+  items:
+    - title: Windows
+      href: guides/windows.md
+      planned: true
+    - title: Dialogs
+      href: guides/dialogs.md
+      planned: true
+    - title: Menus
+      href: guides/menus.md
+      planned: true
+    - title: Text
+      href: guides/text.md
+      planned: true
+    - title: Lists
+      href: guides/lists.md
+      planned: true
+    - title: Images
+      href: guides/images.md
+      planned: true
+    - title: SVG
+      href: guides/svg.md
+      planned: true
+    - title: Animated GIF
+      href: guides/animated-gif.md
+      planned: true
+    - title: Animated WebP
+      href: guides/animated-webp.md
+      planned: true
+    - title: Web fonts
+      href: guides/woff.md
+      planned: true
+    - title: Drag and drop
+      href: guides/drag-and-drop.md
+      planned: true
+    - title: Animations
+      href: guides/animations.md
+      planned: true
+    - title: App badging
+      href: guides/badging.md
+      planned: true
+    - title: GPU acceleration
+      href: guides/gpu-acceleration.md
+      planned: true
+    - title: The virtual DOM
+      href: guides/virtual-dom.md
+      planned: true
+    - title: Observables
+      href: guides/observables.md
+      planned: true
+    - title: The application component
+      href: guides/application-component.md
+      planned: true
+
+- title: Reference
+  items:
+    - title: Controls
+      include: controls
+    - title: Application
+      href: reference/application.md
+      planned: true
+    - title: Window
+      href: reference/window.md
+      planned: true
+    - title: UiHost
+      href: reference/uihost.md
+      planned: true
+    - title: Application options
+      href: reference/options.md
+      planned: true
+    - title: Environment variables
+      href: reference/environment-variables.md
+      planned: true
+    - title: Platform matrix
+      href: reference/platform-matrix.md
+    - title: Packages
+      href: reference/packages.md
+      planned: true
+
+- title: Shipping
+  items:
+    - title: NativeAOT
+      href: shipping/nativeaot.md
+      planned: true
+    - title: Trimming
+      href: shipping/trimming.md
+      planned: true
+    - title: Packaging an app
+      href: shipping/packaging.md
+      planned: true
+    - title: Windows
+      href: shipping/windows.md
+      planned: true
+    - title: macOS
+      href: shipping/macos.md
+      planned: true
+    - title: Linux
+      href: shipping/linux.md
+      planned: true
+
+- title: Troubleshooting
+  href: troubleshooting.md
+  planned: true
+
+- title: The sample application
+  href: samples.md
+  planned: true

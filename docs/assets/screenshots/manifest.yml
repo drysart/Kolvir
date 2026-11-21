@@ -1,0 +1,16 @@
+# Every image the guide shows, and the arguments that produce it.
+#
+# The images are not captured from a desktop: the sample paints the page through its headless
+# renderer, so this file is the whole recipe and the set can be re-taken from any checkout with
+#
+#   dotnet run --project src/tools/Kolvir.Docs -- screenshots
+#
+# `image` is relative to docs/assets/, and `page` is the sample's own page id, the one `--page`
+# accepts. The sample is laid out for a 1280 by 820 client area, which is the size to use unless an
+# image is deliberately of something smaller.
+
+- image: screenshots/demo-window.png
+  page: split-container
+  width: 1280
+  height: 820
+  appearance: light
