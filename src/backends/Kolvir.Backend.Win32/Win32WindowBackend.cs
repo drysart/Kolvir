@@ -34,6 +34,7 @@ public sealed class Win32WindowBackend : IWindowBackend
     private Action<object>? _activated;
     private Action<object>? _deactivated;
     private Action<object>? _clientSizeChanged;
+    private Action<object>? _locationChanged;
     private Action<object>? _scaleChanged;
     private Action<object>? _stateChanged;
     private static int _nextClassId;
@@ -64,6 +65,8 @@ public sealed class Win32WindowBackend : IWindowBackend
     private SKSize _minimumClientSize;
     private SKSize _maximumClientSize;
     private SKPoint? _location;
+    private SKPoint? _reportedLocation;
+    private bool _locationEventsEnabled;
     private bool _resizable = true;
     private bool _topMost;
     private IWindowBackend? _owner;
@@ -915,6 +918,21 @@ public sealed class Win32WindowBackend : IWindowBackend
     }
 
     /// <inheritdoc />
+    public IDisposable AddLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged += handler;
+        return new HandlerToken<Action<object>>(RemoveLocationChangedHandler, handler);
+    }
+
+    /// <inheritdoc />
+    public void RemoveLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged -= handler;
+    }
+
+    /// <inheritdoc />
     public IDisposable AddScaleChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -1220,6 +1238,11 @@ public sealed class Win32WindowBackend : IWindowBackend
         // Windows ignores a z-order change on a hidden window, so topmost can only be applied once
         // the window is visible - which is why it is not done when the window is created.
         ApplyTopMost();
+
+        // Everything up to here was the framework placing the window. From this point a move is a
+        // move the application did not make, so the first one is worth reporting.
+        _reportedLocation = Location;
+        _locationEventsEnabled = true;
 
         _shown?.Invoke(this);
     }
@@ -1568,6 +1591,10 @@ public sealed class Win32WindowBackend : IWindowBackend
                 return EraseBackground(wParam)
                     ? new IntPtr(1)
                     : NativeMethods.DefWindowProcW(hwnd, message, wParam, lParam);
+
+            case NativeMethods.WmMove:
+                OnMove();
+                return IntPtr.Zero;
 
             case NativeMethods.WmSize:
                 OnSize(NativeMethods.LowWord(lParam), NativeMethods.HighWord(lParam), (uint)wParam);
@@ -1987,6 +2014,32 @@ public sealed class Win32WindowBackend : IWindowBackend
             NativeMethods.DeleteDC(dc);
             NativeMethods.DeleteObject(dib);
         }
+    }
+
+    private void OnMove()
+    {
+        if (_hwnd == IntPtr.Zero || _disposed)
+        {
+            return;
+        }
+
+        var location = Location;
+
+        if (!_locationEventsEnabled)
+        {
+            // The initial placement and the show-time messages are not a move the application made.
+            // Record where the window ended up so the first genuine move compares against it.
+            _reportedLocation = location;
+            return;
+        }
+
+        if (_reportedLocation == location)
+        {
+            return;
+        }
+
+        _reportedLocation = location;
+        _locationChanged?.Invoke(this);
     }
 
     private void OnSize(int width, int height, uint sizeType)

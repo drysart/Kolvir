@@ -30,6 +30,7 @@ public sealed partial class Window : IDisposable
     private Action<object>? _activated;
     private Action<object>? _deactivated;
     private Action<object>? _clientSizeChanged;
+    private Action<object>? _locationChanged;
     private Action<object>? _scaleChanged;
     private Action<object>? _stateChanged;
     private readonly Application _application;
@@ -99,6 +100,7 @@ public sealed partial class Window : IDisposable
         Backend.AddActivatedHandler(OnBackendActivated);
         Backend.AddDeactivatedHandler(OnBackendDeactivated);
         Backend.AddClientSizeChangedHandler(OnBackendClientSizeChanged);
+        Backend.AddLocationChangedHandler(OnBackendLocationChanged);
         Backend.AddScaleChangedHandler(OnBackendScaleChanged);
         Backend.AddStateChangedHandler(OnBackendStateChanged);
 
@@ -565,6 +567,27 @@ public sealed partial class Window : IDisposable
         _clientSizeChanged -= handler;
     }
 
+    /// <summary>Adds a handler that runs when the window's screen position changes.</summary>
+    /// <remarks>
+    /// Windows and macOS report a move as the user drags or the platform places the window; the
+    /// headless backend reports a <see cref="Location"/> change. GTK4 cannot report a surface
+    /// position through its supported API, so this never fires on GTK4. Read <see cref="Location"/>
+    /// for the new position.
+    /// </remarks>
+    public IDisposable AddLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged += handler;
+        return new HandlerToken<Action<object>>(RemoveLocationChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddLocationChangedHandler"/> added.</summary>
+    public void RemoveLocationChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _locationChanged -= handler;
+    }
+
     /// <summary>Adds a handler that runs when the window moves to a display with a different scale factor.</summary>
     public IDisposable AddScaleChangedHandler(Action<object> handler)
     {
@@ -712,6 +735,7 @@ public sealed partial class Window : IDisposable
         Backend.RemoveActivatedHandler(OnBackendActivated);
         Backend.RemoveDeactivatedHandler(OnBackendDeactivated);
         Backend.RemoveClientSizeChangedHandler(OnBackendClientSizeChanged);
+        Backend.RemoveLocationChangedHandler(OnBackendLocationChanged);
         Backend.RemoveScaleChangedHandler(OnBackendScaleChanged);
         Backend.RemoveStateChangedHandler(OnBackendStateChanged);
 
@@ -901,6 +925,9 @@ public sealed partial class Window : IDisposable
 
     private void OnBackendClientSizeChanged(object sender) =>
         Guard(() => _clientSizeChanged?.Invoke(this));
+
+    private void OnBackendLocationChanged(object sender) =>
+        Guard(() => _locationChanged?.Invoke(this));
 
     private void OnBackendScaleChanged(object sender) => Guard(() =>
     {

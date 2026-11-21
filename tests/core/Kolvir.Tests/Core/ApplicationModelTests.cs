@@ -274,6 +274,35 @@ public sealed class ApplicationModelTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AMoveIsAnnouncedOnceAndOnlyWhenItChanges()
+    {
+        WithApplication(NewApplication(_ => { }), _ =>
+        {
+            var window = new Window("main", new Panel());
+            var moves = new List<SKPoint>();
+
+            window.AddLocationChangedHandler(_ => moves.Add(window.Location));
+            window.Location = new SKPoint(120f, 64f);
+
+            CollectionAssert.AreEqual(
+                new[] { new SKPoint(120f, 64f) },
+                moves,
+                "a move is announced once with the new position");
+
+            window.Location = new SKPoint(120f, 64f);
+
+            Assert.AreEqual(1, moves.Count, "assigning the same position again is not a move");
+
+            window.Location = new SKPoint(140f, 80f);
+
+            CollectionAssert.AreEqual(
+                new[] { new SKPoint(120f, 64f), new SKPoint(140f, 80f) },
+                moves,
+                "a second real move is announced with the position it moved to");
+        });
+    }
+
+    [TestMethod]
     public void ShowDialogReportsTheDialogResultTheWindowCarries()
     {
         WithApplication(NewApplication(_ => { }), app =>
