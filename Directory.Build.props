@@ -33,6 +33,8 @@
     <ShipsToConsumers Condition="'$(MSBuildProjectName)' == 'Kolvir.Minimal'
                                or '$(MSBuildProjectName)' == 'Kolvir.Demo.App'
                                or '$(MSBuildProjectName)' == 'Kolvir.Demo.VirtualDom'
+                               or '$(MSBuildProjectName)' == 'Kolvir.Docs'
+                               or '$(MSBuildProjectName)' == 'Kolvir.Docs.Snippets'
                                or $(MSBuildProjectName.Contains('.Tests'))">false</ShipsToConsumers>
     <GenerateDocumentationFile>$(ShipsToConsumers)</GenerateDocumentationFile>
     <WarningsAsErrors Condition="'$(ShipsToConsumers)' == 'true'">$(WarningsAsErrors);CS1591</WarningsAsErrors>

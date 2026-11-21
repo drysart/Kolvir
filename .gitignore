@@ -364,3 +364,15 @@ FodyWeavers.xsd
 
 # Render output written by the harnesses' --render switch
 *.png
+
+# The guide's screenshots are committed on purpose: each one is named in
+# docs/assets/screenshots/manifest.yml with the page and arguments that produced it, so it can be
+# re-rendered rather than captured by hand.
+!docs/assets/screenshots/*.png
+
+# The built guide and the parts of it the docs tool generates. None of it is committed: the reference
+# is generated from the library's XML documentation at build time, and the navigation file the site
+# generator reads is translated from docs/nav.yml.
+docs/_site/
+docs/toc.yml
+docs/reference/controls/

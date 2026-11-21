@@ -1,0 +1,28 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The code the getting-started and concepts pages show, as a project that compiles. A page's
+       fenced C# block has to appear here verbatim, which the docs tool checks, so a snippet cannot be
+       a paraphrase of code that used to work: it is either in a project that builds or the docs build
+       fails. Nothing references this project; it exists to be compiled. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Docs.Snippets</RootNamespace>
+    <IsPackable>false</IsPackable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+    <!-- The selector, which is what an application references to get `KolvirBackend.CreateDefault()`.
+         A net10.0 project binds its portable inner build, exactly as an application targeting it does. -->
+    <ProjectReference Include="..\..\core\Kolvir.Backend\Kolvir.Backend.csproj" />
+    <!-- The offscreen backend, so the headless-render snippet compiles. -->
+    <ProjectReference Include="..\..\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+    <!-- Two feature packages, because a concept page shows how one is opted into and the code it
+         shows has to compile. -->
+    <ProjectReference Include="..\..\features\Kolvir.Feature.Animations\Kolvir.Feature.Animations.csproj" />
+    <ProjectReference Include="..\..\features\Kolvir.Feature.DragDrop\Kolvir.Feature.DragDrop.csproj" />
+  </ItemGroup>
+
+</Project>
