@@ -102,13 +102,14 @@ position in the list; `--light` and `--dark` force an appearance.
 
 ## Documentation
 
-The user-facing reference is being written and will live in [`docs/`](docs). Until then, the
-developer guide carries the design of every control, its rules and worked examples:
-
-- [`dev-docs/DEVELOPER-GUIDE.md`](dev-docs/DEVELOPER-GUIDE.md) - the design, the controls, the
-  application model and the platform notes.
+- [`docs/`](docs/index.md) - the guide for applications built with Kolvir: install, a first window,
+  the concepts, a task guide per feature, and a control reference generated from the library's own
+  documentation. Build it with `dotnet run --project src/tools/Kolvir.Docs -- build`.
+- [`dev-docs/DEVELOPER-GUIDE.md`](dev-docs/DEVELOPER-GUIDE.md) - for working **on** Kolvir: the design,
+  the controls, the application model and the platform notes.
 - [`dev-docs/APPLICATION-MODEL.md`](dev-docs/APPLICATION-MODEL.md) - how an application is put
   together, and the decisions behind the API.
+- [`dev-docs/DOCS-PLAN.md`](dev-docs/DOCS-PLAN.md) - how the guide is organised and how it is built.
 
 ## Working on Kolvir
 
@@ -123,7 +124,8 @@ src/generators   the build-time halves that ship inside a feature package
 src/demo         the sample application, and the minimal measurement fixture
 tests            a test project per project, in the same folders src/ uses
 dev-docs         the design and rationale documents
-docs             user-facing reference documentation
+docs             the application developer guide: Markdown sources, nav.yml and its screenshots
+src/tools        the documentation tool and the snippets it compiles
 ```
 
 Start with [`dev-docs/DEVELOPER-GUIDE.md`](dev-docs/DEVELOPER-GUIDE.md), which has the build and
