@@ -21,6 +21,19 @@ namespace Kolvir.VirtualDom;
 /// reconciled by the control mount inside the host panel that becomes <see cref="Kolvir.Window.Content"/>.
 /// </para>
 /// <para>
+/// The event handlers on this node report changes made outside the render: the user's move or
+/// resize, the platform's minimize or maximize, and focus moving to or away from the window. A
+/// change the mount applied from this node's own properties never raises them, including a
+/// <see cref="GeometryToken"/> re-assert and the pristine restore when an assignment is withdrawn.
+/// The handlers come from the most recently rendered node, so a closure over current state is
+/// current without recreating the window.
+/// </para>
+/// <para>
+/// There is deliberately no <c>Closed</c> handler. An application closes a window by omitting its
+/// node from a later render, so a closed notification would only tell the model what it already
+/// did itself. The window's disappearance is the model's action, not an outside change.
+/// </para>
+/// <para>
 /// Owned windows are not supported yet. A window node has no owner property today; when that shape
 /// arrives it will be a property on this node rather than a child node, and a window will be able to
 /// name another <see cref="VWindow"/> as its owner.
@@ -170,6 +183,51 @@ public sealed class VWindow : ApplicationVNode
     /// </para>
     /// </remarks>
     public Action<VWindow>? CloseRequested { get; init; }
+
+    /// <summary>
+    /// Raised when the window moves to a new screen position.
+    /// </summary>
+    /// <remarks>
+    /// The payload is the new logical position. The handler is read from the latest node, and it is
+    /// not raised for a <see cref="Location"/> the mount applied from that node or for the pristine
+    /// location restored when the assignment is withdrawn. GTK4 cannot observe a move, so this
+    /// never fires there.
+    /// </remarks>
+    public Action<VWindow, SKPoint>? Moved { get; init; }
+
+    /// <summary>
+    /// Raised when the client area is resized.
+    /// </summary>
+    /// <remarks>
+    /// The payload is the new logical size. The handler is read from the latest node, and it is not
+    /// raised for a <see cref="ClientSize"/> the mount applied from that node or for the pristine
+    /// size restored when the assignment is withdrawn.
+    /// </remarks>
+    public Action<VWindow, SKSize>? Resized { get; init; }
+
+    /// <summary>
+    /// Raised when the window is minimized, maximized, restored, or otherwise changes display state.
+    /// </summary>
+    /// <remarks>
+    /// The payload is the new <see cref="WindowState"/>. Minimized, maximized and restored all use
+    /// this one handler. It is read from the latest node and is not raised for a <see cref="State"/>
+    /// the mount applied or for the pristine state restored when the assignment is withdrawn.
+    /// </remarks>
+    public Action<VWindow, WindowState>? StateChanged { get; init; }
+
+    /// <summary>Raised when the window becomes the active window.</summary>
+    /// <remarks>
+    /// The handler is read from the latest node. It reports focus moving to the window; it is not a
+    /// geometry change and is not affected by the mount's property suppression.
+    /// </remarks>
+    public Action<VWindow>? Activated { get; init; }
+
+    /// <summary>Raised when the window stops being the active window.</summary>
+    /// <remarks>
+    /// The handler is read from the latest node. It reports focus moving away from the window; it is
+    /// not a geometry change and is not affected by the mount's property suppression.
+    /// </remarks>
+    public Action<VWindow>? Deactivated { get; init; }
 
     /// <summary>Applies every property this node assigns to a freshly created window.</summary>
     /// <param name="window">The window to configure.</param>

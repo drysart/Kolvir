@@ -624,7 +624,7 @@ generic wrapper would only be ceremony. `Invalidate()` is the one render on the 
 | Piece | Shape | Purpose |
 | --- | --- | --- |
 | `ApplicationVNode` | Abstract base: `Key`, and nothing else today | The application description. Deliberately not a `VNode`. |
-| `VWindow` | `Title`, `ClientSize`, `Location`, `State`, `Resizable`, `TopMost`, `Icon`, `MenuBar`, `MinimumClientSize`, `MaximumClientSize` as tracked properties; `GeometryToken`; `Content`; `CloseRequested` | One window, with the same omitted/set/unassigned distinction a control node has. |
+| `VWindow` | `Title`, `ClientSize`, `Location`, `State`, `Resizable`, `TopMost`, `Icon`, `MenuBar`, `MinimumClientSize`, `MaximumClientSize` as tracked properties; `GeometryToken`; `Content`; `CloseRequested`, `Moved`, `Resized`, `StateChanged`, `Activated`, `Deactivated` | One window, with the same omitted/set/unassigned distinction a control node has, plus the notifications for changes made outside a render. |
 | `IApplicationComponent` | `IReadOnlyList<ApplicationVNode> Render()`, `Attach(ApplicationMount)`, `Detach(ApplicationMount)` | The mount's half of the protocol, exactly as `IComponent` is the control mount's half. |
 | `ApplicationComponent` | The interface, `Invalidate()`, and `IDisposable` | The supplied base class. |
 | `ApplicationMount` | `Invalidate()`, `Dispose()` | Owns the real windows and their content mounts. |
@@ -739,6 +739,60 @@ An owned window - a `VWindow` whose owner is another `VWindow` - is not supporte
 owner property today, so the shape is reserved rather than half-built: when it arrives it will be a
 property on the window node, with the owner matched like any other window, not a child node. This is
 a not-yet-supported boundary, not an illegal one.
+
+### 8.7 Window notifications
+
+A `VWindow` can carry handlers for changes made outside the render, in the same style as
+`CloseRequested`:
+
+| Handler | Payload | Meaning |
+| --- | --- | --- |
+| `Moved` | `SKPoint` | The user (or the platform) moved the window. |
+| `Resized` | `SKSize` | The user resized the window's client area. |
+| `StateChanged` | `WindowState` | The window was minimized, maximized, restored, or otherwise changed state. |
+| `Activated` / `Deactivated` | none; the window is the sender | The window gained or lost focus. |
+
+The rule that matters is what does **not** raise them: a change the mount applied from the render.
+Creation, a changed assignment, the `GeometryToken` re-assert, and the pristine restore when an
+assignment is withdrawn are all the render's own work, so they are suppressed while the mount is
+applying them. If they were announced, every render that assigns `ClientSize` or `Location` would
+echo straight back into the model - noise at best, a feedback loop at worst. These handlers mean
+"something outside the render changed this window", and that is the distinction to rely on.
+
+The handlers are read from the most recently rendered node, so a render can replace a delegate and a
+closure over current state is current without recreating the window. Nothing is raised once the
+window is gone. `StateChanged` deliberately carries the state rather than being split into
+`Minimized`, `Maximized` and `Restored`: one handler is enough to follow the window, and the state
+value says which transition happened. There is deliberately no `Closed` handler either: the
+application closes a window by omitting it from the render, so a close notification would only tell
+the model what it just did itself.
+
+The intended pattern is a loop that settles by itself. The handler writes the window's new value into
+the model, and the next render assigns exactly that value:
+
+```csharp
+new VWindow
+{
+    Key = document,
+    Location = document.Location.Value,
+    ClientSize = document.ClientSize.Value,
+    State = document.State.Value,
+    Moved = (_, location) => document.Location.Value = location,
+    Resized = (_, size) => document.ClientSize.Value = size,
+    StateChanged = (_, state) => document.State.Value = state,
+    Content = new VComponent(document.Page),
+}
+```
+
+The user moves the window; `Moved` writes the model; the write re-renders; the render assigns the
+value the user already chose. The ordinary unchanged-assignment rule then leaves the window alone, so
+one render settles it and a later frame does not move it again. `GeometryToken` remains the opposite
+action: the way to take assigned geometry back after the user changed it.
+
+`Moved` is limited by the platform, not by the node. Windows and macOS report real moves; GTK4 has no
+supported move signal, and Wayland does not expose a surface position at all, so `Moved` never fires
+there. Do not infer a position from assignments: an application that needs a location on GTK4 reads
+`Window.Location` at the moment it needs it.
 
 ## 9. Steps
 

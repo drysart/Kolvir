@@ -72,16 +72,56 @@ internal static class HeadlessCheck
         Console.WriteLine($"after rename: {Titles(application)}");
         Console.WriteLine($"readout: {Readout(list)}");
 
-        var assignedLocation = first.Location;
-        first.Location = new SKPoint(900f, 900f);
+        var homeLocation = first.Location;
+        var homeSize = first.ClientSize;
+        var userLocation = new SKPoint(900f, 900f);
 
-        Check(first.Location != assignedLocation, "the move should take before tidy");
+        // A user move goes through the backend, so the window's own notification is what the model
+        // sees - exactly the path a drag takes on a desktop.
+        first.Backend.Location = userLocation;
+        Paint(list);
+
+        first = Find(application, "Document 1 renamed 1 - document");
+        Check(first.Location == userLocation, "the render should leave a window where the user moved it");
+        Check(Readout(list).Contains("900,900", StringComparison.Ordinal), "the model should see the user's move");
+        Console.WriteLine("after move: the model tracks the position and the window stayed put");
+
+        var userSize = new SKSize(620f, 420f);
+        first.Backend.ClientSize = userSize;
+        Paint(list);
+
+        first = Find(application, "Document 1 renamed 1 - document");
+        Check(first.ClientSize == userSize, "the render should leave a window at the size the user gave it");
+        Check(first.Backend.ClientSize == userSize, "the resize should reach the backend");
+        Check(Readout(list).Contains("620x420", StringComparison.Ordinal), "the model should see the user's resize");
+        Check(first.Location == userLocation, "resizing should not move the window");
+        Console.WriteLine("after resize: the model tracks the size and the window stayed put");
+
+        first.Backend.State = WindowState.Minimized;
+        Paint(list);
+
+        first = Find(application, "Document 1 renamed 1 - document");
+        Check(first.Backend.State == WindowState.Minimized, "the user's minimize should survive the render");
+        Check(Readout(list).Contains("Minimized", StringComparison.Ordinal), "the model should see the state change");
+        Check(first.Location == userLocation && first.ClientSize == userSize, "minimizing should not change the geometry");
+
+        first.Backend.State = WindowState.Normal;
+        Paint(list);
+
+        first = Find(application, "Document 1 renamed 1 - document");
+        Check(first.Backend.State == WindowState.Normal, "the user's restore should survive the render");
+        Check(Readout(list).Contains("Normal", StringComparison.Ordinal), "the model should see the restore");
+        Console.WriteLine("after minimize and restore: the model tracked both states");
+
         Click(list, "tidy");
         Paint(list);
 
         first = Find(application, "Document 1 renamed 1 - document");
-        Check(first.Location == assignedLocation, "Tidy should put the document back where the model assigned it");
-        Console.WriteLine("after tidy: the moved document returned to its assigned position");
+        Check(first.Location == homeLocation, "Tidy should put the document back where the model assigned it");
+        Check(first.ClientSize == homeSize, "Tidy should put the document back at the size the model assigned");
+        Check(first.Backend.State == WindowState.Normal, "Tidy should restore the model's window state");
+        Check(Readout(list).Contains("160,60 480x300 Normal", StringComparison.Ordinal), "the readout should follow the tidy");
+        Console.WriteLine("after tidy: the moved document returned to its assigned position and size");
 
         Click(list, "quit");
 

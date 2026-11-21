@@ -34,6 +34,15 @@ internal sealed class MountedWindow
     /// <summary>True while the framework itself is asking the window to close.</summary>
     internal bool ClosingFromFramework { get; set; }
 
+    /// <summary>
+    /// True while the mount is applying this window's properties from a render, and through the
+    /// loop turn that completes a deferred size assignment. Geometry and state notifications raised
+    /// in that window are the mount echoing its own work, so they are dropped.
+    /// </summary>
+    internal bool SuppressGeometryNotifications { get; set; }
+
+    private List<IDisposable>? _notificationTokens;
+
     private MountHandle? NodeContent { get; set; }
 
     private ComponentMount? ComponentContent { get; set; }
@@ -85,6 +94,28 @@ internal sealed class MountedWindow
         else
         {
             NodeContent.Update(content);
+        }
+    }
+
+    /// <summary>Keeps a window notification subscription for the life of this record.</summary>
+    /// <param name="token">The subscription to release when the record ends.</param>
+    internal void AddNotificationToken(IDisposable token) =>
+        (_notificationTokens ??= []).Add(token);
+
+    /// <summary>Detaches every window notification subscription this record added. Idempotent.</summary>
+    internal void DisposeNotifications()
+    {
+        var tokens = _notificationTokens;
+        _notificationTokens = null;
+
+        if (tokens is null)
+        {
+            return;
+        }
+
+        foreach (var token in tokens)
+        {
+            token.Dispose();
         }
     }
 

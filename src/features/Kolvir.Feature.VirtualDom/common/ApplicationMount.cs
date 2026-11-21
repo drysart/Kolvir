@@ -216,9 +216,19 @@ public sealed class ApplicationMount : IDisposable
 
                 if (match is not null && !match.Window.IsClosed)
                 {
-                    node.PatchFrom(match.Node, match.Window, match.Pristine);
-                    match.Node = node;
-                    match.UpdateContent(node.Content);
+                    BeginGeometrySuppression(match);
+
+                    try
+                    {
+                        node.PatchFrom(match.Node, match.Window, match.Pristine);
+                        match.Node = node;
+                        match.UpdateContent(node.Content);
+                    }
+                    finally
+                    {
+                        EndGeometrySuppression(match);
+                    }
+
                     updated.Add(match);
                     continue;
                 }
@@ -229,6 +239,7 @@ public sealed class ApplicationMount : IDisposable
                     // by its own close path - so its content is already released and a new window
                     // replaces the record in the same slot.
                     match.DisposeContent();
+                    match.DisposeNotifications();
                 }
 
                 var record = Create(node);
@@ -244,6 +255,7 @@ public sealed class ApplicationMount : IDisposable
             foreach (var record in created)
             {
                 record.DisposeContent();
+                record.DisposeNotifications();
                 record.ClosingFromFramework = true;
 
                 try
@@ -289,6 +301,9 @@ public sealed class ApplicationMount : IDisposable
 
         window.AddClosingHandler((_, args) => OnWindowClosing(record, args));
         window.AddClosedHandler(_ => OnWindowClosed(record));
+        AttachNotifications(record);
+
+        BeginGeometrySuppression(record);
 
         try
         {
@@ -301,6 +316,7 @@ public sealed class ApplicationMount : IDisposable
             // The record has not reached the window list yet, so a failure while its content or
             // properties are being applied has to release the window it already created.
             record.DisposeContent();
+            record.DisposeNotifications();
             record.ClosingFromFramework = true;
 
             try
@@ -314,6 +330,10 @@ public sealed class ApplicationMount : IDisposable
 
             throw;
         }
+        finally
+        {
+            EndGeometrySuppression(record);
+        }
 
         return record;
     }
@@ -321,6 +341,7 @@ public sealed class ApplicationMount : IDisposable
     private void Close(MountedWindow record)
     {
         record.DisposeContent();
+        record.DisposeNotifications();
         record.ClosingFromFramework = true;
 
         try
@@ -345,6 +366,7 @@ public sealed class ApplicationMount : IDisposable
         foreach (var record in windows)
         {
             record.DisposeContent();
+            record.DisposeNotifications();
             record.ClosingFromFramework = true;
 
             try
@@ -375,7 +397,116 @@ public sealed class ApplicationMount : IDisposable
     private void OnWindowClosed(MountedWindow record)
     {
         record.DisposeContent();
+        record.DisposeNotifications();
         _windows.Remove(record);
+    }
+
+    /// <summary>
+    /// Routes the window's own notifications to the handlers on the most recently rendered node.
+    /// Subscribing happens before the first property is applied so a window's creation and its
+    /// show-time state are covered by the suppression below.
+    /// </summary>
+    private void AttachNotifications(MountedWindow record)
+    {
+        var window = record.Window;
+
+        record.AddNotificationToken(window.AddLocationChangedHandler(_ => OnWindowMoved(record)));
+        record.AddNotificationToken(window.AddClientSizeChangedHandler(_ => OnWindowResized(record)));
+        record.AddNotificationToken(window.AddStateChangedHandler(_ => OnWindowStateChanged(record)));
+        record.AddNotificationToken(window.AddActivatedHandler(_ => OnWindowActivated(record)));
+        record.AddNotificationToken(window.AddDeactivatedHandler(_ => OnWindowDeactivated(record)));
+    }
+
+    /// <summary>
+    /// Starts dropping the geometry notifications the mount's own property application provokes.
+    /// The result of that application is an implementation detail of the render - reading it back
+    /// into the model would echo the render into itself - so it must not surface through the node's
+    /// events. Activation is not geometry and is left alone.
+    /// </summary>
+    private static void BeginGeometrySuppression(MountedWindow record) =>
+        record.SuppressGeometryNotifications = true;
+
+    /// <summary>
+    /// Ends the suppression started by <see cref="BeginGeometrySuppression"/>. A size assigned to a
+    /// shown window during a paint is applied on a later loop turn, so when the turn that ends the
+    /// suppression is still inside a paint the suppression stays until a turn lands outside one.
+    /// </summary>
+    private void EndGeometrySuppression(MountedWindow record)
+    {
+        if (UiHost.IsPainting)
+        {
+            _application.BeginInvoke(() => ClearGeometrySuppression(record));
+        }
+        else
+        {
+            record.SuppressGeometryNotifications = false;
+        }
+    }
+
+    private void ClearGeometrySuppression(MountedWindow record)
+    {
+        if (UiHost.IsPainting)
+        {
+            _application.BeginInvoke(() => ClearGeometrySuppression(record));
+            return;
+        }
+
+        record.SuppressGeometryNotifications = false;
+    }
+
+    private void OnWindowMoved(MountedWindow record)
+    {
+        if (_disposed || record.Window.IsClosed || record.SuppressGeometryNotifications)
+        {
+            return;
+        }
+
+        var node = record.Node;
+        node.Moved?.Invoke(node, record.Window.Location);
+    }
+
+    private void OnWindowResized(MountedWindow record)
+    {
+        if (_disposed || record.Window.IsClosed || record.SuppressGeometryNotifications)
+        {
+            return;
+        }
+
+        var node = record.Node;
+        node.Resized?.Invoke(node, record.Window.ClientSize);
+    }
+
+    private void OnWindowStateChanged(MountedWindow record)
+    {
+        if (_disposed || record.Window.IsClosed || record.SuppressGeometryNotifications)
+        {
+            return;
+        }
+
+        var node = record.Node;
+        node.StateChanged?.Invoke(node, record.Window.State);
+    }
+
+    private void OnWindowActivated(MountedWindow record)
+    {
+        if (_disposed || record.Window.IsClosed)
+        {
+            return;
+        }
+
+        var node = record.Node;
+        node.Activated?.Invoke(node);
+    }
+
+    private void OnWindowDeactivated(MountedWindow record)
+    {
+        if (_disposed || record.Window.IsClosed)
+        {
+            return;
+        }
+
+        var node = record.Node;
+        node.Deactivated?.Invoke(node);
     }
 
     private IReadOnlyList<VWindow> Validate(IReadOnlyList<ApplicationVNode> nodes)

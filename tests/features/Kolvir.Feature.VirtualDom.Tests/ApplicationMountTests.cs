@@ -1,5 +1,6 @@
 using SkiaSharp;
 using Kolvir;
+using Kolvir.Backend.Headless;
 using Kolvir.Observables;
 
 namespace Kolvir.VirtualDom.Tests;
@@ -398,6 +399,252 @@ public sealed class ApplicationMountTests
             "a token change still restores a withdrawn size");
         Assert.AreEqual(default(SKPoint), window.Location,
             "and a withdrawn location");
+    }
+
+    [TestMethod]
+    public void AWindowReportsItsOwnMovesResizesAndStateChanges()
+    {
+        VWindow? movedNode = null;
+        VWindow? resizedNode = null;
+        VWindow? stateNode = null;
+        VWindow? activatedNode = null;
+        VWindow? deactivatedNode = null;
+        var movedTo = default(SKPoint);
+        var resizedTo = default(SKSize);
+        var stateTo = default(WindowState);
+
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                Location = new SKPoint(10f, 20f),
+                ClientSize = new SKSize(300f, 200f),
+                State = WindowState.Normal,
+                Moved = (node, location) =>
+                {
+                    movedNode = node;
+                    movedTo = location;
+                },
+                Resized = (node, size) =>
+                {
+                    resizedNode = node;
+                    resizedTo = size;
+                },
+                StateChanged = (node, state) =>
+                {
+                    stateNode = node;
+                    stateTo = state;
+                },
+                Activated = node => activatedNode = node,
+                Deactivated = node => deactivatedNode = node,
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+        var backend = (HeadlessWindowBackend)window.Backend;
+
+        backend.Location = new SKPoint(200f, 300f);
+        backend.ClientSize = new SKSize(420f, 280f);
+        backend.State = WindowState.Minimized;
+        backend.Activate();
+        backend.SimulateDeactivate();
+
+        Assert.AreEqual("one", movedNode?.Key, "Moved comes from the current node");
+        Assert.AreEqual(new SKPoint(200f, 300f), movedTo, "Moved carries the new location");
+        Assert.AreEqual("one", resizedNode?.Key);
+        Assert.AreEqual(new SKSize(420f, 280f), resizedTo, "Resized carries the new client size");
+        Assert.AreEqual("one", stateNode?.Key);
+        Assert.AreEqual(WindowState.Minimized, stateTo, "StateChanged carries the new state");
+        Assert.AreEqual("one", activatedNode?.Key, "Activated carries the window");
+        Assert.AreEqual("one", deactivatedNode?.Key, "Deactivated carries the window");
+    }
+
+    [TestMethod]
+    public void ChangesTheRenderAppliedAreNotAnnounced()
+    {
+        var size = new SKSize(300f, 200f);
+        var location = new SKPoint(10f, 20f);
+        var state = WindowState.Normal;
+        object token = 0;
+        int moved = 0;
+        int resized = 0;
+        int stateChanged = 0;
+
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                ClientSize = size,
+                Location = location,
+                State = state,
+                GeometryToken = token,
+                Moved = (_, _) => moved++,
+                Resized = (_, _) => resized++,
+                StateChanged = (_, _) => stateChanged++,
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+        var backend = (HeadlessWindowBackend)window.Backend;
+
+        Assert.AreEqual(0, moved + resized + stateChanged,
+            "the properties applied while the window was created are the render's own work");
+
+        backend.ClientSize = new SKSize(420f, 280f);
+        backend.Location = new SKPoint(400f, 300f);
+        backend.State = WindowState.Minimized;
+
+        Assert.AreEqual(1, moved, "a user move is announced once");
+        Assert.AreEqual(1, resized, "a user resize is announced once");
+        Assert.AreEqual(1, stateChanged, "a user state change is announced once");
+
+        moved = 0;
+        resized = 0;
+        stateChanged = 0;
+        token = 1;
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(0, moved + resized + stateChanged,
+            "a geometry token re-assert is the mount applying the render, not a user change");
+        Assert.AreEqual(new SKSize(300f, 200f), window.ClientSize, "the token put the assigned size back");
+        Assert.AreEqual(new SKPoint(10f, 20f), window.Location, "and the assigned location");
+        Assert.AreEqual(WindowState.Normal, window.State, "and the assigned state");
+
+        size = new SKSize(420f, 280f);
+        location = new SKPoint(400f, 300f);
+        state = WindowState.Minimized;
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(0, moved + resized + stateChanged,
+            "a changed assignment the mount applies is not announced back to the node");
+        Assert.AreEqual(new SKSize(420f, 280f), window.ClientSize);
+        Assert.AreEqual(new SKPoint(400f, 300f), window.Location);
+        Assert.AreEqual(WindowState.Minimized, window.State);
+
+        component.Renderer = _ => [new VWindow { Key = "one", Title = "one", GeometryToken = token }];
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.AreEqual(0, moved + resized + stateChanged,
+            "a withdrawn assignment restoring the pristine values is not announced either");
+        Assert.AreEqual(default(SKSize), window.ClientSize);
+        Assert.AreEqual(default(SKPoint), window.Location);
+        Assert.AreEqual(WindowState.Normal, window.State);
+    }
+
+    [TestMethod]
+    public void AnEventHandlerComesFromTheLatestNode()
+    {
+        int first = 0;
+        int second = 0;
+
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                Moved = (_, _) => first++,
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+
+        component.Renderer = _ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                Moved = (_, _) => second++,
+            },
+        ];
+
+        component.Invalidate();
+        scene.Frame();
+
+        window.Backend.Location = new SKPoint(50f, 60f);
+
+        Assert.AreEqual(0, first, "the handler replaced by the latest render is no longer used");
+        Assert.AreEqual(1, second, "the latest node's handler receives the move");
+    }
+
+    [TestMethod]
+    public void EventsAreNotRaisedOnceTheWindowIsGone()
+    {
+        int moved = 0;
+
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                Moved = (_, _) => moved++,
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+        var backend = (HeadlessWindowBackend)window.Backend;
+
+        component.Renderer = _ => [];
+        component.Invalidate();
+        scene.Frame();
+
+        Assert.IsTrue(window.IsClosed, "the render that omits the window closes it");
+
+        backend.Location = new SKPoint(70f, 80f);
+
+        Assert.AreEqual(0, moved, "a window that is gone raises nothing");
+    }
+
+    [TestMethod]
+    public void AHandlerThatWritesTheValueBackSettlesWithoutMovingTheWindow()
+    {
+        var location = Observable.CreateValue(new SKPoint(10f, 20f));
+        int moves = 0;
+
+        var component = new TestApplicationComponent(_ =>
+        [
+            new VWindow
+            {
+                Key = "one",
+                Title = "one",
+                Location = location.Value,
+                Moved = (_, movedTo) =>
+                {
+                    moves++;
+                    location.Value = movedTo;
+                },
+            },
+        ]);
+
+        using var scene = ApplicationScene.Create(component);
+        var window = scene.Window("one");
+        var userLocation = new SKPoint(400f, 500f);
+
+        window.Backend.Location = userLocation;
+        scene.Frame();
+
+        Assert.AreEqual(1, moves, "the user's move is announced once");
+        Assert.AreEqual(userLocation, window.Location,
+            "the render assigns what the model recorded, and an unchanged value does not move the window back");
+        Assert.AreEqual(2, component.Renders, "the model change caused exactly one re-render");
+
+        scene.Frame();
+
+        Assert.AreEqual(userLocation, window.Location, "a later frame leaves the settled window alone");
+        Assert.AreEqual(2, component.Renders, "and does not render again on its own");
     }
 
     [TestMethod]

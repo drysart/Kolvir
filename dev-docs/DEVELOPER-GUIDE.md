@@ -3371,7 +3371,10 @@ Move reporting is the part that is not uniform, because the platforms do not exp
 On GTK4 use `Location` only for a value you assigned or read at the moment you need it; do not wait
 for a move notification that will not arrive. The handler reports what the platform observed, not
 who asked for the move; an application that echoes its own assignments back into its model needs to
-account for that.
+account for that. The application-level `VWindow` builds its `Moved`, `Resized`, `StateChanged`,
+`Activated` and `Deactivated` handlers on these notifications and suppresses the ones its own property
+application provokes, which is what lets the model use them without an echo loop; see the
+application-component section for that surface.
 
 ### Chromeless windows
 
@@ -4960,12 +4963,66 @@ What to know:
 - **`ApplicationVNode` is not a `VNode`.** A window has no control to create or patch, and keeping the
   hierarchies apart makes "a window in a control tree" and "a control in an application render" compile
   errors rather than run-time refusals.
+- **Window notifications describe changes the render did not make.** `Moved`, `Resized`,
+  `StateChanged`, `Activated` and `Deactivated` are node-held handlers read from the latest node, and
+  they are never raised for a change the mount applied from the render. See below.
+
+#### Window notifications
+
+A document window can follow the user instead of only instructing them:
+
+```csharp
+new VWindow
+{
+    Key = document,
+    Location = document.Location.Value,
+    ClientSize = document.ClientSize.Value,
+    State = document.State.Value,
+    Moved = (_, location) => document.Location.Value = location,
+    Resized = (_, size) => document.ClientSize.Value = size,
+    StateChanged = (_, state) => document.State.Value = state,
+    Content = new VComponent(document.Page),
+}
+```
+
+| Handler | Payload |
+| --- | --- |
+| `Moved` | The new location as an `SKPoint` |
+| `Resized` | The new client size as an `SKSize` |
+| `StateChanged` | The new `WindowState` |
+| `Activated` / `Deactivated` | No payload beyond the window |
+
+The rule to rely on is the negative one: a change the mount itself applied from the render does not
+raise these handlers. Creation, a changed assignment, the `GeometryToken` re-assert and the pristine
+restore when an assignment is withdrawn are all the render's own work, and announcing them back to
+the node would echo the render into the model. These events mean "something outside the render
+changed this window" - the user's drag, a user resize, the platform's minimize or restore. The
+handlers are read from the most recently rendered node, so a closure over current state is current
+without recreating the window, and nothing is raised after the window is gone.
+
+Write the feature's pattern as a loop that settles by itself: the handler writes the value into the
+model's own observable, the next render assigns exactly that value, and the ordinary
+unchanged-assignment rule leaves the window where the user put it. One render settles it; the next
+frame does not move it again. `GeometryToken` is the opposite action - it takes the assigned geometry
+back.
+
+What is deliberately absent:
+
+- **No `Closed` handler.** The application closes a window by omitting it from the render, so a close
+  notification would only tell the model what it just did itself.
+- **No separate `Minimized`, `Maximized` and `Restored` handlers.** They all arrive through
+  `StateChanged`, which carries the new `WindowState`.
+- **No move events on GTK4.** GTK 4 has no supported move signal and Wayland does not expose a
+  surface position, so `Moved` never fires there. Do not reconstruct a position from assignments; read
+  `Window.Location` when you need it. The Windows and macOS backends report real moves.
 
 `src/demo/Kolvir.Demo.VirtualDom` is the sample: a list window that opens documents, one keyed window
 per document, a close handled by `CloseRequested`, a rename that changes one observable title and
-updates both the document's window and the list's readout, and a "Tidy windows" action that bumps the
-geometry token after the user has moved a window. `--check` runs the same component on the headless
-backend and drives the open, close, rename and tidy flows through real controls and real frames.
+updates both the document's window and the list's readout, document windows that write the user's
+moves, resizes and state changes back into the model, and a "Tidy windows" action that resets the live
+geometry and bumps the token. `--check` runs the same component on the headless backend and drives the
+open, close, rename, move, resize, minimize/restore and tidy flows through real controls and real
+frames.
 
 #### Writing your own component base class
 
