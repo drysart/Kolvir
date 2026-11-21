@@ -79,11 +79,12 @@ Numbered so a later phase can cite them.
 
 1. **The sources live in this repository; publication does not.** Documentation is updated in the
    pull request that changes the API, the samples compile in CI, and the reference is generated from
-   the code it describes, so a second repository cannot drift. Publication is: build in CI and push
-   the built HTML to a `gh-pages` branch (or a publish-only repository), laid out as `/latest/` plus
-   one directory per release tag (`/v0.9.0/`). That layout is recorded here rather than implemented:
-   enabling Pages and choosing the host is the maintainer's call, and this phase delivers no
-   deployment.
+   the code it describes, so a second repository cannot drift. Publication is from this repository
+   to GitHub Pages: a push to `develop` builds the site and deploys it as an artifact at
+   `https://drysart.github.io/Kolvir/latest/`, with the site root redirecting into `latest/`. A
+   deployment replaces the whole site rather than adding to it, so one directory per release tag
+   (`/v0.9.0/`) waits until the job can build `latest/` and every tag into a single artifact. The
+   `latest/` directory exists from the first deployment so that later change moves nothing.
 
 2. **`docs/` must export to static HTML, so the Markdown stays generator-agnostic.** Plain Markdown,
    relative links only (`../guides/text.md`, never a repository or site URL), images under
@@ -211,10 +212,13 @@ Numbered so a later phase can cite them.
     and `run-on-each-platform.md` say so where a reader chooses a version; a guide repeats it only
     where one API is known to be in motion.
 
-16. **CI verifies, and nothing is deployed.** `.github/workflows/docs.yml` runs on pull requests that
-    touch `docs/`, the docs tool, `src/core/Kolvir/`, the tool manifest or the demo's page table. It
-    builds the library, the snippets, the reference and the site on `ubuntu-latest` - which is also the
-    case-sensitivity check - and uploads the HTML as a workflow artifact. No Pages, no push, no tag.
+16. **CI verifies on a pull request and publishes on a push.** `.github/workflows/docs.yml` runs on
+    pull requests that touch `docs/`, the docs tool, `src/core/Kolvir/`, the tool manifest or the
+    demo's page table, building the library, the snippets, the reference and the site on
+    `ubuntu-latest` - which is also the case-sensitivity check - and uploading the HTML as a workflow
+    artifact. A push to `develop` then deploys that same artifact to GitHub Pages. A pull request
+    never publishes. Superseded pull request builds cancel; publications queue instead, because a
+    cancelled deployment leaves the site on whichever version happened to finish.
 
 ## 5. The pipeline
 
@@ -300,8 +304,10 @@ page, its screenshot and its matrix link.
 **Phase 3.** `shipping/`, `troubleshooting.md`, `samples.md`, and the hand-written reference pages for
 `Application`, `Window`, `UiHost`, options and environment variables.
 
-**Phase 4.** Publication: the CI job that pushes the built site to `gh-pages`, `/latest/` and
-`/v<tag>/`, once Pages is enabled.
+**Phase 4.** A directory per release tag beside `latest/`, once there are releases to publish. The
+deploy job then builds `latest/` and every tag into one artifact, because a deployment replaces the
+site rather than adding to it. A custom domain, if one is ever wanted, is the same job plus a
+`CNAME` file in the artifact.
 
 ## 8. Acceptance for phase 1
 
