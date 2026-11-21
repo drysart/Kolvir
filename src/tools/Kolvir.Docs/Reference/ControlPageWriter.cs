@@ -17,6 +17,7 @@ internal sealed class ControlPageWriter(ReferenceModel model, ControlPage page, 
     private static readonly string[] MemberGroups = ["Constructor", "Property", "Method", "Field"];
 
     private readonly StringBuilder _builder = new();
+    private Dictionary<string, string> _headings = [];
 
     /// <summary>Writes the page.</summary>
     /// <returns>The Markdown.</returns>
@@ -41,6 +42,8 @@ internal sealed class ControlPageWriter(ReferenceModel model, ControlPage page, 
         AppendWhere();
 
         var members = page.Members();
+        _headings = Headings(page, members);
+
         foreach (string group in MemberGroups)
         {
             var inGroup = members.Where(member => member.Kind == group).ToList();
@@ -97,7 +100,7 @@ internal sealed class ControlPageWriter(ReferenceModel model, ControlPage page, 
 
     private void AppendMember(DocumentedMember member)
     {
-        string name = member.Info is ConstructorInfo ? member.Info.DeclaringType!.Name : member.Info.Name;
+        string name = _headings.TryGetValue(member.DocId, out string? heading) ? heading : PlainName(member);
 
         _builder.Append("### ").Append(name).Append("\n\n");
         _builder.Append("```csharp\n").Append(member.Signature).Append("\n```\n\n");
@@ -113,6 +116,113 @@ internal sealed class ControlPageWriter(ReferenceModel model, ControlPage page, 
         AppendReturns(member);
         AppendExceptions(member);
     }
+
+    /// <summary>
+    /// The heading each member is written under.
+    /// </summary>
+    /// <remarks>
+    /// A page carries more than one type - the control, and the types documented as sections of it -
+    /// so a name on its own is not unique: <c>Text</c> can be a property of two of them,
+    /// <c>Invalidate</c> can be six overloads, and a member can share its name with a section. Two
+    /// headings with one name are two links with one anchor, so a repeated name says which one it is:
+    /// its type when the types differ, and its parameters when one type still contributes it more
+    /// than once. A name used once on the page is left alone.
+    /// </remarks>
+    private static Dictionary<string, string> Headings(ControlPage page, IReadOnlyList<DocumentedMember> members)
+    {
+        var written = new List<(DocumentedMember? Member, string Name)>();
+
+        // The page's own title competes for an anchor too, which a lone constructor loses to.
+        written.Add((null, page.Entry.Type));
+
+        foreach (var member in members)
+        {
+            written.Add((member, PlainName(member)));
+        }
+
+        foreach (var related in page.Related)
+        {
+            written.Add((null, related.Name));
+
+            if (related.IsEnum)
+            {
+                continue;
+            }
+
+            foreach (var member in ControlPage.MembersOf(related).Where(member => member.Kind != "Constructor"))
+            {
+                written.Add((member, PlainName(member)));
+            }
+        }
+
+        var headings = new Dictionary<string, string>(StringComparer.Ordinal);
+
+        foreach (var repeated in written.GroupBy(entry => entry.Name, StringComparer.Ordinal).Where(group => group.Count() > 1))
+        {
+            var documented = repeated.Where(entry => entry.Member is not null).ToList();
+
+            // A constructor is named after its type, so only its parameters can tell it apart - from
+            // an overload, and from the title the page already uses. Any other repeated name says
+            // which type it belongs to, because a property has no parameters to show.
+            bool constructors = documented.All(entry => entry.Member!.Info is ConstructorInfo);
+            bool oneType = documented.Select(entry => entry.Member!.Info.DeclaringType).Distinct().Count() == 1;
+            bool sharesAHeading = documented.Count != repeated.Count();
+
+            foreach (var entry in documented)
+            {
+                headings[entry.Member!.DocId] = constructors || (oneType && !sharesAHeading)
+                    ? entry.Name
+                    : entry.Member.Info.DeclaringType!.Name + "." + entry.Name;
+            }
+        }
+
+        // Overloads of one type still share a name, so whatever is still shared takes the parameters
+        // as well - including a lone constructor and the page title it repeats, or a section.
+        var byId = new Dictionary<string, DocumentedMember>(StringComparer.Ordinal);
+        var reserved = new HashSet<string>(StringComparer.Ordinal);
+        foreach (var entry in written)
+        {
+            if (entry.Member is { } member)
+            {
+                byId[member.DocId] = member;
+            }
+            else
+            {
+                reserved.Add(entry.Name);
+            }
+        }
+
+        foreach (var shared in headings
+            .GroupBy(entry => entry.Value, StringComparer.Ordinal)
+            .Where(group => group.Count() > 1 || reserved.Contains(group.Key))
+            .ToList())
+        {
+            foreach (var entry in shared)
+            {
+                headings[entry.Key] = shared.Key + ParameterTypes(byId[entry.Key].Info);
+            }
+        }
+
+        return headings;
+    }
+
+    private static string PlainName(DocumentedMember member) =>
+        member.Info is ConstructorInfo ? member.Info.DeclaringType!.Name : member.Info.Name;
+
+    private static string ParameterTypes(MemberInfo member)
+    {
+        var parameters = member switch
+        {
+            MethodBase method => method.GetParameters(),
+            PropertyInfo property => property.GetIndexParameters(),
+            _ => Array.Empty<ParameterInfo>(),
+        };
+
+        return "(" + string.Join(", ", parameters.Select(parameter => Escape(Signatures.Short(parameter.ParameterType)))) + ")";
+    }
+
+    private static string Escape(string text) =>
+        text.Replace("<", "&lt;", StringComparison.Ordinal).Replace(">", "&gt;", StringComparison.Ordinal);
 
     private void AppendParameters(DocumentedMember member)
     {

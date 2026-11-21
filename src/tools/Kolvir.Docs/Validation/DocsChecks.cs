@@ -12,7 +12,8 @@ namespace Kolvir.Docs.Validation;
 /// The generator reports its own broken links, which is most of what can go wrong here. What it cannot
 /// see, and this does, is the rule the repository keeps for its Markdown (7-bit ASCII), the one CI
 /// would only catch after a push (a path whose case is wrong), whether every page the navigation names
-/// exists, and whether the code a page shows is code that compiles.
+/// exists, whether two headings on a page share a name and therefore an anchor, and whether the code a
+/// page shows is code that compiles.
 /// </remarks>
 internal static partial class DocsChecks
 {
@@ -29,6 +30,7 @@ internal static partial class DocsChecks
         foreach (string file in MarkdownFiles(repository))
         {
             problems.AddRange(CheckAscii(repository, file));
+            problems.AddRange(CheckAnchors(repository, file));
             problems.AddRange(CheckLinks(repository, file));
         }
 
@@ -121,6 +123,51 @@ internal static partial class DocsChecks
             else
             {
                 column++;
+            }
+        }
+
+        return problems;
+    }
+
+    private static List<string> CheckAnchors(DocsRepository repository, string file)
+    {
+        var problems = new List<string>();
+        var seen = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+        bool fenced = false;
+        int number = 0;
+
+        foreach (string line in File.ReadLines(file))
+        {
+            number++;
+
+            // A C# block can hold a line that starts with a #, so headings inside a fence are not
+            // headings.
+            if (line.TrimStart().StartsWith("```", StringComparison.Ordinal))
+            {
+                fenced = !fenced;
+                continue;
+            }
+
+            if (fenced)
+            {
+                continue;
+            }
+
+            var heading = HeadingMarker().Match(line);
+            if (!heading.Success)
+            {
+                continue;
+            }
+
+            string text = heading.Groups[2].Value.Trim();
+
+            if (seen.TryGetValue(text, out int first))
+            {
+                problems.Add($"error: {repository.Relative(file)}({number}): the heading '{text}' also appears on line {first}; the two share an anchor, so a link reaches only the first.");
+            }
+            else
+            {
+                seen[text] = number;
             }
         }
 
@@ -327,6 +374,9 @@ internal static partial class DocsChecks
 
     [GeneratedRegex(@"<img[^>]*src=""([^""]+)""")]
     private static partial Regex HtmlSource();
+
+    [GeneratedRegex(@"^(#{1,6})\s+(.+?)\s*$")]
+    private static partial Regex HeadingMarker();
 
     [GeneratedRegex(@"```csharp\r?\n(.*?)```", RegexOptions.Singleline)]
     private static partial Regex CSharpBlock();

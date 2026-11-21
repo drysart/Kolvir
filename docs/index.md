@@ -1,4 +1,4 @@
-# Kolvir
+# Application developer guide
 
 Kolvir is a UI library for .NET. You describe a window and its controls in C#, and Kolvir draws them
 itself; the operating system supplies the window, the input and the system dialogs. One control tree

@@ -206,7 +206,9 @@ Numbered so a later phase can cite them.
 
 14. **The repository's Markdown rules apply.** Every file is 7-bit ASCII (`-`, `...`, `->`, `x`), no
     tabs, fenced code with a language, tables for capabilities and option lists. The docs tool enforces
-    the ASCII rule and the path-case rule as part of the build.
+    the ASCII rule and the path-case rule as part of the build, and fails a page whose headings repeat:
+    two headings with one name are two links with one anchor, so a generated page that has a property
+    on two of its types, or overloads, or a member named like its own title, says which one each is.
 
 15. **The pre-1.0 caveat appears once.** Kolvir is pre-1.0 and the API is settling, so `install.md`
     and `run-on-each-platform.md` say so where a reader chooses a version; a guide repeats it only
@@ -228,7 +230,7 @@ src/tools/Kolvir.Docs/             console app; `build` runs everything, the par
   Reference/                       XML + assembly -> Markdown, one page per control
   ControlMap.cs                    control -> how-to page, demo page id, remarks choice
   Navigation/                      nav.yml -> generator navigation, planned-entry checks
-  Validation/                      ASCII, path case, screenshots, snippets
+  Validation/                      ASCII, path case, headings, screenshots, snippets
   Site/                            invokes the pinned generator
 src/tools/Kolvir.Docs.Snippets/    compiles the code the getting-started pages show
 docs/docfx.json                    hand-written generator configuration
