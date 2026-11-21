@@ -59,9 +59,13 @@ jobs:
         run: dotnet build src/tools/Kolvir.Docs.Snippets/Kolvir.Docs.Snippets.csproj --nologo
 
       # One command: build the library for its XML documentation, generate the control reference,
-      # translate nav.yml, check the tree, and run the generator.
+      # translate nav.yml, check the tree, and run the generator. `pipefail` is what makes a failing
+      # build fail the step, since the pipeline's exit status is tee's otherwise.
       - name: Build the guide
-        run: dotnet run --project src/tools/Kolvir.Docs -- build 2>&1 | tee "$RUNNER_TEMP/docs.log"
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet run --project src/tools/Kolvir.Docs -- build 2>&1 | tee "$RUNNER_TEMP/docs.log"
 
       - name: Summarise failures
         if: failure()
