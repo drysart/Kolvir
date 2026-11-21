@@ -9,12 +9,18 @@ at all.
 
 ## Is Kolvir for you?
 
-| Choose Kolvir when | Choose something else when |
-| --- | --- |
-| You want one control tree for Windows, macOS and Linux, with no per-OS code in your application. | You want XAML, data binding, styles or a visual designer. |
-| You like the WinForms programming model: `Dock`, `Margin`, `TabIndex`, `Add...Handler` subscriptions. | You need the platform's own controls inside your window; Kolvir draws its controls. |
-| You publish NativeAOT and want no reflection in your UI layer. | You need an API that will not change: Kolvir is pre-1.0. |
-| You want to render the same UI to a file, for tests or for documentation. | |
+Choose Kolvir when:
+
+- you want one control tree for Windows, macOS and Linux, with no per-OS code in your application;
+- you like the WinForms programming model: `Dock`, `Margin`, `TabIndex`, `Add...Handler` subscriptions;
+- you publish NativeAOT and want no reflection in your UI layer;
+- you want to render the same UI to a file, for tests or for documentation.
+
+Choose something else when:
+
+- you want XAML, data binding, styles or a visual designer;
+- you need the platform's own controls inside your window - Kolvir draws its controls;
+- you need an API that will not change: Kolvir is pre-1.0.
 
 ## What you get
 
