@@ -21,6 +21,10 @@
     <Project Path="src/demo/Kolvir.Demo.VirtualDom/Kolvir.Demo.VirtualDom.csproj" />
     <Project Path="src/demo/Kolvir.Minimal/Kolvir.Minimal.csproj" />
   </Folder>
+  <Folder Name="/src/tools/">
+    <Project Path="src/tools/Kolvir.Docs/Kolvir.Docs.csproj" />
+    <Project Path="src/tools/Kolvir.Docs.Snippets/Kolvir.Docs.Snippets.csproj" />
+  </Folder>
   <Folder Name="/src/features/">
     <Project Path="src/features/Kolvir.Feature.AnimatedGif/Kolvir.Feature.AnimatedGif.csproj" />
     <Project Path="src/features/Kolvir.Feature.AnimatedWebp/Kolvir.Feature.AnimatedWebp.csproj" />

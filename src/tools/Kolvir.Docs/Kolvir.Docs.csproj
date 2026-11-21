@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The documentation tool. It is desktop-only and runs on the developer's machine or a CI runner:
+       it reads the built library by reflection, shells out to `dotnet` and to the sample, and writes
+       Markdown. None of that is allowed in a shipped assembly, and none of it ships: the project is
+       excluded from packing by ShipsToConsumers in Directory.Build.props, the same switch the sample
+       projects use, and the pack action only walks src/core, src/backends and src/features anyway. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Docs</RootNamespace>
+    <AssemblyName>Kolvir.Docs</AssemblyName>
+    <!-- The library's props switch the trim and AOT analyzers on for anything that references it,
+         because an application probably wants them. This tool is the opposite of an application: it
+         exists to reflect, to read YAML by name and to start child processes, none of which survives
+         trimming. Saying so here keeps the analyzers' reports from burying the ones that matter. -->
+    <IsAotCompatible>false</IsAotCompatible>
+    <IsTrimmable>false</IsTrimmable>
+    <EnableAotAnalyzer>false</EnableAotAnalyzer>
+    <EnableTrimAnalyzer>false</EnableTrimAnalyzer>
+    <EnableSingleFileAnalyzer>false</EnableSingleFileAnalyzer>
+    <Description>The documentation tool: generates the control reference from the library's XML documentation, translates docs/nav.yml into the site generator's navigation, checks the docs tree, and builds the site.</Description>
+  </PropertyGroup>
+
+  <!-- The library itself, so the reference is generated from the assembly and the XML file the
+       packages ship rather than from a copy of either. -->
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- docs/nav.yml is YAML, and the alternative to a pinned parser is a hand-written one. A
+         documentation tool is allowed a dependency an application is not. -->
+    <PackageReference Include="YamlDotNet" Version="18.1.0" />
+  </ItemGroup>
+
+</Project>

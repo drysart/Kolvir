@@ -1,0 +1,141 @@
+name: Docs
+
+# The guide is built rather than checked in: the control reference is generated from the library's XML
+# documentation, the navigation is translated from docs/nav.yml, and the HTML comes out of the pinned
+# generator in .config/dotnet-tools.json. So this job is the only thing that proves the docs build at
+# all, and it runs on the same generator every developer runs locally.
+#
+# It builds on Linux on purpose. That is where a relative link whose case does not match the file on
+# disk stops working, and the generator treats a broken link or a missing image as an error.
+#
+# Pull requests build it and stop there. A push to develop also publishes it to GitHub Pages, under
+# /latest/ with the site root redirecting into it, so a per-release directory can be added beside it
+# without moving anything. Pages can only be deployed from an artifact, and a deployment replaces the
+# whole site rather than adding to it, so a tag directory is only worth adding once the job builds
+# `latest/` and every tag into one artifact; see dev-docs/DOCS-PLAN.md.
+
+on:
+  pull_request:
+    branches: [develop]
+    paths: &docs-paths
+      - '.github/workflows/docs.yml'
+      - '.config/dotnet-tools.json'
+      - 'docs/**'
+      - 'src/tools/**'
+      - 'src/core/Kolvir/**'
+      - 'src/demo/Kolvir.Demo.App/DemoUi.cs'
+      - 'Directory.Build.props'
+      - 'Directory.Build.targets'
+  push:
+    branches: [develop]
+    paths: *docs-paths
+  workflow_dispatch:
+
+env:
+  DOTNET_NOLOGO: true
+  DOTNET_CLI_TELEMETRY_OPTOUT: true
+  DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
+
+jobs:
+  build:
+    name: Build the guide
+    runs-on: ubuntu-latest
+    # Superseded pull request builds are worth cancelling. A push to develop is not: cancelling it
+    # would drop a publication, so only the pull request case cancels.
+    concurrency:
+      group: docs-${{ github.ref }}
+      cancel-in-progress: ${{ github.event_name == 'pull_request' }}
+    steps:
+      - name: Check out
+        uses: actions/checkout@v4
+
+      - name: Set up .NET
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+
+      # The tool's own project is restored first, so a restore failure reads as one rather than as a
+      # confusing build failure later.
+      - name: Restore the docs tool
+        run: dotnet restore src/tools/Kolvir.Docs/Kolvir.Docs.csproj --nologo
+
+      # The snippets are the code the getting-started and concepts pages show. Nothing references
+      # this project; it exists to be compiled, and the docs build then checks that every C# block on
+      # those pages appears in it verbatim.
+      - name: Build the snippets
+        run: dotnet build src/tools/Kolvir.Docs.Snippets/Kolvir.Docs.Snippets.csproj --nologo
+
+      # One command: build the library for its XML documentation, generate the control reference,
+      # translate nav.yml, check the tree, and run the generator. `pipefail` is what makes a failing
+      # build fail the step, since the pipeline's exit status is tee's otherwise.
+      - name: Build the guide
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet run --project src/tools/Kolvir.Docs -- build 2>&1 | tee "$RUNNER_TEMP/docs.log"
+
+      - name: Summarise failures
+        if: failure()
+        shell: bash
+        run: |
+          set -euo pipefail
+          {
+            echo '### Docs diagnostics'
+            echo '```'
+            grep -E '^(error|warning|.*error:)' "$RUNNER_TEMP/docs.log" | head -n 40 || true
+            echo '```'
+            echo '### Environment'
+            echo '```'
+            dotnet --version
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+
+      # The built HTML is the artifact: it is what a reviewer needs to read the page, and it is what
+      # the publication job below deploys.
+      - name: Upload the built guide
+        uses: actions/upload-artifact@v4
+        with:
+          name: docs-site
+          path: docs/_site
+          if-no-files-found: error
+
+  deploy:
+    name: Publish the guide
+    needs: build
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deploy.outputs.page_url }}
+    # Publications queue instead of cancelling each other: a deployment that is interrupted leaves the
+    # site on whichever version happened to finish.
+    concurrency:
+      group: pages
+      cancel-in-progress: false
+    steps:
+      # The site is published a directory below its root so a per-release directory can sit beside it
+      # later, and the root becomes a redirect into it. Every link in the built HTML is relative, so
+      # the guide works unchanged at that depth.
+      - name: Lay the site out under latest/
+        uses: actions/download-artifact@v4
+        with:
+          name: docs-site
+          path: site/latest
+
+      - name: Redirect the site root into latest/
+        run: printf '<meta http-equiv="refresh" content="0; url=latest/">\n' > site/index.html
+
+      - name: Read the Pages configuration
+        uses: actions/configure-pages@v5
+
+      - name: Package the site for Pages
+        uses: actions/upload-pages-artifact@v3
+        with:
+          path: site
+
+      - name: Deploy to Pages
+        id: deploy
+        uses: actions/deploy-pages@v4
