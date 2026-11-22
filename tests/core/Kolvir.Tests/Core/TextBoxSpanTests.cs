@@ -45,7 +45,7 @@ public sealed class TextBoxSpanTests : HeadlessTestBase
             span.EffectiveColor(field),
             "a role is resolved when it is read and beats the field's own colour");
 
-        span.Color = InheritedValue.Instance;
+        span.Color = PropertyValue.Inherited;
         Assert.AreEqual(field.EffectiveForeColor, span.EffectiveColor(field), "and assigning inherit goes back to the field");
     }
 

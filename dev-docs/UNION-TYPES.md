@@ -186,13 +186,13 @@ in each case:
 The property reports the assignment. The get-only `EffectiveFont` / `EffectiveForeColor` /
 `EffectiveBackColor` resolves it: the value assigned here, else the nearest ancestor that assigned
 one, else the class default (`DefaultFont` / `DefaultForeColor` / `DefaultBackColor`). The backing
-field is initialised to `InheritedValue.Instance`, so "never assigned" reads back as Inherit; a
+field is initialised to `PropertyValue.Inherited`, so "never assigned" reads back as Inherit; a
 `default` union is refused by `ThrowIfUnspecified()` in the `Effective*` getter rather than being
 treated as inherit.
 
 `Control.Enabled` is the same shape with one difference: `EffectiveEnabled` ANDs the local answer
 down the chain rather than taking the nearest assignment, because disabling a container disables
-everything inside it. `InheritedValue.Instance` and an explicit `true` therefore resolve
+everything inside it. `PropertyValue.Inherited` and an explicit `true` therefore resolve
 identically, and an explicit `true` does not override a disabled ancestor. The arm still earns its
 place in the raw property: it reports that nothing was assigned, which is what lets the colour
 dialog save and restore the owner's state without turning an inherited value into an explicit
@@ -215,7 +215,7 @@ Three decisions are worth recording, because each one is a place the obvious alt
   background), the most neutral one where transparency would be destructive (`Theme.Foreground` for
   text, `Theme.DefaultFont` for a font).
 
-`Clear*` is gone in favour of `= InheritedValue.Instance`, and the two names for one thing are
+`Clear*` is gone in favour of `= PropertyValue.Inherited`, and the two names for one thing are
 merged under the WinForms name: `Foreground` and `ForeColorRole` became `ForeColor`, `Background`
 and `BackColor` became `BackColor`.
 

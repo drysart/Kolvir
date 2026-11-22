@@ -210,7 +210,7 @@ public sealed class ColorDialogTests : HeadlessTestBase
             ownerContent.Enabled.TryGetValue<InheritedValue>(out _),
             "the modal session puts back the inherited value, not a literal false");
 
-        disabledAncestor.Enabled = InheritedValue.Instance;
+        disabledAncestor.Enabled = PropertyValue.Inherited;
 
         Assert.IsTrue(
             ownerContent.EffectiveEnabled,

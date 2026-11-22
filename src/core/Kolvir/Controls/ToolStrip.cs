@@ -21,7 +21,7 @@ public enum ToolStripItemAlignment
 public abstract class ToolStripItem
 {
     private string _text = string.Empty;
-    private Union<Font, InheritedValue> _font = InheritedValue.Instance;
+    private Union<Font, InheritedValue> _font = PropertyValue.Inherited;
     private bool _enabled = true;
     private bool _visible = true;
     private bool _spring;
@@ -49,7 +49,7 @@ public abstract class ToolStripItem
 
     /// <summary>
     /// The font assigned to this item: a <see cref="Font"/>, or
-    /// <see cref="InheritedValue.Instance"/> to take its strip's effective font.
+    /// <see cref="PropertyValue.Inherited"/> to take its strip's effective font.
     /// </summary>
     /// <remarks>
     /// The item's font is resolved through the same chain a control's is, with the strip as the
@@ -203,7 +203,7 @@ public class ToolStripLabel : ToolStripItem
     public const float HorizontalPadding = 6f;
 
     private ContentAlignment _textAlign = ContentAlignment.MiddleLeft;
-    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = PropertyValue.Inherited;
 
     /// <summary>Creates a label with no caption.</summary>
     public ToolStripLabel()
@@ -215,7 +215,7 @@ public class ToolStripLabel : ToolStripItem
 
     /// <summary>
     /// The caption's colour: a literal <see cref="SKColor"/>, a palette <see cref="ThemeColor"/>
-    /// role, or <see cref="InheritedValue.Instance"/> to take its strip's effective text colour.
+    /// role, or <see cref="PropertyValue.Inherited"/> to take its strip's effective text colour.
     /// </summary>
     /// <remarks>
     /// A role is resolved when the caption is painted, so a palette swap recolours the label with

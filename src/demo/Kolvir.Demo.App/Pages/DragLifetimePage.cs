@@ -368,7 +368,7 @@ internal sealed class DragLifetimePage : DemoPage
         if (_dragLifetimeSamples.Count == 0)
         {
             verdict.Text = "Waiting: the reference count must never fall during a drag.";
-            verdict.ForeColor = InheritedValue.Instance;
+            verdict.ForeColor = PropertyValue.Inherited;
             verdict.ForeColor = ThemeColor.MutedForeground;
         }
         else
@@ -430,7 +430,7 @@ internal sealed class DragLifetimePage : DemoPage
         // No sample can arrive where the sampler does not exist, so the page never reaches a verdict
         // here; this repeats the resting line rather than inventing a second one to read.
         verdict.Text = "Waiting: the reference count must never fall during a drag.";
-        verdict.ForeColor = InheritedValue.Instance;
+        verdict.ForeColor = PropertyValue.Inherited;
         verdict.ForeColor = ThemeColor.MutedForeground;
 #endif
     }

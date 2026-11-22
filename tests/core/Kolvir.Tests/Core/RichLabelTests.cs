@@ -353,7 +353,7 @@ public sealed class RichLabelTests : HeadlessTestBase
         Assert.IsTrue(span.ForeColor.TryGetValue<InheritedValue>(out _), "a span with no colour reads back as inherit");
         Assert.AreEqual(color, span.EffectiveForeColor, "it resolves to the label's effective colour");
 
-        span.ForeColor = InheritedValue.Instance;
+        span.ForeColor = PropertyValue.Inherited;
         Assert.AreEqual(color, span.EffectiveForeColor, "and assigning inherit back restores the same answer");
     }
 

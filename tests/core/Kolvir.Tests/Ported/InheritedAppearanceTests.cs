@@ -91,7 +91,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             Assert.AreSame(outerFont, stayed.EffectiveFont, "a sibling outside the override keeps the outer font");
             Assert.AreEqual(AncestorColour, stayed.EffectiveForeColor);
 
-            middle.Font = InheritedValue.Instance;
+            middle.Font = PropertyValue.Inherited;
 
             Assert.AreSame(outerFont, deep.EffectiveFont, "inheriting again should fall back to the ancestor");
             Assert.AreSame(deep.EffectiveFont, stayed.EffectiveFont);

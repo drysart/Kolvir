@@ -68,8 +68,8 @@ public sealed class TextSpan
     private bool _italic;
     private bool _underline;
     private bool _strikethrough;
-    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = InheritedValue.Instance;
-    private Union<SKColor, ThemeColor, InheritedValue> _hoverBackColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = PropertyValue.Inherited;
+    private Union<SKColor, ThemeColor, InheritedValue> _hoverBackColor = PropertyValue.Inherited;
     private float? _fontSize;
     private string? _fontFamily;
     private Font? _font;
@@ -265,14 +265,14 @@ public sealed class TextSpan
 
     /// <summary>
     /// The colour this span is painted in: a literal <see cref="SKColor"/>, a
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> to take the label's
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> to take the label's
     /// <see cref="Control.EffectiveForeColor"/>.
     /// </summary>
     /// <remarks>
     /// The property reports what was assigned. Read <see cref="EffectiveForeColor"/> for the colour
     /// the span is actually painted in; a role is resolved when it is read, so a palette swap
     /// recolours the span with no rebuild. The initial value is
-    /// <see cref="InheritedValue.Instance"/>.
+    /// <see cref="PropertyValue.Inherited"/>.
     /// </remarks>
     public Union<SKColor, ThemeColor, InheritedValue> ForeColor
     {
@@ -328,12 +328,12 @@ public sealed class TextSpan
     /// <summary>
     /// The fill painted behind the span while the pointer is over it: a literal
     /// <see cref="SKColor"/>, a <see cref="ThemeColor"/> role that is tinted, or
-    /// <see cref="InheritedValue.Instance"/> for no fill at all.
+    /// <see cref="PropertyValue.Inherited"/> for no fill at all.
     /// </summary>
     /// <remarks>
     /// The property reports what was assigned. Read <see cref="EffectiveHoverBackColor"/> for the
     /// fill the span is actually painted with. The initial value is
-    /// <see cref="InheritedValue.Instance"/>, which is how a span that never asked for a highlight
+    /// <see cref="PropertyValue.Inherited"/>, which is how a span that never asked for a highlight
     /// gets none.
     /// </remarks>
     public Union<SKColor, ThemeColor, InheritedValue> HoverBackColor

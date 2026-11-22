@@ -10,7 +10,7 @@ namespace Kolvir.Tests;
 /// <remarks>
 /// The resolution keeps the documented AND: a child under a disabled ancestor is effectively
 /// disabled however its own value is assigned, so an explicit <c>true</c> is not an override.
-/// <see cref="InheritedValue.Instance"/> and <c>true</c> therefore resolve identically; the arm
+/// <see cref="PropertyValue.Inherited"/> and <c>true</c> therefore resolve identically; the arm
 /// exists so the property can report that nothing was assigned.
 /// </remarks>
 [TestClass]
@@ -44,7 +44,7 @@ public sealed class EnabledUnionTests : HeadlessTestBase
         Assert.IsTrue(enabled, "and the true that was assigned");
         Assert.IsTrue(control.EffectiveEnabled);
 
-        control.Enabled = InheritedValue.Instance;
+        control.Enabled = PropertyValue.Inherited;
         Assert.IsTrue(control.Enabled.TryGetValue<InheritedValue>(out _));
         Assert.IsTrue(control.EffectiveEnabled);
     }
@@ -68,7 +68,7 @@ public sealed class EnabledUnionTests : HeadlessTestBase
             grandchild.Enabled.TryGetValue<InheritedValue>(out _),
             "the child's own value is untouched");
 
-        parent.Enabled = InheritedValue.Instance;
+        parent.Enabled = PropertyValue.Inherited;
 
         Assert.IsTrue(grandchild.EffectiveEnabled, "and the subtree comes back");
     }
@@ -100,7 +100,7 @@ public sealed class EnabledUnionTests : HeadlessTestBase
         child.Enabled = false;
         Assert.IsFalse(child.EffectiveEnabled);
 
-        child.Enabled = InheritedValue.Instance;
+        child.Enabled = PropertyValue.Inherited;
 
         Assert.IsTrue(child.Enabled.TryGetValue<InheritedValue>(out _));
         Assert.IsTrue(child.EffectiveEnabled, "the enabled parent answers for the child again");
@@ -146,7 +146,7 @@ public sealed class EnabledUnionTests : HeadlessTestBase
         child.Enabled = true;
         Assert.AreEqual(0, changes, "inherit to explicit true resolves the same, so nothing fires");
 
-        child.Enabled = InheritedValue.Instance;
+        child.Enabled = PropertyValue.Inherited;
         Assert.AreEqual(0, changes, "and back again resolves the same, so nothing fires");
 
         parent.Enabled = false;
@@ -155,10 +155,10 @@ public sealed class EnabledUnionTests : HeadlessTestBase
         child.Enabled = true;
         Assert.AreEqual(1, changes, "an explicit true under a disabled ancestor resolves false");
 
-        child.Enabled = InheritedValue.Instance;
+        child.Enabled = PropertyValue.Inherited;
         Assert.AreEqual(1, changes, "so going back to inherit resolves false as well");
 
-        parent.Enabled = InheritedValue.Instance;
+        parent.Enabled = PropertyValue.Inherited;
         Assert.AreEqual(2, changes, "re-enabling the parent resolves the inherited answer");
 
         child.Enabled = false;

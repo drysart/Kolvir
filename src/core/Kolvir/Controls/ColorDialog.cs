@@ -171,7 +171,7 @@ public sealed class ColorDialog
         // turn an inherited enabled state into an explicit false when the owner sits under a
         // disabled ancestor.
         Union<bool, InheritedValue> ownerWasEnabled =
-            ownerContent is null ? InheritedValue.Instance : ownerContent.Enabled;
+            ownerContent is null ? PropertyValue.Inherited : ownerContent.Enabled;
         if (ownerContent is not null)
         {
             ownerContent.Enabled = false;

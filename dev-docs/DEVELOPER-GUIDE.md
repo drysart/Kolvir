@@ -1249,13 +1249,13 @@ group.Controls.Add(new CheckBox { Dock = DockStyle.Top, Text = "Snap to grid" })
 
 `Enabled` cascades, so disabling a group box greys its caption, its frame and everything inside it,
 and none of the content takes input. The property is a union: it holds the value that was assigned -
-`true`, `false`, or `InheritedValue.Instance` for "ask the parent" - and `EffectiveEnabled` is the
+`true`, `false`, or `PropertyValue.Inherited` for "ask the parent" - and `EffectiveEnabled` is the
 resolved answer.
 
 | Member | Meaning |
 | --- | --- |
-| `Enabled` | The enabled state assigned here: `true`, `false`, or `InheritedValue.Instance` |
-| `EffectiveEnabled` | The local answer - `true` when `Enabled` holds `InheritedValue.Instance` - AND every container above it, with an unparented control treating the parent as enabled |
+| `Enabled` | The enabled state assigned here: `true`, `false`, or `PropertyValue.Inherited` |
+| `EffectiveEnabled` | The local answer - `true` when `Enabled` holds `PropertyValue.Inherited` - AND every container above it, with an unparented control treating the parent as enabled |
 | `AddEnabledChangedHandler` / `OnEnabledChanged()` | Run when `EffectiveEnabled` changes, including when an ancestor is disabled or enabled; a raw assignment that resolves to the same answer fires nothing |
 
 Only the value that was set is remembered: a control that was disabled on its own stays disabled
@@ -1263,7 +1263,7 @@ when its container is enabled again, and one that was only disabled by its conta
 it. Moving a subtree under a disabled container disables it the same way, without touching the
 children's own values.
 
-`InheritedValue.Instance` and an explicit `true` resolve identically. An explicit `true` is not an
+`PropertyValue.Inherited` and an explicit `true` resolve identically. An explicit `true` is not an
 override: a child cannot be enabled under a disabled ancestor, because the answer is the AND. The
 difference is only what `Enabled` reports, which is what lets code that saves an enabled state put
 back "nothing was assigned here" rather than pinning a literal.
@@ -2735,7 +2735,7 @@ palette change updates the chrome too.
 
 `Font`, `ForeColor` and `BackColor` are properties of `Control`, and they are inherited down the
 tree the way WinForms' `Font`, `ForeColor` and `BackColor` are. Each one is a union: it holds the
-value that was assigned - a font, a literal colour, a palette role - or `InheritedValue.Instance`,
+value that was assigned - a font, a literal colour, a palette role - or `PropertyValue.Inherited`,
 which asks the parent. Whatever a control assigns answers for itself and for everything inside it;
 a control that assigns none asks its parent, and a tree that assigns none falls back to the class
 default, which is where `Theme` supplies the value.
@@ -2756,23 +2756,23 @@ default.** `DefaultFont`, `DefaultForeColor` and `DefaultBackColor` are the clas
 
 | Member | Meaning |
 | --- | --- |
-| `Font` | The font assigned here, or `InheritedValue.Instance` |
+| `Font` | The font assigned here, or `PropertyValue.Inherited` |
 | `EffectiveFont` | The resolved font: assigned here, else the nearest ancestor's, else `DefaultFont` |
 | `DefaultFont` | The font a control of this class draws with when nothing else answers; the base control returns `Theme.DefaultFont`, a button and a group box `EmphasizedFont` |
-| `ForeColor` | The text colour assigned here: an `SKColor`, a `ThemeColor` role, or `InheritedValue.Instance` |
+| `ForeColor` | The text colour assigned here: an `SKColor`, a `ThemeColor` role, or `PropertyValue.Inherited` |
 | `EffectiveForeColor` | The resolved text colour, as an `SKColor`; a role is read from the current palette |
 | `DefaultForeColor` | What a control of this class draws its text in when nothing else answers; the base is `ThemeColor.Foreground`, a group box `MutedForeground` |
-| `BackColor` | The background assigned here: an `SKColor`, a `ThemeColor` role, or `InheritedValue.Instance` |
+| `BackColor` | The background assigned here: an `SKColor`, a `ThemeColor` role, or `PropertyValue.Inherited` |
 | `EffectiveBackColor` | The resolved background colour, as an `SKColor`; `SKColors.Transparent` means nothing is painted |
 | `DefaultBackColor` | What a control of this class paints when nothing else answers; the base is `SKColors.Transparent`, a field `InputBackground`, a tab control or a panel that looks like a card `Surface` |
 
-Assigning `InheritedValue.Instance` is how a control goes back to inheriting; there are no
+Assigning `PropertyValue.Inherited` is how a control goes back to inheriting; there are no
 `ClearFont`, `ClearForeground` or `ClearBackground` methods:
 
 ```csharp
-panel.Font = InheritedValue.Instance;
-panel.ForeColor = InheritedValue.Instance;
-panel.BackColor = InheritedValue.Instance;
+panel.Font = PropertyValue.Inherited;
+panel.ForeColor = PropertyValue.Inherited;
+panel.BackColor = PropertyValue.Inherited;
 ```
 
 Only an assigned value is inherited; a class default is not. That is what keeps today's look
@@ -2783,7 +2783,7 @@ caption role. A role assigned to a container does inherit, the same as a literal
 
 **Transparent is how "paint nothing" is spelled, and where it comes from matters.**
 
-* `BackColor = InheritedValue.Instance` - the initial value: ask the parent.
+* `BackColor = PropertyValue.Inherited` - the initial value: ask the parent.
 * `BackColor = SKColors.Transparent` - paint nothing here, and answer transparent to descendants
   that inherit from this control.
 * `DefaultBackColor = SKColors.Transparent` - this class paints nothing wherever it sits, and the

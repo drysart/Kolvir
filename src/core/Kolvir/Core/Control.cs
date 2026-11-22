@@ -41,7 +41,7 @@ public class Control : IDisposable
     private Border _border = Border.None;
     private string _text = string.Empty;
     private bool _visible = true;
-    private Union<bool, InheritedValue> _enabled = InheritedValue.Instance;
+    private Union<bool, InheritedValue> _enabled = PropertyValue.Inherited;
 
     // The answer last announced through OnEnabledChanged. EffectiveEnabled walks the tree on every
     // read; this field exists only to decide whether a handler has to run.
@@ -76,9 +76,9 @@ public class Control : IDisposable
     private List<SKRect>? _selectionRects;
 
     // Appearance set on this control. InheritedValue means "not set here".
-    private Union<Font, InheritedValue> _font = InheritedValue.Instance;
-    private Union<SKColor, ThemeColor, InheritedValue> _backColor = InheritedValue.Instance;
-    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = InheritedValue.Instance;
+    private Union<Font, InheritedValue> _font = PropertyValue.Inherited;
+    private Union<SKColor, ThemeColor, InheritedValue> _backColor = PropertyValue.Inherited;
+    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = PropertyValue.Inherited;
 
     // What the parent chain contributes. Resolved in one walk, then reused until something that
     // can change the answer - a value set on an ancestor, or a new parent - drops it.
@@ -1223,17 +1223,17 @@ public class Control : IDisposable
 
     /// <summary>
     /// The enabled state assigned to this control: <c>true</c>, <c>false</c>, or
-    /// <see cref="InheritedValue.Instance"/> to take the parent's answer.
+    /// <see cref="PropertyValue.Inherited"/> to take the parent's answer.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The property reports what was assigned, not what the tree resolves. Read
     /// <see cref="EffectiveEnabled"/> for that. The initial value is
-    /// <see cref="InheritedValue.Instance"/>, which is how a control that never assigns a value
+    /// <see cref="PropertyValue.Inherited"/>, which is how a control that never assigns a value
     /// inherits one.
     /// </para>
     /// <para>
-    /// <see cref="InheritedValue.Instance"/> and an explicit <c>true</c> resolve identically; see
+    /// <see cref="PropertyValue.Inherited"/> and an explicit <c>true</c> resolve identically; see
     /// <see cref="EffectiveEnabled"/>. The difference is only what this property reports, and it
     /// is the reason the inherit arm exists: code that saves and restores an enabled state can put
     /// back "nothing was assigned here" rather than pinning a literal.
@@ -1242,7 +1242,7 @@ public class Control : IDisposable
     /// Assigning a value only records it; <see cref="UpdateEffectiveEnabled"/> is what notices
     /// that the answer for the subtree changed and fires <see cref="OnEnabledChanged"/> down it.
     /// A change that leaves the effective answer alone - between
-    /// <see cref="InheritedValue.Instance"/> and <c>true</c>, or a local assignment under an
+    /// <see cref="PropertyValue.Inherited"/> and <c>true</c>, or a local assignment under an
     /// already-disabled ancestor - fires nothing.
     /// </para>
     /// </remarks>
@@ -1269,14 +1269,14 @@ public class Control : IDisposable
 
     /// <summary>
     /// Whether this control and every container above it are enabled: the local assignment -
-    /// <c>true</c> when <see cref="Enabled"/> holds <see cref="InheritedValue.Instance"/> - AND the
+    /// <c>true</c> when <see cref="Enabled"/> holds <see cref="PropertyValue.Inherited"/> - AND the
     /// parent's answer, with an unparented control treating the parent as enabled.
     /// </summary>
     /// <remarks>
     /// <para>
     /// An explicit <c>true</c> does not override a disabled ancestor. Disabling a container
     /// disables everything inside it, and that holds however the child is assigned. This is why
-    /// <see cref="InheritedValue.Instance"/> and <c>true</c> resolve identically; the raw/effective
+    /// <see cref="PropertyValue.Inherited"/> and <c>true</c> resolve identically; the raw/effective
     /// split is about what was assigned, not about an override.
     /// </para>
     /// <para>
@@ -1639,13 +1639,13 @@ public class Control : IDisposable
 
     /// <summary>
     /// The font assigned to this control: a <see cref="Font"/>, or
-    /// <see cref="InheritedValue.Instance"/> to take the nearest ancestor's font instead.
+    /// <see cref="PropertyValue.Inherited"/> to take the nearest ancestor's font instead.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The property reports what was assigned, not what the control draws with. Read
     /// <see cref="EffectiveFont"/> for the font that resolves through the parent chain and the
-    /// class default. The initial value is <see cref="InheritedValue.Instance"/>, which is how a
+    /// class default. The initial value is <see cref="PropertyValue.Inherited"/>, which is how a
     /// control that never assigns a font inherits one.
     /// </para>
     /// <para>
@@ -1731,14 +1731,14 @@ public class Control : IDisposable
 
     /// <summary>
     /// The background assigned to this control: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> to take the nearest
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> to take the nearest
     /// ancestor's background.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The property reports what was assigned, not what the control paints with. Read
     /// <see cref="EffectiveBackColor"/> for the colour that resolves through the parent chain and
-    /// <see cref="DefaultBackColor"/>. The initial value is <see cref="InheritedValue.Instance"/>,
+    /// <see cref="DefaultBackColor"/>. The initial value is <see cref="PropertyValue.Inherited"/>,
     /// which is how a control that never assigns one inherits its background.
     /// </para>
     /// <para>
@@ -1925,14 +1925,14 @@ public class Control : IDisposable
 
     /// <summary>
     /// The text colour assigned to this control: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> to take the nearest
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> to take the nearest
     /// ancestor's colour.
     /// </summary>
     /// <remarks>
     /// <para>
     /// The property reports what was assigned, not what the control draws with. Read
     /// <see cref="EffectiveForeColor"/> for the colour that resolves through the parent chain and
-    /// <see cref="DefaultForeColor"/>. The initial value is <see cref="InheritedValue.Instance"/>,
+    /// <see cref="DefaultForeColor"/>. The initial value is <see cref="PropertyValue.Inherited"/>,
     /// which is how a control that never assigns a colour inherits one.
     /// </para>
     /// <para>
@@ -3343,7 +3343,7 @@ public class Control : IDisposable
     /// </summary>
     /// <remarks>
     /// A change to <see cref="Enabled"/> that leaves this answer alone - between
-    /// <see cref="InheritedValue.Instance"/> and <c>true</c>, or a local assignment under an
+    /// <see cref="PropertyValue.Inherited"/> and <c>true</c>, or a local assignment under an
     /// already-disabled ancestor - does not call it.
     /// </remarks>
     protected virtual void OnEnabledChanged()
