@@ -47,6 +47,8 @@ public sealed partial class Window : IDisposable
     private bool _tornDown;
     private SKSize? _pendingClientSize;
     private bool _clientSizeDeferred;
+    private Union<SKColor, ThemeColor, InheritedValue> _captionColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _borderColor = InheritedValue.Instance;
 
     /// <summary>Creates an untitled window with no content.</summary>
     /// <exception cref="InvalidOperationException">No <see cref="Application"/> exists yet.</exception>
@@ -406,22 +408,122 @@ public sealed partial class Window : IDisposable
     public WindowChromeMetrics ChromeMetrics => Backend.ChromeMetrics;
 
     /// <summary>
-    /// The colour the platform should use where it treats the window as a caption, or null for its
-    /// default. Only meaningful for a borderless window.
+    /// The colour the platform should use where it treats the window as a caption: a literal
+    /// <see cref="SKColor"/>, a palette <see cref="ThemeColor"/> role, or
+    /// <see cref="InheritedValue.Instance"/> for the platform's own default.
     /// </summary>
-    public SKColor? CaptionColor
+    /// <remarks>
+    /// <para>
+    /// Only meaningful for a borderless window. The property reports what was assigned, not what the
+    /// platform holds; that is <see cref="IWindowBackend.CaptionColor"/> on <see cref="Backend"/>.
+    /// </para>
+    /// <para>
+    /// There is no <c>EffectiveCaptionColor</c>: the platform owns the surface, so the window is the
+    /// last place that can resolve a role. A literal is handed over as it is and a role is resolved
+    /// through <see cref="Theme.ColorOf"/> when it is assigned, and again whenever the palette
+    /// changes while the window is alive, so a role keeps following the theme the platform cannot
+    /// see. <see cref="InheritedValue.Instance"/> hands the surface back to the platform's default,
+    /// which is what a null colour meant before this became a union.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The value was <c>default</c>, so it holds no case.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// The backend does not report <see cref="ChromeCapabilities.WindowColors"/>. The request is
+    /// refused rather than silently ignored, and the window keeps the value it had.
+    /// </exception>
+    public Union<SKColor, ThemeColor, InheritedValue> CaptionColor
     {
-        get => Backend.CaptionColor;
-        set => Backend.CaptionColor = value;
+        get => _captionColor;
+        set
+        {
+            if (_captionColor.Equals(value))
+            {
+                return;
+            }
+
+            value.ThrowIfUnspecified();
+            Backend.CaptionColor = ResolveChromeColor(value);
+            _captionColor = value;
+        }
     }
 
     /// <summary>
-    /// The colour the platform should use for its own window border, or null to keep the default.
+    /// The colour the platform should use for its own window border: a literal
+    /// <see cref="SKColor"/>, a palette <see cref="ThemeColor"/> role, or
+    /// <see cref="InheritedValue.Instance"/> to keep the platform's default.
     /// </summary>
-    public SKColor? BorderColor
+    /// <remarks>
+    /// <para>
+    /// This is the border the platform draws, not one the application draws. The property reports
+    /// what was assigned, not what the platform holds; that is
+    /// <see cref="IWindowBackend.BorderColor"/> on <see cref="Backend"/>.
+    /// </para>
+    /// <para>
+    /// It resolves exactly like <see cref="CaptionColor"/>: a literal as it is, a role when it is
+    /// assigned and again on every palette change, and
+    /// <see cref="InheritedValue.Instance"/> for the platform's default.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// The value was <c>default</c>, so it holds no case.
+    /// </exception>
+    /// <exception cref="NotSupportedException">
+    /// The backend does not report <see cref="ChromeCapabilities.WindowColors"/>. The request is
+    /// refused rather than silently ignored, and the window keeps the value it had.
+    /// </exception>
+    public Union<SKColor, ThemeColor, InheritedValue> BorderColor
     {
-        get => Backend.BorderColor;
-        set => Backend.BorderColor = value;
+        get => _borderColor;
+        set
+        {
+            if (_borderColor.Equals(value))
+            {
+                return;
+            }
+
+            value.ThrowIfUnspecified();
+            Backend.BorderColor = ResolveChromeColor(value);
+            _borderColor = value;
+        }
+    }
+
+    /// <summary>
+    /// Resolves a chrome colour to the concrete value the platform takes, with null for its own
+    /// default.
+    /// </summary>
+    private static SKColor? ResolveChromeColor(Union<SKColor, ThemeColor, InheritedValue> value)
+    {
+        if (value.TryGetValue<SKColor>(out var literal))
+        {
+            return literal;
+        }
+
+        return value.TryGetValue<ThemeColor>(out var role) ? Theme.ColorOf(role) : null;
+    }
+
+    /// <summary>
+    /// Re-resolves the two chrome colours against the current palette, which is what keeps an
+    /// assigned role following the theme the platform cannot read.
+    /// </summary>
+    /// <remarks>
+    /// Only a role needs this: a literal never changes and an inherited colour is the platform's
+    /// own. The application calls it from the same loop that re-invalidates every window after a
+    /// palette change. A role could only have been stored after the backend accepted one, so the
+    /// push here cannot be the first request a backend refuses.
+    /// </remarks>
+    internal void RefreshChromeColors()
+    {
+        if (_captionColor.TryGetValue<ThemeColor>(out var captionRole))
+        {
+            Backend.CaptionColor = Theme.ColorOf(captionRole);
+        }
+
+        if (_borderColor.TryGetValue<ThemeColor>(out var borderRole))
+        {
+            Backend.BorderColor = Theme.ColorOf(borderRole);
+        }
     }
 
     /// <summary>

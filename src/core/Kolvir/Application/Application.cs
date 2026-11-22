@@ -749,6 +749,7 @@ public sealed partial class Application : IDisposable
             foreach (var window in _windows.ToArray())
             {
                 window.Backend.SetTitleBarAppearance(Theme.IsDarkMode);
+                window.RefreshChromeColors();
                 window.Host.Invalidate();
             }
 
