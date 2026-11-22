@@ -136,6 +136,29 @@ jobs:
         with:
           path: site
 
+      # actions/deploy-pages resolves the artifact through the artifacts API the moment
+      # upload-pages-artifact finishes, and that lookup can lose the race: run 45030034324 uploaded
+      # "github-pages" successfully and failed 20ms later with "No artifacts named github-pages were
+      # found". Wait until the API lists it, so the deploy step sees it on its first request.
+      - name: Wait for the packaged site to reach the artifacts API
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          for attempt in $(seq 1 30); do
+            listed=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+              --jq '[.artifacts[] | select(.name == "github-pages" and .expired == false)] | length' \
+              2>/dev/null || echo 0)
+            if [ "$listed" -ge 1 ]; then
+              echo "the github-pages artifact is listed after $attempt attempt(s)"
+              exit 0
+            fi
+            sleep 2
+          done
+          echo "::warning::the github-pages artifact never appeared in the artifacts API; deploying anyway"
+
       - name: Deploy to Pages
         id: deploy
         uses: actions/deploy-pages@v4
