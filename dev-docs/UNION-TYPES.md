@@ -10,9 +10,11 @@ Status: the types, their tests and the appearance properties are implemented. `C
 `ToolStripItem`/`ToolStripLabel` follow the same shape. `Control.Foreground`, `Control.Background`,
 the `Background` type, `ForeColorRole` and the `Clear*` aliases are gone. The non-control
 colour-or-role pairs joined them: `TextSpan.ForeColor` / `HoverBackColor`, `TextBoxSpan.Color` and
-`SimpleBorder`'s edges. There is no Roslyn analyzer. `UiHost.ClearColor`,
-`Window.CaptionColor`/`BorderColor`, `Toast.BarColor`, `ColorPicker.Color` and the remaining
-single-property colours are still follow-up work, not part of this branch.
+`SimpleBorder`'s edges. The last single-property colours are unions too: `Toast.BarColor`,
+`SplitContainer.SplitterColor`, `Image.PlaceholderColor`, `Caret.Color`, `UiHost.ClearColor` and
+`Window.CaptionColor` / `BorderColor` - see section 12. `ColorPicker.Color` is deliberately not
+one: it is the colour the user picks, application data rather than a theme choice. There is no
+Roslyn analyzer.
 
 ---
 
@@ -251,3 +253,40 @@ A border is immutable and carries no per-control state, so there is no `SimpleBo
 The union is stored on the edge and resolved in `ColorFor` while painting, and it has no
 `InheritedValue` arm because a border has no parent to inherit from. That is deliberate: an
 `Effective*` on a border would be a value with nothing to resolve.
+
+## 12. The single-property colours
+
+The last colours that were nullable are unions of the same shape, each with a get-only reader:
+
+| Property | Union | Resolved by | Inherit means |
+| --- | --- | --- | --- |
+| `Toast.BarColor` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectiveBarColor` | the colour the severity implies |
+| `SplitContainer.SplitterColor` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectiveSplitterColor` | `ThemeColor.Splitter` |
+| `Image.PlaceholderColor` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectivePlaceholderColor` | `SKColors.Transparent`, so no placeholder |
+| `Caret.Color` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectiveColor` | `ThemeColor.Caret` |
+| `UiHost.ClearColor` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectiveClearColor` | `ThemeColor.Background` |
+| `Window.CaptionColor` | `Union<SKColor, ThemeColor, InheritedValue>` | none | the platform's own default |
+| `Window.BorderColor` | `Union<SKColor, ThemeColor, InheritedValue>` | none | the platform's own default |
+
+None of these walks a parent chain: there is no parent to ask and no ancestor whose answer should
+win. `InheritedValue` here means "nothing was assigned", and the class default is the least
+destructive value available - the theme's own answer where there is one, transparent where the
+property is a fill that can be absent. Each of those is what a null meant before, so no control
+changed its appearance.
+
+`ColorPicker.Color` stays a plain `SKColor`. It is the colour the user picked in a colour picker,
+which is application data rather than a theme choice, so an inherit arm or a palette role would say
+nothing useful about it.
+
+The window colours are the one pair with no `Effective*`. They go to a backend that takes a
+concrete `SKColor` or null for the platform's default, and the platform owns the actual pixels, so
+no later reader can resolve a role. The window therefore resolves one with `Theme.ColorOf` when it
+is assigned and hands over the result, and re-resolves it from the application's palette-change
+loop, so an assigned role keeps following the theme. `InheritedValue.Instance` passes null.
+`Window.CaptionColor` and `Window.BorderColor` report the assignment;
+`Window.Backend.CaptionColor` and `BorderColor` report what the platform holds.
+
+The tests are `WindowChromeColorTests`, `CaretTests`, `UiHostColorTests`, and cases added to
+`ToastTests`, `ContainerLayoutTests` and `PixelInvariantTests`: the assigned case, a role resolved
+after a palette swap, the unset fallback, the default-union refusal, and a pixel assertion that the
+painted result is the one the old nullable property produced.

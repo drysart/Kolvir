@@ -44,7 +44,7 @@ public sealed class UiHost
     private SKPoint _selectionOrigin;
     private bool _selecting;
     private bool _draggingSelection;
-    private SKColor? _clearColor;
+    private Union<SKColor, ThemeColor, InheritedValue> _clearColor = InheritedValue.Instance;
     private SKRegion _dirty = new();
     private SKRegion _painting = new();
     private bool _dirtyAll = true;
@@ -297,13 +297,51 @@ public sealed class UiHost
     public SKSize ClientSize => _clientSize;
 
     /// <summary>
-    /// Color used to clear the surface before painting. While it has never been assigned it
-    /// follows <see cref="Theme.Background"/>, so the window follows the theme on its own.
+    /// The colour the host clears the surface with: a literal <see cref="SKColor"/>, a palette
+    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the theme's
+    /// background.
     /// </summary>
-    public SKColor ClearColor
+    /// <remarks>
+    /// The property reports what was assigned, not what is painted. Read
+    /// <see cref="EffectiveClearColor"/> for the colour the surface is cleared with. Nothing is
+    /// assigned by default, which follows <see cref="ThemeColor.Background"/>, so the window follows
+    /// the theme on its own; a role is resolved when it is read, so a palette swap recolours the
+    /// next frame.
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> ClearColor
     {
-        get => _clearColor ?? Theme.Background;
+        get => _clearColor;
         set => _clearColor = value;
+    }
+
+    /// <summary>
+    /// The colour the surface is cleared with: the assignment, else
+    /// <see cref="ThemeColor.Background"/>.
+    /// </summary>
+    /// <remarks>
+    /// A literal colour is returned as it is and a role is resolved through
+    /// <see cref="Theme.ColorOf"/> on every read, so a palette swap is a repaint rather than a
+    /// rebuild. A backend that erases the window natively asks the same question through this
+    /// property, so the platform and the application agree on what the window is cleared with.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="ClearColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveClearColor
+    {
+        get
+        {
+            _clearColor.ThrowIfUnspecified();
+
+            if (_clearColor.TryGetValue<SKColor>(out var literal))
+            {
+                return literal;
+            }
+
+            return _clearColor.TryGetValue<ThemeColor>(out var role)
+                ? Theme.ColorOf(role)
+                : Theme.ColorOf(ThemeColor.Background);
+        }
     }
 
     /// <summary>The control that holds the keyboard focus, or null when no control does.</summary>
@@ -764,7 +802,7 @@ public sealed class UiHost
 
             // DrawPaint rather than Clear: both fill the clip, but only DrawPaint is documented to
             // fill the clip *region*, and the region the dirty area came from can have holes in it.
-            using var clear = new SKPaint { Color = ClearColor, BlendMode = SKBlendMode.Src };
+            using var clear = new SKPaint { Color = EffectiveClearColor, BlendMode = SKBlendMode.Src };
             canvas.DrawPaint(clear);
 
             _menuBar?.Render(canvas);

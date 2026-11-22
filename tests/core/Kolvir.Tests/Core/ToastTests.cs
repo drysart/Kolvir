@@ -161,6 +161,69 @@ public sealed class ToastTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void TheBarColorReportsTheAssignedCase()
+    {
+        var toast = new Toast("Saved");
+
+        Assert.IsTrue(toast.BarColor.TryGetValue<InheritedValue>(out _), "an unassigned bar reads back as inherit");
+
+        toast.BarColor = ThemeColor.Accent;
+        Assert.IsTrue(toast.BarColor.TryGetValue<ThemeColor>(out var role));
+        Assert.AreEqual(ThemeColor.Accent, role, "the property reports the role it was given");
+
+        toast.BarColor = new SKColor(0x12, 0x34, 0x56);
+        Assert.IsTrue(toast.BarColor.TryGetValue<SKColor>(out var literal));
+        Assert.AreEqual(new SKColor(0x12, 0x34, 0x56), literal, "and a literal colour as well");
+
+        toast.BarColor = InheritedValue.Instance;
+        Assert.IsTrue(toast.BarColor.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
+    }
+
+    [TestMethod]
+    public void ABarColorRoleIsResolvedWhenItIsReadSoAPaletteSwapRecolours()
+    {
+        var toast = new Toast("Saved") { Dock = DockStyle.Fill, Severity = ToastSeverity.Error };
+        using var scene = HeadlessScene.Create(toast, 320f, 60f);
+
+        toast.Show();
+        toast.BarColor = ThemeColor.MutedForeground;
+
+        Assert.AreEqual(Theme.MutedForeground, toast.EffectiveBarColor, "the role is read from the current palette");
+        Assert.AreEqual(Theme.MutedForeground, scene.PixelAt(12, 30), "and the bar is painted with it");
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(Theme.MutedForeground, toast.EffectiveBarColor, "the role follows the new palette");
+        Assert.AreEqual(Theme.MutedForeground, scene.PixelAt(12, 30), "and the next frame is painted with it");
+    }
+
+    [TestMethod]
+    [DataRow(ToastSeverity.Info, 0x2F, 0x6F, 0xED)]
+    [DataRow(ToastSeverity.Success, 0x2E, 0x9E, 0x5B)]
+    [DataRow(ToastSeverity.Warning, 0xD0, 0x8B, 0x0A)]
+    [DataRow(ToastSeverity.Error, 0xC9, 0x3C, 0x37)]
+    public void AnUnassignedBarColorIsTheSeveritysFixedColour(ToastSeverity severity, int red, int green, int blue)
+    {
+        var toast = new Toast("Saved") { Severity = severity };
+
+        Assert.AreEqual(
+            new SKColor((byte)red, (byte)green, (byte)blue),
+            toast.EffectiveBarColor,
+            "the documented bar colour for this severity, which reads on both surfaces");
+    }
+
+    [TestMethod]
+    public void AnUnspecifiedBarColorIsRefused()
+    {
+        var toast = new Toast("Saved");
+        toast.BarColor = default;
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = toast.EffectiveBarColor,
+            "a default-initialised union holds no case and must not be read as inherit");
+    }
+
+    [TestMethod]
     public void ShowingAToastDockedToAnEdgeMakesRoomForIt()
     {
         var content = new Label("Content") { Dock = DockStyle.Fill, AutoSize = false };

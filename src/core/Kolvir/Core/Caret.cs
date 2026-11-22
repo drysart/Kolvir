@@ -76,10 +76,45 @@ public sealed class Caret : IDisposable
     public float Width { get; set; } = DefaultWidth;
 
     /// <summary>
-    /// The caret's color, or null (the default) to follow <see cref="Theme.Caret"/> so the
-    /// caret tracks the theme.
+    /// The caret's colour assigned here: a literal <see cref="SKColor"/>, a palette
+    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the theme's
+    /// caret colour.
     /// </summary>
-    public SKColor? Color { get; set; }
+    /// <remarks>
+    /// The property reports what was assigned, not what is painted. Read
+    /// <see cref="EffectiveColor"/> for the colour the caret is drawn in. An unassigned caret
+    /// follows <see cref="ThemeColor.Caret"/>, and a role is resolved when the caret paints, so a
+    /// palette swap recolours a live caret.
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> Color { get; set; } = InheritedValue.Instance;
+
+    /// <summary>
+    /// The colour the caret is drawn in: the assignment, else <see cref="ThemeColor.Caret"/>.
+    /// </summary>
+    /// <remarks>
+    /// A literal colour is returned as it is and a role is resolved through
+    /// <see cref="Theme.ColorOf"/> on every read, so a palette swap is a repaint rather than a
+    /// rebuild.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="Color"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveColor
+    {
+        get
+        {
+            Color.ThrowIfUnspecified();
+
+            if (Color.TryGetValue<SKColor>(out var literal))
+            {
+                return literal;
+            }
+
+            return Color.TryGetValue<ThemeColor>(out var role)
+                ? Theme.ColorOf(role)
+                : Theme.ColorOf(ThemeColor.Caret);
+        }
+    }
 
     /// <summary>
     /// Whether this control currently owns the caret. Editable controls activate it when they take
@@ -157,7 +192,7 @@ public sealed class Caret : IDisposable
             return;
         }
 
-        Painter.Fill(canvas, bounds, Color ?? Theme.Caret);
+        Painter.Fill(canvas, bounds, EffectiveColor);
     }
 
     /// <summary>

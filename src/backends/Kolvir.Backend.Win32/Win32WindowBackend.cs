@@ -3394,7 +3394,7 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <returns>False when there is no brush to fill with, leaving the erase to the class background.</returns>
     private bool EraseBackground(IntPtr hdc)
     {
-        var color = Win32EraseColor.Resolve(_host.Root, _clientSize, _host.ClearColor);
+        var color = Win32EraseColor.Resolve(_host.Root, _clientSize, _host.EffectiveClearColor);
 
         // 0x00BBGGRR: a GDI brush takes Win32 colour order, not RGB.
         uint wanted = (uint)(color.Red | (color.Green << 8) | (color.Blue << 16));

@@ -117,8 +117,52 @@ public class Image : Control
     /// </summary>
     public ContentAlignment ImageAlign { get; set; } = ContentAlignment.MiddleCenter;
 
-    /// <summary>Draws a solid color placeholder instead of an image.</summary>
-    public SKColor? PlaceholderColor { get; set; }
+    /// <summary>
+    /// The solid colour an image with no <see cref="Source"/> shows: a literal
+    /// <see cref="SKColor"/>, a palette <see cref="ThemeColor"/> role, or
+    /// <see cref="InheritedValue.Instance"/> for no placeholder at all.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The property reports what was assigned, not what is painted. Read
+    /// <see cref="EffectivePlaceholderColor"/> for the colour the surface is filled with. Nothing is
+    /// assigned by default, and that means no placeholder: the background the image sits on shows
+    /// through, which is what a nullable property meant before this became a union.
+    /// </para>
+    /// <para>
+    /// A role is resolved when it is read, so a palette swap recolours a live image.
+    /// </para>
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> PlaceholderColor { get; set; } = InheritedValue.Instance;
+
+    /// <summary>
+    /// The colour an image with no source is filled with: the assignment, else
+    /// <see cref="SKColors.Transparent"/> for nothing.
+    /// </summary>
+    /// <remarks>
+    /// A literal colour is returned as it is and a role is resolved through
+    /// <see cref="Theme.ColorOf"/> on every read, so a palette swap is a repaint rather than a
+    /// rebuild. Transparent means there is no placeholder, and nothing is filled.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="PlaceholderColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectivePlaceholderColor
+    {
+        get
+        {
+            PlaceholderColor.ThrowIfUnspecified();
+
+            if (PlaceholderColor.TryGetValue<SKColor>(out var literal))
+            {
+                return literal;
+            }
+
+            return PlaceholderColor.TryGetValue<ThemeColor>(out var role)
+                ? Theme.ColorOf(role)
+                : SKColors.Transparent;
+        }
+    }
 
     /// <inheritdoc />
     /// <remarks>
@@ -133,7 +177,7 @@ public class Image : Control
     }
 
     /// <summary>
-    /// Fills the background with <see cref="PlaceholderColor"/> while there is no
+    /// Fills the background with <see cref="EffectivePlaceholderColor"/> while there is no
     /// <see cref="Source"/>, and leaves the background to the base class once there is one.
     /// </summary>
     /// <param name="canvas">Canvas to paint into, in this control's client space.</param>
@@ -142,9 +186,13 @@ public class Image : Control
     {
         base.OnPaintBackground(canvas, rect);
 
-        if (PlaceholderColor is { } placeholder && _image is null)
+        if (_image is null)
         {
-            Painter.Fill(canvas, rect, placeholder, Border.Corners);
+            var placeholder = EffectivePlaceholderColor;
+            if (placeholder.Alpha != 0)
+            {
+                Painter.Fill(canvas, rect, placeholder, Border.Corners);
+            }
         }
     }
 

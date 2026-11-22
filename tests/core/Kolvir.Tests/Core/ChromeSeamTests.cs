@@ -80,8 +80,12 @@ public sealed class ChromeSeamTests : HeadlessTestBase
 
             Assert.AreEqual(WindowChrome.System, window.Chrome, "a refused request leaves the window as it was");
             Assert.AreEqual(CaptionButtons.None, window.CaptionButtons);
-            Assert.IsNull(window.CaptionColor);
-            Assert.IsNull(window.BorderColor);
+            Assert.IsTrue(
+                window.CaptionColor.TryGetValue<InheritedValue>(out _),
+                "the caption colour is still inherit, which is the value the refused request would have replaced");
+            Assert.IsTrue(
+                window.BorderColor.TryGetValue<InheritedValue>(out _),
+                "and so is the border colour");
         });
     }
 
