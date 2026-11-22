@@ -39,7 +39,6 @@ internal sealed class FiltersPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 190f,
-            BackColor = null,
             Padding = new Thickness(0f),
             CellPadding = new Thickness(0f, 0f, 12f, 0f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
@@ -140,7 +139,6 @@ internal sealed class FiltersPage : DemoPage
         var cell = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -158,7 +156,7 @@ internal sealed class FiltersPage : DemoPage
             Height = 30f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         };
 

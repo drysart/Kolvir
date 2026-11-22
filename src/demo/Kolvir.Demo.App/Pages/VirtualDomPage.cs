@@ -52,7 +52,6 @@ internal sealed class VirtualDomPage : DemoPage
         var stage = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Border = Border.None,
             Padding = new Thickness(0f),
         };
@@ -96,7 +95,6 @@ internal sealed class VirtualDomPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children =
@@ -116,7 +114,7 @@ internal sealed class VirtualDomPage : DemoPage
                         AutoSize = false,
                         Height = 20f,
                         Font = Theme.CaptionFont,
-                        ForeColorRole = ThemeColor.MutedForeground,
+                        ForeColor = ThemeColor.MutedForeground,
                         Text = $"{_rows.Count} row(s) - {_renders} render(s) of the list",
                         Margin = new Thickness(0f, 0f, 0f, 8f),
                     },
@@ -127,7 +125,6 @@ internal sealed class VirtualDomPage : DemoPage
                     new VPanel
                     {
                         Dock = XDock.Fill,
-                        BackColor = null,
                         Border = Border.None,
                         Padding = new Thickness(0f),
                         Children = [.. _rows.Select(row => new VComponent(row) { Key = row })],
@@ -219,7 +216,6 @@ internal sealed class VirtualDomPage : DemoPage
             {
                 Dock = XDock.Top,
                 Height = 30f,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Margin = new Thickness(0f, 0f, 0f, 6f),
@@ -233,7 +229,7 @@ internal sealed class VirtualDomPage : DemoPage
                         AutoSize = false,
                         Width = 104f,
                         Font = Theme.CaptionFont,
-                        ForeColorRole = ThemeColor.MutedForeground,
+                        ForeColor = ThemeColor.MutedForeground,
                         TextAlign = ContentAlignment.MiddleRight,
                         Text = $"#{Id} - {Renders} render(s)",
                     },

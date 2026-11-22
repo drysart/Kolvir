@@ -70,7 +70,7 @@ internal sealed class ChromelessWindowPage : DemoPage
             Dock = XDock.Fill,
             TextAlign = ContentAlignment.MiddleCenter,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         });
         AttachWindowDrag(handle);
         _chromeDragHandle = handle;
@@ -83,7 +83,7 @@ internal sealed class ChromelessWindowPage : DemoPage
             Height = 150f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };
         _chromeReadout = readout;
@@ -102,7 +102,7 @@ internal sealed class ChromelessWindowPage : DemoPage
             Height = 62f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         });
 
         return card;

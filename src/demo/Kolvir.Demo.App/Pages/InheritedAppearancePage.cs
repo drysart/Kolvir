@@ -1,4 +1,5 @@
 using System.Globalization;
+using SkiaSharp;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;
@@ -51,7 +52,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             Height = 56f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         });
@@ -89,7 +90,7 @@ internal sealed class InheritedAppearancePage : DemoPage
         };
         reset.AddClickHandler(_ =>
         {
-            _appearanceStage?.ClearFont();
+            _appearanceStage?.Font = InheritedValue.Instance;
             Theme.FontFamily = null;
             UpdateAppearanceReadout();
         });
@@ -106,7 +107,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             Height = 62f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };
@@ -121,8 +122,8 @@ internal sealed class InheritedAppearancePage : DemoPage
             Padding = new Thickness(12f, 8f),
             Border = Framed(8f),
             Font = _appearanceSubtreeFont,
-            Foreground = Theme.Accent,
-            Background = Background.FromThemeColor(ThemeColor.Secondary),
+            ForeColor = Theme.Accent,
+            BackColor = ThemeColor.Secondary,
         };
         _appearanceStage = stage;
 
@@ -147,7 +148,8 @@ internal sealed class InheritedAppearancePage : DemoPage
 
         var noBackground = new Label(
             "This label paints nothing at all, so the colour behind it - the panel's, inherited one " +
-            "level up - is what shows. Its background resolves to None, not to a colour of its own.")
+            "level up - is what shows. Its transparent class default stops the walk, so it resolves " +
+            "to nothing rather than to a colour of its own.")
         {
             Dock = XDock.Fill,
             AutoSize = false,
@@ -164,7 +166,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             AutoSize = false,
             Height = 24f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         };
         _appearanceOverrides = overrides;
 
@@ -183,22 +185,23 @@ internal sealed class InheritedAppearancePage : DemoPage
         card.Controls.Add(stage);
 
         card.Controls.Add(new Label(
-            "Three background states, because two would be wrong: unset means \"ask my parent\", a " +
-            "colour answers for this control and everything under it, and \"paint nothing\" is a value " +
-            "of its own - a label keeps painting nothing wherever it sits, so it never gains a box it " +
-            "did not ask for. Only a colour is inherited: a layout container that paints nothing must " +
-            "not take the card inside it away with it.\n\n" +
-            "Nothing here is captured at construction. The effective font is read when text is " +
-            "measured and painted; what the parent chain contributes is walked once and cached, and " +
-            "dropped when an ancestor assigns a value or a control changes parent. Palette roles are " +
-            "resolved at paint time, so a palette swap is still just a repaint - but a font is the " +
-            "size of the text, so a font change lays the tree out again before the next frame.")
+            "A background is a colour, a palette role, or \"inherit\". A colour or a role assigned to " +
+            "a control answers for everything under it. A control whose class default is transparent " +
+            "- a label, a plain panel - paints nothing wherever it sits, because that default stops " +
+            "the walk rather than inheriting; an assigned transparent, by contrast, is an ordinary " +
+            "colour and does answer for descendants.\n\n" +
+            "Nothing here is captured at construction. The effective font, text colour and background " +
+            "are read when the control is measured and painted; what the parent chain contributes is " +
+            "walked once and cached, and dropped when an ancestor assigns a value or a control changes " +
+            "parent. Palette roles are resolved when read, so a palette swap is still just a repaint - " +
+            "but a font is the size of the text, so a font change lays the tree out again before the " +
+            "next frame.")
         {
             Dock = XDock.Fill,
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 12f, 0f, 0f),
         });
@@ -216,7 +219,7 @@ internal sealed class InheritedAppearancePage : DemoPage
     {
         if (!size.HasValue)
         {
-            _appearanceStage?.ClearFont();
+            _appearanceStage?.Font = InheritedValue.Instance;
         }
         else if (_appearanceStage is not null && _appearanceBigFont is not null)
         {
@@ -259,8 +262,8 @@ internal sealed class InheritedAppearancePage : DemoPage
             $"nested panel: {Describe(_appearanceNested)}\n" +
             $"label that paints nothing: {Describe(_appearanceLabel)}\n" +
             $"override inside the subtree: {Describe(_appearanceOverrides)}   |   " +
-            $"inherited label text: {S(_appearanceInherited is { } label ? label.Font.MeasureWidth(label.Text) : null)} px wide, " +
-            $"{S(_appearanceInherited?.Font.LineHeight)} px line height";
+            $"inherited label text: {S(_appearanceInherited is { } label ? label.EffectiveFont.MeasureWidth(label.Text) : null)} px wide, " +
+            $"{S(_appearanceInherited?.EffectiveFont.LineHeight)} px line height";
 
         static string Describe(Control? control)
         {
@@ -269,15 +272,15 @@ internal sealed class InheritedAppearancePage : DemoPage
                 return "-";
             }
 
-            string background = control.Background switch
-            {
-                { IsNone: true } => "none",
-                { ThemeColor: { } role } => role.ToString(),
-                { Color: { } color } => $"#{color.Alpha:X2}{color.Red:X2}{color.Green:X2}{color.Blue:X2}",
-                _ => "inherit",
-            };
+            string background = control.BackColor.Match(
+                control,
+                static (Control _, SKColor color) => color.Alpha == 0
+                    ? "none"
+                    : $"#{color.Alpha:X2}{color.Red:X2}{color.Green:X2}{color.Blue:X2}",
+                static (Control _, ThemeColor role) => role.ToString(),
+                static (Control _, InheritedValue _) => "inherit");
 
-            return $"{control.Font.Size:0.#} pt, {background}";
+            return $"{control.EffectiveFont.Size:0.#} pt, {background}";
         }
 
         static string S(float? value) =>

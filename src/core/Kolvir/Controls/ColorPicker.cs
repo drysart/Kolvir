@@ -249,8 +249,7 @@ public class ColorPicker : Control
     /// The picker paints on the theme's surface colour, so it reads as a panel of its own rather
     /// than as something written on the window.
     /// </summary>
-    protected override Background DefaultBackground =>
-        Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <summary>
     /// Asks for the square at its preferred side, the hue strip beside it, the gap between them and
@@ -326,13 +325,13 @@ public class ColorPicker : Control
         {
             if (_labelRects[index].Width > 0f)
             {
-                TextRenderer.Draw(canvas, labels[index], Font, color, _labelRects[index], ContentAlignment.MiddleLeft);
+                TextRenderer.Draw(canvas, labels[index], EffectiveFont, color, _labelRects[index], ContentAlignment.MiddleLeft);
             }
         }
 
         if (_hexLabelRect.Width > 0f)
         {
-            TextRenderer.Draw(canvas, "Hex", Font, color, _hexLabelRect, ContentAlignment.MiddleLeft);
+            TextRenderer.Draw(canvas, "Hex", EffectiveFont, color, _hexLabelRect, ContentAlignment.MiddleLeft);
         }
     }
 

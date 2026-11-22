@@ -81,7 +81,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         {
             Dock = DockStyle.Fill,
             Padding = Thickness.Empty,
-            Background = Background.FromColor(new SKColor(0xFF102030)),
+            BackColor = new SKColor(0xFF102030),
         };
 
         var plain = new Panel
@@ -104,7 +104,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         var panel = new Panel
         {
             Dock = DockStyle.Fill,
-            Background = Background.FromThemeColor(ThemeColor.Surface),
+            BackColor = ThemeColor.Surface,
             Padding = Thickness.Empty,
         };
 

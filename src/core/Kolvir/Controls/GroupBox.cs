@@ -29,7 +29,6 @@ public class GroupBox : Panel
         // one of it, so the content lands where it always has.
         Border = DefaultBorder;
         Padding = new Thickness(11f, 0f, 11f, 11f);
-        ForeColorRole = ThemeColor.MutedForeground;
         TabStop = false;
     }
 
@@ -43,4 +42,7 @@ public class GroupBox : Panel
 
     /// <summary>The caption is emphasized until the theme or an ancestor says otherwise.</summary>
     protected override Font DefaultFont => Theme.EmphasizedFont;
+
+    /// <summary>The caption is muted; the controls inside the frame keep the foreground colour.</summary>
+    protected override Union<SKColor, ThemeColor> DefaultForeColor => ThemeColor.MutedForeground;
 }

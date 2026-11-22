@@ -5,10 +5,14 @@ or "inherit" - needs a type that says which one is set. `Union<T1, T2>`, `Union<
 `Union<T1, T2, T3, T4>` in `src/core/Kolvir/Core/Union.cs` are that type, and
 `src/core/Kolvir/Core/InheritedValue.cs` is the sentinel the "inherit" case is made of.
 
-Status: the types and their tests are implemented. Nothing uses them yet: `Control.Font`,
-`Foreground`, `ForeColor`, `ForeColorRole`, `Background` and `BackColor` stay exactly as they
-are, as do the `Effective*` and `Clear*` methods. There is no Roslyn analyzer, and `Control` has no
-`Effective*` property. This page records the decisions those next steps have to work with.
+Status: the types, their tests and the appearance properties are implemented. `Control.Font`,
+`ForeColor` and `BackColor` are unions now, each with a get-only `Effective<Property>`, and
+`ToolStripItem`/`ToolStripLabel` follow the same shape. `Control.Foreground`, `Control.Background`,
+the `Background` type, `ForeColorRole` and the `Clear*` aliases are gone. The non-control
+colour-or-role pairs joined them: `TextSpan.ForeColor` / `HoverBackColor`, `TextBoxSpan.Color` and
+`SimpleBorder`'s edges. There is no Roslyn analyzer. `UiHost.ClearColor`,
+`Window.CaptionColor`/`BorderColor`, `Toast.BarColor`, `ColorPicker.Color` and the remaining
+single-property colours are still follow-up work, not part of this branch.
 
 ---
 
@@ -165,3 +169,75 @@ construction, and then the shared contract in detail on
 matching in a union whose first case is `object`, `IsUnspecified` and `ThrowIfUnspecified`, `Switch`
 and `Match` with and without state, equality and hashing, `ToString`, a null payload in a
 reference-typed case, and the no-allocation assertion.
+
+## 10. Control appearance properties
+
+The first consumers are `Control.Font`, `Control.ForeColor` and `Control.BackColor`, plus
+`ToolStripItem.Font` and `ToolStripLabel.ForeColor`. The shape is the same in each case:
+
+| Property | Union |
+| --- | --- |
+| `Control.Font` | `Union<Font, InheritedValue>` |
+| `Control.ForeColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
+| `Control.BackColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
+
+The property reports the assignment. The get-only `EffectiveFont` / `EffectiveForeColor` /
+`EffectiveBackColor` resolves it: the value assigned here, else the nearest ancestor that assigned
+one, else the class default (`DefaultFont` / `DefaultForeColor` / `DefaultBackColor`). The backing
+field is initialised to `InheritedValue.Instance`, so "never assigned" reads back as Inherit; a
+`default` union is refused by `ThrowIfUnspecified()` in the `Effective*` getter rather than being
+treated as inherit.
+
+Three decisions are worth recording, because each one is a place the obvious alternative is wrong:
+
+- **Inheritance stays in `Control`, not in `Union<>`.** The union has no parent, default or theme;
+  the control walks its own chain and caches what an ancestor assigned. Class defaults and palette
+  roles are read live, so a palette swap is a repaint.
+- **"Paint nothing" is a transparent colour, not a fourth case.** `Background.None` was removed; a
+  class that paints nothing returns `SKColors.Transparent` from `DefaultBackColor`. The subtle part
+  is where the transparency comes from: a *class default* that is transparent stops the walk (a
+  label keeps painting nothing inside a filled panel), while an *assigned* transparent is an
+  ordinary colour and answers for descendants. That is the one behaviour the old struct encoded
+  that the union does not, so `Control` encodes it.
+- **`EffectiveBackColor` is `SKColor`, not `SKColor?`.** Alpha 0 is how "nothing is painted" is
+  spelled, which is what `Opaque`, `OnPaintBackground` and the Win32 erase colour read. A fallback
+  rule follows the same principle: the least destructive value first (`Transparent` for a
+  background), the most neutral one where transparency would be destructive (`Theme.Foreground` for
+  text, `Theme.DefaultFont` for a font).
+
+`Clear*` is gone in favour of `= InheritedValue.Instance`, and the two names for one thing are
+merged under the WinForms name: `Foreground` and `ForeColorRole` became `ForeColor`, `Background`
+and `BackColor` became `BackColor`.
+
+The tests are `tests/core/Kolvir.Tests/Core/AppearanceUnionTests.cs` and the ported
+`InheritedAppearanceTests`: what each property reports, what each `Effective*` resolves through a
+parent chain, role resolution after a palette swap, the transparent class default versus the
+assigned transparent, the cache being dropped by a later ancestor assignment and by reparenting, an
+unparented control's class default, a `default` union being refused, and the `ToolStripItem` chain.
+
+## 11. Spans and borders
+
+A span and a border now offer one concept as one property, too:
+
+| Property | Union | Resolved by |
+| --- | --- | --- |
+| `TextSpan.ForeColor` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectiveForeColor` |
+| `TextSpan.HoverBackColor` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectiveHoverBackColor` |
+| `TextBoxSpan.Color` | `Union<SKColor, ThemeColor, InheritedValue>` | `EffectiveColor(TextBox owner)` |
+| a `SimpleBorder` edge's colour | `Union<SKColor, ThemeColor>` | `ColorFor(side, state)` |
+
+A span is not a control, so its `InheritedValue` does not walk a parent chain: it means the owning
+control. `TextSpan` reads `Owner.EffectiveForeColor`, which is the label's resolved text colour,
+and falls back to `ThemeColor.Foreground` when the span has no label. `TextBoxSpan` holds no owner
+reference by design - it is caller-owned and may be handed to more than one box - so the field is
+passed to `EffectiveColor`, and the inherited arm answers with that field's `EffectiveForeColor`.
+
+`TextSpan.HoverBackColor` has no tint to inherit: `InheritedValue` is `SKColors.Transparent`, which
+is "paint nothing", and a `ThemeColor` arm is tinted to `0x1A` while it is resolved. The label keeps
+the decision that a disabled label greys every span, because that is label state rather than span
+state.
+
+A border is immutable and carries no per-control state, so there is no `SimpleBorder.Effective*`.
+The union is stored on the edge and resolved in `ColorFor` while painting, and it has no
+`InheritedValue` arm because a border has no parent to inherit from. That is deliberate: an
+`Effective*` on a border would be a value with nothing to resolve.

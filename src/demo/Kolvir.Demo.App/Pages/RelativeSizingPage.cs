@@ -35,7 +35,6 @@ internal sealed class RelativeSizingPage : DemoPage
             Dock = XDock.Fill,
             Border = Framed(8f),
             Padding = new Thickness(0f),
-            BackColor = null,
         };
 
         var percent = new Panel

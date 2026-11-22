@@ -42,7 +42,7 @@ public class Label : Control
             ? MathF.Max(0f, availableSize.Width)
             : float.PositiveInfinity;
 
-        var measured = TextRenderer.Measure(Text, Font, maxWidth, WrapText && !float.IsInfinity(maxWidth));
+        var measured = TextRenderer.Measure(Text, EffectiveFont, maxWidth, WrapText && !float.IsInfinity(maxWidth));
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
 
@@ -58,7 +58,7 @@ public class Label : Control
         }
 
         var content = Geometry.Deflate(rect, Padding);
-        TextRenderer.Draw(canvas, Text, Font, ForeColor, content, TextAlign, WrapText);
+        TextRenderer.Draw(canvas, Text, EffectiveFont, EffectiveForeColor, content, TextAlign, WrapText);
     }
 
     /// <summary>
@@ -74,17 +74,17 @@ public class Label : Control
             return 0f;
         }
 
-        float lineHeight = Font.LineHeight;
+        float lineHeight = EffectiveFont.LineHeight;
         if (lineHeight <= 0f)
         {
             return 0f;
         }
 
-        float top = TextRenderer.GetBlockTop(content, Font, lines.Count, TextAlign);
+        float top = TextRenderer.GetBlockTop(content, EffectiveFont, lines.Count, TextAlign);
         int index = Math.Clamp((int)MathF.Floor((pointInLocal.Y - top) / lineHeight), 0, lines.Count - 1);
 
         var line = lines[index];
-        float left = TextRenderer.GetLineLeft(content, Font, line.Text, TextAlign);
+        float left = TextRenderer.GetLineLeft(content, EffectiveFont, line.Text, TextAlign);
         return line.Start + OffsetInLine(line.Text, pointInLocal.X - left);
     }
 
@@ -106,8 +106,8 @@ public class Label : Control
         }
 
         int end = start + length;
-        float lineHeight = Font.LineHeight;
-        float top = TextRenderer.GetBlockTop(content, Font, lines.Count, TextAlign);
+        float lineHeight = EffectiveFont.LineHeight;
+        float top = TextRenderer.GetBlockTop(content, EffectiveFont, lines.Count, TextAlign);
 
         for (int i = 0; i < lines.Count; i++)
         {
@@ -119,16 +119,16 @@ public class Label : Control
                 continue;
             }
 
-            float left = TextRenderer.GetLineLeft(content, Font, line.Text, TextAlign);
-            float x1 = left + Font.MeasureWidth(line.Text[..(from - line.Start)]);
-            float x2 = left + Font.MeasureWidth(line.Text[..(to - line.Start)]);
+            float left = TextRenderer.GetLineLeft(content, EffectiveFont, line.Text, TextAlign);
+            float x1 = left + EffectiveFont.MeasureWidth(line.Text[..(from - line.Start)]);
+            float x2 = left + EffectiveFont.MeasureWidth(line.Text[..(to - line.Start)]);
             float lineTop = top + (i * lineHeight);
             output.Add(new SKRect(x1, lineTop, MathF.Max(x1, x2), lineTop + lineHeight));
         }
     }
 
     private List<TextLine> BuildLines(SKRect content) =>
-        TextRenderer.BuildTextLines(Text, Font, content.Width, WrapText);
+        TextRenderer.BuildTextLines(Text, EffectiveFont, content.Width, WrapText);
 
     /// <summary>Index of the character boundary in <paramref name="line"/> nearest to <paramref name="x"/>.</summary>
     private int OffsetInLine(string line, float x)
@@ -137,7 +137,7 @@ public class Label : Control
         float bestDistance = MathF.Abs(x);
         for (int i = 1; i <= line.Length; i++)
         {
-            float distance = MathF.Abs(Font.MeasureWidth(line[..i]) - x);
+            float distance = MathF.Abs(EffectiveFont.MeasureWidth(line[..i]) - x);
             if (distance < bestDistance)
             {
                 bestDistance = distance;

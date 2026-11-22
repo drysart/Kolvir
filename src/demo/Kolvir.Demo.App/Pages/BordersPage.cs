@@ -20,7 +20,6 @@ internal sealed class BordersPage : DemoPage
         var body = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 
@@ -28,7 +27,7 @@ internal sealed class BordersPage : DemoPage
             "An accent edge",
             "Four pixels on the left, one on the others: the content starts after the thicker edge.",
             new SimpleBorder(new Thickness(4f, 1f, 1f, 1f), 8f)
-                .WithThemeColor(BorderSide.Left, ThemeColor.Accent)));
+                .WithColor(BorderSide.Left, ThemeColor.Accent)));
 
         body.Controls.Add(BorderRow(
             "A radius per corner",
@@ -39,8 +38,8 @@ internal sealed class BordersPage : DemoPage
             "A colour per edge",
             "Accent on top, pressed secondary below, the border role elsewhere, mitred where they meet.",
             SimpleBorder.Thin
-                .WithThemeColor(BorderSide.Top, ThemeColor.Accent)
-                .WithThemeColor(BorderSide.Bottom, ThemeColor.SecondaryPressed)));
+                .WithColor(BorderSide.Top, ThemeColor.Accent)
+                .WithColor(BorderSide.Bottom, ThemeColor.SecondaryPressed)));
 
         body.Controls.Add(BorderRow(
             "A band along the top",
@@ -63,7 +62,7 @@ internal sealed class BordersPage : DemoPage
             SimpleBorder.Thin.WithCornerRadius(8f).WithControlText(),
             height: 88f);
         groupRow.Text = "Options";
-        groupRow.ForeColorRole = ThemeColor.MutedForeground;
+        groupRow.ForeColor = ThemeColor.MutedForeground;
         body.Controls.Add(groupRow);
 
         return body;
@@ -102,7 +101,7 @@ internal sealed class BordersPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

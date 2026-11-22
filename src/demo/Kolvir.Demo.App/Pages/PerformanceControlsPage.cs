@@ -84,7 +84,7 @@ internal sealed class PerformanceControlsPage : DemoPage
             AutoSize = false,
             Width = 110f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.BottomRight,
             Margin = new Thickness(0f),
         };
@@ -94,7 +94,7 @@ internal sealed class PerformanceControlsPage : DemoPage
             Dock = XDock.Fill,
             AutoSize = false,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.BottomLeft,
             Margin = new Thickness(0f),
         };

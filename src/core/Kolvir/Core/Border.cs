@@ -10,7 +10,7 @@ namespace Kolvir;
 /// <para>
 /// <b>A border is immutable.</b> Its properties are read-only and a change is expressed by assigning a
 /// different instance to <see cref="Control.Border"/>, the way <see cref="Thickness"/> and
-/// <see cref="Background"/> are used. That is what lets one instance be shared by every control of a
+/// <see cref="Control.BackColor"/> are used. That is what lets one instance be shared by every control of a
 /// kind - a control class keeps its frame in a <c>private static readonly</c> field and assigns it in
 /// its constructor - and it is why a border has no change notification to get wrong.
 /// </para>

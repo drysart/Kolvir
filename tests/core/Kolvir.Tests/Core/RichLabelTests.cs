@@ -342,6 +342,137 @@ public sealed class RichLabelTests : HeadlessTestBase
         Assert.AreEqual(1, label.Spans.Count, "and assigning it again replaces the run rather than appending");
     }
 
+    [TestMethod]
+    public void AnUnassignedSpanTakesTheLabelsForeColor()
+    {
+        using var label = new RichLabel();
+        var color = new SKColor(0x11, 0x22, 0x33);
+        label.ForeColor = color;
+        var span = label.AddText("inherited");
+
+        Assert.IsTrue(span.ForeColor.TryGetValue<InheritedValue>(out _), "a span with no colour reads back as inherit");
+        Assert.AreEqual(color, span.EffectiveForeColor, "it resolves to the label's effective colour");
+
+        span.ForeColor = InheritedValue.Instance;
+        Assert.AreEqual(color, span.EffectiveForeColor, "and assigning inherit back restores the same answer");
+    }
+
+    [TestMethod]
+    public void ASpanColorCanBeALiteralOrARole()
+    {
+        using var label = new RichLabel();
+        var span = label.AddText("styled");
+
+        var literal = new SKColor(1, 2, 3);
+        span.ForeColor = literal;
+        Assert.AreEqual(literal, span.EffectiveForeColor, "a literal is used as it is");
+
+        span.ForeColor = ThemeColor.Accent;
+        Assert.IsTrue(span.ForeColor.TryGetValue<ThemeColor>(out var role), "the property reports the role it was given");
+        Assert.AreEqual(ThemeColor.Accent, role);
+        Assert.AreEqual(Theme.ColorOf(ThemeColor.Accent), span.EffectiveForeColor, "a role is resolved when it is read");
+    }
+
+    [TestMethod]
+    public void ASpanRoleIsResolvedWhenItIsReadSoAPaletteSwapRecolours()
+    {
+        using var label = new RichLabel();
+        var span = label.AddText("themed");
+        span.ForeColor = ThemeColor.MutedForeground;
+
+        var light = span.EffectiveForeColor;
+        Assert.AreEqual(Theme.MutedForeground, light, "the role is read from the current palette");
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(Theme.MutedForeground, span.EffectiveForeColor, "the same span follows the new palette");
+        Assert.AreNotEqual(light, span.EffectiveForeColor, "the two palettes should differ");
+    }
+
+    [TestMethod]
+    public void ASpanHoverRoleIsResolvedWhenItIsReadSoAPaletteSwapRecolours()
+    {
+        using var label = new RichLabel();
+        var span = label.AddText("themed");
+        span.HoverBackColor = ThemeColor.MutedForeground;
+
+        var light = span.EffectiveHoverBackColor;
+        var lightMuted = Theme.ColorOf(ThemeColor.MutedForeground);
+        Assert.AreEqual(lightMuted.Red, light.Red, "the role is read from the current palette");
+        Assert.AreEqual(lightMuted.Green, light.Green);
+        Assert.AreEqual(lightMuted.Blue, light.Blue);
+        Assert.AreEqual(0x1A, light.Alpha, "and tinted while it is read");
+
+        Theme.Palette = Palette.Dark;
+
+        var dark = span.EffectiveHoverBackColor;
+        var darkMuted = Theme.ColorOf(ThemeColor.MutedForeground);
+        Assert.AreEqual(darkMuted.Red, dark.Red, "the same span follows the new palette");
+        Assert.AreEqual(darkMuted.Green, dark.Green);
+        Assert.AreEqual(darkMuted.Blue, dark.Blue);
+        Assert.AreEqual(0x1A, dark.Alpha, "the tint follows the new palette too");
+        Assert.AreNotEqual(light, dark, "the two palettes should differ");
+    }
+
+    [TestMethod]
+    public void AnUnownedSpanTakesTheBaseForeground()
+    {
+        var span = new TextSpan("loose");
+
+        Assert.IsNull(span.Owner);
+        Assert.AreEqual(Theme.ColorOf(ThemeColor.Foreground), span.EffectiveForeColor);
+    }
+
+    [TestMethod]
+    public void AnUnspecifiedSpanColorIsRefused()
+    {
+        var span = new TextSpan("bad");
+        span.ForeColor = default;
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = span.EffectiveForeColor,
+            "a default-initialised union holds no case and must not be read as inherit");
+
+        span.HoverBackColor = default;
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = span.EffectiveHoverBackColor,
+            "the hover fill refuses an unspecified union the same way");
+    }
+
+    [TestMethod]
+    public void ALinkNamesTheAccentRoleForTextAndHoverBack()
+    {
+        using var label = new RichLabel();
+        var link = label.AddLink("documentation");
+
+        Assert.IsTrue(link.ForeColor.TryGetValue<ThemeColor>(out var textRole), "a link's colour is a role");
+        Assert.AreEqual(ThemeColor.Accent, textRole);
+        Assert.IsTrue(link.HoverBackColor.TryGetValue<ThemeColor>(out var hoverRole), "so is its hover fill");
+        Assert.AreEqual(ThemeColor.Accent, hoverRole);
+    }
+
+    [TestMethod]
+    public void ASpansHoverFillIsTransparentUntilOneIsGiven()
+    {
+        using var label = new RichLabel();
+        var span = label.AddText("hover");
+
+        Assert.AreEqual(SKColors.Transparent, span.EffectiveHoverBackColor, "nothing assigned is no fill");
+
+        var literal = new SKColor(10, 20, 30);
+        span.HoverBackColor = literal;
+        Assert.AreEqual(literal, span.EffectiveHoverBackColor, "a literal keeps its own alpha");
+
+        var accent = Theme.ColorOf(ThemeColor.Accent);
+        span.HoverBackColor = ThemeColor.Accent;
+        var tinted = span.EffectiveHoverBackColor;
+        Assert.AreEqual(accent.Red, tinted.Red);
+        Assert.AreEqual(accent.Green, tinted.Green);
+        Assert.AreEqual(accent.Blue, tinted.Blue);
+        Assert.AreEqual(0x1A, tinted.Alpha, "a role is tinted so the text stays legible");
+    }
+
     /// <summary>
     /// The first point inside the label whose glyphs belong to <paramref name="span"/>. Searching
     /// for it keeps the assertion about hit-testing rather than about where a font put a glyph.

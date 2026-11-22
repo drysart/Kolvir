@@ -1,3 +1,5 @@
+using SkiaSharp;
+
 namespace Kolvir.Demo;
 
 /// <summary>
@@ -20,7 +22,7 @@ internal sealed class SurfacePanel : Panel
         Border = SimpleBorder.Thin.WithCornerRadius(8f).WithInsets(Thickness.Empty);
     }
 
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 }
 
 /// <summary>The same card look for a stack, which the sample frames on the stack panel page.</summary>
@@ -31,5 +33,5 @@ internal sealed class SurfaceStackPanel : StackPanel
         Border = SimpleBorder.Thin.WithCornerRadius(8f).WithInsets(Thickness.Empty);
     }
 
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 }

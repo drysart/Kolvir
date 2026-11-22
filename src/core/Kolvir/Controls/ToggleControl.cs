@@ -184,7 +184,7 @@ public abstract class ToggleControl : Control
     }
 
     /// <summary>The label colour: <see cref="Control.ForeColor"/>, greyed out while disabled.</summary>
-    protected SKColor TextColor => Enabled ? ForeColor : Theme.DisabledForeground;
+    protected SKColor TextColor => Enabled ? EffectiveForeColor : Theme.DisabledForeground;
 
     /// <summary>The glyph outline: accent while it carries a mark, the theme border otherwise.</summary>
     protected SKColor GlyphBorderColor
@@ -214,7 +214,7 @@ public abstract class ToggleControl : Control
     /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var text = TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
+        var text = TextRenderer.Measure(Text, EffectiveFont, float.PositiveInfinity, wrap: false);
         return new SKSize(
             MathF.Ceiling(_glyphSize + _glyphGap + text.Width),
             MathF.Ceiling(MathF.Max(_glyphSize, text.Height)));
@@ -238,7 +238,7 @@ public abstract class ToggleControl : Control
         }
 
         var label = new SKRect(glyph.Right + _glyphGap, rect.Top, rect.Right - Padding.Right, rect.Bottom);
-        TextRenderer.Draw(canvas, Text, Font, TextColor, label, _textAlign);
+        TextRenderer.Draw(canvas, Text, EffectiveFont, TextColor, label, _textAlign);
     }
 
     /// <summary>

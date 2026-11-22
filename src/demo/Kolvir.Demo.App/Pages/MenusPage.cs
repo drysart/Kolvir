@@ -43,7 +43,7 @@ internal sealed class MenusPage : DemoPage
             Dock = XDock.Fill,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Font = Theme.CaptionFont,
         });
 
@@ -81,7 +81,7 @@ internal sealed class MenusPage : DemoPage
             Height = 92f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

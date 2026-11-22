@@ -24,7 +24,6 @@ internal sealed class TabOrderPage : DemoPage
         var section = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -85,7 +84,7 @@ internal sealed class TabOrderPage : DemoPage
                 AutoSize = false,
                 Bounds = new SKRect(0f, y, 330f, y + 28f),
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 TextAlign = ContentAlignment.MiddleLeft,
             });
 
@@ -110,7 +109,7 @@ internal sealed class TabOrderPage : DemoPage
             Height = 60f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 6f),
         });
@@ -122,7 +121,6 @@ internal sealed class TabOrderPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 436f,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
         form.Controls.Add(rows);
@@ -161,7 +159,7 @@ internal sealed class TabOrderPage : DemoPage
             AutoSize = false,
             Bounds = new SKRect(0f, 0f, 612f, 18f),
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -175,7 +173,7 @@ internal sealed class TabOrderPage : DemoPage
             AutoSize = false,
             Bounds = new SKRect(0f, 22f, 300f, 50f),
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
         });
         checkAddress.Bounds = new SKRect(308f, 22f, 540f, 50f);
@@ -186,7 +184,7 @@ internal sealed class TabOrderPage : DemoPage
             AutoSize = false,
             Bounds = new SKRect(0f, 56f, 300f, 84f),
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
         });
         street.Bounds = new SKRect(308f, 56f, 540f, 84f);
@@ -201,7 +199,7 @@ internal sealed class TabOrderPage : DemoPage
             AutoSize = false,
             Bounds = new SKRect(0f, 236f, 330f, 264f),
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
         });
         notATabStop.Bounds = new SKRect(338f, 236f, 470f, 264f);
@@ -218,7 +216,7 @@ internal sealed class TabOrderPage : DemoPage
             Bounds = new SKRect(0f, 268f, 628f, 298f),
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -240,7 +238,7 @@ internal sealed class TabOrderPage : DemoPage
                 AutoSize = false,
                 Bounds = new SKRect(4f, 38f + (i * 22f), 420f, 58f + (i * 22f)),
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
             });
         }
 

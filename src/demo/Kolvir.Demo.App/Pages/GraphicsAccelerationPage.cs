@@ -102,7 +102,7 @@ internal sealed class GraphicsAccelerationPage : DemoPage
             Height = 66f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
@@ -142,7 +142,7 @@ internal sealed class GraphicsAccelerationPage : DemoPage
             Height = 22f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Thickness(0f, 0f, 0f, 4f),
         };
@@ -156,7 +156,7 @@ internal sealed class GraphicsAccelerationPage : DemoPage
             Height = 22f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };

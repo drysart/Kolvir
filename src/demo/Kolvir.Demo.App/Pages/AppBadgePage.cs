@@ -83,7 +83,7 @@ internal sealed class AppBadgePage : DemoPage
             Height = 74f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };
         _badgeReadout = readout;
@@ -102,7 +102,7 @@ internal sealed class AppBadgePage : DemoPage
             Height = 74f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         });
 
         return card;

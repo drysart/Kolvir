@@ -95,7 +95,6 @@ internal sealed class ObservableSetPage : DemoPage
     {
         Dock = height > 0f ? XDock.Top : XDock.Fill,
         Height = height,
-        BackColor = null,
         Border = Border.None,
         Padding = new Thickness(0f),
     };
@@ -275,7 +274,7 @@ internal sealed class ObservableSetPage : DemoPage
                 Dock = XDock.Fill,
                 AutoSize = false,
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 Text = $"Count is {count} - this line has rendered {_renders} time(s), on the size alone",
             };
         }
@@ -306,7 +305,6 @@ internal sealed class ObservableSetPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children =
@@ -317,7 +315,7 @@ internal sealed class ObservableSetPage : DemoPage
                         AutoSize = false,
                         Height = 18f,
                         Font = Theme.CaptionFont,
-                        ForeColorRole = ThemeColor.MutedForeground,
+                        ForeColor = ThemeColor.MutedForeground,
                         Text = $"the contents: {items.Length} item(s) - this line asked for all of them, "
                             + $"so it has rendered {_renders} time(s)",
                         Margin = new Thickness(0f, 2f, 0f, 2f),
@@ -329,7 +327,7 @@ internal sealed class ObservableSetPage : DemoPage
                         WrapText = true,
                         TextAlign = ContentAlignment.TopLeft,
                         Font = Theme.DefaultFont,
-                        ForeColorRole = ThemeColor.Foreground,
+                        ForeColor = ThemeColor.Foreground,
                         Text = listed,
                     },
                 ],
@@ -355,7 +353,7 @@ internal sealed class ObservableSetPage : DemoPage
                     AutoSize = false,
                     Height = 18f,
                     Font = Theme.CaptionFont,
-                    ForeColorRole = ThemeColor.MutedForeground,
+                    ForeColor = ThemeColor.MutedForeground,
                     Text = "the five known tags - one chip each, asking only about itself; the board has "
                         + "rendered once",
                     Margin = new Thickness(0f, 2f, 0f, 4f),
@@ -381,7 +379,6 @@ internal sealed class ObservableSetPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children = children,
@@ -409,7 +406,7 @@ internal sealed class ObservableSetPage : DemoPage
                 AutoSize = false,
                 Height = 22f,
                 Font = Theme.DefaultFont,
-                ForeColorRole = on ? ThemeColor.Foreground : ThemeColor.MutedForeground,
+                ForeColor = on ? ThemeColor.Foreground : ThemeColor.MutedForeground,
                 Text = $"{(on ? "on " : "off")}  {Tag}    (this chip has rendered {_renders} time(s))",
                 Margin = new Thickness(0f, 0f, 0f, 2f),
             };

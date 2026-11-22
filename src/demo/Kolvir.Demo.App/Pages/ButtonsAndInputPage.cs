@@ -77,7 +77,7 @@ internal sealed class ButtonsAndInputPage : DemoPage
             Height = 40f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

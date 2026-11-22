@@ -32,7 +32,7 @@ internal sealed class SvgRasterTwinPage : DemoPage
             Height = 46f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
@@ -51,7 +51,6 @@ internal sealed class SvgRasterTwinPage : DemoPage
         {
             Dock = XDock.Left,
             Width = 200f,
-            BackColor = null,
             Padding = new Thickness(4f),
         };
 
@@ -61,7 +60,7 @@ internal sealed class SvgRasterTwinPage : DemoPage
             Height = 18f,
             AutoSize = false,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

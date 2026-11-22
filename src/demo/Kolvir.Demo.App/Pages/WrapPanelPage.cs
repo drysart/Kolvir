@@ -32,7 +32,7 @@ internal sealed class WrapPanelPage : DemoPage
             Height = 58f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         });
@@ -43,7 +43,7 @@ internal sealed class WrapPanelPage : DemoPage
             AutoSize = false,
             Height = 22f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -80,7 +80,7 @@ internal sealed class WrapPanelPage : DemoPage
             AutoSize = false,
             Height = 22f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -129,7 +129,7 @@ internal sealed class WrapPanelPage : DemoPage
             AutoSize = false,
             Height = 22f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -175,7 +175,7 @@ internal sealed class WrapPanelPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

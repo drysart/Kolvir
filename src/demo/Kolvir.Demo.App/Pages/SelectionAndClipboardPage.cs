@@ -34,7 +34,7 @@ internal sealed class SelectionAndClipboardPage : DemoPage
             Height = 40f,
             WrapText = true,
             Font = Theme.DefaultFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 6f),
             Selectable = true,
@@ -65,7 +65,7 @@ internal sealed class SelectionAndClipboardPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

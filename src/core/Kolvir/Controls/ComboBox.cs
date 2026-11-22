@@ -61,8 +61,8 @@ public class ComboBox : Control
         _popup.AddClosedHandler(OnPopupClosed);
     }
 
-    /// <summary>A combo box is a field, so it paints on the input fill until <see cref="Control.Background"/> is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.InputBackground);
+    /// <summary>A combo box is a field, so it paints on the input fill until <see cref="Control.BackColor"/> is assigned.</summary>
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.InputBackground;
 
     /// <summary>The items the user can pick from.</summary>
     public ListBox.ItemCollection Items => _list.Items;
@@ -160,7 +160,7 @@ public class ComboBox : Control
 
         // The popup list has no parent to inherit from, and the font may have changed since the last
         // time it was shown. Assigning the same font again is a no-op.
-        _list.Font = Font;
+        _list.Font = EffectiveFont;
 
         var size = MeasureDropDown();
         var scale = EffectiveScaleMultiplier;
@@ -212,12 +212,12 @@ public class ComboBox : Control
 
         for (int i = 0; i < _list.ItemCount; i++)
         {
-            widest = MathF.Max(widest, TextRenderer.Measure(_list.GetItemText(i), Font, float.PositiveInfinity, false).Width);
+            widest = MathF.Max(widest, TextRenderer.Measure(_list.GetItemText(i), EffectiveFont, float.PositiveInfinity, false).Width);
         }
 
         return new SKSize(
             MathF.Max(MinimumSize.Width, widest + Padding.Horizontal),
-            MathF.Max(MinimumSize.Height, Font.LineHeight + Padding.Vertical));
+            MathF.Max(MinimumSize.Height, EffectiveFont.LineHeight + Padding.Vertical));
     }
 
     /// <summary>
@@ -226,7 +226,7 @@ public class ComboBox : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
+        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 
@@ -245,11 +245,11 @@ public class ComboBox : Control
         var text = SelectedText;
         var color = !Enabled
             ? Theme.DisabledForeground
-            : text.Length > 0 ? ForeColor : Theme.Placeholder;
+            : text.Length > 0 ? EffectiveForeColor : Theme.Placeholder;
 
         canvas.Save();
         canvas.ClipRect(content);
-        TextRenderer.Draw(canvas, text.Length > 0 ? text : EmptyText, Font, color, content);
+        TextRenderer.Draw(canvas, text.Length > 0 ? text : EmptyText, EffectiveFont, color, content);
         canvas.Restore();
 
         PaintChevron(canvas, rect);

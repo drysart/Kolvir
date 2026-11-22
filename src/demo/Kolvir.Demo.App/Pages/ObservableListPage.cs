@@ -92,7 +92,6 @@ internal sealed class ObservableListPage : DemoPage
     {
         Dock = height > 0f ? XDock.Top : XDock.Fill,
         Height = height,
-        BackColor = null,
         Border = Border.None,
         Padding = new Thickness(0f),
     };
@@ -300,7 +299,7 @@ internal sealed class ObservableListPage : DemoPage
                 Dock = XDock.Fill,
                 AutoSize = false,
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 Text = $"{count} item(s) - this line has rendered {_renders} time(s), on the size alone",
             };
         }
@@ -335,7 +334,7 @@ internal sealed class ObservableListPage : DemoPage
                     AutoSize = false,
                     Height = 18f,
                     Font = Theme.CaptionFont,
-                    ForeColorRole = ThemeColor.MutedForeground,
+                    ForeColor = ThemeColor.MutedForeground,
                     Text = $"the list itself has rendered {_renders} time(s), on the size alone",
                     Margin = new Thickness(0f, 2f, 0f, 4f),
                 },
@@ -362,7 +361,6 @@ internal sealed class ObservableListPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children = children,

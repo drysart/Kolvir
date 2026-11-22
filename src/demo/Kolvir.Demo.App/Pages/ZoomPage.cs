@@ -87,7 +87,7 @@ internal sealed class ZoomPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         };
 
         var buttonRow = Row(34f);

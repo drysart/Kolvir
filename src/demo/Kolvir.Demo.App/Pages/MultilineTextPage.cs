@@ -97,7 +97,7 @@ internal sealed class MultilineTextPage : DemoPage
             Height = 52f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 8f, 0f, 0f),
         });

@@ -77,7 +77,6 @@ public sealed class MenuView : Control, IInputSink
         Focusable = false;
         Selectable = false;
         Cursor = Cursor.Default;
-        BackColor = null;
     }
 
     /// <summary>The items shown, in order, with the separators that would look wrong already dropped.</summary>
@@ -420,7 +419,7 @@ public sealed class MenuView : Control, IInputSink
         var child = new MenuView(item.SubItems)
         {
             Metrics = Metrics,
-            Font = Font,
+            Font = EffectiveFont,
             SurfaceAlpha = SurfaceAlpha,
             ShowShadow = ShowShadow,
             _parent = this,
@@ -601,7 +600,7 @@ public sealed class MenuView : Control, IInputSink
             return;
         }
 
-        MenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, Font, null, _scroll);
+        MenuRenderer.Paint(canvas, layout, _hovered, SurfaceAlpha, Metrics, EffectiveFont, null, _scroll);
     }
 
     /// <inheritdoc />
@@ -882,7 +881,7 @@ public sealed class MenuView : Control, IInputSink
         _layout = MenuRenderer.Measure(
             _items,
             Metrics,
-            Font,
+                EffectiveFont,
             ShowShadow,
             MathF.Max(0f, availableWidth - (extent * 2f)),
             _maximumSurfaceHeight ?? float.PositiveInfinity);

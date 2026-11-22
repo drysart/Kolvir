@@ -21,7 +21,7 @@ public enum ToolStripItemAlignment
 public abstract class ToolStripItem
 {
     private string _text = string.Empty;
-    private Font? _font;
+    private Union<Font, InheritedValue> _font = InheritedValue.Instance;
     private bool _enabled = true;
     private bool _visible = true;
     private bool _spring;
@@ -47,19 +47,50 @@ public abstract class ToolStripItem
         }
     }
 
-    /// <summary>The item's font, or <c>null</c> to inherit the strip's.</summary>
-    public Font? Font
+    /// <summary>
+    /// The font assigned to this item: a <see cref="Font"/>, or
+    /// <see cref="InheritedValue.Instance"/> to take its strip's effective font.
+    /// </summary>
+    /// <remarks>
+    /// The item's font is resolved through the same chain a control's is, with the strip as the
+    /// parent: its own assignment, then its strip's <see cref="Control.EffectiveFont"/>, then
+    /// <see cref="Theme.DefaultFont"/>. Read <see cref="EffectiveFont"/> for that answer; this
+    /// property reports only what was assigned here.
+    /// </remarks>
+    /// <exception cref="ArgumentNullException">A null <see cref="Font"/> was assigned.</exception>
+    public Union<Font, InheritedValue> Font
     {
         get => _font;
         set
         {
-            if (ReferenceEquals(_font, value))
+            if (value.TryGetValue<Font>(out var font))
+            {
+                ArgumentNullException.ThrowIfNull(font);
+            }
+
+            if (_font.Equals(value))
             {
                 return;
             }
 
             _font = value;
             NotifyChanged();
+        }
+    }
+
+    /// <summary>The font this item draws with, after inheritance from its strip.</summary>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="Font"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public Font EffectiveFont
+    {
+        get
+        {
+            _font.ThrowIfUnspecified();
+
+            return _font.TryGetValue<Font>(out var local)
+                ? local
+                : Owner?.EffectiveFont ?? Theme.DefaultFont;
         }
     }
 
@@ -149,9 +180,6 @@ public abstract class ToolStripItem
     /// <summary>Whether the item can be clicked or focused. Only buttons qualify.</summary>
     public virtual bool IsInteractive => false;
 
-    /// <summary>The font this item draws with, after inheritance from the strip.</summary>
-    protected Font ResolveFont() => _font ?? Owner?.Font ?? Theme.DefaultFont;
-
     /// <summary>Width the item wants, given the height it will be given.</summary>
     internal virtual float MeasureWidth(float height) => 0f;
 
@@ -175,7 +203,7 @@ public class ToolStripLabel : ToolStripItem
     public const float HorizontalPadding = 6f;
 
     private ContentAlignment _textAlign = ContentAlignment.MiddleLeft;
-    private ThemeColor _foreColor = ThemeColor.Foreground;
+    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = InheritedValue.Instance;
 
     /// <summary>Creates a label with no caption.</summary>
     public ToolStripLabel()
@@ -185,19 +213,54 @@ public class ToolStripLabel : ToolStripItem
     /// <summary>Creates a label with a caption.</summary>
     public ToolStripLabel(string text) => Text = text;
 
-    /// <summary>The caption's colour role, resolved at paint time.</summary>
-    public ThemeColor ForeColor
+    /// <summary>
+    /// The caption's colour: a literal <see cref="SKColor"/>, a palette <see cref="ThemeColor"/>
+    /// role, or <see cref="InheritedValue.Instance"/> to take its strip's effective text colour.
+    /// </summary>
+    /// <remarks>
+    /// A role is resolved when the caption is painted, so a palette swap recolours the label with
+    /// no rebuild. Read <see cref="EffectiveForeColor"/> for the colour that resolves through the
+    /// strip.
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> ForeColor
     {
         get => _foreColor;
         set
         {
-            if (_foreColor == value)
+            if (_foreColor.Equals(value))
             {
                 return;
             }
 
             _foreColor = value;
             NotifyChanged();
+        }
+    }
+
+    /// <summary>
+    /// The colour this caption actually paints with: its own assignment, else its strip's
+    /// effective text colour, else <see cref="Theme.Foreground"/>.
+    /// </summary>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="ForeColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveForeColor
+    {
+        get
+        {
+            _foreColor.ThrowIfUnspecified();
+
+            if (_foreColor.TryGetValue<SKColor>(out var literal))
+            {
+                return literal;
+            }
+
+            if (_foreColor.TryGetValue<ThemeColor>(out var role))
+            {
+                return Theme.ColorOf(role);
+            }
+
+            return Owner?.EffectiveForeColor ?? Theme.ColorOf(ThemeColor.Foreground);
         }
     }
 
@@ -219,7 +282,7 @@ public class ToolStripLabel : ToolStripItem
 
     internal override float MeasureWidth(float height)
     {
-        float textWidth = TextRenderer.Measure(Text, ResolveFont(), float.PositiveInfinity, wrap: false).Width;
+        float textWidth = TextRenderer.Measure(Text, EffectiveFont, float.PositiveInfinity, wrap: false).Width;
         return textWidth + (HorizontalPadding * 2f);
     }
 
@@ -230,9 +293,9 @@ public class ToolStripLabel : ToolStripItem
             return;
         }
 
-        var color = enabled ? Theme.ColorOf(_foreColor) : Theme.DisabledForeground;
+        var color = enabled ? EffectiveForeColor : Theme.DisabledForeground;
         var inner = Geometry.Deflate(rect, new Thickness(HorizontalPadding, 0f));
-        TextRenderer.Draw(canvas, Text, ResolveFont(), color, inner, _textAlign, wrap: false);
+        TextRenderer.Draw(canvas, Text, EffectiveFont, color, inner, _textAlign, wrap: false);
     }
 }
 
@@ -275,7 +338,7 @@ public class ToolStripButton : ToolStripItem
 
     internal override float MeasureWidth(float height)
     {
-        float textWidth = TextRenderer.Measure(Text, ResolveFont(), float.PositiveInfinity, wrap: false).Width;
+        float textWidth = TextRenderer.Measure(Text, EffectiveFont, float.PositiveInfinity, wrap: false).Width;
         return textWidth + (HorizontalPadding * 2f);
     }
 
@@ -297,7 +360,7 @@ public class ToolStripButton : ToolStripItem
 
         var color = enabled ? Theme.Foreground : Theme.DisabledForeground;
         var inner = Geometry.Deflate(rect, new Thickness(HorizontalPadding, 0f));
-        TextRenderer.Draw(canvas, Text, ResolveFont(), color, inner, ContentAlignment.MiddleCenter, wrap: false);
+        TextRenderer.Draw(canvas, Text, EffectiveFont, color, inner, ContentAlignment.MiddleCenter, wrap: false);
     }
 
     internal override void Activate() => _click?.Invoke(this);
@@ -483,7 +546,7 @@ public class ToolStrip : Control
     protected override void OnAppearanceChanged() => _layoutDirty = true;
 
     /// <inheritdoc />
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)

@@ -143,7 +143,7 @@ public sealed class ExpanderTests : HeadlessTestBase
         expander.IsExpanded = false;
         scene.Paint();
 
-        var surface = expander.Background.Color ?? Theme.Surface;
+        var surface = expander.EffectiveBackColor;
         var below = new SKPoint(
             expander.GetPositionInHost().X + 20f,
             expander.GetPositionInHost().Y + expander.Height + 12f);
@@ -165,7 +165,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 
@@ -348,7 +347,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 
@@ -490,7 +488,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         {
             Dock = DockStyle.Top,
             Height = 40f,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 
@@ -520,7 +517,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 
@@ -546,7 +542,6 @@ public sealed class ExpanderTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 

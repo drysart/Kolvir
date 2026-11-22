@@ -85,7 +85,7 @@ internal sealed class SpanTextPage : DemoPage
             Height = 78f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 8f, 0f, 0f),
         });
@@ -95,14 +95,18 @@ internal sealed class SpanTextPage : DemoPage
 
     /// <summary>A span over one word, marked the way a spelling checker marks it.</summary>
     private static TextBoxSpan Spelling(string text, string word) =>
-            new(text.IndexOf(word, StringComparison.Ordinal), word.Length) { Tag = word };
+            new(text.IndexOf(word, StringComparison.Ordinal), word.Length)
+            {
+                Tag = word,
+                Color = TextBoxSpan.DefaultColor,
+            };
 
     /// <summary>A span over one word in the accent colour, the way a grammar checker marks it.</summary>
     private static TextBoxSpan Grammar(string text, string word) =>
             new(text.IndexOf(word, StringComparison.Ordinal), word.Length)
             {
                 Tag = word,
-                ThemeColor = ThemeColor.Accent,
+                Color = ThemeColor.Accent,
             };
 
     /// <summary>A span from the start of one word to the end of another, for a run of text.</summary>
@@ -111,7 +115,11 @@ internal sealed class SpanTextPage : DemoPage
         int start = text.IndexOf(from, StringComparison.Ordinal);
         int end = text.IndexOf(to, StringComparison.Ordinal) + to.Length;
 
-        return new(start, Math.Max(0, end - start)) { Tag = text[start..end] };
+        return new(start, Math.Max(0, end - start))
+        {
+            Tag = text[start..end],
+            Color = TextBoxSpan.DefaultColor,
+        };
     }
 
     /// <summary>

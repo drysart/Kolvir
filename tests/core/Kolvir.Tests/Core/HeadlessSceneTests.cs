@@ -123,7 +123,7 @@ public sealed class HeadlessSceneTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            Background = Background.FromThemeColor(ThemeColor.Surface),
+            BackColor = ThemeColor.Surface,
         };
 
         using var scene = HeadlessScene.Create(root, 200f, 100f);
@@ -132,7 +132,7 @@ public sealed class HeadlessSceneTests : HeadlessTestBase
         Assert.AreEqual(200, bitmap.Width);
         Assert.AreEqual(100, bitmap.Height);
         Assert.IsTrue(scene.Host.FrameCount > 0, "a render should count as a frame");
-        Assert.AreEqual(root.Background.Color, bitmap.GetPixel(5, 5), "the panel should paint its own surface");
+        Assert.AreEqual(root.EffectiveBackColor, bitmap.GetPixel(5, 5), "the panel should paint its own surface");
     }
 
     [TestMethod]

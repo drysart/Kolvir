@@ -84,7 +84,7 @@ internal sealed class FontsFromFilePage : DemoPage
         rich.AddText("The same face in ");
         rich.AddSpan(new TextSpan("a larger size") { FontSize = 17f });
         rich.AddText(", in ");
-        rich.AddSpan(new TextSpan("the accent colour") { ThemeColor = ThemeColor.Accent });
+        rich.AddSpan(new TextSpan("the accent colour") { ForeColor = ThemeColor.Accent });
         rich.AddText(", and in ");
         rich.AddSpan(new TextSpan("a bold span") { Bold = true });
         rich.AddText(
@@ -114,7 +114,7 @@ internal sealed class FontsFromFilePage : DemoPage
             AutoSize = false,
             Height = 20f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         };
 
         card.Controls.Add(_fontPageWebReadout);
@@ -129,7 +129,7 @@ internal sealed class FontsFromFilePage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 10f, 0f, 0f),
         });

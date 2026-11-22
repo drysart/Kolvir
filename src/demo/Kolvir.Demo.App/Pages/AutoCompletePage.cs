@@ -74,7 +74,7 @@ internal sealed class AutoCompletePage : DemoPage
             Height = 66f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 6f, 0f, 0f),
         });

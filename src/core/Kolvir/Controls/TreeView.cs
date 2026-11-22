@@ -488,7 +488,7 @@ public class TreeView : VirtualList
         foreach (var node in _visible)
         {
             float left = overhead + (node.Level * _indent);
-            width = MathF.Max(width, left + Font.MeasureWidth(node.Text));
+            width = MathF.Max(width, left + EffectiveFont.MeasureWidth(node.Text));
         }
 
         return width;
@@ -524,7 +524,7 @@ public class TreeView : VirtualList
         left += GlyphSize + GlyphGap;
 
         var textBounds = new SKRect(left, bounds.Top, bounds.Right - TextInset, bounds.Bottom);
-        TextRenderer.Draw(canvas, node.Text, Font, textColor, textBounds, ContentAlignment.MiddleLeft);
+        TextRenderer.Draw(canvas, node.Text, EffectiveFont, textColor, textBounds, ContentAlignment.MiddleLeft);
 
         if (focused)
         {

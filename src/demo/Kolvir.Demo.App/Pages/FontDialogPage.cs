@@ -51,7 +51,7 @@ internal sealed class FontDialogPage : DemoPage
             Height = 58f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         });
@@ -63,7 +63,7 @@ internal sealed class FontDialogPage : DemoPage
             Height = 44f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };
@@ -101,7 +101,7 @@ internal sealed class FontDialogPage : DemoPage
             Padding = new Thickness(14f, 10f),
             Border = Framed(8f),
             Font = font,
-            Background = Background.FromThemeColor(ThemeColor.Secondary),
+            BackColor = ThemeColor.Secondary,
         };
         _fontDialogStage = stage;
 
@@ -153,7 +153,7 @@ internal sealed class FontDialogPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 10f, 0f, 0f),
         });
@@ -194,11 +194,10 @@ internal sealed class FontDialogPage : DemoPage
 
     private void ResetFontDialog()
     {
-        _fontDialogStage?.ClearFont();
-
         if (_fontDialogStage is { } stage)
         {
-            _fontDialogSelection = SelectionOf(stage.Font);
+            stage.Font = InheritedValue.Instance;
+            _fontDialogSelection = SelectionOf(stage.EffectiveFont);
         }
 
         UpdateFontDialogReadout();
@@ -229,7 +228,7 @@ internal sealed class FontDialogPage : DemoPage
             return;
         }
 
-        var effective = _fontDialogStage?.Font;
+        var effective = _fontDialogStage?.EffectiveFont;
         _fontDialogReadout.Text =
             $"Selection: {DescribeSelection(selection)}." +
             (effective is null

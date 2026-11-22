@@ -284,7 +284,6 @@ public sealed class BusyOverlayTests : HeadlessTestBase
     private static Panel Muted() => new()
     {
         Dock = DockStyle.Fill,
-        BackColor = null,
         Padding = Thickness.Empty,
     };
 }

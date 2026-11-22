@@ -43,7 +43,7 @@ internal sealed class RichTextPage : DemoPage
         rich.AddText(", ");
         rich.AddSpan(new TextSpan("underline test") { Underline = true });
         rich.AddText(", ");
-        rich.AddSpan(new TextSpan("colour") { ThemeColor = ThemeColor.Accent });
+        rich.AddSpan(new TextSpan("colour") { ForeColor = ThemeColor.Accent });
         rich.AddText(" and ");
         rich.AddSpan(new TextSpan("struck") { Strikethrough = true });
         rich.AddText(" text, plus a ");

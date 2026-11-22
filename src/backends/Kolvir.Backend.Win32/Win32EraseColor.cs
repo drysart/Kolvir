@@ -42,7 +42,7 @@ internal static class Win32EraseColor
 
         while (control is not null && Covers(control.Bounds, client))
         {
-            if (control.Visible && control.Background.Color is { } painted)
+            if (control.Visible && control.EffectiveBackColor is { Alpha: > 0 } painted)
             {
                 color = painted;
             }

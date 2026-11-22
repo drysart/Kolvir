@@ -327,7 +327,7 @@ public class ListView : VirtualList
     /// </summary>
     public float HeaderHeight
     {
-        get => _headerHeight ?? MathF.Ceiling(Font.LineHeight + 8f);
+        get => _headerHeight ?? MathF.Ceiling(EffectiveFont.LineHeight + 8f);
         set
         {
             ArgumentOutOfRangeException.ThrowIfNegative(value);
@@ -705,7 +705,7 @@ public class ListView : VirtualList
         float width = 0f;
         foreach (var item in _items)
         {
-            width = MathF.Max(width, Font.MeasureWidth(item.Text));
+            width = MathF.Max(width, EffectiveFont.MeasureWidth(item.Text));
         }
 
         return width + (TextInset * 2f);
@@ -984,18 +984,18 @@ public class ListView : VirtualList
             return;
         }
 
-        TextRenderer.Draw(canvas, Trim(text, bounds.Width), Font, color, bounds, alignment);
+        TextRenderer.Draw(canvas, Trim(text, bounds.Width), EffectiveFont, color, bounds, alignment);
     }
 
     private string Trim(string text, float maxWidth)
     {
-        if (Font.MeasureWidth(text) <= maxWidth)
+        if (EffectiveFont.MeasureWidth(text) <= maxWidth)
         {
             return text;
         }
 
         const string Ellipsis = "\u2026";
-        float ellipsisWidth = Font.MeasureWidth(Ellipsis);
+        float ellipsisWidth = EffectiveFont.MeasureWidth(Ellipsis);
         if (ellipsisWidth > maxWidth)
         {
             return string.Empty;
@@ -1006,7 +1006,7 @@ public class ListView : VirtualList
         while (low < high)
         {
             int middle = (low + high + 1) / 2;
-            if (Font.MeasureWidth(text[..middle]) + ellipsisWidth <= maxWidth)
+            if (EffectiveFont.MeasureWidth(text[..middle]) + ellipsisWidth <= maxWidth)
             {
                 low = middle;
             }

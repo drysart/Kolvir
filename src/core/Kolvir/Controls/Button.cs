@@ -78,7 +78,7 @@ public class Button : Control
     /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var measured = TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
+        var measured = TextRenderer.Measure(Text, EffectiveFont, float.PositiveInfinity, wrap: false);
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
 
@@ -114,7 +114,7 @@ public class Button : Control
 
         var (_, textColor) = ResolveColors();
         var content = Geometry.Deflate(rect, Padding);
-        TextRenderer.Draw(canvas, Text, Font, textColor, content, ContentAlignment.MiddleCenter);
+        TextRenderer.Draw(canvas, Text, EffectiveFont, textColor, content, ContentAlignment.MiddleCenter);
     }
 
     /// <summary>Takes the mouse capture and marks the button pressed on a left-button press.</summary>

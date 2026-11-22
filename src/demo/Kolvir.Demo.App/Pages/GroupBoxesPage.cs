@@ -22,7 +22,6 @@ internal sealed class GroupBoxesPage : DemoPage
         var section = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -30,7 +29,6 @@ internal sealed class GroupBoxesPage : DemoPage
         {
             Dock = XDock.Left,
             Width = 320f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 16f, 0f),
         };
@@ -87,7 +85,6 @@ internal sealed class GroupBoxesPage : DemoPage
         var list = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
             VerticalScroll = ScrollStyle.Automatic,
             HorizontalScroll = ScrollStyle.None,

@@ -95,7 +95,6 @@ internal sealed class ObservableDictionaryPage : DemoPage
     {
         Dock = height > 0f ? XDock.Top : XDock.Fill,
         Height = height,
-        BackColor = null,
         Border = Border.None,
         Padding = new Thickness(0f),
     };
@@ -287,7 +286,7 @@ internal sealed class ObservableDictionaryPage : DemoPage
                 Dock = XDock.Fill,
                 AutoSize = false,
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 Text = $"{count} key(s) - this line has rendered {_renders} time(s), on the structure alone",
             };
         }
@@ -324,7 +323,7 @@ internal sealed class ObservableDictionaryPage : DemoPage
                     AutoSize = false,
                     Height = 18f,
                     Font = Theme.CaptionFont,
-                    ForeColorRole = ThemeColor.MutedForeground,
+                    ForeColor = ThemeColor.MutedForeground,
                     Text = $"the key list has rendered {_renders} time(s), on the structure alone",
                     Margin = new Thickness(0f, 2f, 0f, 4f),
                 },
@@ -349,7 +348,6 @@ internal sealed class ObservableDictionaryPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children = children,
@@ -378,7 +376,7 @@ internal sealed class ObservableDictionaryPage : DemoPage
                 AutoSize = false,
                 Height = 22f,
                 Font = Theme.DefaultFont,
-                ForeColorRole = present ? ThemeColor.Foreground : ThemeColor.MutedForeground,
+                ForeColor = present ? ThemeColor.Foreground : ThemeColor.MutedForeground,
                 Text = $"{Key} = {(present ? value : "(removed)")}    (this row has rendered {_renders} time(s))",
                 Margin = new Thickness(0f, 0f, 0f, 2f),
             };

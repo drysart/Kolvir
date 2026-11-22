@@ -117,7 +117,7 @@ public class Toast : Control
     }
 
     /// <summary>A toast is a raised message, so it paints on the surface until a background is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <summary>Raised after the toast dismissed itself or was dismissed.</summary>
     public IDisposable AddDismissedHandler(Action<object> handler)
@@ -398,7 +398,7 @@ public class Toast : Control
     {
         var measured = TextRenderer.Measure(
             Text,
-            Font,
+                EffectiveFont,
             MathF.Max(0f, availableSize.Width - (Padding.Horizontal + Border.Insets(this).Horizontal)),
             wrap: true);
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
@@ -450,7 +450,7 @@ public class Toast : Control
     {
         bool shifted = BeginSlide(canvas);
 
-        var color = Enabled ? ForeColor : Theme.DisabledForeground;
+        var color = Enabled ? EffectiveForeColor : Theme.DisabledForeground;
         var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
 
         if (content.Width > 0f && content.Height > 0f && !string.IsNullOrEmpty(Text))
@@ -460,7 +460,7 @@ public class Toast : Control
             TextRenderer.Draw(
                 canvas,
                 Text,
-                Font,
+                EffectiveFont,
                 color,
                 content,
                 ContentAlignment.MiddleLeft,

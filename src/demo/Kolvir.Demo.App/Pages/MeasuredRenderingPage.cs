@@ -79,7 +79,7 @@ internal sealed class MeasuredRenderingPage : DemoPage
             AutoSize = false,
             Height = 22f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };
@@ -132,7 +132,7 @@ internal sealed class MeasuredRenderingPage : DemoPage
             WrapText = true,
             Height = 84f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 12f, 0f, 0f),
         };

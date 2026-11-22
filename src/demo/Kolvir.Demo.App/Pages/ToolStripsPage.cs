@@ -91,7 +91,7 @@ internal sealed class ToolStripsPage : DemoPage
             WrapText = true,
             Padding = new Thickness(14f, 10f),
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -143,7 +143,7 @@ internal sealed class ToolStripsPage : DemoPage
             WrapText = true,
             Padding = new Thickness(14f, 10f),
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

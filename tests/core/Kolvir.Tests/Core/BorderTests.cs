@@ -65,7 +65,7 @@ public sealed class BorderTests : HeadlessTestBase
     public void TheStateColoursAreTakenInOrder()
     {
         var border = SimpleBorder.Thin
-            .WithThemeColor(ThemeColor.Border)
+            .WithColor(ThemeColor.Border)
             .WithHoverColor(ThemeColor.SecondaryHover)
             .WithFocusColor(ThemeColor.Accent)
             .WithActiveColor(ThemeColor.AccentPressed)
@@ -93,7 +93,7 @@ public sealed class BorderTests : HeadlessTestBase
     public void AStateColourCoversEveryEdge()
     {
         var border = SimpleBorder.Thin
-            .WithThemeColor(BorderSide.Top, ThemeColor.Accent)
+            .WithColor(BorderSide.Top, ThemeColor.Accent)
             .WithFocusColor(ThemeColor.AccentPressed);
 
         Assert.AreEqual(Theme.Accent, border.ColorFor(BorderSide.Top, ControlState.None));
@@ -116,6 +116,52 @@ public sealed class BorderTests : HeadlessTestBase
         Assert.AreEqual(muted, border.ColorFor(BorderSide.Bottom, ControlState.None));
         Assert.AreEqual(Theme.Border, border.ColorFor(BorderSide.Right, ControlState.None), "an edge left alone keeps the palette role");
         Assert.AreEqual(Theme.Border, border.ColorFor(BorderSide.Top, ControlState.None));
+    }
+
+    [TestMethod]
+    public void AnEdgeCanRestInAPaletteRole()
+    {
+        var border = SimpleBorder.Thin.WithColor(BorderSide.Left, ThemeColor.Accent);
+
+        Assert.AreEqual(
+            Theme.ColorOf(ThemeColor.Accent),
+            border.ColorFor(BorderSide.Left, ControlState.None),
+            "the role is resolved when the edge is read");
+        Assert.AreEqual(Theme.Border, border.ColorFor(BorderSide.Right, ControlState.None), "the other edges keep the border role");
+    }
+
+    [TestMethod]
+    public void AWholeFrameCanRestInAPaletteRole()
+    {
+        var border = SimpleBorder.Rounded(4f).WithColor(ThemeColor.Accent);
+        var accent = Theme.ColorOf(ThemeColor.Accent);
+
+        Assert.AreEqual(accent, border.ColorFor(BorderSide.Top, ControlState.None));
+        Assert.AreEqual(accent, border.ColorFor(BorderSide.Right, ControlState.None));
+        Assert.AreEqual(accent, border.ColorFor(BorderSide.Bottom, ControlState.None));
+        Assert.AreEqual(accent, border.ColorFor(BorderSide.Left, ControlState.None));
+    }
+
+    [TestMethod]
+    public void ALiteralAndARoleCanShareOneFrame()
+    {
+        var accent = new SKColor(1, 2, 3);
+        var border = SimpleBorder.Thin
+            .WithColor(BorderSide.Left, accent)
+            .WithColor(BorderSide.Top, ThemeColor.MutedForeground);
+
+        Assert.AreEqual(accent, border.ColorFor(BorderSide.Left, ControlState.None), "a literal is still used as it is");
+        Assert.AreEqual(Theme.ColorOf(ThemeColor.MutedForeground), border.ColorFor(BorderSide.Top, ControlState.None));
+    }
+
+    [TestMethod]
+    public void AnUnspecifiedEdgeColourIsRefused()
+    {
+        var border = SimpleBorder.Thin.WithColor(BorderSide.Top, default(Union<SKColor, ThemeColor>));
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = border.ColorFor(BorderSide.Top, ControlState.None),
+            "a default-initialised union holds no case and must not be read as the border role");
     }
 
     [TestMethod]
@@ -394,7 +440,7 @@ public sealed class BorderTests : HeadlessTestBase
     {
         var control = new Control { Padding = Thickness.Empty, Text = "Options" };
         control.Border = SimpleBorder.Thin.WithControlText();
-        float band = MathF.Ceiling(control.Font.LineHeight) + 2f;
+        float band = MathF.Ceiling(control.EffectiveFont.LineHeight) + 2f;
 
         Assert.IsTrue(control.Border.ShowsControlText);
         Assert.AreEqual(band, control.Border.Insets(control).Top, "the caption band comes out of the top");
@@ -415,7 +461,7 @@ public sealed class BorderTests : HeadlessTestBase
             Border = SimpleBorder.Thin.WithControlText(),
         };
         using var scene = HeadlessScene.Create(control, 200f, 100f);
-        var edge = (int)MathF.Round((MathF.Ceiling(control.Font.LineHeight) + 2f) / 2f);
+        var edge = (int)MathF.Round((MathF.Ceiling(control.EffectiveFont.LineHeight) + 2f) / 2f);
 
         Assert.AreNotEqual(Theme.Border, scene.PixelAt(20, edge), "the edge is cut away behind the caption");
         Assert.AreEqual(Theme.Border, scene.PixelAt(180, edge), "and painted where the caption does not reach");
@@ -435,7 +481,7 @@ public sealed class BorderTests : HeadlessTestBase
 
         control.Text = "Now it has one";
         Assert.AreEqual(
-            MathF.Ceiling(control.Font.LineHeight) + 2f,
+            MathF.Ceiling(control.EffectiveFont.LineHeight) + 2f,
             control.Border.Insets(control).Top,
             "and the band appears with the text");
     }

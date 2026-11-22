@@ -11,7 +11,7 @@ namespace Kolvir;
 /// Immutable, so a control class keeps one in a <c>private static readonly</c> field and shares it with
 /// every instance. A variation is a new instance: <c>SimpleBorder.Thin.WithCornerRadius(6f)</c>,
 /// <c>SimpleBorder.Thin.WithWidths(new Thickness(4f, 1f, 1f, 1f))</c>,
-/// <c>SimpleBorder.Thin.WithThemeColor(BorderSide.Left, ThemeColor.Accent)</c>.
+/// <c>SimpleBorder.Thin.WithColor(BorderSide.Left, ThemeColor.Accent)</c>.
 /// </para>
 /// <para>
 /// <b>Edges.</b> <see cref="Widths"/> is one thickness per side and each side has its own resting
@@ -43,11 +43,15 @@ namespace Kolvir;
 /// </remarks>
 public sealed class SimpleBorder : Border
 {
+    /// <summary>
+    /// The edge every side starts as. Declared before <see cref="Thin"/> because static field
+    /// initialisers run in textual order and the shared default instance reads it while being built.
+    /// </summary>
+    private static readonly Edge DefaultEdge = new(ThemeColor.Border);
+
     /// <summary>The frame a control class gives itself by default: one pixel, the border palette role,
     /// square corners, no state colours.</summary>
     public static SimpleBorder Thin { get; } = new(new Thickness(1f), CornerRadii.None);
-
-    private static readonly Edge DefaultEdge = new(Color: null, Role: ThemeColor.Border);
 
     /// <summary>How far the caption's break reaches past the text, on each side.</summary>
     private const float CaptionGap = 4f;
@@ -182,11 +186,15 @@ public sealed class SimpleBorder : Border
 
     /// <summary>
     /// The colour an edge takes for <paramref name="state"/>: the state colour in the documented order
-    /// when one applies, otherwise that edge's own colour, and the border palette role when it has none.
+    /// when one applies, otherwise that edge's own colour. A literal is returned as it is and a
+    /// palette role is resolved through <see cref="Theme.ColorOf"/> while painting.
     /// </summary>
     /// <param name="side">The edge being painted.</param>
     /// <param name="state">The state of the control being painted.</param>
     /// <returns>The colour, alpha included.</returns>
+    /// <exception cref="InvalidOperationException">
+    /// The edge's colour was assigned <c>default</c>, so it holds no case.
+    /// </exception>
     public SKColor ColorFor(BorderSide side, ControlState state)
     {
         if (StateRoleFor(state) is { } role)
@@ -194,8 +202,10 @@ public sealed class SimpleBorder : Border
             return Theme.ColorOf(role);
         }
 
-        var edge = _edges[(int)side];
-        return edge.Color ?? Theme.ColorOf(edge.Role ?? ThemeColor.Border);
+        return _edges[(int)side].Color.Match(
+            0,
+            static (int _, SKColor literal) => literal,
+            static (int _, ThemeColor edgeRole) => Theme.ColorOf(edgeRole));
     }
 
     /// <summary>This frame with the same thickness on every side.</summary>
@@ -249,35 +259,26 @@ public sealed class SimpleBorder : Border
     /// </remarks>
     public SimpleBorder WithControlText(bool show = true) => With(showsControlText: show);
 
-    /// <summary>This frame with a fixed resting colour on every side.</summary>
-    /// <param name="color">The colour, alpha included.</param>
+    /// <summary>This frame with a resting colour on every side.</summary>
+    /// <param name="color">The colour, alpha included, or the palette entry it names.</param>
     /// <returns>A new border; this one is unchanged.</returns>
-    public SimpleBorder WithColor(SKColor color) =>
+    /// <remarks>
+    /// The colour is a literal <see cref="SKColor"/> or a <see cref="ThemeColor"/> role, the same
+    /// pair <see cref="Control.BackColor"/> accepts; a role is resolved while painting, so a palette
+    /// swap recolours live controls with no rebuild.
+    /// </remarks>
+    public SimpleBorder WithColor(Union<SKColor, ThemeColor> color) =>
         WithColor(BorderSide.Top, color)
             .WithColor(BorderSide.Right, color)
             .WithColor(BorderSide.Bottom, color)
             .WithColor(BorderSide.Left, color);
 
-    /// <summary>This frame with a fixed resting colour on one side.</summary>
+    /// <summary>This frame with a resting colour on one side.</summary>
     /// <param name="side">The edge to recolour.</param>
-    /// <param name="color">The colour, alpha included.</param>
+    /// <param name="color">The colour, alpha included, or the palette entry it names.</param>
     /// <returns>A new border; this one is unchanged.</returns>
-    public SimpleBorder WithColor(BorderSide side, SKColor color) => WithEdge(side, new Edge(color, null));
-
-    /// <summary>This frame with a resting colour taken from the palette on every side.</summary>
-    /// <param name="role">The palette entry, resolved while painting.</param>
-    /// <returns>A new border; this one is unchanged.</returns>
-    public SimpleBorder WithThemeColor(ThemeColor role) =>
-        WithThemeColor(BorderSide.Top, role)
-            .WithThemeColor(BorderSide.Right, role)
-            .WithThemeColor(BorderSide.Bottom, role)
-            .WithThemeColor(BorderSide.Left, role);
-
-    /// <summary>This frame with a resting colour taken from the palette on one side.</summary>
-    /// <param name="side">The edge to recolour.</param>
-    /// <param name="role">The palette entry, resolved while painting.</param>
-    /// <returns>A new border; this one is unchanged.</returns>
-    public SimpleBorder WithThemeColor(BorderSide side, ThemeColor role) => WithEdge(side, new Edge(null, role));
+    public SimpleBorder WithColor(BorderSide side, Union<SKColor, ThemeColor> color) =>
+        WithEdge(side, new Edge(color));
 
     /// <summary>This frame with the colour it takes while the pointer is over the control.</summary>
     /// <param name="role">The palette entry, resolved while painting.</param>
@@ -358,8 +359,8 @@ public sealed class SimpleBorder : Border
             TextRenderer.Draw(
                 canvas,
                 owner.Text,
-                owner.Font,
-                owner.Enabled ? owner.ForeColor : Theme.DisabledForeground,
+                owner.EffectiveFont,
+                owner.Enabled ? owner.EffectiveForeColor : Theme.DisabledForeground,
                 shown,
                 ContentAlignment.MiddleLeft);
         }
@@ -389,14 +390,14 @@ public sealed class SimpleBorder : Border
     /// <summary>The height of the band the control's text sits in, or zero when there is no text.</summary>
     private float CaptionBand(Control owner) =>
         _showsControlText && !string.IsNullOrEmpty(owner.Text)
-            ? MathF.Ceiling(owner.Font.LineHeight) + CaptionLeading
+            ? MathF.Ceiling(owner.EffectiveFont.LineHeight) + CaptionLeading
             : 0f;
 
     /// <summary>The box the caption is drawn in, lined up with the content under it.</summary>
     private SKRect CaptionRect(Control owner, SKRect bounds, float band)
     {
         float left = bounds.Left + Insets(owner).Left + owner.Padding.Left;
-        float width = TextRenderer.Measure(owner.Text, owner.Font, float.PositiveInfinity, wrap: false).Width;
+        float width = TextRenderer.Measure(owner.Text, owner.EffectiveFont, float.PositiveInfinity, wrap: false).Width;
 
         return new SKRect(left, bounds.Top, left + MathF.Ceiling(width), bounds.Top + band);
     }
@@ -560,6 +561,6 @@ public sealed class SimpleBorder : Border
             _showsControlText);
     }
 
-    /// <summary>One side's resting colour: a fixed colour, a palette role, or neither for the default.</summary>
-    private readonly record struct Edge(SKColor? Color, ThemeColor? Role);
+    /// <summary>One side's resting colour: a fixed colour or a palette role, resolved while painting.</summary>
+    private readonly record struct Edge(Union<SKColor, ThemeColor> Color);
 }

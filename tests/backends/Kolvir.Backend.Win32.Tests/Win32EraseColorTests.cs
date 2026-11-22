@@ -20,11 +20,11 @@ public sealed class Win32EraseColorTests
 
     private static readonly SKSize Client = new(800f, 600f);
 
-    private static Panel Sized(Background background, float width = 800f, float height = 600f)
+    private static Panel Sized(SKColor background, float width = 800f, float height = 600f)
     {
         var control = new Panel
         {
-            Background = background,
+            BackColor = background,
             Bounds = new SKRect(0f, 0f, width, height),
         };
 
@@ -42,7 +42,7 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void ARootThatPaintsTheWholeWindowIsWhatTheEdgeLooksLike()
     {
-        var root = Sized(Background.FromColor(Root));
+        var root = Sized(Root);
 
         var color = Win32EraseColor.Resolve(root, Client, Clear);
 
@@ -52,7 +52,7 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void ARootThatPaintsNothingFallsBackToTheHostClearColour()
     {
-        var root = Sized(Background.None);
+        var root = Sized(SKColors.Transparent);
 
         var color = Win32EraseColor.Resolve(root, Client, Clear);
 
@@ -62,8 +62,8 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void TheInnermostFullWindowControlWins()
     {
-        var root = Sized(Background.FromColor(Root));
-        var page = Sized(Background.FromColor(Page));
+        var root = Sized(Root);
+        var page = Sized(Page);
 
         root.Controls.Add(page);
 
@@ -75,8 +75,8 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void AControlThatDoesNotCoverTheWindowIsIgnored()
     {
-        var root = Sized(Background.FromColor(Root));
-        var card = Sized(Background.FromColor(Card), width: 200f, height: 100f);
+        var root = Sized(Root);
+        var card = Sized(Card, width: 200f, height: 100f);
 
         root.Controls.Add(card);
 
@@ -88,8 +88,8 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void AnInsetPageLeavesTheClearColourAtTheEdge()
     {
-        var root = Sized(Background.None);
-        var page = Sized(Background.FromColor(Page), width: 780f, height: 580f);
+        var root = Sized(SKColors.Transparent);
+        var page = Sized(Page, width: 780f, height: 580f);
         page.Bounds = new SKRect(10f, 10f, 790f, 590f);
 
         root.Controls.Add(page);
@@ -102,8 +102,8 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void AnInvisiblePageIsNotPaintedAndSoNotErasedTo()
     {
-        var root = Sized(Background.FromColor(Root));
-        var page = Sized(Background.FromColor(Page));
+        var root = Sized(Root);
+        var page = Sized(Page);
         page.Visible = false;
 
         root.Controls.Add(page);
@@ -116,7 +116,7 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void AnUnlaidOutWindowErasesToItsClearColour()
     {
-        var root = Sized(Background.FromColor(Root), width: 0f, height: 0f);
+        var root = Sized(Root, width: 0f, height: 0f);
 
         var color = Win32EraseColor.Resolve(root, new SKSize(0f, 0f), Clear);
 
@@ -126,7 +126,7 @@ public sealed class Win32EraseColorTests
     [TestMethod]
     public void AFractionalPixelOfLayoutRoundingStillCountsAsCovering()
     {
-        var root = Sized(Background.FromColor(Root), width: 799.6f, height: 599.6f);
+        var root = Sized(Root, width: 799.6f, height: 599.6f);
 
         var color = Win32EraseColor.Resolve(root, Client, Clear);
 

@@ -42,7 +42,6 @@ public class RichLabel : Control
     }
 
     private const float HighlightRadius = 2f;
-    private const byte HoverBackAlpha = 0x1A;
 
     private readonly TextSpanCollection _spans;
     private readonly Dictionary<string, Font> _derivedFonts = new(StringComparer.Ordinal);
@@ -192,9 +191,9 @@ public class RichLabel : Control
     {
         var span = new TextSpan(text)
         {
-            ThemeColor = ThemeColor.Accent,
+            ForeColor = ThemeColor.Accent,
             Underline = true,
-            HoverBackColorRole = ThemeColor.Accent,
+            HoverBackColor = ThemeColor.Accent,
             Cursor = Cursor.Hand,
         };
 
@@ -794,7 +793,7 @@ public class RichLabel : Control
     {
         StringBuilder? builder = null;
 
-        if (span.ForeColor is { } color)
+        if (span.ForeColor.TryGetValue<SKColor>(out var color))
         {
             builder = new StringBuilder();
             builder.Append("color:#")
@@ -993,8 +992,13 @@ public class RichLabel : Control
             var first = fragments[i];
             var span = first.Span;
             if (first.Kind is FragmentKind.Break or FragmentKind.Control ||
-                (!span.IsMouseOver && !span.IsPressed) ||
-                ResolveHoverBackColor(span) is not { } hoverBack)
+                (!span.IsMouseOver && !span.IsPressed))
+            {
+                continue;
+            }
+
+            var hoverBack = span.EffectiveHoverBackColor;
+            if (hoverBack.Alpha == 0)
             {
                 continue;
             }
@@ -1030,47 +1034,13 @@ public class RichLabel : Control
     }
 
     /// <summary>
-    /// The colour a span's text is painted in: its own colour, else the palette entry it names,
-    /// else the label's <see cref="Control.ForeColor"/> - except while the label is disabled,
-    /// where every span greys out so a link inside a disabled panel stops looking live. Resolved
-    /// while painting so that a link keeps up with the theme instead of freezing the accent colour
-    /// it was created with.
+    /// The colour a span's text is painted in: the span's <see cref="TextSpan.EffectiveForeColor"/>,
+    /// except while the label is disabled, where every span greys out so a link inside a disabled
+    /// panel stops looking live. Resolved while painting so that a link keeps up with the theme
+    /// instead of freezing the accent colour it was created with.
     /// </summary>
-    private SKColor ResolveSpanColor(TextSpan span)
-    {
-        if (!Enabled)
-        {
-            return Theme.DisabledForeground;
-        }
-
-        if (span.ForeColor is { } literal)
-        {
-            return literal;
-        }
-
-        if (span.ThemeColor is { } role)
-        {
-            return Theme.ColorOf(role);
-        }
-
-        return ForeColor;
-    }
-
-    /// <summary>
-    /// The fill painted behind a span while it is hovered or pressed: its own colour, else a light
-    /// tint of the palette entry it names, so a link's highlight follows the theme.
-    /// </summary>
-    private static SKColor? ResolveHoverBackColor(TextSpan span)
-    {
-        if (span.HoverBackColor is { } literal)
-        {
-            return literal;
-        }
-
-        return span.HoverBackColorRole is { } role
-            ? Theme.ColorOf(role).WithAlpha(HoverBackAlpha)
-            : null;
-    }
+    private SKColor ResolveSpanColor(TextSpan span) =>
+        Enabled ? span.EffectiveForeColor : Theme.DisabledForeground;
 
     /// <summary>
     /// Returns the index of the last fragment in the run of adjacent fragments belonging to the
@@ -1187,7 +1157,7 @@ public class RichLabel : Control
                     if (layout.Lines.Count == before)
                     {
                         // A blank line keeps the paragraph spacing of an empty line.
-                        layout.Lines.Add(new Line { Ascent = Font.BaselineOffset, Height = Font.LineHeight });
+                        layout.Lines.Add(new Line { Ascent = EffectiveFont.BaselineOffset, Height = EffectiveFont.LineHeight });
                     }
 
                     break;
@@ -1499,27 +1469,27 @@ public class RichLabel : Control
             return span.Font;
         }
 
-        int weight = span.Bold ? Math.Max(700, Font.Weight) : Font.Weight;
-        bool italic = span.Italic || Font.Italic;
-        float size = span.FontSize is { } spanSize ? spanSize : Font.Size;
+        int weight = span.Bold ? Math.Max(700, EffectiveFont.Weight) : EffectiveFont.Weight;
+        bool italic = span.Italic || EffectiveFont.Italic;
+        float size = span.FontSize is { } spanSize ? spanSize : EffectiveFont.Size;
         string? family = span.FontFamily;
 
-        if (weight == Font.Weight
-            && italic == Font.Italic
-            && MathF.Abs(size - Font.Size) < 0.01f
-            && (family is null || string.Equals(family, Font.FamilyName, StringComparison.Ordinal)))
+        if (weight == EffectiveFont.Weight
+            && italic == EffectiveFont.Italic
+            && MathF.Abs(size - EffectiveFont.Size) < 0.01f
+            && (family is null || string.Equals(family, EffectiveFont.FamilyName, StringComparison.Ordinal)))
         {
-            return Font;
+            return EffectiveFont;
         }
 
-        string key = string.Concat(family ?? Font.FamilyName, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
+        string key = string.Concat(family ?? EffectiveFont.FamilyName, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
         if (!_derivedFonts.TryGetValue(key, out var font))
         {
             // A span that names a family asks for a different family and is resolved by name. A span
             // that only changes weight, slant or size is derived from the label's own font, so a face
             // loaded from a file stays on that face instead of being looked up on the machine.
             font = family is null
-                ? Font.Derive(size, weight, italic)
+                ? EffectiveFont.Derive(size, weight, italic)
                 : new Font(family, size, weight, italic);
             _derivedFonts[key] = font;
         }

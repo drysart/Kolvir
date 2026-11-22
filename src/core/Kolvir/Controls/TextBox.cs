@@ -78,8 +78,8 @@ public class TextBox : Control
         Text = text;
     }
 
-    /// <summary>An editable field is painted on the input fill until <see cref="Control.Background"/> is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.InputBackground);
+    /// <summary>An editable field is painted on the input fill until <see cref="Control.BackColor"/> is assigned.</summary>
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.InputBackground;
 
     /// <summary>
     /// The multi-line feature when this box opted into it, otherwise null.
@@ -246,7 +246,7 @@ public class TextBox : Control
                 return SKRect.Empty;
             }
 
-            float lineHeight = Font.LineHeight;
+            float lineHeight = EffectiveFont.LineHeight;
             float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
             float x = content.Left - _scrollX + MeasureX(DisplayText, _caretIndex);
             return new SKRect(x, top, x + _caret.Width, top + lineHeight);
@@ -461,8 +461,8 @@ public class TextBox : Control
         }
 
         var sample = Text.Length == 0 ? "W" : Text;
-        float width = MathF.Min(MathF.Ceiling(Font.MeasureWidth(sample)) + 4f, 320f);
-        return new SKSize(width, MathF.Ceiling(Font.LineHeight) + 2f);
+        float width = MathF.Min(MathF.Ceiling(EffectiveFont.MeasureWidth(sample)) + 4f, 320f);
+        return new SKSize(width, MathF.Ceiling(EffectiveFont.LineHeight) + 2f);
     }
 
     /// <summary>
@@ -495,7 +495,7 @@ public class TextBox : Control
         }
 
         var display = DisplayText;
-        float lineHeight = Font.LineHeight;
+        float lineHeight = EffectiveFont.LineHeight;
         float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
         float originX = content.Left - _scrollX;
 
@@ -634,7 +634,7 @@ public class TextBox : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
+        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 
@@ -665,9 +665,9 @@ public class TextBox : Control
         PaintUnderText(canvas, content);
 
         var display = DisplayText;
-        float lineHeight = Font.LineHeight;
+        float lineHeight = EffectiveFont.LineHeight;
         float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
-        float baseline = top + Font.BaselineOffset;
+        float baseline = top + EffectiveFont.BaselineOffset;
         float originX = content.Left - _scrollX;
 
         canvas.Save();
@@ -676,7 +676,7 @@ public class TextBox : Control
         using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
 
         string text = display;
-        var color = ForeColor;
+        var color = EffectiveForeColor;
         if (text.Length == 0 && !string.IsNullOrEmpty(_placeholderText))
         {
             text = _placeholderText;
@@ -691,7 +691,7 @@ public class TextBox : Control
         if (text.Length > 0)
         {
             paint.Color = color;
-            canvas.DrawText(text, originX, baseline, SKTextAlign.Left, Font.SkFont, paint);
+            canvas.DrawText(text, originX, baseline, SKTextAlign.Left, EffectiveFont.SkFont, paint);
         }
 
         canvas.Restore();
@@ -1251,7 +1251,7 @@ public class TextBox : Control
         }
 
         float width = TextRect.Width;
-        float textWidth = Font.MeasureWidth(DisplayText);
+        float textWidth = EffectiveFont.MeasureWidth(DisplayText);
         float max = MathF.Max(0f, textWidth - width + HorizontalCaretPadding + _caret.Width);
         _scrollX = Math.Clamp(_scrollX, 0f, max);
     }
@@ -1263,7 +1263,7 @@ public class TextBox : Control
             return 0f;
         }
 
-        return Font.MeasureWidth(index >= display.Length ? display : display[..index]);
+        return EffectiveFont.MeasureWidth(index >= display.Length ? display : display[..index]);
     }
 
     private int IndexFromX(float xInControl)

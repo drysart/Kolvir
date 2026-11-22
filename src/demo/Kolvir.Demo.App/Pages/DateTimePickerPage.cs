@@ -75,7 +75,7 @@ internal sealed class DateTimePickerPage : DemoPage
             Height = 78f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 6f, 0f, 0f),
         });

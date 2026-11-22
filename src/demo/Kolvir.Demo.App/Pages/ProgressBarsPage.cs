@@ -66,7 +66,6 @@ internal sealed class ProgressBarsPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 32f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
         };
@@ -113,7 +112,7 @@ internal sealed class ProgressBarsPage : DemoPage
             Height = 34f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

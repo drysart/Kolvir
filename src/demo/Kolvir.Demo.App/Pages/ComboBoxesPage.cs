@@ -99,7 +99,7 @@ internal sealed class ComboBoxesPage : DemoPage
             Height = 54f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
