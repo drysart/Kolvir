@@ -63,7 +63,7 @@ internal sealed class BordersPage : DemoPage
             SimpleBorder.Thin.WithCornerRadius(8f).WithControlText(),
             height: 88f);
         groupRow.Text = "Options";
-        groupRow.ForeColorRole = ThemeColor.MutedForeground;
+        groupRow.ForeColor = ThemeColor.MutedForeground;
         body.Controls.Add(groupRow);
 
         return body;
@@ -102,7 +102,7 @@ internal sealed class BordersPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

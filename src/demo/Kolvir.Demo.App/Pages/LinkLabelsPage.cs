@@ -90,7 +90,7 @@ internal sealed class LinkLabelsPage : DemoPage
             Height = 62f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

@@ -128,4 +128,102 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
         Assert.AreSame(Theme.DefaultFont, label.EffectiveFont, "a label falls back to the theme's font");
         Assert.AreSame(Theme.EmphasizedFont, button.EffectiveFont, "a button falls back to its own class default");
     }
+
+    [TestMethod]
+    public void TheForeColorPropertyReportsTheAssignedCase()
+    {
+        var label = new Label("x");
+        var color = new SKColor(0xFF2F6F4F);
+
+        Assert.IsTrue(label.ForeColor.TryGetValue<InheritedValue>(out _), "an unassigned colour reads back as inherit");
+
+        label.ForeColor = color;
+        Assert.IsTrue(label.ForeColor.TryGetValue<SKColor>(out var literal));
+        Assert.AreEqual(color, literal);
+        Assert.AreEqual(color, label.EffectiveForeColor);
+
+        label.ForeColor = ThemeColor.Accent;
+        Assert.IsTrue(label.ForeColor.TryGetValue<ThemeColor>(out var role));
+        Assert.AreEqual(ThemeColor.Accent, role);
+        Assert.AreEqual(Theme.Accent, label.EffectiveForeColor);
+
+        label.ForeColor = InheritedValue.Instance;
+        Assert.IsTrue(label.ForeColor.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
+    }
+
+    [TestMethod]
+    public void AnUnspecifiedForeColorIsRefused()
+    {
+        var label = new Label("x");
+        label.ForeColor = default;
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = label.EffectiveForeColor,
+            "a default-initialised union holds no case and must not be read as inherit");
+    }
+
+    [TestMethod]
+    public void AnUnparentedControlUsesTheThemesForeground()
+    {
+        var label = new Label("x");
+
+        Assert.AreEqual(Theme.Foreground, label.EffectiveForeColor, "transparent text would be invisible, so the neutral default is used");
+    }
+
+    [TestMethod]
+    public void ARoleAssignedToAContainerAnswersForItsDescendants()
+    {
+        var panel = new Panel { ForeColor = ThemeColor.MutedForeground };
+        var label = new Label("x");
+        panel.Controls.Add(label);
+
+        Assert.AreEqual(Theme.MutedForeground, panel.EffectiveForeColor);
+        Assert.AreEqual(Theme.MutedForeground, label.EffectiveForeColor, "a role is a value and inherits like a literal");
+    }
+
+    [TestMethod]
+    public void ARoleIsResolvedWhenItIsReadSoAPaletteSwapRecolours()
+    {
+        var panel = new Panel { ForeColor = ThemeColor.Accent };
+        var label = new Label("x");
+        panel.Controls.Add(label);
+
+        var light = label.EffectiveForeColor;
+        Assert.AreEqual(Theme.Accent, light, "the role is read from the current palette");
+        Assert.IsTrue(panel.ForeColor.TryGetValue<ThemeColor>(out _), "the property still reports the role");
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(Theme.Accent, label.EffectiveForeColor, "the same tree follows the new palette");
+        Assert.AreNotEqual(light, label.EffectiveForeColor, "the two palettes should differ");
+    }
+
+    [TestMethod]
+    public void AForeColorAssignedAboveAChildThatAlreadyResolvedIsPickedUp()
+    {
+        var outer = new Panel();
+        var label = new Label("x");
+        outer.Controls.Add(label);
+
+        Assert.AreEqual(Theme.Foreground, label.EffectiveForeColor, "nothing is assigned yet");
+
+        outer.ForeColor = new SKColor(0xFF203040);
+
+        Assert.AreEqual(new SKColor(0xFF203040), label.EffectiveForeColor, "the cached answer is dropped");
+    }
+
+    [TestMethod]
+    public void AGroupBoxKeepsItsMutedCaptionWhileItsChildrenUseTheForeground()
+    {
+        var group = new GroupBox("caption");
+        var label = new Label("x");
+        group.Controls.Add(label);
+
+        Assert.AreEqual(Theme.MutedForeground, group.EffectiveForeColor, "the caption uses the class default role");
+        Assert.AreEqual(Theme.Foreground, label.EffectiveForeColor, "the class default is not inherited");
+
+        group.ForeColor = new SKColor(0xFF101010);
+
+        Assert.AreEqual(new SKColor(0xFF101010), label.EffectiveForeColor, "an assigned colour does answer for the children");
+    }
 }

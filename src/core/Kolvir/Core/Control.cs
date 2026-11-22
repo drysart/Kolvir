@@ -71,19 +71,18 @@ public class Control : IDisposable
     private ControlCollection? _controls;
     private List<IDisposable>? _resources;
     private List<SKRect>? _selectionRects;
-    private ThemeColor _foreColorRole = ThemeColor.Foreground;
 
     // Appearance set on this control. InheritedValue means "not set here".
     private Union<Font, InheritedValue> _font = InheritedValue.Instance;
     private Background? _background;
-    private SKColor? _foreground;
+    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = InheritedValue.Instance;
 
     // What the parent chain contributes. Resolved in one walk, then reused until something that
     // can change the answer - a value set on an ancestor, or a new parent - drops it.
     private bool _inheritedResolved;
     private Font? _inheritedFont;
     private Background? _inheritedBackground;
-    private SKColor? _inheritedForeground;
+    private Union<SKColor, ThemeColor>? _inheritedForeColor;
 
     /// <summary>
     /// Creates a control named after its own type, which is what <see cref="Name"/> starts as.
@@ -1845,73 +1844,100 @@ public class Control : IDisposable
         _filter is null && _opacity >= 1f && Border.IsRectangular && Background.Color is { Alpha: 255 };
 
     /// <summary>
-    /// Text colour, inherited the way <see cref="Font"/> is: a colour assigned to a container
-    /// answers for the text of everything inside it, and a control that assigns none keeps
-    /// <see cref="ForeColorRole"/>.
+    /// The text colour assigned to this control: a literal <see cref="SKColor"/>, a palette
+    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> to take the nearest
+    /// ancestor's colour.
     /// </summary>
     /// <remarks>
-    /// Only an assigned colour is inherited, not a role. A role is the class default - a group box
-    /// caption is <see cref="ThemeColor.MutedForeground"/> whatever its labels are - so
-    /// inheriting one would change how existing trees look. The role is resolved when it is read,
-    /// which is what keeps a palette swap to a repaint.
+    /// <para>
+    /// The property reports what was assigned, not what the control draws with. Read
+    /// <see cref="EffectiveForeColor"/> for the colour that resolves through the parent chain and
+    /// <see cref="DefaultForeColor"/>. The initial value is <see cref="InheritedValue.Instance"/>,
+    /// which is how a control that never assigns a colour inherits one.
+    /// </para>
+    /// <para>
+    /// A colour assigned to a container answers for the text of everything inside it, whether it is
+    /// a literal or a role - this is the WinForms <c>ForeColor</c> behaviour. A role is resolved
+    /// when it is read, so a palette swap recolours a live tree with no rebuild. A role assigned to
+    /// a container inherits the same way a literal does; <see cref="DefaultForeColor"/> is where a
+    /// control class says what its own text uses when nothing else answers, and that default is not
+    /// inherited.
+    /// </para>
     /// </remarks>
-    public SKColor Foreground
+    public Union<SKColor, ThemeColor, InheritedValue> ForeColor
     {
-        get
-        {
-            if (_foreground is { } local)
-            {
-                return local;
-            }
-
-            ResolveInheritedAppearance();
-            return _inheritedForeground ?? Theme.ColorOf(_foreColorRole);
-        }
+        get => _foreColor;
         set
         {
-            if (_foreground == value)
+            if (_foreColor.Equals(value))
             {
                 return;
             }
 
-            _foreground = value;
+            _foreColor = value;
             InvalidateAppearanceTree();
         }
     }
 
-    /// <summary>The WinForms name for <see cref="Foreground"/>.</summary>
-    public SKColor ForeColor
+    /// <summary>
+    /// The text colour this control actually draws with: its own assignment, else the nearest
+    /// ancestor's, else <see cref="DefaultForeColor"/>.
+    /// </summary>
+    /// <remarks>
+    /// A literal colour is returned as it is and a role is resolved through
+    /// <see cref="Theme.ColorOf"/> on every read, so a palette swap is a repaint rather than a
+    /// rebuild. What the parent chain assigned is cached until <see cref="InvalidateAppearanceTree"/>
+    /// drops it. An unparented control that never assigns a colour gets the class default, which is
+    /// the theme's foreground for the base control.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="ForeColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveForeColor
     {
-        get => Foreground;
-        set => Foreground = value;
-    }
-
-    /// <summary>Palette entry used while neither this control nor an ancestor assigns a <see cref="Foreground"/>.</summary>
-    public ThemeColor ForeColorRole
-    {
-        get => _foreColorRole;
-        set
+        get
         {
-            if (_foreColorRole == value)
+            _foreColor.ThrowIfUnspecified();
+
+            if (_foreColor.TryGetValue<SKColor>(out var literal))
             {
-                return;
+                return literal;
             }
 
-            _foreColorRole = value;
-            Invalidate();
+            if (_foreColor.TryGetValue<ThemeColor>(out var role))
+            {
+                return Theme.ColorOf(role);
+            }
+
+            ResolveInheritedAppearance();
+
+            return _inheritedForeColor is { } inherited
+                ? ResolveForeColor(inherited)
+                : ResolveForeColor(DefaultForeColor);
         }
     }
 
-    /// <summary>Forgets the foreground colour assigned to this control, so it inherits one again.</summary>
-    public void ClearForeground()
+    /// <summary>
+    /// The text colour a control of this class uses when none has been assigned to it and no
+    /// ancestor sets one: the last step of the walk up the tree.
+    /// </summary>
+    /// <remarks>
+    /// A role rather than a colour on purpose, so a palette swap recolours every control that never
+    /// overrode it. The base returns <see cref="ThemeColor.Foreground"/>; a group box returns
+    /// <see cref="ThemeColor.MutedForeground"/> for its caption while its children keep the
+    /// foreground. It is read on every resolution, so a class is free to vary it.
+    /// </remarks>
+    protected virtual Union<SKColor, ThemeColor> DefaultForeColor => ThemeColor.Foreground;
+
+    /// <summary>Resolves a literal colour or a palette role, with the theme foreground as the fallback.</summary>
+    private static SKColor ResolveForeColor(Union<SKColor, ThemeColor> value)
     {
-        if (_foreground is null)
+        if (value.TryGetValue<SKColor>(out var literal))
         {
-            return;
+            return literal;
         }
 
-        _foreground = null;
-        InvalidateAppearanceTree();
+        return value.TryGetValue<ThemeColor>(out var role) ? Theme.ColorOf(role) : Theme.Foreground;
     }
 
     /// <summary>
@@ -1935,7 +1961,7 @@ public class Control : IDisposable
 
         Font? font = null;
         Background? background = null;
-        SKColor? foreground = null;
+        Union<SKColor, ThemeColor>? foreground = null;
 
         for (var ancestor = _parent; ancestor is not null; ancestor = ancestor._parent)
         {
@@ -1953,7 +1979,14 @@ public class Control : IDisposable
                 background = inheritedBackground;
             }
 
-            foreground ??= ancestor._foreground;
+            if (foreground is null && ancestor._foreColor.TryGetValue<SKColor>(out var ancestorColor))
+            {
+                foreground = ancestorColor;
+            }
+            else if (foreground is null && ancestor._foreColor.TryGetValue<ThemeColor>(out var ancestorRole))
+            {
+                foreground = ancestorRole;
+            }
 
             if (font is not null && background is not null && foreground is not null)
             {
@@ -1963,7 +1996,7 @@ public class Control : IDisposable
 
         _inheritedFont = font;
         _inheritedBackground = background;
-        _inheritedForeground = foreground;
+        _inheritedForeColor = foreground;
         _inheritedResolved = true;
     }
 
@@ -1977,7 +2010,7 @@ public class Control : IDisposable
         _inheritedResolved = false;
         _inheritedFont = null;
         _inheritedBackground = null;
-        _inheritedForeground = null;
+        _inheritedForeColor = null;
 
         OnAppearanceChanged();
         Invalidate();

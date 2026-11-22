@@ -158,7 +158,7 @@ internal sealed class FiltersPage : DemoPage
             Height = 30f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         };
 

@@ -81,7 +81,7 @@ internal sealed class AudioPage : DemoPage
             Height = 64f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };
         _audioReadout = readout;
@@ -101,7 +101,7 @@ internal sealed class AudioPage : DemoPage
             Height = 92f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         });
 
         RefreshAudioDevices();

@@ -510,6 +510,6 @@ internal sealed class ToolTipView : Control
         }
 
         var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
-        TextRenderer.Draw(canvas, _text, EffectiveFont, ForeColor, content, ContentAlignment.TopLeft, wrap: true);
+        TextRenderer.Draw(canvas, _text, EffectiveFont, EffectiveForeColor, content, ContentAlignment.TopLeft, wrap: true);
     }
 }

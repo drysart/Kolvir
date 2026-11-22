@@ -350,7 +350,7 @@ public class Expander : Panel
     /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
-        var color = Enabled ? ForeColor : Theme.DisabledForeground;
+        var color = Enabled ? EffectiveForeColor : Theme.DisabledForeground;
         float headerBottom = rect.Top + HeaderHeight;
 
         // The frame takes its own inset on each side, so the caption and the chevron start inside

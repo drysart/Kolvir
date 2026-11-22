@@ -282,7 +282,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         }
         else
         {
-            paint.Color = textBox.Enabled ? textBox.ForeColor : Theme.DisabledForeground;
+            paint.Color = textBox.Enabled ? textBox.EffectiveForeColor : Theme.DisabledForeground;
 
             for (int i = 0; i < lines.Count; i++)
             {

@@ -32,7 +32,7 @@ internal sealed class OverlayFadePage : DemoPage
             Height = 42f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 12f),
         });
@@ -58,7 +58,7 @@ internal sealed class OverlayFadePage : DemoPage
             Dock = XDock.Top,
             AutoSize = false,
             Height = 24f,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         };
 
@@ -98,7 +98,7 @@ internal sealed class OverlayFadePage : DemoPage
             Dock = XDock.Fill,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft,
-            ForeColorRole = ThemeColor.Foreground,
+            ForeColor = ThemeColor.Foreground,
         });
 
         // The layer starts up, so the page opens with the blocked state on screen and the fade is
@@ -155,7 +155,7 @@ internal sealed class OverlayFadePage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

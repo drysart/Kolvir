@@ -73,7 +73,7 @@ internal sealed class ScrollingPage : DemoPage
             {
                 AutoSize = false,
                 BackColor = Theme.Secondary,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 TextAlign = ContentAlignment.MiddleCenter,
                 Bounds = new SKRect(4f + (i * 92f), 4f, 88f + (i * 92f), 16f),
             });

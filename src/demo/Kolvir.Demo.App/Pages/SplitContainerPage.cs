@@ -60,7 +60,7 @@ internal sealed class SplitContainerPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -108,7 +108,7 @@ internal sealed class SplitContainerPage : DemoPage
             Width = 76f,
             AutoSize = false,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
         });
 

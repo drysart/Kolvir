@@ -184,7 +184,7 @@ public abstract class ToggleControl : Control
     }
 
     /// <summary>The label colour: <see cref="Control.ForeColor"/>, greyed out while disabled.</summary>
-    protected SKColor TextColor => Enabled ? ForeColor : Theme.DisabledForeground;
+    protected SKColor TextColor => Enabled ? EffectiveForeColor : Theme.DisabledForeground;
 
     /// <summary>The glyph outline: accent while it carries a mark, the theme border otherwise.</summary>
     protected SKColor GlyphBorderColor

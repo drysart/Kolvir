@@ -51,7 +51,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             Height = 56f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         });
@@ -106,7 +106,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             Height = 62f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };
@@ -121,7 +121,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             Padding = new Thickness(12f, 8f),
             Border = Framed(8f),
             Font = _appearanceSubtreeFont,
-            Foreground = Theme.Accent,
+            ForeColor = Theme.Accent,
             Background = Background.FromThemeColor(ThemeColor.Secondary),
         };
         _appearanceStage = stage;
@@ -164,7 +164,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             AutoSize = false,
             Height = 24f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         };
         _appearanceOverrides = overrides;
 
@@ -198,7 +198,7 @@ internal sealed class InheritedAppearancePage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 12f, 0f, 0f),
         });

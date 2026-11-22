@@ -245,7 +245,7 @@ public class ComboBox : Control
         var text = SelectedText;
         var color = !Enabled
             ? Theme.DisabledForeground
-            : text.Length > 0 ? ForeColor : Theme.Placeholder;
+            : text.Length > 0 ? EffectiveForeColor : Theme.Placeholder;
 
         canvas.Save();
         canvas.ClipRect(content);

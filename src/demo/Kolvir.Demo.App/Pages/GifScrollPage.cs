@@ -69,7 +69,7 @@ internal sealed class GifScrollPage : DemoPage
                 AutoSize = false,
                 Height = 22f,
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
             });
         }
 

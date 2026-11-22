@@ -37,7 +37,7 @@ internal sealed class SvgRecolourPage : DemoPage
             Height = 40f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
@@ -75,7 +75,7 @@ internal sealed class SvgRecolourPage : DemoPage
                 Height = 18f,
                 AutoSize = false,
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 TextAlign = ContentAlignment.TopLeft,
             });
 
@@ -102,7 +102,7 @@ internal sealed class SvgRecolourPage : DemoPage
             Height = 22f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 
@@ -138,7 +138,7 @@ internal sealed class SvgRecolourPage : DemoPage
             Height = 18f,
             AutoSize = false,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

@@ -111,7 +111,7 @@ internal sealed class StackPanelPage : DemoPage
             AutoSize = false,
             Height = 20f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
         });
 

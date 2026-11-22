@@ -359,7 +359,7 @@ public sealed class SimpleBorder : Border
                 canvas,
                 owner.Text,
                 owner.EffectiveFont,
-                owner.Enabled ? owner.ForeColor : Theme.DisabledForeground,
+                owner.Enabled ? owner.EffectiveForeColor : Theme.DisabledForeground,
                 shown,
                 ContentAlignment.MiddleLeft);
         }

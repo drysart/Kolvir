@@ -31,7 +31,7 @@ internal sealed class BusyOverlayPage : DemoPage
             Height = 42f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 12f),
         });
@@ -115,7 +115,7 @@ internal sealed class BusyOverlayPage : DemoPage
             Dock = XDock.Top,
             AutoSize = false,
             Height = 24f,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         };
 
@@ -157,7 +157,7 @@ internal sealed class BusyOverlayPage : DemoPage
             Dock = XDock.Fill,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleLeft,
-            ForeColorRole = ThemeColor.Foreground,
+            ForeColor = ThemeColor.Foreground,
         });
 
         // The page opens with the layer up, so the blocked state is what a screenshot of the page
@@ -214,7 +214,7 @@ internal sealed class BusyOverlayPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

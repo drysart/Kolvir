@@ -82,7 +82,7 @@ internal sealed class GifFramesPage : DemoPage
             Bounds = new SKRect(208f, 84f, 468f, 196f),
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         });
 
         card.Controls.Add(row);

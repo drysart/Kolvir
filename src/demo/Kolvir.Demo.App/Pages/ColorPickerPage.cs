@@ -32,7 +32,7 @@ internal sealed class ColorPickerPage : DemoPage
             Height = 42f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
@@ -80,7 +80,7 @@ internal sealed class ColorPickerPage : DemoPage
             AutoSize = false,
             Height = 20f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.Accent,
+            ForeColor = ThemeColor.Accent,
             TextAlign = ContentAlignment.MiddleLeft,
             Selectable = true,
         };
@@ -93,7 +93,7 @@ internal sealed class ColorPickerPage : DemoPage
             AutoSize = false,
             Height = 18f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.BottomLeft,
         });
 

@@ -531,7 +531,7 @@ public class TabControl : Control
 
         var color = !Enabled
             ? Theme.DisabledForeground
-            : selected ? ForeColor : Theme.MutedForeground;
+            : selected ? EffectiveForeColor : Theme.MutedForeground;
 
         TextRenderer.Draw(canvas, _captions[index], EffectiveFont, color, tab, ContentAlignment.MiddleCenter);
 

@@ -113,7 +113,7 @@ internal sealed class ProgressBarsPage : DemoPage
             Height = 34f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
         });
 

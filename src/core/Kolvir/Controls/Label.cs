@@ -58,7 +58,7 @@ public class Label : Control
         }
 
         var content = Geometry.Deflate(rect, Padding);
-        TextRenderer.Draw(canvas, Text, EffectiveFont, ForeColor, content, TextAlign, WrapText);
+        TextRenderer.Draw(canvas, Text, EffectiveFont, EffectiveForeColor, content, TextAlign, WrapText);
     }
 
     /// <summary>

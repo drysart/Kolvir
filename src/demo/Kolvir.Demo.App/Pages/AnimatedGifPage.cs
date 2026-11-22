@@ -73,7 +73,7 @@ internal sealed class AnimatedGifPage : DemoPage
             AutoSize = false,
             Bounds = new SKRect(208f, 84f, 468f, 104f),
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         };
         row.Controls.Add(readout);
 
@@ -86,7 +86,7 @@ internal sealed class AnimatedGifPage : DemoPage
             Bounds = new SKRect(208f, 110f, 468f, 196f),
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         });
 
         card.Controls.Add(row);

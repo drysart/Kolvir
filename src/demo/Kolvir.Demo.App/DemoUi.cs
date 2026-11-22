@@ -344,7 +344,7 @@ public sealed class DemoUi
             AutoSize = false,
             Height = 24f,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(28f, 4f, 28f, 0f),
         };
@@ -439,7 +439,7 @@ public sealed class DemoUi
             Dock = XDock.Fill,
             AutoSize = false,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleLeft,
             Margin = new Thickness(28f, 0f, 12f, 0f),
         };
@@ -486,7 +486,7 @@ public sealed class DemoUi
             // label existed - an invisible docked child takes no space.
             Visible = false,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.MiddleRight,
             Margin = new Thickness(8f, 0f, 0f, 0f),
         };

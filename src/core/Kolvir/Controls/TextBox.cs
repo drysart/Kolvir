@@ -676,7 +676,7 @@ public class TextBox : Control
         using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill };
 
         string text = display;
-        var color = ForeColor;
+        var color = EffectiveForeColor;
         if (text.Length == 0 && !string.IsNullOrEmpty(_placeholderText))
         {
             text = _placeholderText;

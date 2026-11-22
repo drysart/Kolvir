@@ -139,7 +139,7 @@ internal abstract class DemoPage
         AutoSize = false,
         Height = 16f,
         Font = Theme.CaptionFont,
-        ForeColorRole = ThemeColor.MutedForeground,
+        ForeColor = ThemeColor.MutedForeground,
         TextAlign = ContentAlignment.BottomLeft,
         Margin = new Thickness(0f, 0f, 0f, 2f),
     };
@@ -153,7 +153,7 @@ internal abstract class DemoPage
         AutoSize = false,
         Height = 20f,
         Font = Theme.CaptionFont,
-        ForeColorRole = ThemeColor.MutedForeground,
+        ForeColor = ThemeColor.MutedForeground,
         TextAlign = ContentAlignment.BottomLeft,
     };
 
@@ -167,7 +167,7 @@ internal abstract class DemoPage
         Height = 66f,
         WrapText = true,
         Font = Theme.CaptionFont,
-        ForeColorRole = ThemeColor.MutedForeground,
+        ForeColor = ThemeColor.MutedForeground,
         TextAlign = ContentAlignment.TopLeft,
         Margin = new Thickness(0f, 0f, 0f, 4f),
     };

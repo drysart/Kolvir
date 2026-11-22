@@ -36,7 +36,7 @@ internal sealed class SvgIconsPage : DemoPage
             Height = 34f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
@@ -57,7 +57,7 @@ internal sealed class SvgIconsPage : DemoPage
                 Width = 64f,
                 AutoSize = false,
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 TextAlign = ContentAlignment.MiddleLeft,
             });
 

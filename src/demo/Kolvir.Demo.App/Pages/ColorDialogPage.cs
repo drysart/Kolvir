@@ -40,7 +40,7 @@ internal sealed class ColorDialogPage : DemoPage
             Height = 58f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 0f, 0f, 10f),
         });
@@ -63,7 +63,7 @@ internal sealed class ColorDialogPage : DemoPage
             Height = 40f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.Accent,
+            ForeColor = ThemeColor.Accent,
             TextAlign = ContentAlignment.TopLeft,
             Selectable = true,
             Margin = new Thickness(0f, 0f, 0f, 8f),
@@ -103,7 +103,7 @@ internal sealed class ColorDialogPage : DemoPage
             AutoSize = false,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             TextAlign = ContentAlignment.TopLeft,
             Margin = new Thickness(0f, 10f, 0f, 0f),
         });

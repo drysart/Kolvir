@@ -38,7 +38,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
         {
             using var outerFont = Font.FromBytes(TestFont.Data, 17f);
 
-            var outer = new Panel { Dock = DockStyle.Fill, Font = outerFont, Foreground = AncestorColour };
+            var outer = new Panel { Dock = DockStyle.Fill, Font = outerFont, ForeColor = AncestorColour };
             var middle = NoChrome();
             var label = new Label(Sample) { Dock = DockStyle.Top, AutoSize = true };
             var outsider = new Label(Sample) { Dock = DockStyle.Top, AutoSize = true };
@@ -50,13 +50,13 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
 
             Assert.AreSame(outerFont, label.EffectiveFont, "the leaf should inherit the ancestor's font");
             Assert.AreSame(outerFont, middle.EffectiveFont, "an unassigning container should inherit it too");
-            Assert.AreEqual(AncestorColour, label.Foreground, "the leaf should inherit the foreground");
-            Assert.AreEqual(AncestorColour, middle.Foreground);
+            Assert.AreEqual(AncestorColour, label.EffectiveForeColor, "the leaf should inherit the foreground");
+            Assert.AreEqual(AncestorColour, middle.EffectiveForeColor);
 
             Assert.AreSame(Theme.DefaultFont, outsider.EffectiveFont, "a control outside the chain keeps the class default");
             Assert.AreEqual(
                 Theme.ColorOf(ThemeColor.Foreground),
-                outsider.Foreground,
+                outsider.EffectiveForeColor,
                 "and the theme's foreground");
         });
     }
@@ -69,7 +69,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             using var outerFont = Font.FromBytes(TestFont.Data, 17f);
             using var innerFont = Font.FromBytes(TestFont.Data, 11f);
 
-            var outer = new Panel { Dock = DockStyle.Fill, Font = outerFont, Foreground = AncestorColour };
+            var outer = new Panel { Dock = DockStyle.Fill, Font = outerFont, ForeColor = AncestorColour };
             var middle = NoChrome();
             var deep = new Label(Sample) { Dock = DockStyle.Top, AutoSize = true };
             var stayed = new Label(Sample) { Dock = DockStyle.Top, AutoSize = true };
@@ -82,14 +82,14 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             float before = deep.DesiredSize.Width;
 
             middle.Font = innerFont;
-            middle.Foreground = OverrideColour;
+            middle.ForeColor = OverrideColour;
 
             float after = deep.DesiredSize.Width;
 
             Assert.AreSame(innerFont, deep.EffectiveFont, "the nearer assignment should win");
-            Assert.AreEqual(OverrideColour, deep.Foreground);
+            Assert.AreEqual(OverrideColour, deep.EffectiveForeColor);
             Assert.AreSame(outerFont, stayed.EffectiveFont, "a sibling outside the override keeps the outer font");
-            Assert.AreEqual(AncestorColour, stayed.Foreground);
+            Assert.AreEqual(AncestorColour, stayed.EffectiveForeColor);
 
             middle.Font = InheritedValue.Instance;
 
@@ -232,7 +232,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             root.Controls.Add(panel);
 
             var lightSurface = panel.Background.Color;
-            var lightText = label.Foreground;
+            var lightText = label.EffectiveForeColor;
 
             Assert.AreEqual(Theme.Surface, lightSurface, "a panel reads the palette role, not a captured colour");
             Assert.AreEqual(Theme.Foreground, lightText);
@@ -240,7 +240,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             Theme.Palette = Palette.Dark;
 
             var darkSurface = panel.Background.Color;
-            var darkText = label.Foreground;
+            var darkText = label.EffectiveForeColor;
 
             Assert.AreEqual(Theme.Surface, darkSurface, "the same control should follow the dark palette");
             Assert.AreEqual(Theme.Foreground, darkText);

@@ -300,7 +300,7 @@ internal sealed class ObservableListPage : DemoPage
                 Dock = XDock.Fill,
                 AutoSize = false,
                 Font = Theme.CaptionFont,
-                ForeColorRole = ThemeColor.MutedForeground,
+                ForeColor = ThemeColor.MutedForeground,
                 Text = $"{count} item(s) - this line has rendered {_renders} time(s), on the size alone",
             };
         }
@@ -335,7 +335,7 @@ internal sealed class ObservableListPage : DemoPage
                     AutoSize = false,
                     Height = 18f,
                     Font = Theme.CaptionFont,
-                    ForeColorRole = ThemeColor.MutedForeground,
+                    ForeColor = ThemeColor.MutedForeground,
                     Text = $"the list itself has rendered {_renders} time(s), on the size alone",
                     Margin = new Thickness(0f, 2f, 0f, 4f),
                 },

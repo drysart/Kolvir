@@ -80,7 +80,7 @@ internal sealed class DragLifetimePage : DemoPage
             Height = 32f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Margin = new Thickness(0f, 0f, 0f, 6f),
         });
 
@@ -95,7 +95,7 @@ internal sealed class DragLifetimePage : DemoPage
             Height = 48f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
 
@@ -122,7 +122,7 @@ internal sealed class DragLifetimePage : DemoPage
             Height = 64f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Margin = new Thickness(0f, 0f, 0f, 8f),
         });
 
@@ -139,7 +139,7 @@ internal sealed class DragLifetimePage : DemoPage
             Dock = XDock.Fill,
             AutoSize = false,
             TextAlign = ContentAlignment.MiddleCenter,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
         });
 
         // The zone is the measured area; the window itself already takes drops, so a drag that
@@ -170,7 +170,7 @@ internal sealed class DragLifetimePage : DemoPage
             Height = 34f,
             WrapText = true,
             Font = Theme.CaptionFont,
-            ForeColorRole = ThemeColor.MutedForeground,
+            ForeColor = ThemeColor.MutedForeground,
             Margin = new Thickness(0f, 0f, 0f, 4f),
         };
         card.Controls.Add(_dragLifetimeCurrent);
@@ -368,8 +368,8 @@ internal sealed class DragLifetimePage : DemoPage
         if (_dragLifetimeSamples.Count == 0)
         {
             verdict.Text = "Waiting: the reference count must never fall during a drag.";
-            verdict.ClearForeground();
-            verdict.ForeColorRole = ThemeColor.MutedForeground;
+            verdict.ForeColor = InheritedValue.Instance;
+            verdict.ForeColor = ThemeColor.MutedForeground;
         }
         else
         {
@@ -418,20 +418,20 @@ internal sealed class DragLifetimePage : DemoPage
                 $"FAIL - the reference count fell from {_dragLifetimeFallFrom} to {_dragLifetimeFallTo} " +
                 $"at {_dragLifetimeFallEvent ?? "a drag event"}: {sequence}. The count must never fall " +
                 $"while the shell is still using the object, and it did.";
-            verdict.Foreground = new SKColor(0xFFD32F2F);
+            verdict.ForeColor = new SKColor(0xFFD32F2F);
         }
         else
         {
             verdict.Text =
                 $"PASS - the count held at {_dragLifetimeSamples[0]} for the whole drag: {sequence}.";
-            verdict.Foreground = new SKColor(0xFF2E7D32);
+            verdict.ForeColor = new SKColor(0xFF2E7D32);
         }
 #else
         // No sample can arrive where the sampler does not exist, so the page never reaches a verdict
         // here; this repeats the resting line rather than inventing a second one to read.
         verdict.Text = "Waiting: the reference count must never fall during a drag.";
-        verdict.ClearForeground();
-        verdict.ForeColorRole = ThemeColor.MutedForeground;
+        verdict.ForeColor = InheritedValue.Instance;
+        verdict.ForeColor = ThemeColor.MutedForeground;
 #endif
     }
 

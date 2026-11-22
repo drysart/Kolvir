@@ -1053,7 +1053,7 @@ public class RichLabel : Control
             return Theme.ColorOf(role);
         }
 
-        return ForeColor;
+        return EffectiveForeColor;
     }
 
     /// <summary>

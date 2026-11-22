@@ -450,7 +450,7 @@ public class Toast : Control
     {
         bool shifted = BeginSlide(canvas);
 
-        var color = Enabled ? ForeColor : Theme.DisabledForeground;
+        var color = Enabled ? EffectiveForeColor : Theme.DisabledForeground;
         var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
 
         if (content.Width > 0f && content.Height > 0f && !string.IsNullOrEmpty(Text))
