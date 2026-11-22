@@ -1,4 +1,4 @@
-<Project>
+<Project InitialTargets="_KolvirSelectUnionAnalyzer">
 
   <!-- A NuGet consumer imports buildTransitive/*.targets from the package automatically. This
 	   repository's projects reference Kolvir by project instead, and a ProjectReference imports no
@@ -6,6 +6,164 @@
 	   on publishing with AOT, which makes it inert for the library, the backends and the demo. -->
 
   <Import Project="$(MSBuildThisFileDirectory)src\core\Kolvir\buildTransitive\Kolvir.targets" />
+
+  <!-- The union analyzer's own paths. The analyzer ships inside the Kolvir package, but this
+       repository's projects reference Kolvir by project, and a ProjectReference imports no package
+       assets, so the rule below wires the analyzer for them. This file is evaluated only inside
+       this repository; nothing here is packed, so a NuGet consumer gets the analyzer only from
+       analyzers/dotnet/cs in the package. -->
+  <PropertyGroup>
+    <KolvirCoreProjectPath>$(MSBuildThisFileDirectory)src\core\Kolvir\Kolvir.csproj</KolvirCoreProjectPath>
+    <KolvirUnionAnalyzerProject>$(MSBuildThisFileDirectory)src\generators\Kolvir.Analyzers\Kolvir.Analyzers.csproj</KolvirUnionAnalyzerProject>
+  </PropertyGroup>
+
+  <!-- Walks this project's ProjectReference graph and answers whether src/core/Kolvir/Kolvir.csproj
+       is reachable. It reads the project files rather than the evaluated graph because this runs
+       before AssignProjectConfiguration, when a transitive consumer's references have not been
+       resolved yet. Only literal Include paths are supported; anything else is reported so it
+       cannot be silently misclassified. -->
+  <UsingTask TaskName="KolvirProjectReferencesCore"
+             TaskFactory="RoslynCodeTaskFactory"
+             AssemblyFile="$(MSBuildToolsPath)\Microsoft.Build.Tasks.Core.dll">
+    <ParameterGroup>
+      <ProjectPath ParameterType="System.String" Required="true" />
+      <CoreProjectPath ParameterType="System.String" Required="true" />
+      <ReferencesCore ParameterType="System.Boolean" Output="true" />
+      <UnresolvedReferences ParameterType="System.String" Output="true" />
+    </ParameterGroup>
+    <Task>
+      <Using Namespace="System" />
+      <Using Namespace="System.Collections.Generic" />
+      <Using Namespace="System.IO" />
+      <Using Namespace="System.Xml.Linq" />
+      <Code Type="Fragment" Language="cs"><![CDATA[
+        string Normalize(string value)
+        {
+            return Path.GetFullPath(value.Replace('\\', Path.DirectorySeparatorChar)
+                                          .Replace('/', Path.DirectorySeparatorChar));
+        }
+
+        var core = Normalize(CoreProjectPath);
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var pending = new Stack<string>();
+        var unresolved = new List<string>();
+        var found = false;
+
+        pending.Push(Normalize(ProjectPath));
+
+        while (pending.Count > 0)
+        {
+            var path = pending.Pop();
+            if (!seen.Add(path))
+            {
+                continue;
+            }
+
+            if (string.Equals(path, core, StringComparison.OrdinalIgnoreCase))
+            {
+                found = true;
+                break;
+            }
+
+            if (!File.Exists(path))
+            {
+                unresolved.Add(path);
+                continue;
+            }
+
+            XDocument document;
+            try
+            {
+                document = XDocument.Load(path);
+            }
+            catch (Exception)
+            {
+                unresolved.Add(path);
+                continue;
+            }
+
+            foreach (var element in document.Descendants())
+            {
+                if (element.Name.LocalName != "ProjectReference")
+                {
+                    continue;
+                }
+
+                var include = (string)element.Attribute("Include");
+                if (string.IsNullOrWhiteSpace(include))
+                {
+                    continue;
+                }
+
+                if (include.Contains("$("))
+                {
+                    unresolved.Add(include);
+                    continue;
+                }
+
+                var directory = Path.GetDirectoryName(path) ?? string.Empty;
+                pending.Push(Path.GetFullPath(Path.Combine(directory, include.Replace('\\', Path.DirectorySeparatorChar)
+                                                                              .Replace('/', Path.DirectorySeparatorChar))));
+            }
+        }
+
+        ReferencesCore = found;
+        UnresolvedReferences = string.Join(";", unresolved);
+      ]]></Code>
+    </Task>
+  </UsingTask>
+
+  <!-- The reference is added at evaluation time, so it is part of every project's restore graph and
+       survives the CI shape: one restore, then builds and tests that skip restore. A target below
+       only removes it from projects that turn out not to reach core. Adding it in a target instead
+       would make it invisible to restore, which is exactly the failure this avoids.
+
+       A project that already declares an Analyzer item is left alone: the analyzer's own test
+       project uses a plain ProjectReference plus an explicit Analyzer item so it can construct the
+       analyzers in code, and must not get a second, duplicate reference. -->
+  <ItemGroup Condition="'$(MSBuildProjectName)' != 'Kolvir.Analyzers'
+                        and '@(Analyzer)' == ''">
+    <ProjectReference Include="$(KolvirUnionAnalyzerProject)"
+                      OutputItemType="Analyzer"
+                      ReferenceOutputAssembly="false"
+                      PrivateAssets="all" />
+  </ItemGroup>
+
+  <!-- Decides, before the project references are resolved, whether this project consumes Kolvir
+       core. The core project itself is a consumer: it is the analyzer's anchor and the package that
+       ships it. Everything else keeps the reference only when the graph reaches core, so a project
+       that references only an independent feature (Observables) or nothing at all (a generator)
+       is left alone. -->
+  <Target Name="_KolvirSelectUnionAnalyzer"
+          Condition="'$(MSBuildProjectName)' != 'Kolvir.Analyzers'">
+    <KolvirProjectReferencesCore ProjectPath="$(MSBuildProjectFullPath)"
+                                 CoreProjectPath="$(KolvirCoreProjectPath)">
+      <Output TaskParameter="ReferencesCore" PropertyName="_KolvirReferencesCore" />
+      <Output TaskParameter="UnresolvedReferences" PropertyName="_KolvirUnresolvedReferences" />
+    </KolvirProjectReferencesCore>
+
+    <Error Condition="'$(_KolvirUnresolvedReferences)' != ''"
+           Text="$(MSBuildProjectName): the union analyzer wiring could not classify these ProjectReference paths: $(_KolvirUnresolvedReferences). Use a literal relative path for a ProjectReference, because the analyzer rule has to follow the graph before restore and build resolve it." />
+
+    <ItemGroup Condition="'$(_KolvirReferencesCore)' != 'true' and '$(MSBuildProjectName)' != 'Kolvir'">
+      <ProjectReference Remove="$(KolvirUnionAnalyzerProject)" />
+    </ItemGroup>
+  </Target>
+
+  <!-- The enforcement, not an audit: any project that reaches core must hand the compiler the
+       analyzer. A project added later is detected by the same walk and fails here if the wiring
+       somehow does not arrive. The analyzer's own test project has an explicit Analyzer item, so
+       this check passes for the project that exists to test the analyzer. -->
+  <Target Name="_KolvirVerifyUnionAnalyzer"
+          AfterTargets="ResolveProjectReferences"
+          Condition="'$(_KolvirReferencesCore)' == 'true' or '$(MSBuildProjectName)' == 'Kolvir'">
+    <ItemGroup>
+      <_KolvirWiredAnalyzer Include="@(Analyzer)"
+                            Condition="'%(Filename)%(Extension)' == 'Kolvir.Analyzers.dll'" />
+    </ItemGroup>
+    <Error Condition="'@(_KolvirWiredAnalyzer)' == ''"
+           Text="$(MSBuildProjectName) references Kolvir core but the KOLVIR union analyzer is not wired into the compiler. Directory.Build.targets should have added it; do not add a per-project ProjectReference, fix the central rule instead." />
+  </Target>
 
   <!-- A package carries one lib/ folder and one dependency group per platform, and NuGet falls back to
        the nearest one, so a package built for the host alone installs, compiles and then ships another

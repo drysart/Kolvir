@@ -96,6 +96,7 @@ jobs:
           dotnet restore tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.Observables.Tests/Kolvir.Feature.Observables.Tests.csproj --nologo
           dotnet restore tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --nologo
+          dotnet restore tests/generators/Kolvir.Analyzers.Tests/Kolvir.Analyzers.Tests.csproj --nologo
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -239,6 +240,15 @@ jobs:
           dotnet test tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --no-restore --nologo \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=virtualdom-generator.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      - name: Test the union analyzers
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test tests/generators/Kolvir.Analyzers.Tests/Kolvir.Analyzers.Tests.csproj --no-restore --nologo \
+            --logger "trx;LogFileName=analyzers.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

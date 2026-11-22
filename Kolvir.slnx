@@ -14,6 +14,7 @@
     <Project Path="src/core/Kolvir/Kolvir.csproj" />
   </Folder>
   <Folder Name="/src/generators/">
+    <Project Path="src/generators/Kolvir.Analyzers/Kolvir.Analyzers.csproj" />
     <Project Path="src/generators/Kolvir.Feature.VirtualDom.Generators/Kolvir.Feature.VirtualDom.Generators.csproj" />
   </Folder>
   <Folder Name="/src/demo/">
@@ -42,6 +43,7 @@
     <Project Path="tests/backends/Kolvir.Backend.Win32.Tests/Kolvir.Backend.Win32.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/generators/">
+    <Project Path="tests/generators/Kolvir.Analyzers.Tests/Kolvir.Analyzers.Tests.csproj" />
     <Project Path="tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/core/">

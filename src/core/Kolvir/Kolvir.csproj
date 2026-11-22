@@ -24,4 +24,28 @@
     <None Include="buildTransitive\Kolvir.targets" Pack="true" PackagePath="buildTransitive\" />
   </ItemGroup>
 
+  <!-- The union analyzer. It is not a lib/ asset and the library does not reference it: it is
+       packed under analyzers/dotnet/cs, the folder NuGet and the compiler look in, so a package
+       consumer gets KOLVIR0001-0003 and 0005 with no opt-in. Directory.Build.targets adds the
+       matching ProjectReference for this repository's own builds (including this project, which
+       keeps it), so dotnet pack builds the DLL before GenerateNuspec. -->
+  <PropertyGroup>
+    <KolvirUnionAnalyzerDll>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Analyzers\bin\$(Configuration)\netstandard2.0\Kolvir.Analyzers.dll</KolvirUnionAnalyzerDll>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <None Include="$(KolvirUnionAnalyzerDll)"
+          Pack="true"
+          PackagePath="analyzers/dotnet/cs"
+          Visible="false" />
+  </ItemGroup>
+
+  <!-- A package without the analyzer installs, compiles and silently loses every union
+       diagnostic. The pack fails here instead, the same way the platform guard in
+       Directory.Build.targets refuses a package that is missing a platform. -->
+  <Target Name="KolvirRequireUnionAnalyzerToPack" BeforeTargets="GenerateNuspec">
+    <Error Condition="!Exists('$(KolvirUnionAnalyzerDll)')"
+           Text="The union analyzer was not built at '$(KolvirUnionAnalyzerDll)', so the package would ship without KOLVIR0001-0003 and 0005. Do not pack with --no-build; build the analyzer through the central reference in Directory.Build.targets." />
+  </Target>
+
 </Project>

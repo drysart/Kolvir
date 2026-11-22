@@ -1,0 +1,43 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The union diagnostics: the mistakes around Kolvir.Union<...> that the compiler cannot see.
+       It is a project of its own and lives outside `src/features/*` because the pack job globs that
+       tree; its output is packed into the Kolvir package under `analyzers/dotnet/cs`, which is how
+       an analyzer reaches a consumer.
+
+       netstandard2.0 because that is what the compiler loads analyzers from. The language features
+       are modern, but the BCL is 2.0, so nothing here can use the runtime's types. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <LangVersion>latest</LangVersion>
+    <RootNamespace>Kolvir.Analyzers</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <IsPackable>false</IsPackable>
+    <IsRoslynComponent>true</IsRoslynComponent>
+    <EnforceExtendedAnalyzerRules>true</EnforceExtendedAnalyzerRules>
+    <!-- Build-time only: it runs inside the compiler's own host, so AOT analysis does not apply. -->
+    <IsAotCompatible>false</IsAotCompatible>
+
+    <!-- A solution-wide `dotnet publish -p:PublishAot=true` passes PublishAot as a global
+         property to every project in the graph, including this netstandard2.0 one, which cannot
+         satisfy it (NETSDK1207). TreatAsLocalProperty lets the values below win for this project
+         only, so an application's AOT publish builds its analyzer without trying to publish one. -->
+    <TreatAsLocalProperty>PublishAot;RuntimeIdentifier;SelfContained</TreatAsLocalProperty>
+    <PublishAot>false</PublishAot>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- An analyzer must not ship its own copy of the compiler: it loads into the one the SDK is
+         running, so this is compile-time only. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The release-tracking analyzer that comes with Microsoft.CodeAnalysis.CSharp wants these two,
+         found by file name, so that a rule's identifier stops being editable once it has shipped. -->
+    <AdditionalFiles Include="AnalyzerReleases.Shipped.md" />
+    <AdditionalFiles Include="AnalyzerReleases.Unshipped.md" />
+  </ItemGroup>
+
+</Project>

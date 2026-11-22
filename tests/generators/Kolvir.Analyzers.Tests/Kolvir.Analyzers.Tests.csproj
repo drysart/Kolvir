@@ -1,0 +1,49 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The analyzer suite. It references the analyzer as a plain assembly rather than as an
+       analyzer, because these tests run the analyzers by hand over a compilation they build: that
+       is the only way to assert on what each rule reports and, just as important, what it leaves
+       alone.
+
+       It references Kolvir for the metadata a test compilation needs, and the analyzer project
+       again as an analyzer (with the plain reference above providing build order), so this project
+       is itself checked by the central wiring. The guard in Directory.Build.targets looks at
+       @(Analyzer), so that explicit item is what it sees. -->
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Analyzers.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+    <!-- The compiler the analyzers are written against, so the test hosts the same Roslyn. -->
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- As an assembly, so the tests can construct the analyzers themselves. -->
+    <ProjectReference Include="..\..\..\src\generators\Kolvir.Analyzers\Kolvir.Analyzers.csproj" />
+    <!-- For the metadata a test compilation needs: the real Union, InheritedValue and friends. -->
+    <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The analyzer is applied to this project's own compilation through this item. The plain
+         ProjectReference above builds it first; the central Directory.Build.targets rule sees this
+         item and does not add a second, duplicate reference. -->
+    <Analyzer Include="..\..\..\src\generators\Kolvir.Analyzers\bin\$(Configuration)\netstandard2.0\Kolvir.Analyzers.dll" />
+  </ItemGroup>
+
+</Project>
