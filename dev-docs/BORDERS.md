@@ -17,7 +17,7 @@ deliberately still not here.
 
 ## 1. Where it belongs: core, and why not a package
 
-`Kolvir` itself, beside `Background` and `Thickness`. Every control has the property, so nothing here
+`Kolvir` itself, beside `BackColor` and `Thickness`. Every control has the property, so nothing here
 can be trimmed away and no package split helps; this is the same accepted seam cost as
 `FEATURE-COST-POLICY.md` section 7 describes, not a feature.
 
@@ -28,7 +28,7 @@ The price, stated plainly:
   `Opaque`) and two per layout (the insets, once in `Measure` and once in `ContentRect`);
 - an `SKPath` allocation only when a border actually narrows the clip, never on the plain path.
 
-An abstract **class** rather than a `Background`-style struct, because polymorphism is the whole point:
+An abstract **class** rather than a value-type discriminant, because polymorphism is the whole point:
 a dashed border, a 9-slice image border or a group-box frame cannot be a discriminant plus four fields.
 Immutability is then a contract rather than a property of the type, which is why section 3 spends
 words on it.
@@ -149,7 +149,7 @@ A `Border` is immutable by contract: its properties are read-only and change is 
 a different instance to `Control.Border`. Mutability was rejected because a border has no way to tell
 the controls that use it that it changed, and adding a notification channel means subscription
 tokens, unsubscription on reassign and dispose, and every control paying for a mechanism most never
-use. This also matches how `Thickness` and `Background` are used, and it is what makes a single shared
+use. This also matches how `Thickness` and `BackColor` are used, and it is what makes a single shared
 `static readonly` instance safe for a control class's own border.
 
 The cost is that a state change assigns rather than mutates, which is why `Control.Border`'s setter
@@ -319,9 +319,8 @@ still reads as one number. `Border.CornerRadius` survives as `Corners.Maximum` f
 genuinely need one number — a focus ring, `Painter.Fill` — and the per-corner overloads of those take
 `Corners`.
 
-Colour is a fixed `SKColor` or a `ThemeColor` role, mirroring `Background.FromColor` and
-`Background.FromThemeColor`; the role is resolved while painting, so a palette swap recolours live
-controls with no rebuild.
+Colour is a fixed `SKColor` or a `ThemeColor` role, the same pair `Control.BackColor` accepts; the
+role is resolved while painting, so a palette swap recolours live controls with no rebuild.
 
 `Paint` resolves the state in one documented order — **disabled > pressed > active > focused >
 hovered > resting** — which is what the built-in controls already implement by hand, differing only in

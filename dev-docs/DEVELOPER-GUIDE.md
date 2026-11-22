@@ -116,10 +116,10 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`Foreground`/`Background` inherited down the tree, focus, mouse/keyboard events; any control can host children |
-| `Background` | `BackColor` | The background state: inherit, paint nothing, or a colour or palette role - three states, because "no value" and "draw nothing" are not the same thing |
+| `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`ForeColor`/`BackColor` inherited down the tree, with `EffectiveFont`/`EffectiveForeColor`/`EffectiveBackColor` giving the resolved value, focus, mouse/keyboard events; any control can host children |
+| `BackColor` | `BackColor` | The background a control assigned: a colour, a palette role, or inherit; a transparent class default paints nothing |
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
-| `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `Background` and `Border` for a card |
+| `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `BackColor` and `Border` for a card |
 | `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
 | `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, min/max sizes, and which of them a resize keeps |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
@@ -586,7 +586,7 @@ var stack = new StackPanel
 {
     Dock = DockStyle.Fill,
     Spacing = 8f,
-    Background = Background.FromThemeColor(ThemeColor.Surface),   // a stack draws no frame of its own by default
+    BackColor = ThemeColor.Surface,   // a stack draws no frame of its own by default
     Padding = new Thickness(11f),                                 // eleven: the frame takes one more
     Border = SimpleBorder.Thin,
 };
@@ -840,7 +840,7 @@ thousand items cost one control.
 | `GetSelected(i)`, `SetSelected(i, bool)`, `ClearSelected()`, `SelectAll()` | The per-row form of the same thing |
 | `GetItemRect(i)`, `IndexFromPoint(point)` | Row geometry, in control coordinates; `IndexFromPoint` returns the nearest row and `-1` above the first |
 | `ItemHeight` | Row height; follows `Font.LineHeight` until assigned explicitly |
-| `Font` | Optional override of `Theme.DefaultFont` |
+| `Font` | Optional override of the inherited font; `EffectiveFont` is what the rows are measured with |
 | `TopIndex` | The first row at the top of the viewport, clamped to what can actually scroll |
 | `HorizontalScroll`, `VerticalScroll` | The same `ScrollStyle` values a panel takes; vertical defaults to `Automatic`, horizontal to `None` |
 | `ScrollBarThickness` | The gutter width, 16 px by default |
@@ -1402,7 +1402,7 @@ it; the other pages stay in `Controls` but are hidden, so their state survives a
 | --- | --- |
 | `TabPages` | The pages, in strip order (the same collection as `Controls`) |
 | `SelectedIndex`, `SelectedTab` | The visible page; `-1` selects nothing |
-| `Font` | The tab captions; the strip measures itself from it |
+| `Font` | The tab captions; the strip measures itself from `EffectiveFont` |
 | `AddSelectedIndexChangedHandler` | Called with the tab control when the selection changes |
 
 The strip scrolls with the wheel when the tabs do not fit, and the keyboard works the way it does
@@ -1968,7 +1968,7 @@ spell-checker style annotations, described in [Text box spans](#text-box-spans).
 | `ReadOnly` | Selection and copy still work; typing, paste, cut and delete are blocked |
 | `IsPassword`, `PasswordChar` | Draws one mask glyph per character (`'\u2022'` by default) |
 | `PlaceholderText` | Muted text shown while the field is empty |
-| `Font` | Optional override of `Theme.DefaultFont` |
+| `Font` | Optional override of the inherited font; `EffectiveFont` is what the rows are measured with |
 | `Copy()`, `Cut()`, `Paste()`, `InsertText(text)` | Programmatic edit operations |
 
 Keyboard: `Left`/`Right` move by character (`Ctrl` moves by word), `Home`/`End` jump to the
@@ -2580,7 +2580,7 @@ var card = new Panel
 {
     Dock = DockStyle.Fill,
     Padding = new Thickness(11f),           // one less than the gutter, because the frame takes one
-    Background = Background.FromThemeColor(ThemeColor.Surface),
+    BackColor = ThemeColor.Surface,
     Border = SimpleBorder.Thin.WithCornerRadius(8f),
 };
 ```
@@ -2595,7 +2595,7 @@ var card = new Panel
 | `Paint(canvas, bounds, control)` | Draws the frame, inside the bounds and after the children, so it covers the edge of whatever the content ran into |
 
 A border is immutable, so a control class keeps one in a `private static readonly` field and assigns
-it in its constructor; a change is a different instance, the way `Padding` and `Background` work. The
+it in its constructor; a change is a different instance, the way `Padding` and `BackColor` work. The
 setter repaints, and lays out as well when the new border takes a different amount of room.
 
 `SimpleBorder` carries a thickness per edge and a radius per corner, and gives the frame a colour per
@@ -2679,15 +2679,17 @@ var accent = Theme.ColorOf(ThemeColor.Accent);
 e.g. `Theme.Accent = ...`) runs the `Theme.AddChangedHandler` handlers and the next frame
 picks it up: controls never snapshot a colour at construction time.
 
-Controls resolve their colours while painting - through the inherited `Background`/`Foreground`
+Controls resolve their colours while painting - through the inherited `BackColor`/`ForeColor`
 when the control itself assigns nothing - so a palette change re-applies nothing:
 
 | Member | Meaning |
 | --- | --- |
-| `Background` | The background state - inherited from an ancestor, painted from a colour or palette role, or nothing at all; see [Inherited appearance](#inherited-appearance) |
-| `BackColor` | The WinForms name for `Background`: the effective colour, or `null` when nothing is painted |
-| `DefaultBackground` | Override to return the palette role a control of this class paints - the base control paints nothing |
-| `ForeColorRole` | The role used while neither this control nor an ancestor assigns a `Foreground` |
+| `BackColor` | The background assigned here: a colour, a palette role, or `InheritedValue`; see [Inherited appearance](#inherited-appearance) |
+| `EffectiveBackColor` | The resolved background colour; `SKColors.Transparent` means nothing is painted |
+| `DefaultBackColor` | Override to return the palette role a control of this class paints - the base control paints nothing |
+| `ForeColor` | The text colour assigned here: a colour, a palette role, or `InheritedValue` |
+| `EffectiveForeColor` | The resolved text colour |
+| `DefaultForeColor` | Override to return what a control of this class draws its text in when nothing else answers |
 | `Border` | The frame - see [Borders](#borders) |
 | `Opacity` | Fades the control and everything inside it as one group, 0 to 1 |
 | `Filter` | A blur, a tint or a chain of them, painted over the control and its subtree - see [Filters](#filters) |
@@ -2714,55 +2716,69 @@ palette change updates the chrome too.
 
 ### Inherited appearance
 
-`Font`, `Foreground` and `Background` are properties of `Control`, and they are inherited down
-the tree the way WinForms' `Font`, `ForeColor` and `BackColor` are. Whatever a control assigns
-answers for itself and for everything inside it; a control that assigns none asks its parent, and a
-tree that assigns none falls back to the class default, which is where `Theme` supplies the
-role.
+`Font`, `ForeColor` and `BackColor` are properties of `Control`, and they are inherited down the
+tree the way WinForms' `Font`, `ForeColor` and `BackColor` are. Each one is a union: it holds the
+value that was assigned - a font, a literal colour, a palette role - or `InheritedValue.Instance`,
+which asks the parent. Whatever a control assigns answers for itself and for everything inside it;
+a control that assigns none asks its parent, and a tree that assigns none falls back to the class
+default, which is where `Theme` supplies the value.
 
 ```csharp
-var group = new Panel { Font = title, Foreground = Theme.Accent, Background = Background.FromThemeColor(ThemeColor.Secondary) };
+var group = new Panel { Font = title, ForeColor = Theme.Accent, BackColor = ThemeColor.Secondary };
 
 group.Controls.Add(new Label("24 pt, accent, on the secondary colour"));       // inherits all three
 group.Controls.Add(new Label("has its own") { Font = small });                 // overrides the font only
 group.Controls.Add(new TextBox());                                             // paints its own input fill
 ```
 
-The precedence is the one WPF uses for an inherited property: **a value assigned here, then the
-nearest ancestor that assigns one, then this control's class default.** `DefaultFont` and
-`DefaultBackground` are the class defaults, and `Theme` is what they contain:
+The property reports the assignment; `Effective<Property>` reports the answer, which is what the
+control measures and paints with. The precedence is the one WPF uses for an inherited property:
+**a value assigned here, then the nearest ancestor that assigns one, then this control's class
+default.** `DefaultFont`, `DefaultForeColor` and `DefaultBackColor` are the class defaults, and
+`Theme` is what they contain:
 
 | Member | Meaning |
 | --- | --- |
-| `Font` | The effective font: assigned here, else the nearest ancestor's, else `DefaultFont` |
+| `Font` | The font assigned here, or `InheritedValue.Instance` |
+| `EffectiveFont` | The resolved font: assigned here, else the nearest ancestor's, else `DefaultFont` |
 | `DefaultFont` | The font a control of this class draws with when nothing else answers; the base control returns `Theme.DefaultFont`, a button and a group box `EmphasizedFont` |
-| `ClearFont()` | Forget the font assigned here, so the control inherits one again |
-| `Foreground` (`ForeColor`) | The effective text colour, inherited the same way; `ForeColorRole` is the class default and is *not* inherited |
-| `Background` | An `Background`: `Inherit`, `None`, or a colour or palette role |
-| `DefaultBackground` | The role this class paints when nothing else answers; `None` - the base control's answer - means it paints nothing |
-| `BackColor` | The WinForms name for `Background`: the effective colour, or `null` when nothing is painted |
-| `ClearBackground()`, `ClearForeground()` | Back to inheritance |
+| `ForeColor` | The text colour assigned here: an `SKColor`, a `ThemeColor` role, or `InheritedValue.Instance` |
+| `EffectiveForeColor` | The resolved text colour, as an `SKColor`; a role is read from the current palette |
+| `DefaultForeColor` | What a control of this class draws its text in when nothing else answers; the base is `ThemeColor.Foreground`, a group box `MutedForeground` |
+| `BackColor` | The background assigned here: an `SKColor`, a `ThemeColor` role, or `InheritedValue.Instance` |
+| `EffectiveBackColor` | The resolved background colour, as an `SKColor`; `SKColors.Transparent` means nothing is painted |
+| `DefaultBackColor` | What a control of this class paints when nothing else answers; the base is `SKColors.Transparent`, a field `InputBackground`, a tab control or a panel that looks like a card `Surface` |
 
-Only an assigned value is inherited; a class default is not. That is what keeps today's look intact:
-a label inside a group box stays at `DefaultFont` rather than picking up the caption's
-`EmphasizedFont`, and a label under a panel that sets `ForeColorRole` keeps its own role rather than
-inheriting the panel's. Assign a `Foreground` when a whole subtree really should share one.
+Assigning `InheritedValue.Instance` is how a control goes back to inheriting; there are no
+`ClearFont`, `ClearForeground` or `ClearBackground` methods:
 
-**`Background` has three states, and the difference between the last two is the point.**
+```csharp
+panel.Font = InheritedValue.Instance;
+panel.ForeColor = InheritedValue.Instance;
+panel.BackColor = InheritedValue.Instance;
+```
 
-* `Background.Inherit` - the initial value: ask the parent.
-* `Background.None` - paint nothing here.
-* a colour, or `Background.FromThemeColor(role)` - paint that, here and for everything below.
+Only an assigned value is inherited; a class default is not. That is what keeps today's look
+intact: a label inside a group box stays at `DefaultFont` rather than picking up the caption's
+`EmphasizedFont`, and the group box's children keep `DefaultForeColor` rather than the muted
+caption role. A role assigned to a container does inherit, the same as a literal colour, so
+`panel.ForeColor = ThemeColor.MutedForeground` mutes everything under it.
 
-A nullable colour would have to mean both "no value" and "draw nothing", and then a label inside a
-filled panel would silently start painting a box of its own - with its own corners and opacity -
-the first time a panel got a colour. So a control whose class default is `None` (a label, a toggle,
-a plain panel - anything that draws no chrome) keeps painting nothing wherever it sits, and a
-control that does paint (a field, a tab control, an expander) takes the nearest ancestor's assigned
-colour instead of its own default.
-Only a colour is inherited, not `None`: a layout container that paints nothing is the ordinary
-parent of a card that does, and suppressing what is inside it would take the card away with the
-container. A control that must not be filled assigns `None` to itself.
+**Transparent is how "paint nothing" is spelled, and where it comes from matters.**
+
+* `BackColor = InheritedValue.Instance` - the initial value: ask the parent.
+* `BackColor = SKColors.Transparent` - paint nothing here, and answer transparent to descendants
+  that inherit from this control.
+* `DefaultBackColor = SKColors.Transparent` - this class paints nothing wherever it sits, and the
+  walk stops at the class default rather than reaching an ancestor's colour.
+
+The last one is what stops a label inside a filled panel from painting a box of its own - with its
+own corners and opacity - the first time a panel gets a colour. A class that does paint (a field, a
+tab control, an expander, a card) takes the nearest ancestor's assigned colour instead of its own
+default, which is WinForms' precedence of a local value over an inherited one over a default. When
+a control really must not be filled, leave its `BackColor` unassigned if its class already paints
+nothing; assign `SKColors.Transparent` only when the class would otherwise paint, and remember that
+assigned transparent is inherited.
 
 **Nothing is captured when a control is built.** The effective font is resolved when text is
 measured and painted, never in a constructor, so a control created before the theme was configured
@@ -2974,10 +2990,10 @@ var choice = window.Application.Dialogs.PickFont(
     new FontDialogOptions
     {
         Title = "Choose a font",
-        InitialFamilyName = preview.Font.FamilyName,
-        InitialSize = preview.Font.Size,
-        InitialWeight = preview.Font.Weight,
-        InitialItalic = preview.Font.Italic,
+        InitialFamilyName = preview.EffectiveFont.FamilyName,
+        InitialSize = preview.EffectiveFont.Size,
+        InitialWeight = preview.EffectiveFont.Weight,
+        InitialItalic = preview.EffectiveFont.Italic,
         MinimumSize = 6f,
         MaximumSize = 48f,
     },
@@ -4695,7 +4711,7 @@ A property a node does not assign is one it says nothing about. That is not the 
 | --- | --- |
 | `new VLabel { }` | whatever its constructor gave it |
 | `new VLabel { Text = "a" }` | `"a"` |
-| `new VLabel { Font = null }` | `null` - only where the control's property is nullable |
+| `new VLabel { Filter = null }` | no filter - `null` is a value the control's property can hold |
 
 Dropping a property between renders restores it to what the control's constructor left, not to
 `default(T)`, because those differ: a `Label`'s text starts as an empty string and its `Name` starts

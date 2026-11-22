@@ -39,8 +39,9 @@ a reviewer should ask for each one rather than infer it.
   - the constructor sets `TabStop`, `Cursor`, `Padding` and `MinimumSize`; anything that measures its
 	own text also sets `AutoSize`;
   - it never captures a font or a colour when it is constructed: a control that draws with another
-	role overrides `DefaultFont` / `DefaultBackground` (`EmphasizedFont` for a button, the input fill
-	for a field), and the effective appearance is read when text is measured and painted - see
+	role overrides `DefaultFont` / `DefaultForeColor` / `DefaultBackColor` (`EmphasizedFont` for a
+	button, the input fill for a field), and the effective appearance is read when text is measured
+	and painted - see
 	[Inherited appearance](DEVELOPER-GUIDE.md#inherited-appearance);
   - there is a `Xxx(string text)` convenience constructor where text is meaningful;
   - `MeasureContent` answers `AutoSize`, and the paint path uses `Painter.Fill`,

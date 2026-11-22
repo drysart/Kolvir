@@ -1850,7 +1850,7 @@ public class Control : IDisposable
     /// </summary>
     /// <remarks>
     /// It is an observation about what the control paints, not a switch: it follows
-    /// <see cref="BackColor"/>, <see cref="Border"/>, <see cref="Opacity"/> and <see cref="Filter"/>,
+    /// <see cref="EffectiveBackColor"/>, <see cref="Border"/>, <see cref="Opacity"/> and <see cref="Filter"/>,
     /// so a control whose background is transparent, whose border rounds its corners, which is faded
     /// or which is filtered is reported as not opaque without anything having to be told. A filter is
     /// in that list because even one that only recolours can leave a pixel translucent, and a blur
@@ -3081,7 +3081,7 @@ public class Control : IDisposable
 
     /// <summary>
     /// Paints the control's background into <paramref name="rect"/>, the client area in the
-    /// control's own coordinates. The default fills it with <see cref="BackColor"/>, rounded by the
+    /// control's own coordinates. The default fills it with <see cref="EffectiveBackColor"/>, rounded by the
     /// border's corner radius, and paints nothing when no background is resolved.
     /// </summary>
     /// <param name="canvas">The canvas, already translated to the control's origin and clipped.</param>
