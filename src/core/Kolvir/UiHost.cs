@@ -1616,7 +1616,7 @@ public sealed class UiHost
         ref Control? best,
         ref float bestDistance)
     {
-        if (control is null || !control.Visible || !control.Enabled)
+        if (control is null || !control.Visible || !control.EffectiveEnabled)
         {
             return;
         }

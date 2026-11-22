@@ -554,7 +554,7 @@ public class ListView : VirtualList
     /// </summary>
     private int ResizeColumnFromPoint(SKPoint point)
     {
-        if (!_allowColumnResize || !Enabled || _view != View.Details || !Geometry.Contains(HeaderBand, point))
+        if (!_allowColumnResize || !EffectiveEnabled || _view != View.Details || !Geometry.Contains(HeaderBand, point))
         {
             return -1;
         }
@@ -919,7 +919,7 @@ public class ListView : VirtualList
             return;
         }
 
-        var back = !Enabled
+        var back = !EffectiveEnabled
             ? Theme.DisabledBackground
             : _hotColumn >= 0 ? Theme.SecondaryHover : Theme.Secondary;
 
@@ -939,7 +939,7 @@ public class ListView : VirtualList
             }
 
             bool sorted = index == _sortColumn && _sortOrder != SortOrder.None;
-            var color = !Enabled
+            var color = !EffectiveEnabled
                 ? Theme.DisabledForeground
                 : sorted ? Theme.Foreground : Theme.MutedForeground;
 

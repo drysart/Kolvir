@@ -167,7 +167,7 @@ public sealed class ColorDialog
         // it back by itself, so the caller would be left with a window that answers to nothing
         // until it was clicked. Remember where it was and give it back on the way out.
         var ownerFocus = ownerContent is null ? null : FindFocused(ownerContent);
-        var ownerWasEnabled = ownerContent?.Enabled ?? true;
+        var ownerWasEnabled = ownerContent?.EffectiveEnabled ?? true;
         if (ownerContent is not null)
         {
             ownerContent.Enabled = false;

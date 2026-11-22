@@ -597,7 +597,7 @@ public class ToolStrip : Control
                 continue;
             }
 
-            bool enabled = Enabled && entry.Item.Enabled;
+            bool enabled = EffectiveEnabled && entry.Item.Enabled;
             bool hot = ReferenceEquals(entry.Item, _hot);
             bool pressed = ReferenceEquals(entry.Item, _pressed) || (_keyPressed && ReferenceEquals(entry.Item, _selected));
             entry.Item.Paint(canvas, itemRect, enabled, hot, pressed);
@@ -721,7 +721,7 @@ public class ToolStrip : Control
         _hot = null;
         _pressed = null;
         _keyPressed = false;
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _selected = null;
         }
@@ -733,7 +733,7 @@ public class ToolStrip : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             return;
         }
@@ -783,7 +783,7 @@ public class ToolStrip : Control
         _keyPressed = false;
         var selected = _selected;
         Invalidate();
-        if (selected is not null && Enabled && selected.Enabled)
+        if (selected is not null && EffectiveEnabled && selected.Enabled)
         {
             selected.Activate();
         }

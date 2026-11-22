@@ -486,7 +486,7 @@ public class Panel : Control
         // where the two bars meet) must not reach them even though it is inside the client area.
         if (!Geometry.Contains(ContentViewport, local))
         {
-            return Enabled ? this : null;
+            return EffectiveEnabled ? this : null;
         }
 
         // Everything above is panel space, including both bars. The children live in the zoomed
@@ -495,7 +495,7 @@ public class Panel : Control
             ? local
             : new SKPoint(local.X / _scaleFactor, local.Y / _scaleFactor);
 
-        return HitTestChildren(contentPoint) ?? (Enabled ? this : null);
+        return HitTestChildren(contentPoint) ?? (EffectiveEnabled ? this : null);
     }
 
     /// <summary>

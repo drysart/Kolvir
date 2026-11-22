@@ -208,7 +208,7 @@ public class NumericUpDown : TextBox
     /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button != MouseButtons.Left || !Enabled)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled)
         {
             base.OnMouseDown(e);
             return;
@@ -300,7 +300,7 @@ public class NumericUpDown : TextBox
     {
         base.OnMouseWheel(e);
 
-        if (e.Handled || !Enabled || e.Delta == 0f)
+        if (e.Handled || !EffectiveEnabled || e.Delta == 0f)
         {
             return;
         }
@@ -316,7 +316,7 @@ public class NumericUpDown : TextBox
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (e.Handled || !Enabled)
+        if (e.Handled || !EffectiveEnabled)
         {
             return;
         }
@@ -414,7 +414,7 @@ public class NumericUpDown : TextBox
     /// <summary>Clears the spinner's hover and press state, and stops the repeat, when disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _pressedButton = 0;
             _hotButton = 0;
@@ -601,7 +601,7 @@ public class NumericUpDown : TextBox
             return;
         }
 
-        Painter.Fill(canvas, spinner, Enabled ? Theme.Secondary : Theme.DisabledBackground, 3f);
+        Painter.Fill(canvas, spinner, EffectiveEnabled ? Theme.Secondary : Theme.DisabledBackground, 3f);
 
         float mid = spinner.MidY;
         var up = new SKRect(spinner.Left, spinner.Top, spinner.Right, mid);
@@ -610,14 +610,14 @@ public class NumericUpDown : TextBox
         PaintButton(canvas, up, _pressedButton == 1, _hotButton == 1);
         PaintButton(canvas, down, _pressedButton == 2, _hotButton == 2);
 
-        var glyph = Enabled ? Theme.MutedForeground : Theme.DisabledForeground;
+        var glyph = EffectiveEnabled ? Theme.MutedForeground : Theme.DisabledForeground;
         PaintChevron(canvas, up, pointingUp: true, glyph);
         PaintChevron(canvas, down, pointingUp: false, glyph);
     }
 
     private void PaintButton(SKCanvas canvas, SKRect rect, bool pressed, bool hot)
     {
-        if (!Enabled || (!pressed && !hot))
+        if (!EffectiveEnabled || (!pressed && !hot))
         {
             return;
         }

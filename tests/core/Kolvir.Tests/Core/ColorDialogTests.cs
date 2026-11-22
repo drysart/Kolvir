@@ -172,13 +172,13 @@ public sealed class ColorDialogTests : HeadlessTestBase
 
         dialog.Window.AddShownHandler(_ =>
         {
-            sawBlocked = !ownerContent.Enabled;
+            sawBlocked = !ownerContent.EffectiveEnabled;
             Click(dialog.Window, dialog.CancelButton);
         });
 
         Assert.IsNull(dialog.Show(owner));
         Assert.IsTrue(sawBlocked, "the owner's content is disabled for the modal session");
-        Assert.IsTrue(ownerContent.Enabled, "and is enabled again once the dialog closes");
+        Assert.IsTrue(ownerContent.EffectiveEnabled, "and is enabled again once the dialog closes");
     }
 
     [TestMethod]
@@ -310,7 +310,7 @@ public sealed class ColorDialogTests : HeadlessTestBase
         // on macOS before this.
         Assert.IsFalse(focusedWhileOpen, "the owner's button loses the keyboard while the dialog is open");
         Assert.IsTrue(button.IsFocused, "and has it back once the dialog closes");
-        Assert.IsTrue(button.Enabled, "with the owner's content enabled again");
+        Assert.IsTrue(button.EffectiveEnabled, "with the owner's content enabled again");
     }
 
     [TestMethod]

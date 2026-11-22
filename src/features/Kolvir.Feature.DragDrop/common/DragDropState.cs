@@ -41,7 +41,7 @@ internal sealed class DragDropState
     /// <param name="e">The event data.</param>
     public void RaiseDragEnter(Control control, DragEventArgs e)
     {
-        if (control.Enabled)
+        if (control.EffectiveEnabled)
         {
             DragEnter?.Invoke(control, e);
         }
@@ -52,7 +52,7 @@ internal sealed class DragDropState
     /// <param name="e">The event data.</param>
     public void RaiseDragOver(Control control, DragEventArgs e)
     {
-        if (control.Enabled)
+        if (control.EffectiveEnabled)
         {
             DragOver?.Invoke(control, e);
         }
@@ -62,7 +62,7 @@ internal sealed class DragDropState
     /// <param name="control">The control the drag left.</param>
     public void RaiseDragLeave(Control control)
     {
-        if (control.Enabled)
+        if (control.EffectiveEnabled)
         {
             DragLeave?.Invoke(control);
         }
@@ -73,7 +73,7 @@ internal sealed class DragDropState
     /// <param name="e">The event data.</param>
     public void RaiseDragDrop(Control control, DragEventArgs e)
     {
-        if (control.Enabled)
+        if (control.EffectiveEnabled)
         {
             DragDrop?.Invoke(control, e);
         }

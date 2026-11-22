@@ -208,7 +208,7 @@ public sealed class ToolTip : IDisposable
             return;
         }
 
-        if (!_active || !_entries.TryGetValue(control, out var entry) || !control.Enabled || !control.EffectiveVisible)
+        if (!_active || !_entries.TryGetValue(control, out var entry) || !control.EffectiveEnabled || !control.EffectiveVisible)
         {
             return;
         }
@@ -298,7 +298,7 @@ public sealed class ToolTip : IDisposable
 
             // The pointer can leave a control without the host ever raising the leave - a popup
             // opening over it, for instance - so the delay re-checks what the tick is for.
-            if (!control.Enabled || !control.EffectiveVisible || control.Host is null || !control.IsMouseOver)
+            if (!control.EffectiveEnabled || !control.EffectiveVisible || control.Host is null || !control.IsMouseOver)
             {
                 ClosePopup();
                 return;

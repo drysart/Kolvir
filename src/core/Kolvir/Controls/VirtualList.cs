@@ -603,7 +603,7 @@ public abstract class VirtualList : Control
         // rows - belongs to the control itself rather than to an item.
         if (!Geometry.Contains(_scroll.EffectiveViewport(ScrollClient), local))
         {
-            return Enabled ? this : null;
+            return EffectiveEnabled ? this : null;
         }
 
         return base.HitTest(pointInParent);
@@ -638,7 +638,7 @@ public abstract class VirtualList : Control
     /// </remarks>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
+        var fill = EffectiveEnabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 
@@ -1395,7 +1395,7 @@ public abstract class VirtualList : Control
             canvas,
             _emptyText,
                 EffectiveFont,
-            Enabled ? Theme.Placeholder : Theme.DisabledForeground,
+            EffectiveEnabled ? Theme.Placeholder : Theme.DisabledForeground,
             new SKRect(bounds.Left + TextInset, bounds.Top, bounds.Right - TextInset, bounds.Top + ItemHeight),
             ContentAlignment.MiddleLeft);
     }
@@ -1432,12 +1432,12 @@ public abstract class VirtualList : Control
             state |= DrawItemState.Hot;
         }
 
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             state |= DrawItemState.Disabled;
         }
 
-        var textColor = !Enabled
+        var textColor = !EffectiveEnabled
             ? Theme.DisabledForeground
             : selected
                 ? IsFocused ? Theme.AccentForeground : Theme.Foreground

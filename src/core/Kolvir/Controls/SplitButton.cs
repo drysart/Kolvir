@@ -112,7 +112,7 @@ public class SplitButton : Button
     /// <summary>Opens <see cref="Menu"/> below the button, or above it when there is no room below.</summary>
     public void OpenDropDown()
     {
-        if (_dropDownOpen || !Enabled || Host is not { } host || Menu.IsEmpty)
+        if (_dropDownOpen || !EffectiveEnabled || Host is not { } host || Menu.IsEmpty)
         {
             return;
         }
@@ -159,7 +159,7 @@ public class SplitButton : Button
     {
         base.OnPaintBackground(canvas, rect);
 
-        if (!Enabled || (!_arrowHot && !_arrowPressed))
+        if (!EffectiveEnabled || (!_arrowHot && !_arrowPressed))
         {
             return;
         }
@@ -190,7 +190,7 @@ public class SplitButton : Button
 
         if (ShowsArrowDivider)
         {
-            var divider = Enabled
+            var divider = EffectiveEnabled
                 ? Style == ButtonStyle.Primary
                     ? Theme.AccentForeground.WithAlpha(70)
                     : Theme.Border
@@ -308,7 +308,7 @@ public class SplitButton : Button
     {
         base.OnKeyDown(e);
 
-        if (e.Handled || !Enabled)
+        if (e.Handled || !EffectiveEnabled)
         {
             return;
         }
@@ -323,7 +323,7 @@ public class SplitButton : Button
     /// <summary>Clears the arrow's states and closes the menu when the button is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _arrowHot = false;
             _arrowPressed = false;

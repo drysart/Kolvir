@@ -140,7 +140,7 @@ public class TabControl : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        Painter.Fill(canvas, rect, Enabled ? EffectiveBackColor : Theme.DisabledBackground, Border.Corners);
+        Painter.Fill(canvas, rect, EffectiveEnabled ? EffectiveBackColor : Theme.DisabledBackground, Border.Corners);
         Painter.DrawBorder(canvas, rect, Theme.Border, FrameWidth, Border.Corners);
     }
 
@@ -182,7 +182,7 @@ public class TabControl : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button != MouseButtons.Left || !Enabled)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled)
         {
             return;
         }
@@ -274,7 +274,7 @@ public class TabControl : Control
     {
         base.OnKeyDown(e);
 
-        if (!Enabled || e.Handled)
+        if (!EffectiveEnabled || e.Handled)
         {
             return;
         }
@@ -522,14 +522,14 @@ public class TabControl : Control
     private void PaintTab(SKCanvas canvas, int index, SKRect tab)
     {
         bool selected = index == _selectedIndex;
-        bool hot = index == _hotIndex && !selected && Enabled;
+        bool hot = index == _hotIndex && !selected && EffectiveEnabled;
 
         if (hot)
         {
             Painter.Fill(canvas, tab, Theme.Splitter, 6f);
         }
 
-        var color = !Enabled
+        var color = !EffectiveEnabled
             ? Theme.DisabledForeground
             : selected ? EffectiveForeColor : Theme.MutedForeground;
 
@@ -540,7 +540,7 @@ public class TabControl : Control
             Painter.Fill(
                 canvas,
                 new SKRect(tab.Left + 8f, tab.Bottom - IndicatorHeight, tab.Right - 8f, tab.Bottom),
-                Enabled ? Theme.Accent : Theme.DisabledForeground,
+                EffectiveEnabled ? Theme.Accent : Theme.DisabledForeground,
                 1f);
         }
     }

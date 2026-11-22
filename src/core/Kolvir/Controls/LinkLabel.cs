@@ -156,7 +156,7 @@ public class LinkLabel : RichLabel
     {
         base.OnPaintBackground(canvas, rect);
 
-        if (IsFocused && Enabled)
+        if (IsFocused && EffectiveEnabled)
         {
             // A link has no fill of its own, so the ring is the only thing marking it as the
             // focused control. It is drawn thin to stay inside the padding rather than across
@@ -227,7 +227,7 @@ public class LinkLabel : RichLabel
     /// </summary>
     private void Activate(TextSpan? span)
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             return;
         }

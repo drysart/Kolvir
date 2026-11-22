@@ -153,7 +153,7 @@ public class ComboBox : Control
     /// <summary>Opens the list, if the combo box is enabled and the list is not already open.</summary>
     public void OpenDropDown()
     {
-        if (_dropDownOpen || !Enabled || Host is not { } host)
+        if (_dropDownOpen || !EffectiveEnabled || Host is not { } host)
         {
             return;
         }
@@ -226,7 +226,7 @@ public class ComboBox : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
+        var fill = EffectiveEnabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 
@@ -243,7 +243,7 @@ public class ComboBox : Control
         }
 
         var text = SelectedText;
-        var color = !Enabled
+        var color = !EffectiveEnabled
             ? Theme.DisabledForeground
             : text.Length > 0 ? EffectiveForeColor : Theme.Placeholder;
 
@@ -262,7 +262,7 @@ public class ComboBox : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button != MouseButtons.Left || !Enabled)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled)
         {
             return;
         }
@@ -302,7 +302,7 @@ public class ComboBox : Control
     {
         base.OnKeyDown(e);
 
-        if (!Enabled || e.Handled)
+        if (!EffectiveEnabled || e.Handled)
         {
             return;
         }
@@ -325,7 +325,7 @@ public class ComboBox : Control
     {
         base.OnTextInput(e);
 
-        if (!Enabled || string.IsNullOrEmpty(e.Text))
+        if (!EffectiveEnabled || string.IsNullOrEmpty(e.Text))
         {
             return;
         }
@@ -359,7 +359,7 @@ public class ComboBox : Control
     {
         base.OnEnabledChanged();
 
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             CloseDropDown();
         }
@@ -567,7 +567,7 @@ public class ComboBox : Control
         using var path = builder.Snapshot();
         using var paint = new SKPaint
         {
-            Color = Enabled ? Theme.MutedForeground : Theme.DisabledForeground,
+            Color = EffectiveEnabled ? Theme.MutedForeground : Theme.DisabledForeground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill,
         };
@@ -599,7 +599,7 @@ public class ComboBox : Control
         _dropDownOpen = false;
         Invalidate();
 
-        if (Enabled && Visible)
+        if (EffectiveEnabled && Visible)
         {
             Focus();
         }

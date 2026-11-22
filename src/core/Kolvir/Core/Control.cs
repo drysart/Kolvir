@@ -1243,6 +1243,18 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>
+    /// Whether the control and every container above it are enabled - the answer to "can this
+    /// control be reached", which is what painting and input routing ask.
+    /// </summary>
+    /// <remarks>
+    /// The getter walks the parent chain rather than caching, so a subtree moved under a disabled
+    /// container answers correctly the moment it is attached. <see cref="UpdateEffectiveEnabled"/>
+    /// is what notices that the answer for a subtree changed and fires <see cref="OnEnabledChanged"/>
+    /// down it.
+    /// </remarks>
+    public bool EffectiveEnabled => Enabled;
+
     /// <summary>When true, containers size the control to its <see cref="DesiredSize"/>.</summary>
     public bool AutoSize
     {

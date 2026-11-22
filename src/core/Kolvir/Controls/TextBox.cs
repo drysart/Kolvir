@@ -563,7 +563,7 @@ public class TextBox : Control
     /// </remarks>
     protected internal override ContextMenu? BuildContextMenu()
     {
-        if (ContextMenu is not null || !Enabled)
+        if (ContextMenu is not null || !EffectiveEnabled)
         {
             return base.BuildContextMenu();
         }
@@ -634,7 +634,7 @@ public class TextBox : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
+        var fill = EffectiveEnabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 
@@ -683,7 +683,7 @@ public class TextBox : Control
             color = Theme.Placeholder;
         }
 
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             color = Theme.DisabledForeground;
         }
@@ -722,7 +722,7 @@ public class TextBox : Control
         canvas.Save();
         canvas.ClipRect(area);
 
-        if (HasSelection && Enabled && SelectionLength > 0)
+        if (HasSelection && EffectiveEnabled && SelectionLength > 0)
         {
             var rects = new List<SKRect>();
             GetSelectionRects(SelectionStart, SelectionLength, rects);
@@ -772,7 +772,7 @@ public class TextBox : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button != MouseButtons.Left || !Enabled)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled)
         {
             return;
         }
@@ -1078,7 +1078,7 @@ public class TextBox : Control
     /// <summary>Abandons a drag and releases the mouse capture when the box is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _selecting = false;
             ReleaseMouseCapture();

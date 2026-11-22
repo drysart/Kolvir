@@ -410,8 +410,8 @@ public class SplitContainer : Control
             return;
         }
 
-        var highlight = Enabled && !_isSplitterFixed && (IsMouseOver || _isDragging || IsFocused);
-        var color = !Enabled
+        var highlight = EffectiveEnabled && !_isSplitterFixed && (IsMouseOver || _isDragging || IsFocused);
+        var color = !EffectiveEnabled
             ? Theme.DisabledBackground
             : _isDragging
                 ? Theme.Accent
@@ -421,7 +421,7 @@ public class SplitContainer : Control
 
         Painter.Fill(canvas, _splitterRect, color);
 
-        if (ShowSplitterGrip && Enabled)
+        if (ShowSplitterGrip && EffectiveEnabled)
         {
             DrawGrip(canvas, _isDragging || highlight);
         }
@@ -435,7 +435,7 @@ public class SplitContainer : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button != MouseButtons.Left || !Enabled || _isSplitterFixed)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled || _isSplitterFixed)
         {
             return;
         }
@@ -494,7 +494,7 @@ public class SplitContainer : Control
     {
         base.OnKeyDown(e);
 
-        if (e.Handled || !Enabled || _isSplitterFixed)
+        if (e.Handled || !EffectiveEnabled || _isSplitterFixed)
         {
             return;
         }
@@ -541,7 +541,7 @@ public class SplitContainer : Control
     /// <summary>Ends a drag in progress when the container is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             EndDrag();
         }

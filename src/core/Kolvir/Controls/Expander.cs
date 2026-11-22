@@ -350,7 +350,7 @@ public class Expander : Panel
     /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
-        var color = Enabled ? EffectiveForeColor : Theme.DisabledForeground;
+        var color = EffectiveEnabled ? EffectiveForeColor : Theme.DisabledForeground;
         float headerBottom = rect.Top + HeaderHeight;
 
         // The frame takes its own inset on each side, so the caption and the chevron start inside
@@ -470,7 +470,7 @@ public class Expander : Panel
     {
         base.OnKeyDown(e);
 
-        if (e.Handled || !Enabled)
+        if (e.Handled || !EffectiveEnabled)
         {
             return;
         }
@@ -522,7 +522,7 @@ public class Expander : Panel
     /// <summary>Clears the header's hover and press state when the control is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _headerHot = false;
             _headerPressed = false;
@@ -537,7 +537,7 @@ public class Expander : Panel
     {
         base.OnPaintBorder(canvas, rect);
 
-        if (IsFocused && Enabled)
+        if (IsFocused && EffectiveEnabled)
         {
             var header = new SKRect(rect.Left, rect.Top, rect.Right, rect.Top + HeaderHeight);
             Painter.DrawFocusRing(canvas, header, Theme.FocusRing, 2f, Border.CornerRadius);

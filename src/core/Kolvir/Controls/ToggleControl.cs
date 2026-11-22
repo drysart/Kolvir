@@ -184,14 +184,14 @@ public abstract class ToggleControl : Control
     }
 
     /// <summary>The label colour: <see cref="Control.ForeColor"/>, greyed out while disabled.</summary>
-    protected SKColor TextColor => Enabled ? EffectiveForeColor : Theme.DisabledForeground;
+    protected SKColor TextColor => EffectiveEnabled ? EffectiveForeColor : Theme.DisabledForeground;
 
     /// <summary>The glyph outline: accent while it carries a mark, the theme border otherwise.</summary>
     protected SKColor GlyphBorderColor
     {
         get
         {
-            if (!Enabled)
+            if (!EffectiveEnabled)
             {
                 return Theme.DisabledForeground;
             }
@@ -204,12 +204,12 @@ public abstract class ToggleControl : Control
 
     /// <summary>The glyph fill, for the states that fill it.</summary>
     protected SKColor GlyphFillColor =>
-        !Enabled ? Theme.DisabledBackground
+        !EffectiveEnabled ? Theme.DisabledBackground
         : IsMouseOver ? Theme.AccentHover
         : Theme.Accent;
 
     /// <summary>The mark inside a filled glyph.</summary>
-    protected SKColor GlyphMarkColor => Enabled ? Theme.AccentForeground : Theme.DisabledForeground;
+    protected SKColor GlyphMarkColor => EffectiveEnabled ? Theme.AccentForeground : Theme.DisabledForeground;
 
     /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
@@ -249,7 +249,7 @@ public abstract class ToggleControl : Control
     {
         // The border slot is used for the focus ring, which is drawn last so it sits above the
         // glyph and the label it surrounds.
-        if (IsFocused && Enabled)
+        if (IsFocused && EffectiveEnabled)
         {
             Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.Corners);
         }
@@ -294,7 +294,7 @@ public abstract class ToggleControl : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button == MouseButtons.Left && Enabled)
+        if (e.Button == MouseButtons.Left && EffectiveEnabled)
         {
             IsPressed = true;
             CaptureMouse();
@@ -398,7 +398,7 @@ public abstract class ToggleControl : Control
     /// </summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             IsPressed = false;
             ReleaseMouseCapture();

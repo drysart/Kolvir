@@ -395,7 +395,7 @@ public class RichLabel : Control
     {
         // Disabling a control does not send it a mouse-leave, so a span hovered or pressed at the
         // time would keep its highlight - and keep painting it, since nothing would clear it.
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _pressedSpan = null;
             SetHoverSpan(null);
@@ -1040,7 +1040,7 @@ public class RichLabel : Control
     /// instead of freezing the accent colour it was created with.
     /// </summary>
     private SKColor ResolveSpanColor(TextSpan span) =>
-        Enabled ? span.EffectiveForeColor : Theme.DisabledForeground;
+        EffectiveEnabled ? span.EffectiveForeColor : Theme.DisabledForeground;
 
     /// <summary>
     /// Returns the index of the last fragment in the run of adjacent fragments belonging to the

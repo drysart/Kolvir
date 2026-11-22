@@ -245,7 +245,7 @@ public sealed class Selection
 
     private void CollectOrder(Control? control)
     {
-        if (control is null || !control.Visible || !control.Enabled)
+        if (control is null || !control.Visible || !control.EffectiveEnabled)
         {
             return;
         }
