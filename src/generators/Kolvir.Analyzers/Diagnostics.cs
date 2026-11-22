@@ -14,4 +14,12 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor TryGetValueCaseType = new(
+        "KOLVIR0001",
+        "TryGetValue type is not a case of this union",
+        "'{0}' is not a case type of {1}, so TryGetValue<{0}> cannot answer and throws ArgumentException at run time; ask for one of {2}{3}",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

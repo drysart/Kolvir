@@ -133,6 +133,7 @@ public sealed class UnionTests
     [TestMethod]
     public void TryGetValueRefusesATypeThatIsNotACase()
     {
+#pragma warning disable KOLVIR0001 // The three calls below are deliberately wrong: this is the run-time guard's own test.
         Union<SKColor, ThemeColor, InheritedValue> union = ThemeColor.MutedForeground;
 
         var exception = Assert.ThrowsExactly<ArgumentException>(() => union.TryGetValue<object>(out _));
@@ -144,6 +145,7 @@ public sealed class UnionTests
         Assert.ThrowsExactly<ArgumentException>(() => new Union<SKColor, ThemeColor>(Direct).TryGetValue<int>(out _));
         Assert.ThrowsExactly<ArgumentException>(
             () => new Union<SKColor, ThemeColor, InheritedValue, int>(12).TryGetValue<double>(out _));
+#pragma warning restore KOLVIR0001
     }
 
     [TestMethod]

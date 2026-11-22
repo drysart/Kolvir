@@ -10,3 +10,4 @@
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
 KOLVIR0003 | Kolvir.Usage | Error | A union has duplicate case types
+KOLVIR0001 | Kolvir.Usage | Error | A TryGetValue type argument is not one of the union's case types
