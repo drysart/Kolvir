@@ -93,6 +93,11 @@ void RemoveChromeMetricsChangedHandler(Action<object> handler);
 All geometry is logical pixels in client coordinates. Applications must never compute caption-button
 geometry themselves: it differs by platform, by GTK version and by DPI.
 
+The seam takes a concrete `SKColor?` on purpose: the platform applies a colour it is given and has no
+way to read the palette. `Window` mirrors the two as
+`Union<SKColor, ThemeColor, InheritedValue>` instead, resolves a role when it is assigned and again
+when the palette changes, and hands the backend the result - or null for its own default.
+
 ## Normative rules
 
 1. **Report, do not assume.** Ask `ChromeCapabilities` before setting anything - the setters throw
