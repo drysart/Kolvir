@@ -153,29 +153,29 @@ public sealed class UnionTests
         Union<SKColor, ThemeColor, InheritedValue> triple = default;
         Union<SKColor, ThemeColor, InheritedValue, int> quadruple = default;
 
-        Assert.IsTrue(pair.IsInvalid);
-        Assert.IsTrue(triple.IsInvalid);
-        Assert.IsTrue(quadruple.IsInvalid);
+        Assert.IsTrue(pair.IsUnspecified);
+        Assert.IsTrue(triple.IsUnspecified);
+        Assert.IsTrue(quadruple.IsUnspecified);
 
-        var pairException = Assert.ThrowsExactly<InvalidOperationException>(pair.ThrowIfInvalid);
+        var pairException = Assert.ThrowsExactly<InvalidOperationException>(pair.ThrowIfUnspecified);
         StringAssert.Contains(pairException.Message, "default-initialised");
-        StringAssert.Contains(pairException.Message, "Union<SKColor, ThemeColor>(invalid)");
+        StringAssert.Contains(pairException.Message, "Union<SKColor, ThemeColor>(unspecified)");
 
         StringAssert.Contains(
-            Assert.ThrowsExactly<InvalidOperationException>(triple.ThrowIfInvalid).Message,
-            "Union<SKColor, ThemeColor, InheritedValue>(invalid)");
+            Assert.ThrowsExactly<InvalidOperationException>(triple.ThrowIfUnspecified).Message,
+            "Union<SKColor, ThemeColor, InheritedValue>(unspecified)");
         StringAssert.Contains(
-            Assert.ThrowsExactly<InvalidOperationException>(quadruple.ThrowIfInvalid).Message,
-            "Union<SKColor, ThemeColor, InheritedValue, Int32>(invalid)");
+            Assert.ThrowsExactly<InvalidOperationException>(quadruple.ThrowIfUnspecified).Message,
+            "Union<SKColor, ThemeColor, InheritedValue, Int32>(unspecified)");
     }
 
     [TestMethod]
-    public void AValidUnionIsNotInvalidAndDoesNotThrow()
+    public void AValidUnionIsNotUnspecifiedAndDoesNotThrow()
     {
         Union<SKColor, ThemeColor, InheritedValue> union = ThemeColor.MutedForeground;
 
-        Assert.IsFalse(union.IsInvalid);
-        union.ThrowIfInvalid();
+        Assert.IsFalse(union.IsUnspecified);
+        union.ThrowIfUnspecified();
     }
 
     [TestMethod]
@@ -337,7 +337,7 @@ public sealed class UnionTests
         Assert.AreEqual("InheritedValue(Inherit)", inherit.ToString());
 
         Assert.AreEqual(
-            "Union<SKColor, ThemeColor, InheritedValue>(invalid)",
+            "Union<SKColor, ThemeColor, InheritedValue>(unspecified)",
             default(Union<SKColor, ThemeColor, InheritedValue>).ToString());
 
         var quadruple = new Union<SKColor, ThemeColor, InheritedValue, int>(12);
@@ -351,7 +351,7 @@ public sealed class UnionTests
         // expected. The union does not decide that for anyone.
         Union<object, string?, InheritedValue> union = (string?)null;
 
-        Assert.IsFalse(union.IsInvalid);
+        Assert.IsFalse(union.IsUnspecified);
         Assert.IsTrue(union.TryGetValue<string>(out string? text));
         Assert.IsNull(text);
     }

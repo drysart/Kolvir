@@ -110,19 +110,24 @@ Exhaustiveness therefore comes from the arity, not from a pattern:
   captured values passed as state;
 - `Match<TState, TResult>(TState, Func<TState, T1, TResult>, ...)` for handlers that produce a value.
 
-All of them call `ThrowIfInvalid()` first, and all of them take one delegate per case type. That is
-the point: adding a case type to a union changes its arity, so every `Switch` and `Match` over it
-stops compiling until the new case has a handler. A dispatch that silently does nothing for a case
-nobody thought about is the failure mode this design exists to prevent.
+All of them call `ThrowIfUnspecified()` first, and all of them take one delegate per case type.
+That is the point: adding a case type to a union changes its arity, so every `Switch` and `Match`
+over it stops compiling until the new case has a handler. A dispatch that silently does nothing for
+a case nobody thought about is the failure mode this design exists to prevent.
 
 There is no bare `Func<T1, TResult>` form; it would only save one argument and would bring back
 closures for anything that needs to see more than the payload.
 
-## 7. Default-initialised is invalid, and says so
+## 7. A default-initialised union is unspecified, and says so
 
-`default(Union<...>)` holds no case. `IsInvalid` reports it and `ThrowIfInvalid()` throws
-`InvalidOperationException`, whose message names the union and says it was default-initialised.
-`Switch` and `Match` throw on it rather than doing nothing.
+`default(Union<...>)` holds no case, and that state is called unspecified: nothing was assigned, so
+the union is not any of its case types. `IsUnspecified` reports it and `ThrowIfUnspecified()` throws
+`InvalidOperationException`, whose message names the union and says it was never assigned. `Switch`
+and `Match` throw on it rather than doing nothing.
+
+The name matches `Specified<T>` in `Kolvir.VirtualDom`, which already uses `IsSpecified` for "this
+render assigned the property". Unspecified is the same idea one layer down, and one word for it in
+both places is worth more than a local invention.
 
 The alternative - treating the zero value as "inherit" - was rejected. It would make a property
 that was never assigned indistinguishable from one that was deliberately set to inherit, and the
@@ -144,7 +149,7 @@ each other and share a hash code. They are still not a case.
 - `ToString` names the stored case: `ThemeColor.MutedForeground` when the first case is stored (a
   named constant reads with a dot), `SKColor(#ff404040)` for the rest (a value reads in
   parentheses), `InheritedValue(Inherit)` for the sentinel, and
-  `Union<SKColor, ThemeColor, InheritedValue>(invalid)` for the default. The `[DebuggerDisplay]`
+  `Union<SKColor, ThemeColor, InheritedValue>(unspecified)` for the default. The `[DebuggerDisplay]`
   uses it, and so should test failures and exception messages.
 - There is no arity above four. A fifth case type is a design smell before it is a missing overload;
   add the arity when something needs it, not in advance.
@@ -154,8 +159,9 @@ each other and share a hash code. They are still not a case.
 ## 9. Tests
 
 `tests/core/Kolvir.Tests/Core/UnionTests.cs` covers every arity for assignment and explicit
-construction, and then the shared contract in detail on `Union<SKColor, ThemeColor, InheritedValue>`:
-the hit, the miss on another arm, the `ArgumentException` for a type that is not a case (including
-`TryGetValue<object>`), exact-type matching in a union whose first case is `object`, `IsInvalid` and
-`ThrowIfInvalid`, `Switch` and `Match` with and without state, equality and hashing, `ToString`,
-a null payload in a reference-typed case, and the no-allocation assertion.
+construction, and then the shared contract in detail on
+`Union<SKColor, ThemeColor, InheritedValue>`: the hit, the miss on another arm, the
+`ArgumentException` for a type that is not a case (including `TryGetValue<object>`), exact-type
+matching in a union whose first case is `object`, `IsUnspecified` and `ThrowIfUnspecified`, `Switch`
+and `Match` with and without state, equality and hashing, `ToString`, a null payload in a
+reference-typed case, and the no-allocation assertion.

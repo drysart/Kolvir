@@ -77,17 +77,17 @@ public readonly struct Union<T1, T2> : IEquatable<Union<T1, T2>>
     public static implicit operator Union<T1, T2>(T2 value) => new(value);
 
     /// <summary>
-    /// Whether this is a default-initialised union, which holds none of its case types.
+    /// Whether this union was never assigned, so it holds none of its case types.
     /// </summary>
     /// <remarks>
     /// A union that has never been assigned is <c>default</c>, and a <c>default</c> union has no
     /// case. This property is how a caller checks for the case before reading anything;
-    /// <see cref="ThrowIfInvalid"/> is the way to refuse it.
+    /// <see cref="ThrowIfUnspecified"/> is the way to refuse it.
     /// </remarks>
     /// <value><c>true</c> for <c>default</c>; otherwise <c>false</c>.</value>
-    public bool IsInvalid => _arm == 0;
+    public bool IsUnspecified => _arm == 0;
 
-    /// <summary>Throws when this is a default-initialised union, which holds no case.</summary>
+    /// <summary>Throws when this union was never assigned, and therefore holds no case.</summary>
     /// <remarks>
     /// Call this at the top of anything that cannot do without a case - a paint method, a handler -
     /// so a property that was never set fails where it is used rather than silently doing nothing.
@@ -97,14 +97,15 @@ public readonly struct Union<T1, T2> : IEquatable<Union<T1, T2>>
     /// call it themselves.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// This union is default-initialised, so it is not one of its case types.
+    /// This union is unspecified, which means it is default-initialised, so it is not one of its
+    /// case types.
     /// </exception>
-    public void ThrowIfInvalid()
+    public void ThrowIfUnspecified()
     {
         if (_arm == 0)
         {
             throw new InvalidOperationException(
-                $"{this} is default-initialised, so it is not one of its case types. Assign a value before reading it.");
+                $"{this} has no case: it is default-initialised, and was never assigned. Assign a value before reading it.");
         }
     }
 
@@ -177,7 +178,7 @@ public readonly struct Union<T1, T2> : IEquatable<Union<T1, T2>>
     /// </exception>
     public void Switch(Action<T1> first, Action<T2> second)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         switch (_arm)
         {
@@ -200,7 +201,7 @@ public readonly struct Union<T1, T2> : IEquatable<Union<T1, T2>>
     /// </exception>
     public void Switch<TState>(TState state, Action<TState, T1> first, Action<TState, T2> second)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         switch (_arm)
         {
@@ -229,7 +230,7 @@ public readonly struct Union<T1, T2> : IEquatable<Union<T1, T2>>
     /// </exception>
     public TResult Match<TState, TResult>(TState state, Func<TState, T1, TResult> first, Func<TState, T2, TResult> second)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         return _arm switch
         {
@@ -286,15 +287,15 @@ public readonly struct Union<T1, T2> : IEquatable<Union<T1, T2>>
     /// <remarks>
     /// The first case reads as its type name, a dot and the value, which is how a named constant
     /// reads; every other case as its type name and the value in parentheses. A default-initialised
-    /// union reads as <c>Union&lt;T1, T2&gt;(invalid)</c>.
+    /// union reads as <c>Union&lt;T1, T2&gt;(unspecified)</c>.
     /// </remarks>
     /// <returns>A string such as <c>ThemeColor.MutedForeground</c>, <c>SKColor(#FF404040)</c> or
-    /// <c>Union&lt;SKColor, ThemeColor&gt;(invalid)</c>.</returns>
+    /// <c>Union&lt;SKColor, ThemeColor&gt;(unspecified)</c>.</returns>
     public override string ToString() => _arm switch
     {
         ArmFirst => $"{typeof(T1).Name}.{_first}",
         ArmSecond => $"{typeof(T2).Name}({_second})",
-        _ => $"Union<{typeof(T1).Name}, {typeof(T2).Name}>(invalid)",
+        _ => $"Union<{typeof(T1).Name}, {typeof(T2).Name}>(unspecified)",
     };
 }
 
@@ -390,17 +391,17 @@ public readonly struct Union<T1, T2, T3> : IEquatable<Union<T1, T2, T3>>
     public static implicit operator Union<T1, T2, T3>(T3 value) => new(value);
 
     /// <summary>
-    /// Whether this is a default-initialised union, which holds none of its case types.
+    /// Whether this union was never assigned, so it holds none of its case types.
     /// </summary>
     /// <remarks>
     /// A union that has never been assigned is <c>default</c>, and a <c>default</c> union has no
     /// case. This property is how a caller checks for the case before reading anything;
-    /// <see cref="ThrowIfInvalid"/> is the way to refuse it.
+    /// <see cref="ThrowIfUnspecified"/> is the way to refuse it.
     /// </remarks>
     /// <value><c>true</c> for <c>default</c>; otherwise <c>false</c>.</value>
-    public bool IsInvalid => _arm == 0;
+    public bool IsUnspecified => _arm == 0;
 
-    /// <summary>Throws when this is a default-initialised union, which holds no case.</summary>
+    /// <summary>Throws when this union was never assigned, and therefore holds no case.</summary>
     /// <remarks>
     /// Call this at the top of anything that cannot do without a case - a paint method, a handler -
     /// so a property that was never set fails where it is used rather than silently doing nothing.
@@ -410,14 +411,15 @@ public readonly struct Union<T1, T2, T3> : IEquatable<Union<T1, T2, T3>>
     /// call it themselves.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// This union is default-initialised, so it is not one of its case types.
+    /// This union is unspecified, which means it is default-initialised, so it is not one of its
+    /// case types.
     /// </exception>
-    public void ThrowIfInvalid()
+    public void ThrowIfUnspecified()
     {
         if (_arm == 0)
         {
             throw new InvalidOperationException(
-                $"{this} is default-initialised, so it is not one of its case types. Assign a value before reading it.");
+                $"{this} has no case: it is default-initialised, and was never assigned. Assign a value before reading it.");
         }
     }
 
@@ -499,7 +501,7 @@ public readonly struct Union<T1, T2, T3> : IEquatable<Union<T1, T2, T3>>
     /// </exception>
     public void Switch(Action<T1> first, Action<T2> second, Action<T3> third)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         switch (_arm)
         {
@@ -526,7 +528,7 @@ public readonly struct Union<T1, T2, T3> : IEquatable<Union<T1, T2, T3>>
     /// </exception>
     public void Switch<TState>(TState state, Action<TState, T1> first, Action<TState, T2> second, Action<TState, T3> third)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         switch (_arm)
         {
@@ -563,7 +565,7 @@ public readonly struct Union<T1, T2, T3> : IEquatable<Union<T1, T2, T3>>
         Func<TState, T2, TResult> second,
         Func<TState, T3, TResult> third)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         return _arm switch
         {
@@ -623,16 +625,16 @@ public readonly struct Union<T1, T2, T3> : IEquatable<Union<T1, T2, T3>>
     /// <remarks>
     /// The first case reads as its type name, a dot and the value, which is how a named constant
     /// reads; every other case as its type name and the value in parentheses. A default-initialised
-    /// union reads as <c>Union&lt;T1, T2, T3&gt;(invalid)</c>.
+    /// union reads as <c>Union&lt;T1, T2, T3&gt;(unspecified)</c>.
     /// </remarks>
     /// <returns>A string such as <c>ThemeColor.MutedForeground</c>, <c>SKColor(#FF404040)</c>,
-    /// <c>InheritedValue(Inherit)</c> or <c>Union&lt;SKColor, ThemeColor, InheritedValue&gt;(invalid)</c>.</returns>
+    /// <c>InheritedValue(Inherit)</c> or <c>Union&lt;SKColor, ThemeColor, InheritedValue&gt;(unspecified)</c>.</returns>
     public override string ToString() => _arm switch
     {
         ArmFirst => $"{typeof(T1).Name}.{_first}",
         ArmSecond => $"{typeof(T2).Name}({_second})",
         ArmThird => $"{typeof(T3).Name}({_third})",
-        _ => $"Union<{typeof(T1).Name}, {typeof(T2).Name}, {typeof(T3).Name}>(invalid)",
+        _ => $"Union<{typeof(T1).Name}, {typeof(T2).Name}, {typeof(T3).Name}>(unspecified)",
     };
 }
 
@@ -748,17 +750,17 @@ public readonly struct Union<T1, T2, T3, T4> : IEquatable<Union<T1, T2, T3, T4>>
     public static implicit operator Union<T1, T2, T3, T4>(T4 value) => new(value);
 
     /// <summary>
-    /// Whether this is a default-initialised union, which holds none of its case types.
+    /// Whether this union was never assigned, so it holds none of its case types.
     /// </summary>
     /// <remarks>
     /// A union that has never been assigned is <c>default</c>, and a <c>default</c> union has no
     /// case. This property is how a caller checks for the case before reading anything;
-    /// <see cref="ThrowIfInvalid"/> is the way to refuse it.
+    /// <see cref="ThrowIfUnspecified"/> is the way to refuse it.
     /// </remarks>
     /// <value><c>true</c> for <c>default</c>; otherwise <c>false</c>.</value>
-    public bool IsInvalid => _arm == 0;
+    public bool IsUnspecified => _arm == 0;
 
-    /// <summary>Throws when this is a default-initialised union, which holds no case.</summary>
+    /// <summary>Throws when this union was never assigned, and therefore holds no case.</summary>
     /// <remarks>
     /// Call this at the top of anything that cannot do without a case - a paint method, a handler -
     /// so a property that was never set fails where it is used rather than silently doing nothing.
@@ -768,14 +770,15 @@ public readonly struct Union<T1, T2, T3, T4> : IEquatable<Union<T1, T2, T3, T4>>
     /// call it themselves.
     /// </remarks>
     /// <exception cref="InvalidOperationException">
-    /// This union is default-initialised, so it is not one of its case types.
+    /// This union is unspecified, which means it is default-initialised, so it is not one of its
+    /// case types.
     /// </exception>
-    public void ThrowIfInvalid()
+    public void ThrowIfUnspecified()
     {
         if (_arm == 0)
         {
             throw new InvalidOperationException(
-                $"{this} is default-initialised, so it is not one of its case types. Assign a value before reading it.");
+                $"{this} has no case: it is default-initialised, and was never assigned. Assign a value before reading it.");
         }
     }
 
@@ -866,7 +869,7 @@ public readonly struct Union<T1, T2, T3, T4> : IEquatable<Union<T1, T2, T3, T4>>
     /// </exception>
     public void Switch(Action<T1> first, Action<T2> second, Action<T3> third, Action<T4> fourth)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         switch (_arm)
         {
@@ -902,7 +905,7 @@ public readonly struct Union<T1, T2, T3, T4> : IEquatable<Union<T1, T2, T3, T4>>
         Action<TState, T3> third,
         Action<TState, T4> fourth)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         switch (_arm)
         {
@@ -945,7 +948,7 @@ public readonly struct Union<T1, T2, T3, T4> : IEquatable<Union<T1, T2, T3, T4>>
         Func<TState, T3, TResult> third,
         Func<TState, T4, TResult> fourth)
     {
-        ThrowIfInvalid();
+        ThrowIfUnspecified();
 
         return _arm switch
         {
@@ -1008,17 +1011,17 @@ public readonly struct Union<T1, T2, T3, T4> : IEquatable<Union<T1, T2, T3, T4>>
     /// <remarks>
     /// The first case reads as its type name, a dot and the value, which is how a named constant
     /// reads; every other case as its type name and the value in parentheses. A default-initialised
-    /// union reads as <c>Union&lt;T1, T2, T3, T4&gt;(invalid)</c>.
+    /// union reads as <c>Union&lt;T1, T2, T3, T4&gt;(unspecified)</c>.
     /// </remarks>
     /// <returns>A string such as <c>ThemeColor.MutedForeground</c>, <c>SKColor(#FF404040)</c>,
     /// <c>InheritedValue(Inherit)</c>, <c>Int32(12)</c> or
-    /// <c>Union&lt;SKColor, ThemeColor, InheritedValue, int&gt;(invalid)</c>.</returns>
+    /// <c>Union&lt;SKColor, ThemeColor, InheritedValue, int&gt;(unspecified)</c>.</returns>
     public override string ToString() => _arm switch
     {
         ArmFirst => $"{typeof(T1).Name}.{_first}",
         ArmSecond => $"{typeof(T2).Name}({_second})",
         ArmThird => $"{typeof(T3).Name}({_third})",
         ArmFourth => $"{typeof(T4).Name}({_fourth})",
-        _ => $"Union<{typeof(T1).Name}, {typeof(T2).Name}, {typeof(T3).Name}, {typeof(T4).Name}>(invalid)",
+        _ => $"Union<{typeof(T1).Name}, {typeof(T2).Name}, {typeof(T3).Name}, {typeof(T4).Name}>(unspecified)",
     };
 }
