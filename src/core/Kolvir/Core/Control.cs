@@ -42,6 +42,9 @@ public class Control : IDisposable
     private string _text = string.Empty;
     private bool _visible = true;
     private Union<bool, InheritedValue> _enabled = InheritedValue.Instance;
+
+    // The answer last announced through OnEnabledChanged. EffectiveEnabled walks the tree on every
+    // read; this field exists only to decide whether a handler has to run.
     private bool _effectiveEnabled = true;
     private bool _effectiveVisible;
     private bool _displayed;
@@ -1281,6 +1284,11 @@ public class Control : IDisposable
     /// replaces did, so a subtree moved under a disabled container answers correctly the moment it
     /// is attached. <see cref="UpdateEffectiveEnabled"/> is what notices that the answer for a
     /// subtree changed and fires <see cref="OnEnabledChanged"/> down it.
+    /// </para>
+    /// <para>
+    /// This walk is authoritative. The private field <c>_effectiveEnabled</c> only records the
+    /// answer last announced to the handlers, so the two can disagree until the next update; a
+    /// reader asking what the tree resolves must use this property, never the field.
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">

@@ -183,6 +183,42 @@ public sealed class ColorDialogTests : HeadlessTestBase
 
     [TestMethod]
     [TestCategory("Headless")]
+    public void TheModalSessionPutsBackAnInheritedEnabledValue()
+    {
+        using var app = NewApplication();
+
+        // The owner's content is the window's root but still has a parent, and that parent is
+        // disabled: its own Enabled is Inherit, and the effective answer comes from the ancestor.
+        var disabledAncestor = new Panel { Enabled = false };
+        var ownerContent = new Panel();
+        disabledAncestor.Controls.Add(ownerContent);
+        var owner = new Window("owner", ownerContent);
+        var dialog = new ColorDialog();
+
+        Assert.IsTrue(
+            ownerContent.Enabled.TryGetValue<InheritedValue>(out _),
+            "the owner's content has not assigned an enabled value");
+        Assert.IsFalse(
+            ownerContent.EffectiveEnabled,
+            "the disabled ancestor is what makes it effectively disabled");
+
+        dialog.Window.AddShownHandler(_ => Click(dialog.Window, dialog.CancelButton));
+
+        Assert.IsNull(dialog.Show(owner));
+
+        Assert.IsTrue(
+            ownerContent.Enabled.TryGetValue<InheritedValue>(out _),
+            "the modal session puts back the inherited value, not a literal false");
+
+        disabledAncestor.Enabled = InheritedValue.Instance;
+
+        Assert.IsTrue(
+            ownerContent.EffectiveEnabled,
+            "so re-enabling the ancestor enables the content again");
+    }
+
+    [TestMethod]
+    [TestCategory("Headless")]
     public void TheDialogCentresOnTheOwnerAndStaysInsideTheScreen()
     {
         using var app = NewApplication();
