@@ -12,10 +12,9 @@ namespace Kolvir;
 /// a separate flag.
 /// </para>
 /// <para>
-/// The type carries no behaviour and nothing to configure. <see cref="Instance"/> is the only value
-/// it has, and a <c>default</c> <see cref="InheritedValue"/> is that same value. Assign
-/// <c>InheritedValue.Instance</c> where a case is wanted, and read it back through
-/// <c>TryGetValue&lt;InheritedValue&gt;</c>.
+/// The type carries no behaviour and nothing to configure. It has one value, and a <c>default</c>
+/// <see cref="InheritedValue"/> is that value. Assign <see cref="PropertyValue.Inherited"/> where a
+/// case is wanted, and read it back through <c>TryGetValue&lt;InheritedValue&gt;</c>.
 /// </para>
 /// <para>
 /// It is only meaningful as a case of a union. A member typed as an <see cref="InheritedValue"/>
@@ -25,13 +24,6 @@ namespace Kolvir;
 /// </remarks>
 public readonly struct InheritedValue
 {
-    /// <summary>
-    /// The one <see cref="InheritedValue"/> there is, for the places that need something to name
-    /// rather than the type alone.
-    /// </summary>
-    /// <value>A value with no members, identical to <c>default</c>.</value>
-    public static InheritedValue Instance => default;
-
     /// <summary>The word <c>Inherit</c>, which is what this value means.</summary>
     /// <returns><c>Inherit</c>.</returns>
     public override string ToString() => "Inherit";

@@ -185,7 +185,7 @@ public class ScrollBar : Control, ISelectionBarrier
     }
 
     /// <summary>True when the whole range fits, so there is nothing to scroll.</summary>
-    public bool IsScrollable => Enabled && _maximum > _minimum;
+    public bool IsScrollable => EffectiveEnabled && _maximum > _minimum;
 
     /// <summary>The rectangle the thumb is painted into, in control coordinates.</summary>
     public SKRect ThumbRect => _thumbRect;
@@ -211,7 +211,7 @@ public class ScrollBar : Control, ISelectionBarrier
     /// </summary>
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
-        var surface = Enabled ? Theme.Secondary : Theme.DisabledBackground;
+        var surface = EffectiveEnabled ? Theme.Secondary : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, surface);
 
         if (_trackRect.Width <= 0f || _trackRect.Height <= 0f)
@@ -287,7 +287,7 @@ public class ScrollBar : Control, ISelectionBarrier
     {
         base.OnMouseMove(e);
 
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             return;
         }
@@ -424,7 +424,7 @@ public class ScrollBar : Control, ISelectionBarrier
     /// <summary>Ends a drag or press in progress when the bar is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             EndInteraction();
         }
@@ -568,7 +568,7 @@ public class ScrollBar : Control, ISelectionBarrier
             return;
         }
 
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             var color = _pressedPart == part
                 ? Theme.SecondaryPressed
@@ -584,7 +584,7 @@ public class ScrollBar : Control, ISelectionBarrier
 
     private void DrawSeparators(SKCanvas canvas)
     {
-        if (!Enabled || _decrementRect.Height <= 0f)
+        if (!EffectiveEnabled || _decrementRect.Height <= 0f)
         {
             return;
         }
@@ -641,7 +641,7 @@ public class ScrollBar : Control, ISelectionBarrier
         using var path = builder.Snapshot();
         using var paint = new SKPaint
         {
-            Color = Enabled ? Theme.MutedForeground : Theme.DisabledForeground,
+            Color = EffectiveEnabled ? Theme.MutedForeground : Theme.DisabledForeground,
             IsAntialias = true,
             Style = SKPaintStyle.Fill,
         };
@@ -657,7 +657,7 @@ public class ScrollBar : Control, ISelectionBarrier
             return;
         }
 
-        var color = !Enabled
+        var color = !EffectiveEnabled
             ? Theme.DisabledForeground.WithAlpha(0x30)
             : _draggingThumb
                 ? Theme.Accent

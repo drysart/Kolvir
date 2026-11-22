@@ -194,8 +194,8 @@ public class TrackBar : Control
             return;
         }
 
-        var track = Enabled ? Theme.Secondary : Theme.DisabledBackground;
-        var fill = Enabled ? Theme.Accent : Theme.DisabledForeground;
+        var track = EffectiveEnabled ? Theme.Secondary : Theme.DisabledBackground;
+        var fill = EffectiveEnabled ? Theme.Accent : Theme.DisabledForeground;
 
         Painter.Fill(canvas, _trackRect, track, TrackThickness / 2f);
         PaintTicks(canvas);
@@ -217,7 +217,7 @@ public class TrackBar : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button != MouseButtons.Left || !Enabled)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled)
         {
             return;
         }
@@ -282,7 +282,7 @@ public class TrackBar : Control
     {
         base.OnMouseWheel(e);
 
-        if (e.Handled || !Enabled || e.Delta == 0f)
+        if (e.Handled || !EffectiveEnabled || e.Delta == 0f)
         {
             return;
         }
@@ -299,7 +299,7 @@ public class TrackBar : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (e.Handled || !Enabled)
+        if (e.Handled || !EffectiveEnabled)
         {
             return;
         }
@@ -349,7 +349,7 @@ public class TrackBar : Control
     /// <summary>Ends a drag in progress when the bar is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             EndDrag();
         }
@@ -506,7 +506,7 @@ public class TrackBar : Control
 
         using var paint = new SKPaint
         {
-            Color = (Enabled ? Theme.MutedForeground : Theme.DisabledForeground).WithAlpha(0x60),
+            Color = (EffectiveEnabled ? Theme.MutedForeground : Theme.DisabledForeground).WithAlpha(0x60),
             IsAntialias = false,
             Style = SKPaintStyle.Stroke,
             StrokeWidth = 1f,
@@ -552,7 +552,7 @@ public class TrackBar : Control
             return;
         }
 
-        var color = !Enabled
+        var color = !EffectiveEnabled
             ? Theme.DisabledForeground
             : _dragging
                 ? Theme.AccentPressed
@@ -562,7 +562,7 @@ public class TrackBar : Control
 
         // The gap is the control's own surface colour, so the knob stays separate from the fill it
         // sits at the end of without a hard outline.
-        var gap = Enabled ? Theme.Surface : Theme.DisabledBackground;
+        var gap = EffectiveEnabled ? Theme.Surface : Theme.DisabledBackground;
         float radius = MathF.Min(_knobRect.Width, _knobRect.Height) / 2f;
 
         Painter.Fill(canvas, Geometry.Inflate(_knobRect, RingWidth), gap, radius + RingWidth);

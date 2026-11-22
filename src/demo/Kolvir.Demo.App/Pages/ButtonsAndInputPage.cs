@@ -44,9 +44,9 @@ internal sealed class ButtonsAndInputPage : DemoPage
         };
         enableSwitch.AddClickHandler(_ =>
         {
-            primary.Enabled = !primary.Enabled;
-            enableSwitch.Text = primary.Enabled ? "Disable primary" : "Enable primary";
-            SetStatus(primary.Enabled ? "Primary action enabled." : "Primary action disabled.");
+            primary.Enabled = !primary.EffectiveEnabled;
+            enableSwitch.Text = primary.EffectiveEnabled ? "Disable primary" : "Enable primary";
+            SetStatus(primary.EffectiveEnabled ? "Primary action enabled." : "Primary action disabled.");
         });
         card.Controls.Add(enableSwitch);
 

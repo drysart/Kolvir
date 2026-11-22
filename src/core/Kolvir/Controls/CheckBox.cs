@@ -32,7 +32,7 @@ public class CheckBox : ToggleControl
         {
             Painter.Fill(canvas, glyph, GlyphFillColor, Radius);
         }
-        else if (IsMouseOver && Enabled)
+        else if (IsMouseOver && EffectiveEnabled)
         {
             Painter.Fill(canvas, glyph, Theme.Secondary, Radius);
         }

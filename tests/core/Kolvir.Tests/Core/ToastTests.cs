@@ -175,7 +175,7 @@ public sealed class ToastTests : HeadlessTestBase
         Assert.IsTrue(toast.BarColor.TryGetValue<SKColor>(out var literal));
         Assert.AreEqual(new SKColor(0x12, 0x34, 0x56), literal, "and a literal colour as well");
 
-        toast.BarColor = InheritedValue.Instance;
+        toast.BarColor = PropertyValue.Inherited;
         Assert.IsTrue(toast.BarColor.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
     }
 

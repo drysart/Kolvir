@@ -90,7 +90,7 @@ internal sealed class InheritedAppearancePage : DemoPage
         };
         reset.AddClickHandler(_ =>
         {
-            _appearanceStage?.Font = InheritedValue.Instance;
+            _appearanceStage?.Font = PropertyValue.Inherited;
             Theme.FontFamily = null;
             UpdateAppearanceReadout();
         });
@@ -219,7 +219,7 @@ internal sealed class InheritedAppearancePage : DemoPage
     {
         if (!size.HasValue)
         {
-            _appearanceStage?.Font = InheritedValue.Instance;
+            _appearanceStage?.Font = PropertyValue.Inherited;
         }
         else if (_appearanceStage is not null && _appearanceBigFont is not null)
         {

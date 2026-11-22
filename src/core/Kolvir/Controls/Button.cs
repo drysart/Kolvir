@@ -91,12 +91,12 @@ public class Button : Control
             Painter.Fill(canvas, rect, color, Border.Corners);
         }
 
-        if (_style == ButtonStyle.Secondary && Enabled)
+        if (_style == ButtonStyle.Secondary && EffectiveEnabled)
         {
             Painter.DrawBorder(canvas, rect, Theme.Border, 1f, Border.Corners);
         }
 
-        if (IsFocused && Enabled)
+        if (IsFocused && EffectiveEnabled)
         {
             Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.Corners);
         }
@@ -225,7 +225,7 @@ public class Button : Control
     /// <summary>Cancels a press and releases the capture when the button becomes disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             IsPressed = false;
             ReleaseMouseCapture();
@@ -241,7 +241,7 @@ public class Button : Control
     /// </summary>
     protected (SKColor? Fill, SKColor Text) ResolveColors()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             return _style switch
             {

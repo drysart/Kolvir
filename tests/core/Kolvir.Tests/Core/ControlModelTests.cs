@@ -25,7 +25,7 @@ public sealed class ControlModelTests : HeadlessTestBase
         Assert.AreEqual(string.Empty, control.Text);
         Assert.AreEqual("Control", control.Name, "the default name is the type name");
         Assert.IsTrue(control.Visible);
-        Assert.IsTrue(control.Enabled);
+        Assert.IsTrue(control.EffectiveEnabled);
         Assert.IsTrue(control.Focusable);
         Assert.IsFalse(control.TabStop, "a plain control is not a tab stop");
         Assert.IsFalse(control.AutoSize);

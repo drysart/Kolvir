@@ -116,7 +116,7 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`ForeColor`/`BackColor` inherited down the tree, with `EffectiveFont`/`EffectiveForeColor`/`EffectiveBackColor` giving the resolved value, focus, mouse/keyboard events; any control can host children |
+| `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` as the raw flags, with `EffectiveVisible`/`EffectiveEnabled`/`IsDisplayed` answering for the whole chain (a disabled container disables its subtree), `Font`/`ForeColor`/`BackColor` inherited down the tree, with `EffectiveFont`/`EffectiveForeColor`/`EffectiveBackColor` giving the resolved value, focus, mouse/keyboard events; any control can host children |
 | `BackColor` | `BackColor` | The background a control assigned: a colour, a palette role, or inherit; a transparent class default paints nothing |
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `BackColor` and `Border` for a card |
@@ -298,7 +298,7 @@ for scaling the canvas and the incoming pointer coordinates (the Win32 backend u
 ## Using it
 
 ```csharp
-var host = new UiHost { ClearColor = SKColors.White };   // or ThemeColor.Background, or InheritedValue.Instance
+var host = new UiHost { ClearColor = SKColors.White };   // or ThemeColor.Background, or PropertyValue.Inherited
 
 var root = new Panel { BackColor = Theme.Background, Padding = new Thickness(16) };
 
@@ -379,10 +379,10 @@ skipped, with a readout naming whatever has the focus, its `TabIndex` and its pl
 
 ### Visibility and display state
 
-`Visible` is the flag a control owns, and like `Enabled` it is only one of the answers that matter:
-hiding a container hides everything inside it, and a window that was never shown shows nothing at
-all. Two computed properties carry the rest, so a control that does work on a timer never has to
-watch its ancestors itself:
+`Visible` is the flag a control owns, and `Enabled` works the same way: each is only one of the
+answers that matter - hiding a container hides everything inside it, and a window that was never
+shown shows nothing at all. Two computed properties carry the rest, so a control that does work on
+a timer never has to watch its ancestors itself:
 
 | Member | Meaning |
 | --- | --- |
@@ -1187,7 +1187,7 @@ would not.
 | --- | --- |
 | `Text` | The message |
 | `Severity` | `Info`, `Success`, `Warning` or `Error`, which is what the accent bar is coloured for |
-| `BarColor` | Overrides the severity's colour, for an application that brands its own messages: a colour, a palette role, or `InheritedValue.Instance`; see [Inherited appearance](#inherited-appearance) |
+| `BarColor` | Overrides the severity's colour, for an application that brands its own messages: a colour, a palette role, or `PropertyValue.Inherited`; see [Inherited appearance](#inherited-appearance) |
 | `Duration` | How long it shows before dismissing itself; `Toast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
 | `Show()`, `Dismiss()`, `IsOpen` | The message state, so one control can be built once and reused |
 | `AddDismissedHandler` | Runs once the message went, whether by its countdown, its close glyph or the keyboard |
@@ -1249,10 +1249,25 @@ group.Controls.Add(new CheckBox { Dock = DockStyle.Top, Text = "Snap to grid" })
 ```
 
 `Enabled` cascades, so disabling a group box greys its caption, its frame and everything inside it,
-and none of the content takes input. Only the flag that was set is remembered: a control that was
-disabled on its own stays disabled when its container is enabled again, and one that was only
-disabled by its container comes back with it. Moving a subtree under a disabled container disables
-it the same way, without touching a single `Enabled` flag on the children.
+and none of the content takes input. The property is a union: it holds the value that was assigned -
+`true`, `false`, or `PropertyValue.Inherited` for "ask the parent" - and `EffectiveEnabled` is the
+resolved answer.
+
+| Member | Meaning |
+| --- | --- |
+| `Enabled` | The enabled state assigned here: `true`, `false`, or `PropertyValue.Inherited` |
+| `EffectiveEnabled` | The local answer - `true` when `Enabled` holds `PropertyValue.Inherited` - AND every container above it, with an unparented control treating the parent as enabled |
+| `AddEnabledChangedHandler` / `OnEnabledChanged()` | Run when `EffectiveEnabled` changes, including when an ancestor is disabled or enabled; a raw assignment that resolves to the same answer fires nothing |
+
+Only the value that was set is remembered: a control that was disabled on its own stays disabled
+when its container is enabled again, and one that was only disabled by its container comes back with
+it. Moving a subtree under a disabled container disables it the same way, without touching the
+children's own values.
+
+`PropertyValue.Inherited` and an explicit `true` resolve identically. An explicit `true` is not an
+override: a child cannot be enabled under a disabled ancestor, because the answer is the AND. The
+difference is only what `Enabled` reports, which is what lets code that saves an enabled state put
+back "nothing was assigned here" rather than pinning a literal.
 
 ### Expander
 
@@ -2649,8 +2664,8 @@ text, so the caption reads the same on any background, and the band comes out of
 content. `GroupBox` is a panel with that border and nothing else.
 
 The state a colour is resolved for is `Control.State`, a `ControlState` flag set computed from
-`Enabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its own adds it
-to the base's:
+`EffectiveEnabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its
+own adds it to the base's:
 
 ```csharp
 public override ControlState State => base.State | (_dropDownOpen ? ControlState.Active : ControlState.None);
@@ -2721,7 +2736,7 @@ palette change updates the chrome too.
 
 `Font`, `ForeColor` and `BackColor` are properties of `Control`, and they are inherited down the
 tree the way WinForms' `Font`, `ForeColor` and `BackColor` are. Each one is a union: it holds the
-value that was assigned - a font, a literal colour, a palette role - or `InheritedValue.Instance`,
+value that was assigned - a font, a literal colour, a palette role - or `PropertyValue.Inherited`,
 which asks the parent. Whatever a control assigns answers for itself and for everything inside it;
 a control that assigns none asks its parent, and a tree that assigns none falls back to the class
 default, which is where `Theme` supplies the value.
@@ -2742,23 +2757,23 @@ default.** `DefaultFont`, `DefaultForeColor` and `DefaultBackColor` are the clas
 
 | Member | Meaning |
 | --- | --- |
-| `Font` | The font assigned here, or `InheritedValue.Instance` |
+| `Font` | The font assigned here, or `PropertyValue.Inherited` |
 | `EffectiveFont` | The resolved font: assigned here, else the nearest ancestor's, else `DefaultFont` |
 | `DefaultFont` | The font a control of this class draws with when nothing else answers; the base control returns `Theme.DefaultFont`, a button and a group box `EmphasizedFont` |
-| `ForeColor` | The text colour assigned here: an `SKColor`, a `ThemeColor` role, or `InheritedValue.Instance` |
+| `ForeColor` | The text colour assigned here: an `SKColor`, a `ThemeColor` role, or `PropertyValue.Inherited` |
 | `EffectiveForeColor` | The resolved text colour, as an `SKColor`; a role is read from the current palette |
 | `DefaultForeColor` | What a control of this class draws its text in when nothing else answers; the base is `ThemeColor.Foreground`, a group box `MutedForeground` |
-| `BackColor` | The background assigned here: an `SKColor`, a `ThemeColor` role, or `InheritedValue.Instance` |
+| `BackColor` | The background assigned here: an `SKColor`, a `ThemeColor` role, or `PropertyValue.Inherited` |
 | `EffectiveBackColor` | The resolved background colour, as an `SKColor`; `SKColors.Transparent` means nothing is painted |
 | `DefaultBackColor` | What a control of this class paints when nothing else answers; the base is `SKColors.Transparent`, a field `InputBackground`, a tab control or a panel that looks like a card `Surface` |
 
-Assigning `InheritedValue.Instance` is how a control goes back to inheriting; there are no
+Assigning `PropertyValue.Inherited` is how a control goes back to inheriting; there are no
 `ClearFont`, `ClearForeground` or `ClearBackground` methods:
 
 ```csharp
-panel.Font = InheritedValue.Instance;
-panel.ForeColor = InheritedValue.Instance;
-panel.BackColor = InheritedValue.Instance;
+panel.Font = PropertyValue.Inherited;
+panel.ForeColor = PropertyValue.Inherited;
+panel.BackColor = PropertyValue.Inherited;
 ```
 
 Only an assigned value is inherited; a class default is not. That is what keeps today's look
@@ -2769,7 +2784,7 @@ caption role. A role assigned to a container does inherit, the same as a literal
 
 **Transparent is how "paint nothing" is spelled, and where it comes from matters.**
 
-* `BackColor = InheritedValue.Instance` - the initial value: ask the parent.
+* `BackColor = PropertyValue.Inherited` - the initial value: ask the parent.
 * `BackColor = SKColors.Transparent` - paint nothing here, and answer transparent to descendants
   that inherit from this control.
 * `DefaultBackColor = SKColors.Transparent` - this class paints nothing wherever it sits, and the
@@ -2784,11 +2799,11 @@ nothing; assign `SKColors.Transparent` only when the class would otherwise paint
 assigned transparent is inherited.
 
 **Not every colour is inherited.** A handful of members are a colour, a palette role or
-`InheritedValue.Instance` without walking a parent chain, because there is no parent whose answer
+`PropertyValue.Inherited` without walking a parent chain, because there is no parent whose answer
 should win. Their `InheritedValue` means "nothing was assigned", and each default is the least
 destructive value that keeps the look unchanged:
 
-| Member | Resolved by | `InheritedValue.Instance` means |
+| Member | Resolved by | `PropertyValue.Inherited` means |
 | --- | --- | --- |
 | `Toast.BarColor` | `EffectiveBarColor` | the colour the severity implies |
 | `SplitContainer.SplitterColor` | `EffectiveSplitterColor` | `ThemeColor.Splitter` |
@@ -3500,7 +3515,7 @@ drag of its own.
 
 `CaptionColor` and `BorderColor` recolour the two surfaces a borderless window can still show under
 it: Windows uses them for DWM's caption strip and its own 1 px border, GTK4 for the window's CSS
-border. Each takes a colour, a palette role or `InheritedValue.Instance`; inherit means the
+border. Each takes a colour, a palette role or `PropertyValue.Inherited`; inherit means the
 platform's own, not "no colour" - give both a colour if you want no visible platform chrome at all.
 The platform owns those pixels, so a role is resolved when it is assigned and again whenever the
 palette changes, and there is no `Effective*` to read: `Window.Backend.CaptionColor` and
@@ -3942,7 +3957,7 @@ image.Source = factory.LoadFromStream(stream);    // a PNG is a zero-duration an
 ```
 
 The control's image surface is `Source`, `SizeMode`, `ImageAlign` and `PlaceholderColor`, which is a
-colour, a palette role, or `InheritedValue.Instance` for none. It has no
+colour, a palette role, or `PropertyValue.Inherited` for none. It has no
 loader - `IImageDataFactory` is where bytes become an image - and it has no ownership of what it
 shows. That is `PictureBox`'s convention and the one to arrive with: you create the image, you assign
 it, you dispose it. Disposing the control does not dispose the image, and assigning a second image

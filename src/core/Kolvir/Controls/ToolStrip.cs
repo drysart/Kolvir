@@ -21,7 +21,7 @@ public enum ToolStripItemAlignment
 public abstract class ToolStripItem
 {
     private string _text = string.Empty;
-    private Union<Font, InheritedValue> _font = InheritedValue.Instance;
+    private Union<Font, InheritedValue> _font = PropertyValue.Inherited;
     private bool _enabled = true;
     private bool _visible = true;
     private bool _spring;
@@ -49,7 +49,7 @@ public abstract class ToolStripItem
 
     /// <summary>
     /// The font assigned to this item: a <see cref="Font"/>, or
-    /// <see cref="InheritedValue.Instance"/> to take its strip's effective font.
+    /// <see cref="PropertyValue.Inherited"/> to take its strip's effective font.
     /// </summary>
     /// <remarks>
     /// The item's font is resolved through the same chain a control's is, with the strip as the
@@ -203,7 +203,7 @@ public class ToolStripLabel : ToolStripItem
     public const float HorizontalPadding = 6f;
 
     private ContentAlignment _textAlign = ContentAlignment.MiddleLeft;
-    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = PropertyValue.Inherited;
 
     /// <summary>Creates a label with no caption.</summary>
     public ToolStripLabel()
@@ -215,7 +215,7 @@ public class ToolStripLabel : ToolStripItem
 
     /// <summary>
     /// The caption's colour: a literal <see cref="SKColor"/>, a palette <see cref="ThemeColor"/>
-    /// role, or <see cref="InheritedValue.Instance"/> to take its strip's effective text colour.
+    /// role, or <see cref="PropertyValue.Inherited"/> to take its strip's effective text colour.
     /// </summary>
     /// <remarks>
     /// A role is resolved when the caption is painted, so a palette swap recolours the label with
@@ -597,7 +597,7 @@ public class ToolStrip : Control
                 continue;
             }
 
-            bool enabled = Enabled && entry.Item.Enabled;
+            bool enabled = EffectiveEnabled && entry.Item.Enabled;
             bool hot = ReferenceEquals(entry.Item, _hot);
             bool pressed = ReferenceEquals(entry.Item, _pressed) || (_keyPressed && ReferenceEquals(entry.Item, _selected));
             entry.Item.Paint(canvas, itemRect, enabled, hot, pressed);
@@ -721,7 +721,7 @@ public class ToolStrip : Control
         _hot = null;
         _pressed = null;
         _keyPressed = false;
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _selected = null;
         }
@@ -733,7 +733,7 @@ public class ToolStrip : Control
     protected override void OnKeyDown(KeyEventArgs e)
     {
         base.OnKeyDown(e);
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             return;
         }
@@ -783,7 +783,7 @@ public class ToolStrip : Control
         _keyPressed = false;
         var selected = _selected;
         Invalidate();
-        if (selected is not null && Enabled && selected.Enabled)
+        if (selected is not null && EffectiveEnabled && selected.Enabled)
         {
             selected.Activate();
         }

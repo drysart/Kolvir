@@ -328,7 +328,7 @@ public readonly struct Union<T1, T2> : IEquatable<Union<T1, T2>>
 /// <example>
 /// <code>
 /// Union&lt;SKColor, ThemeColor, InheritedValue&gt; forerunner;
-/// forerunner = InheritedValue.Instance;
+/// forerunner = PropertyValue.Inherited;
 ///
 /// if (forerunner.TryGetValue&lt;InheritedValue&gt;(out _))
 /// {

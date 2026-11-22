@@ -44,7 +44,7 @@ public class TextBoxSpan
     private const float DefaultAmplitude = 1.5f;
     private const float DefaultWavelength = 4f;
 
-    private Union<SKColor, ThemeColor, InheritedValue> _color = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _color = PropertyValue.Inherited;
     private float _thickness = DefaultThickness;
     private float _amplitude = DefaultAmplitude;
     private float _wavelength = DefaultWavelength;
@@ -82,13 +82,13 @@ public class TextBoxSpan
 
     /// <summary>
     /// The squiggle's colour: a literal <see cref="SKColor"/>, a <see cref="ThemeColor"/> role, or
-    /// <see cref="InheritedValue.Instance"/> to draw in the field's
+    /// <see cref="PropertyValue.Inherited"/> to draw in the field's
     /// <see cref="Control.EffectiveForeColor"/>.
     /// </summary>
     /// <remarks>
     /// The property reports what was assigned. Read <see cref="EffectiveColor"/> for the colour the
     /// squiggle is actually drawn in. The initial value is
-    /// <see cref="InheritedValue.Instance"/>; a checker that wants the conventional red assigns
+    /// <see cref="PropertyValue.Inherited"/>; a checker that wants the conventional red assigns
     /// <see cref="DefaultColor"/>.
     /// </remarks>
     public Union<SKColor, ThemeColor, InheritedValue> Color
@@ -105,7 +105,7 @@ public class TextBoxSpan
     /// <returns>The colour, alpha included.</returns>
     /// <remarks>
     /// A literal is returned as it is, a role is resolved through <see cref="Theme.ColorOf"/> on
-    /// every read, and <see cref="InheritedValue.Instance"/> answers with the field's own
+    /// every read, and <see cref="PropertyValue.Inherited"/> answers with the field's own
     /// <see cref="Control.EffectiveForeColor"/>. The field is passed in rather than remembered
     /// because a span is caller-owned and may be handed to more than one box.
     /// </remarks>

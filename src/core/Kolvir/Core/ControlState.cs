@@ -8,8 +8,9 @@ namespace Kolvir;
 /// <para>
 /// This is what a <see cref="Border"/> reads when it decides which colour to paint. It exists as a
 /// value rather than as a set of properties on <see cref="Control"/> because four of its five members
-/// are already properties there (<see cref="Control.Enabled"/>, <see cref="Control.IsFocused"/>,
-/// <see cref="Control.IsMouseOver"/>, <see cref="Control.IsPressed"/>) and the fifth is not: a popup
+/// are already properties there (<see cref="Control.EffectiveEnabled"/>,
+/// <see cref="Control.IsFocused"/>, <see cref="Control.IsMouseOver"/>,
+/// <see cref="Control.IsPressed"/>) and the fifth is not: a popup
 /// being open is declared separately by <see cref="ComboBox"/>, <see cref="SplitButton"/> and
 /// <see cref="DateTimePicker"/>, and a border that read it directly would have to know and cast to all
 /// three. A bit says the same thing without the cast.

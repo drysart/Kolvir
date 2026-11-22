@@ -206,7 +206,7 @@ public class DateTimePicker : TextBox
     /// <summary>Opens the calendar, if the picker is enabled and it is not already open.</summary>
     public void OpenDropDown()
     {
-        if (_dropDownOpen || !Enabled || Host is not { } host)
+        if (_dropDownOpen || !EffectiveEnabled || Host is not { } host)
         {
             return;
         }
@@ -289,7 +289,7 @@ public class DateTimePicker : TextBox
     {
         base.OnPaintBackground(canvas, rect);
 
-        if (IsFocused && Enabled)
+        if (IsFocused && EffectiveEnabled)
         {
             Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 1.5f, Border.Corners);
         }
@@ -311,7 +311,7 @@ public class DateTimePicker : TextBox
     /// </summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {
-        if (e.Button == MouseButtons.Left && Enabled && Geometry.Contains(ButtonBounds, e.Location))
+        if (e.Button == MouseButtons.Left && EffectiveEnabled && Geometry.Contains(ButtonBounds, e.Location))
         {
             // A press on the button is not a press in the text: the caret and the selection stay
             // where they were, which is what makes the calendar usable while a date is half-typed.
@@ -340,7 +340,7 @@ public class DateTimePicker : TextBox
     /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        bool hot = Enabled && Geometry.Contains(ButtonBounds, e.Location);
+        bool hot = EffectiveEnabled && Geometry.Contains(ButtonBounds, e.Location);
         if (hot != _hotButton)
         {
             _hotButton = hot;
@@ -374,7 +374,7 @@ public class DateTimePicker : TextBox
         // Keys the picker owns are marked handled before the text box sees them, so its own
         // left/right character movement does not run. Calling base afterwards still notifies the
         // public key handlers, and the text box skips its editing switch because Handled is set.
-        if (!e.Handled && Enabled && HandleKey(e))
+        if (!e.Handled && EffectiveEnabled && HandleKey(e))
         {
             e.Handled = true;
             base.OnKeyDown(e);
@@ -421,7 +421,7 @@ public class DateTimePicker : TextBox
     /// <summary>Clears the button's hover state and closes the calendar when the picker is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _hotButton = false;
             CloseDropDown();
@@ -1049,7 +1049,7 @@ public class DateTimePicker : TextBox
             Painter.Fill(canvas, Geometry.Deflate(bounds, 2f), fill, 4f);
         }
 
-        var color = !Enabled
+        var color = !EffectiveEnabled
             ? Theme.DisabledForeground
             : _dropDownOpen ? Theme.Accent : Theme.MutedForeground;
 
@@ -1123,7 +1123,7 @@ public class DateTimePicker : TextBox
         Invalidate();
 
         var focused = Host?.FocusedControl;
-        if (Enabled && Visible && (focused is null || ReferenceEquals(focused, this)))
+        if (EffectiveEnabled && Visible && (focused is null || ReferenceEquals(focused, this)))
         {
             Focus();
         }
@@ -1255,7 +1255,7 @@ public class DateTimePicker : TextBox
 
         protected override void OnMouseDown(MouseEventArgs e)
         {
-            if (e.Button != MouseButtons.Left || !Enabled)
+            if (e.Button != MouseButtons.Left || !EffectiveEnabled)
             {
                 return;
             }
@@ -1308,7 +1308,7 @@ public class DateTimePicker : TextBox
 
         protected override void OnEnabledChanged()
         {
-            if (!Enabled)
+            if (!EffectiveEnabled)
             {
                 _hot = -1;
                 _pressed = -1;

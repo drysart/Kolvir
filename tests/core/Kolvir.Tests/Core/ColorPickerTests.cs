@@ -446,7 +446,7 @@ public sealed class ColorPickerTests : HeadlessTestBase
         scene.ClickAt(new SKPoint(origin.X + square.Width - 1f, origin.Y + 1f));
 
         Assert.AreEqual(before, picker.Color, "a disabled square takes no press");
-        Assert.IsFalse(Component(picker, 0).Enabled, "the fields inherit the disabled state");
+        Assert.IsFalse(Component(picker, 0).EffectiveEnabled, "the fields inherit the disabled state");
 
         var pixel = scene.PixelAt(
             (int)(origin.X + (square.Width / 2f)),

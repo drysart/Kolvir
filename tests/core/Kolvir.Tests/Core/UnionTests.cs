@@ -37,7 +37,7 @@ public sealed class UnionTests
         Assert.IsTrue(triple.TryGetValue<ThemeColor>(out ThemeColor tripleRole));
         Assert.AreEqual(ThemeColor.MutedForeground, tripleRole);
 
-        triple = InheritedValue.Instance;
+        triple = PropertyValue.Inherited;
         Assert.IsTrue(triple.TryGetValue<InheritedValue>(out _));
 
         Union<SKColor, ThemeColor, InheritedValue, int> quadruple = Direct;
@@ -48,7 +48,7 @@ public sealed class UnionTests
         Assert.IsTrue(quadruple.TryGetValue<ThemeColor>(out ThemeColor quadrupleRole));
         Assert.AreEqual(ThemeColor.Accent, quadrupleRole);
 
-        quadruple = InheritedValue.Instance;
+        quadruple = PropertyValue.Inherited;
         Assert.IsTrue(quadruple.TryGetValue<InheritedValue>(out _));
 
         quadruple = 12;
@@ -71,8 +71,8 @@ public sealed class UnionTests
         var tripleFromRole = new Union<SKColor, ThemeColor, InheritedValue>(ThemeColor.MutedForeground);
         Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue>)ThemeColor.MutedForeground, tripleFromRole);
 
-        var tripleFromInherit = new Union<SKColor, ThemeColor, InheritedValue>(InheritedValue.Instance);
-        Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue>)InheritedValue.Instance, tripleFromInherit);
+        var tripleFromInherit = new Union<SKColor, ThemeColor, InheritedValue>(PropertyValue.Inherited);
+        Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue>)PropertyValue.Inherited, tripleFromInherit);
 
         var quadrupleFromDirect = new Union<SKColor, ThemeColor, InheritedValue, int>(Direct);
         Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue, int>)Direct, quadrupleFromDirect);
@@ -80,8 +80,8 @@ public sealed class UnionTests
         var quadrupleFromRole = new Union<SKColor, ThemeColor, InheritedValue, int>(ThemeColor.MutedForeground);
         Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue, int>)ThemeColor.MutedForeground, quadrupleFromRole);
 
-        var quadrupleFromInherit = new Union<SKColor, ThemeColor, InheritedValue, int>(InheritedValue.Instance);
-        Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue, int>)InheritedValue.Instance, quadrupleFromInherit);
+        var quadrupleFromInherit = new Union<SKColor, ThemeColor, InheritedValue, int>(PropertyValue.Inherited);
+        Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue, int>)PropertyValue.Inherited, quadrupleFromInherit);
 
         var quadrupleFromNumber = new Union<SKColor, ThemeColor, InheritedValue, int>(12);
         Assert.AreEqual((Union<SKColor, ThemeColor, InheritedValue, int>)12, quadrupleFromNumber);
@@ -196,7 +196,7 @@ public sealed class UnionTests
     public void SwitchWithStatePassesTheStateAndRunsOnce()
     {
         var log = new List<string>();
-        Union<SKColor, ThemeColor, InheritedValue> union = InheritedValue.Instance;
+        Union<SKColor, ThemeColor, InheritedValue> union = PropertyValue.Inherited;
 
         union.Switch(
             log,
@@ -333,7 +333,7 @@ public sealed class UnionTests
         var directSecond = new Union<ThemeColor, SKColor>(Direct);
         Assert.AreEqual($"SKColor({Direct})", directSecond.ToString(), "every other case reads as a type and a value");
 
-        var inherit = new Union<SKColor, ThemeColor, InheritedValue>(InheritedValue.Instance);
+        var inherit = new Union<SKColor, ThemeColor, InheritedValue>(PropertyValue.Inherited);
         Assert.AreEqual("InheritedValue(Inherit)", inherit.ToString());
 
         Assert.AreEqual(

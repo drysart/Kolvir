@@ -196,7 +196,7 @@ internal sealed class FontDialogPage : DemoPage
     {
         if (_fontDialogStage is { } stage)
         {
-            stage.Font = InheritedValue.Instance;
+            stage.Font = PropertyValue.Inherited;
             _fontDialogSelection = SelectionOf(stage.EffectiveFont);
         }
 

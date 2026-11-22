@@ -300,7 +300,7 @@ public class SplitContainer : Control
 
     /// <summary>
     /// Fill colour of the splitter assigned here: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> for
     /// <see cref="ThemeColor.Splitter"/>.
     /// </summary>
     /// <remarks>
@@ -310,7 +310,7 @@ public class SplitContainer : Control
     /// the splitter is enabled, not hovered and not being dragged; those states keep their own
     /// theme colours.
     /// </remarks>
-    public Union<SKColor, ThemeColor, InheritedValue> SplitterColor { get; set; } = InheritedValue.Instance;
+    public Union<SKColor, ThemeColor, InheritedValue> SplitterColor { get; set; } = PropertyValue.Inherited;
 
     /// <summary>
     /// The splitter band's fill as it is painted: the assignment, else <see cref="ThemeColor.Splitter"/>.
@@ -449,8 +449,8 @@ public class SplitContainer : Control
             return;
         }
 
-        var highlight = Enabled && !_isSplitterFixed && (IsMouseOver || _isDragging || IsFocused);
-        var color = !Enabled
+        var highlight = EffectiveEnabled && !_isSplitterFixed && (IsMouseOver || _isDragging || IsFocused);
+        var color = !EffectiveEnabled
             ? Theme.DisabledBackground
             : _isDragging
                 ? Theme.Accent
@@ -460,7 +460,7 @@ public class SplitContainer : Control
 
         Painter.Fill(canvas, _splitterRect, color);
 
-        if (ShowSplitterGrip && Enabled)
+        if (ShowSplitterGrip && EffectiveEnabled)
         {
             DrawGrip(canvas, _isDragging || highlight);
         }
@@ -474,7 +474,7 @@ public class SplitContainer : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button != MouseButtons.Left || !Enabled || _isSplitterFixed)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled || _isSplitterFixed)
         {
             return;
         }
@@ -533,7 +533,7 @@ public class SplitContainer : Control
     {
         base.OnKeyDown(e);
 
-        if (e.Handled || !Enabled || _isSplitterFixed)
+        if (e.Handled || !EffectiveEnabled || _isSplitterFixed)
         {
             return;
         }
@@ -580,7 +580,7 @@ public class SplitContainer : Control
     /// <summary>Ends a drag in progress when the container is disabled.</summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             EndDrag();
         }

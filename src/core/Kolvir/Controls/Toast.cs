@@ -75,7 +75,7 @@ public class Toast : Control
     private Action<object>? _dismissing;
     private ToastSeverity _severity = ToastSeverity.Info;
     private TimeSpan? _duration = DefaultDuration;
-    private Union<SKColor, ThemeColor, InheritedValue> _barColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _barColor = PropertyValue.Inherited;
     private bool _open;
     private bool _closeHot;
     private bool _closePressed;
@@ -304,7 +304,7 @@ public class Toast : Control
 
     /// <summary>
     /// The accent bar's colour assigned to this toast: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the one
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> for the one
     /// <see cref="Severity"/> implies.
     /// </summary>
     /// <remarks>
@@ -458,7 +458,7 @@ public class Toast : Control
 
         base.OnPaintBackground(canvas, rect);
 
-        if (IsFocused && Enabled)
+        if (IsFocused && EffectiveEnabled)
         {
             Painter.DrawFocusRing(canvas, rect, Theme.FocusRing, 2f, Border.Corners);
         }
@@ -494,7 +494,7 @@ public class Toast : Control
     {
         bool shifted = BeginSlide(canvas);
 
-        var color = Enabled ? EffectiveForeColor : Theme.DisabledForeground;
+        var color = EffectiveEnabled ? EffectiveForeColor : Theme.DisabledForeground;
         var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
 
         if (content.Width > 0f && content.Height > 0f && !string.IsNullOrEmpty(Text))
@@ -512,7 +512,7 @@ public class Toast : Control
             canvas.Restore();
         }
 
-        PaintCloseGlyph(canvas, CloseBounds, Enabled ? Theme.MutedForeground : Theme.DisabledForeground);
+        PaintCloseGlyph(canvas, CloseBounds, EffectiveEnabled ? Theme.MutedForeground : Theme.DisabledForeground);
 
         if (shifted)
         {
@@ -529,7 +529,7 @@ public class Toast : Control
     {
         base.OnMouseDown(e);
 
-        if (e.Button != MouseButtons.Left || !Enabled)
+        if (e.Button != MouseButtons.Left || !EffectiveEnabled)
         {
             return;
         }
@@ -572,7 +572,7 @@ public class Toast : Control
     /// </summary>
     protected override void OnMouseMove(MouseEventArgs e)
     {
-        bool hot = Enabled && Geometry.Contains(CloseBounds, e.Location);
+        bool hot = EffectiveEnabled && Geometry.Contains(CloseBounds, e.Location);
         if (hot != _closeHot)
         {
             _closeHot = hot;
@@ -609,7 +609,7 @@ public class Toast : Control
     {
         base.OnKeyDown(e);
 
-        if (e.Handled || !Enabled || !_open)
+        if (e.Handled || !EffectiveEnabled || !_open)
         {
             return;
         }
@@ -651,7 +651,7 @@ public class Toast : Control
     /// </summary>
     protected override void OnEnabledChanged()
     {
-        if (!Enabled)
+        if (!EffectiveEnabled)
         {
             _closeHot = false;
             _closePressed = false;
@@ -678,7 +678,7 @@ public class Toast : Control
     {
         bool run = _open
             && IsDisplayed
-            && Enabled
+            && EffectiveEnabled
             && _duration is { } duration
             && duration > TimeSpan.Zero
             && Application.Current is not null;

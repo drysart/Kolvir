@@ -47,8 +47,8 @@ public sealed partial class Window : IDisposable
     private bool _tornDown;
     private SKSize? _pendingClientSize;
     private bool _clientSizeDeferred;
-    private Union<SKColor, ThemeColor, InheritedValue> _captionColor = InheritedValue.Instance;
-    private Union<SKColor, ThemeColor, InheritedValue> _borderColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _captionColor = PropertyValue.Inherited;
+    private Union<SKColor, ThemeColor, InheritedValue> _borderColor = PropertyValue.Inherited;
 
     /// <summary>Creates an untitled window with no content.</summary>
     /// <exception cref="InvalidOperationException">No <see cref="Application"/> exists yet.</exception>
@@ -410,7 +410,7 @@ public sealed partial class Window : IDisposable
     /// <summary>
     /// The colour the platform should use where it treats the window as a caption: a literal
     /// <see cref="SKColor"/>, a palette <see cref="ThemeColor"/> role, or
-    /// <see cref="InheritedValue.Instance"/> for the platform's own default.
+    /// <see cref="PropertyValue.Inherited"/> for the platform's own default.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -422,7 +422,7 @@ public sealed partial class Window : IDisposable
     /// last place that can resolve a role. A literal is handed over as it is and a role is resolved
     /// through <see cref="Theme.ColorOf"/> when it is assigned, and again whenever the palette
     /// changes while the window is alive, so a role keeps following the theme the platform cannot
-    /// see. <see cref="InheritedValue.Instance"/> hands the surface back to the platform's default,
+    /// see. <see cref="PropertyValue.Inherited"/> hands the surface back to the platform's default,
     /// which is what a null colour meant before this became a union.
     /// </para>
     /// </remarks>
@@ -452,7 +452,7 @@ public sealed partial class Window : IDisposable
     /// <summary>
     /// The colour the platform should use for its own window border: a literal
     /// <see cref="SKColor"/>, a palette <see cref="ThemeColor"/> role, or
-    /// <see cref="InheritedValue.Instance"/> to keep the platform's default.
+    /// <see cref="PropertyValue.Inherited"/> to keep the platform's default.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -463,7 +463,7 @@ public sealed partial class Window : IDisposable
     /// <para>
     /// It resolves exactly like <see cref="CaptionColor"/>: a literal as it is, a role when it is
     /// assigned and again on every palette change, and
-    /// <see cref="InheritedValue.Instance"/> for the platform's default.
+    /// <see cref="PropertyValue.Inherited"/> for the platform's default.
     /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">

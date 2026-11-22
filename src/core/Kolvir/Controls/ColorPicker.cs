@@ -214,7 +214,7 @@ public class ColorPicker : Control
     /// When true the picker displays its colour but refuses to change it. Defaults to false.
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="Control.Enabled"/>, a read-only picker still looks live: the spectrum
+    /// Unlike <see cref="Control.EffectiveEnabled"/>, a read-only picker still looks live: the spectrum
     /// and the fields paint in their normal colours, the fields can be focused and copied from, and
     /// programmatic assignment to <see cref="Color"/> still works. Only the user's edits are
     /// refused. A disabled picker paints the disabled palette, takes no input and is skipped by Tab.
@@ -319,7 +319,7 @@ public class ColorPicker : Control
     protected override void OnPaint(SKCanvas canvas, SKRect rect)
     {
         var labels = LabelsFor(_mode);
-        var color = Enabled ? Theme.MutedForeground : Theme.DisabledForeground;
+        var color = EffectiveEnabled ? Theme.MutedForeground : Theme.DisabledForeground;
 
         for (int index = 0; index < labels.Length; index++)
         {
@@ -562,7 +562,7 @@ public class ColorPicker : Control
 
     private void StepComponent(ComponentField field, int index, int delta)
     {
-        if (IsReadOnly || !Enabled)
+        if (IsReadOnly || !EffectiveEnabled)
         {
             return;
         }
@@ -798,7 +798,7 @@ public class ColorPicker : Control
                 return;
             }
 
-            if (!Enabled)
+            if (!EffectiveEnabled)
             {
                 Painter.Fill(canvas, rect, Theme.DisabledBackground);
                 Painter.DrawBorder(canvas, rect, Theme.DisabledForeground, 1f);
@@ -830,7 +830,7 @@ public class ColorPicker : Control
         {
             base.OnMouseDown(e);
 
-            if (e.Button != MouseButtons.Left || !Enabled)
+            if (e.Button != MouseButtons.Left || !EffectiveEnabled)
             {
                 return;
             }
@@ -852,7 +852,7 @@ public class ColorPicker : Control
         {
             base.OnMouseMove(e);
 
-            if (_dragging && Enabled && !_owner.IsReadOnly)
+            if (_dragging && EffectiveEnabled && !_owner.IsReadOnly)
             {
                 SetFromPoint(e.Location);
             }
@@ -874,7 +874,7 @@ public class ColorPicker : Control
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            if (e.Handled || !Enabled || _owner.IsReadOnly)
+            if (e.Handled || !EffectiveEnabled || _owner.IsReadOnly)
             {
                 return;
             }
@@ -939,7 +939,7 @@ public class ColorPicker : Control
 
         protected override void OnEnabledChanged()
         {
-            if (!Enabled)
+            if (!EffectiveEnabled)
             {
                 EndDrag();
             }
@@ -1118,7 +1118,7 @@ public class ColorPicker : Control
                 return;
             }
 
-            if (!Enabled)
+            if (!EffectiveEnabled)
             {
                 Painter.Fill(canvas, rect, Theme.DisabledBackground);
                 Painter.DrawBorder(canvas, rect, Theme.DisabledForeground, 1f);
@@ -1149,7 +1149,7 @@ public class ColorPicker : Control
         {
             base.OnMouseDown(e);
 
-            if (e.Button != MouseButtons.Left || !Enabled)
+            if (e.Button != MouseButtons.Left || !EffectiveEnabled)
             {
                 return;
             }
@@ -1171,7 +1171,7 @@ public class ColorPicker : Control
         {
             base.OnMouseMove(e);
 
-            if (_dragging && Enabled && !_owner.IsReadOnly)
+            if (_dragging && EffectiveEnabled && !_owner.IsReadOnly)
             {
                 SetFromPoint(e.Location);
             }
@@ -1193,7 +1193,7 @@ public class ColorPicker : Control
         protected override void OnKeyDown(KeyEventArgs e)
         {
             base.OnKeyDown(e);
-            if (e.Handled || !Enabled || _owner.IsReadOnly)
+            if (e.Handled || !EffectiveEnabled || _owner.IsReadOnly)
             {
                 return;
             }
@@ -1248,7 +1248,7 @@ public class ColorPicker : Control
 
         protected override void OnEnabledChanged()
         {
-            if (!Enabled)
+            if (!EffectiveEnabled)
             {
                 EndDrag();
             }

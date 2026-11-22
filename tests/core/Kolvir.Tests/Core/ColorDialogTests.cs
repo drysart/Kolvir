@@ -172,13 +172,49 @@ public sealed class ColorDialogTests : HeadlessTestBase
 
         dialog.Window.AddShownHandler(_ =>
         {
-            sawBlocked = !ownerContent.Enabled;
+            sawBlocked = !ownerContent.EffectiveEnabled;
             Click(dialog.Window, dialog.CancelButton);
         });
 
         Assert.IsNull(dialog.Show(owner));
         Assert.IsTrue(sawBlocked, "the owner's content is disabled for the modal session");
-        Assert.IsTrue(ownerContent.Enabled, "and is enabled again once the dialog closes");
+        Assert.IsTrue(ownerContent.EffectiveEnabled, "and is enabled again once the dialog closes");
+    }
+
+    [TestMethod]
+    [TestCategory("Headless")]
+    public void TheModalSessionPutsBackAnInheritedEnabledValue()
+    {
+        using var app = NewApplication();
+
+        // The owner's content is the window's root but still has a parent, and that parent is
+        // disabled: its own Enabled is Inherit, and the effective answer comes from the ancestor.
+        var disabledAncestor = new Panel { Enabled = false };
+        var ownerContent = new Panel();
+        disabledAncestor.Controls.Add(ownerContent);
+        var owner = new Window("owner", ownerContent);
+        var dialog = new ColorDialog();
+
+        Assert.IsTrue(
+            ownerContent.Enabled.TryGetValue<InheritedValue>(out _),
+            "the owner's content has not assigned an enabled value");
+        Assert.IsFalse(
+            ownerContent.EffectiveEnabled,
+            "the disabled ancestor is what makes it effectively disabled");
+
+        dialog.Window.AddShownHandler(_ => Click(dialog.Window, dialog.CancelButton));
+
+        Assert.IsNull(dialog.Show(owner));
+
+        Assert.IsTrue(
+            ownerContent.Enabled.TryGetValue<InheritedValue>(out _),
+            "the modal session puts back the inherited value, not a literal false");
+
+        disabledAncestor.Enabled = PropertyValue.Inherited;
+
+        Assert.IsTrue(
+            ownerContent.EffectiveEnabled,
+            "so re-enabling the ancestor enables the content again");
     }
 
     [TestMethod]
@@ -310,7 +346,7 @@ public sealed class ColorDialogTests : HeadlessTestBase
         // on macOS before this.
         Assert.IsFalse(focusedWhileOpen, "the owner's button loses the keyboard while the dialog is open");
         Assert.IsTrue(button.IsFocused, "and has it back once the dialog closes");
-        Assert.IsTrue(button.Enabled, "with the owner's content enabled again");
+        Assert.IsTrue(button.EffectiveEnabled, "with the owner's content enabled again");
     }
 
     [TestMethod]

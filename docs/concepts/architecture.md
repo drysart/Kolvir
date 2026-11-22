@@ -60,8 +60,8 @@ close over. `Control.Id` exists for the cases where something outside the buildi
 control up, and `window.TryGetControlById` is that lookup.
 
 Every control has the same base features: a position and size, `Margin` and `Padding`, `Dock`,
-`Visible` and `Enabled` (a disabled container disables everything inside it), an inherited font and
-foreground colour, the focus, and notifications. Those notifications are not C# events: each is a pair
+`Visible` and `Enabled`/`EffectiveEnabled` (a disabled container disables everything inside it), an
+inherited font and foreground colour, the focus, and notifications. Those notifications are not C# events: each is a pair
 of `Add...Handler` and `Remove...Handler` methods, and the `Add` call returns a token that
 unsubscribes when it is disposed:
 

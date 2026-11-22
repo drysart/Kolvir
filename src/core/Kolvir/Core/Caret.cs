@@ -77,7 +77,7 @@ public sealed class Caret : IDisposable
 
     /// <summary>
     /// The caret's colour assigned here: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the theme's
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> for the theme's
     /// caret colour.
     /// </summary>
     /// <remarks>
@@ -86,7 +86,7 @@ public sealed class Caret : IDisposable
     /// follows <see cref="ThemeColor.Caret"/>, and a role is resolved when the caret paints, so a
     /// palette swap recolours a live caret.
     /// </remarks>
-    public Union<SKColor, ThemeColor, InheritedValue> Color { get; set; } = InheritedValue.Instance;
+    public Union<SKColor, ThemeColor, InheritedValue> Color { get; set; } = PropertyValue.Inherited;
 
     /// <summary>
     /// The colour the caret is drawn in: the assignment, else <see cref="ThemeColor.Caret"/>.
@@ -129,13 +129,13 @@ public sealed class Caret : IDisposable
     /// Whether a paint should draw the caret: it is active, in its visible phase, and its control
     /// is focused, enabled and <see cref="Control.EffectiveVisible"/>.
     /// </summary>
-    public bool ShouldPaint => _active && _visible && _owner.IsFocused && _owner.Enabled && _owner.EffectiveVisible;
+    public bool ShouldPaint => _active && _visible && _owner.IsFocused && _owner.EffectiveEnabled && _owner.EffectiveVisible;
 
     /// <summary>
     /// Whether the blink has any reason to run: the caret is taken, and its control is focused,
     /// enabled and <see cref="Control.IsDisplayed"/>.
     /// </summary>
-    private bool ShouldBlink => _active && _owner.IsFocused && _owner.Enabled && _owner.IsDisplayed;
+    private bool ShouldBlink => _active && _owner.IsFocused && _owner.EffectiveEnabled && _owner.IsDisplayed;
 
     /// <summary>
     /// Takes the caret and restarts the blink, so it appears solid the moment the user starts
@@ -261,7 +261,7 @@ public sealed class Caret : IDisposable
     {
         // The control tree belongs to the caller, so this timer can outlive the application. Once
         // that happens Timer ticks inline on a pool thread, which must not touch the UI.
-        if (Application.Current is null || !_active || !_owner.IsFocused || !_owner.Enabled || !_owner.IsDisplayed)
+        if (Application.Current is null || !_active || !_owner.IsFocused || !_owner.EffectiveEnabled || !_owner.IsDisplayed)
         {
             _visible = true;
             _timer.Stop();

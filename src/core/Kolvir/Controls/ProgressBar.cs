@@ -195,9 +195,9 @@ public class ProgressBar : Control
             return;
         }
 
-        Painter.Fill(canvas, rect, Enabled ? Theme.Secondary : Theme.DisabledBackground, Border.CornerRadius);
+        Painter.Fill(canvas, rect, EffectiveEnabled ? Theme.Secondary : Theme.DisabledBackground, Border.CornerRadius);
 
-        var fill = Enabled ? Theme.Accent : Theme.DisabledForeground;
+        var fill = EffectiveEnabled ? Theme.Accent : Theme.DisabledForeground;
 
         switch (_style)
         {
@@ -291,7 +291,7 @@ public class ProgressBar : Control
     {
         bool run = _style == ProgressBarStyle.Marquee
             && IsDisplayed
-            && Enabled
+            && EffectiveEnabled
             && Application.Current is not null;
 
         if (!run)

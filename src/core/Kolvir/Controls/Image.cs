@@ -120,7 +120,7 @@ public class Image : Control
     /// <summary>
     /// The solid colour an image with no <see cref="Source"/> shows: a literal
     /// <see cref="SKColor"/>, a palette <see cref="ThemeColor"/> role, or
-    /// <see cref="InheritedValue.Instance"/> for no placeholder at all.
+    /// <see cref="PropertyValue.Inherited"/> for no placeholder at all.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -133,7 +133,7 @@ public class Image : Control
     /// A role is resolved when it is read, so a palette swap recolours a live image.
     /// </para>
     /// </remarks>
-    public Union<SKColor, ThemeColor, InheritedValue> PlaceholderColor { get; set; } = InheritedValue.Instance;
+    public Union<SKColor, ThemeColor, InheritedValue> PlaceholderColor { get; set; } = PropertyValue.Inherited;
 
     /// <summary>
     /// The colour an image with no source is filled with: the assignment, else

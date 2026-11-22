@@ -103,7 +103,7 @@ public class Overlay : Panel, IInputSink
     public bool ProcessTextInput(string text) => BlocksInput && text.Length > 0;
 
     /// <summary>True while the layer is really able to hold the window still.</summary>
-    private bool BlocksInput => IsDisplayed && Enabled;
+    private bool BlocksInput => IsDisplayed && EffectiveEnabled;
 
     /// <summary>
     /// Paints the dimming: <see cref="Theme.Background"/> at <see cref="Dim"/> alpha, read from the

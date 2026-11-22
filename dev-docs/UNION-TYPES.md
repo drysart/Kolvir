@@ -174,21 +174,31 @@ reference-typed case, and the no-allocation assertion.
 
 ## 10. Control appearance properties
 
-The first consumers are `Control.Font`, `Control.ForeColor` and `Control.BackColor`, plus
-`ToolStripItem.Font` and `ToolStripLabel.ForeColor`. The shape is the same in each case:
+The first consumers are `Control.Font`, `Control.ForeColor`, `Control.BackColor` and
+`Control.Enabled`, plus `ToolStripItem.Font` and `ToolStripLabel.ForeColor`. The shape is the same
+in each case:
 
 | Property | Union |
 | --- | --- |
 | `Control.Font` | `Union<Font, InheritedValue>` |
 | `Control.ForeColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
 | `Control.BackColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
+| `Control.Enabled` | `Union<bool, InheritedValue>` |
 
 The property reports the assignment. The get-only `EffectiveFont` / `EffectiveForeColor` /
 `EffectiveBackColor` resolves it: the value assigned here, else the nearest ancestor that assigned
 one, else the class default (`DefaultFont` / `DefaultForeColor` / `DefaultBackColor`). The backing
-field is initialised to `InheritedValue.Instance`, so "never assigned" reads back as Inherit; a
+field is initialised to `PropertyValue.Inherited`, so "never assigned" reads back as Inherit; a
 `default` union is refused by `ThrowIfUnspecified()` in the `Effective*` getter rather than being
 treated as inherit.
+
+`Control.Enabled` is the same shape with one difference: `EffectiveEnabled` ANDs the local answer
+down the chain rather than taking the nearest assignment, because disabling a container disables
+everything inside it. `PropertyValue.Inherited` and an explicit `true` therefore resolve
+identically, and an explicit `true` does not override a disabled ancestor. The arm still earns its
+place in the raw property: it reports that nothing was assigned, which is what lets the colour
+dialog save and restore the owner's state without turning an inherited value into an explicit
+`false`.
 
 Three decisions are worth recording, because each one is a place the obvious alternative is wrong:
 
@@ -207,7 +217,7 @@ Three decisions are worth recording, because each one is a place the obvious alt
   background), the most neutral one where transparency would be destructive (`Theme.Foreground` for
   text, `Theme.DefaultFont` for a font).
 
-`Clear*` is gone in favour of `= InheritedValue.Instance`, and the two names for one thing are
+`Clear*` is gone in favour of `= PropertyValue.Inherited`, and the two names for one thing are
 merged under the WinForms name: `Foreground` and `ForeColorRole` became `ForeColor`, `Background`
 and `BackColor` became `BackColor`.
 
@@ -272,7 +282,7 @@ The window colours are the one pair with no `Effective*`. They go to a backend t
 concrete `SKColor` or null for the platform's default, and the platform owns the actual pixels, so
 no later reader can resolve a role. The window therefore resolves one with `Theme.ColorOf` when it
 is assigned and hands over the result, and re-resolves it from the application's palette-change
-loop, so an assigned role keeps following the theme. `InheritedValue.Instance` passes null.
+loop, so an assigned role keeps following the theme. `PropertyValue.Inherited` passes null.
 `Window.CaptionColor` and `Window.BorderColor` report the assignment;
 `Window.Backend.CaptionColor` and `BorderColor` report what the platform holds.
 

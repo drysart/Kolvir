@@ -266,7 +266,7 @@ internal sealed class TextBoxAutoCompleteState
 
     private void OnEnabledChanged(object? sender)
     {
-        if (!_textBox.Enabled)
+        if (!_textBox.EffectiveEnabled)
         {
             Close();
         }
@@ -421,7 +421,7 @@ internal sealed class TextBoxAutoCompleteState
 
     private void Show(List<string> matches, bool previewFirst)
     {
-        if (!_textBox.IsFocused || !_textBox.Enabled || !_textBox.Visible || _textBox.Host is not { } host)
+        if (!_textBox.IsFocused || !_textBox.EffectiveEnabled || !_textBox.Visible || _textBox.Host is not { } host)
         {
             Close();
             return;
@@ -628,7 +628,7 @@ internal sealed class TextBoxAutoCompleteState
         _open = false;
 
         var focused = _textBox.Host?.FocusedControl;
-        if (_textBox.Enabled && _textBox.Visible && (focused is null || ReferenceEquals(focused, _textBox)))
+        if (_textBox.EffectiveEnabled && _textBox.Visible && (focused is null || ReferenceEquals(focused, _textBox)))
         {
             _textBox.Focus();
         }

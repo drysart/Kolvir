@@ -33,7 +33,7 @@ public sealed class SplitButtonTests : HeadlessTestBase
         Assert.AreEqual(
             1,
             clicks,
-            $"pressing the main area runs the default action; bounds={button.Bounds} point={MainAreaPoint(button)} enabled={button.Enabled}");
+            $"pressing the main area runs the default action; bounds={button.Bounds} point={MainAreaPoint(button)} enabled={button.EffectiveEnabled}");
         Assert.IsFalse(button.IsDropDownOpen, "and does not open the menu");
     }
 

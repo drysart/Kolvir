@@ -32,7 +32,7 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
         Assert.AreSame(font, assigned, "the property reports the font it was given");
         Assert.IsFalse(label.Font.TryGetValue<InheritedValue>(out _));
 
-        label.Font = InheritedValue.Instance;
+        label.Font = PropertyValue.Inherited;
         Assert.IsTrue(label.Font.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
         Assert.IsFalse(label.Font.TryGetValue<Font>(out _));
     }
@@ -69,7 +69,7 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
         Assert.AreSame(ownFont, label.EffectiveFont);
         Assert.IsTrue(label.DesiredSize.Width < inheritedWidth, "the smaller font should measure narrower");
 
-        label.Font = InheritedValue.Instance;
+        label.Font = PropertyValue.Inherited;
         label.Measure(Unbounded);
 
         Assert.AreSame(parentFont, label.EffectiveFont, "inheriting again should use the parent's font");
@@ -96,7 +96,7 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
         outer.Font = outerFont;
         Assert.AreSame(innerFont, label.EffectiveFont, "the nearer assignment still wins");
 
-        middle.Font = InheritedValue.Instance;
+        middle.Font = PropertyValue.Inherited;
         Assert.AreSame(outerFont, label.EffectiveFont, "dropping it falls through to the next ancestor");
     }
 
@@ -147,7 +147,7 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
         Assert.AreEqual(ThemeColor.Accent, role);
         Assert.AreEqual(Theme.Accent, label.EffectiveForeColor);
 
-        label.ForeColor = InheritedValue.Instance;
+        label.ForeColor = PropertyValue.Inherited;
         Assert.IsTrue(label.ForeColor.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
     }
 
@@ -245,7 +245,7 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
         Assert.AreEqual(ThemeColor.Surface, role);
         Assert.AreEqual(Theme.Surface, panel.EffectiveBackColor);
 
-        panel.BackColor = InheritedValue.Instance;
+        panel.BackColor = PropertyValue.Inherited;
         Assert.IsTrue(panel.BackColor.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
     }
 
@@ -325,7 +325,7 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
 
         Assert.AreEqual(new SKColor(0xFF101010), field.EffectiveBackColor);
 
-        field.BackColor = InheritedValue.Instance;
+        field.BackColor = PropertyValue.Inherited;
 
         Assert.AreEqual(parentColour, field.EffectiveBackColor, "the nearest ancestor answers again");
     }
@@ -363,8 +363,8 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
         Assert.AreSame(itemFont, label.EffectiveFont, "an item's own font wins");
         Assert.AreEqual(new SKColor(0xFF102030), label.EffectiveForeColor);
 
-        label.Font = InheritedValue.Instance;
-        label.ForeColor = InheritedValue.Instance;
+        label.Font = PropertyValue.Inherited;
+        label.ForeColor = PropertyValue.Inherited;
 
         Assert.AreSame(stripFont, label.EffectiveFont, "inheriting again restores the strip's font");
         Assert.AreEqual(Theme.Accent, label.EffectiveForeColor, "and the strip's colour");

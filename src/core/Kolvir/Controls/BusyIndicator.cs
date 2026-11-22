@@ -183,8 +183,8 @@ public class BusyIndicator : Control
             return;
         }
 
-        var track = Enabled ? Theme.Border : Theme.DisabledBackground;
-        var arc = Enabled ? Theme.Accent : Theme.DisabledForeground;
+        var track = EffectiveEnabled ? Theme.Border : Theme.DisabledBackground;
+        var arc = EffectiveEnabled ? Theme.Accent : Theme.DisabledForeground;
 
         using (var paint = new SKPaint
         {
@@ -233,7 +233,7 @@ public class BusyIndicator : Control
     /// </summary>
     private void UpdateTimer()
     {
-        bool run = _busy && IsDisplayed && Enabled && Application.Current is not null;
+        bool run = _busy && IsDisplayed && EffectiveEnabled && Application.Current is not null;
 
         if (!run)
         {

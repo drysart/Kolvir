@@ -20,7 +20,7 @@ Linux              GTK4                 net10.0
 ## What it gives you
 
 - **The WinForms model, without WinForms.** `Dock`, `DockStyle.Fill`, `Margin`/`Padding`,
-  `TabIndex` and tab order, `Enabled`, `Visible`, and events as `Add...Handler` pairs.
+  `TabIndex` and tab order, `Enabled`/`EffectiveEnabled`, `Visible`, and events as `Add...Handler` pairs.
 - **Layout.** A `TableLayoutPanel` with attached cells (`TableColumn`, `TableRow`, and the spans),
   a `SplitContainer` that drags, `StackPanel`, `WrapPanel`, and scrolling panels.
 - **Controls.** Label, RichLabel, Button, CheckBox, RadioButton, ProgressBar, TextBox (single- and

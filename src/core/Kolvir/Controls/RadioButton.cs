@@ -56,7 +56,7 @@ public class RadioButton : ToggleControl
         {
             Painter.Fill(canvas, glyph, GlyphFillColor, radius);
         }
-        else if (IsMouseOver && Enabled)
+        else if (IsMouseOver && EffectiveEnabled)
         {
             Painter.Fill(canvas, glyph, Theme.Secondary, radius);
         }
@@ -100,7 +100,7 @@ public class RadioButton : ToggleControl
     {
         base.OnKeyDown(e);
 
-        if (e.Handled || !Enabled)
+        if (e.Handled || !EffectiveEnabled)
         {
             return;
         }
