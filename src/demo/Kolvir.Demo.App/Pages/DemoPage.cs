@@ -90,7 +90,6 @@ internal abstract class DemoPage
         var page = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(20f, 16f, 20f, 16f),
         };
 
@@ -179,7 +178,6 @@ internal abstract class DemoPage
     {
         Dock = XDock.Top,
         Height = height,
-        BackColor = null,
         Border = Border.None,
         Padding = new Thickness(0f),
         Margin = new Thickness(0f, 0f, 0f, 8f),
@@ -191,7 +189,6 @@ internal abstract class DemoPage
     {
         Dock = XDock.Top,
         Height = 30f,
-        BackColor = null,
         Border = Border.None,
         Padding = new Thickness(0f),
         Margin = new Thickness(0f, 0f, 0f, 6f),
@@ -204,7 +201,6 @@ internal abstract class DemoPage
     {
         Dock = XDock.Top,
         Height = height,
-        BackColor = null,
         Padding = new Thickness(0f),
         Margin = new Thickness(0f, 0f, 0f, 4f),
     };
@@ -219,7 +215,6 @@ internal abstract class DemoPage
         {
             Dock = XDock.Top,
             Height = 34f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 10f),
         };

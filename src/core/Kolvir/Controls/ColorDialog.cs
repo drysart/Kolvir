@@ -94,7 +94,6 @@ public sealed class ColorDialog
         {
             Dock = DockStyle.Bottom,
             Height = 40f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 8f, 0f, 0f),
         };
@@ -104,7 +103,6 @@ public sealed class ColorDialog
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = new Thickness(12f),
         };
         root.Controls.Add(buttons);

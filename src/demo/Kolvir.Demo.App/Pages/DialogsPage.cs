@@ -25,14 +25,12 @@ internal sealed class DialogsPage : DemoPage
             // than stretching to the height of the stage.
             Dock = XDock.Top,
             Height = 44f,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
         var row = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 

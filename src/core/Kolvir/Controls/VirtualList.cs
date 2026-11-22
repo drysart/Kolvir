@@ -108,8 +108,8 @@ public abstract class VirtualList : Control
     /// <param name="textColor">The colour the default drawing would have used for the row's text.</param>
     protected abstract void OnDrawItem(SKCanvas canvas, int index, SKRect bounds, DrawItemState state, SKColor textColor);
 
-    /// <summary>A list paints on the input fill, like the other fields, until <see cref="Control.Background"/> is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.InputBackground);
+    /// <summary>A list paints on the input fill, like the other fields, until <see cref="Control.BackColor"/> is assigned.</summary>
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.InputBackground;
 
     /// <summary>Row height is a function of the font, so a font change means the rows are measured again.</summary>
     protected override void OnAppearanceChanged() => _measureDirty = true;
@@ -638,7 +638,7 @@ public abstract class VirtualList : Control
     /// </remarks>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
+        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 

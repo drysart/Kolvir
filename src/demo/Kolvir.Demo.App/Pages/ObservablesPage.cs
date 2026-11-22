@@ -49,7 +49,6 @@ internal sealed class ObservablesPage : DemoPage
         var stage = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Border = Border.None,
             Padding = new Thickness(0f),
         };
@@ -168,7 +167,6 @@ internal sealed class ObservablesPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children =
@@ -199,7 +197,6 @@ internal sealed class ObservablesPage : DemoPage
                     {
                         Dock = XDock.Top,
                         Height = 30f,
-                        BackColor = null,
                         Border = Border.None,
                         Padding = new Thickness(0f),
                         Margin = new Thickness(0f, 0f, 0f, 10f),

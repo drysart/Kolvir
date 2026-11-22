@@ -86,7 +86,7 @@ public class Expander : Panel
     }
 
     /// <summary>An expander is a card: a surface with a border, which is what it was drawn as.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <summary>Creates an expander whose header reads <paramref name="header"/>.</summary>
     public Expander(string header)

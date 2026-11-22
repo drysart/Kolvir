@@ -249,8 +249,7 @@ public class ColorPicker : Control
     /// The picker paints on the theme's surface colour, so it reads as a panel of its own rather
     /// than as something written on the window.
     /// </summary>
-    protected override Background DefaultBackground =>
-        Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <summary>
     /// Asks for the square at its preferred side, the hue strip beside it, the gap between them and

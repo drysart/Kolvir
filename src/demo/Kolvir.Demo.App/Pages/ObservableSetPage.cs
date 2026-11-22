@@ -95,7 +95,6 @@ internal sealed class ObservableSetPage : DemoPage
     {
         Dock = height > 0f ? XDock.Top : XDock.Fill,
         Height = height,
-        BackColor = null,
         Border = Border.None,
         Padding = new Thickness(0f),
     };
@@ -306,7 +305,6 @@ internal sealed class ObservableSetPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children =
@@ -381,7 +379,6 @@ internal sealed class ObservableSetPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children = children,

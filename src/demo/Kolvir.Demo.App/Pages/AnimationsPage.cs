@@ -59,7 +59,6 @@ internal sealed class AnimationsPage : DemoPage
         var stage = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 

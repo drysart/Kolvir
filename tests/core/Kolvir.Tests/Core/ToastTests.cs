@@ -169,7 +169,6 @@ public sealed class ToastTests : HeadlessTestBase
         var card = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 

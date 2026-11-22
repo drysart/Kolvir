@@ -20,7 +20,6 @@ internal sealed class BordersPage : DemoPage
         var body = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = Thickness.Empty,
         };
 

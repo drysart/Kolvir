@@ -53,8 +53,8 @@ public class TabControl : Control
         Size = new SKSize(360f, 220f);
     }
 
-    /// <summary>A tab control is a raised surface until <see cref="Control.Background"/> is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    /// <summary>A tab control is a raised surface until <see cref="Control.BackColor"/> is assigned.</summary>
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <summary>The pages of the control, in tab order.</summary>
     public ControlCollection TabPages => Controls;
@@ -140,7 +140,7 @@ public class TabControl : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        Painter.Fill(canvas, rect, Enabled ? BackColor ?? Theme.Surface : Theme.DisabledBackground, Border.Corners);
+        Painter.Fill(canvas, rect, Enabled ? EffectiveBackColor : Theme.DisabledBackground, Border.Corners);
         Painter.DrawBorder(canvas, rect, Theme.Border, FrameWidth, Border.Corners);
     }
 

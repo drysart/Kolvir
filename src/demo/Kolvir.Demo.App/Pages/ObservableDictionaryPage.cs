@@ -95,7 +95,6 @@ internal sealed class ObservableDictionaryPage : DemoPage
     {
         Dock = height > 0f ? XDock.Top : XDock.Fill,
         Height = height,
-        BackColor = null,
         Border = Border.None,
         Padding = new Thickness(0f),
     };
@@ -349,7 +348,6 @@ internal sealed class ObservableDictionaryPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children = children,

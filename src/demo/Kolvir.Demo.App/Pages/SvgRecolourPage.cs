@@ -65,7 +65,6 @@ internal sealed class SvgRecolourPage : DemoPage
             {
                 Dock = XDock.Left,
                 Width = 120f,
-                BackColor = null,
                 Padding = new Thickness(4f),
             };
 
@@ -128,7 +127,6 @@ internal sealed class SvgRecolourPage : DemoPage
         {
             Dock = XDock.Left,
             Width = 120f,
-            BackColor = null,
             Padding = new Thickness(4f),
         };
 

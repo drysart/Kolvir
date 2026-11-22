@@ -51,7 +51,6 @@ internal sealed class SvgRasterTwinPage : DemoPage
         {
             Dock = XDock.Left,
             Width = 200f,
-            BackColor = null,
             Padding = new Thickness(4f),
         };
 

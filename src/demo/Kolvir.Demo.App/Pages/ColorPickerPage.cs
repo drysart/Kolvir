@@ -41,7 +41,6 @@ internal sealed class ColorPickerPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 318f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f),
         };
@@ -61,7 +60,6 @@ internal sealed class ColorPickerPage : DemoPage
         {
             Dock = XDock.Left,
             Width = width,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 10f, 0f),
         };

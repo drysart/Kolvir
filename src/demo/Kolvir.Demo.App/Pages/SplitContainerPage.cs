@@ -97,7 +97,6 @@ internal sealed class SplitContainerPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 30f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 8f),
         };

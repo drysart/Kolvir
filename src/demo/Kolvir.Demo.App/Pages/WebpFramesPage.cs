@@ -36,7 +36,6 @@ internal sealed class WebpFramesPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 206f,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 

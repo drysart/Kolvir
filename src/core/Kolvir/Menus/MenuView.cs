@@ -77,7 +77,6 @@ public sealed class MenuView : Control, IInputSink
         Focusable = false;
         Selectable = false;
         Cursor = Cursor.Default;
-        BackColor = null;
     }
 
     /// <summary>The items shown, in order, with the separators that would look wrong already dropped.</summary>

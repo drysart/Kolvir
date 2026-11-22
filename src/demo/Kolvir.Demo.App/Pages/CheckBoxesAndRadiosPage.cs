@@ -21,7 +21,6 @@ internal sealed class CheckBoxesAndRadiosPage : DemoPage
         var section = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 

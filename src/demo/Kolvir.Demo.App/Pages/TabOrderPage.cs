@@ -24,7 +24,6 @@ internal sealed class TabOrderPage : DemoPage
         var section = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -122,7 +121,6 @@ internal sealed class TabOrderPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 436f,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
         form.Controls.Add(rows);

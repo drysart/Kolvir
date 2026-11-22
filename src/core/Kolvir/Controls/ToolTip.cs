@@ -492,7 +492,7 @@ internal sealed class ToolTipView : Control
         Border = SimpleBorder.Thin.WithCornerRadius(5f);
     }
 
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     protected override SKSize MeasureContent(SKSize availableSize)
     {

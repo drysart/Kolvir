@@ -22,7 +22,6 @@ internal sealed class ImagesAndLayoutPage : DemoPage
         var faded = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
             Opacity = 0.6f,
             Margin = new Thickness(0f, 0f, 0f, 8f),

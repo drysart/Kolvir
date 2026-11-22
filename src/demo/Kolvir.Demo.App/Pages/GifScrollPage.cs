@@ -36,7 +36,6 @@ internal sealed class GifScrollPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 150f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 6f),
         };
@@ -153,7 +152,6 @@ internal sealed class GifScrollPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 34f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 6f),
         };

@@ -52,7 +52,6 @@ internal sealed class VirtualDomPage : DemoPage
         var stage = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Border = Border.None,
             Padding = new Thickness(0f),
         };
@@ -96,7 +95,6 @@ internal sealed class VirtualDomPage : DemoPage
             return new VPanel
             {
                 Dock = XDock.Fill,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Children =
@@ -127,7 +125,6 @@ internal sealed class VirtualDomPage : DemoPage
                     new VPanel
                     {
                         Dock = XDock.Fill,
-                        BackColor = null,
                         Border = Border.None,
                         Padding = new Thickness(0f),
                         Children = [.. _rows.Select(row => new VComponent(row) { Key = row })],
@@ -219,7 +216,6 @@ internal sealed class VirtualDomPage : DemoPage
             {
                 Dock = XDock.Top,
                 Height = 30f,
-                BackColor = null,
                 Border = Border.None,
                 Padding = new Thickness(0f),
                 Margin = new Thickness(0f, 0f, 0f, 6f),

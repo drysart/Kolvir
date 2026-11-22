@@ -61,8 +61,8 @@ public class ComboBox : Control
         _popup.AddClosedHandler(OnPopupClosed);
     }
 
-    /// <summary>A combo box is a field, so it paints on the input fill until <see cref="Control.Background"/> is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.InputBackground);
+    /// <summary>A combo box is a field, so it paints on the input fill until <see cref="Control.BackColor"/> is assigned.</summary>
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.InputBackground;
 
     /// <summary>The items the user can pick from.</summary>
     public ListBox.ItemCollection Items => _list.Items;
@@ -226,7 +226,7 @@ public class ComboBox : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
+        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 

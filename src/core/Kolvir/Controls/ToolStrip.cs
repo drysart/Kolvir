@@ -483,7 +483,7 @@ public class ToolStrip : Control
     protected override void OnAppearanceChanged() => _layoutDirty = true;
 
     /// <inheritdoc />
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)

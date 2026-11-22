@@ -101,7 +101,7 @@ internal sealed class FontDialogPage : DemoPage
             Padding = new Thickness(14f, 10f),
             Border = Framed(8f),
             Font = font,
-            Background = Background.FromThemeColor(ThemeColor.Secondary),
+            BackColor = ThemeColor.Secondary,
         };
         _fontDialogStage = stage;
 

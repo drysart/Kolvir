@@ -226,4 +226,121 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
 
         Assert.AreEqual(new SKColor(0xFF101010), label.EffectiveForeColor, "an assigned colour does answer for the children");
     }
+
+    [TestMethod]
+    public void TheBackColorPropertyReportsTheAssignedCase()
+    {
+        var panel = new Panel();
+        var color = new SKColor(0xFF2F6F4F);
+
+        Assert.IsTrue(panel.BackColor.TryGetValue<InheritedValue>(out _), "an unassigned background reads back as inherit");
+
+        panel.BackColor = color;
+        Assert.IsTrue(panel.BackColor.TryGetValue<SKColor>(out var literal));
+        Assert.AreEqual(color, literal);
+        Assert.AreEqual(color, panel.EffectiveBackColor);
+
+        panel.BackColor = ThemeColor.Surface;
+        Assert.IsTrue(panel.BackColor.TryGetValue<ThemeColor>(out var role));
+        Assert.AreEqual(ThemeColor.Surface, role);
+        Assert.AreEqual(Theme.Surface, panel.EffectiveBackColor);
+
+        panel.BackColor = InheritedValue.Instance;
+        Assert.IsTrue(panel.BackColor.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
+    }
+
+    [TestMethod]
+    public void AnUnspecifiedBackColorIsRefused()
+    {
+        var panel = new Panel();
+        panel.BackColor = default;
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = panel.EffectiveBackColor,
+            "a default-initialised union holds no case and must not be read as inherit");
+    }
+
+    [TestMethod]
+    public void AnUnparentedControlPaintsNothingUnlessItsClassPaints()
+    {
+        var label = new Label("x");
+        var panel = new Panel();
+        var field = new TextBox();
+
+        Assert.AreEqual(SKColors.Transparent, label.EffectiveBackColor, "a label paints nothing, the least destructive answer");
+        Assert.AreEqual(SKColors.Transparent, panel.EffectiveBackColor, "and so does a plain panel");
+        Assert.AreEqual(Theme.InputBackground, field.EffectiveBackColor, "a field falls back to its own fill");
+    }
+
+    [TestMethod]
+    public void ATransparentClassDefaultStopsInheritance()
+    {
+        var ancestorColour = new SKColor(0xFFE8EEF9);
+        var stage = new Panel { BackColor = ancestorColour };
+        var label = new Label("paints nothing");
+        var field = new TextBox();
+        stage.Controls.Add(label);
+        stage.Controls.Add(field);
+
+        Assert.AreEqual(SKColors.Transparent, label.EffectiveBackColor, "a label keeps painting nothing inside a filled panel");
+        Assert.AreEqual(ancestorColour, field.EffectiveBackColor, "a control that paints takes the ancestor's colour");
+    }
+
+    [TestMethod]
+    public void AnAssignedTransparentIsInheritedByDescendants()
+    {
+        var stage = new Panel { BackColor = SKColors.Transparent };
+        var field = new TextBox();
+        stage.Controls.Add(field);
+
+        Assert.AreEqual(
+            SKColors.Transparent,
+            field.EffectiveBackColor,
+            "an assigned transparent is a colour and answers for descendants, unlike a transparent class default");
+    }
+
+    [TestMethod]
+    public void ABackgroundRoleIsResolvedWhenItIsRead()
+    {
+        var stage = new Panel { BackColor = ThemeColor.Surface };
+        var field = new TextBox();
+        stage.Controls.Add(field);
+
+        var light = field.EffectiveBackColor;
+        Assert.AreEqual(Theme.Surface, light);
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(Theme.Surface, field.EffectiveBackColor, "the same tree follows the new palette");
+        Assert.AreNotEqual(light, field.EffectiveBackColor, "the two palettes should differ");
+    }
+
+    [TestMethod]
+    public void InheritingAgainRestoresTheParentBackground()
+    {
+        var parentColour = new SKColor(0xFF405060);
+        var stage = new Panel { BackColor = parentColour };
+        var field = new TextBox { BackColor = new SKColor(0xFF101010) };
+        stage.Controls.Add(field);
+
+        Assert.AreEqual(new SKColor(0xFF101010), field.EffectiveBackColor);
+
+        field.BackColor = InheritedValue.Instance;
+
+        Assert.AreEqual(parentColour, field.EffectiveBackColor, "the nearest ancestor answers again");
+    }
+
+    [TestMethod]
+    public void ABackgroundAssignedAboveAChildThatAlreadyResolvedIsPickedUp()
+    {
+        var outer = new Panel();
+        var field = new TextBox();
+        outer.Controls.Add(field);
+
+        Assert.AreEqual(Theme.InputBackground, field.EffectiveBackColor, "nothing is assigned yet");
+
+        outer.BackColor = new SKColor(0xFF203040);
+
+        Assert.AreEqual(new SKColor(0xFF203040), field.EffectiveBackColor, "the cached answer is dropped");
+    }
 }

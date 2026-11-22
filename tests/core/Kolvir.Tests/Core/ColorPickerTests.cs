@@ -487,7 +487,6 @@ public sealed class ColorPickerTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -525,7 +524,6 @@ public sealed class ColorPickerTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -598,7 +596,6 @@ public sealed class ColorPickerTests : HeadlessTestBase
         var root = new Panel
         {
             Dock = DockStyle.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 

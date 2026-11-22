@@ -35,7 +35,6 @@ internal sealed class GifFramesPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 206f,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 

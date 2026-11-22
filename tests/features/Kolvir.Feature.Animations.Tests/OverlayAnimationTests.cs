@@ -191,7 +191,6 @@ public sealed class OverlayAnimationTests : AnimationsTestBase
             var root = new Panel
             {
                 Dock = DockStyle.Fill,
-                BackColor = null,
                 Padding = Thickness.Empty,
             };
 

@@ -106,7 +106,6 @@ internal sealed class BusyOverlayPage : DemoPage
         var content = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 

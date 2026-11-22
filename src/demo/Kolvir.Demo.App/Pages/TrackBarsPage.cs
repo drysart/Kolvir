@@ -61,7 +61,6 @@ internal sealed class TrackBarsPage : DemoPage
         {
             Dock = XDock.Top,
             Height = 150f,
-            BackColor = null,
             Padding = new Thickness(0f),
             Margin = new Thickness(0f, 0f, 0f, 12f),
         };

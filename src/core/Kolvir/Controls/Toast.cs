@@ -117,7 +117,7 @@ public class Toast : Control
     }
 
     /// <summary>A toast is a raised message, so it paints on the surface until a background is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.Surface);
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.Surface;
 
     /// <summary>Raised after the toast dismissed itself or was dismissed.</summary>
     public IDisposable AddDismissedHandler(Action<object> handler)

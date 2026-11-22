@@ -11,8 +11,8 @@ namespace Kolvir;
 /// <remarks>
 /// <para>
 /// The panel brings no look of its own: it paints no background and draws no border unless
-/// <see cref="Control.Background"/> and <see cref="Control.Border"/> say otherwise. A card is those
-/// two assigned - <c>Background.FromThemeColor(ThemeColor.Surface)</c> and
+/// <see cref="Control.BackColor"/> and <see cref="Control.Border"/> say otherwise. A card is those
+/// two assigned - <see cref="ThemeColor.Surface"/> and
 /// <c>SimpleBorder.Thin.WithCornerRadius(8f)</c> - which keeps the choice of how a container looks
 /// with the code that wants it.
 /// </para>

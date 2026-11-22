@@ -79,7 +79,6 @@ internal sealed class SvgIconsPage : DemoPage
         {
             Dock = XDock.Left,
             Width = size + 20f,
-            BackColor = null,
             Padding = new Thickness(6f),
         };
 

@@ -24,7 +24,6 @@ internal sealed class TableLayoutPage : DemoPage
         return new TableLayoutPanel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
             CellPadding = new Thickness(8f),
             ColumnStyles =

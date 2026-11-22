@@ -20,7 +20,6 @@ internal sealed class TextInputPage : DemoPage
             // rather than stretching the inputs to the height of the window.
             Dock = XDock.Top,
             Height = 54f,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -50,7 +49,6 @@ internal sealed class TextInputPage : DemoPage
         var row = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
         row.Controls.Add(Field("Name", nameBox, 320f));
@@ -69,7 +67,6 @@ internal sealed class TextInputPage : DemoPage
         {
             Dock = fill ? XDock.Fill : XDock.Left,
             Width = fill ? 0f : width,
-            BackColor = null,
             Padding = new Thickness(0f, 0f, fill ? 0f : 16f, 0f),
         };
 

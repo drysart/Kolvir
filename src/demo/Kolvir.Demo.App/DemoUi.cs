@@ -299,7 +299,6 @@ public sealed class DemoUi
         // The window background comes from the host's ClearColor, which follows the palette.
         var root = new Panel
         {
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -321,7 +320,6 @@ public sealed class DemoUi
         {
             Dock = XDock.Top,
             Height = 100f,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -606,7 +604,6 @@ public sealed class DemoUi
         _stage = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(0f),
         };
 
@@ -661,7 +658,6 @@ public sealed class DemoUi
         var nav = new Panel
         {
             Dock = XDock.Fill,
-            BackColor = null,
             Padding = new Thickness(20f, 16f, 12f, 16f),
         };
         nav.Controls.Add(_navFilter);
@@ -678,12 +674,10 @@ public sealed class DemoUi
             Panel1MaxSize = 400f,
             Panel2MinSize = 400f,
             TabStop = false,
-            BackColor = null,
         };
 
         foreach (var panel in new[] { split.Panel1, split.Panel2 })
         {
-            panel.BackColor = null;
             panel.Padding = new Thickness(0f);
         }
 

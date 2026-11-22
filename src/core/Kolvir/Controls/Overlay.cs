@@ -45,7 +45,6 @@ public class Overlay : Panel, IInputSink
         TabStop = false;
         Focusable = false;
         Cursor = Cursor.Default;
-        BackColor = null;
 
         // A layer is meant to cover the region it is put in, so filling it is the default the way a
         // tool strip defaults to docking at the top.

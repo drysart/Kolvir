@@ -108,7 +108,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             var stage = new Panel
             {
                 Dock = DockStyle.Fill,
-                Background = Background.FromColor(AncestorColour),
+                BackColor = AncestorColour,
                 Padding = new Thickness(0f),
             };
 
@@ -120,13 +120,16 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             stage.Controls.Add(card);
             root.Controls.Add(stage);
 
-            Assert.IsTrue(label.Background.IsNone, "a label should paint no background of its own");
-            Assert.IsNull(label.BackColor);
+            Assert.AreEqual(
+                SKColors.Transparent,
+                label.EffectiveBackColor,
+                "a label paints no background of its own, wherever it sits");
+            Assert.IsTrue(label.BackColor.TryGetValue<InheritedValue>(out _), "and nothing was assigned to it");
 
             // A panel is a container, not a card: with nothing assigned it paints nothing either,
-            // so the stage's colour reaches the pixel the same way the label's does.
-            Assert.IsTrue(card.Background.IsNone, "an unassigned panel should paint no background");
-            Assert.IsNull(card.BackColor);
+            // because its class default is transparent and that default does not inherit.
+            Assert.AreEqual(SKColors.Transparent, card.EffectiveBackColor, "an unassigned panel paints nothing");
+            Assert.IsTrue(card.BackColor.TryGetValue<InheritedValue>(out _));
 
             var labelArea = Pixel(host, (int)label.Bounds.Left + 300, (int)label.Bounds.MidY);
             var cardArea = Pixel(host, (int)card.Bounds.Left + 300, (int)card.Bounds.MidY);
@@ -225,13 +228,13 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
             {
                 Dock = DockStyle.Top,
                 Height = Height,
-                Background = Background.FromThemeColor(ThemeColor.Surface),
+                BackColor = ThemeColor.Surface,
             };
             var label = new Label(Sample) { Dock = DockStyle.Top, AutoSize = true };
             panel.Controls.Add(label);
             root.Controls.Add(panel);
 
-            var lightSurface = panel.Background.Color;
+            var lightSurface = panel.EffectiveBackColor;
             var lightText = label.EffectiveForeColor;
 
             Assert.AreEqual(Theme.Surface, lightSurface, "a panel reads the palette role, not a captured colour");
@@ -239,7 +242,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
 
             Theme.Palette = Palette.Dark;
 
-            var darkSurface = panel.Background.Color;
+            var darkSurface = panel.EffectiveBackColor;
             var darkText = label.EffectiveForeColor;
 
             Assert.AreEqual(Theme.Surface, darkSurface, "the same control should follow the dark palette");

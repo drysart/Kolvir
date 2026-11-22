@@ -78,8 +78,8 @@ public class TextBox : Control
         Text = text;
     }
 
-    /// <summary>An editable field is painted on the input fill until <see cref="Control.Background"/> is assigned.</summary>
-    protected override Background DefaultBackground => Background.FromThemeColor(ThemeColor.InputBackground);
+    /// <summary>An editable field is painted on the input fill until <see cref="Control.BackColor"/> is assigned.</summary>
+    protected override Union<SKColor, ThemeColor> DefaultBackColor => ThemeColor.InputBackground;
 
     /// <summary>
     /// The multi-line feature when this box opted into it, otherwise null.
@@ -634,7 +634,7 @@ public class TextBox : Control
     /// </summary>
     protected override void OnPaintBackground(SKCanvas canvas, SKRect rect)
     {
-        var fill = Enabled ? BackColor ?? Theme.InputBackground : Theme.DisabledBackground;
+        var fill = Enabled ? EffectiveBackColor : Theme.DisabledBackground;
         Painter.Fill(canvas, rect, fill, Border.Corners);
     }
 
