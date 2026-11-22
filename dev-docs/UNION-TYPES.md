@@ -172,14 +172,16 @@ reference-typed case, and the no-allocation assertion.
 
 ## 10. Control appearance properties
 
-The first consumers are `Control.Font`, `Control.ForeColor` and `Control.BackColor`, plus
-`ToolStripItem.Font` and `ToolStripLabel.ForeColor`. The shape is the same in each case:
+The first consumers are `Control.Font`, `Control.ForeColor`, `Control.BackColor` and
+`Control.Enabled`, plus `ToolStripItem.Font` and `ToolStripLabel.ForeColor`. The shape is the same
+in each case:
 
 | Property | Union |
 | --- | --- |
 | `Control.Font` | `Union<Font, InheritedValue>` |
 | `Control.ForeColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
 | `Control.BackColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
+| `Control.Enabled` | `Union<bool, InheritedValue>` |
 
 The property reports the assignment. The get-only `EffectiveFont` / `EffectiveForeColor` /
 `EffectiveBackColor` resolves it: the value assigned here, else the nearest ancestor that assigned
@@ -187,6 +189,14 @@ one, else the class default (`DefaultFont` / `DefaultForeColor` / `DefaultBackCo
 field is initialised to `InheritedValue.Instance`, so "never assigned" reads back as Inherit; a
 `default` union is refused by `ThrowIfUnspecified()` in the `Effective*` getter rather than being
 treated as inherit.
+
+`Control.Enabled` is the same shape with one difference: `EffectiveEnabled` ANDs the local answer
+down the chain rather than taking the nearest assignment, because disabling a container disables
+everything inside it. `InheritedValue.Instance` and an explicit `true` therefore resolve
+identically, and an explicit `true` does not override a disabled ancestor. The arm still earns its
+place in the raw property: it reports that nothing was assigned, which is what lets the colour
+dialog save and restore the owner's state without turning an inherited value into an explicit
+`false`.
 
 Three decisions are worth recording, because each one is a place the obvious alternative is wrong:
 

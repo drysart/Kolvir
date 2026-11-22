@@ -104,13 +104,13 @@ public enum ControlState
 }
 
 public virtual ControlState State =>
-    (Enabled ? ControlState.None : ControlState.Disabled)
+    (EffectiveEnabled ? ControlState.None : ControlState.Disabled)
     | (IsFocused ? ControlState.Focused : ControlState.None)
     | (IsMouseOver ? ControlState.Hovered : ControlState.None)
     | (IsPressed ? ControlState.Pressed : ControlState.None);
 ```
 
-Four of those five bits are `Control`'s own properties already — `Enabled`, `IsFocused`, `IsMouseOver`
+Four of those five bits are `Control`'s own properties already — `EffectiveEnabled`, `IsFocused`, `IsMouseOver`
 and `IsPressed` — so `State` is a reformatting of what the base type already exposes, and a border that
 reads `owner.State` is not seeing anything an application could not.
 
@@ -499,7 +499,7 @@ Settled in review:
    caption band can measure a font. `NarrowsClip`, `ClipTo` and `IsRectangular` do not, because they
    describe the kind of shape rather than its measurements.
 6. **`Control.State` is a flags value the control computes.** Four of its five bits are `Control`'s own
-   properties — `Enabled`, `IsFocused`, `IsMouseOver`, `IsPressed` — and the fifth, `Active`, exists
+   properties — `EffectiveEnabled`, `IsFocused`, `IsMouseOver`, `IsPressed` — and the fifth, `Active`, exists
    because a popup being open is the only border-affecting state not on `Control`, declared separately
    on `ComboBox`, `SplitButton` and `DateTimePicker`. Each of those overrides `State`; a border reading
    properties directly would have to know and cast to all three. Three border properties on `Control`

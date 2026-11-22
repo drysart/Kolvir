@@ -116,7 +116,7 @@ has to read `--classic-menus` before it can build a backend.
 
 | Concept | WinForms equivalent | Notes |
 | --- | --- | --- |
-| `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` (a disabled container disables its subtree) with `EffectiveVisible`/`IsDisplayed` answering for the whole chain, `Font`/`ForeColor`/`BackColor` inherited down the tree, with `EffectiveFont`/`EffectiveForeColor`/`EffectiveBackColor` giving the resolved value, focus, mouse/keyboard events; any control can host children |
+| `Control` | `Control` | Bounds, `Margin`/`Padding`, `Dock`, `Visible`/`Enabled` as the raw flags, with `EffectiveVisible`/`EffectiveEnabled`/`IsDisplayed` answering for the whole chain (a disabled container disables its subtree), `Font`/`ForeColor`/`BackColor` inherited down the tree, with `EffectiveFont`/`EffectiveForeColor`/`EffectiveBackColor` giving the resolved value, focus, mouse/keyboard events; any control can host children |
 | `BackColor` | `BackColor` | The background a control assigned: a colour, a palette role, or inherit; a transparent class default paints nothing |
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `BackColor` and `Border` for a card |
@@ -379,10 +379,10 @@ skipped, with a readout naming whatever has the focus, its `TabIndex` and its pl
 
 ### Visibility and display state
 
-`Visible` is the flag a control owns, and like `Enabled` it is only one of the answers that matter:
-hiding a container hides everything inside it, and a window that was never shown shows nothing at
-all. Two computed properties carry the rest, so a control that does work on a timer never has to
-watch its ancestors itself:
+`Visible` is the flag a control owns, and `Enabled` works the same way: each is only one of the
+answers that matter - hiding a container hides everything inside it, and a window that was never
+shown shows nothing at all. Two computed properties carry the rest, so a control that does work on
+a timer never has to watch its ancestors itself:
 
 | Member | Meaning |
 | --- | --- |
@@ -1248,10 +1248,25 @@ group.Controls.Add(new CheckBox { Dock = DockStyle.Top, Text = "Snap to grid" })
 ```
 
 `Enabled` cascades, so disabling a group box greys its caption, its frame and everything inside it,
-and none of the content takes input. Only the flag that was set is remembered: a control that was
-disabled on its own stays disabled when its container is enabled again, and one that was only
-disabled by its container comes back with it. Moving a subtree under a disabled container disables
-it the same way, without touching a single `Enabled` flag on the children.
+and none of the content takes input. The property is a union: it holds the value that was assigned -
+`true`, `false`, or `InheritedValue.Instance` for "ask the parent" - and `EffectiveEnabled` is the
+resolved answer.
+
+| Member | Meaning |
+| --- | --- |
+| `Enabled` | The enabled state assigned here: `true`, `false`, or `InheritedValue.Instance` |
+| `EffectiveEnabled` | The local answer - `true` when `Enabled` holds `InheritedValue.Instance` - AND every container above it, with an unparented control treating the parent as enabled |
+| `AddEnabledChangedHandler` / `OnEnabledChanged()` | Run when `EffectiveEnabled` changes, including when an ancestor is disabled or enabled; a raw assignment that resolves to the same answer fires nothing |
+
+Only the value that was set is remembered: a control that was disabled on its own stays disabled
+when its container is enabled again, and one that was only disabled by its container comes back with
+it. Moving a subtree under a disabled container disables it the same way, without touching the
+children's own values.
+
+`InheritedValue.Instance` and an explicit `true` resolve identically. An explicit `true` is not an
+override: a child cannot be enabled under a disabled ancestor, because the answer is the AND. The
+difference is only what `Enabled` reports, which is what lets code that saves an enabled state put
+back "nothing was assigned here" rather than pinning a literal.
 
 ### Expander
 
@@ -2648,8 +2663,8 @@ text, so the caption reads the same on any background, and the band comes out of
 content. `GroupBox` is a panel with that border and nothing else.
 
 The state a colour is resolved for is `Control.State`, a `ControlState` flag set computed from
-`Enabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its own adds it
-to the base's:
+`EffectiveEnabled`, `IsMouseOver`, `IsFocused` and `IsPressed`. A control that has a state of its
+own adds it to the base's:
 
 ```csharp
 public override ControlState State => base.State | (_dropDownOpen ? ControlState.Active : ControlState.None);
