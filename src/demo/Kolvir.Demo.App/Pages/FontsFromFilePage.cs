@@ -84,7 +84,7 @@ internal sealed class FontsFromFilePage : DemoPage
         rich.AddText("The same face in ");
         rich.AddSpan(new TextSpan("a larger size") { FontSize = 17f });
         rich.AddText(", in ");
-        rich.AddSpan(new TextSpan("the accent colour") { ThemeColor = ThemeColor.Accent });
+        rich.AddSpan(new TextSpan("the accent colour") { ForeColor = ThemeColor.Accent });
         rich.AddText(", and in ");
         rich.AddSpan(new TextSpan("a bold span") { Bold = true });
         rich.AddText(

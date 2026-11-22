@@ -61,15 +61,15 @@ public sealed class TextSpan
     private Action<object, SpanEventArgs>? _mouseMove;
     private Action<object>? _mouseEnter;
     private Action<object>? _mouseLeave;
+    private const byte HoverBackAlpha = 0x1A;
+
     private string _text = string.Empty;
     private bool _bold;
     private bool _italic;
     private bool _underline;
     private bool _strikethrough;
-    private SKColor? _foreColor;
-    private ThemeColor? _themeColor;
-    private SKColor? _hoverBackColor;
-    private ThemeColor? _hoverBackColorRole;
+    private Union<SKColor, ThemeColor, InheritedValue> _foreColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _hoverBackColor = InheritedValue.Instance;
     private float? _fontSize;
     private string? _fontFamily;
     private Font? _font;
@@ -263,13 +263,23 @@ public sealed class TextSpan
         set => Set(ref _strikethrough, value);
     }
 
-    /// <summary>Overrides the label's <see cref="Control.ForeColor"/> for this span.</summary>
-    public SKColor? ForeColor
+    /// <summary>
+    /// The colour this span is painted in: a literal <see cref="SKColor"/>, a
+    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> to take the label's
+    /// <see cref="Control.EffectiveForeColor"/>.
+    /// </summary>
+    /// <remarks>
+    /// The property reports what was assigned. Read <see cref="EffectiveForeColor"/> for the colour
+    /// the span is actually painted in; a role is resolved when it is read, so a palette swap
+    /// recolours the span with no rebuild. The initial value is
+    /// <see cref="InheritedValue.Instance"/>.
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> ForeColor
     {
         get => _foreColor;
         set
         {
-            if (_foreColor == value)
+            if (_foreColor.Equals(value))
             {
                 return;
             }
@@ -280,32 +290,58 @@ public sealed class TextSpan
     }
 
     /// <summary>
-    /// A palette entry to paint the span in, resolved while painting so the span follows a theme
-    /// change. Used when <see cref="ForeColor"/> is not set; <see cref="RichLabel.AddLink"/>
-    /// uses <see cref="ThemeColor.Accent"/>.
+    /// The colour this span actually resolves to: its own assignment, else the label's
+    /// <see cref="Control.EffectiveForeColor"/>, else - for a span that has no label - the base
+    /// control default.
     /// </summary>
-    public ThemeColor? ThemeColor
+    /// <remarks>
+    /// A literal is returned as it is and a role is resolved through <see cref="Theme.ColorOf"/> on
+    /// every read. An unowned span resolves to <see cref="ThemeColor.Foreground"/>, which is what a
+    /// label with no parent paints its text in. A disabled label greys every span at paint time;
+    /// that is the label's decision rather than the span's, so it is not part of this value.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="ForeColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveForeColor
     {
-        get => _themeColor;
-        set
+        get
         {
-            if (_themeColor == value)
+            _foreColor.ThrowIfUnspecified();
+
+            if (_foreColor.TryGetValue<SKColor>(out var literal))
             {
-                return;
+                return literal;
             }
 
-            _themeColor = value;
-            NotifyChanged();
+            if (_foreColor.TryGetValue<ThemeColor>(out var role))
+            {
+                return Theme.ColorOf(role);
+            }
+
+            return Owner is { } owner
+                ? owner.EffectiveForeColor
+                : Theme.ColorOf(ThemeColor.Foreground);
         }
     }
 
-    /// <summary>Optional fill painted behind the span while the pointer is over it (handy for links).</summary>
-    public SKColor? HoverBackColor
+    /// <summary>
+    /// The fill painted behind the span while the pointer is over it: a literal
+    /// <see cref="SKColor"/>, a <see cref="ThemeColor"/> role that is tinted, or
+    /// <see cref="InheritedValue.Instance"/> for no fill at all.
+    /// </summary>
+    /// <remarks>
+    /// The property reports what was assigned. Read <see cref="EffectiveHoverBackColor"/> for the
+    /// fill the span is actually painted with. The initial value is
+    /// <see cref="InheritedValue.Instance"/>, which is how a span that never asked for a highlight
+    /// gets none.
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> HoverBackColor
     {
         get => _hoverBackColor;
         set
         {
-            if (_hoverBackColor == value)
+            if (_hoverBackColor.Equals(value))
             {
                 return;
             }
@@ -316,22 +352,34 @@ public sealed class TextSpan
     }
 
     /// <summary>
-    /// A palette entry to tint the hover fill with, resolved while painting. Used when
-    /// <see cref="HoverBackColor"/> is not set; <see cref="RichLabel.AddLink"/> uses
-    /// <see cref="ThemeColor.Accent"/>, so a link keeps its highlight across a theme change.
+    /// The fill this span actually paints while it is hovered or pressed: its own colour, or a
+    /// light tint of the palette entry it names, or <see cref="SKColors.Transparent"/> for none.
     /// </summary>
-    public ThemeColor? HoverBackColorRole
+    /// <remarks>
+    /// A role is resolved through <see cref="Theme.ColorOf"/> on every read and tinted to
+    /// <c>0x1A</c>, so a link's highlight follows a palette swap. Transparent means nothing is
+    /// painted, the same convention <see cref="Control.EffectiveBackColor"/> uses.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="HoverBackColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveHoverBackColor
     {
-        get => _hoverBackColorRole;
-        set
+        get
         {
-            if (_hoverBackColorRole == value)
+            _hoverBackColor.ThrowIfUnspecified();
+
+            if (_hoverBackColor.TryGetValue<SKColor>(out var literal))
             {
-                return;
+                return literal;
             }
 
-            _hoverBackColorRole = value;
-            NotifyChanged();
+            if (_hoverBackColor.TryGetValue<ThemeColor>(out var role))
+            {
+                return Theme.ColorOf(role).WithAlpha(HoverBackAlpha);
+            }
+
+            return SKColors.Transparent;
         }
     }
 

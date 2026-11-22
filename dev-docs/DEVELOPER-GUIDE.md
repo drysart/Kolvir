@@ -1915,8 +1915,9 @@ events that make it behave like a hyperlink.
 | `Text` | The flow as plain text; assigning replaces every span with one unstyled span |
 | `AddSpanClickHandler`, `SpanAt(point)` | Click notification and hit testing; a span also takes `AddClickHandler`, `AddMouseDownHandler`, `AddMouseUpHandler`, `AddMouseMoveHandler`, `AddMouseEnterHandler` and `AddMouseLeaveHandler` |
 
-Span formatting: `Bold`, `Italic`, `Underline`, `Strikethrough`, `ForeColor`, `HoverBackColor`,
-`FontSize`, `FontFamily`, or a whole `Font` override. Decorations and the hover/press background
+Span formatting: `Bold`, `Italic`, `Underline`, `Strikethrough`, `ForeColor`, `HoverBackColor`
+(each a colour, a palette role, or `InheritedValue`), `FontSize`, `FontFamily`, or a whole `Font`
+override. Decorations and the hover/press background
 are drawn once per contiguous run of a span, so an underline or highlight carries across the
 spaces between its words instead of restarting at each one. Spans are hit-tested per **line**, so a
 link that wraps across two lines is clickable on both, and a press on one span followed by a
@@ -2693,8 +2694,8 @@ when the control itself assigns nothing - so a palette change re-applies nothing
 | `Border` | The frame - see [Borders](#borders) |
 | `Opacity` | Fades the control and everything inside it as one group, 0 to 1 |
 | `Filter` | A blur, a tint or a chain of them, painted over the control and its subtree - see [Filters](#filters) |
-| `TextSpan.ThemeColor` | A role for one span of a rich label; `AddLink` uses `Accent` |
-| `TextSpan.HoverBackColorRole` | The role tinted behind a span while it is hovered |
+| `TextSpan.ForeColor` | One span's text colour: a colour, a palette role, or `InheritedValue`; `AddLink` uses `Accent` |
+| `TextSpan.HoverBackColor` | The fill a span takes while hovered: a colour, a palette role (tinted), or `InheritedValue` for none |
 | `UiHost.ClearColor` | Follows `Theme.Background` until assigned |
 
 The library itself never asks the OS anything. A backend implements the two-property

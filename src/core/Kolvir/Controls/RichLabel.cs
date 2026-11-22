@@ -42,7 +42,6 @@ public class RichLabel : Control
     }
 
     private const float HighlightRadius = 2f;
-    private const byte HoverBackAlpha = 0x1A;
 
     private readonly TextSpanCollection _spans;
     private readonly Dictionary<string, Font> _derivedFonts = new(StringComparer.Ordinal);
@@ -192,9 +191,9 @@ public class RichLabel : Control
     {
         var span = new TextSpan(text)
         {
-            ThemeColor = ThemeColor.Accent,
+            ForeColor = ThemeColor.Accent,
             Underline = true,
-            HoverBackColorRole = ThemeColor.Accent,
+            HoverBackColor = ThemeColor.Accent,
             Cursor = Cursor.Hand,
         };
 
@@ -794,7 +793,7 @@ public class RichLabel : Control
     {
         StringBuilder? builder = null;
 
-        if (span.ForeColor is { } color)
+        if (span.ForeColor.TryGetValue<SKColor>(out var color))
         {
             builder = new StringBuilder();
             builder.Append("color:#")
@@ -993,8 +992,13 @@ public class RichLabel : Control
             var first = fragments[i];
             var span = first.Span;
             if (first.Kind is FragmentKind.Break or FragmentKind.Control ||
-                (!span.IsMouseOver && !span.IsPressed) ||
-                ResolveHoverBackColor(span) is not { } hoverBack)
+                (!span.IsMouseOver && !span.IsPressed))
+            {
+                continue;
+            }
+
+            var hoverBack = span.EffectiveHoverBackColor;
+            if (hoverBack.Alpha == 0)
             {
                 continue;
             }
@@ -1030,47 +1034,13 @@ public class RichLabel : Control
     }
 
     /// <summary>
-    /// The colour a span's text is painted in: its own colour, else the palette entry it names,
-    /// else the label's <see cref="Control.ForeColor"/> - except while the label is disabled,
-    /// where every span greys out so a link inside a disabled panel stops looking live. Resolved
-    /// while painting so that a link keeps up with the theme instead of freezing the accent colour
-    /// it was created with.
+    /// The colour a span's text is painted in: the span's <see cref="TextSpan.EffectiveForeColor"/>,
+    /// except while the label is disabled, where every span greys out so a link inside a disabled
+    /// panel stops looking live. Resolved while painting so that a link keeps up with the theme
+    /// instead of freezing the accent colour it was created with.
     /// </summary>
-    private SKColor ResolveSpanColor(TextSpan span)
-    {
-        if (!Enabled)
-        {
-            return Theme.DisabledForeground;
-        }
-
-        if (span.ForeColor is { } literal)
-        {
-            return literal;
-        }
-
-        if (span.ThemeColor is { } role)
-        {
-            return Theme.ColorOf(role);
-        }
-
-        return EffectiveForeColor;
-    }
-
-    /// <summary>
-    /// The fill painted behind a span while it is hovered or pressed: its own colour, else a light
-    /// tint of the palette entry it names, so a link's highlight follows the theme.
-    /// </summary>
-    private static SKColor? ResolveHoverBackColor(TextSpan span)
-    {
-        if (span.HoverBackColor is { } literal)
-        {
-            return literal;
-        }
-
-        return span.HoverBackColorRole is { } role
-            ? Theme.ColorOf(role).WithAlpha(HoverBackAlpha)
-            : null;
-    }
+    private SKColor ResolveSpanColor(TextSpan span) =>
+        Enabled ? span.EffectiveForeColor : Theme.DisabledForeground;
 
     /// <summary>
     /// Returns the index of the last fragment in the run of adjacent fragments belonging to the
