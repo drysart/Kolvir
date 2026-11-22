@@ -61,6 +61,26 @@ public sealed class TextBoxSpanTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void ASpanRoleFollowsThePaletteRatherThanTheField()
+    {
+        using var field = new TextBox();
+        field.ForeColor = new SKColor(0xAA, 0xBB, 0xCC);
+        var span = new TextBoxSpan(0, 3) { Color = ThemeColor.MutedForeground };
+
+        var light = span.EffectiveColor(field);
+        Assert.AreEqual(Theme.ColorOf(ThemeColor.MutedForeground), light);
+        Assert.AreNotEqual(field.EffectiveForeColor, light, "a role does not defer to the field's colour");
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(
+            Theme.ColorOf(ThemeColor.MutedForeground),
+            span.EffectiveColor(field),
+            "the same span follows the new palette");
+        Assert.AreNotEqual(light, span.EffectiveColor(field), "the two palettes should differ");
+    }
+
+    [TestMethod]
     public void ASpanCannotBeResolvedWithoutItsField()
     {
         var span = new TextBoxSpan(0, 1);

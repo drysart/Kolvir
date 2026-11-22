@@ -374,6 +374,47 @@ public sealed class RichLabelTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void ASpanRoleIsResolvedWhenItIsReadSoAPaletteSwapRecolours()
+    {
+        using var label = new RichLabel();
+        var span = label.AddText("themed");
+        span.ForeColor = ThemeColor.MutedForeground;
+
+        var light = span.EffectiveForeColor;
+        Assert.AreEqual(Theme.MutedForeground, light, "the role is read from the current palette");
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(Theme.MutedForeground, span.EffectiveForeColor, "the same span follows the new palette");
+        Assert.AreNotEqual(light, span.EffectiveForeColor, "the two palettes should differ");
+    }
+
+    [TestMethod]
+    public void ASpanHoverRoleIsResolvedWhenItIsReadSoAPaletteSwapRecolours()
+    {
+        using var label = new RichLabel();
+        var span = label.AddText("themed");
+        span.HoverBackColor = ThemeColor.MutedForeground;
+
+        var light = span.EffectiveHoverBackColor;
+        var lightMuted = Theme.ColorOf(ThemeColor.MutedForeground);
+        Assert.AreEqual(lightMuted.Red, light.Red, "the role is read from the current palette");
+        Assert.AreEqual(lightMuted.Green, light.Green);
+        Assert.AreEqual(lightMuted.Blue, light.Blue);
+        Assert.AreEqual(0x1A, light.Alpha, "and tinted while it is read");
+
+        Theme.Palette = Palette.Dark;
+
+        var dark = span.EffectiveHoverBackColor;
+        var darkMuted = Theme.ColorOf(ThemeColor.MutedForeground);
+        Assert.AreEqual(darkMuted.Red, dark.Red, "the same span follows the new palette");
+        Assert.AreEqual(darkMuted.Green, dark.Green);
+        Assert.AreEqual(darkMuted.Blue, dark.Blue);
+        Assert.AreEqual(0x1A, dark.Alpha, "the tint follows the new palette too");
+        Assert.AreNotEqual(light, dark, "the two palettes should differ");
+    }
+
+    [TestMethod]
     public void AnUnownedSpanTakesTheBaseForeground()
     {
         var span = new TextSpan("loose");
