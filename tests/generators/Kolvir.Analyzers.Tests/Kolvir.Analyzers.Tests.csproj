@@ -18,6 +18,10 @@
     <IsTestProject>true</IsTestProject>
     <IsAotCompatible>false</IsAotCompatible>
     <EnableMSTestRunner>false</EnableMSTestRunner>
+    <!-- This project consumes the analyzer as a plain assembly for its test harness, so the
+         central rule must not add a second reference. It still carries an explicit Analyzer item
+         below, which is what the build guard checks. -->
+    <KolvirUnionAnalyzerExplicit>true</KolvirUnionAnalyzerExplicit>
   </PropertyGroup>
 
   <ItemGroup>

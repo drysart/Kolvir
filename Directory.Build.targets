@@ -118,11 +118,11 @@
        only removes it from projects that turn out not to reach core. Adding it in a target instead
        would make it invisible to restore, which is exactly the failure this avoids.
 
-       A project that already declares an Analyzer item is left alone: the analyzer's own test
+       A project that sets KolvirUnionAnalyzerExplicit is left alone: the analyzer's own test
        project uses a plain ProjectReference plus an explicit Analyzer item so it can construct the
        analyzers in code, and must not get a second, duplicate reference. -->
   <ItemGroup Condition="'$(MSBuildProjectName)' != 'Kolvir.Analyzers'
-                        and '@(Analyzer)' == ''">
+                        and '$(KolvirUnionAnalyzerExplicit)' != 'true'">
     <ProjectReference Include="$(KolvirUnionAnalyzerProject)"
                       OutputItemType="Analyzer"
                       ReferenceOutputAssembly="false"
@@ -156,7 +156,7 @@
        this check passes for the project that exists to test the analyzer. -->
   <Target Name="_KolvirVerifyUnionAnalyzer"
           AfterTargets="ResolveProjectReferences"
-          Condition="'$(_KolvirReferencesCore)' == 'true' or '$(MSBuildProjectName)' == 'Kolvir'">
+          Condition="('$(_KolvirReferencesCore)' == 'true' or '$(MSBuildProjectName)' == 'Kolvir') and '$(TargetFramework)' != ''">
     <ItemGroup>
       <_KolvirWiredAnalyzer Include="@(Analyzer)"
                             Condition="'%(Filename)%(Extension)' == 'Kolvir.Analyzers.dll'" />

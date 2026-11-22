@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk">
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;RuntimeIdentifier;SelfContained">
 
   <!-- The union diagnostics: the mistakes around Kolvir.Union<...> that the compiler cannot see.
        It is a project of its own and lives outside `src/features/*` because the pack job globs that
@@ -21,9 +21,9 @@
 
     <!-- A solution-wide `dotnet publish -p:PublishAot=true` passes PublishAot as a global
          property to every project in the graph, including this netstandard2.0 one, which cannot
-         satisfy it (NETSDK1207). TreatAsLocalProperty lets the values below win for this project
-         only, so an application's AOT publish builds its analyzer without trying to publish one. -->
-    <TreatAsLocalProperty>PublishAot;RuntimeIdentifier;SelfContained</TreatAsLocalProperty>
+         satisfy it (NETSDK1207). The Project element localizes the values so the properties below
+         win for this project only, and an application's AOT publish builds its analyzer without
+         trying to publish one. -->
     <PublishAot>false</PublishAot>
   </PropertyGroup>
 
