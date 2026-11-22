@@ -2604,8 +2604,8 @@ state: `WithColor` for the resting colour - a literal or a palette role - and `W
 `WithFocusColor`, `WithActiveColor`, `WithPressedColor` and `WithDisabledColor` for the rest. When
 several apply at once they are taken in that order - disabled, pressed, active, focused, hovered,
 then resting - which is the order the built-in controls hand-coded before borders were objects.
-`Rounded(radius)` is the
-shape without a stroke: it rounds the fill and clips the corners, and takes no room.
+`Rounded(radius)` is the shape without a stroke: it rounds the fill and clips the corners, and takes
+no room.
 `WithInsets(inset)` makes a frame take a different amount of room than the stroke is thick, which is
 what a control whose band is asymmetric needs.
 
