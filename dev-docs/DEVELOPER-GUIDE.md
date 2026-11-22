@@ -2127,7 +2127,7 @@ code. It adds:
 | Member | Behaviour |
 | --- | --- |
 | `Spans` | The annotated runs, or null. Assigning replaces the whole set; assigning null or an empty list removes the feature again |
-| `TextBoxSpan` | One run: `Start`, `Length`, `End`, the squiggle's `Color`/`ThemeColor`, its `Thickness`, `Amplitude` and `Wavelength`, and a `Tag` for the caller's own data |
+| `TextBoxSpan` | One run: `Start`, `Length`, `End`, the squiggle's `Color` (a colour, a palette role, or `InheritedValue`), its `Thickness`, `Amplitude` and `Wavelength`, and a `Tag` for the caller's own data |
 | `ContextMenuEventArgs.Span` | The span the right-click landed in, or null, as an extension member on the existing context-menu event args |
 
 ```csharp
@@ -2140,7 +2140,7 @@ sealed class SpellingError(int start, int length, string[] suggestions) : TextBo
 }
 
 // A grammar note is the same squiggle in a different colour and shape.
-var grammar = new TextBoxSpan(start, length) { ThemeColor = ThemeColor.Accent };
+var grammar = new TextBoxSpan(start, length) { Color = ThemeColor.Accent };
 
 field.Spans = [ new SpellingError(start, length, ["their", "there"]), grammar ];
 

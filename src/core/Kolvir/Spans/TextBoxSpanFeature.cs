@@ -131,7 +131,7 @@ internal sealed class TextBoxSpanFeature : ITextBoxSpanFeature
                 continue;
             }
 
-            paint.Color = span.ResolveColor();
+            paint.Color = span.EffectiveColor(textBox);
             paint.StrokeWidth = span.Thickness;
 
             foreach (var rect in _rects)
