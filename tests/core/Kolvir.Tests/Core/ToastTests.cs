@@ -198,14 +198,18 @@ public sealed class ToastTests : HeadlessTestBase
     }
 
     [TestMethod]
-    public void AnUnassignedBarColorFollowsTheSeverity()
+    [DataRow(ToastSeverity.Info, 0x2F, 0x6F, 0xED)]
+    [DataRow(ToastSeverity.Success, 0x2E, 0x9E, 0x5B)]
+    [DataRow(ToastSeverity.Warning, 0xD0, 0x8B, 0x0A)]
+    [DataRow(ToastSeverity.Error, 0xC9, 0x3C, 0x37)]
+    public void AnUnassignedBarColorIsTheSeveritysFixedColour(ToastSeverity severity, int red, int green, int blue)
     {
-        var toast = new Toast("Saved");
+        var toast = new Toast("Saved") { Severity = severity };
 
-        var info = toast.EffectiveBarColor;
-        toast.Severity = ToastSeverity.Error;
-
-        Assert.AreNotEqual(info, toast.EffectiveBarColor, "the severity answers while nothing is assigned");
+        Assert.AreEqual(
+            new SKColor((byte)red, (byte)green, (byte)blue),
+            toast.EffectiveBarColor,
+            "the documented bar colour for this severity, which reads on both surfaces");
     }
 
     [TestMethod]

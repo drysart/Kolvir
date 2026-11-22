@@ -91,6 +91,46 @@ public sealed class WindowChromeColorTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void ALiteralIsNotReResolvedWhenThePaletteChanges()
+    {
+        WithWindow((window, backend) =>
+        {
+            var literal = new SKColor(0x12, 0x34, 0x56);
+            window.CaptionColor = literal;
+            window.BorderColor = literal;
+
+            Assert.AreEqual(1, backend.CaptionColorPushes, "the literal is handed over once");
+            Assert.AreEqual(1, backend.BorderColorPushes, "and so is the border");
+
+            Theme.Palette = Palette.Dark;
+
+            Assert.AreEqual<SKColor?>(literal, backend.CaptionColor, "a literal has nothing to re-resolve");
+            Assert.AreEqual<SKColor?>(literal, backend.BorderColor);
+            Assert.AreEqual(1, backend.CaptionColorPushes, "so the platform is not handed it again");
+            Assert.AreEqual(1, backend.BorderColorPushes, "for either colour");
+        });
+    }
+
+    [TestMethod]
+    public void ARoleThatResolvesToTheSameColourIsNotPushedAgain()
+    {
+        WithWindow((window, backend) =>
+        {
+            var surface = Theme.Surface;
+            window.CaptionColor = ThemeColor.Surface;
+
+            Assert.AreEqual(1, backend.CaptionColorPushes);
+
+            // A dark palette that keeps the light surface: the role still resolves to the colour
+            // the backend already holds, so there is nothing to hand over.
+            Theme.Palette = Palette.Dark with { Surface = surface };
+
+            Assert.AreEqual<SKColor?>(surface, backend.CaptionColor, "the role still resolves to the same colour");
+            Assert.AreEqual(1, backend.CaptionColorPushes, "and the window does not churn the platform");
+        });
+    }
+
+    [TestMethod]
     public void ARefusedRequestLeavesTheColourUnchanged()
     {
         var app = new Application(

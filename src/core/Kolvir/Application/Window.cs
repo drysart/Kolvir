@@ -510,19 +510,29 @@ public sealed partial class Window : IDisposable
     /// <remarks>
     /// Only a role needs this: a literal never changes and an inherited colour is the platform's
     /// own. The application calls it from the same loop that re-invalidates every window after a
-    /// palette change. A role could only have been stored after the backend accepted one, so the
-    /// push here cannot be the first request a backend refuses.
+    /// palette change. A role whose resolved colour is unchanged - because the palette edit did not
+    /// touch that entry - is not handed over again, so the platform is not churned for nothing. A
+    /// role could only have been stored after the backend accepted one, so the push here cannot be
+    /// the first request a backend refuses.
     /// </remarks>
     internal void RefreshChromeColors()
     {
         if (_captionColor.TryGetValue<ThemeColor>(out var captionRole))
         {
-            Backend.CaptionColor = Theme.ColorOf(captionRole);
+            var caption = Theme.ColorOf(captionRole);
+            if (Backend.CaptionColor != caption)
+            {
+                Backend.CaptionColor = caption;
+            }
         }
 
         if (_borderColor.TryGetValue<ThemeColor>(out var borderRole))
         {
-            Backend.BorderColor = Theme.ColorOf(borderRole);
+            var border = Theme.ColorOf(borderRole);
+            if (Backend.BorderColor != border)
+            {
+                Backend.BorderColor = border;
+            }
         }
     }
 

@@ -59,14 +59,38 @@ internal sealed class ChromeColorApplicationBackend : IApplicationBackend
 internal sealed class ChromeColorWindowBackend : IWindowBackend
 {
     private readonly IWindowBackend _inner;
+    private SKColor? _captionColor;
+    private SKColor? _borderColor;
 
     public ChromeColorWindowBackend(IWindowBackend inner) => _inner = inner;
 
+    /// <summary>How many times the window handed the backend a caption colour, changed or not.</summary>
+    public int CaptionColorPushes { get; private set; }
+
+    /// <summary>How many times the window handed the backend a border colour, changed or not.</summary>
+    public int BorderColorPushes { get; private set; }
+
     /// <summary>The last caption colour handed to the backend, or null for the platform's own.</summary>
-    public SKColor? CaptionColor { get; set; }
+    public SKColor? CaptionColor
+    {
+        get => _captionColor;
+        set
+        {
+            CaptionColorPushes++;
+            _captionColor = value;
+        }
+    }
 
     /// <summary>The last border colour handed to the backend, or null for the platform's own.</summary>
-    public SKColor? BorderColor { get; set; }
+    public SKColor? BorderColor
+    {
+        get => _borderColor;
+        set
+        {
+            BorderColorPushes++;
+            _borderColor = value;
+        }
+    }
 
     /// <summary>Reports the one capability this backend exists to exercise.</summary>
     public ChromeCapabilities ChromeCapabilities => new() { WindowColors = true };
