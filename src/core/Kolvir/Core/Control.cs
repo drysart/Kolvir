@@ -41,7 +41,7 @@ public class Control : IDisposable
     private Border _border = Border.None;
     private string _text = string.Empty;
     private bool _visible = true;
-    private bool _enabled = true;
+    private Union<bool, InheritedValue> _enabled = InheritedValue.Instance;
     private bool _effectiveEnabled = true;
     private bool _effectiveVisible;
     private bool _displayed;
@@ -370,7 +370,7 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// Adds a handler that runs when the control's effective <see cref="Enabled"/> state changes,
+    /// Adds a handler that runs when the control's <see cref="EffectiveEnabled"/> answer changes,
     /// which includes a container above it being disabled or enabled.
     /// </summary>
     /// <param name="handler">The handler, which receives the control.</param>
@@ -1146,7 +1146,7 @@ public class Control : IDisposable
 
     /// <summary>
     /// Whether the control can be reached right now: it is <see cref="EffectiveVisible"/> and
-    /// <see cref="Enabled"/>, and no container above it has stopped showing its content.
+    /// <see cref="EffectiveEnabled"/>, and no container above it has stopped showing its content.
     /// </summary>
     /// <remarks>
     /// This is the tree walk the Tab order and <see cref="UiHost.SetFocus"/> both ask, so a
@@ -1156,7 +1156,7 @@ public class Control : IDisposable
     /// </remarks>
     internal bool IsReachable =>
         EffectiveVisible
-        && Enabled
+        && EffectiveEnabled
         && (Parent is not { } parent || (parent.IsReachable && parent.IsContentReachable));
 
     /// <summary>
@@ -1219,41 +1219,83 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// Whether the control accepts input. Disabling a container disables everything inside it, so
-    /// this is true only when the control's own flag is set and every ancestor is enabled as well.
+    /// The enabled state assigned to this control: <c>true</c>, <c>false</c>, or
+    /// <see cref="InheritedValue.Instance"/> to take the parent's answer.
     /// </summary>
     /// <remarks>
-    /// The getter walks the parent chain rather than caching, so a subtree moved under a disabled
-    /// container answers correctly the moment it is attached. Setting the property only records the
-    /// control's own flag; <see cref="UpdateEffectiveEnabled"/> is what notices that the answer for
-    /// the subtree changed and fires <see cref="OnEnabledChanged"/> down it.
+    /// <para>
+    /// The property reports what was assigned, not what the tree resolves. Read
+    /// <see cref="EffectiveEnabled"/> for that. The initial value is
+    /// <see cref="InheritedValue.Instance"/>, which is how a control that never assigns a value
+    /// inherits one.
+    /// </para>
+    /// <para>
+    /// <see cref="InheritedValue.Instance"/> and an explicit <c>true</c> resolve identically; see
+    /// <see cref="EffectiveEnabled"/>. The difference is only what this property reports, and it
+    /// is the reason the inherit arm exists: code that saves and restores an enabled state can put
+    /// back "nothing was assigned here" rather than pinning a literal.
+    /// </para>
+    /// <para>
+    /// Assigning a value only records it; <see cref="UpdateEffectiveEnabled"/> is what notices
+    /// that the answer for the subtree changed and fires <see cref="OnEnabledChanged"/> down it.
+    /// A change that leaves the effective answer alone - between
+    /// <see cref="InheritedValue.Instance"/> and <c>true</c>, or a local assignment under an
+    /// already-disabled ancestor - fires nothing.
+    /// </para>
     /// </remarks>
-    public bool Enabled
+    public Union<bool, InheritedValue> Enabled
     {
-        get => _enabled && (Parent?.Enabled ?? true);
+        get => _enabled;
         set
         {
-            if (_enabled == value)
+            if (_enabled.Equals(value))
             {
                 return;
             }
 
             _enabled = value;
-            UpdateEffectiveEnabled();
+
+            // A union with no case is stored so the refusal comes from the getter, matching
+            // ForeColor and the other inherited appearance properties.
+            if (!value.IsUnspecified)
+            {
+                UpdateEffectiveEnabled();
+            }
         }
     }
 
     /// <summary>
-    /// Whether the control and every container above it are enabled - the answer to "can this
-    /// control be reached", which is what painting and input routing ask.
+    /// Whether this control and every container above it are enabled: the local assignment -
+    /// <c>true</c> when <see cref="Enabled"/> holds <see cref="InheritedValue.Instance"/> - AND the
+    /// parent's answer, with an unparented control treating the parent as enabled.
     /// </summary>
     /// <remarks>
-    /// The getter walks the parent chain rather than caching, so a subtree moved under a disabled
-    /// container answers correctly the moment it is attached. <see cref="UpdateEffectiveEnabled"/>
-    /// is what notices that the answer for a subtree changed and fires <see cref="OnEnabledChanged"/>
-    /// down it.
+    /// <para>
+    /// An explicit <c>true</c> does not override a disabled ancestor. Disabling a container
+    /// disables everything inside it, and that holds however the child is assigned. This is why
+    /// <see cref="InheritedValue.Instance"/> and <c>true</c> resolve identically; the raw/effective
+    /// split is about what was assigned, not about an override.
+    /// </para>
+    /// <para>
+    /// The getter walks the parent chain rather than caching, exactly as the resolved getter it
+    /// replaces did, so a subtree moved under a disabled container answers correctly the moment it
+    /// is attached. <see cref="UpdateEffectiveEnabled"/> is what notices that the answer for a
+    /// subtree changed and fires <see cref="OnEnabledChanged"/> down it.
+    /// </para>
     /// </remarks>
-    public bool EffectiveEnabled => Enabled;
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="Enabled"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public bool EffectiveEnabled
+    {
+        get
+        {
+            _enabled.ThrowIfUnspecified();
+
+            bool local = !_enabled.TryGetValue<bool>(out var assigned) || assigned;
+            return local && (Parent?.EffectiveEnabled ?? true);
+        }
+    }
 
     /// <summary>When true, containers size the control to its <see cref="DesiredSize"/>.</summary>
     public bool AutoSize
@@ -2166,7 +2208,7 @@ public class Control : IDisposable
     /// base's bits by calling it.
     /// </remarks>
     public virtual ControlState State =>
-        (Enabled ? ControlState.None : ControlState.Disabled)
+        (EffectiveEnabled ? ControlState.None : ControlState.Disabled)
         | (IsFocused ? ControlState.Focused : ControlState.None)
         | (IsMouseOver ? ControlState.Hovered : ControlState.None)
         | (IsPressed ? ControlState.Pressed : ControlState.None);
@@ -2523,7 +2565,7 @@ public class Control : IDisposable
             return null;
         }
 
-        return HitTestChildren(local) ?? (Enabled ? this : null);
+        return HitTestChildren(local) ?? (EffectiveEnabled ? this : null);
     }
 
     /// <summary>
@@ -2975,7 +3017,7 @@ public class Control : IDisposable
 
     internal void RaiseMouseDown(MouseEventArgs e)
     {
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             OnMouseDown(e);
         }
@@ -2983,7 +3025,7 @@ public class Control : IDisposable
 
     internal void RaiseMouseUp(MouseEventArgs e)
     {
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             OnMouseUp(e);
         }
@@ -2991,7 +3033,7 @@ public class Control : IDisposable
 
     internal void RaiseMouseMove(MouseEventArgs e)
     {
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             OnMouseMove(e);
         }
@@ -3000,7 +3042,7 @@ public class Control : IDisposable
     /// <summary>Delivers a wheel turn. Returns true when the control consumed it.</summary>
     internal bool RaiseMouseWheel(MouseEventArgs e)
     {
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             OnMouseWheel(e);
         }
@@ -3052,7 +3094,7 @@ public class Control : IDisposable
     /// <summary>Delivers a key press. Returns true when the control consumed the key.</summary>
     internal bool RaiseKeyDown(KeyEventArgs e)
     {
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             OnKeyDown(e);
         }
@@ -3062,7 +3104,7 @@ public class Control : IDisposable
 
     internal void RaiseKeyUp(KeyEventArgs e)
     {
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             OnKeyUp(e);
         }
@@ -3070,7 +3112,7 @@ public class Control : IDisposable
 
     internal void RaiseTextInput(TextInputEventArgs e)
     {
-        if (Enabled)
+        if (EffectiveEnabled)
         {
             OnTextInput(e);
         }
@@ -3287,10 +3329,15 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// Called when the control's effective <see cref="Enabled"/> state changed, which includes a
+    /// Called when the control's <see cref="EffectiveEnabled"/> answer changed, which includes a
     /// container above it being disabled while its own flag stayed as it was. The default raises
     /// <see cref="AddEnabledChangedHandler"/> and repaints.
     /// </summary>
+    /// <remarks>
+    /// A change to <see cref="Enabled"/> that leaves this answer alone - between
+    /// <see cref="InheritedValue.Instance"/> and <c>true</c>, or a local assignment under an
+    /// already-disabled ancestor - does not call it.
+    /// </remarks>
     protected virtual void OnEnabledChanged()
     {
         _enabledChanged?.Invoke(this);
@@ -3365,13 +3412,14 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// Re-reads <see cref="Enabled"/> and, when it changed, tells this control and then its whole
-    /// subtree. Every path that can change the answer - the local flag and the parent link - ends
-    /// here, so a child never has to watch its ancestors.
+    /// Re-reads <see cref="EffectiveEnabled"/> and, when it changed, tells this control and then
+    /// its whole subtree. Every path that can change the answer - the local value and the parent
+    /// link - ends here, so a child never has to watch its ancestors. A raw change that resolves
+    /// to the same answer returns before notifying or recursing.
     /// </summary>
     private void UpdateEffectiveEnabled()
     {
-        bool enabled = Enabled;
+        bool enabled = EffectiveEnabled;
         if (enabled == _effectiveEnabled)
         {
             return;

@@ -214,7 +214,7 @@ public class ColorPicker : Control
     /// When true the picker displays its colour but refuses to change it. Defaults to false.
     /// </summary>
     /// <remarks>
-    /// Unlike <see cref="Control.Enabled"/>, a read-only picker still looks live: the spectrum
+    /// Unlike <see cref="Control.EffectiveEnabled"/>, a read-only picker still looks live: the spectrum
     /// and the fields paint in their normal colours, the fields can be focused and copied from, and
     /// programmatic assignment to <see cref="Color"/> still works. Only the user's edits are
     /// refused. A disabled picker paints the disabled palette, takes no input and is skipped by Tab.

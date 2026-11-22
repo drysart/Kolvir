@@ -167,7 +167,11 @@ public sealed class ColorDialog
         // it back by itself, so the caller would be left with a window that answers to nothing
         // until it was clicked. Remember where it was and give it back on the way out.
         var ownerFocus = ownerContent is null ? null : FindFocused(ownerContent);
-        var ownerWasEnabled = ownerContent?.EffectiveEnabled ?? true;
+        // Save the raw assignment, not the resolved answer. Restoring the resolved value would
+        // turn an inherited enabled state into an explicit false when the owner sits under a
+        // disabled ancestor.
+        Union<bool, InheritedValue> ownerWasEnabled =
+            ownerContent is null ? InheritedValue.Instance : ownerContent.Enabled;
         if (ownerContent is not null)
         {
             ownerContent.Enabled = false;
