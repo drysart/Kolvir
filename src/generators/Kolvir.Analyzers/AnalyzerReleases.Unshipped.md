@@ -9,3 +9,4 @@
 
 Rule ID | Category | Severity | Notes
 --------|----------|----------|-------
+KOLVIR0003 | Kolvir.Usage | Error | A union has duplicate case types
