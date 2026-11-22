@@ -2600,10 +2600,11 @@ it in its constructor; a change is a different instance, the way `Padding` and `
 setter repaints, and lays out as well when the new border takes a different amount of room.
 
 `SimpleBorder` carries a thickness per edge and a radius per corner, and gives the frame a colour per
-state: `WithThemeColor` for the resting colour and `WithHoverColor`, `WithFocusColor`,
-`WithActiveColor`, `WithPressedColor` and `WithDisabledColor` for the rest. When several apply at
-once they are taken in that order - disabled, pressed, active, focused, hovered, then resting - which
-is the order the built-in controls hand-coded before borders were objects. `Rounded(radius)` is the
+state: `WithColor` for the resting colour - a literal or a palette role - and `WithHoverColor`,
+`WithFocusColor`, `WithActiveColor`, `WithPressedColor` and `WithDisabledColor` for the rest. When
+several apply at once they are taken in that order - disabled, pressed, active, focused, hovered,
+then resting - which is the order the built-in controls hand-coded before borders were objects.
+`Rounded(radius)` is the
 shape without a stroke: it rounds the fill and clips the corners, and takes no room.
 `WithInsets(inset)` makes a frame take a different amount of room than the stroke is thick, which is
 what a control whose band is asymmetric needs.
@@ -2616,7 +2617,7 @@ that is only partly drawn is one border rather than a border plus a decoration:
 var card = new Panel
 {
     Border = new SimpleBorder(new Thickness(4f, 1f, 1f, 1f), new CornerRadii(12f, 12f, 0f, 0f))
-        .WithThemeColor(BorderSide.Left, ThemeColor.Accent),
+        .WithColor(BorderSide.Left, ThemeColor.Accent),
 };
 ```
 

@@ -294,10 +294,8 @@ public sealed class SimpleBorder : Border
     public SimpleBorder WithCorners(CornerRadii corners);
     public SimpleBorder WithInsets(Thickness insets);          // take more room than the stroke is thick
     public SimpleBorder WithControlText(bool show = true);     // draw the owner's Text in the top edge
-    public SimpleBorder WithColor(SKColor color);              // every edge
-    public SimpleBorder WithColor(BorderSide side, SKColor color);
-    public SimpleBorder WithThemeColor(ThemeColor role);       // every edge
-    public SimpleBorder WithThemeColor(BorderSide side, ThemeColor role);
+    public SimpleBorder WithColor(Union<SKColor, ThemeColor> color);              // every edge
+    public SimpleBorder WithColor(BorderSide side, Union<SKColor, ThemeColor> color);
     public SimpleBorder WithHoverColor(ThemeColor role);       // ControlState.Hovered
     public SimpleBorder WithFocusColor(ThemeColor role);       // ControlState.Focused
     public SimpleBorder WithActiveColor(ThemeColor role);      // ControlState.Active
@@ -319,8 +317,9 @@ still reads as one number. `Border.CornerRadius` survives as `Corners.Maximum` f
 genuinely need one number — a focus ring, `Painter.Fill` — and the per-corner overloads of those take
 `Corners`.
 
-Colour is a fixed `SKColor` or a `ThemeColor` role, the same pair `Control.BackColor` accepts; the
-role is resolved while painting, so a palette swap recolours live controls with no rebuild.
+Colour is a `Union<SKColor, ThemeColor>` - the same pair `Control.BackColor` accepts, without the
+inherit arm, because a border has no parent to inherit from. A role is resolved while painting, so
+a palette swap recolours live controls with no rebuild.
 
 `Paint` resolves the state in one documented order — **disabled > pressed > active > focused >
 hovered > resting** — which is what the built-in controls already implement by hand, differing only in
@@ -331,7 +330,7 @@ hover colour, so it keeps its pixels; `TabControl`, `Button` and `DateTimePicker
 unchanged.
 
 This is what lets `TextBox` hold a `static readonly SimpleBorder _focused = SimpleBorder.Thin
-.WithThemeColor(ThemeColor.Border).WithFocusColor(ThemeColor.Accent).WithHoverColor(ThemeColor
+.WithColor(ThemeColor.Border).WithFocusColor(ThemeColor.Accent).WithHoverColor(ThemeColor
 .SplitterHover).WithDisabledColor(ThemeColor.DisabledBackground)` and stop overriding
 `OnPaintBackground` to draw its own frame.
 
@@ -563,7 +562,7 @@ painting became path-based inside `SimpleBorder` alone.
   focus ring, `Painter.Fill`, `Image`'s placeholder - did not move.
 - **`BorderSide`** — `Top`, `Right`, `Bottom`, `Left`, the index order the per-edge colour array uses.
 - **`SimpleBorder`** — `Widths` is a `Thickness`, `Corners` is a `CornerRadii`, and each edge has its
-  own resting colour (`WithColor(BorderSide, SKColor)` and `WithThemeColor(BorderSide, ThemeColor)`).
+  own resting colour (`WithColor(BorderSide, Union<SKColor, ThemeColor>)`).
   State colours stay *uniform across the edges*: nothing in this library needs a frame whose edges
   differ only while hovered, and a per-edge state colour is four arrays instead of five fields.
   `WithControlText()` adds the caption (section 10).
