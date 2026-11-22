@@ -41,7 +41,9 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     public void AnUnspecifiedFontIsRefused()
     {
         var label = new Label("x");
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         label.Font = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = label.EffectiveFont,
@@ -155,7 +157,9 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     public void AnUnspecifiedForeColorIsRefused()
     {
         var label = new Label("x");
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         label.ForeColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = label.EffectiveForeColor,
@@ -253,7 +257,9 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     public void AnUnspecifiedBackColorIsRefused()
     {
         var panel = new Panel();
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         panel.BackColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = panel.EffectiveBackColor,

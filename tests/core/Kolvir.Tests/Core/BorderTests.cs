@@ -157,7 +157,9 @@ public sealed class BorderTests : HeadlessTestBase
     [TestMethod]
     public void AnUnspecifiedEdgeColourIsRefused()
     {
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         var border = SimpleBorder.Thin.WithColor(BorderSide.Top, default(Union<SKColor, ThemeColor>));
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = border.ColorFor(BorderSide.Top, ControlState.None),

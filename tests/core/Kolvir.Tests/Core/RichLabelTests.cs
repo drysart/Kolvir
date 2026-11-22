@@ -427,13 +427,17 @@ public sealed class RichLabelTests : HeadlessTestBase
     public void AnUnspecifiedSpanColorIsRefused()
     {
         var span = new TextSpan("bad");
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         span.ForeColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = span.EffectiveForeColor,
             "a default-initialised union holds no case and must not be read as inherit");
 
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         span.HoverBackColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = span.EffectiveHoverBackColor,

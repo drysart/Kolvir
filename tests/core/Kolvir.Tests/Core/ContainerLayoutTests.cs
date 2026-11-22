@@ -260,7 +260,9 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
     public void AnUnspecifiedSplitterColorIsRefused()
     {
         var split = new SplitContainer();
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         split.SplitterColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = split.EffectiveSplitterColor,

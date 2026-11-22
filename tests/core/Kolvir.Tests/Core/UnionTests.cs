@@ -151,9 +151,11 @@ public sealed class UnionTests
     [TestMethod]
     public void DefaultHoldsNoCaseAndSaysSo()
     {
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         Union<SKColor, ThemeColor> pair = default;
         Union<SKColor, ThemeColor, InheritedValue> triple = default;
         Union<SKColor, ThemeColor, InheritedValue, int> quadruple = default;
+#pragma warning restore KOLVIR0002
 
         Assert.IsTrue(pair.IsUnspecified);
         Assert.IsTrue(triple.IsUnspecified);
@@ -228,7 +230,9 @@ public sealed class UnionTests
     [TestMethod]
     public void SwitchRefusesADefaultUnion()
     {
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         Union<SKColor, ThemeColor, InheritedValue> union = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => union.Switch(_ => { }, _ => { }, _ => { }));
@@ -271,7 +275,9 @@ public sealed class UnionTests
     [TestMethod]
     public void MatchRefusesADefaultUnion()
     {
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         Union<SKColor, ThemeColor> union = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => union.Match(0, static (_, _) => 0, static (_, _) => 0));
@@ -310,8 +316,10 @@ public sealed class UnionTests
     [TestMethod]
     public void TwoDefaultUnionsAreEqual()
     {
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         Union<SKColor, ThemeColor, InheritedValue> left = default;
         Union<SKColor, ThemeColor, InheritedValue> right = default;
+#pragma warning restore KOLVIR0002
 
         Assert.AreEqual(left, right);
         Assert.IsTrue(left == right);
@@ -340,7 +348,9 @@ public sealed class UnionTests
 
         Assert.AreEqual(
             "Union<SKColor, ThemeColor, InheritedValue>(unspecified)",
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
             default(Union<SKColor, ThemeColor, InheritedValue>).ToString());
+#pragma warning restore KOLVIR0002
 
         var quadruple = new Union<SKColor, ThemeColor, InheritedValue, int>(12);
         Assert.AreEqual("Int32(12)", quadruple.ToString());

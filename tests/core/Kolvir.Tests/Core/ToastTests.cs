@@ -216,7 +216,9 @@ public sealed class ToastTests : HeadlessTestBase
     public void AnUnspecifiedBarColorIsRefused()
     {
         var toast = new Toast("Saved");
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         toast.BarColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = toast.EffectiveBarColor,

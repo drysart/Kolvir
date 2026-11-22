@@ -22,4 +22,12 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor DefaultUnion = new(
+        "KOLVIR0002",
+        "Union value is default-initialised",
+        "A default-initialised {0} has no case, so none of its cases can ever be read; assign a case or PropertyValue.Inherited",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }

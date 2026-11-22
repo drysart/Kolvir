@@ -164,8 +164,10 @@ public sealed class WindowChromeColorTests : HeadlessTestBase
     {
         WithWindow((window, backend) =>
         {
+#pragma warning disable KOLVIR0002 // These two tests are about the value the rule exists to refuse.
             Assert.ThrowsExactly<InvalidOperationException>(() => window.CaptionColor = default);
             Assert.ThrowsExactly<InvalidOperationException>(() => window.BorderColor = default);
+#pragma warning restore KOLVIR0002
             Assert.IsNull(backend.CaptionColor, "and nothing reached the platform");
             Assert.IsNull(backend.BorderColor);
         });
