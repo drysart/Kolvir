@@ -107,10 +107,6 @@ jobs:
     permissions:
       pages: write
       id-token: write
-      # The wait step below lists the run's artifacts through the REST API, and that endpoint is
-      # gated on this permission. The deployment itself does not need it: deploy-pages reads the
-      # artifact with the job's runtime token.
-      actions: read
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
