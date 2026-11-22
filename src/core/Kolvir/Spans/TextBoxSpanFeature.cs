@@ -100,7 +100,7 @@ internal sealed class TextBoxSpanFeature : ITextBoxSpanFeature
             return;
         }
 
-        var font = textBox.Font;
+        var font = textBox.EffectiveFont;
         var area = textBox.Viewport.Text;
         if (font.LineHeight <= 0f || area.Width <= 0f || area.Height <= 0f)
         {
@@ -210,7 +210,7 @@ internal sealed class TextBoxSpanFeature : ITextBoxSpanFeature
             return;
         }
 
-        var font = _textBox.Font;
+        var font = _textBox.EffectiveFont;
         float lineHeight = font.LineHeight;
 
         bool topClipped = segment.Top <= area.Top + 0.5f;

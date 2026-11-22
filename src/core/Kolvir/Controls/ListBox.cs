@@ -143,7 +143,7 @@ public class ListBox : VirtualList
         float width = 0f;
         foreach (var item in _items)
         {
-            width = MathF.Max(width, Font.MeasureWidth(GetItemTextOf(item)));
+            width = MathF.Max(width, EffectiveFont.MeasureWidth(GetItemTextOf(item)));
         }
 
         return width + (TextInset * 2f);
@@ -158,7 +158,7 @@ public class ListBox : VirtualList
     {
         if (_drawItem is { } drawItem)
         {
-            drawItem(this, new ListBoxDrawItemEventArgs(canvas, index, _items[index], bounds, state, Font, textColor));
+            drawItem(this, new ListBoxDrawItemEventArgs(canvas, index, _items[index], bounds, state, EffectiveFont, textColor));
             return;
         }
 

@@ -160,7 +160,7 @@ public class ComboBox : Control
 
         // The popup list has no parent to inherit from, and the font may have changed since the last
         // time it was shown. Assigning the same font again is a no-op.
-        _list.Font = Font;
+        _list.Font = EffectiveFont;
 
         var size = MeasureDropDown();
         var scale = EffectiveScaleMultiplier;
@@ -212,12 +212,12 @@ public class ComboBox : Control
 
         for (int i = 0; i < _list.ItemCount; i++)
         {
-            widest = MathF.Max(widest, TextRenderer.Measure(_list.GetItemText(i), Font, float.PositiveInfinity, false).Width);
+            widest = MathF.Max(widest, TextRenderer.Measure(_list.GetItemText(i), EffectiveFont, float.PositiveInfinity, false).Width);
         }
 
         return new SKSize(
             MathF.Max(MinimumSize.Width, widest + Padding.Horizontal),
-            MathF.Max(MinimumSize.Height, Font.LineHeight + Padding.Vertical));
+            MathF.Max(MinimumSize.Height, EffectiveFont.LineHeight + Padding.Vertical));
     }
 
     /// <summary>
@@ -249,7 +249,7 @@ public class ComboBox : Control
 
         canvas.Save();
         canvas.ClipRect(content);
-        TextRenderer.Draw(canvas, text.Length > 0 ? text : EmptyText, Font, color, content);
+        TextRenderer.Draw(canvas, text.Length > 0 ? text : EmptyText, EffectiveFont, color, content);
         canvas.Restore();
 
         PaintChevron(canvas, rect);

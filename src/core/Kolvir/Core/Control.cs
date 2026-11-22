@@ -73,8 +73,8 @@ public class Control : IDisposable
     private List<SKRect>? _selectionRects;
     private ThemeColor _foreColorRole = ThemeColor.Foreground;
 
-    // Appearance set on this control. Null (or, for the background, Inherit) means "not set here".
-    private Font? _font;
+    // Appearance set on this control. InheritedValue means "not set here".
+    private Union<Font, InheritedValue> _font = InheritedValue.Instance;
     private Background? _background;
     private SKColor? _foreground;
 
@@ -1577,42 +1577,44 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// The font this control draws with, inherited the way WinForms' <c>Font</c> is: a control that
-    /// sets one overrides it for itself and for every control under it, and a control that does not
-    /// asks its parent, then <see cref="DefaultFont"/> - its class default, which is where the walk
-    /// ends.
+    /// The font assigned to this control: a <see cref="Font"/>, or
+    /// <see cref="InheritedValue.Instance"/> to take the nearest ancestor's font instead.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The effective font is resolved when text is measured or painted, not when the control is
-    /// built, so a control created before the theme was configured still adopts it, and a theme
-    /// font can be changed - or a font assigned to a control in a live tree - without rebuilding
-    /// anything. What the parent chain contributes is cached: one walk up the chain the first time
-    /// the font is needed, dropped when an ancestor assigns a font or the control changes parent.
-    /// That keeps a glyph measurement to a field read plus one virtual call on the class default.
+    /// The property reports what was assigned, not what the control draws with. Read
+    /// <see cref="EffectiveFont"/> for the font that resolves through the parent chain and the
+    /// class default. The initial value is <see cref="InheritedValue.Instance"/>, which is how a
+    /// control that never assigns a font inherits one.
+    /// </para>
+    /// <para>
+    /// Assigning a font overrides it for this control and for every control under it, the way
+    /// WinForms' <c>Font</c> does. The change resolves when text is measured or painted, not when
+    /// the control is built, so a theme font can be changed - or a font assigned to a control in a
+    /// live tree - without rebuilding anything, and a control created before the theme was
+    /// configured still adopts it.
     /// </para>
     /// <para>
     /// The font is not owned by the control: never dispose one that was inherited or that came from
     /// <see cref="Theme"/>, and keep any font assigned here alive for as long as it is in use.
     /// </para>
     /// </remarks>
-    public Font Font
+    /// <exception cref="ArgumentNullException">A null <see cref="Font"/> was assigned.</exception>
+    public Union<Font, InheritedValue> Font
     {
-        get
-        {
-            if (_font is { } local)
-            {
-                return local;
-            }
-
-            ResolveInheritedAppearance();
-            return _inheritedFont ?? DefaultFont;
-        }
+        get => _font;
         set
         {
-            ArgumentNullException.ThrowIfNull(value);
+            if (value.TryGetValue<Font>(out var font))
+            {
+                ArgumentNullException.ThrowIfNull(font);
 
-            if (ReferenceEquals(_font, value))
+                if (_font.TryGetValue<Font>(out var current) && ReferenceEquals(current, font))
+                {
+                    return;
+                }
+            }
+            else if (value.TryGetValue<InheritedValue>(out _) && _font.TryGetValue<InheritedValue>(out _))
             {
                 return;
             }
@@ -1622,6 +1624,35 @@ public class Control : IDisposable
             // Text is the size of the font, so this is a layout invalidation, not only a repaint.
             InvalidateAppearanceTree();
             UpdateLayoutAfterAppearanceChange();
+        }
+    }
+
+    /// <summary>
+    /// The font this control actually draws with: its own assignment, else the nearest ancestor's,
+    /// else <see cref="DefaultFont"/>.
+    /// </summary>
+    /// <remarks>
+    /// What the parent chain contributes is cached: one walk up the chain the first time the font is
+    /// needed, dropped when an ancestor assigns a font or the control changes parent. That keeps a
+    /// glyph measurement to a field read plus one virtual call on the class default. The class
+    /// default is read every time, so a theme font change needs no rebuild.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="Font"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public Font EffectiveFont
+    {
+        get
+        {
+            _font.ThrowIfUnspecified();
+
+            if (_font.TryGetValue<Font>(out var local))
+            {
+                return local;
+            }
+
+            ResolveInheritedAppearance();
+            return _inheritedFont ?? DefaultFont;
         }
     }
 
@@ -1636,19 +1667,6 @@ public class Control : IDisposable
     /// class is free to vary it (a compact mode, say) and a theme change is picked up immediately.
     /// </remarks>
     protected virtual Font DefaultFont => Theme.DefaultFont;
-
-    /// <summary>Forgets the font assigned to this control, so it inherits one again.</summary>
-    public void ClearFont()
-    {
-        if (_font is null)
-        {
-            return;
-        }
-
-        _font = null;
-        InvalidateAppearanceTree();
-        UpdateLayoutAfterAppearanceChange();
-    }
 
     /// <summary>
     /// How this control fills its background. <see cref="Background.Inherit"/> - the initial
@@ -1921,7 +1939,10 @@ public class Control : IDisposable
 
         for (var ancestor = _parent; ancestor is not null; ancestor = ancestor._parent)
         {
-            font ??= ancestor._font;
+            if (font is null && ancestor._font.TryGetValue<Font>(out var ancestorFont))
+            {
+                font = ancestorFont;
+            }
 
             // Only a colour is inherited, not "paint nothing". A container that draws no background
             // of its own - a layout panel, a transparent row - is the normal parent of something

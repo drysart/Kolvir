@@ -164,7 +164,7 @@ public sealed class MenuBarView : Control
     /// <summary>Measures the strip: as wide as the titles and as tall as <see cref="TitleHeight"/>.</summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var font = Font;
+        var font = EffectiveFont;
         var x = Inset;
 
         _titles.Clear();
@@ -205,7 +205,7 @@ public sealed class MenuBarView : Control
             return;
         }
 
-        var font = Font;
+        var font = EffectiveFont;
         using var pill = new SKPaint { IsAntialias = true };
         using var text = new SKPaint { IsAntialias = true, Color = Theme.Foreground };
 

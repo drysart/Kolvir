@@ -398,7 +398,7 @@ public class Toast : Control
     {
         var measured = TextRenderer.Measure(
             Text,
-            Font,
+                EffectiveFont,
             MathF.Max(0f, availableSize.Width - (Padding.Horizontal + Border.Insets(this).Horizontal)),
             wrap: true);
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
@@ -460,7 +460,7 @@ public class Toast : Control
             TextRenderer.Draw(
                 canvas,
                 Text,
-                Font,
+                EffectiveFont,
                 color,
                 content,
                 ContentAlignment.MiddleLeft,

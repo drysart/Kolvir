@@ -89,7 +89,7 @@ internal sealed class InheritedAppearancePage : DemoPage
         };
         reset.AddClickHandler(_ =>
         {
-            _appearanceStage?.ClearFont();
+            _appearanceStage?.Font = InheritedValue.Instance;
             Theme.FontFamily = null;
             UpdateAppearanceReadout();
         });
@@ -216,7 +216,7 @@ internal sealed class InheritedAppearancePage : DemoPage
     {
         if (!size.HasValue)
         {
-            _appearanceStage?.ClearFont();
+            _appearanceStage?.Font = InheritedValue.Instance;
         }
         else if (_appearanceStage is not null && _appearanceBigFont is not null)
         {
@@ -259,8 +259,8 @@ internal sealed class InheritedAppearancePage : DemoPage
             $"nested panel: {Describe(_appearanceNested)}\n" +
             $"label that paints nothing: {Describe(_appearanceLabel)}\n" +
             $"override inside the subtree: {Describe(_appearanceOverrides)}   |   " +
-            $"inherited label text: {S(_appearanceInherited is { } label ? label.Font.MeasureWidth(label.Text) : null)} px wide, " +
-            $"{S(_appearanceInherited?.Font.LineHeight)} px line height";
+            $"inherited label text: {S(_appearanceInherited is { } label ? label.EffectiveFont.MeasureWidth(label.Text) : null)} px wide, " +
+            $"{S(_appearanceInherited?.EffectiveFont.LineHeight)} px line height";
 
         static string Describe(Control? control)
         {
@@ -277,7 +277,7 @@ internal sealed class InheritedAppearancePage : DemoPage
                 _ => "inherit",
             };
 
-            return $"{control.Font.Size:0.#} pt, {background}";
+            return $"{control.EffectiveFont.Size:0.#} pt, {background}";
         }
 
         static string S(float? value) =>

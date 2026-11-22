@@ -358,7 +358,7 @@ public sealed class SimpleBorder : Border
             TextRenderer.Draw(
                 canvas,
                 owner.Text,
-                owner.Font,
+                owner.EffectiveFont,
                 owner.Enabled ? owner.ForeColor : Theme.DisabledForeground,
                 shown,
                 ContentAlignment.MiddleLeft);
@@ -389,14 +389,14 @@ public sealed class SimpleBorder : Border
     /// <summary>The height of the band the control's text sits in, or zero when there is no text.</summary>
     private float CaptionBand(Control owner) =>
         _showsControlText && !string.IsNullOrEmpty(owner.Text)
-            ? MathF.Ceiling(owner.Font.LineHeight) + CaptionLeading
+            ? MathF.Ceiling(owner.EffectiveFont.LineHeight) + CaptionLeading
             : 0f;
 
     /// <summary>The box the caption is drawn in, lined up with the content under it.</summary>
     private SKRect CaptionRect(Control owner, SKRect bounds, float band)
     {
         float left = bounds.Left + Insets(owner).Left + owner.Padding.Left;
-        float width = TextRenderer.Measure(owner.Text, owner.Font, float.PositiveInfinity, wrap: false).Width;
+        float width = TextRenderer.Measure(owner.Text, owner.EffectiveFont, float.PositiveInfinity, wrap: false).Width;
 
         return new SKRect(left, bounds.Top, left + MathF.Ceiling(width), bounds.Top + band);
     }

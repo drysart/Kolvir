@@ -1187,7 +1187,7 @@ public class RichLabel : Control
                     if (layout.Lines.Count == before)
                     {
                         // A blank line keeps the paragraph spacing of an empty line.
-                        layout.Lines.Add(new Line { Ascent = Font.BaselineOffset, Height = Font.LineHeight });
+                        layout.Lines.Add(new Line { Ascent = EffectiveFont.BaselineOffset, Height = EffectiveFont.LineHeight });
                     }
 
                     break;
@@ -1499,27 +1499,27 @@ public class RichLabel : Control
             return span.Font;
         }
 
-        int weight = span.Bold ? Math.Max(700, Font.Weight) : Font.Weight;
-        bool italic = span.Italic || Font.Italic;
-        float size = span.FontSize is { } spanSize ? spanSize : Font.Size;
+        int weight = span.Bold ? Math.Max(700, EffectiveFont.Weight) : EffectiveFont.Weight;
+        bool italic = span.Italic || EffectiveFont.Italic;
+        float size = span.FontSize is { } spanSize ? spanSize : EffectiveFont.Size;
         string? family = span.FontFamily;
 
-        if (weight == Font.Weight
-            && italic == Font.Italic
-            && MathF.Abs(size - Font.Size) < 0.01f
-            && (family is null || string.Equals(family, Font.FamilyName, StringComparison.Ordinal)))
+        if (weight == EffectiveFont.Weight
+            && italic == EffectiveFont.Italic
+            && MathF.Abs(size - EffectiveFont.Size) < 0.01f
+            && (family is null || string.Equals(family, EffectiveFont.FamilyName, StringComparison.Ordinal)))
         {
-            return Font;
+            return EffectiveFont;
         }
 
-        string key = string.Concat(family ?? Font.FamilyName, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
+        string key = string.Concat(family ?? EffectiveFont.FamilyName, "|", size.ToString("0.##", System.Globalization.CultureInfo.InvariantCulture), "|", weight.ToString(), "|", italic ? "1" : "0");
         if (!_derivedFonts.TryGetValue(key, out var font))
         {
             // A span that names a family asks for a different family and is resolved by name. A span
             // that only changes weight, slant or size is derived from the label's own font, so a face
             // loaded from a file stays on that face instead of being looked up on the machine.
             font = family is null
-                ? Font.Derive(size, weight, italic)
+                ? EffectiveFont.Derive(size, weight, italic)
                 : new Font(family, size, weight, italic);
             _derivedFonts[key] = font;
         }

@@ -1356,7 +1356,7 @@ public class DateTimePicker : TextBox
 
         private SKRect FooterButtonRect(float edge, string text, bool fromRight)
         {
-            float width = _owner.Font.MeasureWidth(text) + 20f;
+            float width = _owner.EffectiveFont.MeasureWidth(text) + 20f;
             float height = MathF.Min(FooterHeight, 28f);
             float top = FooterRect.MidY - (height / 2f);
 
@@ -1523,7 +1523,7 @@ public class DateTimePicker : TextBox
                 TextRenderer.Draw(
                     canvas,
                     date.Day.ToString(CultureInfo.CurrentCulture),
-                    _owner.Font,
+                    _owner.EffectiveFont,
                     color,
                     cell,
                     ContentAlignment.MiddleCenter);
@@ -1554,7 +1554,7 @@ public class DateTimePicker : TextBox
             TextRenderer.Draw(
                 canvas,
                 text,
-                _owner.Font,
+                _owner.EffectiveFont,
                 color,
                 bounds,
                 ContentAlignment.MiddleCenter);

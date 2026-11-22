@@ -394,7 +394,7 @@ public sealed class BorderTests : HeadlessTestBase
     {
         var control = new Control { Padding = Thickness.Empty, Text = "Options" };
         control.Border = SimpleBorder.Thin.WithControlText();
-        float band = MathF.Ceiling(control.Font.LineHeight) + 2f;
+        float band = MathF.Ceiling(control.EffectiveFont.LineHeight) + 2f;
 
         Assert.IsTrue(control.Border.ShowsControlText);
         Assert.AreEqual(band, control.Border.Insets(control).Top, "the caption band comes out of the top");
@@ -415,7 +415,7 @@ public sealed class BorderTests : HeadlessTestBase
             Border = SimpleBorder.Thin.WithControlText(),
         };
         using var scene = HeadlessScene.Create(control, 200f, 100f);
-        var edge = (int)MathF.Round((MathF.Ceiling(control.Font.LineHeight) + 2f) / 2f);
+        var edge = (int)MathF.Round((MathF.Ceiling(control.EffectiveFont.LineHeight) + 2f) / 2f);
 
         Assert.AreNotEqual(Theme.Border, scene.PixelAt(20, edge), "the edge is cut away behind the caption");
         Assert.AreEqual(Theme.Border, scene.PixelAt(180, edge), "and painted where the caption does not reach");
@@ -435,7 +435,7 @@ public sealed class BorderTests : HeadlessTestBase
 
         control.Text = "Now it has one";
         Assert.AreEqual(
-            MathF.Ceiling(control.Font.LineHeight) + 2f,
+            MathF.Ceiling(control.EffectiveFont.LineHeight) + 2f,
             control.Border.Insets(control).Top,
             "and the band appears with the text");
     }

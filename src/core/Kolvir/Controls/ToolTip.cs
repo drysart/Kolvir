@@ -497,7 +497,7 @@ internal sealed class ToolTipView : Control
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         float wrapWidth = MathF.Max(0f, MathF.Min(_maximumWidth, availableSize.Width));
-        var measured = TextRenderer.Measure(_text, Font, wrapWidth, wrap: true);
+        var measured = TextRenderer.Measure(_text, EffectiveFont, wrapWidth, wrap: true);
 
         return new SKSize(MathF.Ceiling(measured.Width), MathF.Ceiling(measured.Height));
     }
@@ -510,6 +510,6 @@ internal sealed class ToolTipView : Control
         }
 
         var content = Geometry.Deflate(rect, Border.Insets(this) + Padding);
-        TextRenderer.Draw(canvas, _text, Font, ForeColor, content, ContentAlignment.TopLeft, wrap: true);
+        TextRenderer.Draw(canvas, _text, EffectiveFont, ForeColor, content, ContentAlignment.TopLeft, wrap: true);
     }
 }

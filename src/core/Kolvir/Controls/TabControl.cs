@@ -439,7 +439,7 @@ public class TabControl : Control
             _captions.Add(caption);
 
             float width = Math.Clamp(
-                TextRenderer.Measure(caption, Font, float.PositiveInfinity, false).Width + (TabPadding * 2f),
+                TextRenderer.Measure(caption, EffectiveFont, float.PositiveInfinity, false).Width + (TabPadding * 2f),
                 MinTabWidth,
                 MaxTabWidth);
 
@@ -533,7 +533,7 @@ public class TabControl : Control
             ? Theme.DisabledForeground
             : selected ? ForeColor : Theme.MutedForeground;
 
-        TextRenderer.Draw(canvas, _captions[index], Font, color, tab, ContentAlignment.MiddleCenter);
+        TextRenderer.Draw(canvas, _captions[index], EffectiveFont, color, tab, ContentAlignment.MiddleCenter);
 
         if (selected)
         {

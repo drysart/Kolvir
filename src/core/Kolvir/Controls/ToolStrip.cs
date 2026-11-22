@@ -150,7 +150,7 @@ public abstract class ToolStripItem
     public virtual bool IsInteractive => false;
 
     /// <summary>The font this item draws with, after inheritance from the strip.</summary>
-    protected Font ResolveFont() => _font ?? Owner?.Font ?? Theme.DefaultFont;
+    protected Font ResolveFont() => _font ?? Owner?.EffectiveFont ?? Theme.DefaultFont;
 
     /// <summary>Width the item wants, given the height it will be given.</summary>
     internal virtual float MeasureWidth(float height) => 0f;

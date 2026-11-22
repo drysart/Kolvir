@@ -147,7 +147,7 @@ public class SplitButton : Button
     /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var measured = TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
+        var measured = TextRenderer.Measure(Text, EffectiveFont, float.PositiveInfinity, wrap: false);
         return new SKSize(MathF.Ceiling(measured.Width) + _arrowWidth, MathF.Ceiling(measured.Height));
     }
 
@@ -205,7 +205,7 @@ public class SplitButton : Button
         var text = TextBounds;
         if (!string.IsNullOrEmpty(Text) && text.Width > 0f)
         {
-            TextRenderer.Draw(canvas, Text, Font, textColor, text, ContentAlignment.MiddleCenter);
+            TextRenderer.Draw(canvas, Text, EffectiveFont, textColor, text, ContentAlignment.MiddleCenter);
         }
 
         PaintChevron(canvas, arrow, textColor);

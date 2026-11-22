@@ -326,13 +326,13 @@ public class ColorPicker : Control
         {
             if (_labelRects[index].Width > 0f)
             {
-                TextRenderer.Draw(canvas, labels[index], Font, color, _labelRects[index], ContentAlignment.MiddleLeft);
+                TextRenderer.Draw(canvas, labels[index], EffectiveFont, color, _labelRects[index], ContentAlignment.MiddleLeft);
             }
         }
 
         if (_hexLabelRect.Width > 0f)
         {
-            TextRenderer.Draw(canvas, "Hex", Font, color, _hexLabelRect, ContentAlignment.MiddleLeft);
+            TextRenderer.Draw(canvas, "Hex", EffectiveFont, color, _hexLabelRect, ContentAlignment.MiddleLeft);
         }
     }
 

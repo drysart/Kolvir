@@ -222,7 +222,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         // A wrapped box is exactly as wide as it was allowed to be, because that is what its lines
         // were wrapped to; an unwrapped one is as wide as its longest line, up to the same cap.
         float contentWidth = _wordWrap ? width : MathF.Min(MathF.Ceiling(widest) + 4f, PreferredWidth);
-        float contentHeight = (MathF.Min(lines.Count, PreferredLines) * textBox.Font.LineHeight) + 2f;
+        float contentHeight = (MathF.Min(lines.Count, PreferredLines) * textBox.EffectiveFont.LineHeight) + 2f;
 
         return new SKSize(MathF.Max(1f, contentWidth), MathF.Max(1f, contentHeight));
     }
@@ -256,7 +256,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         }
 
         var lines = LinesOf(viewport);
-        var font = textBox.Font;
+        var font = textBox.EffectiveFont;
         var display = DisplayText();
         var offset = _scroll.ChildOffset;
         float lineHeight = font.LineHeight;
@@ -336,7 +336,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         }
 
         var lines = LinesOf(viewport);
-        var font = textBox.Font;
+        var font = textBox.EffectiveFont;
         var offset = scrolled ? _scroll.ChildOffset : SKPoint.Empty;
 
         int caret = CaretOf(textBox);
@@ -360,7 +360,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
 
         var lines = LinesOf(viewport);
         var offset = _scroll.ChildOffset;
-        float lineHeight = MathF.Max(1f, textBox.Font.LineHeight);
+        float lineHeight = MathF.Max(1f, textBox.EffectiveFont.LineHeight);
 
         float y = point.Y - content.Top - offset.Y;
         int lineIndex = Math.Clamp((int)MathF.Floor(y / lineHeight), 0, lines.Count - 1);
@@ -397,7 +397,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
 
         var lines = LinesOf(viewport);
         var display = DisplayText();
-        var font = textBox.Font;
+        var font = textBox.EffectiveFont;
         var offset = _scroll.ChildOffset;
 
         int selectionStart = Math.Clamp(start, 0, textBox.Text.Length);
@@ -630,7 +630,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
             widest = MathF.Max(widest, line.Width);
         }
 
-        return new SKSize(_wordWrap ? area.Width : widest, lines.Count * _textBox.Font.LineHeight);
+        return new SKSize(_wordWrap ? area.Width : widest, lines.Count * _textBox.EffectiveFont.LineHeight);
     }
 
     /// <summary>The area the text is laid out, clipped and hit tested inside.</summary>
@@ -650,7 +650,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
             width = float.PositiveInfinity;
         }
 
-        var font = _textBox.Font;
+        var font = _textBox.EffectiveFont;
         char? mask = MaskOf();
         bool current =
             _lines is not null &&
@@ -672,7 +672,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
     {
         _lines = lines;
         _linesText = _textBox.Text;
-        _linesFont = _textBox.Font;
+        _linesFont = _textBox.EffectiveFont;
         _linesMask = MaskOf();
         _linesWidth = width;
         _linesWrap = wrap;
@@ -756,7 +756,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
 
         if (!wrap || float.IsPositiveInfinity(wrapWidth) || wrapWidth <= 0f)
         {
-            lines.Add(new TextLine(start, end, hasNewline, MeasureWidth(_textBox.Font, display, start, end)));
+            lines.Add(new TextLine(start, end, hasNewline, MeasureWidth(_textBox.EffectiveFont, display, start, end)));
             return;
         }
 
@@ -774,11 +774,11 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
             }
 
             int unitEnd = cursor;
-            float unitWidth = MeasureWidth(_textBox.Font, display, unitStart, unitEnd);
+            float unitWidth = MeasureWidth(_textBox.EffectiveFont, display, unitStart, unitEnd);
 
             if (!whitespace && used > 0f && used + unitWidth > wrapWidth)
             {
-                lines.Add(new TextLine(lineStart, unitStart, false, MeasureWidth(_textBox.Font, display, lineStart, unitStart)));
+                lines.Add(new TextLine(lineStart, unitStart, false, MeasureWidth(_textBox.EffectiveFont, display, lineStart, unitStart)));
                 lineStart = unitStart;
                 used = 0f;
             }
@@ -791,7 +791,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
                 float run = 0f;
                 for (int i = unitStart; i < unitEnd; i++)
                 {
-                    float character = MeasureWidth(_textBox.Font, display, i, i + 1);
+                    float character = MeasureWidth(_textBox.EffectiveFont, display, i, i + 1);
                     if (i > unitStart && run + character > wrapWidth)
                     {
                         break;
@@ -811,7 +811,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
             used += unitWidth;
         }
 
-        lines.Add(new TextLine(lineStart, end, hasNewline, MeasureWidth(_textBox.Font, display, lineStart, end)));
+        lines.Add(new TextLine(lineStart, end, hasNewline, MeasureWidth(_textBox.EffectiveFont, display, lineStart, end)));
     }
 
     private static bool IsWhitespace(char c) => c == ' ' || c == '\t';
@@ -853,7 +853,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
     private int IndexFromXOnLine(List<TextLine> lines, int lineIndex, float x)
     {
         var display = DisplayText();
-        var font = _textBox.Font;
+        var font = _textBox.EffectiveFont;
         var line = lines[Math.Clamp(lineIndex, 0, lines.Count - 1)];
 
         if (x <= 0f)
@@ -928,7 +928,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
     private void MoveByLines(TextBox textBox, TextBoxViewport viewport, int delta, bool extend)
     {
         var lines = LinesOf(viewport);
-        var font = textBox.Font;
+        var font = textBox.EffectiveFont;
         var display = DisplayText();
 
         int caret = CaretOf(textBox);
@@ -956,7 +956,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
     private void MoveByPage(TextBox textBox, TextBoxViewport viewport, int direction, bool extend)
     {
         var content = ContentOf(viewport);
-        float lineHeight = MathF.Max(1f, textBox.Font.LineHeight);
+        float lineHeight = MathF.Max(1f, textBox.EffectiveFont.LineHeight);
 
         int page = Math.Max(1, (int)(content.Height / lineHeight) - 1);
         MoveByLines(textBox, viewport, direction * page, extend);

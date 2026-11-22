@@ -214,7 +214,7 @@ public abstract class ToggleControl : Control
     /// <inheritdoc />
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        var text = TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false);
+        var text = TextRenderer.Measure(Text, EffectiveFont, float.PositiveInfinity, wrap: false);
         return new SKSize(
             MathF.Ceiling(_glyphSize + _glyphGap + text.Width),
             MathF.Ceiling(MathF.Max(_glyphSize, text.Height)));
@@ -238,7 +238,7 @@ public abstract class ToggleControl : Control
         }
 
         var label = new SKRect(glyph.Right + _glyphGap, rect.Top, rect.Right - Padding.Right, rect.Bottom);
-        TextRenderer.Draw(canvas, Text, Font, TextColor, label, _textAlign);
+        TextRenderer.Draw(canvas, Text, EffectiveFont, TextColor, label, _textAlign);
     }
 
     /// <summary>

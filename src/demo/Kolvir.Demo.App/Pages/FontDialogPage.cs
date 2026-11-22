@@ -194,11 +194,10 @@ internal sealed class FontDialogPage : DemoPage
 
     private void ResetFontDialog()
     {
-        _fontDialogStage?.ClearFont();
-
         if (_fontDialogStage is { } stage)
         {
-            _fontDialogSelection = SelectionOf(stage.Font);
+            stage.Font = InheritedValue.Instance;
+            _fontDialogSelection = SelectionOf(stage.EffectiveFont);
         }
 
         UpdateFontDialogReadout();
@@ -229,7 +228,7 @@ internal sealed class FontDialogPage : DemoPage
             return;
         }
 
-        var effective = _fontDialogStage?.Font;
+        var effective = _fontDialogStage?.EffectiveFont;
         _fontDialogReadout.Text =
             $"Selection: {DescribeSelection(selection)}." +
             (effective is null

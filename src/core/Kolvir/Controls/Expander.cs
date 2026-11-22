@@ -256,7 +256,7 @@ public class Expander : Panel
     public float ExpandedHeight => _expandedHeight > HeaderHeight ? _expandedHeight : Height;
 
     /// <summary>The height of the header band: the caption's line plus its vertical padding.</summary>
-    protected float HeaderHeight => MathF.Ceiling(Font.LineHeight) + 18f;
+    protected float HeaderHeight => MathF.Ceiling(EffectiveFont.LineHeight) + 18f;
 
     /// <summary>The area the content is laid out in, which starts below the header.</summary>
     protected override SKRect ContentBounds =>
@@ -274,7 +274,7 @@ public class Expander : Panel
     {
         float header = HeaderHeight;
         float headerWidth = ChevronWidth + 2f +
-                            TextRenderer.Measure(Text, Font, float.PositiveInfinity, wrap: false).Width;
+                            TextRenderer.Measure(Text, EffectiveFont, float.PositiveInfinity, wrap: false).Width;
 
         if (_progress <= 0d)
         {
@@ -371,7 +371,7 @@ public class Expander : Panel
 
         if (!string.IsNullOrEmpty(Text) && caption.Width > 0f)
         {
-            TextRenderer.Draw(canvas, Text, Font, color, caption, ContentAlignment.MiddleLeft);
+            TextRenderer.Draw(canvas, Text, EffectiveFont, color, caption, ContentAlignment.MiddleLeft);
         }
 
         if (_progress > 0d)

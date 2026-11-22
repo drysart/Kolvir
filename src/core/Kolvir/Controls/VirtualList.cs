@@ -481,7 +481,7 @@ public abstract class VirtualList : Control
     protected virtual int DefaultVisibleRows => 8;
 
     /// <summary>The row height used until <see cref="ItemHeight"/> is assigned.</summary>
-    protected virtual float DefaultItemHeight => MathF.Ceiling(Font.LineHeight + 10f);
+    protected virtual float DefaultItemHeight => MathF.Ceiling(EffectiveFont.LineHeight + 10f);
 
     /// <summary>The row the focus rectangle is on, or -1. It is not the selection.</summary>
     protected int LeadIndex => _lead;
@@ -498,7 +498,7 @@ public abstract class VirtualList : Control
 
     /// <summary>Draws a row's text with the control's font, at <see cref="TextBoundsOf"/>.</summary>
     protected void DrawItemText(SKCanvas canvas, SKRect bounds, string text, SKColor color) =>
-        TextRenderer.Draw(canvas, text, Font, color, TextBoundsOf(bounds), ContentAlignment.MiddleLeft);
+        TextRenderer.Draw(canvas, text, EffectiveFont, color, TextBoundsOf(bounds), ContentAlignment.MiddleLeft);
 
     /// <summary>
     /// Draws the thin rectangle that marks the row the keyboard is on, so it stays findable when
@@ -1394,7 +1394,7 @@ public abstract class VirtualList : Control
         TextRenderer.Draw(
             canvas,
             _emptyText,
-            Font,
+                EffectiveFont,
             Enabled ? Theme.Placeholder : Theme.DisabledForeground,
             new SKRect(bounds.Left + TextInset, bounds.Top, bounds.Right - TextInset, bounds.Top + ItemHeight),
             ContentAlignment.MiddleLeft);
