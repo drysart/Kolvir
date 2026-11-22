@@ -75,7 +75,7 @@ public class Toast : Control
     private Action<object>? _dismissing;
     private ToastSeverity _severity = ToastSeverity.Info;
     private TimeSpan? _duration = DefaultDuration;
-    private SKColor? _barColor;
+    private Union<SKColor, ThemeColor, InheritedValue> _barColor = InheritedValue.Instance;
     private bool _open;
     private bool _closeHot;
     private bool _closePressed;
@@ -303,21 +303,65 @@ public class Toast : Control
     }
 
     /// <summary>
-    /// The accent bar's colour, or null to use the one <see cref="Severity"/> implies. Assigning a
-    /// colour is how an application brands its own messages.
+    /// The accent bar's colour assigned to this toast: a literal <see cref="SKColor"/>, a palette
+    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the one
+    /// <see cref="Severity"/> implies.
     /// </summary>
-    public SKColor? BarColor
+    /// <remarks>
+    /// <para>
+    /// The property reports what was assigned, not what is painted. Read
+    /// <see cref="EffectiveBarColor"/> for the colour the bar is drawn in. Assigning a colour, or a
+    /// role, is how an application brands its own messages, and a role is resolved when the bar is
+    /// painted, so a palette swap recolours a live toast.
+    /// </para>
+    /// <para>
+    /// The severity's colour is a fallback rather than a value: an unassigned bar still answers for
+    /// whatever <see cref="Severity"/> is at the time it paints, so changing the severity changes
+    /// the bar.
+    /// </para>
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> BarColor
     {
         get => _barColor;
         set
         {
-            if (Nullable.Equals(_barColor, value))
+            if (_barColor.Equals(value))
             {
                 return;
             }
 
             _barColor = value;
             Invalidate();
+        }
+    }
+
+    /// <summary>
+    /// The accent bar's colour as it is painted: the assignment, else the colour
+    /// <see cref="Severity"/> implies.
+    /// </summary>
+    /// <remarks>
+    /// A literal colour is returned as it is and a role is resolved through
+    /// <see cref="Theme.ColorOf"/> on every read, so a palette swap is a repaint rather than a
+    /// rebuild. What a severity implies is a fixed colour rather than a palette role, because these
+    /// bar colours are chosen to read on both the light and the dark surface.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="BarColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveBarColor
+    {
+        get
+        {
+            _barColor.ThrowIfUnspecified();
+
+            if (_barColor.TryGetValue<SKColor>(out var literal))
+            {
+                return literal;
+            }
+
+            return _barColor.TryGetValue<ThemeColor>(out var role)
+                ? Theme.ColorOf(role)
+                : BarColorFor(_severity);
         }
     }
 
@@ -429,7 +473,7 @@ public class Toast : Control
 
         if (bar.Height > 0f)
         {
-            Painter.Fill(canvas, bar, BarColorOf(_severity), BarWidth / 2f);
+            Painter.Fill(canvas, bar, EffectiveBarColor, BarWidth / 2f);
         }
 
         var close = CloseBounds;
@@ -618,7 +662,7 @@ public class Toast : Control
         UpdateTimer();
     }
 
-    private SKColor BarColorOf(ToastSeverity severity) => _barColor ?? severity switch
+    private static SKColor BarColorFor(ToastSeverity severity) => severity switch
     {
         ToastSeverity.Success => SuccessColor,
         ToastSeverity.Warning => WarningColor,

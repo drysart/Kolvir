@@ -227,6 +227,47 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void TheSplitterColorAcceptsAColourARoleOrInherit()
+    {
+        var split = new SplitContainer { Dock = DockStyle.Fill, ShowSplitterGrip = false };
+        using var scene = HeadlessScene.Create(split, 400f, 200f);
+
+        int x = (int)(split.SplitterRect.Left + (split.SplitterRect.Width / 2f));
+        int y = (int)(split.SplitterRect.Height / 2f);
+
+        Assert.AreEqual(
+            Theme.Splitter,
+            scene.PixelAt(x, y),
+            "an unassigned splitter uses the theme's splitter colour");
+
+        split.SplitterColor = new SKColor(0x12, 0x34, 0x56);
+        Assert.AreEqual(new SKColor(0x12, 0x34, 0x56), scene.PixelAt(x, y), "an application can restyle it");
+
+        split.SplitterColor = ThemeColor.Accent;
+        Assert.AreEqual(Theme.Accent, split.EffectiveSplitterColor, "a role is read from the current palette");
+        Assert.AreEqual(Theme.Accent, scene.PixelAt(x, y), "and painted from it");
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(Theme.Accent, split.EffectiveSplitterColor, "the role follows a palette swap");
+        Assert.AreEqual(Theme.Accent, scene.PixelAt(x, y), "and so does the next frame");
+
+        split.SplitterColor = InheritedValue.Instance;
+        Assert.AreEqual(Theme.Splitter, split.EffectiveSplitterColor, "and inherit goes back to the theme");
+    }
+
+    [TestMethod]
+    public void AnUnspecifiedSplitterColorIsRefused()
+    {
+        var split = new SplitContainer();
+        split.SplitterColor = default;
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = split.EffectiveSplitterColor,
+            "a default-initialised union holds no case and must not be read as inherit");
+    }
+
+    [TestMethod]
     public void DraggingTheSplitterMovesItAndRaisesItsEvents()
     {
         var split = new SplitContainer { Dock = DockStyle.Fill, SplitterDistance = 120f };

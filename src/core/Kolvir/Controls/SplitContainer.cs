@@ -298,8 +298,47 @@ public class SplitContainer : Control
     /// <summary>True while the user is dragging the splitter.</summary>
     public bool IsDragging => _isDragging;
 
-    /// <summary>Fill colour of the splitter. Null uses <see cref="Theme.Splitter"/>.</summary>
-    public SKColor? SplitterColor { get; set; }
+    /// <summary>
+    /// Fill colour of the splitter assigned here: a literal <see cref="SKColor"/>, a palette
+    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for
+    /// <see cref="ThemeColor.Splitter"/>.
+    /// </summary>
+    /// <remarks>
+    /// The property reports what was assigned, not what is painted. Read
+    /// <see cref="EffectiveSplitterColor"/> for the colour the band is drawn in. A role is resolved
+    /// when it is read, so a palette swap recolours a live splitter. The colour is only used while
+    /// the splitter is enabled, not hovered and not being dragged; those states keep their own
+    /// theme colours.
+    /// </remarks>
+    public Union<SKColor, ThemeColor, InheritedValue> SplitterColor { get; set; } = InheritedValue.Instance;
+
+    /// <summary>
+    /// The splitter band's fill as it is painted: the assignment, else <see cref="ThemeColor.Splitter"/>.
+    /// </summary>
+    /// <remarks>
+    /// A literal colour is returned as it is and a role is resolved through
+    /// <see cref="Theme.ColorOf"/> on every read, so a palette swap is a repaint rather than a
+    /// rebuild.
+    /// </remarks>
+    /// <exception cref="InvalidOperationException">
+    /// <see cref="SplitterColor"/> was assigned <c>default</c>, so it holds no case.
+    /// </exception>
+    public SKColor EffectiveSplitterColor
+    {
+        get
+        {
+            SplitterColor.ThrowIfUnspecified();
+
+            if (SplitterColor.TryGetValue<SKColor>(out var literal))
+            {
+                return literal;
+            }
+
+            return SplitterColor.TryGetValue<ThemeColor>(out var role)
+                ? Theme.ColorOf(role)
+                : Theme.ColorOf(ThemeColor.Splitter);
+        }
+    }
 
     /// <summary>Draws a small grip in the middle of the splitter.</summary>
     public bool ShowSplitterGrip { get; set; } = true;
@@ -417,7 +456,7 @@ public class SplitContainer : Control
                 ? Theme.Accent
                 : highlight
                     ? Theme.SplitterHover
-                    : SplitterColor ?? Theme.Splitter;
+                    : EffectiveSplitterColor;
 
         Painter.Fill(canvas, _splitterRect, color);
 

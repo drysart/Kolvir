@@ -158,7 +158,7 @@ has to read `--classic-menus` before it can build a backend.
 | `MenuBarView` | `MenuStrip` | The menu bar drawn inside the window, above the root control; reached with `Alt` plus a mnemonic and switched by hovering |
 | `MenuPresenter` | `ToolStripDropDown` plumbing | Shows an `ContextMenu` in an `Popup` with `MenuView`, on every backend, one popup per level of the chain |
 | `MenuPresentation` | - | Chooses the library's menus or the platform's, per application |
-| `Image` | `PictureBox` | Draws an `ImageData` - a still picture or an animation, which are the same thing with different durations: `Source`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `ImageAlign`, `PlaceholderColor`. It decodes nothing and owns nothing: `IImageDataFactory` loads, the caller disposes |
+| `Image` | `PictureBox` | Draws an `ImageData` - a still picture or an animation, which are the same thing with different durations: `Source`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `ImageAlign`, `PlaceholderColor` (a colour, a palette role, or `InheritedValue` for none). It decodes nothing and owns nothing: `IImageDataFactory` loads, the caller disposes |
 | `Theme` / `Palette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
 | `Font` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
 | `Theme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
@@ -298,7 +298,7 @@ for scaling the canvas and the incoming pointer coordinates (the Win32 backend u
 ## Using it
 
 ```csharp
-var host = new UiHost { ClearColor = SKColors.White };
+var host = new UiHost { ClearColor = SKColors.White };   // or ThemeColor.Background, or InheritedValue.Instance
 
 var root = new Panel { BackColor = Theme.Background, Padding = new Thickness(16) };
 
@@ -563,7 +563,8 @@ Dragging is handled internally with mouse capture, so the pointer keeps resizing
 even when it strays over the panels or outside the control. The splitter highlights on
 hover, drag and focus, and can be moved with the arrow keys (`Left`/`Right` for a vertical
 split, `Up`/`Down` for a horizontal one) when the container has keyboard focus. Set
-`IsSplitterFixed` to lock it, and `SplitterColor`/`ShowSplitterGrip` to restyle it.
+`IsSplitterFixed` to lock it, and `SplitterColor` (a colour or a palette role) or
+`ShowSplitterGrip` to restyle it.
 `AddSplitterMovingHandler` runs continuously during a drag; `AddSplitterDistanceChangedHandler` runs
 whenever the distance changes for any reason.
 
@@ -1186,7 +1187,7 @@ would not.
 | --- | --- |
 | `Text` | The message |
 | `Severity` | `Info`, `Success`, `Warning` or `Error`, which is what the accent bar is coloured for |
-| `BarColor` | Overrides the severity's colour, for an application that brands its own messages |
+| `BarColor` | Overrides the severity's colour, for an application that brands its own messages: a colour, a palette role, or `InheritedValue.Instance`; see [Inherited appearance](#inherited-appearance) |
 | `Duration` | How long it shows before dismissing itself; `Toast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
 | `Show()`, `Dismiss()`, `IsOpen` | The message state, so one control can be built once and reused |
 | `AddDismissedHandler` | Runs once the message went, whether by its countdown, its close glyph or the keyboard |
@@ -2697,7 +2698,7 @@ when the control itself assigns nothing - so a palette change re-applies nothing
 | `Filter` | A blur, a tint or a chain of them, painted over the control and its subtree - see [Filters](#filters) |
 | `TextSpan.ForeColor` | One span's text colour: a colour, a palette role, or `InheritedValue`; `AddLink` uses `Accent` |
 | `TextSpan.HoverBackColor` | The fill a span takes while hovered: a colour, a palette role (tinted), or `InheritedValue` for none |
-| `UiHost.ClearColor` | Follows `Theme.Background` until assigned |
+| `UiHost.EffectiveClearColor` | The colour the surface is cleared with: the assignment, else `ThemeColor.Background`, so it follows the palette |
 
 The library itself never asks the OS anything. A backend implements the two-property
 `ISystemTheme`, installs it, and calls `host.RefreshTheme()` whenever the OS reports a change:
@@ -2781,6 +2782,25 @@ default, which is WinForms' precedence of a local value over an inherited one ov
 a control really must not be filled, leave its `BackColor` unassigned if its class already paints
 nothing; assign `SKColors.Transparent` only when the class would otherwise paint, and remember that
 assigned transparent is inherited.
+
+**Not every colour is inherited.** A handful of members are a colour, a palette role or
+`InheritedValue.Instance` without walking a parent chain, because there is no parent whose answer
+should win. Their `InheritedValue` means "nothing was assigned", and each default is the least
+destructive value that keeps the look unchanged:
+
+| Member | Resolved by | `InheritedValue.Instance` means |
+| --- | --- | --- |
+| `Toast.BarColor` | `EffectiveBarColor` | the colour the severity implies |
+| `SplitContainer.SplitterColor` | `EffectiveSplitterColor` | `ThemeColor.Splitter` |
+| `Image.PlaceholderColor` | `EffectivePlaceholderColor` | transparent, so no placeholder is painted |
+| `Caret.Color` | `EffectiveColor` | `ThemeColor.Caret` |
+| `UiHost.ClearColor` | `EffectiveClearColor` | `ThemeColor.Background` |
+| `Window.CaptionColor`, `Window.BorderColor` | none | the platform's own colour |
+
+The window colours are the exception to the reader: the platform owns those pixels and takes a
+concrete `SKColor` or null, so the window resolves a role when it is assigned and again on a
+palette change, and `Window.Backend` reports what the platform holds. `ColorPicker.Color` is not a
+union at all: it is the colour the user picked, not a theme choice.
 
 **Nothing is captured when a control is built.** The effective font is resolved when text is
 measured and painted, never in a constructor, so a control created before the theme was configured
@@ -3480,9 +3500,12 @@ drag of its own.
 
 `CaptionColor` and `BorderColor` recolour the two surfaces a borderless window can still show under
 it: Windows uses them for DWM's caption strip and its own 1 px border, GTK4 for the window's CSS
-border. A null colour means the platform's own, not "no colour" - give both a colour if you want no
-visible platform chrome at all. `ChromeCapabilities.WindowColors` says whether the backend honours
-them; Windows only can from build 22000.
+border. Each takes a colour, a palette role or `InheritedValue.Instance`; inherit means the
+platform's own, not "no colour" - give both a colour if you want no visible platform chrome at all.
+The platform owns those pixels, so a role is resolved when it is assigned and again whenever the
+palette changes, and there is no `Effective*` to read: `Window.Backend.CaptionColor` and
+`BorderColor` are what the platform holds. `ChromeCapabilities.WindowColors` says whether the
+backend honours them; Windows only can from build 22000.
 
 `Chrome` may be changed while the window is open, and the metrics follow it both ways; setting it
 before `Show()` is the cheap path because the style is in place before the first frame.
@@ -3918,7 +3941,8 @@ var image = new Image { SizeMode = SizeMode.Zoom };
 image.Source = factory.LoadFromStream(stream);    // a PNG is a zero-duration animation
 ```
 
-The control's image surface is `Source`, `SizeMode`, `ImageAlign` and `PlaceholderColor`. It has no
+The control's image surface is `Source`, `SizeMode`, `ImageAlign` and `PlaceholderColor`, which is a
+colour, a palette role, or `InheritedValue.Instance` for none. It has no
 loader - `IImageDataFactory` is where bytes become an image - and it has no ownership of what it
 shows. That is `PictureBox`'s convention and the one to arrive with: you create the image, you assign
 it, you dispose it. Disposing the control does not dispose the image, and assigning a second image
@@ -5621,7 +5645,7 @@ The rules the implementation follows:
 - **The erase the window does itself is the window's own colour.** A resize exposes client area
   before the next frame exists, and Windows asks the window to erase it first. Left to the class
   background that strip is black, which is right on no page in particular; this window fills it
-  with the colour it is about to paint - the host's `ClearColor`, which follows the palette, or the
+  with the colour it is about to paint - the host's `EffectiveClearColor`, which follows the palette, or the
   background of a control that covers the whole client area and paints (a root, or a page directly
   inside it). Only the update region is filled, never the whole client area, so nothing outside the
   region the coming paint covers is touched, and the brush is kept between paints so a resize is

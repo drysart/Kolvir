@@ -25,6 +25,8 @@ no other page repeats these differences: the rest of the guide links here.
 
 **Window colours.** Setting `Window.CaptionColor` or `Window.BorderColor` where the system does not
 support it throws `NotSupportedException`. On Windows the support starts at Windows 11 build 22000.
+Both take a colour, a palette role or `InheritedValue.Instance` for the platform's own; a role is
+resolved when it is assigned and again when the palette changes.
 
 **Keep-above.** `Window.TopMost = true` is accepted everywhere and has no effect on Linux.
 

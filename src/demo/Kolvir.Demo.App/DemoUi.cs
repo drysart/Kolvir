@@ -296,7 +296,7 @@ public sealed class DemoUi
 
     private Control BuildUi()
     {
-        // The window background comes from the host's ClearColor, which follows the palette.
+        // The window background comes from the host's EffectiveClearColor, which follows the palette.
         var root = new Panel
         {
             Padding = new Thickness(0f),
