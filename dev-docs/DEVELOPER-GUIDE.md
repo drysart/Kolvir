@@ -298,7 +298,7 @@ for scaling the canvas and the incoming pointer coordinates (the Win32 backend u
 ## Using it
 
 ```csharp
-var host = new UiHost { ClearColor = SKColors.White };   // or ThemeColor.Background, or InheritedValue.Instance
+var host = new UiHost { ClearColor = SKColors.White };   // or ThemeColor.Background, or PropertyValue.Inherited
 
 var root = new Panel { BackColor = Theme.Background, Padding = new Thickness(16) };
 
@@ -1187,7 +1187,7 @@ would not.
 | --- | --- |
 | `Text` | The message |
 | `Severity` | `Info`, `Success`, `Warning` or `Error`, which is what the accent bar is coloured for |
-| `BarColor` | Overrides the severity's colour, for an application that brands its own messages: a colour, a palette role, or `InheritedValue.Instance`; see [Inherited appearance](#inherited-appearance) |
+| `BarColor` | Overrides the severity's colour, for an application that brands its own messages: a colour, a palette role, or `PropertyValue.Inherited`; see [Inherited appearance](#inherited-appearance) |
 | `Duration` | How long it shows before dismissing itself; `Toast.DefaultDuration` is four seconds, and null waits for `Dismiss` |
 | `Show()`, `Dismiss()`, `IsOpen` | The message state, so one control can be built once and reused |
 | `AddDismissedHandler` | Runs once the message went, whether by its countdown, its close glyph or the keyboard |
@@ -2799,11 +2799,11 @@ nothing; assign `SKColors.Transparent` only when the class would otherwise paint
 assigned transparent is inherited.
 
 **Not every colour is inherited.** A handful of members are a colour, a palette role or
-`InheritedValue.Instance` without walking a parent chain, because there is no parent whose answer
+`PropertyValue.Inherited` without walking a parent chain, because there is no parent whose answer
 should win. Their `InheritedValue` means "nothing was assigned", and each default is the least
 destructive value that keeps the look unchanged:
 
-| Member | Resolved by | `InheritedValue.Instance` means |
+| Member | Resolved by | `PropertyValue.Inherited` means |
 | --- | --- | --- |
 | `Toast.BarColor` | `EffectiveBarColor` | the colour the severity implies |
 | `SplitContainer.SplitterColor` | `EffectiveSplitterColor` | `ThemeColor.Splitter` |
@@ -3515,7 +3515,7 @@ drag of its own.
 
 `CaptionColor` and `BorderColor` recolour the two surfaces a borderless window can still show under
 it: Windows uses them for DWM's caption strip and its own 1 px border, GTK4 for the window's CSS
-border. Each takes a colour, a palette role or `InheritedValue.Instance`; inherit means the
+border. Each takes a colour, a palette role or `PropertyValue.Inherited`; inherit means the
 platform's own, not "no colour" - give both a colour if you want no visible platform chrome at all.
 The platform owns those pixels, so a role is resolved when it is assigned and again whenever the
 palette changes, and there is no `Effective*` to read: `Window.Backend.CaptionColor` and
@@ -3957,7 +3957,7 @@ image.Source = factory.LoadFromStream(stream);    // a PNG is a zero-duration an
 ```
 
 The control's image surface is `Source`, `SizeMode`, `ImageAlign` and `PlaceholderColor`, which is a
-colour, a palette role, or `InheritedValue.Instance` for none. It has no
+colour, a palette role, or `PropertyValue.Inherited` for none. It has no
 loader - `IImageDataFactory` is where bytes become an image - and it has no ownership of what it
 shows. That is `PictureBox`'s convention and the one to arrive with: you create the image, you assign
 it, you dispose it. Disposing the control does not dispose the image, and assigning a second image

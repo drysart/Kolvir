@@ -300,7 +300,7 @@ public class SplitContainer : Control
 
     /// <summary>
     /// Fill colour of the splitter assigned here: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> for
     /// <see cref="ThemeColor.Splitter"/>.
     /// </summary>
     /// <remarks>
@@ -310,7 +310,7 @@ public class SplitContainer : Control
     /// the splitter is enabled, not hovered and not being dragged; those states keep their own
     /// theme colours.
     /// </remarks>
-    public Union<SKColor, ThemeColor, InheritedValue> SplitterColor { get; set; } = InheritedValue.Instance;
+    public Union<SKColor, ThemeColor, InheritedValue> SplitterColor { get; set; } = PropertyValue.Inherited;
 
     /// <summary>
     /// The splitter band's fill as it is painted: the assignment, else <see cref="ThemeColor.Splitter"/>.

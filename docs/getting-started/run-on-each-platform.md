@@ -20,7 +20,7 @@ The window appears with the system's title bar and frame. Recolouring the captio
 `Window.CaptionColor` needs Windows 11 (build 22000 or later); on Windows 10 that request throws
 `NotSupportedException`, so ask first with `Window.ChromeCapabilities` and see the
 [platform matrix](../reference/platform-matrix.md). The colour is a literal `SKColor`, a palette
-role, or `InheritedValue.Instance` for the platform's own; a role is resolved when it is assigned and
+role, or `PropertyValue.Inherited` for the platform's own; a role is resolved when it is assigned and
 again on a palette change.
 
 **Per-monitor DPI.** Add an application manifest so the window scales per monitor rather than relying

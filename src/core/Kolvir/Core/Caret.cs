@@ -77,7 +77,7 @@ public sealed class Caret : IDisposable
 
     /// <summary>
     /// The caret's colour assigned here: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the theme's
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> for the theme's
     /// caret colour.
     /// </summary>
     /// <remarks>
@@ -86,7 +86,7 @@ public sealed class Caret : IDisposable
     /// follows <see cref="ThemeColor.Caret"/>, and a role is resolved when the caret paints, so a
     /// palette swap recolours a live caret.
     /// </remarks>
-    public Union<SKColor, ThemeColor, InheritedValue> Color { get; set; } = InheritedValue.Instance;
+    public Union<SKColor, ThemeColor, InheritedValue> Color { get; set; } = PropertyValue.Inherited;
 
     /// <summary>
     /// The colour the caret is drawn in: the assignment, else <see cref="ThemeColor.Caret"/>.

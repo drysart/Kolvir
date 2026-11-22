@@ -58,13 +58,13 @@ public sealed class WindowChromeColorTests : HeadlessTestBase
             Assert.AreEqual(ThemeColor.Surface, captionRole, "a role is reported as the role");
             Assert.AreEqual<SKColor?>(Theme.Surface, backend.CaptionColor, "and resolved when it is assigned");
 
-            window.CaptionColor = InheritedValue.Instance;
+            window.CaptionColor = PropertyValue.Inherited;
             Assert.IsNull(backend.CaptionColor, "and inherit hands the surface back to the platform");
 
             window.BorderColor = ThemeColor.Border;
             Assert.AreEqual<SKColor?>(Theme.Border, backend.BorderColor, "the border follows the same rules");
 
-            window.BorderColor = InheritedValue.Instance;
+            window.BorderColor = PropertyValue.Inherited;
             Assert.IsNull(backend.BorderColor, "including handing its line back");
         });
     }

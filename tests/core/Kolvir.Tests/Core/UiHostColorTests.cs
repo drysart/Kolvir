@@ -35,7 +35,7 @@ public sealed class UiHostColorTests : HeadlessTestBase
         Assert.AreEqual(Theme.Secondary, host.EffectiveClearColor, "the role follows a palette swap");
         Assert.AreEqual(Theme.Secondary, scene.PixelAt(20, 15), "and so does the next frame");
 
-        host.ClearColor = InheritedValue.Instance;
+        host.ClearColor = PropertyValue.Inherited;
         Assert.AreEqual(Theme.Background, scene.PixelAt(20, 15), "and inherit goes back to the theme background");
     }
 

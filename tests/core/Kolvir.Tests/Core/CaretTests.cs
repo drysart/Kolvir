@@ -27,7 +27,7 @@ public sealed class CaretTests : HeadlessTestBase
         Assert.IsTrue(caret.Color.TryGetValue<ThemeColor>(out var role));
         Assert.AreEqual(ThemeColor.Caret, role, "and the role as well");
 
-        caret.Color = InheritedValue.Instance;
+        caret.Color = PropertyValue.Inherited;
         Assert.IsTrue(caret.Color.TryGetValue<InheritedValue>(out _), "and inherit can be assigned back");
     }
 

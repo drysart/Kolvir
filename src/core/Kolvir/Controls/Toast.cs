@@ -75,7 +75,7 @@ public class Toast : Control
     private Action<object>? _dismissing;
     private ToastSeverity _severity = ToastSeverity.Info;
     private TimeSpan? _duration = DefaultDuration;
-    private Union<SKColor, ThemeColor, InheritedValue> _barColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _barColor = PropertyValue.Inherited;
     private bool _open;
     private bool _closeHot;
     private bool _closePressed;
@@ -304,7 +304,7 @@ public class Toast : Control
 
     /// <summary>
     /// The accent bar's colour assigned to this toast: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the one
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> for the one
     /// <see cref="Severity"/> implies.
     /// </summary>
     /// <remarks>

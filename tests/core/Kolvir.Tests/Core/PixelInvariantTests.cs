@@ -248,7 +248,7 @@ public sealed class PixelInvariantTests : HeadlessTestBase
         Assert.AreEqual(Theme.Secondary, image.EffectivePlaceholderColor, "the role follows a palette swap");
         Assert.AreEqual(Theme.Secondary, scene.PixelAt(30, 20), "and so does the next frame");
 
-        image.PlaceholderColor = InheritedValue.Instance;
+        image.PlaceholderColor = PropertyValue.Inherited;
         Assert.AreEqual(Theme.Background, scene.PixelAt(30, 20), "and inherit paints nothing again");
     }
 

@@ -252,7 +252,7 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
         Assert.AreEqual(Theme.Accent, split.EffectiveSplitterColor, "the role follows a palette swap");
         Assert.AreEqual(Theme.Accent, scene.PixelAt(x, y), "and so does the next frame");
 
-        split.SplitterColor = InheritedValue.Instance;
+        split.SplitterColor = PropertyValue.Inherited;
         Assert.AreEqual(Theme.Splitter, split.EffectiveSplitterColor, "and inherit goes back to the theme");
     }
 

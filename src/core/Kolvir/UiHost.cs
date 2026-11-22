@@ -44,7 +44,7 @@ public sealed class UiHost
     private SKPoint _selectionOrigin;
     private bool _selecting;
     private bool _draggingSelection;
-    private Union<SKColor, ThemeColor, InheritedValue> _clearColor = InheritedValue.Instance;
+    private Union<SKColor, ThemeColor, InheritedValue> _clearColor = PropertyValue.Inherited;
     private SKRegion _dirty = new();
     private SKRegion _painting = new();
     private bool _dirtyAll = true;
@@ -298,7 +298,7 @@ public sealed class UiHost
 
     /// <summary>
     /// The colour the host clears the surface with: a literal <see cref="SKColor"/>, a palette
-    /// <see cref="ThemeColor"/> role, or <see cref="InheritedValue.Instance"/> for the theme's
+    /// <see cref="ThemeColor"/> role, or <see cref="PropertyValue.Inherited"/> for the theme's
     /// background.
     /// </summary>
     /// <remarks>

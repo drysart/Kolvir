@@ -282,7 +282,7 @@ The window colours are the one pair with no `Effective*`. They go to a backend t
 concrete `SKColor` or null for the platform's default, and the platform owns the actual pixels, so
 no later reader can resolve a role. The window therefore resolves one with `Theme.ColorOf` when it
 is assigned and hands over the result, and re-resolves it from the application's palette-change
-loop, so an assigned role keeps following the theme. `InheritedValue.Instance` passes null.
+loop, so an assigned role keeps following the theme. `PropertyValue.Inherited` passes null.
 `Window.CaptionColor` and `Window.BorderColor` report the assignment;
 `Window.Backend.CaptionColor` and `BorderColor` report what the platform holds.
 
