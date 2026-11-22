@@ -228,6 +228,42 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AnUnassignedPlaceholderPaintsNothingAndARoleFollowsThePalette()
+    {
+        var image = new Image { Dock = DockStyle.Fill };
+        using var scene = HeadlessScene.Create(image, 60f, 40f);
+
+        Assert.AreEqual(
+            SKColors.Transparent,
+            image.EffectivePlaceholderColor,
+            "nothing assigned means there is no placeholder");
+        Assert.AreEqual(Theme.Background, scene.PixelAt(30, 20), "so the background shows through");
+
+        image.PlaceholderColor = ThemeColor.Secondary;
+        Assert.AreEqual(Theme.Secondary, image.EffectivePlaceholderColor, "a role is read from the current palette");
+        Assert.AreEqual(Theme.Secondary, scene.PixelAt(30, 20), "and fills the surface");
+
+        Theme.Palette = Palette.Dark;
+
+        Assert.AreEqual(Theme.Secondary, image.EffectivePlaceholderColor, "the role follows a palette swap");
+        Assert.AreEqual(Theme.Secondary, scene.PixelAt(30, 20), "and so does the next frame");
+
+        image.PlaceholderColor = InheritedValue.Instance;
+        Assert.AreEqual(Theme.Background, scene.PixelAt(30, 20), "and inherit paints nothing again");
+    }
+
+    [TestMethod]
+    public void AnUnspecifiedPlaceholderColorIsRefused()
+    {
+        var image = new Image();
+        image.PlaceholderColor = default;
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () => _ = image.EffectivePlaceholderColor,
+            "a default-initialised union holds no case and must not be read as inherit");
+    }
+
+    [TestMethod]
     public void ARecordedPicturePaintsExactlyWhatADirectImageDrawWould()
     {
         byte[] png = PatternPng(7, 3);
