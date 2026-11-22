@@ -376,14 +376,14 @@ public sealed class UnionTests
         // Warm the path up so the measurement does not include first-call costs.
         for (int i = 0; i < 1_000; i++)
         {
-            union.TryGetValue<SKColor>(out _);
+            _ = union.TryGetValue<SKColor>(out _);
         }
 
         long before = GC.GetAllocatedBytesForCurrentThread();
 
         for (int i = 0; i < 1_000_000; i++)
         {
-            union.TryGetValue<SKColor>(out _);
+            _ = union.TryGetValue<SKColor>(out _);
         }
 
         long allocated = GC.GetAllocatedBytesForCurrentThread() - before;

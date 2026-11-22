@@ -12,3 +12,4 @@ Rule ID | Category | Severity | Notes
 KOLVIR0003 | Kolvir.Usage | Error | A union has duplicate case types
 KOLVIR0001 | Kolvir.Usage | Error | A TryGetValue type argument is not one of the union's case types
 KOLVIR0002 | Kolvir.Usage | Error | An explicit default or parameterless new produces a union with no case
+KOLVIR0005 | Kolvir.Usage | Warning | The result of TryGetValue is discarded

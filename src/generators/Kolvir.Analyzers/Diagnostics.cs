@@ -30,4 +30,12 @@ internal static class Diagnostics
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);
+
+    internal static readonly DiagnosticDescriptor DiscardedTryGetValue = new(
+        "KOLVIR0005",
+        "TryGetValue result is discarded",
+        "The result of TryGetValue<{0}> is discarded, so the out value stays default when the union holds a different case; use the returned bool, or discard it explicitly with _ = if the read is intentional",
+        Category,
+        DiagnosticSeverity.Warning,
+        isEnabledByDefault: true);
 }
