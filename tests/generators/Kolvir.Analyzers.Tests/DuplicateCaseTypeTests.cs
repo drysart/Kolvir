@@ -72,6 +72,59 @@ public sealed class DuplicateCaseTypeTests
     }
 
     [TestMethod]
+    public async Task XmlDocumentationCrefsAreExamplesNotCode()
+    {
+        var diagnostics = await RunAsync("""
+            namespace TestApp;
+
+            /// <summary>Never write <see cref="Kolvir.Union{int,int}"/>.</summary>
+            /// <exception cref="Kolvir.Union{int,int}">Never.</exception>
+            public sealed class Holder
+            {
+            }
+            """);
+
+        Assert.AreEqual(0, diagnostics.Length, Describe(diagnostics));
+    }
+
+    [TestMethod]
+    public async Task OrdinaryCommentsAreNotCode()
+    {
+        var diagnostics = await RunAsync("""
+            namespace TestApp;
+
+            // Union<int, int> is the bad shape.
+            /* Union<int, int> is still the bad shape. */
+            public sealed class Holder
+            {
+            }
+            """);
+
+        Assert.AreEqual(0, diagnostics.Length, Describe(diagnostics));
+    }
+
+    [TestMethod]
+    public async Task RealCodeWithTheSameTextStillFires()
+    {
+        var diagnostics = await RunAsync("""
+            using System;
+            using Kolvir;
+
+            namespace TestApp;
+
+            public sealed class Holder
+            {
+                public Union<int, int> Value;
+                public Type Shape => typeof(Union<int, int>);
+                public string Name => nameof(Union<int, int>);
+            }
+            """);
+
+        Assert.AreEqual(3, diagnostics.Length, Describe(diagnostics));
+        Assert.IsTrue(diagnostics.All(diagnostic => diagnostic.Id == "KOLVIR0003"));
+    }
+
+    [TestMethod]
     public async Task NullableAnnotationsOnTheSameRuntimeTypeAreARepeat()
     {
         var diagnostics = await RunAsync("""

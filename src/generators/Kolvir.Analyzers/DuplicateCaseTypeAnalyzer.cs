@@ -31,6 +31,13 @@ public sealed class DuplicateCaseTypeAnalyzer : DiagnosticAnalyzer
     {
         var name = (GenericNameSyntax)context.Node;
 
+        // A cref is documentation, not code: a doc comment that spells the bad shape as an
+        // example must not fail the build it is describing.
+        if (name.FirstAncestorOrSelf<CrefSyntax>() is not null)
+        {
+            return;
+        }
+
         // A cheap prefilter only. The type is identified by its symbol below, never by this name.
         if (name.Identifier.ValueText != "Union")
         {
