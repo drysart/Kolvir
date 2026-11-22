@@ -343,4 +343,39 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
 
         Assert.AreEqual(new SKColor(0xFF203040), field.EffectiveBackColor, "the cached answer is dropped");
     }
+
+    [TestMethod]
+    public void ToolStripItemsInheritFromTheirStrip()
+    {
+        using var stripFont = TestFont.Create(16f);
+        using var itemFont = TestFont.Create(10f);
+
+        var strip = new ToolStrip { Font = stripFont, ForeColor = ThemeColor.Accent };
+        var label = new ToolStripLabel("Ready");
+        strip.Items.Add(label);
+
+        Assert.AreSame(stripFont, label.EffectiveFont, "an item with no font of its own uses its strip's");
+        Assert.AreEqual(Theme.Accent, label.EffectiveForeColor, "and its strip's effective text colour");
+
+        label.Font = itemFont;
+        label.ForeColor = new SKColor(0xFF102030);
+
+        Assert.AreSame(itemFont, label.EffectiveFont, "an item's own font wins");
+        Assert.AreEqual(new SKColor(0xFF102030), label.EffectiveForeColor);
+
+        label.Font = InheritedValue.Instance;
+        label.ForeColor = InheritedValue.Instance;
+
+        Assert.AreSame(stripFont, label.EffectiveFont, "inheriting again restores the strip's font");
+        Assert.AreEqual(Theme.Accent, label.EffectiveForeColor, "and the strip's colour");
+    }
+
+    [TestMethod]
+    public void AnUnparentedToolStripItemUsesTheThemesDefaults()
+    {
+        var label = new ToolStripLabel("x");
+
+        Assert.AreSame(Theme.DefaultFont, label.EffectiveFont);
+        Assert.AreEqual(Theme.Foreground, label.EffectiveForeColor);
+    }
 }
