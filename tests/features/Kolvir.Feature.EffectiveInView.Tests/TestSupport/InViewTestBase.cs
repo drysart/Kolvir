@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.InView.Tests;
+namespace Kolvir.Feature.InView.Tests;
 
 /// <summary>
 /// The base every test class derives from, so the feature's process-wide state is put back between

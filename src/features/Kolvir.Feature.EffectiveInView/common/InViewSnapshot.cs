@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.InView;
+namespace Kolvir.Feature.InView;
 
 /// <summary>
 /// One pass over a host's paint tree, in paint order, answering "is any part of this control not

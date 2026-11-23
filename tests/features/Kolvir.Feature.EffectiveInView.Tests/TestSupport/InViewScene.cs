@@ -1,7 +1,7 @@
 using Kolvir.Backend.Headless;
 using SkiaSharp;
 
-namespace Kolvir.InView.Tests;
+namespace Kolvir.Feature.InView.Tests;
 
 /// <summary>
 /// A real application, a real window and a real control tree on the headless backend: the starting

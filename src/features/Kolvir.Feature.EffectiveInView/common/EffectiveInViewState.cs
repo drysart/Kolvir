@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace Kolvir.InView;
+namespace Kolvir.Feature.InView;
 
 /// <summary>
 /// The cached answer and the change handlers a control carries once the feature is in use.

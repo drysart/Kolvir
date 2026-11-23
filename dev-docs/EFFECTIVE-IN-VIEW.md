@@ -159,7 +159,7 @@ dotnet publish src/demo/Kolvir.Minimal/Kolvir.Minimal.csproj -c Release -r win-x
 # Opted in. Add to the fixture's csproj:
 #   <ProjectReference Include="..\..\features\Kolvir.Feature.EffectiveInView\Kolvir.Feature.EffectiveInView.csproj" />
 # and to Program.cs, so both halves of the feature are reachable:
-#   using Kolvir.InView;
+#   using Kolvir.Feature.InView;
 #   var probe = new Label("Probe");
 #   content.Controls.Add(probe);
 #   probe.AddEffectiveInViewChangedHandler(static _ => { });
@@ -302,5 +302,7 @@ tree nor a menu bar, one for a menu bar with no tree below it.
   geometry the last layout produced is settled", which is what a listener needs.
 - Occlusion is exact rectangle subtraction against `Opaque`, not sampling through `HitTest`.
 - The first observation after registering is silent.
-- The package is `Kolvir.Feature.EffectiveInView`; the namespace is `Kolvir.InView`, so the `using`
-  does not share a name with the property it brings into scope.
+- The package is `Kolvir.Feature.EffectiveInView` and the namespace is `Kolvir.Feature.InView`. This is
+  the one feature that does not use the single-word `Kolvir.<Feature>` namespace the others use -
+  deliberate, not an oversight. The last segment still differs from the property name, so the `using`
+  does not share a name with the member it brings into scope.

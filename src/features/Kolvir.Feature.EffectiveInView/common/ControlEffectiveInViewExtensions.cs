@@ -1,4 +1,4 @@
-namespace Kolvir.InView;
+namespace Kolvir.Feature.InView;
 
 /// <summary>
 /// The members a control gains by opting into the effective-in-view feature: whether some part of it
@@ -9,7 +9,7 @@ namespace Kolvir.InView;
 /// These are extension members rather than members of <see cref="Control"/>, the way
 /// FEATURE-COST-POLICY.md section 5 asks, and the surface still reads as part of the control:
 /// <code>
-/// using Kolvir.InView;
+/// using Kolvir.Feature.InView;
 ///
 /// using var subscription = control.AddEffectiveInViewChangedHandler(sender => Update((Control)sender));
 /// bool seen = control.EffectiveInView;

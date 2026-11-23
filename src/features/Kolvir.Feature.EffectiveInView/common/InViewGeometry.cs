@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.InView;
+namespace Kolvir.Feature.InView;
 
 /// <summary>
 /// Rectangle arithmetic for the visibility test, in host coordinates.

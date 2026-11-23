@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using SkiaSharp;
 
-namespace Kolvir.InView.Tests;
+namespace Kolvir.Feature.InView.Tests;
 
 /// <summary>
 /// The change handlers: when they run, when they must not, and what the cache is allowed to remember.

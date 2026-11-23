@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.InView.Tests;
+namespace Kolvir.Feature.InView.Tests;
 
 /// <summary>
 /// The predicate itself: what survives the clip chain, and what survives being painted over.
