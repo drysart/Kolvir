@@ -298,12 +298,27 @@ internal sealed class ScrollBars
         {
             _owner.PerformLayout();
             _owner.Invalidate();
+            NotifyScrolled();
             return;
         }
 
         _childOffset = new SKPoint(-horizontal, -vertical);
         PlaceBars();
         _owner.Invalidate();
+        NotifyScrolled();
+    }
+
+    /// <summary>
+    /// Tells the host that the content moved without a layout pass, unless this scroll is part of
+    /// one: a pass raises the layout event itself when it completes, and dispatching from inside it
+    /// would hand listeners a half-arranged tree.
+    /// </summary>
+    private void NotifyScrolled()
+    {
+        if (!_layingOut)
+        {
+            _owner.Host?.NotifyLayoutCompleted();
+        }
     }
 
     /// <summary>Scrolls by a relative amount, clamped to the scrollable range.</summary>

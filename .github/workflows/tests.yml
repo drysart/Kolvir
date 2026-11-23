@@ -95,6 +95,7 @@ jobs:
           dotnet restore tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.Observables.Tests/Kolvir.Feature.Observables.Tests.csproj --nologo
+          dotnet restore tests/features/Kolvir.Feature.EffectiveInView.Tests/Kolvir.Feature.EffectiveInView.Tests.csproj --nologo
           dotnet restore tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --nologo
           dotnet restore tests/generators/Kolvir.Analyzers.Tests/Kolvir.Analyzers.Tests.csproj --nologo
 
@@ -263,6 +264,20 @@ jobs:
           dotnet test tests/features/Kolvir.Feature.Observables.Tests/Kolvir.Feature.Observables.Tests.csproj --no-restore --nologo \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=observables.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The effective-in-view feature's suite. Same wiring again, and the most portable leg of the lot:
+      # every case is a real headless window, a layout pass and a rectangle, and the occlusion cases
+      # print nothing and need no display. It tests the feature, and through it the public seam the
+      # core library added for it - the completed-layout notification.
+      - name: Test the effective in view feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test tests/features/Kolvir.Feature.EffectiveInView.Tests/Kolvir.Feature.EffectiveInView.Tests.csproj --no-restore --nologo \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=effectiveinview.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

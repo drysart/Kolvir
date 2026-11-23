@@ -22,6 +22,16 @@ public sealed class UiHost
 
     /// <summary>Handlers that run at the start of every frame any host draws.</summary>
     private static Action<UiHost>? _frameStarting;
+
+    /// <summary>Handlers that run once a host has finished arranging its tree.</summary>
+    private static Action<UiHost>? _layoutCompleted;
+
+    /// <summary>Ends the pass that is already completing, so a handler cannot start another one.</summary>
+    private static bool _raisingLayoutCompleted;
+
+    /// <summary>True while this host is inside <see cref="PerformLayout"/>.</summary>
+    private bool _performingLayout;
+
     private static int _paintDepth;
     private Window? _window;
     private IDisposable? _windowShownToken;
@@ -140,6 +150,80 @@ public sealed class UiHost
     {
         ArgumentNullException.ThrowIfNull(handler);
         _frameStarting -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs once a host has finished arranging its tree.
+    /// </summary>
+    /// <param name="handler">What to run; it is told which host completed.</param>
+    /// <returns>A token that removes the handler when disposed.</returns>
+    /// <remarks>
+    /// <para>
+    /// It runs after <see cref="PerformLayout"/> has arranged the menu bar, the root and the
+    /// overlays, and after the arrangements the last frame queued through
+    /// <see cref="RequestLayout"/> have run, so the tree a handler reads is the one the next paint
+    /// will draw. A pass that arranged nothing does not raise it, which is what makes a handler
+    /// that only cares about geometry free on a frame that changed nothing.
+    /// </para>
+    /// <para>
+    /// It also runs when a scroll container moves its content without a layout pass. Scrolling
+    /// slides content under a viewport that does not move, so a scroll deliberately does not
+    /// re-arrange the children - but it does change what the last layout put on screen, and a
+    /// handler that answers "what can the user see" has to hear about it. The event therefore means
+    /// "the geometry the last layout produced is settled", and both cases settle it.
+    /// </para>
+    /// <para>
+    /// Static because the work that needs it is process-wide: a feature can subscribe before any
+    /// window exists, and every handler is told which host completed so a handler that cares can
+    /// narrow to one. Handlers run on the UI thread once per pass per host, in subscription order; a
+    /// handler that throws stops those after it and the exception reaches
+    /// <see cref="Application.AddUnhandledExceptionHandler"/> through the caller's guard, as the other
+    /// handler pairs do. A handler cannot start another pass of the same notification: a
+    /// <see cref="PerformLayout"/> called from one completes normally but does not raise this event
+    /// again, so a handler that moves a control cannot recurse. The next pass reports the change.
+    /// </para>
+    /// </remarks>
+    public static IDisposable AddLayoutCompletedHandler(Action<UiHost> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _layoutCompleted += handler;
+        return new HandlerToken<Action<UiHost>>(RemoveLayoutCompletedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddLayoutCompletedHandler"/> added.</summary>
+    public static void RemoveLayoutCompletedHandler(Action<UiHost> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _layoutCompleted -= handler;
+    }
+
+    /// <summary>
+    /// Tells the layout handlers that this host has finished arranging. Called by a completed pass
+    /// and by a scroll that changed what the last pass put on screen.
+    /// </summary>
+    /// <remarks>
+    /// The flag is what keeps a handler from starting another pass of the same notification - a
+    /// handler is allowed to call <see cref="PerformLayout"/>, and the call completes, it just does
+    /// not raise the event again - and it is restored rather than cleared because a layout can run
+    /// from inside another one. An exception from a handler is deliberately left to the caller's
+    /// guard: the pass is already complete, so nothing is half-arranged.
+    /// </remarks>
+    internal void NotifyLayoutCompleted()
+    {
+        if (_layoutCompleted is null || _raisingLayoutCompleted)
+        {
+            return;
+        }
+
+        _raisingLayoutCompleted = true;
+        try
+        {
+            _layoutCompleted(this);
+        }
+        finally
+        {
+            _raisingLayoutCompleted = false;
+        }
     }
 
     /// <summary>True while any host is inside <see cref="Paint"/>.</summary>
@@ -493,6 +577,8 @@ public sealed class UiHost
     /// </remarks>
     private void FlushArrangements()
     {
+        var arranged = false;
+
         for (int pass = 0; pass < MaxArrangementPasses && _arrangeQueue.Count > 0; pass++)
         {
             // A pass remembers the sizes it measured, so it has to know it is a new one, exactly as
@@ -510,6 +596,7 @@ public sealed class UiHost
                 if (ReferenceEquals(control.Host, this))
                 {
                     control.PerformLayout();
+                    arranged = true;
                 }
             }
         }
@@ -520,57 +607,82 @@ public sealed class UiHost
         }
 
         _arrangeQueue.Clear();
+
+        // This runs from Paint and from a press as well as from the whole-tree pass, and each is a
+        // pass that moved controls without one. The whole-tree pass notifies for itself once it
+        // returns, so this only speaks for the runs that stand alone.
+        if (arranged && !_performingLayout)
+        {
+            NotifyLayoutCompleted();
+        }
     }
 
     /// <summary>Arranges the menu bar across the top of the client area and the root below it.</summary>
     public void PerformLayout()
     {
-        _layoutPending = false;
+        // A pass can run from inside a handler - hit testing asks for one when a size arrived since
+        // the last frame - so the flag is saved and restored rather than cleared.
+        bool wasPerformingLayout = _performingLayout;
+        _performingLayout = true;
 
-        // A pass remembers the sizes it measured, so it needs to know when it is a new one.
-        Control.BeginLayoutEpoch();
-
-        // A theme font assigned after the controls exist changes how much room their text needs. The
-        // controls resolve the font themselves, so all the tree needs is to be told that caches
-        // derived from the old one are stale; the pass below re-measures everything anyway.
-        if (_themeFontVersion != Theme.FontVersion)
+        try
         {
-            _themeFontVersion = Theme.FontVersion;
-            _root?.InvalidateAppearanceTree();
-            _menuBar?.InvalidateAppearanceTree();
-            _root?.PerformLayoutTree();
-            _menuBar?.PerformLayoutTree();
-        }
+            _layoutPending = false;
 
-        var top = 0f;
+            // A pass remembers the sizes it measured, so it needs to know when it is a new one.
+            Control.BeginLayoutEpoch();
 
-        if (_menuBar is { } menuBar)
-        {
-            var size = menuBar.Measure(new SKSize(_clientSize.Width, _clientSize.Height));
-            top = MathF.Min(size.Height, _clientSize.Height);
-            menuBar.SetArrangedBounds(new SKRect(0f, 0f, _clientSize.Width, top));
-            menuBar.PerformLayout();
-        }
-
-        if (_root is null)
-        {
-            return;
-        }
-
-        _root.SetArrangedBounds(new SKRect(0f, top, _clientSize.Width, _clientSize.Height));
-        _root.PerformLayout();
-
-        if (_overlays is not null)
-        {
-            foreach (var overlay in _overlays)
+            // A theme font assigned after the controls exist changes how much room their text needs. The
+            // controls resolve the font themselves, so all the tree needs is to be told that caches
+            // derived from the old one are stale; the pass below re-measures everything anyway.
+            if (_themeFontVersion != Theme.FontVersion)
             {
-                overlay.PerformLayout();
+                _themeFontVersion = Theme.FontVersion;
+                _root?.InvalidateAppearanceTree();
+                _menuBar?.InvalidateAppearanceTree();
+                _root?.PerformLayoutTree();
+                _menuBar?.PerformLayoutTree();
             }
-        }
 
-        // Whoever asked for this pass expects the tree to be arranged when it returns, including the
-        // controls that asked for their own arrangement since the last frame.
-        FlushArrangements();
+            var top = 0f;
+
+            if (_menuBar is { } menuBar)
+            {
+                var size = menuBar.Measure(new SKSize(_clientSize.Width, _clientSize.Height));
+                top = MathF.Min(size.Height, _clientSize.Height);
+                menuBar.SetArrangedBounds(new SKRect(0f, 0f, _clientSize.Width, top));
+                menuBar.PerformLayout();
+            }
+
+            if (_root is null)
+            {
+                // The menu bar was arranged even though there is no tree below it, so this is still a
+                // completed pass and a handler may be watching the bar.
+                NotifyLayoutCompleted();
+                return;
+            }
+
+            _root.SetArrangedBounds(new SKRect(0f, top, _clientSize.Width, _clientSize.Height));
+            _root.PerformLayout();
+
+            if (_overlays is not null)
+            {
+                foreach (var overlay in _overlays)
+                {
+                    overlay.PerformLayout();
+                }
+            }
+
+            // Whoever asked for this pass expects the tree to be arranged when it returns, including the
+            // controls that asked for their own arrangement since the last frame.
+            FlushArrangements();
+
+            NotifyLayoutCompleted();
+        }
+        finally
+        {
+            _performingLayout = wasPerformingLayout;
+        }
     }
 
     /// <summary>
