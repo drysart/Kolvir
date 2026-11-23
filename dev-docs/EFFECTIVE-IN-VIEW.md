@@ -127,8 +127,9 @@ false answer is trustworthy, a true answer can be too generous.
   walked once per pass rather than once per listener. Per listener the work is its occluder query
   plus subtraction, bounded by the local density of opaque controls. With N listeners the pass costs
   one tree walk plus O(N), not N tree walks.
-- **A pass with nobody listening** costs one static call and one counter increment. The pass snapshot
-  is not built while no control has a handler.
+- **A pass with nobody listening** builds no snapshot and allocates nothing: the work is the call into
+  the notification and its first check, and the watched set is not enumerated because the feature
+  tracks whether anything is watched.
 - **The static subscriptions** are one delegate on `UiHost` for completed layouts and, per host that
   has been read or watched, one invalidation handler. The invalidation handler only increments a
   counter; it is what makes a change that repaints without laying out - a child added, a control
@@ -139,9 +140,40 @@ the settings the fixture carries) is 9,055,744 bytes. The same fixture with one 
 `EffectiveInView` and registers a handler - so both halves of the feature are reachable - is
 9,094,656 bytes: **+38,912 bytes (+0.43%)**, which is the whole feature in the deliverable, not the
 cost of the seam. The delta is an upper bound: an application that reads the property but never
-subscribes drops the dispatch code with the handler. The core seam's own share of that number is the
-part an application that does not reference the package pays: one static field, one null check at
-each completion point, and no per-window or per-control work.
+subscribes drops the dispatch code with the handler. The seam's own cost for an application that does
+not reference the package is whatever the measurement above attributes to the core change, and the
+only thing the core change adds to a non-listening pass is the call and its first check.
+
+### Re-measuring
+
+The fixture is `src/demo/Kolvir.Minimal`: one window, one label, no features. Release carries
+`PublishAot`, `PublishTrimmed`, `TrimMode=full` and the SkiaSharp embedding, so the publish is the
+measurement.
+
+```sh
+# Baseline, from a clean checkout.
+dotnet publish src/demo/Kolvir.Minimal/Kolvir.Minimal.csproj -c Release -r win-x64
+# -> src/demo/Kolvir.Minimal/bin/Release/net10.0-windows/win-x64/publish/Kolvir.Minimal.exe
+#    ......................... 9,055,744 bytes
+
+# Opted in. Add to the fixture's csproj:
+#   <ProjectReference Include="..\..\features\Kolvir.Feature.EffectiveInView\Kolvir.Feature.EffectiveInView.csproj" />
+# and to Program.cs, so both halves of the feature are reachable:
+#   using Kolvir.InView;
+#   var probe = new Label("Probe");
+#   content.Controls.Add(probe);
+#   probe.AddEffectiveInViewChangedHandler(static _ => { });
+#   _ = probe.EffectiveInView;
+dotnet publish src/demo/Kolvir.Minimal/Kolvir.Minimal.csproj -c Release -r win-x64
+#    ......................... 9,094,656 bytes
+
+# Delta: +38,912 bytes (+0.43%)
+```
+
+The same two commands with `-r linux-x64` and `-r osx-arm64`, run on those hosts, are the other two
+rows of the comparison in FEATURE-COST-POLICY.md section 8; `win-x64` is the one quoted here because
+that is the host this was measured on. Remove the reference and the probe afterwards - the fixture is
+the floor every feature is measured against, and it must stay feature-free.
 
 ## 5. Caching and invalidation
 
@@ -227,8 +259,9 @@ raised at the end of `PerformLayout`, when a standalone `FlushArrangements` actu
 something, and when a scroll offset changes outside a pass - because a scroll settles the same
 geometry a pass does without running one.
 
-It costs two null checks when nobody subscribes, adds no field to any control, and adds no virtual to
-a retained type.
+It costs nothing to an application that does not subscribe: no snapshot, no enumeration, nothing but
+the call into the notification and its first check. It adds no field to any control and no virtual to
+a retained type. The measurement in section 4 is the number this argument rests on.
 
 The rung story is in two halves. In behaviour it is rung 2: the seam is the opt-in and nothing runs
 until a feature subscribes to it. In packaging it is rung 3: the implementation ships as
@@ -258,7 +291,8 @@ It covers, among others:
 
 `tests/core/Kolvir.Tests/Core/LayoutCompletedTests.cs` covers the seam itself: one event per pass,
 none for a paint with nothing to arrange, one for a queued arrangement, one for a scroll that moved,
-and none for the pass a handler starts.
+none for the pass a handler starts, and the two no-root cases - nothing for a host with neither a
+tree nor a menu bar, one for a menu bar with no tree below it.
 
 ## 10. Decisions
 

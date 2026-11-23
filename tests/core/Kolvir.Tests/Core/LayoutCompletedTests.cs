@@ -103,6 +103,39 @@ public sealed class LayoutCompletedTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AHostWithNoRootOrMenuBarRaisesNothing()
+    {
+        using var scene = HeadlessScene.Create(new Panel());
+
+        int count = 0;
+
+        using var subscription = UiHost.AddLayoutCompletedHandler(_ => count++);
+
+        // Both of these run a pass: detaching the root performs one, and the explicit call is the
+        // second. Neither arranged anything, so neither may raise the event.
+        scene.Host.Root = null;
+        scene.Host.PerformLayout();
+
+        Assert.AreEqual(0, count);
+    }
+
+    [TestMethod]
+    public void AHostWithAMenuBarAndNoRootRaisesOnce()
+    {
+        using var scene = HeadlessScene.Create();
+
+        scene.Host.MenuBar = new MenuBarView();
+
+        int count = 0;
+
+        using var subscription = UiHost.AddLayoutCompletedHandler(_ => count++);
+
+        scene.Host.PerformLayout();
+
+        Assert.AreEqual(1, count, "the bar was arranged even though the window has no tree");
+    }
+
+    [TestMethod]
     public void RemovingTheHandlerStopsIt()
     {
         using var scene = HeadlessScene.Create(new Panel());

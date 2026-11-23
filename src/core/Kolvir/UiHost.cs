@@ -645,6 +645,7 @@ public sealed class UiHost
             }
 
             var top = 0f;
+            var arranged = false;
 
             if (_menuBar is { } menuBar)
             {
@@ -652,13 +653,18 @@ public sealed class UiHost
                 top = MathF.Min(size.Height, _clientSize.Height);
                 menuBar.SetArrangedBounds(new SKRect(0f, 0f, _clientSize.Width, top));
                 menuBar.PerformLayout();
+                arranged = true;
             }
 
             if (_root is null)
             {
-                // The menu bar was arranged even though there is no tree below it, so this is still a
-                // completed pass and a handler may be watching the bar.
-                NotifyLayoutCompleted();
+                // The bar is the only thing this pass can have arranged. A host with neither a bar nor
+                // a tree has arranged nothing, and the event promises not to fire for that.
+                if (arranged)
+                {
+                    NotifyLayoutCompleted();
+                }
+
                 return;
             }
 
