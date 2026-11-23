@@ -1,4 +1,4 @@
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// Turns a node tree into controls under a container, and keeps it in step as renders change it.

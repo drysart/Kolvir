@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// The animation state of one overlay: the duration it was given and the timeline currently fading

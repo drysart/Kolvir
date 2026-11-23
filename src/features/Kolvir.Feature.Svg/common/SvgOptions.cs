@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// What an SVG load can be told, for the one thing SVG needs that a plain image does not:

@@ -1,9 +1,9 @@
 using System.Security.Cryptography;
-using Kolvir.WoffFonts;
+using Kolvir.Feature.WoffFonts;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SkiaSharp;
 
-namespace Kolvir.WoffFonts.Tests;
+namespace Kolvir.Feature.WoffFonts.Tests;
 
 /// <summary>
 /// The two containers, against the plain file they were built from.

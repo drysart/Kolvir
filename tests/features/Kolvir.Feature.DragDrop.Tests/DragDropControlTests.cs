@@ -1,9 +1,9 @@
 using SkiaSharp;
 using Kolvir;
 using Kolvir.Backend.Headless;
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
-namespace Kolvir.DragDrop.Tests;
+namespace Kolvir.Feature.DragDrop.Tests;
 
 /// <summary>
 /// The two public seams the feature adds to a control and to a window: whether a control accepts a

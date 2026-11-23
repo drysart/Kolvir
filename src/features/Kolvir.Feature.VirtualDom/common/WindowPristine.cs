@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// What a window's tracked properties looked like before any node touched them.

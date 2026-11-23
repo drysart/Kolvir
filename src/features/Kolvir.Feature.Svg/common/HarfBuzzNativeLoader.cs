@@ -3,7 +3,7 @@ using System.Runtime.CompilerServices;
 using System.Runtime.InteropServices;
 using HarfBuzzSharp;
 
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// Makes HarfBuzzSharp's native library resolvable when a NativeAOT publish has folded it into the

@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>Opts a macOS application into audio.</summary>
 /// <remarks>

@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// One live reference count read out of the data object the shell handed a drop target.

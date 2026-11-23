@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>One change to an observable set, as a record an observer can replay.</summary>
 /// <typeparam name="T">The type of the set's items.</typeparam>

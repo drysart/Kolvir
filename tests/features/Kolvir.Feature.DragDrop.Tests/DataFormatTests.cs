@@ -1,6 +1,6 @@
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
-namespace Kolvir.DragDrop.Tests;
+namespace Kolvir.Feature.DragDrop.Tests;
 
 /// <summary>
 /// The three well-known data formats and the rule that a format is a name compared without case.

@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Kolvir.Backend.AppKit;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>Opts an AppKit application into drag and drop.</summary>
 public static class AppKitDragDropServiceCollectionExtensions

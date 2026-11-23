@@ -1,7 +1,7 @@
 using System.Text;
 using System.Runtime.InteropServices;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The CoreAudio and AudioToolbox entry points this feature uses.

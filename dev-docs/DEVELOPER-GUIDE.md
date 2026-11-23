@@ -167,7 +167,7 @@ has to read `--classic-menus` before it can build a backend.
 | `SystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
 | `ILauncher` | `Process.Start` with `UseShellExecute` | The seam a backend implements to open a URI: `ShellExecute`, `NSWorkspace.OpenUrl`, `Gtk.UriLauncher` |
 | `Kolvir.Tests` | a test project | One portable `net10.0` MSTest assembly that drives the library through the headless backend, so a control is exercised with no display; a test that can only run on one platform carries a `Platform.*` category rather than being skipped by accident |
-| `AnimationSet` + `Kolvir.Animations` | a hand-written storyboard, or `System.Windows.Media.Animation` | `Start()`/`Pause()`/`Resume()`/`Restart()`/`End()` and one finished handler, as an opt-in package: one or more value animations on a shared timeline, eased by the factories in `Easing`, advanced by a single application-wide frame clock that runs only while something is animating |
+| `AnimationSet` + `Kolvir.Feature.Animations` | a hand-written storyboard, or `System.Windows.Media.Animation` | `Start()`/`Pause()`/`Resume()`/`Restart()`/`End()` and one finished handler, as an opt-in package: one or more value animations on a shared timeline, eased by the factories in `Easing`, advanced by a single application-wide frame clock that runs only while something is animating |
 
 Every feature is held to [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md): anything an application
 does not use has to cost it close to zero in the trimmed executable. A feature reaches that by
@@ -3663,7 +3663,7 @@ which is what keeps OLE, the COM target, the pasteboard types and the GTK contro
 build. Asking for it is one line:
 
 ```csharp
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
 var options = new ApplicationOptions
 {
@@ -3672,7 +3672,7 @@ var options = new ApplicationOptions
 ```
 
 With that in place, setting `AllowDrop` on a control makes it, and everything inside it, a drop
-target. Both `AllowDrop` and the four handlers come from `Kolvir.DragDrop`. The four drag handlers
+target. Both `AllowDrop` and the four handlers come from `Kolvir.Feature.DragDrop`. The four drag handlers
 receive an `DragEventArgs`; the drop handler sets `Effect` to say what it did:
 
 ```csharp
@@ -3752,7 +3752,7 @@ pulls a wrapper's finalizer into the middle of a drag instead of leaving the dam
 #### Migrating from the old surface
 
 Setting `AllowDrop` and subscribing to the four drag handlers used to be members of `Control`.
-They are extension members in `Kolvir.DragDrop` now, and the events are `Add`/`Remove` handler
+They are extension members in `Kolvir.Feature.DragDrop` now, and the events are `Add`/`Remove` handler
 pairs like every other notification, so the two things an application does with the feature look
 like this:
 
@@ -3777,7 +3777,7 @@ root.DragDrop += (_, e) =>
 
 ```csharp
 // after: the same handlers, from the feature's namespace, plus one line at startup
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
 var options = new ApplicationOptions
 {
@@ -3819,7 +3819,7 @@ a clock and an invalidation - so the whole feature is portable code and the pack
 `common/` folder and three empty platform folders. Reference it and opt in:
 
 ```csharp
-using Kolvir.Animations;
+using Kolvir.Feature.Animations;
 
 var options = new ApplicationOptions
 {
@@ -4123,7 +4123,7 @@ type and overloads the factory methods with it, and the provider that claims the
 that receives them:
 
 ```csharp
-using Kolvir.Svg;
+using Kolvir.Feature.Svg;
 
 image.Source = factory.LoadFromPath("icons/badge.svg", new SvgOptions
 {
@@ -4152,7 +4152,7 @@ shows no SVG does not reference the package and therefore does not contain it
 (FEATURE-COST-POLICY.md section 4, rung 3). Reference it and opt in:
 
 ```csharp
-using Kolvir.Svg;
+using Kolvir.Feature.Svg;
 
 var options = new ApplicationOptions
 {
@@ -4183,7 +4183,7 @@ parse, the cache, `currentColor` resolution - and one options type, which reache
 **typed overload** of the same three factory calls:
 
 ```csharp
-using Kolvir.Svg;
+using Kolvir.Feature.Svg;
 
 image.Source = factory.LoadFromPath("icons/badge.svg", new SvgOptions
 {
@@ -4713,7 +4713,7 @@ The nodes a view can build are generated, so the controls have to be named at co
 one partial class with an attribute per control - a **manifest**:
 
 ```csharp
-using Kolvir.VirtualDom;
+using Kolvir.Feature.VirtualDom;
 
 [VirtualDom(typeof(Label))]
 [VirtualDom(typeof(Button))]
@@ -4808,7 +4808,7 @@ in that state, and `MountHandle.IsMounted` is true.
 A `Component` is a view model whose `Render` returns the tree for its current state:
 
 ```csharp
-using Kolvir.VirtualDom;
+using Kolvir.Feature.VirtualDom;
 
 internal sealed class Counter : Component
 {
@@ -4915,8 +4915,8 @@ written the same way: derive, override `Render`, read the model, mutate it, inva
 is that the render returns a list of `VWindow` descriptors:
 
 ```csharp
-using Kolvir.Observables;
-using Kolvir.VirtualDom;
+using Kolvir.Feature.Observables;
+using Kolvir.Feature.VirtualDom;
 
 internal sealed class DocumentApplication : ApplicationComponent
 {

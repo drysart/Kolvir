@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The one implementation of an observable dictionary: a <see cref="Dictionary{TKey, TValue}"/> and the

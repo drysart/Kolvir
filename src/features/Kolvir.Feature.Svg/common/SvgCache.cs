@@ -2,7 +2,7 @@ using System.Security.Cryptography;
 using SkiaSharp;
 using Svg.Skia;
 
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// One parsed document, reused for every load that presents the same bytes and the same

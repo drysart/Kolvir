@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>Opts a macOS application into app badging.</summary>
 /// <remarks>

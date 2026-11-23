@@ -1,4 +1,6 @@
-using Kolvir.Svg;
+using Kolvir.Feature.AnimatedGif;
+using Kolvir.Feature.AnimatedWebp;
+using Kolvir.Feature.Svg;
 using SkiaSharp;
 using XDock = Kolvir.DockStyle;
 

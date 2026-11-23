@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// One notification from an observable dictionary: a single change, or a batch of them in order.

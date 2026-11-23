@@ -17,7 +17,7 @@
 
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>Kolvir.Badges.Tests.Windows</RootNamespace>
+    <RootNamespace>Kolvir.Feature.Badges.Tests.Windows</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <IsAotCompatible>false</IsAotCompatible>

@@ -1,5 +1,5 @@
 using System.Globalization;
-using Kolvir.Badges;
+using Kolvir.Feature.Badges;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;

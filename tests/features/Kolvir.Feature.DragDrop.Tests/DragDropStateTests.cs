@@ -1,8 +1,8 @@
 using SkiaSharp;
 using Kolvir;
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
-namespace Kolvir.DragDrop.Tests;
+namespace Kolvir.Feature.DragDrop.Tests;
 
 /// <summary>
 /// The per-control state the feature keeps beside a control rather than in it, and the rule that a

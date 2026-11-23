@@ -1,5 +1,5 @@
 using System.Globalization;
-using Kolvir.Audio;
+using Kolvir.Feature.Audio;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;

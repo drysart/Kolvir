@@ -1,6 +1,6 @@
 using Kolvir;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// Composition: a component emitted as a node of another component's render keeps a mount of its own,

@@ -1,4 +1,4 @@
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedWebp;
 
 /// <summary>
 /// The format-specific spelling of loading an animated WebP, through the same

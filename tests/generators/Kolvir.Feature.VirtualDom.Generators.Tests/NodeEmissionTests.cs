@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Kolvir.VirtualDom.Generators.Tests;
+namespace Kolvir.Feature.VirtualDom.Generators.Tests;
 
 /// <summary>What a manifest becomes: the node classes, their members, and the fact that they compile.</summary>
 [TestClass]
@@ -11,7 +11,7 @@ public sealed class NodeEmissionTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -24,8 +24,8 @@ public sealed class NodeEmissionTests
         Assert.HasCount(1, generated.Sources);
 
         var source = generated.Source;
-        StringAssert.Contains(source, "public sealed class VLabel : global::Kolvir.VirtualDom.VNode");
-        StringAssert.Contains(source, "public sealed class VButton : global::Kolvir.VirtualDom.VNode");
+        StringAssert.Contains(source, "public sealed class VLabel : global::Kolvir.Feature.VirtualDom.VNode");
+        StringAssert.Contains(source, "public sealed class VButton : global::Kolvir.Feature.VirtualDom.VNode");
         StringAssert.Contains(source, "namespace TestApp");
     }
 
@@ -36,7 +36,7 @@ public sealed class NodeEmissionTests
         // was written for, including the inherited ones and the nullable annotations.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -60,7 +60,7 @@ public sealed class NodeEmissionTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -89,7 +89,7 @@ public sealed class NodeEmissionTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -103,8 +103,8 @@ public sealed class NodeEmissionTests
         var label = NodeClass(generated, "VLabel");
         var panel = NodeClass(generated, "VPanel");
 
-        StringAssert.Contains(label, "[global::Kolvir.VirtualDom.LeafNode]");
-        Assert.IsFalse(panel.Contains("[global::Kolvir.VirtualDom.LeafNode]", StringComparison.Ordinal));
+        StringAssert.Contains(label, "[global::Kolvir.Feature.VirtualDom.LeafNode]");
+        Assert.IsFalse(panel.Contains("[global::Kolvir.Feature.VirtualDom.LeafNode]", StringComparison.Ordinal));
     }
 
     [TestMethod]
@@ -112,7 +112,7 @@ public sealed class NodeEmissionTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -143,7 +143,7 @@ public sealed class NodeEmissionTests
         // not, and the generated file would not compile.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -168,7 +168,7 @@ public sealed class NodeEmissionTests
         // captures those values once rather than constructing a control per property at type load.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -189,7 +189,7 @@ public sealed class NodeEmissionTests
     public void EmitsNothingForAManifestWithNoControls()
     {
         var generated = VirtualDomCompiler.Build("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 

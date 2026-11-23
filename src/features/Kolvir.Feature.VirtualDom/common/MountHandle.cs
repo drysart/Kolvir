@@ -1,4 +1,4 @@
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A mounted node tree: what <see cref="VirtualDomRuntime.Mount(Control, VNode)"/> hands back, and what a render updates.

@@ -1,4 +1,4 @@
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// What a badge is being asked to show, once the application's members have been resolved into one

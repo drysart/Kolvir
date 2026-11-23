@@ -1,4 +1,4 @@
-using Kolvir.Svg;
+using Kolvir.Feature.Svg;
 using SkiaSharp;
 using XDock = Kolvir.DockStyle;
 

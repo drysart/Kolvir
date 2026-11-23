@@ -1,4 +1,4 @@
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// Parsing is the expensive half of loading an icon, and every control that shows the same icon

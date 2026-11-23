@@ -1,6 +1,6 @@
 using Kolvir.Undo;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// One clip playing on one device, with a position, a volume, and a notification when it finishes.

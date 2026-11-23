@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// The opt-in for animations: registers the application's single frame clock.

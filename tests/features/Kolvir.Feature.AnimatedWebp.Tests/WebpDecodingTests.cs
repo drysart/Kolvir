@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
-namespace Kolvir.AnimatedWebp.Tests;
+namespace Kolvir.Feature.AnimatedWebp.Tests;
 
 /// <summary>
 /// Animated WebP decoding: what the container says about frames, durations and looping, and what the

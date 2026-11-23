@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// One change to an observable list, in the form an observer replays.

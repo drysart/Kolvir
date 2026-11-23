@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// What happens when an animation's callback, or the finished handler, throws - and how an

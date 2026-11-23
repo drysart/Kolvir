@@ -1,6 +1,6 @@
 using Kolvir.Undo;
 
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// The base every test class derives from, so process-wide state a test may have changed is put back

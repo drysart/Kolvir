@@ -1,6 +1,6 @@
 using Kolvir.Backend.Gtk4;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// Installs a window view's drop targets once the native window exists, and removes them again when

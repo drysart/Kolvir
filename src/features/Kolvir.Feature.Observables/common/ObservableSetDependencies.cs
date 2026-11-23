@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The dependencies one observable set publishes: its count, its contents, and one per item that

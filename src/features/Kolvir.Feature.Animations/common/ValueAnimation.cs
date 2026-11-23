@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// One value animated on an <see cref="AnimationSet"/>'s timeline: a start value, an end value,

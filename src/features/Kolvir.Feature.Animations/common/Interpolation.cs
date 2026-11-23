@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// The interpolation an <see cref="ValueAnimation{T}"/> uses for the values the framework

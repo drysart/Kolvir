@@ -12,7 +12,7 @@
          portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
          needs the workload of the platform it is on. -->
     <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
-    <RootNamespace>Kolvir.Observables</RootNamespace>
+    <RootNamespace>Kolvir.Feature.Observables</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <!-- AOT compatible for the same reason the library is: an application that opts in publishes the

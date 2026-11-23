@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using Microsoft.CodeAnalysis;
 
-namespace Kolvir.VirtualDom.Generators;
+namespace Kolvir.Feature.VirtualDom.Generators;
 
 /// <summary>One property the node class will expose.</summary>
 /// <param name="Name">The property name, shared by the control and the node.</param>

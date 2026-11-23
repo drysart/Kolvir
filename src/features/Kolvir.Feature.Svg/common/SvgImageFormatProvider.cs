@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// The <see cref="IImageFormatProvider"/> that teaches <see cref="ImageDataFactory"/> to

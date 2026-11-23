@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Kolvir.Backend.Win32;
 
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>Opts a Win32 application into app badging.</summary>
 /// <remarks>

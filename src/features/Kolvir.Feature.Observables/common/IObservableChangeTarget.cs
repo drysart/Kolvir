@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// What a change batch asks the collection it belongs to, so that the queue, the batches, the cap and

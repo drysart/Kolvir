@@ -1,6 +1,6 @@
 using Kolvir;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// The component layer: a view model renders a tree, marks itself when its state changes, and renders

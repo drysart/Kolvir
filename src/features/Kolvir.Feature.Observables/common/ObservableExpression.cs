@@ -1,7 +1,7 @@
 using System.Collections.Immutable;
 using System.Runtime.ExceptionServices;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// A function, its cached result, and the run that subscribed it to what the result was computed from.

@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// Draws a badge and hands it to the shell as an <c>HICON</c>, which is the only way an unpackaged

@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// One or more value animations running on a shared timeline: a thing an application starts, pauses,

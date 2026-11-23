@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The watched addresses of one collection: an entry per key, dropped when its last handler goes.

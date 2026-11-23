@@ -1,4 +1,4 @@
-namespace Kolvir.AnimatedGif.Tests;
+namespace Kolvir.Feature.AnimatedGif.Tests;
 
 /// <summary>
 /// Builds GIF89a files frame by frame, so a test can state exactly what a file contains.

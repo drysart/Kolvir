@@ -1,8 +1,8 @@
 using Kolvir;
 using Kolvir.Backend.Headless;
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
-namespace Kolvir.DragDrop.Tests;
+namespace Kolvir.Feature.DragDrop.Tests;
 
 /// <summary>
 /// The portable half of the feature's window hook: it installs the router when a window is created

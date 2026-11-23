@@ -1,4 +1,4 @@
-namespace Kolvir.Audio.Tests;
+namespace Kolvir.Feature.Audio.Tests;
 
 /// <summary>
 /// A platform half that records what it was asked to do: the device list it was given, and every

@@ -1,4 +1,4 @@
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedGif;
 
 /// <summary>
 /// What an animated GIF load can be told. Both settings are decided while the file is decoded, which

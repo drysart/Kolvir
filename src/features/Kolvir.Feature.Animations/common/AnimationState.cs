@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// Where an <see cref="AnimationSet"/> is in its life.

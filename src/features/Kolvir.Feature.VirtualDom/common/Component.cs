@@ -1,4 +1,4 @@
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A view model whose <see cref="Render"/> describes the controls to show, and which re-renders itself

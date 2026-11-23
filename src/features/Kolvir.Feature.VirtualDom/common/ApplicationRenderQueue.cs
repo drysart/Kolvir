@@ -1,4 +1,4 @@
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// The application mounts that have asked to be rendered, drained once per frame.

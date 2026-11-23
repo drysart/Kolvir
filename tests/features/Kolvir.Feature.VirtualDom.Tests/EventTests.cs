@@ -1,6 +1,6 @@
 using Kolvir;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// Event handlers across a render: the same delegate must not be attached twice, and a changed one

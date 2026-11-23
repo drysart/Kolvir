@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// The toast's fade and slide as the feature animates them: one timeline moving

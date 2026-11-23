@@ -1,6 +1,6 @@
 using Kolvir;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// The manifest the generator reads: one attribute per control this suite builds trees out of.

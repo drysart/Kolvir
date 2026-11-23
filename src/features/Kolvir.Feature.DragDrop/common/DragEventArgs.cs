@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// Carries the data being dragged and where the pointer is, for the drag phases a control receives

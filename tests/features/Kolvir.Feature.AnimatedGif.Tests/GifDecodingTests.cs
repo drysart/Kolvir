@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.AnimatedGif.Tests;
+namespace Kolvir.Feature.AnimatedGif.Tests;
 
 /// <summary>
 /// Animated GIF decoding: what the file says about frames, delays and looping, and what the

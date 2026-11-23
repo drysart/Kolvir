@@ -3,7 +3,7 @@ using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 using Kolvir.Backend.Win32;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// The OLE drop target of one Win32 window: the COM object the shell calls into while something is

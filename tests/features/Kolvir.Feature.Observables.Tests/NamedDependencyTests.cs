@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// Named dependencies: a handle is a name rather than an entry, handles for one key are interchangeable,

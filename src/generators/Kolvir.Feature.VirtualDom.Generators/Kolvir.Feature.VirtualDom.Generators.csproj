@@ -16,7 +16,7 @@
     <!-- netstandard2.0 still defaults to C# 7.3; the generator is compiled by a modern SDK, so it
          gets the modern language. What it cannot have is the modern BCL. -->
     <LangVersion>latest</LangVersion>
-    <RootNamespace>Kolvir.VirtualDom.Generators</RootNamespace>
+    <RootNamespace>Kolvir.Feature.VirtualDom.Generators</RootNamespace>
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
     <IsPackable>false</IsPackable>

@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// The animation state of one toast: the two durations it was given and the timeline currently

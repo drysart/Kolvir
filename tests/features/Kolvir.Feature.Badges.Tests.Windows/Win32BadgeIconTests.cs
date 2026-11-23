@@ -1,7 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SkiaSharp;
 
-namespace Kolvir.Badges.Tests.Windows;
+namespace Kolvir.Feature.Badges.Tests.Windows;
 
 /// <summary>
 /// What the Windows badge looks like, pixel by pixel: the disc, the text inside it, the dot, and the

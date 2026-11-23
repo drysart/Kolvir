@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// An observable list's records: one per actual change, each filling in the members its kind promises,

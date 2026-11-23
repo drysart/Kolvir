@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// An observable value: it raises only when it actually changes, its raise walks a snapshot so a

@@ -765,7 +765,7 @@ without a window, and the seam is testable without a second renderer.
 Five things outside the new code, in the shape `VIRTUAL-DOM.md` section 8.1 recorded for its feature:
 
 1. **`src/features/Kolvir.Feature.Observables/`** in the rung-3 four-folder layout, all of the code in
-   `common/`, namespace `Kolvir.Observables`, `IsAotCompatible`, and **no reference to Kolvir at all** -
+   `common/`, namespace `Kolvir.Feature.Observables`, `IsAotCompatible`, and **no reference to Kolvir at all** -
    nothing here needs a control, a host or an application (section 8.1).
 2. **`tests/features/Kolvir.Feature.Observables.Tests/`**, which references the package under test and
    nothing else - no scene, no host, no window.

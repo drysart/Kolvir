@@ -1,4 +1,4 @@
-namespace Kolvir.WoffFonts;
+namespace Kolvir.Feature.WoffFonts;
 
 /// <summary>
 /// Rebuilds the <c>hmtx</c> table when WOFF 2 stored it transformed.

@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// Loading an SVG through the factory, and the size the document says it is.

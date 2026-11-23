@@ -1,4 +1,4 @@
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// The timeline: a set of value animations sharing one clock, and the five things an application

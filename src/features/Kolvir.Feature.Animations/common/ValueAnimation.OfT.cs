@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// A value animation of <typeparamref name="T"/>, blended by the interpolation function it was
@@ -49,7 +49,7 @@ public sealed class ValueAnimation<T> : ValueAnimation
         Func<T, T, double, T> interpolate,
         TimeSpan startTime = default,
         Func<double, double>? easing = null)
-        : base(startTime, duration, easing ?? Kolvir.Animations.Easing.Linear)
+        : base(startTime, duration, easing ?? Kolvir.Feature.Animations.Easing.Linear)
     {
         ArgumentNullException.ThrowIfNull(assign);
         ArgumentNullException.ThrowIfNull(interpolate);

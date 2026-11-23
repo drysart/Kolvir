@@ -1,8 +1,8 @@
 using SkiaSharp;
 using Kolvir;
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
-namespace Kolvir.DragDrop.Tests;
+namespace Kolvir.Feature.DragDrop.Tests;
 
 /// <summary>
 /// The router: which control a drag reaches, what it is told and when, and what the target settles

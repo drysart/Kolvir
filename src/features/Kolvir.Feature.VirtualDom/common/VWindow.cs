@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A description of one window, which the application reconciler creates and patches.

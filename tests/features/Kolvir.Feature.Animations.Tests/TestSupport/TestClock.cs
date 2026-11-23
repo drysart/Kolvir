@@ -1,4 +1,4 @@
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// A clock that only moves when a test says so, at one tick per millisecond so an advance reads as

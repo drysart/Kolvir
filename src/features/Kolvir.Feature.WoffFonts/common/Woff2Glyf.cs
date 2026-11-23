@@ -1,4 +1,4 @@
-namespace Kolvir.WoffFonts;
+namespace Kolvir.Feature.WoffFonts;
 
 /// <summary>
 /// Rebuilds the <c>glyf</c> and <c>loca</c> tables from the re-encoded form WOFF 2 stores them in.

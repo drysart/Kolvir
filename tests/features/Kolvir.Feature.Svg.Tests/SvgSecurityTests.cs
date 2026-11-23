@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// The refusals. A document that arrives from a download, a drag or a theme pack is data, not code,

@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Kolvir.WoffFonts;
+namespace Kolvir.Feature.WoffFonts;
 
 /// <summary>
 /// The opt-in for applications that wire their features through

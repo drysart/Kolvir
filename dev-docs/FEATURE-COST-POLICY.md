@@ -350,7 +350,7 @@ are worth knowing:
   nothing to guard.
 
 Packaging does not change the namespace (section 5.6). A feature in `Kolvir.Feature.Clocks` is still
-`namespace Kolvir.Clocks`, so moving a feature between rung 2 and rung 3 does not touch application
+`namespace Kolvir.Feature.Clocks`, so moving a feature between rung 2 and rung 3 does not touch application
 code.
 
 This rung has a cost of its own (a project to version and publish, a workload requirement to build
@@ -488,8 +488,8 @@ Three exceptions, each of which has to be stated in the pull request:
 
 ### 5.6 Naming
 
-- One namespace per feature: `Kolvir.DragDrop`, rather than members sprinkled across `Kolvir`.
-- The `using` is the visible opt-in. An application that never writes `using Kolvir.DragDrop;`
+- One namespace per feature: `Kolvir.Feature.DragDrop`, rather than members sprinkled across `Kolvir`.
+- The `using` is the visible opt-in. An application that never writes `using Kolvir.Feature.DragDrop;`
   never sees the surface, which also reminds the reader that it is not paying for it.
 - Extension classes are named for the type they extend plus the feature:
   `ControlDragDropExtensions`.
@@ -806,7 +806,7 @@ reflection, no operating system check.
 feature's namespace, so the application calls it without knowing which platform it is on:
 
 ```csharp
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 
 options.ConfigureServices = services => services.AddDragDrop();
 ```

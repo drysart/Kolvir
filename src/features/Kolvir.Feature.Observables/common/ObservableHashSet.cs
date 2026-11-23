@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The one implementation of an observable set: a <see cref="HashSet{T}"/> in the order it happens to

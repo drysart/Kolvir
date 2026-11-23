@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// The opt-in: what registering the provider does to one factory, what a container does for an

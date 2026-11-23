@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.DependencyInjection.Extensions;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The one registration every platform half shares: the engine itself, over whichever platform half

@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// A dictionary's records: what each mutation raises, what each kind carries, and the replay that proves

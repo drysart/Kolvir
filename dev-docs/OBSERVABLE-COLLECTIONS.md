@@ -489,7 +489,7 @@ stops matching.
 ## 4. The list: API surface, in full
 
 ```csharp
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 public enum ObservableListChangeType { ItemAdded, ItemRemoved, ItemMoved, ItemChanged, ListCleared }
 

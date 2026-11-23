@@ -1,12 +1,14 @@
 using SkiaSharp;
 using Kolvir;
-using Kolvir.Animations;
-using Kolvir.Audio;
-using Kolvir.Badges;
+using Kolvir.Feature.AnimatedGif;
+using Kolvir.Feature.AnimatedWebp;
+using Kolvir.Feature.Animations;
+using Kolvir.Feature.Audio;
+using Kolvir.Feature.Badges;
 using Kolvir.Demo;
-using Kolvir.DragDrop;
-using Kolvir.Svg;
-using Kolvir.WoffFonts;
+using Kolvir.Feature.DragDrop;
+using Kolvir.Feature.Svg;
+using Kolvir.Feature.WoffFonts;
 
 #if WINDOWS
 using Kolvir.Backend.Win32;

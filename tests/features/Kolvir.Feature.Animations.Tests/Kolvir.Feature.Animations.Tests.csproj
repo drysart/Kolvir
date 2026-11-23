@@ -18,7 +18,7 @@
 
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>Kolvir.Animations.Tests</RootNamespace>
+    <RootNamespace>Kolvir.Feature.Animations.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <IsAotCompatible>false</IsAotCompatible>

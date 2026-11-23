@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedWebp;
 
 /// <summary>
 /// The <see cref="IImageFormatProvider"/> that turns an animated WebP into

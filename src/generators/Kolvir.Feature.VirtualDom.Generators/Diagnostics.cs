@@ -1,6 +1,6 @@
 using Microsoft.CodeAnalysis;
 
-namespace Kolvir.VirtualDom.Generators;
+namespace Kolvir.Feature.VirtualDom.Generators;
 
 /// <summary>The diagnostics the generator and the analyzer report.</summary>
 internal static class Diagnostics

@@ -1,7 +1,7 @@
 using System.Runtime.InteropServices;
 using System.Runtime.InteropServices.Marshalling;
 
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// Puts the badge on every window's taskbar button, and flashes the button when the badge is urgent.

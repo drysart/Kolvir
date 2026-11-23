@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// An expression: a function whose result is cached and kept up to date by what it read. Cold it hooks

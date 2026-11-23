@@ -1,4 +1,4 @@
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// The application's badge: an unread count, a short label or a dot on whatever the platform uses for

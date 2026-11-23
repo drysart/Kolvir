@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Kolvir.Backend.Headless;
 using Kolvir.Undo;
 
-namespace Kolvir.Audio.Tests;
+namespace Kolvir.Feature.Audio.Tests;
 
 /// <summary>
 /// A timer the test fires by hand.

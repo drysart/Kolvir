@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The scope a read publishes into: one static field, so an ordinary read outside any run costs one

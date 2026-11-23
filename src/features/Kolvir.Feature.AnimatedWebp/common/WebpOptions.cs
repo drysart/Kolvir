@@ -1,4 +1,4 @@
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedWebp;
 
 /// <summary>
 /// What an animated WebP load can be told. Both settings are decided while the file is decoded, which

@@ -1,6 +1,6 @@
-using Kolvir.Audio;
+using Kolvir.Feature.Audio;
 
-namespace Kolvir.Audio.Tests;
+namespace Kolvir.Feature.Audio.Tests;
 
 /// <summary>
 /// What the WAV reader accepts, what it converts on the way in, and what it refuses.

@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>What one change to an observable dictionary can be.</summary>
 /// <remarks>

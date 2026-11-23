@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// One application component's rendered window set, kept in step with the real windows it owns.

@@ -2,7 +2,7 @@ using System.Runtime.InteropServices;
 using Vortice.Multimedia;
 using Vortice.XAudio2;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The Windows half: endpoints from MMDevice, voices from XAudio2.

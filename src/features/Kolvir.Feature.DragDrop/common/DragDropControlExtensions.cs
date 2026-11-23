@@ -1,4 +1,4 @@
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// The drag and drop members a control gains by opting into the feature: whether it accepts drops,

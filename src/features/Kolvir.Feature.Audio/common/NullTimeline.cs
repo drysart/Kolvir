@@ -1,6 +1,6 @@
 using Kolvir.Undo;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The clock the silent device runs on: one timer for the engine, aimed at the next voice that is due

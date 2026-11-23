@@ -1,6 +1,6 @@
 using Kolvir;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// The fragment node: a group of nodes with no control of its own, inlined into its parent where it sits.

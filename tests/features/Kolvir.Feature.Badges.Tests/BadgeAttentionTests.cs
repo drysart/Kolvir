@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.Badges.Tests;
+namespace Kolvir.Feature.Badges.Tests;
 
 /// <summary>
 /// What an attention request does once the user comes back, which is the only badge state a platform

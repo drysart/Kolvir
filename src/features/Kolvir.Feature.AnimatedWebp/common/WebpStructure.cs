@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedWebp;
 
 /// <summary>
 /// Reads the parts of an animated WebP that SkiaSharp does not expose as a stream of frames: the

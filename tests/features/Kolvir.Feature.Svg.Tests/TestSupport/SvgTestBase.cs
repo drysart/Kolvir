@@ -1,7 +1,7 @@
 using SkiaSharp;
 using Kolvir.Undo;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// The base every test class derives from: a factory with the SVG provider in it, and the

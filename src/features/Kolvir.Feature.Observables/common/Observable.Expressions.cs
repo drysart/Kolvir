@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The expression factory: a function whose result is cached and kept up to date by what it read.

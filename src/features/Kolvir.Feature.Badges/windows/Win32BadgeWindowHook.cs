@@ -1,6 +1,6 @@
 using Kolvir.Backend.Win32;
 
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// Attaches the badge to a window once its handle exists, and listens for the two things that make the

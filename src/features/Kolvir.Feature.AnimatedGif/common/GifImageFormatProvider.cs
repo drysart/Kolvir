@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedGif;
 
 /// <summary>
 /// The <see cref="IImageFormatProvider"/> that turns an animated GIF into

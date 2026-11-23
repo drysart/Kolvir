@@ -16,7 +16,7 @@
 
     <ImplicitUsings>enable</ImplicitUsings>
     <Nullable>enable</Nullable>
-    <RootNamespace>Kolvir.Observables.Tests</RootNamespace>
+    <RootNamespace>Kolvir.Feature.Observables.Tests</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsTestProject>true</IsTestProject>
     <IsAotCompatible>false</IsAotCompatible>

@@ -1,4 +1,4 @@
-namespace Kolvir.WoffFonts;
+namespace Kolvir.Feature.WoffFonts;
 
 /// <summary>
 /// The font format provider for WOFF and WOFF 2: the two web containers for the same OpenType font.
