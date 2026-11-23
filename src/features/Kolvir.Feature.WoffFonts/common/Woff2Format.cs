@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.IO.Compression;
 
-namespace Kolvir.WoffFonts;
+namespace Kolvir.Feature.WoffFonts;
 
 /// <summary>
 /// Unwraps a WOFF 2 file into the OpenType font it carries.

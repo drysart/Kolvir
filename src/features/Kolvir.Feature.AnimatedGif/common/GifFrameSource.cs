@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedGif;
 
 /// <summary>
 /// An animated GIF as an <see cref="IImageDataSource"/>: every frame decoded and composited up

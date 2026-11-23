@@ -1,7 +1,7 @@
 using System.Runtime.CompilerServices;
 using SkiaSharp;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// Routes a drag a backend reports into the control tree: it finds the control under the pointer,

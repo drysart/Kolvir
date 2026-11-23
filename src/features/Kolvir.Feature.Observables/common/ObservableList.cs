@@ -1,6 +1,6 @@
 using System.Collections;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The one implementation of an observable list: storage, and the batch that carries its records to the

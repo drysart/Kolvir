@@ -2,7 +2,7 @@ using System.Buffers.Binary;
 using System.Text;
 using SkiaSharp;
 
-namespace Kolvir.AnimatedWebp.Tests;
+namespace Kolvir.Feature.AnimatedWebp.Tests;
 
 /// <summary>
 /// Builds animated WebP files frame by frame, so a test can state exactly what a file contains.

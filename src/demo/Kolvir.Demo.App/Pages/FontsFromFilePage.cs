@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using System.Globalization;
 using Kolvir.Multiline;
-using Kolvir.WoffFonts;
+using Kolvir.Feature.WoffFonts;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;

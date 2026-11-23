@@ -1,7 +1,7 @@
 using SkiaSharp;
 using Kolvir.Backend.AppKit;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// Registers a window's view for dragged pasteboard types once the native window exists, wires the

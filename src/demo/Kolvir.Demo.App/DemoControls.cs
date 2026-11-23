@@ -1,4 +1,4 @@
-using Kolvir.VirtualDom;
+using Kolvir.Feature.VirtualDom;
 
 namespace Kolvir.Demo;
 

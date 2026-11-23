@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// The repeating wait an <see cref="AnimationScheduler"/> drives its timeline with: it calls a

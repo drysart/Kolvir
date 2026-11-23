@@ -1,6 +1,6 @@
-using Kolvir.Observables;
+using Kolvir.Feature.Observables;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A component that renders from a data model, and re-renders when the model state its render <em>read</em>

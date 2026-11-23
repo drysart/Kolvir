@@ -1,4 +1,4 @@
-using Kolvir.VirtualDom;
+using Kolvir.Feature.VirtualDom;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;

@@ -1,7 +1,7 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
-using Kolvir.Badges;
+using Kolvir.Feature.Badges;
 
-namespace Kolvir.Badges.Tests;
+namespace Kolvir.Feature.Badges.Tests;
 
 /// <summary>
 /// What an application's four badge members resolve to, and what a platform that cannot draw that

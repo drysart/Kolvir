@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// The opt-in for applications that wire their features through

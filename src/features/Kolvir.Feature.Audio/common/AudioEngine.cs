@@ -1,4 +1,4 @@
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The application's audio engine: the devices it can play on, the diagnostic for what it bound to,

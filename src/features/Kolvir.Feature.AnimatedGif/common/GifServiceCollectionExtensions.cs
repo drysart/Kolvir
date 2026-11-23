@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedGif;
 
 /// <summary>
 /// The opt-in for applications that wire their features through

@@ -1,4 +1,4 @@
-namespace Kolvir.WoffFonts;
+namespace Kolvir.Feature.WoffFonts;
 
 /// <summary>
 /// Assembles tables into an OpenType (sfnt) file: the format Skia reads, and the only thing either

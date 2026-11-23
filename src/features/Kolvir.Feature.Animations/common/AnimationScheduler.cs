@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// The one frame clock an application's animations share: every <see cref="AnimationSet"/>

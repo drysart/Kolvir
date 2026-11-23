@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Kolvir.Backend.Gtk4;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>Opts a GTK4 application into drag and drop.</summary>
 public static class Gtk4DragDropServiceCollectionExtensions

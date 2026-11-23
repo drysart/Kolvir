@@ -1,4 +1,4 @@
-namespace Kolvir.Badges.Tests;
+namespace Kolvir.Feature.Badges.Tests;
 
 /// <summary>A platform half that keeps everything it was told.</summary>
 /// <param name="capabilities">What it claims to be able to show.</param>

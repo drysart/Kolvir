@@ -1,4 +1,4 @@
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// One decoded sound: a duration, a channel count and a sample rate, and the ability to be played.

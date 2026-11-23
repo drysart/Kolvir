@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// A dictionary's delivery: batches, the cap, the queue that keeps a handler's own changes in order, and

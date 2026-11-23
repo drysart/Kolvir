@@ -1,6 +1,6 @@
 using System.Buffers.Binary;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// Reads a RIFF WAVE file into a clip: the one decoder this version ships, written in managed code so

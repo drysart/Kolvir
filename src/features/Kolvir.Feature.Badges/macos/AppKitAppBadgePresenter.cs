@@ -2,7 +2,7 @@ using System.Globalization;
 using AppKit;
 using Foundation;
 
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// Shows the badge on the Dock tile, which is the only place macOS has for one.

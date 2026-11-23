@@ -78,7 +78,7 @@ manifest is expected to be short and per application rather than a library-wide 
 
 | Topic | Decision | Rationale |
 | --- | --- | --- |
-| Rung | Separate package, `Kolvir.Feature.VirtualDom`, namespace `Kolvir.VirtualDom` | Rung 3 of `FEATURE-COST-POLICY.md`. The base deliverable must not contain a UI framework that most applications will not use, and a feature that adds members to core types cannot take a lower rung anyway. |
+| Rung | Separate package, `Kolvir.Feature.VirtualDom`, namespace `Kolvir.Feature.VirtualDom` | Rung 3 of `FEATURE-COST-POLICY.md`. The base deliverable must not contain a UI framework that most applications will not use, and a feature that adds members to core types cannot take a lower rung anyway. |
 | Project layout | The four-folder rung-3 layout, all code in `common/`, with empty `windows/`, `macos/`, `linux/` folders | Reconciling a tree is portable arithmetic over object graphs. The folders stay because the package's `lib/` folders and dependency groups come from those same inner builds; a single-target exception would fight `check-package-layout.py` for no gain. |
 | Generator packaging | A second assembly, `Kolvir.Feature.VirtualDom.Generators`, referenced `OutputItemType="Analyzer" ReferenceOutputAssembly="false"` | The generator is build-time only. It must not appear in the deliverable, and it targets `netstandard2.0` because analyzers do. |
 | How a control becomes useable from a tree | A **manifest**: a `partial` class carrying one `[VirtualDom(typeof(X))]` attribute per control | Compile-time, so the generator sees the exact type and can emit direct code. This is the whole reason the design is AOT-clean. Rejected: a runtime `Register<T>()` call, whose effects no generator can see and whose types the trimmer cannot learn about. |
@@ -108,7 +108,7 @@ manifest is expected to be short and per application rather than a library-wide 
 The manifest, once per application (or per library that contributes controls):
 
 ```csharp
-using Kolvir.VirtualDom;
+using Kolvir.Feature.VirtualDom;
 
 [VirtualDom(typeof(StackPanel))]
 [VirtualDom(typeof(Label))]
@@ -446,7 +446,7 @@ The plan's surface, in the order a developer meets it:
 | `ComponentMount` | `IComponent`, `Root`, `IsMounted`, `Invalidate`, `Dispose` | What `Mount` returns for a component: the handle a window owns, which is also how a `SetState` finds something to patch. |
 | `VComponent` | A `VNode` wrapping an `IComponent`, with the inherited `Key` | A component as a child of another component's render (section 7.2). |
 | `VirtualDomRuntime.Mount(Control parent, IComponent component)` | Returns a `ComponentMount` | The same entry point with the scheduling wrapped up (section 7.1). |
-| `VirtualDomRuntime.Mount(Control parent, VNode root)` | Returns a `MountHandle` | Turns a tree into live controls under a container (typically the window's root panel). Named `VirtualDomRuntime` because a type called `VirtualDom` would sit in the `Kolvir.VirtualDom` namespace and shadow it at every call site. |
+| `VirtualDomRuntime.Mount(Control parent, VNode root)` | Returns a `MountHandle` | Turns a tree into live controls under a container (typically the window's root panel). Named `VirtualDomRuntime` because a type called `VirtualDom` would sit in the `Kolvir.Feature.VirtualDom` namespace and shadow it at every call site. |
 | `MountHandle.Update(VNode root)` | Reconciles the new tree against what is mounted | What a component's render calls; also usable directly, without components, for a one-shot tree. |
 | `MountHandle.Unmount()` | Detaches everything and drops references | Window closing, or replacing a whole screen. |
 | `services.AddVirtualDom()` | `IServiceCollection` extension | **Not in step 8.** This feature runs no code of its own: there is no timer, no hook and no process-wide state, so there is nothing for a container to hold, and an empty registration would be ceremony that lies about being the opt-in. The opt-in is the `Mount` call, and an application that references the package without ever calling it keeps nothing, because none of the code is reachable. The row stays for step 9, which does have something to register - the reflective table - and that is when a `ConfigureServices` call becomes worth writing. |

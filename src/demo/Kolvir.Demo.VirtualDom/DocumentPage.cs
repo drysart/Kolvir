@@ -1,5 +1,5 @@
-using Kolvir.Observables;
-using Kolvir.VirtualDom;
+using Kolvir.Feature.Observables;
+using Kolvir.Feature.VirtualDom;
 
 namespace Kolvir.Demo.VirtualDom;
 

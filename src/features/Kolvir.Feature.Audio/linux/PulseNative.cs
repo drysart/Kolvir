@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The libpulse entry points and structures this feature uses, declared by hand.

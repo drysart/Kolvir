@@ -1,7 +1,7 @@
 using Kolvir;
-using Kolvir.Observables;
+using Kolvir.Feature.Observables;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// The observables seam: a component renders from a model, listens to exactly what that render read, and

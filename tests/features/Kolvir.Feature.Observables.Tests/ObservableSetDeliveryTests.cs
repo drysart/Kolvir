@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// A set's delivery: the implicit batch every bulk operation runs in, the cap, the queue that keeps a

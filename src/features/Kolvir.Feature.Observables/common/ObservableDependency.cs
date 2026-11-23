@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// One dependency a collection publishes: an event source that carries nothing and is owned by the

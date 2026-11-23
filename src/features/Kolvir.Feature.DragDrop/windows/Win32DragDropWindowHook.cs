@@ -1,6 +1,6 @@
 using Kolvir.Backend.Win32;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// Registers a window's OLE drop target once the native window exists, and revokes it again before

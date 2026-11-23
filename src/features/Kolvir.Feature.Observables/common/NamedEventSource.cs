@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The handle for one named dependency: a key, and an <c>Equals</c> that says so.

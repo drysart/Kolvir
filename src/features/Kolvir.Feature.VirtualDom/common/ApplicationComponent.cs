@@ -1,6 +1,6 @@
-using Kolvir.Observables;
+using Kolvir.Feature.Observables;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A view model whose <see cref="Render"/> describes the windows to show, and which re-renders itself

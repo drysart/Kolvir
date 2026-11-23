@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// <c>currentColor</c> is the one part of an SVG a palette can change, so it is the one thing the

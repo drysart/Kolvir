@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// The documents and bitmaps the suite loads, kept in one place so a test reads as an assertion

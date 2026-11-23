@@ -1,4 +1,4 @@
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedGif;
 
 /// <summary>
 /// Reads the one piece of a GIF that SkiaSharp does not report: whether the file declares how many

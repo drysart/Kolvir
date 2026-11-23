@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// The part of the supported subset that is a question of paint rather than of parsing: a

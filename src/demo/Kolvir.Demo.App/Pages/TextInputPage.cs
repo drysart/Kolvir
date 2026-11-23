@@ -1,4 +1,4 @@
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;

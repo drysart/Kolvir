@@ -1,7 +1,7 @@
 using Gio;
 using Kolvir.Backend.Gtk4;
 
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// Shows the badge on the desktop's application icon, by emitting the Unity LauncherEntry signal the

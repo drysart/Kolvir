@@ -1,6 +1,6 @@
 using Microsoft.Extensions.DependencyInjection;
 
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedWebp;
 
 /// <summary>
 /// The opt-in for applications that wire their features through

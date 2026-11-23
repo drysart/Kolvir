@@ -66,7 +66,7 @@ Measured, not assumed:
 ## 3. The API
 
 ```csharp
-using Kolvir.Badges;
+using Kolvir.Feature.Badges;
 
 options.ConfigureServices = services => services.AddAppBadges();   // the opt-in, one name per platform
 

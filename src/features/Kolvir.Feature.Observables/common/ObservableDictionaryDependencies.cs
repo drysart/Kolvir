@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The dependencies one observable dictionary publishes: its structure, its contents, and one per key

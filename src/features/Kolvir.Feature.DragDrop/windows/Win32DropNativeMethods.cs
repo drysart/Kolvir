@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// The native side of the Windows half of this feature: the OLE entry points that hand the shell a

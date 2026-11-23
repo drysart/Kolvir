@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedWebp;
 
 /// <summary>
 /// An animated WebP as an <see cref="IImageDataSource"/>: every frame decoded and composited up

@@ -1,6 +1,6 @@
 using System.Runtime.ExceptionServices;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// What one synchronous run read, whether it threw, and the subscriptions taken on its behalf.

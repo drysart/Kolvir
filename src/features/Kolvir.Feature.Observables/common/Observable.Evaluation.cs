@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The one dispatch, and the evaluation depth it shares with a cold read.

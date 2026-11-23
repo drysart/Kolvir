@@ -1,7 +1,7 @@
 using Kolvir;
-using Kolvir.Animations;
+using Kolvir.Feature.Animations;
 using Kolvir.Backend;
-using Kolvir.DragDrop;
+using Kolvir.Feature.DragDrop;
 using SkiaSharp;
 
 namespace Kolvir.Docs.Snippets;

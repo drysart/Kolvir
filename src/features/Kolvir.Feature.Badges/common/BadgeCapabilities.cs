@@ -1,4 +1,4 @@
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// What a platform's badge can actually show.

@@ -1,4 +1,4 @@
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// The scheduler's two edges: the clock starts when the first set starts and stops when the last one

@@ -1,4 +1,4 @@
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// What a drag source allows a drop target to do, and what the target decided to do with the data.

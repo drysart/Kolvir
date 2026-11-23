@@ -1,4 +1,4 @@
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// A frame source a test fires by hand, and the record of what the scheduler asked it to do.

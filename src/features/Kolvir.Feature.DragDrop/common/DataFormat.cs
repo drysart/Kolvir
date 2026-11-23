@@ -1,4 +1,4 @@
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// Names one representation of the content being dragged or dropped.

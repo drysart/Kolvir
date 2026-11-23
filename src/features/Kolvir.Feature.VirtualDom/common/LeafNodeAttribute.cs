@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// Marks a node whose control lays no children out, so that assigning <see cref="VNode.Children"/> to

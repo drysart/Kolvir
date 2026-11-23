@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Kolvir.VirtualDom.Generators;
+namespace Kolvir.Feature.VirtualDom.Generators;
 
 /// <summary>Writes the node classes for one manifest.</summary>
 internal static class NodeEmitter
@@ -42,13 +42,13 @@ internal static class NodeEmitter
         source.AppendLine(indent + "/// <summary>A node that makes a " + control.ControlType + ".</summary>");
         if (!control.AcceptsChildren)
         {
-            source.AppendLine(indent + "[global::Kolvir.VirtualDom.LeafNode]");
+            source.AppendLine(indent + "[global::Kolvir.Feature.VirtualDom.LeafNode]");
         }
 
-        source.AppendLine(indent + control.Accessibility + " sealed class " + control.NodeName + " : global::Kolvir.VirtualDom.VNode");
+        source.AppendLine(indent + control.Accessibility + " sealed class " + control.NodeName + " : global::Kolvir.Feature.VirtualDom.VNode");
         source.AppendLine(indent + "{");
-        source.AppendLine(body + "private static readonly global::Kolvir.VirtualDom.NodeType Kind =");
-        source.AppendLine(body + "    new global::Kolvir.VirtualDom.NodeType(");
+        source.AppendLine(body + "private static readonly global::Kolvir.Feature.VirtualDom.NodeType Kind =");
+        source.AppendLine(body + "    new global::Kolvir.Feature.VirtualDom.NodeType(");
         source.AppendLine(body + "        typeof(" + control.ControlType + "),");
         source.AppendLine(body + "        () => new " + control.ControlType + "());");
 
@@ -75,7 +75,7 @@ internal static class NodeEmitter
         foreach (var property in control.Properties)
         {
             source.AppendLine();
-            source.AppendLine(body + "private global::Kolvir.VirtualDom.Specified<" + property.Type + "> " + property.Field + ";");
+            source.AppendLine(body + "private global::Kolvir.Feature.VirtualDom.Specified<" + property.Type + "> " + property.Field + ";");
             source.AppendLine(body + "public " + property.Type + " " + property.Name);
             source.AppendLine(body + "{");
             source.AppendLine(body + "    get => " + property.Field + ".Value;");
@@ -84,12 +84,12 @@ internal static class NodeEmitter
             // not for a nullable reference type argument, where the operator takes the very type it
             // was handed. A constructor call says the same thing and has no such rule to satisfy.
             source.AppendLine(
-                body + "    set => " + property.Field + " = new global::Kolvir.VirtualDom.Specified<" + property.Type + ">(value);");
+                body + "    set => " + property.Field + " = new global::Kolvir.Feature.VirtualDom.Specified<" + property.Type + ">(value);");
             source.AppendLine(body + "}");
         }
 
         source.AppendLine();
-        source.AppendLine(body + "public override global::Kolvir.VirtualDom.NodeType NodeType => Kind;");
+        source.AppendLine(body + "public override global::Kolvir.Feature.VirtualDom.NodeType NodeType => Kind;");
 
         WriteApply(control, source, body);
         WritePatch(control, source, body);
@@ -128,7 +128,7 @@ internal static class NodeEmitter
     private static void WritePatch(ControlModel control, StringBuilder source, string body)
     {
         source.AppendLine();
-        source.AppendLine(body + "public override void PatchFrom(global::Kolvir.VirtualDom.VNode previous, global::Kolvir.Control control)");
+        source.AppendLine(body + "public override void PatchFrom(global::Kolvir.Feature.VirtualDom.VNode previous, global::Kolvir.Control control)");
         source.AppendLine(body + "{");
         source.AppendLine(body + "    var old = (" + control.NodeName + ")previous;");
         source.AppendLine(body + "    var target = (" + control.ControlType + ")control;");

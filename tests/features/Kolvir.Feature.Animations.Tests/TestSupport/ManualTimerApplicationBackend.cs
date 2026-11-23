@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// A timer the test fires by hand.

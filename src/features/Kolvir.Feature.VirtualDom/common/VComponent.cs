@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A component as a node, so a component can be a child of another component's render.

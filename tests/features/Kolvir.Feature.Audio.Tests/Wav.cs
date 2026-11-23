@@ -1,7 +1,7 @@
 using System.Buffers.Binary;
 using System.Text;
 
-namespace Kolvir.Audio.Tests;
+namespace Kolvir.Feature.Audio.Tests;
 
 /// <summary>
 /// Builds WAV files byte by byte, so a test can say exactly what it means rather than shipping a

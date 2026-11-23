@@ -1,4 +1,4 @@
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// The raster formats the built-in decoder has always read, checked from the assembly that also

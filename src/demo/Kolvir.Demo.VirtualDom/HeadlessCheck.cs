@@ -1,7 +1,7 @@
 using SkiaSharp;
 using Kolvir;
 using Kolvir.Backend.Headless;
-using Kolvir.VirtualDom;
+using Kolvir.Feature.VirtualDom;
 
 namespace Kolvir.Demo.VirtualDom;
 

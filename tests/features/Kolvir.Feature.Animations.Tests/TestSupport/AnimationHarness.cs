@@ -1,4 +1,4 @@
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// Everything a test needs to drive an animation by hand: a clock, a frame source the test fires,

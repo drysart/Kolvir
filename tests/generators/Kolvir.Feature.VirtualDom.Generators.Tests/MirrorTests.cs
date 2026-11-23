@@ -1,7 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Kolvir.VirtualDom.Generators.Tests;
+namespace Kolvir.Feature.VirtualDom.Generators.Tests;
 
 /// <summary>
 /// The check that a node class cannot drift from the control it mirrors: every property the control
@@ -40,7 +40,7 @@ public sealed class MirrorTests
 
         var generated = VirtualDomCompiler.Build($$"""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 

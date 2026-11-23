@@ -1,4 +1,4 @@
-using Kolvir.Svg;
+using Kolvir.Feature.Svg;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;

@@ -1,6 +1,6 @@
 using SkiaSharp;
 
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// The static factory methods for easing curves, and the blends a value animation is given.

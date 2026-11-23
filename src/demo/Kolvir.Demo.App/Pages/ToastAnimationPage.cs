@@ -1,4 +1,4 @@
-using Kolvir.Animations;
+using Kolvir.Feature.Animations;
 using XDock = Kolvir.DockStyle;
 
 namespace Kolvir.Demo;

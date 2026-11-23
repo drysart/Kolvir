@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Kolvir.WoffFonts.Tests;
+namespace Kolvir.Feature.WoffFonts.Tests;
 
 /// <summary>
 /// The <c>hmtx</c> transform, driven directly.

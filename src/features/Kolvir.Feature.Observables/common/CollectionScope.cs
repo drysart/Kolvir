@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// One run of a function: what it read, and the subscriptions taken on its behalf as it read it.

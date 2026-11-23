@@ -1,4 +1,4 @@
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>One change to an observable dictionary, as a record an observer can replay.</summary>
 /// <typeparam name="TKey">The type of the dictionary's keys.</typeparam>

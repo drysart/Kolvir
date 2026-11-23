@@ -132,7 +132,7 @@ the union is not any of its case types. `IsUnspecified` reports it and `ThrowIfU
 `InvalidOperationException`, whose message names the union and says it was never assigned. `Switch`
 and `Match` throw on it rather than doing nothing.
 
-The name matches `Specified<T>` in `Kolvir.VirtualDom`, which already uses `IsSpecified` for "this
+The name matches `Specified<T>` in `Kolvir.Feature.VirtualDom`, which already uses `IsSpecified` for "this
 render assigned the property". Unspecified is the same idea one layer down, and one word for it in
 both places is worth more than a local invention.
 

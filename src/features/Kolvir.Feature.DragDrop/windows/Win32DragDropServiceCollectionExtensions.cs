@@ -1,7 +1,7 @@
 using Microsoft.Extensions.DependencyInjection;
 using Kolvir.Backend.Win32;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>Opts a Win32 application into drag and drop.</summary>
 public static class Win32DragDropServiceCollectionExtensions

@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// The one limit on a runaway graph: raises and cold reads nest, both are counted in one depth, and the

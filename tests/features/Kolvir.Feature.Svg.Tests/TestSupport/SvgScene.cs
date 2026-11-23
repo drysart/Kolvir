@@ -1,7 +1,7 @@
 using SkiaSharp;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// A real application, window and control tree on the headless backend, so a test can lay a

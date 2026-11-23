@@ -1,6 +1,6 @@
 using System.IO.Compression;
 
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// The per-user cache a compressed native library is unpacked into once, and the write discipline

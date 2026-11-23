@@ -1,7 +1,7 @@
 using SkiaSharp;
 using Kolvir;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// Mounting a tree, and updating it: what a control becomes, what a property means, and when a

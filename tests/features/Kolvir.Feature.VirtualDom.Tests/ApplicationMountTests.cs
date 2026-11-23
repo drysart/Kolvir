@@ -1,9 +1,9 @@
 using SkiaSharp;
 using Kolvir;
 using Kolvir.Backend.Headless;
-using Kolvir.Observables;
+using Kolvir.Feature.Observables;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// The application level: an application component renders a window set, and the mount keeps the real

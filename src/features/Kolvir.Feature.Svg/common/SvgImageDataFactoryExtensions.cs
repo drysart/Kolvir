@@ -1,4 +1,4 @@
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// The format-specific spelling of loading an SVG through <see cref="IImageDataFactory"/>.

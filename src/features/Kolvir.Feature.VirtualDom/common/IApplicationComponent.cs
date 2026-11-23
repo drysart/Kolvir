@@ -1,4 +1,4 @@
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>What an <see cref="ApplicationMount"/> needs from the component it renders.</summary>
 /// <remarks>

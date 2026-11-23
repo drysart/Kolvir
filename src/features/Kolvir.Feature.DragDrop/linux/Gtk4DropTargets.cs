@@ -1,7 +1,7 @@
 using SkiaSharp;
 using Kolvir.Backend.Gtk4;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// The GTK4 half of drag and drop: the drop target controllers a window's drawing area carries, and

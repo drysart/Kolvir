@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The process-wide table of named dependencies: who is listening to each key, and nothing else.

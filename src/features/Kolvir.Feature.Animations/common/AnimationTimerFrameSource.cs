@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// The default <see cref="IAnimationFrameSource"/>: an <see cref="Timer"/> asking the

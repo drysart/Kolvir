@@ -1,8 +1,8 @@
-using Kolvir.Audio;
+using Kolvir.Feature.Audio;
 using Kolvir.Undo;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Kolvir.Audio.Tests;
+namespace Kolvir.Feature.Audio.Tests;
 
 /// <summary>
 /// The devices an engine reports, what a voice does on the silent device, and what reaches the

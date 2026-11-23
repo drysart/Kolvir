@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A group of nodes with no control of its own, whose children take its place among the parent's children.

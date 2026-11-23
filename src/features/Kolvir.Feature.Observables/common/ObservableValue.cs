@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// The one implementation of a standalone observable value: a box, a handler list and a dead flag.

@@ -1,4 +1,4 @@
-namespace Kolvir;
+namespace Kolvir.Feature.AnimatedGif;
 
 /// <summary>
 /// The format-specific spelling of loading an animated GIF, through the same

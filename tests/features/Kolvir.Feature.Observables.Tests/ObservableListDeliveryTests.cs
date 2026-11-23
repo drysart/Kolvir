@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// An observable list's delivery: batches, the queue that keeps a handler's own changes in order, the

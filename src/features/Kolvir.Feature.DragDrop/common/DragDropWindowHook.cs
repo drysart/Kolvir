@@ -1,4 +1,4 @@
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// Installs the drag and drop router on every window the application creates, and takes it away

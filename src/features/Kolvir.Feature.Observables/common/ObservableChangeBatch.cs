@@ -1,6 +1,6 @@
 using System.Collections.Immutable;
 
-namespace Kolvir.Observables;
+namespace Kolvir.Feature.Observables;
 
 /// <summary>
 /// One collection's changes in flight: the records that have not been delivered, how deep the open

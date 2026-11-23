@@ -1,6 +1,6 @@
 using System.Runtime.CompilerServices;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// The drag and drop state a control carries once the feature is in use: whether it accepts drops

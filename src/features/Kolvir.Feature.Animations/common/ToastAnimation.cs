@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// What an <see cref="Toast"/> gains by opting into the feature: a duration for appearing and a

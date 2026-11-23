@@ -1,4 +1,4 @@
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// The SVG feature's cache controls.

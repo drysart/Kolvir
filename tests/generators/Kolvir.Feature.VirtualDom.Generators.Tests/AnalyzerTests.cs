@@ -1,7 +1,7 @@
 using Microsoft.CodeAnalysis;
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Kolvir.VirtualDom.Generators.Tests;
+namespace Kolvir.Feature.VirtualDom.Generators.Tests;
 
 /// <summary>
 /// The two mistakes a rendered tree can make that the compiler only warns about, or misses entirely.
@@ -15,7 +15,7 @@ public sealed class AnalyzerTests
     public async Task ANullForANonNullablePropertyIsAnError()
     {
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -38,7 +38,7 @@ public sealed class AnalyzerTests
         // all, and the null would be stored and then thrown from the control's setter.
         var diagnostics = await RunAsync("""
             #nullable disable
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -58,7 +58,7 @@ public sealed class AnalyzerTests
     public async Task APossiblyNullValueForANonNullablePropertyIsAnError()
     {
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -78,7 +78,7 @@ public sealed class AnalyzerTests
     public async Task AnAssignmentWrittenOutAsAStatementIsCheckedToo()
     {
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -105,7 +105,7 @@ public sealed class AnalyzerTests
         // `null!` is the caller telling the analysis it knows better. The control's own setter is the
         // backstop at run time, and the build is not the place to argue.
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -125,7 +125,7 @@ public sealed class AnalyzerTests
     public async Task SettingAValueIsLeftAlone()
     {
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -147,7 +147,7 @@ public sealed class AnalyzerTests
         // The mirror image: where the control's property is nullable, assigning null is a real
         // instruction and the analyzer must not stand in its way.
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -172,7 +172,7 @@ public sealed class AnalyzerTests
     public async Task ChildrenOnALeafAreAnError()
     {
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -197,7 +197,7 @@ public sealed class AnalyzerTests
         // Panel overrides OnLayout, which is what the generator reads to decide a node is not a leaf.
         var diagnostics = await RunAsync("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -221,7 +221,7 @@ public sealed class AnalyzerTests
     {
         // `Children = []` says precisely what not assigning it says, so there is nothing to report.
         var diagnostics = await RunAsync("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 

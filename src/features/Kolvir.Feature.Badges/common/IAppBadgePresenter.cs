@@ -1,4 +1,4 @@
-namespace Kolvir.Badges;
+namespace Kolvir.Feature.Badges;
 
 /// <summary>
 /// The per-platform half of a badge: it says what the platform can show and applies one resolved

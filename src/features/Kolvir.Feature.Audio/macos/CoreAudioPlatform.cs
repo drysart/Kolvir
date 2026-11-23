@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The macOS half: output devices from the HAL, sound from <c>AudioQueue</c>.

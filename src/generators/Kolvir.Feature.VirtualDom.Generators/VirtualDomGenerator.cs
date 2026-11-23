@@ -5,7 +5,7 @@ using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 
-namespace Kolvir.VirtualDom.Generators;
+namespace Kolvir.Feature.VirtualDom.Generators;
 
 /// <summary>
 /// Turns <c>[VirtualDom]</c> registrations into node classes.
@@ -24,7 +24,7 @@ namespace Kolvir.VirtualDom.Generators;
 [Generator(LanguageNames.CSharp)]
 public sealed class VirtualDomGenerator : IIncrementalGenerator
 {
-    private const string AttributeName = "Kolvir.VirtualDom.VirtualDomAttribute";
+    private const string AttributeName = "Kolvir.Feature.VirtualDom.VirtualDomAttribute";
     private const string ControlTypeName = "Kolvir.Control";
 
     /// <summary>

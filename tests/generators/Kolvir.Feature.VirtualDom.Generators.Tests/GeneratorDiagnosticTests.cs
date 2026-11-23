@@ -1,6 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 
-namespace Kolvir.VirtualDom.Generators.Tests;
+namespace Kolvir.Feature.VirtualDom.Generators.Tests;
 
 /// <summary>
 /// The mistakes a manifest can contain and what the build says about them. Each case is a registration
@@ -14,7 +14,7 @@ public sealed class GeneratorDiagnosticTests
     public void NotAControlIsReportedAsVD001()
     {
         var generated = VirtualDomCompiler.Build("""
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -33,7 +33,7 @@ public sealed class GeneratorDiagnosticTests
         // compiler has to be able to resolve - which is what keeps creation trim-safe.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -54,7 +54,7 @@ public sealed class GeneratorDiagnosticTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -75,7 +75,7 @@ public sealed class GeneratorDiagnosticTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -94,7 +94,7 @@ public sealed class GeneratorDiagnosticTests
         // by its node type, so the two would never patch each other and every switch would rebuild.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -113,7 +113,7 @@ public sealed class GeneratorDiagnosticTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -130,7 +130,7 @@ public sealed class GeneratorDiagnosticTests
     {
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -151,7 +151,7 @@ public sealed class GeneratorDiagnosticTests
         // declaratively, which is why it is an error.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -176,7 +176,7 @@ public sealed class GeneratorDiagnosticTests
         // both do it - and the node keeps the derived declaration, which is the one a caller sees.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -210,7 +210,7 @@ public sealed class GeneratorDiagnosticTests
         var generated = VirtualDomCompiler.Build("""
             using System;
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 
@@ -247,7 +247,7 @@ public sealed class GeneratorDiagnosticTests
         var generated = VirtualDomCompiler.Build("""
             using System.Collections.Generic;
             using Kolvir;
-            using Kolvir.VirtualDom;
+            using Kolvir.Feature.VirtualDom;
 
             namespace TestApp;
 

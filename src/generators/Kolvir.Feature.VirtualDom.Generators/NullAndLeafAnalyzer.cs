@@ -4,7 +4,7 @@ using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.CSharp.Syntax;
 using Microsoft.CodeAnalysis.Diagnostics;
 
-namespace Kolvir.VirtualDom.Generators;
+namespace Kolvir.Feature.VirtualDom.Generators;
 
 /// <summary>
 /// The half of the feature's build-time checking that the compiler cannot do: a null assigned to a
@@ -30,8 +30,8 @@ namespace Kolvir.VirtualDom.Generators;
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class NullAndLeafAnalyzer : DiagnosticAnalyzer
 {
-    private const string VNodeName = "Kolvir.VirtualDom.VNode";
-    private const string LeafNodeName = "Kolvir.VirtualDom.LeafNodeAttribute";
+    private const string VNodeName = "Kolvir.Feature.VirtualDom.VNode";
+    private const string LeafNodeName = "Kolvir.Feature.VirtualDom.LeafNodeAttribute";
     private const string ChildrenName = "Children";
 
     /// <inheritdoc />

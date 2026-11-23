@@ -1,6 +1,6 @@
 using System.ComponentModel;
 
-namespace Kolvir.VirtualDom;
+namespace Kolvir.Feature.VirtualDom;
 
 /// <summary>
 /// A description of one control, which the reconciler turns into a real control and then patches.

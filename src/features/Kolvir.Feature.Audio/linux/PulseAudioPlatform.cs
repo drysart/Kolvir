@@ -1,6 +1,6 @@
 using System.Runtime.InteropServices;
 
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// The Linux half: sinks through PulseAudio, one <c>pa_simple</c> stream per voice.

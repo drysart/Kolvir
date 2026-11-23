@@ -2,7 +2,7 @@ using System.IO.Compression;
 using System.Reflection;
 using System.Runtime.InteropServices;
 
-namespace Kolvir.Svg.Tests;
+namespace Kolvir.Feature.Svg.Tests;
 
 /// <summary>
 /// The half of the single-file story that can be checked without publishing: where a cached library

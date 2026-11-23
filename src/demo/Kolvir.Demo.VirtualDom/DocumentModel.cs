@@ -1,5 +1,5 @@
 using Kolvir;
-using Kolvir.Observables;
+using Kolvir.Feature.Observables;
 using SkiaSharp;
 
 namespace Kolvir.Demo.VirtualDom;

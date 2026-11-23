@@ -2,7 +2,7 @@ using SkiaSharp;
 using Kolvir;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.DragDrop.Tests;
+namespace Kolvir.Feature.DragDrop.Tests;
 
 /// <summary>
 /// A real application, window and control tree on the headless backend, laid out at a known client

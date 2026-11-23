@@ -1,10 +1,10 @@
 using System.Collections.Immutable;
-using Kolvir.VirtualDom.Generators;
+using Kolvir.Feature.VirtualDom.Generators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
 
-namespace Kolvir.VirtualDom.Generators.Tests;
+namespace Kolvir.Feature.VirtualDom.Generators.Tests;
 
 /// <summary>
 /// Builds a compilation from source, runs the generator over it, and hands back everything a test

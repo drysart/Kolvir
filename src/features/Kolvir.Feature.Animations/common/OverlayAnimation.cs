@@ -1,4 +1,4 @@
-namespace Kolvir.Animations;
+namespace Kolvir.Feature.Animations;
 
 /// <summary>
 /// What an <see cref="Overlay"/> gains by opting into the feature: a duration for coming in.

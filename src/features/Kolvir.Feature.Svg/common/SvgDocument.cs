@@ -4,7 +4,7 @@ using Svg;
 using Svg.Model;
 using Svg.Skia;
 
-namespace Kolvir.Svg;
+namespace Kolvir.Feature.Svg;
 
 /// <summary>
 /// The parsing half of the feature: bytes in, a picture out, with the refusals the security posture

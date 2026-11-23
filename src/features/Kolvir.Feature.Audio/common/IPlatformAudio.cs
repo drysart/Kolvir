@@ -1,4 +1,4 @@
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// One output device as the platform half sees it, before the engine decides what is the default and

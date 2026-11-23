@@ -1,4 +1,4 @@
-namespace Kolvir.Audio;
+namespace Kolvir.Feature.Audio;
 
 /// <summary>
 /// One way an application can be heard: an output device, or the silent device that stands in when

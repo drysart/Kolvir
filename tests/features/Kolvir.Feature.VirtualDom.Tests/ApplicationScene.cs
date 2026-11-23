@@ -2,7 +2,7 @@ using SkiaSharp;
 using Kolvir;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.VirtualDom.Tests;
+namespace Kolvir.Feature.VirtualDom.Tests;
 
 /// <summary>
 /// A real application with an application mount on the headless backend, so a window set can be

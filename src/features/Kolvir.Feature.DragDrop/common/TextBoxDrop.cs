@@ -1,6 +1,6 @@
 using System.Text;
 
-namespace Kolvir.DragDrop;
+namespace Kolvir.Feature.DragDrop;
 
 /// <summary>
 /// The handling the library itself gives an <see cref="TextBox"/>: text dropped on the field is

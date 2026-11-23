@@ -1,4 +1,4 @@
-namespace Kolvir.Observables.Tests;
+namespace Kolvir.Feature.Observables.Tests;
 
 /// <summary>
 /// What a read of an observable set depends on, and what wakes it: the count, one item, and the contents,

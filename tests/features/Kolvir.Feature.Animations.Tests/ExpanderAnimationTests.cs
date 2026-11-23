@@ -2,7 +2,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 using Kolvir.Backend.Headless;
 
-namespace Kolvir.Animations.Tests;
+namespace Kolvir.Feature.Animations.Tests;
 
 /// <summary>
 /// The expander's fold as the feature animates it: one timeline moving
