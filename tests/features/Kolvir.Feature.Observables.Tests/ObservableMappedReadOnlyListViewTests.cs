@@ -158,6 +158,68 @@ public sealed class ObservableMappedReadOnlyListViewTests
     }
 
     [TestMethod]
+    public void ASourceEventAtTheViewsCapArrivesWithEveryRecord()
+    {
+        // The boundary is the cap itself, not one past it: exactly this many records is still a
+        // describable event, so they have to leave here as that many translated records.
+        using var source = Observable.CreateList<string>();
+        using var view = Upper(source);
+
+        var events = new List<IReadOnlyList<ObservableListChange<string>>>();
+        view.AddObservableListChangedHandler(args => events.Add([.. args.Changes]));
+
+        source.BeginChangeBatch();
+
+        for (var index = 0; index < Observable.Default.MaxCollectionBatchSize; index++)
+        {
+            source.Add($"x{index}");
+        }
+
+        source.EndChangeBatch();
+
+        Assert.AreEqual(1, events.Count, "one source event, one delivery");
+        Assert.AreEqual(Observable.Default.MaxCollectionBatchSize, events[0].Count, "carrying every record");
+        Assert.AreEqual(
+            ObservableListChangeType.ItemAdded,
+            events[0][0].ChangeType,
+            "and no untracked record, because the check is strictly greater");
+        Assert.AreEqual(Observable.Default.MaxCollectionBatchSize, view.Count, "while the view holds them all");
+    }
+
+    [TestMethod]
+    public void ASourceTunedAboveTheViewsCapCollapsesToUntrackedWithTheContentsIntact()
+    {
+        // The view's cap is the default and the source's cap is its owner's, so a source that describes
+        // more records in one event than the view will describe has its event collapsed here. What is
+        // lost is the description; the mapped list was applied record by record before anything was
+        // written, so the contents are whole.
+        using var source = Observable.CreateList<string>();
+        using var view = Upper(source);
+
+        source.MaxCollectionBatchSize = Observable.Default.MaxCollectionBatchSize * 4;
+
+        var events = new List<IReadOnlyList<ObservableListChange<string>>>();
+        view.AddObservableListChangedHandler(args => events.Add([.. args.Changes]));
+
+        var added = Observable.Default.MaxCollectionBatchSize * 2;
+
+        source.BeginChangeBatch();
+
+        for (var index = 0; index < added; index++)
+        {
+            source.Add($"x{index}");
+        }
+
+        source.EndChangeBatch();
+
+        Assert.AreEqual(1, events.Count, "the source described them in one event, as its own cap allowed");
+        Assert.AreEqual(1, events[0].Count, "and this view gave up on describing it");
+        Assert.AreEqual(ObservableListChangeType.UntrackedChanges, events[0][0].ChangeType);
+        Assert.AreEqual(added, view.Count, "but every item was applied to the mapped list");
+        Assert.AreEqual($"X{added - 1}", view[added - 1], "and every one of them was mapped");
+    }
+
+    [TestMethod]
     public void TheDeliveredRecordsAreTheSourcesRecordsTranslated()
     {
         using var source = Observable.CreateList("a", "b");

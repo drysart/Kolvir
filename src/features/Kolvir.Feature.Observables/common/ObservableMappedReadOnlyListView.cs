@@ -294,8 +294,10 @@ public sealed class ObservableMappedReadOnlyListView<TInner, TOuter>
     /// <para>
     /// The loop runs inside one batch of this view's own. The source's delivery is already the unit an
     /// observer sees, so a batch of three source changes has to leave here as one event with three
-    /// translated records rather than three events; and the batch is what makes that true however many
-    /// records arrived.
+    /// translated records rather than three events. That batch carries the package default cap and knows
+    /// nothing about a source whose owner raised its own: an event longer than the default collapses here
+    /// to one untracked record, while the mapped list is already complete, which is the same
+    /// fidelity-for-boundedness trade a single list makes, one level down.
     /// </para>
     /// </remarks>
     private void OnInnerChanged(ObservableListChangedEventArgs<TInner> args)
