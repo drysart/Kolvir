@@ -6,14 +6,14 @@ netstandard2.0 Roslyn analyzer project whose assembly ships inside the `Kolvir` 
 the rules with no opt-in and no project-file change.
 
 The rules share one category, `Kolvir.Usage`. The first release has KOLVIR0001, 0002, 0003 and
-0005.
+0004.
 
 | Id | Severity | Catches |
 | --- | --- | --- |
 | KOLVIR0001 | Error | `TryGetValue<T>` where `T` is not a case type of the union |
 | KOLVIR0002 | Error | An explicit `default`/`default(T)` targeting a union, or `new Union<...>()` |
 | KOLVIR0003 | Error | A union type with duplicate case types |
-| KOLVIR0005 | Warning | A `TryGetValue` result discarded as a whole expression statement |
+| KOLVIR0004 | Warning | A `TryGetValue` result discarded as a whole expression statement |
 
 ## KOLVIR0001: TryGetValue type is not a case type
 
@@ -77,7 +77,7 @@ type, because `typeof(dynamic) == typeof(object)`. Nullable annotations do not m
 distinct (`string` and `string?` are the same runtime type). Unresolved arguments and unbound
 generics are left alone.
 
-## KOLVIR0005: discarded TryGetValue result
+## KOLVIR0004: discarded TryGetValue result
 
 A `TryGetValue` call used as a whole statement throws its boolean away. The `out` value is then
 `default` whenever the union holds a different case, which is usually a bug and occasionally
@@ -91,20 +91,6 @@ the read is intentional.
 
 The two warm-up loops in `UnionTests.TryGetValueDoesNotAllocate` use `_ =` for exactly that; the
 allocation assertion is unchanged.
-
-## KOLVIR0004 is out of scope
-
-KOLVIR0004 is deliberately not implemented. The suggested rule would have been a
-"you dropped the `IDisposable`" or "you subscribed a handler and never unsubscribed" diagnostic.
-It is a non-goal because the API is designed for handlers to be subscribed without an unsubscribe
-path when the whole control tree goes away with the window:
-
-> It is expected and normal that application developers will wire up handler subscriptions
-> without providing a way of unregistering (e.g., when setting up a window's control tree; there's
-> no need to unregister events when the entire control tree goes away when the window is closed).
-
-A rule that fought that usage would be reporting the library's intended design. The identifier is
-reserved and must not be added later without an explicit decision.
 
 ## How the analyzer is delivered
 

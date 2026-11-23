@@ -30,7 +30,7 @@ public sealed class DiscardedTryGetValueTests
             """);
 
         Assert.AreEqual(1, diagnostics.Length, Describe(diagnostics));
-        Assert.AreEqual("KOLVIR0005", diagnostics[0].Id);
+        Assert.AreEqual("KOLVIR0004", diagnostics[0].Id);
         Assert.AreEqual(DiagnosticSeverity.Warning, diagnostics[0].Severity);
     }
 
