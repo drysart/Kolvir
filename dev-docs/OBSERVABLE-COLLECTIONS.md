@@ -67,8 +67,9 @@ Non-goals:
   rather than a mutation, which is open question 8.6.
 - Coalescing or compacting records inside a batch (dropping an add that was removed again, merging
   two sets of one item). The batch keeps what happened. 8.5 records the question.
-- Filtered, sorted or projected views over a list (5.3), and ordered or sorted variants of any of the
-  three (open question 8.11). Both need the record format to settle first.
+- Filtered or sorted views over a list (5.3), and ordered or sorted variants of any of the three (open
+  question 8.11). Both need the record format to settle first. Projection is no longer on this list: a
+  view that never drops and never reorders an item is 5.4.
 
 ## 2. The list: type model
 
@@ -605,13 +606,136 @@ collection caps one event at its own `MaxCollectionBatchSize`, copied from
 
 ### 5.3 Still undesigned
 
-- **Derived views** - `Filter`, `Select`, `Sort` over an `IReadOnlyObservableList<T>`. The hard one: an
-  insert the filter drops is no record, and a re-sort is a diff rather than a mutation. These need the
-  source's records as input, which is why the list's records carry old and new items.
+- **Derived views** - `Filter` and `Sort` over an `IReadOnlyObservableList<T>`. `Select` is 5.4, and it
+  is the easy one: it drops nothing and reorders nothing, so every record of the source has exactly one
+  record in the view and the old and new items the records already carry are all the mapping needs. The
+  hard ones are the ones that decide membership or order - an insert the filter drops is no record, and
+  a re-sort is a diff rather than a mutation.
 - **`AsReadOnly` wrappers** for each collection: pass records through and hide the write surface. What
   a model exposes when it wants to hand out a collection without letting anyone mutate it.
 - **An ordered or sorted variant.** A `SortedSet`-shaped collection has to report where things went,
   which is `Move` with a different mutation surface (open question 8.11).
+
+### 5.4 The mapped view
+
+`ObservableMappedReadOnlyListView<TInner, TOuter>` is a read-only view over another observable list
+that projects every item through a function - the `Select` of the family, and the one derived view that
+turned out not to need a design of its own:
+
+```csharp
+namespace Kolvir.Feature.Observables;
+
+public sealed class ObservableMappedReadOnlyListView<TInner, TOuter>
+    : IReadOnlyObservableList<TOuter>, IObservableChangeTarget<ObservableListChange<TOuter>, ...>
+{
+    public ObservableMappedReadOnlyListView(
+        IReadOnlyObservableList<TInner> inner,
+        Func<TInner, TOuter> selector);
+
+    public bool IsDisposed { get; }
+    public int Count { get; }
+    public TOuter this[int index] { get; }
+    public bool Contains(TOuter item);
+    public int IndexOf(TOuter item);
+    public void CopyTo(TOuter[] array, int arrayIndex);
+    public IEnumerator<TOuter> GetEnumerator();
+    public IDisposable AddObservableListChangedHandler(Action<ObservableListChangedEventArgs<TOuter>> handler);
+    public void RemoveObservableListChangedHandler(Action<ObservableListChangedEventArgs<TOuter>> handler);
+    public void Dispose();
+}
+```
+
+`Contains`, `IndexOf` and `CopyTo` are not on `IReadOnlyList<T>`; they are here because they are the
+scans a list has and a view of one should have, and because each has to publish the contents
+dependency. What is deliberately absent is the write surface, `ChangeBatchDepth` and
+`MaxCollectionBatchSize`: a view is read-only to whoever is handed it, and its batching is its own
+business.
+
+The pieces are all section 5's. It implements `IObservableChangeTarget` exactly as the list does, so
+`ObservableChangeBatch` gives it the queue, the batches, the cap, the final empty event and the
+disposal; `ObservableListDependencies<TOuter>` gives it the same three questions; and every record it
+delivers is built with the same `ObservableListChange<TOuter>` factories a list uses. Nothing is
+widened out of `internal`, because the view lives in the same assembly.
+
+**Eager, cached mapping.** A parallel `List<TOuter>` is kept beside the source, index for index, and
+the function runs once per item that arrives. A read is then a list read: no projection on the read
+path, no allocation per item, and no LINQ.
+
+**Record for record, translated.** Every record the source raises has exactly one record here:
+
+| Source record | The mapped list | The record the view delivers |
+| --- | --- | --- |
+| `ItemAdded` at `i` | `selector(NewItem)` inserted at `i` | `ItemAdded` at `i`, mapped |
+| `ItemRemoved` at `i` | the mapped item at `i` dropped | `ItemRemoved` at `i`, the mapped item it held |
+| `ItemMoved` `i` to `j` | the mapped item at `i` moved to `j` | `ItemMoved` `i` to `j`, that item on both sides |
+| `ItemChanged` at `i` | `selector(NewItem)` replaces it | `ItemChanged` at `i`, both mapped values |
+| `ListCleared` | emptied | `ListCleared`, carrying nothing |
+| `UntrackedChanges` | rebuilt from the source | `UntrackedChanges` |
+
+A move is a reposition and does not map anything again: the mapped value the view already has is the
+mapped value the moved item has, which is the same reason `Move` is its own record in the first place.
+A removal does not map at all - the record says what came out, and that is the value the view already
+held. An add and a replacement map exactly once each. So the call count is a claim a test can assert
+rather than an implementation detail.
+
+An unknown change type falls into the untracked row rather than throwing, which is the same
+conservative answer `ObservableListDependencies.Mark` gives for a record it does not know: rebuild, and
+say that the change was not described.
+
+**One source delivery is one view delivery.** `OnInnerChanged` opens one batch of the view's own around
+the translation, so a source batch of three records leaves here as one event with three translated
+records in the source's order. Without it the view would deliver once per record, and a consumer that
+batched on the source would still be woken three times.
+
+**The cap is the view's own, and it is the default.** The view's batch is a batch like any other, so it
+carries `Observable.Default.MaxCollectionBatchSize` and knows nothing about whatever a source's owner
+set on the source. A source left at the default cannot deliver more records in one event than the view
+will describe, so that event arrives here intact - exactly the cap included, because the check is
+strictly greater. A source whose owner raised its cap above the default can deliver more, and an event
+longer than the view's cap collapses here to one `UntrackedChanges` record, like any other over-cap
+batch (3.11). The mapped list is not affected by that collapse: every item is applied and mapped before
+the record is written, so the view's contents and its count are complete and every dependency is marked
+- only the description of the change is gone. It is the same fidelity-for-boundedness trade 3.11
+documents for one list, one level down: an owner who decided the source's handlers could afford to
+replay two hundred records did not make that decision for this view's handlers, which rescan instead.
+
+There is no `MaxCollectionBatchSize` here on purpose. The source's value is not on
+`IReadOnlyObservableList<TInner>` at all, so mirroring it would take a type test against the concrete
+list that goes stale the moment that owner retunes the source.
+
+**Reads publish the same three questions** (5.1), from the view's own dependency table: `Count` is the
+count, `this[i]` is index `i`, and enumeration, `Contains`, `IndexOf` and `CopyTo` are the contents.
+An expression over the view is therefore woken through the view and once per change, rather than
+through the source and once per record - and a reader of one row is not woken by a change to another.
+
+**Mutating an item in place is not observed.** If `TInner` is mutable and changes internally, `TOuter`
+does not follow: nothing in the source list reports that, and this view only re-maps what the source
+says was replaced. Replacing the item in the source (`list[i] = ...`) re-maps it. There is no
+`Refresh` or `Remap`: re-mapping everything would invalidate every index and be an untracked event in
+disguise, and mapping on read is the thing this type exists to avoid, so the boundary is documented
+instead of papered over with an API that has no cheap correct shape.
+
+**The source is not owned.** The view subscribes to it, reads it, and never disposes it - the same
+source may be read directly and by other views, so a view that took the model's list down on teardown
+would be a bug. `Dispose` unsubscribes, drops what had not been delivered, delivers one last event with
+no changes, and lets its handlers go, exactly as 3.9 says of a list. Everything else here follows from
+`ObservableChangeBatch` rather than from new code: `IsDisposed` is true from the start of disposal,
+everything else throws `ObjectDisposedException`, and removal plus a repeated dispose stay safe.
+
+**A disposed source is not a disposed view.** The source's one empty event is its disposal, which the
+view ignores: there can never be another change, so it keeps the contents it last had and stays
+readable. Its lifetime is its own - and the handler snapshot the source delivers to means a late call
+can arrive after the view unsubscribed, which the view answers by doing nothing.
+
+**The selector's contract.** It runs on the thread that changed the source, inside the source's
+delivery, at most once per item that arrives. It must not throw and must not change the source list or
+the view; a function that throws propagates out of the source list's delivery like any other handler's
+exception, and leaves the view behind the source until something forces a resync.
+
+**No factory.** There is no `Observable.Map` beside `Observable.CreateList`. Every `Create*` factory
+returns something the caller does not dispose; this view is the one object in the family its holder
+must dispose, and a factory shaped like its neighbours is where that obligation gets lost. The
+constructor is the API, and a factory can be added later without breaking anything.
 
 ## 6. The observable set
 
@@ -1106,6 +1230,7 @@ treatment:
 | **A set's `Contains` is its own dependency** | A body asking `Contains("a")` and `Contains("b")` is woken once when `a` is added and not at all when `c` is; a `Count` reader is woken by the bulk operation that changed the size, once for the whole event; `SetEquals` and the subset tests are woken by any change, including one that alters no size (8.5: records are what happened, not a diff) |
 | **The dictionary's key is its own address** | A body reading `dict["a"]` and `dict["b"]` is woken once per change to that key and not by a change to the other; `Count` and `Keys` readers are not woken by a value write; `TryGetValue` on an absent key reports a dependency and is woken when the key appears |
 | **A removal reports the value that was there** | `Remove(k)` records the value it removed; `Remove(pair)` with a mismatched value raises nothing and leaves the entry alone; a `Clear` of a non-empty dictionary is one record with nothing in it |
+| **A mapped view's records are the source's records translated** | Applying a view's records to a mirror of the mapped type ends equal to the view, after inserts, appends, removals, replacements, moves and a clear, and `args.List` is the view itself; a move leaves the selector's call count alone while a replacement adds exactly one, and a removal adds none; a batch on the source arrives as one delivery with the records in order, a batch at exactly the view's cap arrives with every record, and a source whose cap was raised above the default collapses to one untracked record with the mapped list still complete; an untracked source event rebuilds the view from the source and is delivered as one `UntrackedChanges` record; an index reader is not woken by a change to another index; disposing the view unsubscribes from the source and leaves it usable, while a disposed source leaves the view readable with its last contents |
 | **Enumeration is a snapshot of the version, not of the contents** | Mutating during `foreach` throws `InvalidOperationException`; reading after it throws is fine; a `CopyTo` during a mutation is the same failure rather than a torn array |
 
 The demo pages are the other half: each applies records to a mirror and asserts equality against the
@@ -1128,3 +1253,4 @@ by the producer.
 | 9-10 | Done | `ObservableSetChangeType` (with `UntrackedChanges`), `ObservableSetChange<T>`, `ObservableSetChangedEventArgs<T>`, the two interfaces with their eight redeclarations, `ObservableSetDependencies<T>`, `ObservableHashSet<T>` and the four `CreateHashSet` overloads. 35 tests in three files cover section 10's claims for the set: one record per item with the bulk operations implicitly batched, removals before additions in a symmetric difference, the cap, disposal, and `Contains` as its own per-item dependency keyed by the set's comparer |
 | 11-12 | Done | `ObservableDictionaryChangeType` (with `UntrackedChanges`), `ObservableDictionaryChange<TKey, TValue>` with the old and new value, `ObservableDictionaryChangedEventArgs<TKey, TValue>`, the two interfaces with their six redeclarations and `TryAdd`, `ObservableDictionaryDependencies<TKey, TValue>`, `ObservableDictionary<TKey, TValue>` and the four `CreateDictionary` overloads. 34 tests cover section 10's claims: the record table row for row - `TryAdd`, the conditional pair removal and the indexer's add-or-change included - a replay, the cap, disposal, and the three reads, where an `ItemChanged` wakes the key and the contents and leaves the structure alone |
 | 13-14 | Done | Both pages, with the guide passages beside them. The set page renders a chip per tag from a constant list, so the board itself reads nothing and renders once; a chip asks `Contains(its own tag)` and nothing else, so a toggle moves one chip and leaves the others alone, while the line above it reads `Count` and moves with every change of size. Beside those two sits the third read: a contents line that enumerates the set, which is why it re-renders on every change and why an item no chip asks about - the sixty a bulk add brings - is visible at all; an earlier version showed only the five constant chips, so a bulk add moved the count with nothing on the page to account for it. Both pages also group their buttons into one row per kind of change, because a single row of seven docked left clipped instead of wrapping once the window was narrower. The dictionary page puts the three reads side by side: a line on `Count`, a key list on `Keys`, and a row per key on `TryGetValue`, so editing a value moves one row and a key arriving moves the list. Both keep a mirror under the buttons that is built only from the records and says whether it still matches, which is what makes `UntrackedChanges` visible rather than theoretical: `Add sixty at once` is one batch past `MaxCollectionBatchSize` (the set's own `UnionWith` opens the batch; the dictionary page opens one), and the mirror is rebuilt from the collection rather than from the record. Rendering both headlessly (`--page observable-set`, `--page observable-dictionary`) caught nothing this time, so the two composition tests were added to the Virtual DOM suite instead: a chip woken by its own membership question and by nothing else, and a row woken by its own key while its parent wakes for a key arriving or leaving - the arrangement the pages stand on, which no dependency test in the observables suite can prove. Suites: 198 in the observables suite - the list's 129 unchanged through the extraction of the shared core, which is the evidence that the core is the core, then 35 for the set and 34 for the dictionary - and 86 in the Virtual DOM suite, which is the list's composition test beside these two |
+| 15 | Done | `ObservableMappedReadOnlyListView<TInner, TOuter>` (5.4), the first derived view: a `public sealed` class over `IReadOnlyObservableList<TOuter>` and `IObservableChangeTarget`, on the shared core unchanged - `ObservableChangeBatch` wired to itself for the queue, the cap and the disposal, `ObservableListDependencies` for the same three questions, and the existing `ObservableListChange` factories for the record - with a parallel cached `List<TOuter>` that maps an add and a replacement once each and never maps a move or a removal. One source delivery is one view delivery, an untracked source event rebuilds the cache, the source is never disposed, and a source disposed first leaves the view readable with its last contents. 22 tests in `ObservableMappedReadOnlyListViewTests`: the cache against every record kind, the call count across move, change and removal, one delivery per source batch and the cap's three cases (a source event at exactly the default arrives with every record, one above the default is the source collapsing and being passed on, and a source tuned above the default is the view collapsing with the contents intact), the three dependencies, unsubscribe on disposal, the full disposed contract, and the null arguments. Suites: 220 in the observables suite - the 198 from step 13-14 unchanged and 22 new - with the core and every other feature suite untouched |
