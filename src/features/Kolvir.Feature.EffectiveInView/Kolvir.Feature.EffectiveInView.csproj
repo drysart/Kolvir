@@ -1,0 +1,63 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application reads EffectiveInView or
+       subscribes to its handler. -->
+  <PropertyGroup>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
+    <RootNamespace>Kolvir</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- AOT compatible for the same reason the library is: an application that opts in publishes the
+         same way whether it did or not. There is no reflection here - the per-control state is a
+         weak table over the control, the geometry is arithmetic on the rectangles layout produced,
+         and the only discovery of anything is a subscription to a static handler. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>EffectiveInView for Kolvir: whether any part of a control is genuinely on screen after clipping and occlusion, with change handlers, computed from the last layout pass.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- The state, the snapshot and the geometry helpers are internal on purpose: an application names
+       the extension property and the handler pair and nothing else, which is what keeps the feature
+       out of an application that never opts in. The tests drive the machinery directly - the cache
+       and the pass snapshot are where the behaviour that regresses silently lives - so the feature's
+       own test assembly can see them. No new public API was added for testing, and nothing is granted
+       to Kolvir.Tests or to the demo. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kolvir.Feature.EffectiveInView.Tests" />
+  </ItemGroup>
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- The three platform folders are empty, and that is the finding rather than an oversight: the
+       whole feature is arithmetic over the rectangles the core library already produced, so there is
+       nothing native and nothing to select by platform. The folders stay because the layout is the
+       package's shape - the `lib/` folders and dependency groups come from these same inner builds
+       either way. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>

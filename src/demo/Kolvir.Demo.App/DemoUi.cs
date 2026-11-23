@@ -579,6 +579,7 @@ public sealed class DemoUi
         ("observable-list", "Observable list", demo => new ObservableListPage(demo)),
 ("observable-set", "Observable set", demo => new ObservableSetPage(demo)),
         ("observable-dictionary", "Observable dictionary", demo => new ObservableDictionaryPage(demo)),
+        ("effective-in-view", "Effective in view", demo => new EffectiveInViewPage(demo)),
 
         // Kept last in the table so that every page above it keeps the position a screenshot script
         // names with --page <position>.

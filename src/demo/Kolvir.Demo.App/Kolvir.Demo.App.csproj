@@ -65,6 +65,7 @@
          than leaning on the reference VirtualDom already carries. -->
     <ProjectReference Include="..\..\features\Kolvir.Feature.Observables\Kolvir.Feature.Observables.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.WoffFonts\Kolvir.Feature.WoffFonts.csproj" />
+    <ProjectReference Include="..\..\features\Kolvir.Feature.EffectiveInView\Kolvir.Feature.EffectiveInView.csproj" />
   </ItemGroup>
 
   <PropertyGroup>
