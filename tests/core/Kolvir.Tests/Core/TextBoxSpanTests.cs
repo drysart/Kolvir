@@ -53,7 +53,9 @@ public sealed class TextBoxSpanTests : HeadlessTestBase
     public void AnUnspecifiedSpanColorIsRefused()
     {
         using var field = new TextBox();
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         var span = new TextBoxSpan(0, 1) { Color = default };
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = span.EffectiveColor(field),

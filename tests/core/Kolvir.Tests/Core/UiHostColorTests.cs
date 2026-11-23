@@ -43,7 +43,9 @@ public sealed class UiHostColorTests : HeadlessTestBase
     public void AnUnspecifiedClearColorIsRefused()
     {
         using var scene = HeadlessScene.Create(null, 40f, 30f);
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         scene.Host.ClearColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = scene.Host.EffectiveClearColor,

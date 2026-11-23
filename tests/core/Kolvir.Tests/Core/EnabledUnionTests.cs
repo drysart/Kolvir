@@ -172,7 +172,9 @@ public sealed class EnabledUnionTests : HeadlessTestBase
     public void ADefaultUnionIsRefusedWhenTheAnswerIsRead()
     {
         using var control = new Control();
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         control.Enabled = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = control.EffectiveEnabled,

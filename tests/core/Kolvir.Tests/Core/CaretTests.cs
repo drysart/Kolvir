@@ -52,7 +52,9 @@ public sealed class CaretTests : HeadlessTestBase
     {
         using var box = new TextBox();
         var caret = box.Caret;
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         caret.Color = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = caret.EffectiveColor,

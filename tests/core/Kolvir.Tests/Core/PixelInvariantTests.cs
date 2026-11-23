@@ -256,7 +256,9 @@ public sealed class PixelInvariantTests : HeadlessTestBase
     public void AnUnspecifiedPlaceholderColorIsRefused()
     {
         var image = new Image();
+#pragma warning disable KOLVIR0002 // This test is about the value the rule exists to refuse.
         image.PlaceholderColor = default;
+#pragma warning restore KOLVIR0002
 
         Assert.ThrowsExactly<InvalidOperationException>(
             () => _ = image.EffectivePlaceholderColor,

@@ -13,8 +13,9 @@ colour-or-role pairs joined them: `TextSpan.ForeColor` / `HoverBackColor`, `Text
 `SimpleBorder`'s edges. The last single-property colours are unions too: `Toast.BarColor`,
 `SplitContainer.SplitterColor`, `Image.PlaceholderColor`, `Caret.Color`, `UiHost.ClearColor` and
 `Window.CaptionColor` / `BorderColor` - see section 12. `ColorPicker.Color` is deliberately not
-one: it is the colour the user picks, application data rather than a theme choice. There is no
-Roslyn analyzer.
+one: it is the colour the user picks, application data rather than a theme choice. The union
+types have Roslyn diagnostics for the invalid shapes the compiler accepts - see
+[ANALYZERS.md](ANALYZERS.md).
 
 ---
 
@@ -90,8 +91,8 @@ should never be reachable. The distinction the method draws is deliberate:
 - `T` is a case type but another arm is stored: a normal answer, and it returns `false`, leaving
   the `out` parameter at `default`.
 
-This is also the only guard in this branch; the analyzer that reports the mistake at compile time
-is a later piece of work.
+This is also the run-time guard; [KOLVIR0001 in ANALYZERS.md](ANALYZERS.md#kolvir0001-trygetvalue-type-is-not-a-case-type)
+reports the same mistake at compile time.
 
 ## 5. There is no `object? Value`
 
