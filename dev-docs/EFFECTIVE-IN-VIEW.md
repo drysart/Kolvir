@@ -302,7 +302,7 @@ tree nor a menu bar, one for a menu bar with no tree below it.
   geometry the last layout produced is settled", which is what a listener needs.
 - Occlusion is exact rectangle subtraction against `Opaque`, not sampling through `HitTest`.
 - The first observation after registering is silent.
-- The package is `Kolvir.Feature.EffectiveInView` and the namespace is `Kolvir.Feature.InView`. This is
-  the one feature that does not use the single-word `Kolvir.<Feature>` namespace the others use -
-  deliberate, not an oversight. The last segment still differs from the property name, so the `using`
-  does not share a name with the member it brings into scope.
+- The package is `Kolvir.Feature.EffectiveInView` and the namespace is `Kolvir.Feature.InView`. The last
+  segment differs from the property name, so the opt-in reads as `using Kolvir.Feature.InView;` while
+  the member reads as `control.EffectiveInView` - the import never shares a name with the member it
+  brings into scope.
