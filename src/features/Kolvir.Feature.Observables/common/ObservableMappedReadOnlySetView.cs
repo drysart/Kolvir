@@ -61,7 +61,9 @@ namespace Kolvir.Feature.Observables;
 /// changed the source, inside the source set's delivery; it must not throw, must not change the source,
 /// and must be deterministic - two calls for the same item have to produce outers this view's comparer
 /// calls equal, or the counts no longer describe the view. A function that throws propagates out of the
-/// source set's delivery, like any other handler's exception, and leaves this view behind the source.
+/// source set's delivery, like any other handler's exception, and leaves this view behind the source; one
+/// that is not deterministic fails visibly rather than silently, because a removal whose mapping finds
+/// nothing this view holds rebuilds from the source and delivers an untracked record.
 /// </para>
 /// <para>
 /// Single-threaded, like every collection in this package: no locks, no cross-thread delivery. It is not
@@ -386,9 +388,24 @@ public sealed class ObservableMappedReadOnlySetView<TInner, TOuter>
                 // instance, not the fresh one, which is what a consumer's own copy holds.
                 var item = _selector(change.Item!);
 
-                if (TryRemoveMapped(item, out var stored))
+                switch (RemoveMapped(item, out var stored))
                 {
-                    _batch.Record(ObservableSetChange<TOuter>.Remove(stored));
+                    case RemovalOutcome.LastOneLeft:
+                        _batch.Record(ObservableSetChange<TOuter>.Remove(stored));
+                        break;
+
+                    case RemovalOutcome.NotHeld:
+                        // The storage and the source disagree, which means the mapping function was not
+                        // deterministic. Nothing here can describe what happened, so rebuild from the
+                        // source and say the change was not described - the same conservative answer an
+                        // unknown record gets - so every reader is told to re-read and the view heals
+                        // instead of drifting silently.
+                        Resync();
+                        break;
+
+                    default:
+                        // StillHeld: another inner item maps to it, so the view is unchanged.
+                        break;
                 }
 
                 break;
@@ -446,26 +463,30 @@ public sealed class ObservableMappedReadOnlySetView<TInner, TOuter>
 
     /// <summary>Takes one mapping out of the storage.</summary>
     /// <param name="item">The mapped item, as the mapping function produced it now.</param>
-    /// <param name="stored">The instance the view held for it, meaningful only when this returns true.</param>
-    /// <returns>True when the last mapping left, which is the only case a record describes.</returns>
+    /// <param name="stored">The instance the view held for it, meaningful only when this returns
+    /// <see cref="RemovalOutcome.LastOneLeft"/>.</param>
+    /// <returns>What the removal found: the last mapping for it, another inner item still on it, or
+    /// nothing at all.</returns>
     /// <remarks>
-    /// The one place the two structures shrink together. A mapped item with no count was never given to
-    /// this view, so the mapping function has broken its contract; nothing is recorded rather than
-    /// handing an observer a removal for an item the view does not hold.
+    /// The one place the two structures shrink together. <see cref="RemovalOutcome.NotHeld"/> is the one
+    /// outcome that is not a removal: the storage has no mapping for what the source says left, which
+    /// means the mapping function was not deterministic - it produced an outer for that item on the way in
+    /// that it does not produce on the way out. The caller answers that by resyncing, because a count that
+    /// disagrees with the source would otherwise stay wrong and unwatched.
     /// </remarks>
-    private bool TryRemoveMapped(TOuter item, out TOuter stored)
+    private RemovalOutcome RemoveMapped(TOuter item, out TOuter stored)
     {
         if (!_counts.TryGetValue(item, out var count))
         {
             stored = item;
-            return false;
+            return RemovalOutcome.NotHeld;
         }
 
         if (count > 1)
         {
             _counts[item] = count - 1;
             stored = item;
-            return false;
+            return RemovalOutcome.StillHeld;
         }
 
         if (!_items.TryGetValue(item, out var storedItem))
@@ -476,7 +497,20 @@ public sealed class ObservableMappedReadOnlySetView<TInner, TOuter>
         _items.Remove(item);
         _counts.Remove(item);
         stored = storedItem;
-        return true;
+        return RemovalOutcome.LastOneLeft;
+    }
+
+    /// <summary>What taking one mapping out of the storage found.</summary>
+    private enum RemovalOutcome
+    {
+        /// <summary>No mapping was held for it, so the storage and the source disagree.</summary>
+        NotHeld,
+
+        /// <summary>Another inner item still maps to it, so the view is unchanged.</summary>
+        StillHeld,
+
+        /// <summary>It was the last one, so the mapped item left the view.</summary>
+        LastOneLeft,
     }
 
     /// <summary>Empties both structures together.</summary>

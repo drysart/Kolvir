@@ -132,6 +132,36 @@ public sealed class ObservableMappedReadOnlySetViewTests
     }
 
     [TestMethod]
+    public void AnImpureSelectorResyncsAndSaysTheRemovalWasNotDescribed()
+    {
+        // The mapping function is supposed to be deterministic. One that is not produces a removal for an
+        // outer the view never took in, and the view answers that by rebuilding from the source and saying
+        // the change was not described - so the disagreement is visible and the view heals rather than
+        // drifting silently.
+        using var source = Observable.CreateHashSet("a");
+        var calls = 0;
+
+        using var view = new ObservableMappedReadOnlySetView<string, string>(
+            source,
+            _ => $"v{++calls}");
+
+        Assert.AreEqual(1, view.Count, "the source's item was mapped once on construction");
+
+        var events = new List<IReadOnlyList<ObservableSetChange<string>>>();
+        view.AddObservableSetChangedHandler(args => events.Add([.. args.Changes]));
+
+        source.Remove("a");
+
+        Assert.AreEqual(1, events.Count, "one source record, one delivery");
+        Assert.AreEqual(1, events[0].Count, "carrying the record that says it was not described");
+        Assert.AreEqual(
+            ObservableSetChangeType.UntrackedChanges,
+            events[0][events[0].Count - 1].ChangeType,
+            "because the removal mapped to something the view never held");
+        Assert.AreEqual(0, view.Count, "and the view was rebuilt from the now-empty source");
+    }
+
+    [TestMethod]
     public void AClearEmptiesTheViewAndLeavesItUsable()
     {
         using var source = Observable.CreateHashSet("a", "b");
