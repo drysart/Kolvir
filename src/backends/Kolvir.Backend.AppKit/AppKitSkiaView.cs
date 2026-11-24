@@ -1238,10 +1238,44 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     }
 
     /// <summary>
-    /// The attributes the input manager may put inside marked text. Empty is legal, and the
-    /// library draws the preedit itself, so it is also the honest answer.
+    /// The attributes the input manager may put inside marked text.
     /// </summary>
-    public NSString[] ValidAttributesForMarkedText => [];
+    /// <remarks>
+    /// <para>
+    /// Empty is legal, and it is what this answered while the composition was being built: the library
+    /// draws the preedit itself and drops whatever attributes arrive, so declaring a set looked like
+    /// needless surface. It is not needless. A reference trace of a stock <c>NSTextView</c> on macOS
+    /// 27.2, driven with the same keystrokes through the same Japanese input method, shows the input
+    /// method asking for this list five times immediately before it offers the marked text of a
+    /// conversion, and never asking a client that answers with an empty array. The list is what tells
+    /// it which decorations it may put in a mark - <c>NSMarkedClauseSegment</c> is how Kotoeri marks
+    /// the clause under conversion - so an empty answer is a client claiming it can render none of
+    /// them. This is now the same list <c>NSTextView</c> returns, and the queries arrive here in the
+    /// same pattern they arrive there (section 7.7).
+    /// </para>
+    /// <para>
+    /// Declaring them costs nothing: <c>insertText:</c> and <c>setMarkedText:</c> take the string and
+    /// ignore the attributes, exactly as before, because the field draws its own text.
+    /// </para>
+    /// </remarks>
+    public NSString[] ValidAttributesForMarkedText => MarkedTextAttributes;
+
+    /// <summary>The attribute names <c>NSTextView</c> declares, which is the set a client that works returns.</summary>
+    private static readonly NSString[] MarkedTextAttributes =
+    [
+        new("NSFont"),
+        new("NSUnderline"),
+        new("NSColor"),
+        new("NSBackgroundColor"),
+        new("NSUnderlineColor"),
+        new("NSMarkedClauseSegment"),
+        new("NSLanguage"),
+        new("NSTextInputReplacementRangeAttributeName"),
+        new("NSGlyphInfo"),
+        new("NSTextAlternatives"),
+        new("NSTextInsertionUndoable"),
+        new("NSAttachment"),
+    ];
 
     /// <summary>No attributed string holds this view's text.</summary>
     public NSAttributedString AttributedString => null!;

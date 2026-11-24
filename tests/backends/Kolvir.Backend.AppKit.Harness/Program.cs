@@ -27,8 +27,9 @@ namespace Kolvir.Backend.AppKit.Harness;
 /// What it proves, in order: the raw-text fallback is gone, so a dead key inserts nothing; a commit
 /// reported by the input manager inserts exactly once; the key path refuses a re-entry instead of
 /// recursing; a declined command cannot ping-pong either; the protocol methods reach the marked
-/// text and the commit; and the caret answer matches <c>ConvertRectToScreen</c> in screen points on
-/// the display this runs on.
+/// text and the commit, and answer the conversion's selection, its document context and the
+/// attribute list a stock client declares; and the caret answer matches <c>ConvertRectToScreen</c>
+/// in screen points on the display this runs on.
 /// </para>
 /// </remarks>
 internal static class Program
@@ -53,6 +54,7 @@ internal static class Program
         Check("a command that re-enters the key path is refused", ACommandTheHostReissuesIsRefused);
         Check("the protocol methods reach the marked text and the commit", TheProtocolReachesTheComposition);
         Check("the selection and the document context answer the marked run", TheSelectionAndContextAnswerTheMark);
+        Check("the marked-text attributes match the platform's own client", TheMarkedTextAttributesMatchThePlatform);
         Check("a refused composition is discarded and holds nothing", ARefusedCompositionHoldsNothing);
         Check("the caret answer matches ConvertRectToScreen", TheCaretAnswerMatchesThePlatform);
 
@@ -272,6 +274,37 @@ internal static class Program
         if (scene.Box.Text.Length != 0)
         {
             throw new InvalidOperationException("the context answer inserted text");
+        }
+    }
+
+    /// <summary>
+    /// The client declares the same marked-text attributes a stock <c>NSTextView</c> declares.
+    /// </summary>
+    /// <remarks>
+    /// A reference trace of `NSTextView` on macOS 27.2 shows the input method asking for this list
+    /// five times immediately before it offers a conversion's marked text, and never asking a client
+    /// that answers with an empty array (section 7.7 of `dev-docs/IME.md`). The library drops the
+    /// attributes either way; what the list buys is an input method that keeps treating the mark as
+    /// editable text.
+    /// </remarks>
+    private static void TheMarkedTextAttributesMatchThePlatform()
+    {
+        using var scene = new Scene();
+
+        var names = scene.View.ValidAttributesForMarkedText.Select(attribute => attribute.ToString()).ToArray();
+
+        if (names.Length == 0)
+        {
+            throw new InvalidOperationException("the client declares no marked-text attributes at all");
+        }
+
+        foreach (var required in new[] { "NSMarkedClauseSegment", "NSUnderline", "NSFont", "NSTextInputReplacementRangeAttributeName" })
+        {
+            if (!names.Contains(required))
+            {
+                throw new InvalidOperationException(
+                    $"'{required}' is missing from [{string.Join(", ", names)}]");
+            }
         }
     }
 
