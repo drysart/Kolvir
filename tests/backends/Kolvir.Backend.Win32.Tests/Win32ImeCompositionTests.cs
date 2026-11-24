@@ -87,6 +87,7 @@ public sealed class Win32ImeCompositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Creates a Win32ApplicationBackend and opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void ASynthesizedCompositionShowsAPreeditAndCommitsExactlyOnce()
     {
         var application = new Application(new Win32ApplicationBackend());
@@ -176,6 +177,7 @@ public sealed class Win32ImeCompositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Creates a Win32ApplicationBackend and opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void AnEndedCompositionLeavesNothingBehind()
     {
         var application = new Application(new Win32ApplicationBackend());
@@ -228,6 +230,7 @@ public sealed class Win32ImeCompositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Creates a Win32ApplicationBackend and opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void AnAstralCharacterArrivesAsOneWholeCharacter()
     {
         var application = new Application(new Win32ApplicationBackend());
@@ -294,11 +297,13 @@ public sealed class Win32ImeCompositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Creates a Win32ApplicationBackend and opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void AReadOnlyFieldRefusesACompositionAndTheInputMethodIsTold() =>
         RefusalIsSentToTheInputMethod("ime read only", box => box.ReadOnly = true);
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Creates a Win32ApplicationBackend and opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void ADisabledFieldRefusesACompositionAndTheInputMethodIsTold() =>
         RefusalIsSentToTheInputMethod("ime disabled", box => box.Enabled = false);
 
@@ -367,6 +372,7 @@ public sealed class Win32ImeCompositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Creates a Win32ApplicationBackend and opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void AnAcceptedCompositionIsNotCancelled()
     {
         var application = new Application(new Win32ApplicationBackend());
