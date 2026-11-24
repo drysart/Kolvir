@@ -2155,7 +2155,11 @@ through `tests/backends/Kolvir.Backend.AppKit.Tests`, and the view-level half is
 objects on the process's main thread. Neither can reach the input manager itself: on macOS the marked
 text, the commit and the candidate list were driven by hand over `ssh` with a real Japanese source
 against the demo's readout, and `dev-docs/IME.md` section 7.7 records which of those items were
-measured and which are still a checklist.
+measured and which are still a checklist. One of those items is a failure that is *not* this
+backend's: a conversion opened with Space does not commit on the test host in any client tested - this
+one, a bundled stock `NSTextView` launched the same way, and `TextEdit` - so the cause is unresolved
+and a candidate list left open can still lose the uncommitted text there. Section 7.7 item 9 has the
+three-client record and the probe that comes next.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and

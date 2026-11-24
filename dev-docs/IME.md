@@ -979,88 +979,64 @@ What is **not** verified, and stays a checklist:
 8. **The password field masks the preedit**, and **the read-only field refuses** a composition. The
    refusal is pinned by a test (`AppKitCompositionTests`, and the harness check), but neither was
    watched on screen. **(unverified)**
-9. **A conversion opened with Space does not commit on macOS, and it loses the text.** Reproduced by
-   hand over VNC on the Mac host, Hiragana `/nihongo/` Space Enter: the field went empty, nothing was
-   committed, and the readout still showed the preedit. **`TextEdit` commits the identical flow on the
-   same host in the same session**, so this is a defect in this backend and the macOS Japanese
-   conversion path is not done until it is fixed.
+9. **A conversion opened with Space does not commit on this host - in any client tested.** Three
+   clients, one session, Hiragana, the same two sequences typed by hand over VNC, all started through
+   LaunchServices:
 
-   What the investigation established, and one thing it got wrong:
+   | Client | Launch | Plain Enter | Space then Enter | Log counts |
+   |---|---|---|---|---|
+   | `NSTextView` subclass, logging every call | bundled `ref.app`, `open -n` | commits (`insertText '日本語'`) | **no commit** | `insertText` 1, `unmarkText` 0 |
+   | This backend | bundle, `open -n --args --page text-input` | commits | **no commit** | `insertText` 1, `unmarkText` 0 |
+   | `TextEdit`, by hand | `open -a TextEdit` | commits | **no commit** | - |
 
-   | Hypothesis | Test | Result |
-   |---|---|---|
-   | The shared `TextBox` rule clears the preedit for `Enter`/`Escape` before the platform sees the key (section 4.5) | traced the rule and `ClearPreedit`; re-ran with `Enter`/`Escape` exempted | **ruled out**: the plain-Enter path commits *after* `box preedit cleared (was 'あ')`, and exempting them did not make the Space path commit |
-   | The client contradicts the input method about what is marked | traced `hasMarkedText`, `markedRange`, `selectedRange`, `attributedSubstringForProposedRange:` in call order | ruled out: `hasMarkedText` true and `markedRange` `(0,1)` whenever asked; after Enter it asks `selectedRange` and gets back exactly what it set |
-   | Kotoeri's candidate panel takes key status and swallows the Return | `NSWindow` `DidBecomeKey`/`DidResignKey` observers plus `NSApplication.KeyWindow` on every key | not supported by the trace that runs: no other window became key, ours stayed key throughout - **but that trace used posted events, which this section now shows are the wrong instrument, so it must be re-checked under VNC** |
-   | The view's `NSTextInputContext` is recreated | logged the context identity per key and per mark | ruled out: one instance for the whole session |
-   | A stock `NSTextView` loses the same Enter, so this is AppKit's behaviour | a logged `NSTextView` subclass driven with `System Events` | **wrong, and withdrawn**: it was measured with posted events, which are not equivalent to VNC keystrokes. TextEdit commits the same flow under VNC |
+   The candidate state looks the same in the two logged clients. Reference, bundled and
+   `open -n`-launched:
 
-   **The instrument matters more than the comparison.** Under `System Events` posting, *every* custom
-   client loses this Enter: a logged `NSTextView` subclass, a minimal from-scratch `NSTextInputClient`
-   (`NSView` + protocol, 120 lines, its own caret rect and answers) and this client all show
-   `insertText` count 0 for the flow, while TextEdit commits it under VNC. So the posted-event route
-   cannot drive Kotoeri's candidate state for any custom view, and any conclusion drawn from it -
-   including this section's earlier "both clients lose it" - is void. Comparisons of this state have
-   to be made under VNC, or not at all.
+   ```
+   ---- key 49 pressed while a mark is live ----
+   setMarkedText '日本号' selected=0,3
+   ---- key 36 pressed while a mark is live ----
+   selectedRange -> 0,3
+   attributedSubstring 0,3 -> '...' actual=0,3
+   selectedRange -> 0,3
+   hasMarkedText -> true
+   KEY code=36 routed: marked=true
+   selectedRange -> 0,3
+   selectedRange -> 0,3
+   markedRange -> 0,3            (the mark was still live when the app was quit)
+   ```
 
-   What the same comparison did catch is fixed: `validAttributesForMarkedText` was an empty array, so
-   the input method never asked for the marked range's contents, where `NSTextView` declares twelve
-   names - `NSMarkedClauseSegment` among them, which is how Kotoeri marks the clause under conversion.
-   With the twelve names the queries arrive in the reference client's pattern. It does **not** fix this
-   defect: the reference client declares them all along and (whatever the instrument) still loses the
-   Enter under posting.
+   This backend's tail is the same shape: four `selectedRange` answers and silence. **So this is not
+   attributable to this backend.** The cause is unresolved, and what a user experiences on this host is
+   still lost uncommitted text: the word disappears when Enter is pressed and nothing is committed.
 
-   Also fixed, and ours on its own terms: the stale preedit. When the input method abandoned its mark
-   without sending `unmarkText` or `insertText`, the field dropped the preedit but the control's own
-   observers kept theirs, so the demo's readout claimed a four-character preedit over an empty field.
-   A key the library consumes now ends the composition through `OnCompositionCancelled`
-   (section 4.5), which is the only notification a control author gets in that case; measured after
-   the change, the same losing flow leaves `Preedit: ""` instead of the stale mark, and a core test
-   fails without it.
+   What was ruled out, each by measurement rather than argument:
 
-   **The hand run under VNC, and what it settled.** Two sequences in one session on an instrumented
-   build: `nihongo` Enter (the control), then `nihongo` Space Enter (the defect).
+   | Hypothesis | How it was settled |
+   |---|---|
+   | The shared `TextBox` preedit-clearing rule (section 4.5) | **exonerated on a valid instrument**: in the control the box cleared its preedit on that Enter and the commit arrived anyway |
+   | The client contradicting the input method about what is marked | `hasMarkedText` true and `markedRange` `(0,1)` whenever asked; after Enter it asks `selectedRange` and gets back exactly what it set |
+   | Kotoeri's candidate panel taking key status | one `WINDOW became key` line in the whole run, the app's own; every key `ourWindowKey=True` with the view as first responder |
+   | The view's `NSTextInputContext` being recreated | one instance for the whole session |
+   | AppKit handing this view `insertNewline:` and its forwarding destroying the preedit | zero `doCommandBySelector` lines in the whole run: the input method kept that Return |
+   | Echoing the marked selection from `selectedRange` | **exonerated**: a stock client answers `0,3`/`0,4`, a full selection, as this client does |
+   | The launch path - every failing run was a bundle binary over `ssh`, and `TextEdit` was the only LaunchServices-launched app | **tested and cleared**: bundling the reference and launching both it and this backend with `open -n` reproduced the identical outcomes |
 
-   - **The control commits.** `---- Enter pressed while a mark is live (selection 3,0) ----`, then
-     `selectedRange` twice, `hasMarkedText -> True`, `validAttributesForMarkedText` four times,
-     `insertText '日本語'`. So the input method asks two questions about the client's state and then
-     commits, and clearing the preedit first does not stop it (section 4.5).
-   - **The defect delivers no callback at all** - and no command either: **zero
-     `doCommandBySelector` lines in the whole run**, so the reading that AppKit handed this view
-     `insertNewline:` and its forwarding destroyed the preedit is disproved. The input method kept
-     that Return.
-   - **The candidate state stops after four `selectedRange` answers.** In that Return it never asks
-     `hasMarkedText`, `markedRange`, `firstRectForCharacterRange:` or
-     `attributedSubstringForProposedRange:` - the calls it does make in the control - and then goes
-     quiet. `insertText` count for that window: 0.
-   - **The candidate panel never takes the key.** Exactly one `WINDOW became key` line in the whole
-     run, naming the app's own window; every key names `ourWindowKey=True appKey=NSWindow"Kolvir -
-     AppKit" (key)` with the view as first responder.
-   - The marks in order: `n`, `に`, `にh`, `にほ`, `にほn`, `日本語`, `日本語歌詞`.
+   **The `TextEdit` control is withdrawn, for the second time, and both records stay.** An earlier hand
+   run reported that `TextEdit` committed this flow on this host; today, on the same machine and the
+   same source, `TextEdit` lost it too. The earlier report is not reproducible. The first withdrawal
+   was the opposite error: a logged `NSTextView` driven with `System Events` posting appeared to lose
+   the Return, which was then read as "both clients fail" - posted events turned out not to drive this
+   state for any custom client. Both corrections are here because the next person will otherwise
+   repeat one of them.
 
-   **The reference client loses the same Return, and `selectedRange` is exonerated.** The logged
-   `NSTextView` subclass, typed by hand over VNC with the same two sequences, commits the control
-   (`insertText '日本語'`) and loses the candidate Enter exactly as this client does: candidate
-   `setMarkedText '日本語学' selected=0,4`, then on Enter `hasMarkedText -> true`,
-   `selectedRange -> 0,4`, `attributedSubstring 0,4`, `selectedRange -> 0,4`, `hasMarkedText -> true`,
-   and the mark stays live. Run totals: `insertText` 1 (the control), `unmarkText` 0 - the same shape
-   as this client's run. **So a full selection echoed from `selectedRange` is what a stock client
-   answers too** (`0,4` there, `0,3` here), and echoing it is not the mistake. The suspicion recorded
-   here against that change is closed: it stays as shipped.
+   **The next probe needs no build: whether the panel is on screen at all.** Three questions, asked of
+   `TextEdit` with a candidate list open - is a candidate list visible, does clicking a candidate with
+   the mouse commit it, and does Tab followed by Return commit where a bare Return does not. If only
+   the bare Return fails, the defect is in how the input method treats that key in that state; if the
+   panel is not on screen at all, it is the input method failing to present its UI on this host, which
+   would also explain why nothing arrives.
 
-   **What that reopens is attribution, and there is a confound in every run so far.** Every failing
-   Kolvir run and the failing reference run were started as a bare binary or a bundle binary launched
-   over `ssh`; the only LaunchServices-launched app in the series is `TextEdit`, and `TextEdit` is the
-   one that commits. `MACOS-TESTRUN.md` already records that `open -n <bundle>` is what makes an app
-   frontmost, and that route had never been used for these hand runs. A launch path that changes how
-   the app is presented to the window server is a plausible difference for an input method that
-   attaches a candidate panel, so the next pass measures it rather than reasoning about it: the
-   reference client bundled as a real `.app` and launched with `open -n`, this backend launched with
-   `open -n` with its trace on, and `TextEdit` again today on the same source, the same two sequences
-   each. If the bundled/`open`-launched reference commits and this client does not, the defect is here
-   and the instrument is finally clean; if both commit, the earlier failures were the launch path,
-   which is itself the finding; if `TextEdit` now fails too, the claim that it commits is retracted and
-   the candidate state on this host is the defect.
 Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
 in this section is a hand run over `ssh` with `screencapture`.
@@ -1071,7 +1047,7 @@ in this section is a hand run over `ssh` with `screencapture`.
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
 | Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
-| macOS | Implemented; covered by section 7.6 | Implemented through NSTextInputClient and driven with the Japanese source on the test host (section 7.7): marked text, conversion to 日本語 and a single commit when no candidate list is open. **A conversion opened with Space loses the text, reproduced by hand over VNC, while TextEdit commits the same flow on the same host** - open question 6, and the macOS Japanese path is not done until it is fixed | **Implemented; Japanese conversion known broken in the candidate state** |
+| macOS | Implemented; covered by section 7.6 | Implemented through NSTextInputClient and driven with the Japanese source on the test host (section 7.7): marked text, conversion to 日本語 and a single commit when no candidate list is open, with the candidate list placed from the caret answer. A conversion opened with Space does not commit on this host **in any client tested** - this backend, a bundled stock NSTextView launched the same way, and TextEdit - so it is not attributable to this backend and the cause is unresolved (open question 6) | **Implemented; candidate-state conversion fails on this host in every client tested** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
 `IMM32` calls behind it were measured against the Microsoft IME that is installed on this
@@ -1088,10 +1064,10 @@ suite fails when any of them is removed (section 7.6). What that cannot show is 
 manager does with `interpretKeyEvents:`, because a view with no key window has no input context to drive
 it. Section 7.7 is that half: a hand run over `ssh` with a real Japanese source, a live console and
 `screencapture`, on the demo's readout, plus a logged subclass of `NSTextView` and a minimal
-from-scratch `NSTextInputClient` as reference clients. Six of its items are measured, three are not,
-and one measured item - a conversion opened with Space - is a defect in this backend: reproduced by
-hand over VNC, with `TextEdit` committing the same flow on the same host, while every custom client
-loses it under posted events, which is what invalidated the reference comparison.
+from-scratch `NSTextInputClient` as reference clients. Seven of its items are measured and two are
+and one measured item - a conversion opened with Space - is a failure on this host that no client
+has been shown to avoid: a bundled stock `NSTextView` launched the same way, this backend and
+`TextEdit` all lose that Return, and the cause is unresolved.
 
 Open questions:
 
@@ -1113,16 +1089,13 @@ Open questions:
    after the whole preedit rather than inside it. The index is recorded and handed to the platform
    through the caret seam; repositioning the drawn caret inside the preedit comes with clause
    styling.
-6. **A conversion opened with Space loses the text on macOS.** Reproduced by hand over VNC: with
-   Hiragana active, `/nihongo/`, Space, Enter leaves the field empty and commits nothing, while
-   `TextEdit` commits the identical flow on the same host in the same session. The defect is this
-   backend's and the macOS Japanese conversion path is not done until it is fixed. Five explanations
-   were tested; four are ruled out (including the `TextBox` preedit clearing, which looked most
-   likely) and the fifth - Kotoeri's candidate panel taking key status - is undecided because the
-   trace that ran used posted events, and posted events turned out to be unable to drive this state
-   for **any** custom client: a logged `NSTextView` subclass, a minimal from-scratch
-   `NSTextInputClient` and this client all lose it under posting while TextEdit commits under VNC.
-   That is why the earlier "both clients lose it" reading was withdrawn, and why the next probe - the
-   panel's key status under VNC - needs a person at the machine. Section 7.7 item 9 has the traces,
-   the withdrawn claim and the instrument note. The stale preedit left by the loss is fixed
-   separately (section 4.5).
+6. **A conversion opened with Space does not commit on this host, in any client tested.** Three
+   clients - a logged bundled `NSTextView` launched with `open -n`, this backend launched the same
+   way, and `TextEdit` by hand - all commit the plain-Enter flow and all lose the Return once a
+   candidate list is open, with the same call shape and the same counts (`insertText` 1,
+   `unmarkText` 0). So this is **not attributable to this backend**, and the cause is unresolved. The
+   user-visible consequence stands and is not filed as cosmetic: on this host, pressing Enter on a
+   conversion discards uncommitted text. Two controls had to be withdrawn to get here - a posted-event
+   `NSTextView` run and an earlier `TextEdit` report - and section 7.7 item 9 keeps both records. The
+   next probe needs no build: whether the candidate panel is on screen at all, whether a mouse click
+   commits a candidate, and whether Tab then Return commits where a bare Return does not.
