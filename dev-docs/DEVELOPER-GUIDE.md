@@ -2091,6 +2091,15 @@ the preedit first, because the library sees a key before the platform's input me
 This is implemented for GTK4 only. `dev-docs/IME.md` is the design: the Win32 and macOS
 integrations, the invariants, the caret seam, and what is still open.
 
+On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
+Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and
+a custom-drawn control gets none of it, so the GTK4 view installs `Gtk.EmojiChooser` itself and opens
+it on `Ctrl+Period`. It is anchored at the caret seam, its text is inserted through
+`UiHost.ProcessTextInput` so undo, validation, `MaxLength` and every `OnTextInput` override see typed
+text, and focus is handed back to the drawing area when it closes, because a popover takes the
+keyboard focus while it is up. The action it runs is installed on the drawing area as
+`emoji.insert-emoji`, so a menu can invoke the same path.
+
 ### Multi-line text
 
 `Multiline` turns the same `TextBox` into a multi-line editor. It is an opt-in extension in

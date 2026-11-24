@@ -96,6 +96,18 @@ public sealed class Gtk4SkiaView : IDisposable
     /// <summary>True while the input method has told the host about uncommitted text.</summary>
     private bool _composing;
 
+    /// <summary>
+    /// The emoji chooser, created on first use and parented to the drawing area. A custom-drawn
+    /// widget gets none of the emoji affordances GTK gives its own editable widgets.
+    /// </summary>
+    private Gtk.EmojiChooser? _emojiChooser;
+
+    /// <summary>
+    /// The action group that holds the emoji action. Kept alive here: the activation closure belongs
+    /// to this view, and the drawing area only references the group by name.
+    /// </summary>
+    private Gio.SimpleActionGroup? _emojiActions;
+
     private bool _inDraw;
     private bool _redrawPending;
     private bool _picturePassPending;
@@ -498,6 +510,22 @@ public sealed class Gtk4SkiaView : IDisposable
         _im.OnPreeditChanged -= OnImPreeditChanged;
         _im.OnPreeditEnd -= OnImPreeditEnd;
         _im.Dispose();
+
+        // The chooser is parented to the area, so it has to be taken out of it before it is released;
+        // its closed handler tolerates being called on the way out.
+        if (_emojiChooser is { } chooser)
+        {
+            _emojiChooser = null;
+            chooser.Unparent();
+            chooser.Dispose();
+        }
+
+        if (_emojiActions is { } emojiActions)
+        {
+            _emojiActions = null;
+            _area.InsertActionGroup("emoji", null);
+            emojiActions.Dispose();
+        }
 
         _gl?.Dispose();
         _gl = null;
@@ -1039,9 +1067,18 @@ public sealed class Gtk4SkiaView : IDisposable
         focus.OnEnter += OnFocusEnter;
         focus.OnLeave += OnFocusLeave;
         _area.AddController(focus);
+
+        AttachEmojiAction();
     }
 
-    private void OnFocusEnter(Gtk.EventControllerFocus sender, EventArgs args) => _im.FocusIn();
+    private void OnFocusEnter(Gtk.EventControllerFocus sender, EventArgs args)
+    {
+        _im.FocusIn();
+
+        // Told as soon as the area takes focus: an input method that starts composing on the first
+        // key already has a current location instead of the one the context held before.
+        MoveImCursor();
+    }
 
     private void OnFocusLeave(Gtk.EventControllerFocus sender, EventArgs args)
     {
@@ -1077,6 +1114,10 @@ public sealed class Gtk4SkiaView : IDisposable
             button,
             Gtk4KeyMap.MapModifiers(gesture.GetCurrentEventState()),
             Math.Max(args.NPress, 1));
+
+        // This is the click that repositioned the caret. The focus-in above can still have pushed
+        // the previous control's caret, so the location is refreshed once the control has it.
+        MoveImCursor();
     }
 
     private void OnReleased(Gtk.GestureClick gesture, Gtk.GestureClick.ReleasedSignalArgs args)
@@ -1093,6 +1134,9 @@ public sealed class Gtk4SkiaView : IDisposable
 
         var point = new SKPoint((float)args.X, (float)args.Y);
         Host.ProcessMouseUp(point, button, Gtk4KeyMap.MapModifiers(gesture.GetCurrentEventState()));
+
+        // A drag finalises the caret on release, so the candidate window follows that too.
+        MoveImCursor();
 
         // GTK has no context menu message of its own for a drawing area, so the release drives it,
         // which is also when Win32 asks for one.
@@ -1128,7 +1172,12 @@ public sealed class Gtk4SkiaView : IDisposable
             delta = (float)-args.Dx * scale;
         }
 
-        return Host.ProcessMouseWheel(_pointer, delta, Gtk4KeyMap.MapModifiers(sender.GetCurrentEventState()));
+        var handled = Host.ProcessMouseWheel(_pointer, delta, Gtk4KeyMap.MapModifiers(sender.GetCurrentEventState()));
+
+        // Scrolling moves the caret on screen even though it does not move it in the text.
+        MoveImCursor();
+
+        return handled;
     }
 
     /// <summary>Forwards a key press; returns true when the UI or the input method consumed it.</summary>
@@ -1153,16 +1202,42 @@ public sealed class Gtk4SkiaView : IDisposable
                 _im.Reset();
             }
 
+            // The library may have moved the caret (arrows, Home/End, Backspace, an editing
+            // shortcut), so the context is brought up to date before it can see another key.
+            MoveImCursor();
+
             return true;
         }
 
-        return sender.GetCurrentEvent() is { } keyEvent && _im.FilterKeypress(keyEvent);
+        // Ctrl+Period is the insertion gesture GNOME and Windows share, and the library's Key names
+        // no punctuation, so it can only be recognised here, by key value. Claimed before the input
+        // context so a context that would swallow the key cannot: the shortcut only ever exists as
+        // the value of an action, never as a key the accelerator machinery has to find.
+        if (args.Keyval == Gtk4KeyMap.KeyPeriod && (args.State & Gdk.ModifierType.ControlMask) != 0)
+        {
+            ActivateEmojiAction();
+            return true;
+        }
+
+        if (sender.GetCurrentEvent() is not { } keyEvent)
+        {
+            return false;
+        }
+
+        // The context has to know the insertion point on the turn the key arrives: an input method
+        // places its candidate window when it starts the composition, not after it has started.
+        MoveImCursor();
+
+        return _im.FilterKeypress(keyEvent);
     }
 
     private void OnImCommit(Gtk.IMContext sender, Gtk.IMContext.CommitSignalArgs args)
     {
         _composing = false;
         Host.CommitComposition(args.Str ?? string.Empty);
+
+        // The commit advanced the caret, which is where the next candidate window goes.
+        MoveImCursor();
     }
 
     private void OnImPreeditStart(Gtk.IMContext sender, EventArgs args)
@@ -1202,18 +1277,106 @@ public sealed class Gtk4SkiaView : IDisposable
     /// </summary>
     private void MoveImCursor()
     {
+        if (TryGetCaretRect() is { } caret)
+        {
+            _im.SetCursorLocation(caret);
+        }
+    }
+
+    /// <summary>The caret of the focused control as a GTK rectangle, in the area's coordinates.</summary>
+    /// <returns>Null when no control is focused, so there is nothing to anchor to.</returns>
+    private Gdk.Rectangle? TryGetCaretRect()
+    {
         if (!Host.TryGetCaretBounds(out var caret))
         {
-            return;
+            return null;
         }
 
-        _im.SetCursorLocation(new Gdk.Rectangle
+        return new Gdk.Rectangle
         {
             X = (int)MathF.Round(caret.Left),
             Y = (int)MathF.Round(caret.Top),
             Width = Math.Max(1, (int)MathF.Round(caret.Width)),
             Height = Math.Max(1, (int)MathF.Round(caret.Height)),
-        });
+        };
+    }
+
+    /// <summary>
+    /// Installs the emoji action on the drawing area.
+    /// </summary>
+    /// <remarks>
+    /// GNOME's emoji chooser is a widget GTK only gives its own editable widgets, and a custom-drawn
+    /// widget gets none of it. The Linux counterpart of Win+Period is therefore the backend's to
+    /// provide. The action is installed rather than called directly so a menu or a context menu can
+    /// invoke the same path later; the Ctrl+Period key is recognized in <see cref="OnKeyPressed"/>.
+    /// </remarks>
+    private void AttachEmojiAction()
+    {
+        var actions = Gio.SimpleActionGroup.New();
+
+        var action = Gio.SimpleAction.New("insert-emoji", null);
+        action.OnActivate += (_, _) => ShowEmojiChooser();
+        ((Gio.ActionMap)actions).AddAction(action);
+
+        _emojiActions = actions;
+        _area.InsertActionGroup("emoji", actions);
+    }
+
+    /// <summary>Activates the emoji action, which is the only path that opens the chooser.</summary>
+    private void ActivateEmojiAction()
+    {
+        if (_emojiActions is { } actions)
+        {
+            ((Gio.ActionGroup)actions).ActivateAction("insert-emoji", null);
+        }
+    }
+
+    private void ShowEmojiChooser()
+    {
+        if (_disposed)
+        {
+            return;
+        }
+
+        if (_emojiChooser is null)
+        {
+            _emojiChooser = Gtk.EmojiChooser.New();
+            _emojiChooser.SetParent(_area);
+
+            _emojiChooser.OnEmojiPicked += (_, args) =>
+            {
+                if (_disposed)
+                {
+                    return;
+                }
+
+                // Through the ordinary text path, so undo, validation, MaxLength and every control
+                // that overrides OnTextInput see typed text rather than a value written behind them.
+                Host.ProcessTextInput(args.Text);
+                MoveImCursor();
+            };
+
+            _emojiChooser.OnClosed += (_, _) =>
+            {
+                // A popover takes the keyboard focus, so it has to be handed back or the drawing
+                // area stays deaf and the next keystroke goes nowhere. GTK's own entry does the same
+                // from the same signal, which covers a pick, a dismissal and Escape alike.
+                if (!_disposed)
+                {
+                    _area.GrabFocus();
+                }
+            };
+        }
+
+        // Anchored at the same rect the candidate window uses, so it opens against the insertion
+        // point rather than the window corner. A control with no caret of its own answers its own
+        // bounds, and with nothing focused there is no anchor: the popup still opens, ungated.
+        if (TryGetCaretRect() is { } caret)
+        {
+            _emojiChooser.SetPointingTo(caret);
+        }
+
+        _emojiChooser.Popup();
     }
 
     /// <summary>

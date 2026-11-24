@@ -237,8 +237,17 @@ drawing area is the client widget of the input context.
   position of 1, so the unit is characters. The implementation still converts defensively: the
   value is clamped into the string, and a value past the character count is treated as a byte
   offset and mapped back to a character boundary, keeping a surrogate pair whole.
-- **Candidate window.** `SetCursorLocation` is called on preedit start and on every change, from
-  `Host.TryGetCaretBounds`, in widget coordinates.
+- **Candidate window.** `SetCursorLocation` is pushed from `Host.TryGetCaretBounds` in widget
+  coordinates. It is no longer pushed only when a preedit starts: the location is refreshed when the
+  drawing area takes focus, immediately before a key is offered to the context, after the library
+  consumes a key that can move the caret, after a press, a release, a wheel turn and a commit. An
+  input method decides where its candidate window goes on the turn it begins a composition, so a push
+  made only from `PreeditStart` arrives one turn too late and the first placement uses whatever the
+  context held before. Refreshing at those points removes that staleness. It is *not* an observation
+  that the window moved: the Linux host has `ibus` with no engines at all (`ibus-hangul`,
+  `ibus-pinyin`, `ibus-anthy` and `ibus-libpinyin` are absent) and `sudo` needs a password, so no
+  candidate window can be produced there, and `gtk-im-context-simple`, the context the live proof
+  used, draws none by design. Section 7.3 records the same limit.
 - **Focus.** A `Gtk.EventControllerFocus` on the drawing area does `FocusIn` when it gains focus and
   `CancelComposition`, `FocusOut` and `Reset` when it loses it, so a composition cannot outlive the
   focus.
@@ -349,6 +358,12 @@ without it proves nothing.
 A real input method's candidate window, its clause behaviour and its own preedit styling. Those are
 the platform's UI, not the library's, and every platform draws them differently. They are verified
 by hand, if at all, and they are the reasons section 8 leaves clause styling open.
+
+On the Linux host used for this work even the by-hand check could not be made: `ibus` is installed
+but no engine is (`ibus-hangul`, `ibus-pinyin`, `ibus-anthy` and `ibus-libpinyin` are all absent) and
+`sudo` needs a password, while `gtk-im-context-simple` draws no candidate window by design. The
+cursor-location maintenance described in section 6.1 is therefore reasoned from the order the
+signals arrive in, not an observed candidate-window move.
 
 ## 8. Status and open questions
 
