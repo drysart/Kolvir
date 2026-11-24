@@ -528,12 +528,12 @@ methods map onto the host contract like this.
 | Protocol method | What the backend does |
 |---|---|
 | `insertText:replacementRange:` | `Host.CommitComposition` with the string - an `NSString`, or an `NSAttributedString`'s value. The attributes are dropped: the field draws its own text. Then the marked state is cleared and the caret coordinates invalidated. |
-| `setMarkedText:selectedRange:replacementRange:` | Empty text cancels. Otherwise `Host.BeginComposition` on the first call and `Host.UpdateComposition(text, selectedRange.location)` on every one, so the composition opens once and then updates. |
+| `setMarkedText:selectedRange:replacementRange:` | Empty text cancels. Otherwise `Host.BeginComposition` on the first call and `Host.UpdateComposition(text, selectedRange.location)` on every one, so the composition opens once and then updates. `selectedRange.length` is kept as well: a conversion selects the run it is converting, so a real input method sends a non-empty selection there even though the caret the library draws is its location (section 7.7). |
 | `unmarkText` | `Host.CancelComposition`, idempotent because a commit already cleared the preedit. |
-| `hasMarkedText`, `markedRange`, `selectedRange` | The local marked state: the marked range is `{0, length}`, the selection is the preedit caret, and both are `{NSNotFound, 0}` when nothing is marked. |
+| `hasMarkedText`, `markedRange`, `selectedRange` | The local marked state: the marked range is `{0, length}`, the selection is the range the input method last reported - its location is the preedit caret and its length the run a conversion covers - and both are `{NSNotFound, 0}` when nothing is marked. |
 | `firstRectForCharacterRange:actualRange:` | `Host.TryGetCaretBounds`, converted to screen points (below). |
 | `doCommandBySelector:` | The key the input manager declined, forwarded as `ProcessKeyDown`. |
-| `attributedSubstringForProposedRange:actualRange:`, `validAttributesForMarkedText` | `nil` with `{NSNotFound, 0}`, and an empty attribute array: the library holds its own text and draws its own decorations. |
+| `attributedSubstringForProposedRange:actualRange:`, `validAttributesForMarkedText` | The marked run, clamped to the proposed range, and an empty attribute array. The library holds its own text and draws its own decorations, so the marked run is the only context it can honestly offer; a candidate list that is told "no text at all" has nothing to convert against. |
 | `characterIndexForPoint:`, `drawsVerticallyForCharacterAtIndex:`, `baselineDeltaForCharacterAtIndex:`, `fractionOfDistanceThroughGlyphForPoint:`, `attributedString`, `windowLevel`, `documentVisibleRect`, `unionRectInVisibleSelectedRange`, `preferredTextAccessoryPlacement`, `supportsAdaptiveImageGlyph`, `insertAdaptiveImageGlyph:replacementRange:` | The legal minimum. The whole protocol is required, so each of these is answered rather than omitted: the first character index, no vertical layout, zero baselines, no attributed string, the window's level, the view's bounds as the document, and inline image glyphs declined with a trace line. |
 
 - **Key routing.** `KeyDown` keeps its order and only changes what its tail does:
@@ -584,9 +584,12 @@ methods map onto the host contract like this.
   turn, a consumed key, a commit or a preedit change - because the header says the client must say so
   whenever the document's visual coordinates change and that `handleEvent:` is only an implicit
   notification. A click or a key the input manager never sees is neither.
-  What that does **not** establish is that the system uses the answer as the viewer's position: that
-  needs a session with a person in it (section 7.7, item 3). The one channel is a property of the API;
-  the placement is an observation, and it has not been made here.
+  **The system does use this answer.** Measured on the Mac host with Hiragana active: the caret answer
+  for a marked run at the start of the field was `(352, 712.2)` screen points, the candidate list
+  opened under the field at that X, and with the answer deliberately offset by `(+200, -100)` the
+  same list moved with it - X by the offset it was given, Y downwards, which is the direction the
+  offset was in. So the panel is placed from `firstRectForCharacterRange:`, not from a second piece
+  of client-side state, and on macOS there is no composition form that could drift away from it.
 - **The coordinate conversion, and its numbers.** The view is flipped, so a host rectangle is already
   in the view's own coordinate system, measured downwards like the host's. What is missing is where the
   view's *bottom* edge sits on the screen, because screen coordinates count upwards:
@@ -599,10 +602,11 @@ methods map onto the host contract like this.
 
   No backing scale appears anywhere, and `AppKitImeGeometry` is the only place this arithmetic lives.
   Measured on the 2x display of the Mac host, through a real `NSWindow` (section 7.6): a caret at host
-  `(8, 33.5)-(9.5, 46.5)` in a 320 point tall view whose bottom-left is at screen `(100, 125)` answers
-  `(108, 398.5)-(109.5, 411.5)`, which is exactly what `NSWindow.ConvertRectToScreen` says for the same
-  rectangle. A stray multiply by the 2x backing scale would have answered a Y of `921.5` for the same
-  caret - a candidate window beside the field rather than under it.
+  `(8, 33.5)-(9.5, 46.5)` in a 320 point tall view whose bottom-left is at screen `(100, 127)` answers
+  `(108, 400.5)-(109.5, 413.5)`, which is exactly what `NSWindow.ConvertRectToScreen` says for the same
+  rectangle. Scaling the vertical offset by the 2x backing factor instead of by 1 would answer `674`
+  for that Y - a candidate window 273 points above the caret it belongs to, and higher still on a
+  larger display.
 - **Focus.** `ResignFirstResponder` resets the composition and discards the marked text, so a
   composition cannot outlive the focus. The core already cancels on a focus change between controls
   (section 4.3); this covers the window losing the keyboard.
@@ -613,9 +617,10 @@ methods map onto the host contract like this.
   popup never takes the input focus, so no composition can begin there.
 - **Fallback.** What a composition or the character viewer inserts is drawn by the core text pipeline,
   which splits a string into runs and draws a character with a face that covers it
-  (`DEVELOPER-GUIDE.md`, fonts). That is the same code as on Windows and GTK4, so a committed Japanese
-  word or an emoji should be glyphs rather than boxes. It is **unverified on macOS**: the interactive
-  half could not be driven on the test host (section 7.7).
+  (`DEVELOPER-GUIDE.md`, fonts). That is the same code as on Windows and GTK4. Measured on the Mac host
+  with Hiragana active: a commit of `日本語` drew as three glyphs in the field, and the readout under it
+  reported `last commit: "日本語"  |  value: "日本語"` with `Name: 日本語 (3/24)` - three characters, one
+  commit, no doubling (section 7.7).
 
 ### 6.4 Why popups are out of scope
 
@@ -906,51 +911,65 @@ read, and the shipped path is exercised only against a real input method - secti
 
 ### 7.7 Verifying macOS with a real input method
 
-**None of this was run.** The Mac host's console session was at the login window when the work was
-tested: `/dev/console` was owned by `root`, the session record reported `kCGSSessionOnConsoleKey`
-false, and synthesized clicks and keystrokes arrived at the login session rather than the application -
-the demo's window existed and answered `System Events` queries, but a click and a keystroke changed
-nothing, and every screenshot showed the login background. `CGPreflightPostEventAccess` and
-`CGPreflightScreenCaptureAccess` both answer true, so this is a session boundary, not a missing
-permission grant. Unlocking needs a person at the machine. The host also had no Japanese, Chinese or
-Korean input source enabled - `AppleEnabledInputSources` listed the U.S. keyboard layout and the
-character palette only - so a daemon-driven composition would additionally need that added.
+This was first attempted with the Mac host's console at the login window and no CJK input source
+enabled, and nothing could be driven: `/dev/console` was owned by `root`, the session record reported
+`kCGSSessionOnConsoleKey` false, and synthesized clicks and keystrokes arrived at the login session
+rather than the application. It was then re-run with the console logged in, the demo launched over
+`ssh`, and a real input method: `AppleEnabledInputSources` already listed
+`com.apple.inputmethod.Kotoeri.RomajiTyping`, so nothing on the host had to be reconfigured - the
+source was switched with `Ctrl+Space`, used, and switched back.
 
-Marked text, a real commit and the viewer's placement are therefore **unverified**, not confirmed. The
-demo's **Text Input** page is the evidence surface, exactly as it is on Windows: the `Name` field has a
-readout under it - `Preedit: "..."  |  preedit caret: n  |  last commit: "..."  |  value: "..."` - plus
-a `Password` field and a `Read only` field. Run it with
-`dotnet run --project Kolvir.Demo.App --launch-profile mac -- --page text-input` (or `open -n` on the
-bundle, which also makes the app frontmost, as `dev-docs/MACOS-TESTRUN.md` records), then:
+The evidence surface is the demo's **Text Input** page, as on Windows: the `Name` field has a readout
+under it - `Preedit: "..."  |  preedit caret: n  |  last commit: "..."  |  value: "..."` - plus a
+`Password` field and a `Read only` field. Run it from the repository root with
+`dotnet run --project src/demo/Kolvir.Demo.App --launch-profile mac -- --page text-input`; the launch
+profile's `executablePath` is written for that directory, and the section "The route that works" in
+`MACOS-TESTRUN.md` records why.
 
-1. **A dead key composes instead of inserting.** Click `Name` and press **Option+E**. The field shows a
-   bare acute accent as marked text - underlined, or with AppKit's own composition underline - the
-   readout shows `Preedit: "´"` with a preedit caret, and `value` does not change. Before this change
-   the accent was inserted as a character and nothing was marked. (unverified)
-2. **The preedit caret reaches the field.** With the accent marked, press **E**. The readout shows
-   `last commit: "é"` and `value: "é"`, and the field shows `é` **once** - `é´` or `éé` is the second
-   text path this change removes. (unverified)
-3. **The character viewer opens at the caret.** Put the caret mid-field and press
-   **Ctrl+Cmd+Space**. The emoji panel opens beside the caret, not in a corner of the screen; click
-   somewhere else in the field and repeat. This is the one item section 6.3 cannot claim from the
-   code: the answer is tested, the use of it is not. (unverified)
-4. **Escape cancels.** Type into the field with an input method that marks text, press Escape: the
-   preedit goes, the value is unchanged, and undo adds nothing. (unverified)
-5. **The password field masks the preedit.** Click `Password` and compose: the marked text is masked
-   the same way the value is, and a commit inserts one masked character - the status line reads
-   `Password length: 1`. (unverified)
-6. **The read-only field refuses.** Click `Read only` and compose. No preedit appears, the field keeps
-   its text, and the input method's own window is dismissed rather than left over the field. This is
-   the macOS form of the Win32 defect in section 6.2; the discard is pinned by a test, its visible
-   effect is not. (unverified)
-7. **A Japanese input method, if one is enabled.** With Hiragana active, type `ni`, `hon`, Space,
-   Enter: the readout follows `に`, `にほん`, `日本`, the field shows `日本` once and as glyphs rather
-   than boxes, and the candidate list opens under the caret. (unverified, and needs an input source
-   added on the host first)
+What was **measured**, with screenshots of that readout:
 
-Steps 1, 2 and 4 exercise the shipped `KeyDown` and protocol paths end to end and are the ones the
-harness cannot reach, because it scripts the input manager. Step 3 is the placement question, step 6
-is the refusal's visible half, and step 7 is the only one that needs a daemon.
+1. **A dead key composes instead of inserting.** `Option+E` in the `Name` field left the field showing
+   a bare acute accent, the readout `Preedit: "´"  |  preedit caret: 1  |  value: ""`. The accent was
+   not inserted as a character: the value stayed empty. **Verified.**
+2. **The commit is the only text path, and it inserts once.** Pressing `E` after that accent gave
+   `last commit: "é"  |  value: "é"` with the status line `Name: é (1/24)` - one character, not two, so
+   nothing else also inserted it. **Verified.**
+3. **A daemon-driven IME composes, converts and commits.** With the Japanese source active, typing
+   `nihongo` produced marked runs `n`, `に`, `にほ`, ... and settled at `日本語`, then Enter gave
+   `last commit: "日本語"  |  value: "日本語"` and `Name: 日本語 (3/24)`. Three characters, one commit,
+   drawn as glyphs. The trace of the same run shows exactly one `insertText` for it. **Verified.**
+4. **The candidate list is positioned from the caret answer.** With a marked run at the start of the
+   field the caret answer was `(352, 712.2)` screen points and the candidate list opened under the
+   field at that X; offsetting the answer by `(+200, -100)` moved the list with it. **Verified**
+   (section 6.3 records what this settles).
+5. **Escape cancels without inserting.** With marked text present, Escape left the field's value
+   unchanged and inserted nothing. **Verified.** Note that the input method may consume the first
+   Escape to undo a conversion step and re-offer the mark; a second Escape or a deleted character ends
+   the composition. That is the input method's own state machine, not the client's.
+6. **`--page text-input` opens the page and the readout is drawn.** The readout line is visible below
+   the three fields and updates live with each composition step, on the frame every screenshot was
+   taken from. **Verified.**
+
+What is **not** verified, and stays a checklist:
+
+7. **The character viewer opens at the caret.** `Ctrl+Cmd+Space` was never pressed, so the emoji
+   panel's placement is unobserved. Its input - the caret answer - is now pinned as the answer the
+   candidate list uses (item 4), which is as far as this can be taken without a person at the machine.
+   **(unverified)**
+8. **The password field masks the preedit**, and **the read-only field refuses** a composition. The
+   refusal is pinned by a test (`AppKitCompositionTests`, and the harness check), but neither was
+   watched on screen. **(unverified)**
+9. **A conversion opened with Space instead of committed on Enter.** Observed twice: with a marked
+   run and Space pressed, the input method re-offered the run as a selected range, and the Enter that
+   followed delivered *no* callback at all to the client - no `insertText`, no `doCommandBySelector`,
+   no `unmarkText` - so the marked text ended with nothing committed. The same Enter after a mark
+   *without* a Space conversion does commit (item 3), so this is specific to the candidate-list state,
+   and it is recorded in section 8 as an open question rather than claimed as working. **(defect
+   observed, cause not isolated)**
+
+Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
+cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
+in this section is a hand run over `ssh` with `screencapture`.
 
 ## 8. Status and open questions
 
@@ -958,7 +977,7 @@ is the refusal's visible half, and step 7 is the only one that needs a daemon.
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
 | Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
-| macOS | Implemented; the marked-text path and the dead-key routing are covered by section 7.6 | Implemented through `NSTextInputClient`; **no real input method was driven**, because the test host's console was at the login window and no CJK input source was enabled (section 7.7) | **Implemented, interactive half unverified** |
+| macOS | Implemented; the marked-text path and the dead-key routing are covered by section 7.6 | Implemented through `NSTextInputClient`, and driven with the Japanese source that was already enabled on the test host (section 7.7): marked text, conversion to `日本語` and a single commit, with the candidate list placed from the caret answer. One case did not commit - a conversion opened with Space, item 9 of section 7.7 - and it is open question 6 below | **Implemented; interactive half measured, one open question** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
 `IMM32` calls behind it were measured against the Microsoft IME that is installed on this
@@ -973,8 +992,9 @@ message protocol to synthesize: the backend is the text input client, so the pro
 routing, the refusal, the re-entrancy guards and the caret arithmetic are all driven directly, and the
 suite fails when any of them is removed (section 7.6). What that cannot show is what AppKit's own input
 manager does with `interpretKeyEvents:`, because a view with no key window has no input context to drive
-it - and it cannot show what a person sees. Section 7.7 is that half, item by item, and every item is
-marked unverified for a stated reason rather than assumed.
+it. Section 7.7 is that half: a hand run over `ssh` with a real Japanese source, a live console and
+`screencapture`, on the demo's readout. Six of its items are measured; three are not, and one of the
+measured items is a defect rather than a success.
 
 Open questions:
 
@@ -996,3 +1016,12 @@ Open questions:
    after the whole preedit rather than inside it. The index is recorded and handed to the platform
    through the caret seam; repositioning the drawn caret inside the preedit comes with clause
    styling.
+6. **A conversion opened with Space commits nothing on macOS.** Observed twice on the Mac host with
+   Kotoeri: with a marked run, Space made the input method re-offer the run as a selected range, and
+   the Enter after it delivered no callback to the client at all - no `insertText`, no
+   `doCommandBySelector`, no `unmarkText` - so the marked text went away with nothing committed
+   (section 7.7, item 9). The same Enter after a mark with no Space conversion does commit, so the
+   difference is the candidate-list state, not the commit path. Two protocol answers that a
+   conversion exercises were corrected while chasing it - the selection's length and the marked run
+   as the attributed substring - and neither changed the outcome, so the cause is still open. It is
+   not claimed as working.

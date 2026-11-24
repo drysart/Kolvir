@@ -2152,7 +2152,10 @@ prove and what still needs a real input method to verify. On macOS the AppKit-fr
 (marked text, the refusal, the caret arithmetic, the re-entrancy guards) runs under `dotnet test`
 through `tests/backends/Kolvir.Backend.AppKit.Tests`, and the view-level half is
 `tests/backends/Kolvir.Backend.AppKit.Harness`, a console program because AppKit only builds its
-objects on the process's main thread.
+objects on the process's main thread. Neither can reach the input manager itself: on macOS the marked
+text, the commit and the candidate list were driven by hand over `ssh` with a real Japanese source
+against the demo's readout, and `dev-docs/IME.md` section 7.7 records which of those items were
+measured and which are still a checklist.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and
