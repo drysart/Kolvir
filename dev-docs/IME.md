@@ -722,7 +722,9 @@ without it proves nothing.
 
 `tests/backends/Kolvir.Backend.Win32.Tests/Win32ImeCompositionTests.cs` creates a real window, focuses
 a real text box and sends the real `WM_IME_*` messages to its real window procedure, so the message
-routing, the host calls and the text box are all the shipped ones. What it proves:
+routing, the host calls and the text box are all the shipped ones. These window-opening tests are
+currently disabled with `[Ignore]`, because the automated suite must not create Win32 windows; the
+list below records what they cover and what to expect when the attribute is removed. What it proves:
 
 1. `WM_IME_STARTCOMPOSITION` asks the focused control for a composition, and a `GCS_COMPSTR` update
    reaches the preedit with the input method's caret index while `Text` stays empty.
