@@ -272,12 +272,11 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         if (textBox.Text.Length == 0 && !string.IsNullOrEmpty(placeholderText))
         {
             paint.Color = Theme.Placeholder;
-            canvas.DrawText(
+            font.DrawText(
+                canvas,
                 placeholderText,
                 content.Left + offset.X,
                 content.Top + offset.Y + font.BaselineOffset,
-                SKTextAlign.Left,
-                font.SkFont,
                 paint);
         }
         else
@@ -298,12 +297,11 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
                     continue;
                 }
 
-                canvas.DrawText(
+                font.DrawText(
+                    canvas,
                     display[line.Start..line.End],
                     content.Left + offset.X,
                     top + font.BaselineOffset,
-                    SKTextAlign.Left,
-                    font.SkFont,
                     paint);
             }
         }

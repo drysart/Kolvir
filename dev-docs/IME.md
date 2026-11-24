@@ -380,6 +380,12 @@ Details that are not visible from the message table:
 - **`dwSize` is respected.** A request whose incoming `dwSize` is smaller than the structure is
   refused with `0` and left untouched, rather than written past what its caller allocated. Gecko and
   Chromium both discard such an answer; real callers send the full size, which the trace confirmed.
+- **Text the primary face does not cover needs a fallback face to be legible.** A committed Japanese
+  word drawn in a Latin face is a row of missing-glyph boxes, which is what the user saw on the first
+  successful commit; the fix is in the text pipeline rather than in this backend (see the fallback
+  section of `DEVELOPER-GUIDE.md`), because every control that draws a string has the same problem. The
+  same applies to an emoji inserted through the panel: it is a character like any other, and it draws
+  from a colour emoji face where the platform has one.
 - **Popups.** `Win32PopupWindow` and `Win32MenuWindow` are deliberately left alone, for the reason
   section 6.4 gives: a non-activating popup never takes the input focus, so no composition can begin
   there.
@@ -652,7 +658,9 @@ IME is Japanese and in Hiragana mode. The steps below name the readout each one 
    owns the caret inside its own string.
 3. **A commit inserts once.** Press Space to convert, then Enter. The readout shows `last commit: "日本"`
    and `value: "日本"`, and the field shows 日本 **once**. `日本日本` is the `GCS_RESULTSTR` plus
-   `WM_CHAR` doubling that section 6.2 suppresses.
+   `WM_CHAR` doubling that section 6.2 suppresses. The characters must be legible glyphs, not boxes:
+   the committed text is drawn through the library's own fallback (section 6.2), so a row of boxes here
+   means the machine has no face for that script rather than that the commit failed.
 4. **The candidate list appears at the caret on the first conversion.** Type `ka` and press Space. The
    candidate list opens just below the caret inside the field, not at the window corner and not in the
    bottom-right of the screen. Press Escape, click to move the caret to the middle of existing text, and

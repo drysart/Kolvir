@@ -2926,6 +2926,39 @@ old type still catches it. Disposing a font twice does nothing, and a font obtai
 keeps working after the one it came from is disposed: each derived font holds its own reference to the
 face.
 
+**Fallback for text the face does not cover.** A face with no glyph for a character draws a box, and
+a control that draws a committed word from another script in the default face therefore shows a row of
+boxes. Text is split into runs, each drawn and measured with a face that covers it: the primary face
+where it can, and otherwise the face the platform offers through `SKFontManager.MatchCharacter`,
+starting from the primary family. Latin text in a Latin face is one run and costs one managed scan
+for the ASCII check; Japanese, Chinese, Korean or emoji in the same string become runs beside it.
+
+The split is per run rather than per character, and it is the same split that `MeasureWidth` uses, so
+`LineHeight`-based wrapping, alignment, selection geometry and the caret all agree with what was
+drawn - a caret placed at a measured width lands on the boundary between two glyphs. The resolution is
+cached three ways: a string remembers its runs, a code point remembers the font that covers it, and a
+family and style remember the one font made for it. A string already split costs one dictionary lookup
+per frame.
+
+Measured on `win-x64`, SkiaSharp 4.154, 13 pt: a cached measure is 103 ns either way, a string the
+primary face covers adds one pass to decide it is ASCII (about 0.3 µs per thousand characters), and a
+string that needs several faces costs one shaping call per run - 0.6 µs per run, so a 1,001-character
+string alternating scripts every few characters (201 runs) costs 118 µs the first time it is seen and
+103 ns thereafter. A sentence with a word of Japanese in it is three runs.
+
+A **loaded** face gets fallback too. A pinned Latin face promises its own advances, line height and
+baseline, not that it contains every script; text it does not cover is still drawn with a system face
+rather than as boxes, and the pinned face's layout settings are mirrored onto the face standing in for
+it so the two do not measure differently on this platform alone. Two promises, kept apart: a pinned
+face's *metrics* are identical on every platform, and the *fallback* face is whatever each platform
+covers that script with.
+
+Colour emoji is the platform's business, and it works: with SkiaSharp 4.154 on Windows, an emoji at 28 pt
+renders from `Segoe UI Emoji` with 533 of its 628 inked pixels chromatic, so `COLR`/`CBDT` colour
+glyphs are drawn in colour rather than as a monochrome outline or a box. What this does not promise is
+that every platform's emoji font behaves that way; where it does not, the glyphs are the platform's
+own.
+
 **A loaded font is one face.** `WithSize` keeps it, and a weight or italic that the data does not
 contain is satisfied by the same face: nothing is synthesised, so `Weight` and `Italic` describe the
 face actually used rather than what was asked for. Span formatting in `RichLabel` follows the
