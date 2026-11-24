@@ -393,23 +393,35 @@ Two hazards, both fixed in this branch:
    emits the pair when the partner arrives, and drops a lone half. A composition commit is the
    realistic way to get such a character into a window.
 
-**Measured, versus assumed, on this machine.** The measured facts are what a machine with no input
-method installed does, and they are why section 7.3 substitutes a reader:
+**Measured, versus assumed, on this machine.** These were re-measured with the Japanese language pack
+and Microsoft IME installed, which the first runs did not have. The correction matters more than the
+result, because the first reading of the API was wrong about *why* the reads came back empty:
 
-- `Get-WinUserLanguageList` is `en-US` alone, with the generic `0409:00000409` layout: no Japanese,
-  Chinese or Korean IME exists here, so nothing below was proved with a real one.
-- `ImmGetContext` still returns a valid context on such a machine, and `ImmIsIME` still answers TRUE
-  for `0x0409:00000409`, which makes "no context" a poor test of "no IME".
-- `ImmGetProperty(hkl, IGP_SETCOMPSTR)` is `0`, so the installed layout does not support setting a
-  composition string at all. With both the composition and the reading buffer supplied at their
-  documented lengths, `ImmSetCompositionStringW(SCS_SETSTR)` answers TRUE and
-  `ImmGetCompositionStringW` then reads `0` bytes for `GCS_COMPSTR`, `GCS_COMPREADSTR`,
-  `GCS_CURSORPOS` and `GCS_RESULTSTR`. A first attempt that passed only the composition buffer
-  answered FALSE, which reads exactly like "no IME installed" and is why the call shape is recorded
-  here rather than retried.
-- Ignored on purpose: the input method's candidate window, its clause attributes
-  (`GCS_COMPCLAUSE`, `GCS_COMPATTR`) and its own preedit styling.
-- Measured with the trace on, against a real focused window on an English-only machine: the shell
+- `ImmGetProperty(hkl, IGP_SETCOMPSTR)` is `0` for `00000409` and `7` for `00000411`. The earlier
+  conclusion - "the installed layout does not support setting a composition string at all" - was a
+  property of the English layout, not of `ImmSetCompositionStringW`. `ImmIsIME` answers TRUE for both
+  layouts, so neither "no context" nor "not an IME" is a usable test.
+- `ImmGetIMEFileNameW` returns an empty name for `00000411` too. The Microsoft IME on Windows 11 is a
+  TSF text service rather than an `IMM32` `.ime` file, and `IMM32` reaches it through the CUAS bridge
+  in `msctf.dll`. That is why the name is empty, and it is the reason a message that never arrives is
+  a question about the bridge rather than about a missing IME.
+- `ImmSetCompositionStringW(SCS_SETSTR)` still stores nothing on an ordinary context. It stores the
+  string when the window has the focus **and** the context has been made the thread's active one with
+  `ImmSetActiveContext(hwnd, himc, TRUE)`; then `GCS_COMPSTR` reads back `こん` and `GCS_CURSORPOS`
+  reads `2`. The zero-byte reads recorded by the first probe were a call-shape and focus result, not
+  proof that the string cannot be read.
+- Set that way, the IME drives the real message path, in this order: `WM_IME_STARTCOMPOSITION`,
+  `WM_IME_COMPOSITION` with `lParam` `0x1B8` (the preedit), and then, on
+  `ImmNotifyIME(himc, NI_COMPOSITIONSTR, CPS_COMPLETE)` - what the confirm key does - a
+  `WM_IME_COMPOSITION` with `lParam` `0x1C00` carrying `GCS_RESULTSTR`, one `WM_IME_CHAR` per committed
+  character, and `WM_IME_ENDCOMPOSITION`. `DefWindowProc` turns each `WM_IME_CHAR` into a `WM_CHAR`,
+  measured arriving after `ImmNotifyIME` returns: `WM_CHAR` for `こ` and `ん`, from a commit that had
+  already delivered them. That is the doubling hazard above in the input method's own words, and it is
+  why the suppression is keyed on the committed text rather than on a flag.
+- Not measured here, and as unverified as on GTK4: the candidate window's position and appearance, the
+  clause attributes (`GCS_COMPCLAUSE`, `GCS_COMPATTR`) and the IME's own preedit styling. Those are
+  the checklist in section 7.5.
+- Measured with the trace on, against a real focused window: the shell
   does ask. `WM_IME_REQUEST` with `IMR_QUERYCHARPOSITION` arrived four to five times within 300 ms of
   the window taking the focus, every time on the focused window with `GetFocus()` matching, with
   `dwSize` = 36 and `dwCharPos` = 0, and our answer was `pt` in screen coordinates equal to the seam
@@ -524,11 +536,13 @@ routing, the host calls and the text box are all the shipped ones. What it prove
     marker only it knows and checking the marker survives.
 
 The composition string itself is published through `IWin32ImeComposition`, which is internal and
-defaults to `Win32ImeComposition.Instance`. That is forced by a measurement rather than chosen for
-convenience, and the measurement is in section 6.2: on a machine with no IME the installed layout has
-`IGP_SETCOMPSTR == 0`, so `ImmSetCompositionStringW(SCS_SETSTR)` answers TRUE and stores nothing, and
-`ImmGetCompositionStringW` reads zero bytes even when both the composition and the reading buffer are
-supplied. What the test therefore does **not** cover is listed in section 7.4.
+defaults to `Win32ImeComposition.Instance`. The seam exists so the message path can be driven where no
+composition can be produced: the hosted CI images carry no input method at all, and even here, with one
+installed, setting a composition string needs the context to be the thread's active one (section 6.2).
+It is held to three conditions - internal only, defaulting to the production instance, and pinned by a
+test that fails if that default is replaced with a fake. It is not there because this machine lacked an
+IME; it is there because a test cannot manufacture a composition without one. What the test therefore
+does **not** cover is listed in section 7.4, and what a person can cover is section 7.5.
 
 ### 7.4 What cannot be automated
 
@@ -536,11 +550,14 @@ A real input method's candidate window, its clause behaviour and its own preedit
 the platform's UI, not the library's, and every platform draws them differently. They are verified
 by hand, if at all, and they are the reasons section 8 leaves clause styling open.
 
-On Windows this is also where the Imm32 reads themselves sit: `ImmGetCompositionStringW` returning a
-real composition string, `ImmSetCompositionWindow` putting the input method's window where it was
-asked, and `ImmNotifyIME` cancelling a live composition are all unexercised here, because this machine
-has no input method to answer them. The message handling around them is covered; the calls' answers
-are not.
+On Windows the `IMM32` calls themselves used to be listed here. With an input method installed and its
+context made active they do answer: `ImmGetCompositionStringW` returns the composition string and the
+caret index, `ImmSetCompositionWindow` places the input method's window, `ImmNotifyIME` completes or
+cancels a live composition, and a commit really does arrive as `GCS_RESULTSTR` followed by
+`WM_IME_CHAR` per character (section 6.2). What stays out of a test's reach is the IME itself. The
+hosted CI runners are English-only images with no input method, so **CI cannot cover this path, and the
+tests do not claim to**: what they cover is the message handling, the suppression and the caret seam.
+The calls' real answers are covered by the manual checklist in section 7.5, item by item.
 
 The emoji panel is the other thing only a person can check. A test can prove the answer is right - the
 caret in screen coordinates, the same point from the thread's caret, and both moving with a click - but
@@ -568,23 +585,67 @@ open and still at the caret on the second, after typing had moved it. The switch
 is not.
 
 What that leaves unverified is the input method's own UI rather than its position: a real IME's
-candidate list, its clause attributes and its own preedit styling. Those need an IME installed (section
-7.5) and a person to look at them.
+candidate list, its clause attributes and its own preedit styling. Those need an IME installed and a
+person to look at them, which is section 7.5.
+
+### 7.5 Verifying with a real input method
+
+The Japanese language pack and its Microsoft IME are installed on this development machine, so the
+real path is reachable by hand. The demo's **Text Input** page carries the evidence: the `Name` field
+has a composition readout under it - `Preedit: "..."  |  preedit caret: n  |  last commit: "..."  |
+value: "..."` - plus a `Password` field and a `Read only` field holding
+`Read-only - select, then Ctrl+C`.
+
+Setup: run the demo, open **Text Input**, and press **Win+Space** (or use the language bar) until the
+IME is Japanese and in Hiragana mode. The steps below name the readout each one expects.
+
+1. **The preedit reaches the field.** Click `Name`, type `ni`. The field shows `に` underlined and the
+   readout shows `Preedit: "に"`, `preedit caret: 1`; `value` does not change, because a composition is
+   not text yet.
+2. **The preedit caret reaches the field.** Type `hon` so the readout shows `Preedit: "にほん"`,
+   `preedit caret: 3`. Press Left. The preedit stays `"にほん"` and `preedit caret` becomes `2`: the IME
+   owns the caret inside its own string.
+3. **A commit inserts once.** Press Space to convert, then Enter. The readout shows `last commit: "日本"`
+   and `value: "日本"`, and the field shows 日本 **once**. `日本日本` is the `GCS_RESULTSTR` plus
+   `WM_CHAR` doubling that section 6.2 suppresses.
+4. **The candidate list appears at the caret on the first conversion.** Type `ka` and press Space. The
+   candidate list opens just below the caret inside the field, not at the window corner and not in the
+   bottom-right of the screen. Press Escape, click to move the caret to the middle of existing text, and
+   repeat: the list must open at the new caret. That is the same composition form the emoji panel reads
+   (section 6.2).
+5. **Escape cancels without inserting.** Type `ka`, press Escape. `Preedit: ""`, `last commit` and
+   `value` are both unchanged.
+6. **The password field masks the preedit.** Click `Password`, type `ni`. The preedit appears masked, the
+   candidate list still opens at the caret, and a commit inserts masked characters - the status line
+   reads `Password length: 1` for one committed character.
+7. **The read-only field refuses a composition.** Click `Read only`, type `ni`. No preedit appears, the
+   readout stays empty, and the field still reads `Read-only - select, then Ctrl+C`.
+8. **The emoji panel lands at the caret with the IME active.** With the caret mid-field, press
+   **Win+Period**. The panel opens beside the caret. Switch back to English (Win+Space) and repeat: the
+   panel must still land at the caret.
+
+Steps 1-3, 5, 6 and 7 exercise the shipped `WM_IME_*` handling end to end, and step 4 and step 8 are the
+ones section 7.4 cannot reach. A test could be written for steps 1-5 the same way the probe in section
+6.2 was run - `LoadKeyboardLayoutW`, `ActivateKeyboardLayout`, `ImmSetActiveContext`, then
+`ImmSetCompositionStringW(SCS_SETSTR)` and a pumped message loop - but it can only run where an IME is
+installed, so it belongs behind a capability check (`GCS_COMPSTR` reading back empty means no IME) rather
+than in the CI suite.
 
 ## 8. Status and open questions
 
 | Platform | Dead keys / Compose | Daemon-driven IME | Status |
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
-| Win32 | Implemented and covered by section 7.3 | Implemented, but untestable on a machine with no IME (section 6.2) | **Done** |
+| Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), its UI is the section 7.5 checklist | **Done** |
 | macOS | Designed | Designed | Not implemented |
 
-No input method is installed on the Windows development machine used for this branch: only `en-US`
-with the generic `0409:00000409` layout. The Win32 path is therefore proved against a synthesized
-composition driven through the real messages, not against a Japanese, Chinese or Korean IME. Its
-candidate window, its clauses and its own preedit UI are unverified, exactly as they are on GTK4. The
-emoji panel's placement is the same kind of limit: the answers it reads are tested, but the panel
-itself is checked by hand (section 7.4).
+The Win32 path is proved against a synthesized composition driven through the real messages, and the
+`IMM32` calls behind it were measured against the Microsoft IME that is installed on this
+development machine (section 6.2). What that leaves is the input method's own UI - its candidate
+window, its clauses and its preedit styling - which is a person's job, not a test's: section 7.5 is
+the checklist, and it is the only place those items are claimed. CI cannot help here; the hosted
+runners carry no input method. The emoji panel's placement is the same kind of limit: the answers it
+reads are tested, and the panel itself was confirmed by hand on this machine (section 7.4).
 
 Open questions:
 
