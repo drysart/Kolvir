@@ -896,12 +896,29 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
 
                 if (_composition.HasMarkedText && key is Key.Space or Key.Enter or Key.Escape)
                 {
-                    AppKitImeTrace.Boundary($"{key} pressed while a mark is live");
+                    var selection = _composition.SelectedLocation + "," + _composition.SelectedLength;
+                    AppKitImeTrace.Boundary($"{key} pressed while a mark is live (selection {selection})");
+
+                    if (_composition.SelectedLength > 0)
+                    {
+                        AppKitImeTrace.Boundary("a commit key arrived with a candidate selected");
+                    }
+                }
+
+                if (!_composition.HasMarkedText && key == Key.Enter)
+                {
+                    AppKitImeTrace.Boundary("Enter pressed with no mark live");
                 }
             }
 
             if (key != Key.None && _host.ProcessKeyDown(key, modifiers))
             {
+                if (AppKitImeTrace.Enabled)
+                {
+                    AppKitImeTrace.Line($"key {key} taken by the host; the input method never sees it");
+                    AppKitImeTrace.Line($"reset the mark: reason=key taken by the host, key={key}, marked={_composition.HasMarkedText}");
+                }
+
                 // The input method never saw this key, so whatever it was composing cannot survive
                 // it: the field has already dropped its preedit, and the input manager's own state
                 // is reset here. This is GTK's IMContext.Reset and Win32's CPS_CANCEL.
@@ -971,6 +988,11 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     /// </remarks>
     public override bool ResignFirstResponder()
     {
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"reset the mark: reason=first responder resigning, marked={_composition.HasMarkedText}");
+        }
+
         _composition.Reset();
         return base.ResignFirstResponder();
     }
@@ -1017,7 +1039,12 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     {
         if (AppKitImeTrace.Enabled)
         {
-            AppKitImeTrace.Line($"setMarkedText '{TextOf(text)}' selected={selectedRange.Location},{selectedRange.Length} replacement={replacementRange.Location},{replacementRange.Length}");
+            if (!_composition.HasMarkedText)
+            {
+                AppKitImeTrace.Boundary("a composition starts");
+            }
+
+            AppKitImeTrace.Line($"setMarkedText '{TextOf(text)}' selected={selectedRange.Location},{selectedRange.Length} replacement={replacementRange.Location},{replacementRange.Length} candidate={selectedRange.Length > 0}");
         }
 
         _composition.SetMarkedText(
@@ -1142,6 +1169,12 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     {
         var name = selector?.Name ?? string.Empty;
 
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"doCommandBySelector '{name}' marked={_composition.HasMarkedText}");
+            AppKitImeTrace.Boundary($"AppKit dispatched the command '{name}' to this view");
+        }
+
         // The host callback can re-enter here. Without this, a command that moves the focus to a
         // control which answers by issuing another command never returns.
         if (_forwardingCommand)
@@ -1152,6 +1185,12 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
         }
 
         var key = KeyForCommand(name, _eventBeingInterpreted);
+
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"doCommandBySelector '{name}' maps to {key}");
+        }
+
         if (key == Key.None)
         {
             Trace($"doCommandBySelector {name}: nothing to forward");
@@ -1166,7 +1205,17 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
 
         try
         {
-            if (!_host.ProcessKeyDown(key, modifiers))
+            var markedBefore = _composition.HasMarkedText;
+            var taken = _host.ProcessKeyDown(key, modifiers);
+
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line(
+                    $"doCommandBySelector '{name}' forwarded {key}: host took it={taken}, " +
+                    $"marked before={markedBefore} after={_composition.HasMarkedText}");
+            }
+
+            if (!taken)
             {
                 Trace($"doCommandBySelector {name}: the library did not take {key}");
             }

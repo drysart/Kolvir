@@ -797,7 +797,15 @@ public sealed class AppKitWindowBackend : IWindowBackend
     /// an editing key, but the input manager's marked text would otherwise survive a Cmd+X and
     /// leave the view answering <c>hasMarkedText</c> for a composition that is over.
     /// </remarks>
-    internal void ResetInputComposition() => _view?.Composition.Reset();
+    internal void ResetInputComposition()
+    {
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"reset the mark: reason=a menu accelerator took the key, marked={_view?.Composition.HasMarkedText}");
+        }
+
+        _view?.Composition.Reset();
+    }
 
     /// <summary>
     /// Makes the window a drag destination, and takes it back out again when set to null. A window
