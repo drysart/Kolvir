@@ -41,6 +41,10 @@
   </Folder>
   <Folder Name="/tests/" />
   <Folder Name="/tests/backends/">
+    <!-- The AppKit suites are deliberately absent: they are executable net10.0-macos projects, and on
+         Windows the macOS SDK resolves the host's win-x64 as their runtime identifier, for which
+         there is no macOS runtime pack. A library in the same framework builds there; an app bundle
+         does not. Run them by path, as the Tests workflow does. -->
     <Project Path="tests/backends/Kolvir.Backend.Win32.Tests/Kolvir.Backend.Win32.Tests.csproj" />
   </Folder>
   <Folder Name="/tests/generators/">
