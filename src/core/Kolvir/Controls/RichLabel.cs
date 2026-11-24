@@ -308,7 +308,7 @@ public class RichLabel : Control
 
                 float baseline = fragment.Bounds.Top + line.Ascent;
                 textPaint.Color = ResolveSpanColor(fragment.Span);
-                canvas.DrawText(fragment.Text, fragment.Bounds.Left, baseline, SKTextAlign.Left, fragment.Font.SkFont, textPaint);
+                fragment.Font.DrawText(canvas, fragment.Text, fragment.Bounds.Left, baseline, textPaint);
             }
 
             DrawSpanDecorations(canvas, line, fill);

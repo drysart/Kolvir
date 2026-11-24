@@ -57,6 +57,47 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <summary>Everything that asked to see this window's messages, empty unless a feature attached one.</summary>
     private readonly Win32MessageFilters _messageFilters = new();
 
+    /// <summary>
+    /// Where the window procedure reads the input method's composition from. Internal, and defaulted to
+    /// the real Imm32 reader, so no application can substitute one and the shipped path cannot be a
+    /// fake; see <see cref="IWin32ImeComposition"/> for why the seam exists at all.
+    /// </summary>
+    internal IWin32ImeComposition ImeComposition { get; set; } = Win32ImeComposition.Instance;
+
+    /// <summary>True while the focused control is holding uncommitted text from the input method.</summary>
+    private bool _composing;
+
+    /// <summary>
+    /// True while a refusal is being sent to the input method, so a start message provoked by the
+    /// cancel itself cannot recurse.
+    /// </summary>
+    private bool _refusingComposition;
+
+    /// <summary>
+    /// The characters a commit has already inserted, which the input method's own WM_CHAR copies must
+    /// not insert again. Emptied as each one arrives.
+    /// </summary>
+    private string _pendingCommitText = string.Empty;
+
+    /// <summary>
+    /// The high half of a character past the BMP, held until the WM_CHAR that carries its partner
+    /// arrives, because one character cannot be handed over as half a pair.
+    /// </summary>
+    private char? _pendingHighSurrogate;
+
+    /// <summary>True while this window holds the thread's keyboard focus, which is when a caret exists.</summary>
+    private bool _hasKeyboardFocus;
+
+    /// <summary>The window the thread's system caret was created for, or zero when there is none.</summary>
+    private IntPtr _caretWindow;
+
+    /// <summary>Where the system caret was last put, so a message that changed nothing costs no call.</summary>
+    private int _caretX = int.MinValue;
+    private int _caretY = int.MinValue;
+
+    /// <summary>True once a diagnostic run has shown the system caret.</summary>
+    private bool _caretShown;
+
     /// <summary>The model's window, kept so a native window replacement can re-run its hooks.</summary>
     private Window? _modelWindow;
 
@@ -1088,6 +1129,7 @@ public sealed class Win32WindowBackend : IWindowBackend
             // Before the window goes away, so the modal handover happens while this window is
             // still the foreground one; see RestoreModalOwner.
             RestoreModalOwner();
+            ReleaseCaret();
             NativeMethods.DestroyWindow(_hwnd);
             _hwnd = IntPtr.Zero;
         }
@@ -1114,7 +1156,16 @@ public sealed class Win32WindowBackend : IWindowBackend
     {
         var key = MapKey((int)wParam);
         var modifiers = CurrentModifiers();
-        return key != Key.None && _host.ProcessKeyDown(key, modifiers);
+        var handled = key != Key.None && _host.ProcessKeyDown(key, modifiers);
+
+        // The library consumed the key, so the input method never saw it and cannot know the composition
+        // it was holding is over. Resetting it here is what the GTK view does with its input context.
+        if (handled)
+        {
+            CancelImeComposition();
+        }
+
+        return handled;
     }
 
     /// <summary>Maps a logical client point to physical screen pixels, for native menus.</summary>
@@ -1216,6 +1267,18 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
 
         UpdateHostSize();
+
+        // The trace proves it is running before anything interesting happens: the file existing says the
+        // instrumented build started, that the variable reached this process, and where it wrote. A
+        // trace that only writes when a message arrives cannot tell "never asked" from "logger off".
+        Win32ImeLog.WriteStartup(_hwnd, _className);
+        if (Win32ImeLog.Enabled)
+        {
+            // The heartbeat is what makes a run correlatable in wall-clock time, and its absence around
+            // the instant Win+Period is pressed is positive evidence that nothing messaged this process.
+            NativeMethods.SetTimer(_hwnd, Win32ImeLog.HeartbeatTimerId, Win32ImeLog.HeartbeatMilliseconds, IntPtr.Zero);
+        }
+
         return true;
     }
 
@@ -1523,11 +1586,29 @@ public sealed class Win32WindowBackend : IWindowBackend
 
     private IntPtr HandleMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
+        try
+        {
+            return HandleWindowMessage(hwnd, message, wParam, lParam);
+        }
+        finally
+        {
+            // The system caret follows the drawn one after every message rather than at a list of
+            // call sites: a key, a click, a composition step and a relayout can each move the
+            // insertion point, and anything that asks the thread where the caret is - an input
+            // method, the emoji panel, the touch keyboard - must never read a stale position.
+            SyncCaret();
+        }
+    }
+
+    private IntPtr HandleWindowMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    {
         // Messages raised while CreateWindowExW is still running arrive before _hwnd is assigned.
         if (_hwnd == IntPtr.Zero)
         {
             _hwnd = hwnd;
         }
+
+        LogImeMessage(hwnd, message, wParam, lParam);
 
         // Anything that asked to see the window's messages sees them first, and can stop the message
         // here. The check is against the snapshot, which is empty for a window no feature attached
@@ -1681,6 +1762,58 @@ public sealed class Win32WindowBackend : IWindowBackend
                 OnChar(wParam);
                 return IntPtr.Zero;
 
+            case NativeMethods.WmKeyDown:
+            case NativeMethods.WmSysKeyDown:
+                // A keystroke starts new text, so anything a commit still owed is no longer coming and
+                // the expectation must not survive to swallow a character the user actually typed.
+                _pendingCommitText = string.Empty;
+                break;
+
+            case NativeMethods.WmTimer:
+                if ((nuint)wParam == Win32ImeLog.HeartbeatTimerId)
+                {
+                    WriteImeHeartbeat();
+                    return IntPtr.Zero;
+                }
+
+                break;
+
+            case NativeMethods.WmSetFocus:
+                // The caret is per thread and exists only while a window of this thread has the focus,
+                // so it is created here and dropped in WM_KILLFOCUS. It is never shown: the library
+                // draws its own, and a second blinking caret would be a regression.
+                _hasKeyboardFocus = true;
+                Win32ImeLog.Write($"WM_SETFOCUS hwnd=0x{hwnd.ToInt64():X}: caret on the next message");
+                break;
+
+            case NativeMethods.WmKillFocus:
+                _hasKeyboardFocus = false;
+                ReleaseCaret();
+                Win32ImeLog.Write($"WM_KILLFOCUS hwnd=0x{hwnd.ToInt64():X}: caret released");
+                break;
+
+            case NativeMethods.WmImeSetContext:
+                return OnImeSetContext(hwnd, wParam, lParam);
+
+            case NativeMethods.WmImeRequest:
+                return OnImeRequest(hwnd, wParam, lParam);
+
+            case NativeMethods.WmImeStartComposition:
+                OnImeStartComposition(hwnd);
+                return NativeMethods.DefWindowProcW(hwnd, message, wParam, lParam);
+
+            case NativeMethods.WmImeComposition:
+                // Never to DefWindowProc: the default handler is one of the ways the result string
+                // becomes an ordinary WM_CHAR, and the commit has already inserted the text.
+                OnImeComposition(hwnd, lParam);
+                return IntPtr.Zero;
+
+            case NativeMethods.WmImeEndComposition:
+                // A commit has already cleared the preedit, which is what makes this idempotent.
+                _composing = false;
+                _host.CancelComposition();
+                return IntPtr.Zero;
+
             case NativeMethods.WmSetCursor:
                 if (NativeMethods.LowWord(lParam) == NativeMethods.HtClient)
                 {
@@ -1710,6 +1843,8 @@ public sealed class Win32WindowBackend : IWindowBackend
                 // A window that is being replaced is not this window going away.
                 if (hwnd == _hwnd)
                 {
+                    // The thread's caret belongs to a window that is about to stop existing.
+                    ReleaseCaret();
                     _hwnd = IntPtr.Zero;
                 }
 
@@ -2662,15 +2797,590 @@ public sealed class Win32WindowBackend : IWindowBackend
         return _host.ProcessContextMenu(ScreenToLogical(screen.X, screen.Y));
     }
 
+    /// <summary>
+    /// Turns a <c>WM_CHAR</c> into text for the focused control, dropping the copies that belong to a
+    /// composition commit and pairing a character that arrives in two messages.
+    /// </summary>
     private void OnChar(IntPtr wParam)
     {
         var character = (char)(int)wParam;
-        if (char.IsControl(character))
+
+        // A commit inserted its text through the ordinary text path, and the input method still turns
+        // the same characters into WM_CHAR. Dropping the ones it owes is what stops a commit from
+        // inserting twice.
+        if (ConsumeCommittedChar(character))
+        {
+            return;
+        }
+
+        // WM_CHAR carries UTF-16 code units, so a character past the BMP arrives as two messages. The
+        // high half is held until its partner arrives, which is what keeps such a character whole
+        // instead of handing the host a lone surrogate.
+        if (_pendingHighSurrogate is { } high)
+        {
+            _pendingHighSurrogate = null;
+
+            if (char.IsLowSurrogate(character))
+            {
+                _host.ProcessTextInput(new string(new[] { high, character }));
+                return;
+            }
+
+            // Not a pair, so the held unit was stray and is dropped; this character is handled alone.
+        }
+
+        if (char.IsHighSurrogate(character))
+        {
+            _pendingHighSurrogate = character;
+            return;
+        }
+
+        if (char.IsControl(character) || char.IsLowSurrogate(character))
         {
             return;
         }
 
         _host.ProcessTextInput(character.ToString());
+    }
+
+    /// <summary>
+    /// True when <paramref name="character"/> is the next one a commit has already inserted.
+    /// </summary>
+    /// <remarks>
+    /// Matching is character by character rather than by count, so a WM_CHAR that is not the commit's
+    /// own text clears the expectation and is delivered instead of being swallowed.
+    /// </remarks>
+    private bool ConsumeCommittedChar(char character)
+    {
+        if (_pendingCommitText.Length == 0)
+        {
+            return false;
+        }
+
+        if (_pendingCommitText[0] != character)
+        {
+            _pendingCommitText = string.Empty;
+            return false;
+        }
+
+        _pendingCommitText = _pendingCommitText[1..];
+        return true;
+    }
+
+    /// <summary>
+    /// Answers what an input method asks about the caret. The emoji panel and the touch keyboard send
+    /// <c>IMR_QUERYCHARPOSITION</c> before they decide where to appear, and a window that does not
+    /// answer leaves them anchored to the window instead of to the insertion point.
+    /// </summary>
+    private unsafe IntPtr OnImeRequest(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
+    {
+        // Only one request is answered here. Everything else belongs to the default handler, and
+        // swallowing a request the backend does not implement would hide it.
+        if ((uint)wParam != NativeMethods.ImrQueryCharPosition || lParam == IntPtr.Zero)
+        {
+            Win32ImeLog.Write($"  request wParam=0x{unchecked((uint)wParam):X4} is not IMR_QUERYCHARPOSITION: DefWindowProc");
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmImeRequest, wParam, lParam);
+        }
+
+        var size = (uint)sizeof(NativeMethods.IMECHARPOSITION);
+        var position = (NativeMethods.IMECHARPOSITION*)lParam;
+
+        // The caller sizes the structure it allocated. An incoming size below ours means it expects a
+        // smaller one, so writing ours would run past its buffer; Gecko and Chromium both answer
+        // nothing in that case rather than a structure the caller will discard.
+        var incomingSize = position->dwSize;
+        var incomingCharPos = position->dwCharPos;
+
+        if (incomingSize < size)
+        {
+            Win32ImeLog.Write(
+                $"  IMR_QUERYCHARPOSITION rejected: incoming dwSize={incomingSize} < {size} charPos={incomingCharPos}");
+            return IntPtr.Zero;
+        }
+
+        if (!NativeMethods.GetClientRect(hwnd, out var client))
+        {
+            Win32ImeLog.Write("  IMR_QUERYCHARPOSITION: no client rectangle, DefWindowProc");
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmImeRequest, wParam, lParam);
+        }
+
+        var document = new NativeMethods.POINT();
+        NativeMethods.ClientToScreen(hwnd, ref document);
+
+        // A window with nothing focused still has to answer. The shell's fallback when it has no anchor
+        // at all is the bottom-right corner of the screen, which is what a report of "the panel opens in
+        // the corner" looks like, so the client area's top-left is the honest answer for a window whose
+        // controls hold no caret.
+        var anchored = _host.TryGetCaretBounds(out var caret);
+        var origin = anchored ? LogicalToScreen(new SKPoint(caret.Left, caret.Top)) : document;
+
+        if (!anchored)
+        {
+            Win32ImeLog.Write("  IMR_QUERYCHARPOSITION: nothing is focused, answering from the client origin");
+        }
+
+        // A diagnostic run can answer with fixed screen coordinates instead, which is what decides
+        // whether the shell uses the point at all or places the panel somewhere of its own choosing.
+        var testPoint = Win32ImeLog.TestPoint;
+        if (testPoint is { } point)
+        {
+            origin = new NativeMethods.POINT { X = (int)point.X, Y = (int)point.Y };
+        }
+
+        // dwCharPos stays as the caller set it: it names a character of the composition, and this
+        // library commits text rather than holding a composition string of its own. dwSize is never
+        // shrunk below what the caller allocated.
+        position->dwSize = Math.Max(incomingSize, size);
+        position->pt = origin;
+        position->cLineHeight = LineHeightOf(_host.FocusedControl);
+        position->rcDocument = new NativeMethods.RECT
+        {
+            Left = document.X,
+            Top = document.Y,
+            Right = document.X + client.Right,
+            Bottom = document.Y + client.Bottom,
+        };
+
+        Win32ImeLog.Write(
+            $"  IMR_QUERYCHARPOSITION answered: in dwSize={incomingSize} charPos={incomingCharPos} -> "
+            + $"pt={position->pt.X},{position->pt.Y} line={position->cLineHeight} "
+            + $"doc={position->rcDocument.Left},{position->rcDocument.Top},{position->rcDocument.Right},{position->rcDocument.Bottom} "
+            + $"size={position->dwSize} result={size} pointer={PointerText()}"
+            + (testPoint is null ? string.Empty : $" testPoint={position->pt.X},{position->pt.Y} (KOLVIR_IME_TEST_POINT)"));
+
+        // The size is how an application says it handled the request.
+        return new IntPtr((int)size);
+    }
+
+    /// <summary>
+    /// The height of a line in <paramref name="control"/>'s font, in device pixels, or the theme's own
+    /// line height when nothing with a font is focused, because a zero line height would tell an input
+    /// method there is nowhere to put its window.
+    /// </summary>
+    private uint LineHeightOf(Control? control)
+    {
+        var height = (control?.EffectiveFont ?? Theme.DefaultFont).LineHeight;
+        if (height <= 0f && _host.TryGetCaretBounds(out var caret))
+        {
+            height = caret.Height;
+        }
+
+        return (uint)Math.Max(1, MathF.Round(height * _scale));
+    }
+
+    /// <summary>
+    /// Keeps the thread's system caret on the focused control's insertion point.
+    /// </summary>
+    /// <remarks>
+    /// The caret is created one pixel square and never shown - the library draws its own - so it exists
+    /// only to answer the question "where is the insertion point" for anything that asks the thread
+    /// rather than the window: an input method's candidate window, the emoji panel, the touch keyboard.
+    /// A caret belongs to one window and a thread has one, so a second Kolvir window that takes the
+    /// focus recreates it. This is a push, so it runs after every message rather than on a list of
+    /// events: a key, a click, a composition step and a relayout can each move the caret.
+    /// </remarks>
+    private void SyncCaret()
+    {
+        if (_hwnd == IntPtr.Zero || !_hasKeyboardFocus)
+        {
+            return;
+        }
+
+        if (_caretWindow != _hwnd)
+        {
+            ReleaseCaret();
+            NativeMethods.CreateCaret(_hwnd, IntPtr.Zero, 1, 1);
+            _caretWindow = _hwnd;
+        }
+
+        if (!_host.TryGetCaretBounds(out var caret))
+        {
+            return;
+        }
+
+        var x = (int)MathF.Round(caret.Left * _scale);
+        var y = (int)MathF.Round(caret.Top * _scale);
+
+        if (x == _caretX && y == _caretY)
+        {
+            return;
+        }
+
+        NativeMethods.SetCaretPos(x, y);
+        _caretX = x;
+        _caretY = y;
+
+        if (Win32ImeLog.Enabled)
+        {
+            var screen = new NativeMethods.POINT { X = x, Y = y };
+            NativeMethods.ClientToScreen(_hwnd, ref screen);
+            Win32ImeLog.Write(
+                $"caret client={x},{y} screen={screen.X},{screen.Y} focus=0x{NativeMethods.GetFocus().ToInt64():X}");
+        }
+
+        // The composition window follows the caret from the moment there is one, not only while a
+        // composition is running. The emoji panel reads this form, and an unset one sits at the client
+        // origin - which is why the first open of a run landed at the window's top-left corner while
+        // every later open, after our composition handler had written the form, landed at the caret.
+        UpdateCompositionWindow(x, y);
+
+        if (Win32ImeLog.ShowCaret && !_caretShown)
+        {
+            // Experiment 1: the only visibility signal a thread exposes is GUI_CARETBLINKING, which
+            // ShowCaret sets. Nothing extra is drawn - the caret is still one pixel, under ours.
+            _caretShown = NativeMethods.ShowCaret(_hwnd);
+            Win32ImeLog.Write($"  ShowCaret -> {_caretShown} (KOLVIR_IME_SHOW_CARET)");
+        }
+    }
+
+    /// <summary>
+    /// Puts the input context's composition window at the caret with no composition active.
+    /// </summary>
+    /// <remarks>
+    /// This runs only when the rounded caret point changed, so a message that did not move the caret
+    /// costs nothing. The calls themselves are cheap - about 1.4 microseconds for
+    /// <c>ImmGetContext</c>, <c>ImmSetCompositionWindow</c> and <c>ImmReleaseContext</c> together,
+    /// measured on this machine - and a caret move is at most a few per second.
+    /// </remarks>
+    private void UpdateCompositionWindow(int x, int y)
+    {
+        var context = NativeMethods.ImmGetContext(_hwnd);
+        if (context == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            PlaceCompositionWindow(context, x, y);
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(_hwnd, context);
+        }
+    }
+
+    /// <summary>
+    /// One line per IME message when the trace is on. This is what decides between "the application was
+    /// never asked" and "it answered and was ignored", which are different problems with different
+    /// fixes.
+    /// </summary>
+    private static void LogImeMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    {
+        if (!Win32ImeLog.Enabled || !IsImeMessage(message))
+        {
+            return;
+        }
+
+        var name = message switch
+        {
+            NativeMethods.WmImeSetContext => "WM_IME_SETCONTEXT",
+            NativeMethods.WmImeStartComposition => "WM_IME_STARTCOMPOSITION",
+            NativeMethods.WmImeEndComposition => "WM_IME_ENDCOMPOSITION",
+            NativeMethods.WmImeComposition => "WM_IME_COMPOSITION",
+            _ => "WM_IME_REQUEST",
+        };
+
+        Win32ImeLog.Write(
+            $"{name} hwnd=0x{hwnd.ToInt64():X} focus=0x{NativeMethods.GetFocus().ToInt64():X} "
+            + $"wParam=0x{unchecked((uint)wParam.ToInt64()):X4} lParam=0x{lParam.ToInt64():X}");
+    }
+
+    private static bool IsImeMessage(uint message) => message is
+        NativeMethods.WmImeSetContext or NativeMethods.WmImeStartComposition
+        or NativeMethods.WmImeEndComposition or NativeMethods.WmImeComposition
+        or NativeMethods.WmImeRequest;
+
+    /// <summary>The pointer position as text for the trace, or "?" when the system will not say.</summary>
+    private static string PointerText() =>
+        NativeMethods.GetCursorPos(out var pointer) ? $"{pointer.X},{pointer.Y}" : "?";
+
+    /// <summary>
+    /// One line every half second while tracing: what the thread's caret looks like right now and
+    /// whether a composition is live. It proves the trace is alive, and it puts a timestamp on every
+    /// moment of the run, so the instant the emoji panel was asked for can be found by looking for a gap
+    /// with no IME line in it - which is positive evidence that the panel never messaged this process.
+    /// The pointer is in the line because one hypothesis for a panel that lands in a fixed screen
+    /// position is that it falls back to the mouse pointer, and a run can only be checked against that
+    /// if the pointer is recorded at the same moments.
+    /// </summary>
+    private void WriteImeHeartbeat()
+    {
+        var info = new NativeMethods.GUITHREADINFO
+        {
+            cbSize = (uint)Marshal.SizeOf<NativeMethods.GUITHREADINFO>(),
+        };
+
+        NativeMethods.GetGUIThreadInfo(0, ref info);
+
+        Win32ImeLog.Write(
+            $"heartbeat caretWindow=0x{info.hwndCaret.ToInt64():X} "
+            + $"rcCaret={info.rcCaret.Left},{info.rcCaret.Top},{info.rcCaret.Right},{info.rcCaret.Bottom} "
+            + $"focus=0x{NativeMethods.GetFocus().ToInt64():X} composing={_composing} "
+            + $"caret=0x{_caretWindow.ToInt64():X} hasFocus={_hasKeyboardFocus} pointer={PointerText()}");
+    }
+
+    /// <summary>Destroys the thread's caret if this window is the one that created it.</summary>
+    private void ReleaseCaret()
+    {
+        if (_caretWindow == IntPtr.Zero)
+        {
+            return;
+        }
+
+        NativeMethods.DestroyCaret();
+        _caretWindow = IntPtr.Zero;
+        _caretX = int.MinValue;
+        _caretY = int.MinValue;
+        _caretShown = false;
+    }
+
+    /// <summary>
+    /// Stops the system drawing its own composition window, because the library draws the preedit
+    /// itself, and leaves the rest of the message to the default handler.
+    /// </summary>
+    private IntPtr OnImeSetContext(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
+    {
+        // The flag sits in the low 32 bits of the LPARAM and its value is unsigned, so the mask is
+        // applied to the DWORD and the result widened back the way Windows fills an LPARAM.
+        var flags = unchecked((uint)lParam.ToInt64()) & ~NativeMethods.IscShowUiCompositionWindow;
+        return NativeMethods.DefWindowProcW(
+            hwnd,
+            NativeMethods.WmImeSetContext,
+            wParam,
+            new IntPtr(unchecked((int)flags)));
+    }
+
+    /// <summary>
+    /// Asks the focused control to take a composition and, when it does, anchors the input method's
+    /// window at the caret and tells it which font the field uses.
+    /// </summary>
+    private void OnImeStartComposition(IntPtr hwnd)
+    {
+        _composing = _host.BeginComposition();
+
+        if (!_composing)
+        {
+            RefuseComposition(hwnd);
+            return;
+        }
+
+        var context = NativeMethods.ImmGetContext(hwnd);
+        if (context == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            PlaceCompositionWindow(context);
+            SetCompositionFont(context);
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    /// <summary>
+    /// Tells the input method that the composition it just started is not wanted: the focused control
+    /// refused it, and the input method has to take its own state and window down rather than keep
+    /// them over a field that will never accept the text.
+    /// </summary>
+    /// <remarks>
+    /// Declining in the host is invisible to the input method - it started a composition because it was
+    /// asked to, and answering the message while keeping quiet leaves its window on screen over a
+    /// read-only field. This is the one place a refusal is made audible. Saying this does not make the
+    /// control refuse the *characters*: an input method that cancels still delivers what the user typed
+    /// as ordinary text on the next key, and the field's own text-input path decides what to do with it.
+    /// </remarks>
+    private void RefuseComposition(IntPtr hwnd)
+    {
+        if (_refusingComposition)
+        {
+            // The cancel itself provoked another start message. Cancelling that too would be a loop,
+            // and an unresponsive input method must not be able to ping-pong the window procedure.
+            Win32ImeLog.Write(
+                $"WM_IME_STARTCOMPOSITION refused while already refusing hwnd=0x{hwnd.ToInt64():X}: "
+                + "another start arrived from the cancel and is not answered");
+            return;
+        }
+
+        var context = NativeMethods.ImmGetContext(hwnd);
+        if (context == IntPtr.Zero)
+        {
+            Win32ImeLog.Write($"WM_IME_STARTCOMPOSITION refused hwnd=0x{hwnd.ToInt64():X}: no input context to cancel on");
+            return;
+        }
+
+        _refusingComposition = true;
+        try
+        {
+            ImeComposition.Cancel(context);
+            Win32ImeLog.Write($"WM_IME_STARTCOMPOSITION refused hwnd=0x{hwnd.ToInt64():X}: composition cancelled");
+        }
+        finally
+        {
+            _refusingComposition = false;
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    /// <summary>
+    /// Reads what the input method reports and routes it: the uncommitted text to the preedit, the
+    /// committed text through the ordinary text path.
+    /// </summary>
+    private void OnImeComposition(IntPtr hwnd, IntPtr lParam)
+    {
+        var flags = unchecked((uint)lParam.ToInt64());
+        var context = NativeMethods.ImmGetContext(hwnd);
+
+        try
+        {
+            var source = ImeComposition;
+
+            if ((flags & NativeMethods.GcsCompStr) != 0)
+            {
+                if (!_composing)
+                {
+                    // Some input methods report a composition without a start message first.
+                    _composing = _host.BeginComposition();
+                }
+
+                if (!_composing)
+                {
+                    // Nothing accepted this composition - read-only, disabled, or a control with no
+                    // preedit - so the update belongs to nobody. Showing it would put uncommitted text
+                    // over a field that will never take the commit.
+                    Win32ImeLog.Write(
+                        $"WM_IME_COMPOSITION dropped hwnd=0x{hwnd.ToInt64():X}: the focused control is not composing");
+                    return;
+                }
+
+                _host.UpdateComposition(source.CompositionString(context), source.CaretPosition(context));
+            }
+
+            if ((flags & NativeMethods.GcsResultStr) != 0)
+            {
+                if (!_composing)
+                {
+                    // A result for a composition this field refused. Inserting it would be text the
+                    // field said it would not take, and the characters still arrive as WM_CHAR for a
+                    // field that accepts ordinary input.
+                    Win32ImeLog.Write(
+                        $"WM_IME_COMPOSITION result dropped hwnd=0x{hwnd.ToInt64():X}: no live composition");
+                    return;
+                }
+
+                var committed = source.ResultString(context);
+
+                // The commit inserts the text, and the same characters are still on their way back as
+                // WM_CHAR; remembering them is what lets OnChar drop that second copy.
+                _pendingCommitText += committed;
+                _composing = false;
+                _host.CommitComposition(committed);
+            }
+
+            if (_composing && context != IntPtr.Zero)
+            {
+                // The candidate window follows the caret, which the preedit has just moved.
+                PlaceCompositionWindow(context);
+            }
+        }
+        finally
+        {
+            if (context != IntPtr.Zero)
+            {
+                NativeMethods.ImmReleaseContext(hwnd, context);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drops a live composition and tells the input method to abandon it as well. This is the Win32
+    /// form of the GTK view resetting its input context after a key the library consumed: the input
+    /// method never saw the key, so it must not carry a half-finished preedit into the next one.
+    /// </summary>
+    private void CancelImeComposition()
+    {
+        if (!_composing)
+        {
+            return;
+        }
+
+        _composing = false;
+
+        var context = NativeMethods.ImmGetContext(_hwnd);
+        if (context != IntPtr.Zero)
+        {
+            try
+            {
+                ImeComposition.Cancel(context);
+            }
+            finally
+            {
+                NativeMethods.ImmReleaseContext(_hwnd, context);
+            }
+        }
+
+        _host.CancelComposition();
+    }
+
+    /// <summary>
+    /// Anchors the input method's window at the caret of the focused control: the host answers in
+    /// logical client pixels and a composition form takes device pixels, so the window's scale is the
+    /// only conversion.
+    /// </summary>
+    private void PlaceCompositionWindow(IntPtr context)
+    {
+        if (!_host.TryGetCaretBounds(out var caret))
+        {
+            return;
+        }
+
+        PlaceCompositionWindow(
+            context,
+            (int)MathF.Round(caret.Left * _scale),
+            (int)MathF.Round(caret.Top * _scale));
+    }
+
+    /// <summary>Positions the input method's window at a point already in device client pixels.</summary>
+    private static void PlaceCompositionWindow(IntPtr context, int x, int y)
+    {
+        var form = new NativeMethods.COMPOSITIONFORM
+        {
+            dwStyle = NativeMethods.CfsPoint,
+            ptCurrentPos = new NativeMethods.POINT { X = x, Y = y },
+        };
+
+        NativeMethods.ImmSetCompositionWindow(context, ref form);
+    }
+
+    /// <summary>
+    /// Tells the input method which font to draw its own window in, taken from the focused control so it
+    /// matches the field rather than the system default.
+    /// </summary>
+    private unsafe void SetCompositionFont(IntPtr context)
+    {
+        if (_host.FocusedControl?.EffectiveFont is not { } font)
+        {
+            return;
+        }
+
+        var logFont = new NativeMethods.LOGFONTW
+        {
+            // The input method's window is drawn in device pixels, so the field's logical size is
+            // scaled like everything else on this window.
+            lfHeight = -(int)MathF.Round(font.Size * _scale),
+            lfWeight = font.Weight,
+            lfItalic = (byte)(font.Italic ? 1 : 0),
+            lfCharSet = 1, // DEFAULT_CHARSET
+        };
+
+        // The struct is a local, so its address is stable for the call and the fixed buffer never needs
+        // pinning. Passing the pointer keeps the struct blittable, which matters under NativeAOT.
+        Win32LogFont.SetFaceName(&logFont, font.FamilyName);
+        NativeMethods.ImmSetCompositionFontW(context, ref logFont);
     }
 
     private void UpdateHostSize()

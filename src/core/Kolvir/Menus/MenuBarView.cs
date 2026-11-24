@@ -226,7 +226,7 @@ public sealed class MenuBarView : Control
             }
 
             var baseline = title.MidY + (font.BaselineOffset - (font.LineHeight * 0.5f));
-            canvas.DrawText(bar.Menus[i].DisplayText, title.Left + TitlePadding, baseline, SKTextAlign.Left, font.SkFont, text);
+            font.DrawText(canvas, bar.Menus[i].DisplayText, title.Left + TitlePadding, baseline, text);
         }
     }
 

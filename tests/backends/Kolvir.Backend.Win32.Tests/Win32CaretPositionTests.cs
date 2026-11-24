@@ -1,0 +1,777 @@
+using System.Runtime.InteropServices;
+using Kolvir;
+using SkiaSharp;
+
+namespace Kolvir.Backend.Win32.Tests;
+
+/// <summary>
+/// Where Windows is told the insertion point is. The emoji panel and the touch keyboard ask before they
+/// appear, so a library that draws its own caret has to answer both ways Windows asks: the thread's
+/// caret, and <c>WM_IME_REQUEST</c> with <c>IMR_QUERYCHARPOSITION</c>.
+/// </summary>
+/// <remarks>
+/// The diagnosis and the fix are measured the same way, with <c>GetGUIThreadInfo</c> against a real
+/// focused text box in a real window. Before the caret existed it reported <c>hwndCaret == 0</c> and an
+/// empty rectangle, which is exactly why the emoji panel anchored to the window instead of the caret.
+/// </remarks>
+[TestClass]
+[TestCategory("Platform.Win32")]
+public sealed class Win32CaretPositionTests
+{
+    private const int MKLButton = 0x0001;
+
+    /// <summary>The other request a real IME sends, which this backend deliberately does not answer.</summary>
+    private const uint ImrCandidateWindow = 0x0002;
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct GUITHREADINFO
+    {
+        public uint cbSize;
+        public uint flags;
+        public IntPtr hwndActive;
+        public IntPtr hwndFocus;
+        public IntPtr hwndCapture;
+        public IntPtr hwndMenuOwner;
+        public IntPtr hwndMoveSize;
+        public IntPtr hwndCaret;
+        public NativeMethods.RECT rcCaret;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
+    /// <summary>The scale the backend works at, from the same place it reads it: the window's DPI.</summary>
+    private static float ScaleOf(IntPtr hwnd) => NativeMethods.GetDpiForWindow(hwnd) / 96f;
+
+    private static NativeMethods.POINT ToScreenPoint(IntPtr hwnd, SKRect caret)
+    {
+        var scale = ScaleOf(hwnd);
+        var point = new NativeMethods.POINT
+        {
+            X = (int)MathF.Round(caret.Left * scale),
+            Y = (int)MathF.Round(caret.Top * scale),
+        };
+
+        NativeMethods.ClientToScreen(hwnd, ref point);
+        return point;
+    }
+
+    private static IntPtr PointParam(int x, int y) => new((y << 16) | (x & 0xFFFF));
+
+    /// <summary>Asks the window what an input method asks it, and hands back what it filled in.</summary>
+    private static (int Returned, NativeMethods.IMECHARPOSITION Answer) Ask(
+        IntPtr hwnd,
+        uint request,
+        uint charPos = 0,
+        uint? dwSize = null)
+    {
+        var size = Marshal.SizeOf<NativeMethods.IMECHARPOSITION>();
+        var buffer = Marshal.AllocHGlobal(size);
+
+        try
+        {
+            Marshal.StructureToPtr(
+                new NativeMethods.IMECHARPOSITION
+                {
+                    dwSize = dwSize ?? (uint)size,
+                    dwCharPos = charPos,
+                },
+                buffer,
+                false);
+
+            var returned = (int)NativeMethods.SendMessageW(hwnd, NativeMethods.WmImeRequest, new IntPtr(request), buffer);
+
+            return (returned, Marshal.PtrToStructure<NativeMethods.IMECHARPOSITION>(buffer));
+        }
+        finally
+        {
+            Marshal.FreeHGlobal(buffer);
+        }
+    }
+
+    /// <summary>Dispatches one message, which is what makes the caret sync run.</summary>
+    private static void Settle(IntPtr hwnd) =>
+        NativeMethods.SendMessageW(hwnd, NativeMethods.WmNull, IntPtr.Zero, IntPtr.Zero);
+
+    private static (IntPtr CaretWindow, GUITHREADINFO Info) ThreadCaret()
+    {
+        var info = new GUITHREADINFO { cbSize = (uint)Marshal.SizeOf<GUITHREADINFO>() };
+        var ok = GetGUIThreadInfo(0, ref info);
+
+        Assert.IsTrue(ok, "GetGUIThreadInfo should answer for this thread");
+
+        return (info.hwndCaret, info);
+    }
+
+    /// <summary>
+    /// Gives the window the keyboard focus. A background process may not take the foreground on its
+    /// own, and without it the window never sees <c>WM_SETFOCUS</c>, which is what creates the caret, so
+    /// the test attaches to the foreground thread the way a shell does.
+    /// </summary>
+    private static void TakeFocus(IntPtr hwnd)
+    {
+        var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out uint _);
+        var ourThread = GetWindowThreadProcessId(hwnd, out uint _);
+
+        if (foregroundThread != ourThread)
+        {
+            AttachThreadInput(ourThread, foregroundThread, true);
+            SetForegroundWindow(hwnd);
+            SetFocus(hwnd);
+            AttachThreadInput(ourThread, foregroundThread, false);
+        }
+
+        Assert.AreEqual(hwnd, NativeMethods.GetFocus(), "the window holds the keyboard focus, which a caret requires");
+    }
+
+    /// <summary>A real window with a real text box in it, and the body run inside its shown handler.</summary>
+    /// <param name="title">The window title.</param>
+    /// <param name="body">Runs with keyboard focus and the real message loop underneath it.</param>
+    /// <param name="afterRun">
+    /// Runs once the loop has drained, which is when messages the body posted have been translated and
+    /// dispatched. Reading the trace needs this: the pump writes those lines, not the body.
+    /// </param>
+    private static void Run(string title, Action<IntPtr, Window, TextBox> body, Action? afterRun = null)
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            var box = new TextBox { Dock = DockStyle.Fill, Text = "hello world" };
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(box);
+
+            var window = new Window(title, panel) { ClientSize = new SKSize(320f, 160f) };
+
+            window.AddShownHandler(_ =>
+            {
+                try
+                {
+                    var backend = (Win32WindowBackend)window.Backend;
+
+                    box.Focus();
+                    TakeFocus(backend.Handle);
+
+                    body(backend.Handle, window, box);
+                }
+                finally
+                {
+                    application.Exit();
+                }
+            });
+
+            window.Show();
+            application.Run();
+
+            afterRun?.Invoke();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A real window whose loop ends only after the posted keys have been through the pump, which is
+    /// the one place the key trace is written. <see cref="Run"/> ends by closing its window, and a key
+    /// that arrives after the window is gone is not handled by anything, so its swallowed flag would be
+    /// a lie.
+    /// </summary>
+    private static void RunWithKeys(string title, IntPtr[] keys, Action afterRun)
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            var box = new TextBox { Dock = DockStyle.Fill, Text = "hello world" };
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(box);
+
+            var window = new Window(title, panel) { ClientSize = new SKSize(320f, 160f) };
+
+            window.AddShownHandler(_ =>
+            {
+                var backend = (Win32WindowBackend)window.Backend;
+
+                box.Focus();
+                TakeFocus(backend.Handle);
+
+                foreach (var key in keys)
+                {
+                    NativeMethods.PostMessageW(backend.Handle, NativeMethods.WmKeyDown, key, IntPtr.Zero);
+                }
+
+                // Posted after the keys, so the queue hands them to a live window before the loop ends.
+                NativeMethods.PostQuitMessage(0);
+            });
+
+            window.Show();
+            application.Run();
+
+            afterRun();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheRequestAnswersTheCaretInScreenCoordinates() => Run("ime request", (hwnd, window, box) =>
+    {
+        box.CaretIndex = 5;
+
+        Assert.IsTrue(window.Host.TryGetCaretBounds(out var caret), "the seam answers for a focused text box");
+
+        var (returned, answer) = Ask(hwnd, NativeMethods.ImrQueryCharPosition, charPos: 3);
+        var size = Marshal.SizeOf<NativeMethods.IMECHARPOSITION>();
+
+        Assert.AreEqual(size, returned, "the structure's size is how an app says it handled the request");
+        Assert.AreEqual((uint)size, answer.dwSize, "and the structure is filled in as the contract says");
+        Assert.AreEqual(3u, answer.dwCharPos, "the character the caller asked about is left as it was");
+
+        var expected = ToScreenPoint(hwnd, caret);
+        Assert.AreEqual(expected.X, answer.pt.X, "the caret is answered in screen coordinates");
+        Assert.AreEqual(expected.Y, answer.pt.Y);
+
+        Assert.IsTrue(NativeMethods.GetClientRect(hwnd, out var client));
+        var origin = new NativeMethods.POINT();
+        NativeMethods.ClientToScreen(hwnd, ref origin);
+
+        Assert.AreEqual(origin.X, answer.rcDocument.Left, "the document rectangle is the client area on screen");
+        Assert.AreEqual(origin.Y, answer.rcDocument.Top);
+        Assert.AreEqual(origin.X + client.Right, answer.rcDocument.Right);
+        Assert.AreEqual(origin.Y + client.Bottom, answer.rcDocument.Bottom);
+
+        var lineHeight = (uint)Math.Max(1, MathF.Round(box.EffectiveFont.LineHeight * ScaleOf(hwnd)));
+        Assert.AreEqual(lineHeight, answer.cLineHeight, "a line height comes from the field's own font");
+    });
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void ClickingElsewhereInTheFieldMovesBothAnswers() => Run("ime click", (hwnd, window, box) =>
+    {
+        box.CaretIndex = 0;
+
+        var before = Ask(hwnd, NativeMethods.ImrQueryCharPosition).Answer;
+
+        Assert.IsTrue(NativeMethods.GetClientRect(hwnd, out var client));
+
+        var x = client.Right * 3 / 4;
+        var y = client.Bottom / 2;
+        NativeMethods.SendMessageW(hwnd, NativeMethods.WmLButtonDown, new IntPtr(MKLButton), PointParam(x, y));
+        NativeMethods.SendMessageW(hwnd, NativeMethods.WmLButtonUp, IntPtr.Zero, PointParam(x, y));
+
+        Assert.AreEqual(box.Text.Length, box.CaretIndex, "the click put the caret at the end of the text");
+
+        var after = Ask(hwnd, NativeMethods.ImrQueryCharPosition).Answer;
+
+        Assert.IsTrue(
+            after.pt.X > before.pt.X,
+            "the answer follows the caret, not the window, so a panel anchored to it moves with a click");
+
+        var (caretWindow, info) = ThreadCaret();
+
+        Assert.AreEqual(hwnd, caretWindow, "the thread's caret is the one this window made");
+        Assert.AreEqual(after.pt.X - after.rcDocument.Left, info.rcCaret.Left, "and it moved with the caret too");
+    });
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheThreadCaretReportsTheSamePointAsTheRequest() => Run("thread caret", (hwnd, window, box) =>
+    {
+        box.CaretIndex = 5;
+
+        // The caret is a push, so it reaches the thread on the next message.
+        Settle(hwnd);
+
+        var (caretWindow, info) = ThreadCaret();
+
+        Assert.AreEqual(hwnd, caretWindow, "the focused window owns the thread's caret");
+        Assert.AreEqual(hwnd, info.hwndFocus, "and it owns the keyboard focus while it does");
+
+        var answer = Ask(hwnd, NativeMethods.ImrQueryCharPosition).Answer;
+
+        // GetGUIThreadInfo answers in client coordinates and the request answers in screen coordinates,
+        // so the two agree once the document origin is taken off.
+        Assert.AreEqual(answer.pt.X - answer.rcDocument.Left, info.rcCaret.Left);
+        Assert.AreEqual(answer.pt.Y - answer.rcDocument.Top, info.rcCaret.Top);
+        Assert.AreEqual(info.rcCaret.Left + 1, info.rcCaret.Right, "the caret is one pixel, because it is never shown");
+        Assert.AreEqual(info.rcCaret.Top + 1, info.rcCaret.Bottom);
+    });
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void ARequestTheBackendDoesNotImplementIsNotSwallowed() => Run("ime other request", (hwnd, window, box) =>
+    {
+        box.CaretIndex = 5;
+
+        var (returned, answer) = Ask(hwnd, ImrCandidateWindow);
+
+        // The size is this backend's answer, so a different value can only be the default handler's.
+        Assert.AreEqual(
+            0,
+            returned, "an unimplemented request reaches DefWindowProc instead of being answered here");
+        Assert.AreEqual(0u, answer.dwCharPos, "and nothing this backend fills in is written to it");
+    });
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheTraceProvesItIsRunningBeforeAnythingIsAsked()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-heartbeat-{Guid.NewGuid():N}.log");
+
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+
+            var box = new TextBox { Dock = DockStyle.Fill, Text = "hello world" };
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(box);
+
+            var window = new Window("ime heartbeat", panel) { ClientSize = new SKSize(320f, 160f) };
+
+            window.AddShownHandler(_ =>
+            {
+                box.Focus();
+                box.CaretIndex = 5;
+                TakeFocus(((Win32WindowBackend)window.Backend).Handle);
+            });
+
+            window.Show();
+
+            // The window timer only fires while the real loop pumps, so this test waits in the loop
+            // rather than inside a handler, which is also how a user's run spends its time.
+            using var timer = new System.Threading.Timer(
+                _ => application.BeginInvoke(() => application.Exit()),
+                null,
+                1600,
+                System.Threading.Timeout.Infinite);
+
+            application.Run();
+
+            Assert.IsTrue(System.IO.File.Exists(path), "tracing wrote its file as soon as the window existed");
+
+            var lines = System.IO.File.ReadAllLines(path);
+
+            Assert.IsTrue(lines.Length > 0, "the trace is not empty");
+            Assert.IsTrue(
+                lines[0].Contains("trace enabled pid=", StringComparison.Ordinal),
+                "the first line proves the instrumented build, the variable and the file, before anything is asked");
+            Assert.IsTrue(lines[0].Contains(path, StringComparison.Ordinal), "and says where it is writing");
+
+            var heartbeats = lines.Where(line => line.Contains(" heartbeat ", StringComparison.Ordinal)).ToArray();
+
+            Assert.IsTrue(heartbeats.Length >= 2, $"the heartbeat runs while the loop runs (saw {heartbeats.Length})");
+            Assert.IsTrue(
+                heartbeats[0].Contains("rcCaret=", StringComparison.Ordinal),
+                "and carries the caret Windows would report, which is the point of it");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+            application.Dispose();
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheDiagnosticTraceWritesWhatItSeesAndStopsWhenUnset()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-trace-{Guid.NewGuid():N}.log");
+
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+
+            Run("ime trace", (hwnd, window, box) =>
+            {
+                box.CaretIndex = 5;
+                Ask(hwnd, NativeMethods.ImrQueryCharPosition);
+            });
+
+            Assert.IsTrue(System.IO.File.Exists(path), "the trace goes to the file the variable names");
+
+            var trace = System.IO.File.ReadAllText(path);
+
+            Assert.IsTrue(trace.Contains("WM_IME_REQUEST", StringComparison.Ordinal), "the message is logged");
+            Assert.IsTrue(
+                trace.Contains("IMR_QUERYCHARPOSITION answered", StringComparison.Ordinal),
+                "with what was answered, which is what tells 'never asked' from 'answered and ignored'");
+            Assert.IsTrue(trace.Contains("focus=0x", StringComparison.Ordinal), "and the focus it was asked with");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheTraceRecordsWhetherAKeyReachedTheInputMethod()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-keys-{Guid.NewGuid():N}.log");
+
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+
+        const int vkA = 0x41;
+        const int vkLeft = 0x25;
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+
+            RunWithKeys(
+                "ime key trace",
+                new[] { new IntPtr(vkA), new IntPtr(vkLeft) },
+                () =>
+                {
+                    var trace = System.IO.File.ReadAllText(path);
+
+                    Assert.IsTrue(
+                        trace.Contains("pump WM_KEYDOWN vk=0x41 swallowed=False", StringComparison.Ordinal),
+                        "a letter the library leaves alone reaches TranslateMessage, which is what lets an input "
+                        + "method see it - the opposite would mean no composition can ever start");
+                    Assert.IsTrue(
+                        trace.Contains("pump WM_KEYDOWN vk=0x25 swallowed=True", StringComparison.Ordinal),
+                        "a key the library does handle is logged as swallowed, because it never reaches the "
+                        + "input method");
+                });
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheTestPointAnswersWithFixedScreenCoordinates()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-testpoint-{Guid.NewGuid():N}.log");
+
+        var previousLog = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+        var previousPoint = Environment.GetEnvironmentVariable(Win32ImeLog.TestPointVariable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, "100,100");
+
+            Run("ime test point", (hwnd, window, box) =>
+            {
+                box.CaretIndex = 5;
+
+                var (returned, answer) = Ask(hwnd, NativeMethods.ImrQueryCharPosition);
+                var size = Marshal.SizeOf<NativeMethods.IMECHARPOSITION>();
+
+                Assert.AreEqual(size, returned, "the request is still answered");
+                Assert.AreEqual(100, answer.pt.X, "the point is answered exactly as asked");
+                Assert.AreEqual(100, answer.pt.Y);
+
+                Assert.IsTrue(NativeMethods.GetClientRect(hwnd, out var client));
+                var origin = new NativeMethods.POINT();
+                NativeMethods.ClientToScreen(hwnd, ref origin);
+
+                Assert.AreEqual(origin.X, answer.rcDocument.Left, "while the document rectangle stays the real one");
+                Assert.AreEqual(origin.Y + client.Bottom, answer.rcDocument.Bottom);
+                Assert.IsTrue(answer.cLineHeight >= 1, "and the line height is still filled in");
+            });
+
+            var trace = System.IO.File.ReadAllText(path);
+
+            Assert.IsTrue(
+                trace.Contains("testPoint=100,100 (KOLVIR_IME_TEST_POINT)", StringComparison.Ordinal),
+                "the answer line says the override was used, so a run reports it");
+            Assert.IsTrue(trace.Contains("pointer=", StringComparison.Ordinal), "and carries the pointer position");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previousLog);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, previousPoint);
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void AWindowWithNothingFocusedStillAnswersFromItsClientOrigin()
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            // No focusable control at all: this is the demo at startup, and the state in which the shell
+            // has no anchor and falls back to the bottom-right corner of the screen.
+            var window = new Window("ime unfocused", new Panel { Dock = DockStyle.Fill })
+            {
+                ClientSize = new SKSize(320f, 160f),
+            };
+
+            window.AddShownHandler(_ =>
+            {
+                try
+                {
+                    var hwnd = ((Win32WindowBackend)window.Backend).Handle;
+
+                    Assert.IsFalse(window.Host.TryGetCaretBounds(out SKRect _), "nothing is focused, so there is no caret");
+
+                    var (returned, answer) = Ask(hwnd, NativeMethods.ImrQueryCharPosition);
+                    var size = Marshal.SizeOf<NativeMethods.IMECHARPOSITION>();
+
+                    Assert.AreEqual(size, returned, "the request is still answered rather than left to DefWindowProc");
+
+                    Assert.IsTrue(NativeMethods.GetClientRect(hwnd, out var client));
+                    var origin = new NativeMethods.POINT();
+                    NativeMethods.ClientToScreen(hwnd, ref origin);
+
+                    Assert.AreEqual(origin.X, answer.pt.X, "the answer is the client origin in screen coordinates");
+                    Assert.AreEqual(origin.Y, answer.pt.Y);
+                    Assert.AreEqual(origin.X + client.Right, answer.rcDocument.Right);
+                    Assert.AreEqual(origin.Y + client.Bottom, answer.rcDocument.Bottom);
+                    Assert.IsTrue(answer.cLineHeight >= 1, "with a line height, so the shell has somewhere to put it");
+                }
+                finally
+                {
+                    application.Exit();
+                }
+            });
+
+            window.Show();
+            application.Run();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheCompositionFormFollowsTheCaretOutsideAComposition() => Run(
+        "ime composition form",
+        (hwnd, window, box) =>
+        {
+            box.CaretIndex = 5;
+            Settle(hwnd);
+
+            var answer = Ask(hwnd, NativeMethods.ImrQueryCharPosition).Answer;
+            var expectedX = answer.pt.X - answer.rcDocument.Left;
+            var expectedY = answer.pt.Y - answer.rcDocument.Top;
+
+            var (found, form) = CompositionForm(hwnd);
+
+            Assert.IsTrue(found, "the form is set even though no composition ever started");
+            Assert.AreEqual(NativeMethods.CfsPoint, form.dwStyle, "anchored at a point");
+            Assert.AreEqual(expectedX, form.ptCurrentPos.X, "at the caret the request answers with");
+            Assert.AreEqual(expectedY, form.ptCurrentPos.Y);
+        });
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheCompositionFormIsNotSetWhenNothingIsFocused()
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            var window = new Window("ime form unfocused", new Panel { Dock = DockStyle.Fill })
+            {
+                ClientSize = new SKSize(320f, 160f),
+            };
+
+            window.AddShownHandler(_ =>
+            {
+                try
+                {
+                    var hwnd = ((Win32WindowBackend)window.Backend).Handle;
+
+                    Assert.IsFalse(window.Host.TryGetCaretBounds(out SKRect _), "nothing is focused");
+
+                    // A marker only this test knows about: nothing focused must leave it exactly as it
+                    // is, which is independent of whatever a previous test on this thread left behind.
+                    SetCompositionForm(hwnd, 5, 5);
+                    Settle(hwnd);
+                    Settle(hwnd);
+
+                    var (found, form) = CompositionForm(hwnd);
+
+                    Assert.IsTrue(found);
+                    Assert.AreEqual(5, form.ptCurrentPos.X, "a window with no caret leaves the form alone");
+                    Assert.AreEqual(5, form.ptCurrentPos.Y);
+                }
+                finally
+                {
+                    application.Exit();
+                }
+            });
+
+            window.Show();
+            application.Run();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void AnUnmovedCaretDoesNotRewriteTheCompositionForm() => Run(
+        "ime form stable",
+        (hwnd, window, box) =>
+        {
+            box.CaretIndex = 5;
+            Settle(hwnd);
+
+            Assert.IsTrue(CompositionForm(hwnd).Found, "the form is set to begin with");
+
+            // Write a marker only this test knows about. If a message that does not move the caret
+            // re-issued the update, the marker would be overwritten with the caret again.
+            SetCompositionForm(hwnd, 5, 5);
+
+            Settle(hwnd);
+            Settle(hwnd);
+
+            var (found, form) = CompositionForm(hwnd);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(5, form.ptCurrentPos.X, "an unmoved caret does not re-issue the update");
+            Assert.AreEqual(5, form.ptCurrentPos.Y);
+        });
+
+    /// <summary>Stores a composition window form the test can recognise, so a rewrite is visible.</summary>
+    private static void SetCompositionForm(IntPtr hwnd, int x, int y)
+    {
+        var context = NativeMethods.ImmGetContext(hwnd);
+        Assert.AreNotEqual(IntPtr.Zero, context, "the window has an input context");
+
+        try
+        {
+            var marker = new NativeMethods.COMPOSITIONFORM
+            {
+                dwStyle = NativeMethods.CfsPoint,
+                ptCurrentPos = new NativeMethods.POINT { X = x, Y = y },
+            };
+
+            Assert.IsTrue(NativeMethods.ImmSetCompositionWindow(context, ref marker), "the marker is stored");
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    /// <summary>What the window's input context holds for its composition window right now.</summary>
+    private static (bool Found, NativeMethods.COMPOSITIONFORM Form) CompositionForm(IntPtr hwnd)
+    {
+        var context = NativeMethods.ImmGetContext(hwnd);
+
+        if (context == IntPtr.Zero)
+        {
+            return (false, default);
+        }
+
+        try
+        {
+            var found = NativeMethods.ImmGetCompositionWindow(context, out var form);
+            return (found, form);
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    [TestMethod]
+    public void TheDiagnosticTraceAndItsExperimentsAreOffByDefault()
+    {
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+        var previousShow = Environment.GetEnvironmentVariable(Win32ImeLog.ShowCaretVariable);
+        var previousPoint = Environment.GetEnvironmentVariable(Win32ImeLog.TestPointVariable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, null);
+            Environment.SetEnvironmentVariable(Win32ImeLog.ShowCaretVariable, null);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, null);
+
+            Assert.IsFalse(Win32ImeLog.Enabled, "nothing is written unless a log was asked for");
+            Assert.IsFalse(Win32ImeLog.ShowCaret, "and the caret experiment runs only when asked for");
+            Assert.IsNull(Win32ImeLog.TestPoint, "and nothing is overridden");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+            Environment.SetEnvironmentVariable(Win32ImeLog.ShowCaretVariable, previousShow);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, previousPoint);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void ARequestSizedSmallerThanTheStructureIsRefused() => Run(
+        "ime small request",
+        (hwnd, window, box) =>
+        {
+            box.CaretIndex = 5;
+
+            // Gecko and Chromium both discard an answer whose caller expected a smaller structure, and
+            // writing ours would run past what it allocated. Real callers send the full size, which is
+            // what the trace shows, so this only guards the contract.
+            var (returned, answer) = Ask(hwnd, NativeMethods.ImrQueryCharPosition, dwSize: 8);
+
+            Assert.AreEqual(0, returned, "a structure too small to fill is refused rather than written");
+            Assert.AreEqual(8u, answer.dwSize, "and the caller's own size is left exactly as it was");
+            Assert.AreEqual(0, answer.pt.X, "with nothing written into it");
+            Assert.AreEqual(0, answer.pt.Y);
+        });
+}

@@ -647,12 +647,12 @@ public static class MenuRenderer
             }
 
             text.Color = Scale(item.Enabled ? Theme.Foreground : Theme.DisabledForeground, MathF.Max(alpha, 0.85f));
-            canvas.DrawText(item.DisplayText, textLeft, baseline, SKTextAlign.Left, rowFont.SkFont, text);
+            rowFont.DrawText(canvas, item.DisplayText, textLeft, baseline, text);
 
             if (item.ShortcutDisplayText is { } hint)
             {
                 text.Color = Scale(item.Enabled ? Theme.MutedForeground : Theme.DisabledForeground, MathF.Max(alpha, 0.85f));
-                canvas.DrawText(hint, textRight, baseline, SKTextAlign.Right, f.SkFont, text);
+                f.DrawText(canvas, hint, textRight, baseline, text, SKTextAlign.Right);
             }
 
             if (row.IsSubMenu)

@@ -49,6 +49,7 @@ internal static class NativeMethods
     internal const uint WmKeyUp = 0x0101;
     internal const uint WmSysKeyDown = 0x0104;
     internal const uint WmChar = 0x0102;
+    internal const uint WmSysChar = 0x0106;
     internal const uint WmSetCursor = 0x0020;
     internal const uint WmMouseLeave = 0x02A3;
     internal const uint WmDpiChanged = 0x02E0;
@@ -56,6 +57,51 @@ internal static class NativeMethods
     internal const uint WmSettingChange = 0x001A;
     internal const uint WmThemeChanged = 0x031A;
     internal const uint WmNull = 0x0000;
+
+    // Input method editor. The message values are from winuser.h and the IMM values from imm.h; the
+    // names below are the ones the composition path reads, and each is copied from the header rather
+    // than from memory, because two of them are easy to get wrong (CFS_POINT is 0x0002, and the
+    // nearby 0x0020 is CFS_FORCE_POSITION; NI_COMPOSITIONSTR is 0x0015).
+    internal const uint WmImeSetContext = 0x0281;
+    internal const uint WmImeStartComposition = 0x010D;
+    internal const uint WmImeEndComposition = 0x010E;
+    internal const uint WmImeComposition = 0x010F;
+
+    /// <summary>
+    /// A character the input method produced, sent after the composition that carries it. The default
+    /// window procedure turns it into a <c>WM_CHAR</c>, which is one half of the doubling hazard.
+    /// </summary>
+    internal const uint WmImeChar = 0x0286;
+
+    /// <summary>The composition string, which is what the user has not committed yet.</summary>
+    internal const uint GcsCompStr = 0x0008;
+
+    /// <summary>Where the input method's own caret sits inside the composition string.</summary>
+    internal const uint GcsCursorPos = 0x0080;
+
+    /// <summary>The committed text of a composition.</summary>
+    internal const uint GcsResultStr = 0x0800;
+
+    /// <summary>
+    /// What an input method asks the focused window about the caret. The emoji panel and the touch
+    /// keyboard send it before they decide where to appear.
+    /// </summary>
+    internal const uint WmImeRequest = 0x0288;
+
+    /// <summary>The one <c>WM_IME_REQUEST</c> this backend answers: where the caret is on screen.</summary>
+    internal const uint ImrQueryCharPosition = 0x0006;
+
+    /// <summary>
+    /// Set in the <c>WM_IME_SETCONTEXT</c> <c>lParam</c>; clearing it stops the system drawing its own
+    /// composition window over the preedit the library draws.
+    /// </summary>
+    internal const uint IscShowUiCompositionWindow = 0x80000000;
+
+    /// <summary>Position the composition window at a point, which is what <c>ptCurrentPos</c> holds.</summary>
+    internal const uint CfsPoint = 0x0002;
+
+    internal const uint NiCompositionStr = 0x0015;
+    internal const uint CpsCancel = 0x0004;
 
     // Menus.
     internal const uint MfString = 0x00000000;
@@ -312,6 +358,33 @@ internal static class NativeMethods
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    /// <summary>
+    /// Where <c>ImmSetCompositionWindow</c> puts the input method's window: <c>ptCurrentPos</c> is the
+    /// caret in client coordinates under <see cref="CfsPoint"/>, and <c>rcArea</c> is unused by it.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct COMPOSITIONFORM
+    {
+        public uint dwStyle;
+        public POINT ptCurrentPos;
+        public RECT rcArea;
+    }
+
+    /// <summary>
+    /// The answer to <c>IMR_QUERYCHARPOSITION</c>: where the caret is, in screen coordinates, and the
+    /// client rectangle it sits in. The caller sets <c>dwSize</c> and <c>dwCharPos</c>; the window
+    /// procedure fills the rest.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct IMECHARPOSITION
+    {
+        public uint dwSize;
+        public uint dwCharPos;
+        public POINT pt;
+        public uint cLineHeight;
+        public RECT rcDocument;
     }
 
     /// <summary>
@@ -705,6 +778,75 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT lpEventTrack);
+
+    // imm32 - text composition. The context is per window and is taken and released around a single
+    // message, so a composition can never outlive the call that asked about it.
+    [DllImport("imm32.dll")]
+    internal static extern IntPtr ImmGetContext(IntPtr hwnd);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmReleaseContext(IntPtr hwnd, IntPtr himc);
+
+    /// <summary>
+    /// Reads part of a composition: the string types size with a null buffer, which is why
+    /// <paramref name="lpBuf"/> is nullable. A negative return is an IMM error, never a length.
+    /// </summary>
+    [DllImport("imm32.dll")]
+    internal static extern int ImmGetCompositionStringW(IntPtr himc, uint dwIndex, byte[]? lpBuf, uint dwBufLen);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmSetCompositionWindow(IntPtr himc, ref COMPOSITIONFORM lpCompositionForm);
+
+    /// <summary>
+    /// Reads back the form <see cref="ImmSetCompositionWindow"/> stored, which is what the tests use to
+    /// show the form follows the caret. A context nothing has set yet answers false.
+    /// </summary>
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmGetCompositionWindow(IntPtr himc, out COMPOSITIONFORM lpCompositionForm);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmSetCompositionFontW(IntPtr himc, ref LOGFONTW lplf);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmNotifyIME(IntPtr himc, uint dwAction, uint dwIndex, uint dwValue);
+
+    // user32 - the thread's system caret. The library draws its own caret, so this one is created
+    // one pixel square and never shown: it exists only so anything that asks the thread where the
+    // insertion point is (an input method, the emoji panel, the touch keyboard) has an answer.
+    [DllImport("user32.dll")]
+    internal static extern bool CreateCaret(IntPtr hwnd, IntPtr hBitmap, int nWidth, int nHeight);
+
+    [DllImport("user32.dll")]
+    internal static extern bool SetCaretPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    internal static extern bool DestroyCaret();
+
+    /// <summary>Makes the thread's caret visible; only a diagnostic experiment ever calls it.</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool ShowCaret(IntPtr hwnd);
+
+    /// <summary>The window of this thread that holds the keyboard focus, for the IME trace.</summary>
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetFocus();
+
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GUITHREADINFO
+    {
+        public uint cbSize;
+        public uint flags;
+        public IntPtr hwndActive;
+        public IntPtr hwndFocus;
+        public IntPtr hwndCapture;
+        public IntPtr hwndMenuOwner;
+        public IntPtr hwndMoveSize;
+        public IntPtr hwndCaret;
+        public RECT rcCaret;
+    }
+
+    /// <summary>The thread's input state, which is where a diagnostic finds the caret Windows would report.</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);

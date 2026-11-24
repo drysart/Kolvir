@@ -155,7 +155,7 @@ internal sealed class Win32DialogService : IDialogService
         // fixed buffer never needs a pin. Passing the pointer keeps the struct blittable, which
         // matters under NativeAOT.
         var font = &logFont;
-        SetFaceName(font, options.InitialFamilyName);
+        Win32LogFont.SetFaceName(font, options.InitialFamilyName);
 
         var minimumPoints = Math.Max(1, (int)MathF.Round(FontMapping.PixelsToPoints(options.ClampSize(options.MinimumSize))));
         var maximumPoints = Math.Max(minimumPoints, (int)MathF.Round(FontMapping.PixelsToPoints(options.ClampSize(options.MaximumSize))));
@@ -182,7 +182,7 @@ internal sealed class Win32DialogService : IDialogService
             return null;
         }
 
-        var family = FaceNameOf(font);
+        var family = Win32LogFont.FaceNameOf(font);
         if (string.IsNullOrWhiteSpace(family))
         {
             family = string.IsNullOrWhiteSpace(options.InitialFamilyName) ? "sans-serif" : options.InitialFamilyName;
@@ -200,33 +200,6 @@ internal sealed class Win32DialogService : IDialogService
         var weight = logFont.lfWeight == 0 ? FontMapping.NormalWeight : logFont.lfWeight;
 
         return new FontSelection(family, size, weight, logFont.lfItalic != 0);
-    }
-
-    /// <summary>Copies a family name into the fixed face-name buffer, truncating at the native limit.</summary>
-    private static unsafe void SetFaceName(NativeMethods.LOGFONTW* logFont, string? family)
-    {
-        if (string.IsNullOrEmpty(family))
-        {
-            return;
-        }
-
-        var length = Math.Min(family.Length, 31);
-        for (var index = 0; index < length; index++)
-        {
-            logFont->lfFaceName[index] = family[index];
-        }
-    }
-
-    /// <summary>Reads the NUL-terminated face name out of the fixed buffer.</summary>
-    private static unsafe string FaceNameOf(NativeMethods.LOGFONTW* logFont)
-    {
-        var length = 0;
-        while (length < 32 && logFont->lfFaceName[length] != '\0')
-        {
-            length++;
-        }
-
-        return length == 0 ? string.Empty : new string(logFont->lfFaceName, 0, length);
     }
 
     /// <summary>

@@ -1994,6 +1994,30 @@ character, and `Ctrl+A`/`C`/`X`/`V` select all, copy, cut and paste. `Enter` is 
 consumed, so a form can still treat it as an accept gesture. The mouse sets the caret,
 drags a selection and supports double click (word) and triple click (everything).
 
+**"Character" means a text element, not a UTF-16 code unit.** An emoji outside the BMP is a
+surrogate pair, an accented letter may be a base plus a combining mark, and some emoji are joined
+sequences, so the field moves, selects, deletes and measures one *element* at a time. Left and Right
+step over a whole emoji; `Backspace` after one removes all of it rather than leaving half a surrogate
+in the value; `Shift` selections, the caret rectangle, the selection rectangles and the click mapping
+all use the same boundaries, so geometry and movement cannot disagree; and an index assigned inside an
+element (`CaretIndex = 2` between the halves of an emoji) snaps back to the boundary before it.
+`TextCluster` is where those boundaries are computed - the parts of the Unicode text segmentation
+algorithm this library can meet: surrogate pairs, combining marks, variation selectors, emoji
+modifiers, zero-width-joiner sequences, tag characters, keycaps, regional-indicator pairs and CR LF.
+
+The defect that prompted it was old: movement stepped by one code unit, which was always wrong. Font
+fallback made it *visible*, because a prefix that ended inside a surrogate pair was measured as half a
+character with a width of its own - some fallback face's - so the caret's x was not monotonic and it
+appeared to jump back and forth while the keys walked it forward. Both halves are fixed, and a test
+walks a field with the arrow keys and asserts that every stop is a boundary and that x never goes
+backwards on the way out or forwards on the way back.
+
+It costs nothing measurable. The boundary walk does not allocate - a measured 0 bytes over a
+10,000-character string - at 2-3 ns per element, and snapping an index to a boundary is 38-71 ns. The
+framework's own `StringInfo.ParseCombiningCharacters` answers the same question by allocating 20-40 KB
+and taking 80-160 us per call on the same strings, which is why a per-keypress call to it was not an
+option.
+
 ```csharp
 var name = new TextBox
 {
@@ -2088,8 +2112,12 @@ A control opts in by overriding `OnCompositionStarted`, `OnCompositionUpdated` a
 receives the commit as ordinary text. A focus change cancels, and a key the text box acts on cancels
 the preedit first, because the library sees a key before the platform's input method does.
 
-This is implemented for GTK4 only. `dev-docs/IME.md` is the design: the Win32 and macOS
-integrations, the invariants, the caret seam, and what is still open.
+This is implemented for GTK4 and for Windows. On GTK4 the view drives a `Gtk.IMContext`; on Windows
+the window procedure answers `WM_IME_SETCONTEXT`, `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION` and
+`WM_IME_ENDCOMPOSITION` through Imm32, anchors the candidate window at the same caret, and drops the
+`WM_CHAR` copies a commit would otherwise insert twice. macOS is still designed only.
+`dev-docs/IME.md` is the design: all three integrations, the invariants, the caret seam, what the tests
+prove and what still needs a real input method to verify.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and
@@ -2098,7 +2126,11 @@ it on `Ctrl+Period`. It is anchored at the caret seam, its text is inserted thro
 `UiHost.ProcessTextInput` so undo, validation, `MaxLength` and every `OnTextInput` override see typed
 text, and focus is handed back to the drawing area when it closes, because a popover takes the
 keyboard focus while it is up. The action it runs is installed on the drawing area as
-`emoji.insert-emoji`, so a menu can invoke the same path.
+`emoji.insert-emoji`, so a menu can invoke the same path. What the chooser inserts is an ordinary
+character, so a glyph the field's primary face does not have - emoji, or Japanese from another input
+method - is drawn by the core's font fallback rather than as a missing-glyph box. That path is shared
+with Windows and macOS; on this Linux host it is unverified, because no emoji insertion and no
+candidate window could be exercised there (`dev-docs/IME.md` section 6.1).
 
 ### Multi-line text
 
@@ -2921,6 +2953,39 @@ empty data. `FontFormatException` derives from `ArgumentException`, so a handler
 old type still catches it. Disposing a font twice does nothing, and a font obtained with `WithSize`
 keeps working after the one it came from is disposed: each derived font holds its own reference to the
 face.
+
+**Fallback for text the face does not cover.** A face with no glyph for a character draws a box, and
+a control that draws a committed word from another script in the default face therefore shows a row of
+boxes. Text is split into runs, each drawn and measured with a face that covers it: the primary face
+where it can, and otherwise the face the platform offers through `SKFontManager.MatchCharacter`,
+starting from the primary family. Latin text in a Latin face is one run and costs one managed scan
+for the ASCII check; Japanese, Chinese, Korean or emoji in the same string become runs beside it.
+
+The split is per run rather than per character, and it is the same split that `MeasureWidth` uses, so
+`LineHeight`-based wrapping, alignment, selection geometry and the caret all agree with what was
+drawn - a caret placed at a measured width lands on the boundary between two glyphs. The resolution is
+cached three ways: a string remembers its runs, a code point remembers the font that covers it, and a
+family and style remember the one font made for it. A string already split costs one dictionary lookup
+per frame.
+
+Measured on `win-x64`, SkiaSharp 4.154, 13 pt: a cached measure is 103 ns either way, a string the
+primary face covers adds one pass to decide it is ASCII (about 0.3 µs per thousand characters), and a
+string that needs several faces costs one shaping call per run - 0.6 µs per run, so a 1,001-character
+string alternating scripts every few characters (201 runs) costs 118 µs the first time it is seen and
+103 ns thereafter. A sentence with a word of Japanese in it is three runs.
+
+A **loaded** face gets fallback too. A pinned Latin face promises its own advances, line height and
+baseline, not that it contains every script; text it does not cover is still drawn with a system face
+rather than as boxes, and the pinned face's layout settings are mirrored onto the face standing in for
+it so the two do not measure differently on this platform alone. Two promises, kept apart: a pinned
+face's *metrics* are identical on every platform, and the *fallback* face is whatever each platform
+covers that script with.
+
+Colour emoji is the platform's business, and it works: with SkiaSharp 4.154 on Windows, an emoji at 28 pt
+renders from `Segoe UI Emoji` with 533 of its 628 inked pixels chromatic, so `COLR`/`CBDT` colour
+glyphs are drawn in colour rather than as a monochrome outline or a box. What this does not promise is
+that every platform's emoji font behaves that way; where it does not, the glyphs are the platform's
+own.
 
 **A loaded font is one face.** `WithSize` keeps it, and a weight or italic that the data does not
 contain is satisfied by the same face: nothing is synthesised, so `Weight` and `Italic` describe the
