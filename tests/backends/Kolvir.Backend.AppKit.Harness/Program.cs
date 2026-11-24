@@ -25,9 +25,11 @@ namespace Kolvir.Backend.AppKit.Harness;
 /// </para>
 /// <para>
 /// What it proves, in order: the raw-text fallback is gone, so a dead key inserts nothing; a commit
-/// reported by the input manager inserts exactly once; the key path refuses a re-entry instead of
-/// recursing; a declined command cannot ping-pong either; the protocol methods reach the marked
-/// text and the commit, and answer the conversion's selection, its document context and the
+/// reported by the input manager inserts exactly once; a live mark is offered to the input method
+/// first, so a candidate list can take Tab, while what the method declines still reaches the host
+/// and a key with no mark live still goes to the library first; the key path refuses a re-entry
+/// instead of recursing; a declined command cannot ping-pong either; the protocol methods reach the
+/// marked text and the commit, and answer the conversion's selection, its document context and the
 /// attribute list a stock client declares; and the caret answer matches <c>ConvertRectToScreen</c>
 /// in screen points on the display this runs on.
 /// </para>
@@ -52,6 +54,9 @@ internal static class Program
         Check("a commit the input manager reports inserts exactly once", ACommitInsertsOnce);
         Check("a key that re-enters the key path is refused", AKeyPressedAgainIsRefused);
         Check("a command that re-enters the key path is refused", ACommandTheHostReissuesIsRefused);
+        Check("a key is offered to the input method first while a mark is live", ALiveMarkIsOfferedToTheInputMethodFirst);
+        Check("a key the input method declines still reaches the host", AKeyTheInputMethodDeclinesReachesTheHost);
+        Check("with no mark the library still sees the key first", WithNoMarkTheLibraryStillSeesTheKeyFirst);
         Check("the protocol methods reach the marked text and the commit", TheProtocolReachesTheComposition);
         Check("the selection and the document context answer the marked run", TheSelectionAndContextAnswerTheMark);
         Check("the marked-text attributes match the platform's own client", TheMarkedTextAttributesMatchThePlatform);
@@ -182,6 +187,101 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// While the input method holds a mark, the key is offered to it first and the library only
+    /// sees what the method declines.
+    /// </summary>
+    /// <remarks>
+    /// Measured, not argued: a hand run with a candidate list open lost the word because Tab was
+    /// taken by the library before the input method could move focus into its panel with it, while a
+    /// stock <c>NSTextView</c> handed the same key over and the candidate committed (section 7.7 of
+    /// `dev-docs/IME.md`). Tab is the sharpest key for this because the library does something
+    /// visible and irreversible with it, so the three checks below read focus rather than a return
+    /// value: a mark with a key the method keeps, a mark with a key it declines, and no mark at all.
+    /// </remarks>
+    private static void ALiveMarkIsOfferedToTheInputMethodFirst()
+    {
+        using var scene = new TabScene();
+
+        Mark(scene);
+        scene.View.KeyDown(TabEvent());
+
+        if (scene.Interpreter.Calls != 1)
+        {
+            throw new InvalidOperationException($"the input method saw the key {scene.Interpreter.Calls} time(s)");
+        }
+
+        if (!scene.View.HasMarkedText)
+        {
+            throw new InvalidOperationException("the mark was reset while the input method still held it");
+        }
+
+        if (scene.First.Preedit.Length == 0)
+        {
+            throw new InvalidOperationException("the field dropped its preedit for a key the method kept");
+        }
+
+        if (!scene.First.IsFocused || scene.Second.IsFocused)
+        {
+            throw new InvalidOperationException(
+                "the focus moved for a key the input method kept, which is what took the candidate list away");
+        }
+    }
+
+    private static void AKeyTheInputMethodDeclinesReachesTheHost()
+    {
+        using var scene = new TabScene();
+
+        // The method does not want Tab: AppKit asks the view to run insertTab:, which is the one
+        // route a declined key has back into the library.
+        scene.Interpreter.Answer = _ => scene.View.DoCommandBySelector(new Selector("insertTab:"));
+
+        Mark(scene);
+        scene.View.KeyDown(TabEvent());
+
+        if (scene.Interpreter.Calls != 1)
+        {
+            throw new InvalidOperationException($"the input method saw the key {scene.Interpreter.Calls} time(s)");
+        }
+
+        if (!scene.Second.IsFocused)
+        {
+            throw new InvalidOperationException(
+                "a key the input method declined did not reach the host, so the library never saw it");
+        }
+
+        if (scene.View.HasMarkedText || scene.First.Preedit.Length != 0)
+        {
+            throw new InvalidOperationException(
+                "the mark outlived a key the input method declined and the host acted on");
+        }
+    }
+
+    private static void WithNoMarkTheLibraryStillSeesTheKeyFirst()
+    {
+        using var scene = new TabScene();
+
+        scene.View.KeyDown(TabEvent());
+
+        if (!scene.Second.IsFocused)
+        {
+            throw new InvalidOperationException("Tab with no mark live no longer traverses the focus");
+        }
+
+        if (scene.Interpreter.Calls != 0)
+        {
+            throw new InvalidOperationException(
+                $"the input method saw {scene.Interpreter.Calls} key(s) the library should have taken first");
+        }
+    }
+
+    /// <summary>Puts a Japanese candidate's marked text on the first field, as Kotoeri does.</summary>
+    private static void Mark(TabScene scene) =>
+        scene.View.SetMarkedText(
+            new NSString("\u306b\u307b\u3093\u3054"), new NSRange(0, 4), new NSRange(0, 0));
+
+    /// <summary>Tab's key code on every Apple layout.</summary>
+    private static NSEvent TabEvent() => KeyEvent(0x30, "\t", (NSEventModifierMask)0);
     private static void TheProtocolReachesTheComposition()
     {
         using var scene = new Scene();
@@ -468,6 +568,58 @@ internal static class Program
         }
     }
 
+    /// <summary>
+    /// Two fields in one window, so a key the library took and a key the input method kept are told
+    /// apart by where the focus ended up - which is what a person saw happen.
+    /// </summary>
+    private sealed class TabScene : IDisposable
+    {
+        private readonly Application _application;
+
+        public TabScene()
+        {
+            _application = new Application(new HeadlessApplicationBackend());
+
+            First = new RecordingBox();
+            Second = new RecordingBox();
+
+            var stack = new StackPanel { Dock = DockStyle.Fill };
+            stack.Controls.Add(First);
+            stack.Controls.Add(Second);
+
+            Window = new Window("harness", stack) { ClientSize = new SKSize(320f, 120f) };
+            Window.Host.PerformLayout();
+            View = new AppKitSkiaView(Window.Host);
+
+            Interpreter = new ScriptedInterpreter();
+            View.TextInterpreter = Interpreter;
+
+            First.Focus();
+
+            if (!First.IsFocused)
+            {
+                throw new InvalidOperationException("the first field did not take the focus");
+            }
+        }
+
+        public Window Window { get; }
+
+        public AppKitSkiaView View { get; }
+
+        public RecordingBox First { get; }
+
+        public RecordingBox Second { get; }
+
+        public ScriptedInterpreter Interpreter { get; }
+
+        public void Dispose()
+        {
+            View.Dispose();
+            Window.Close();
+            _application.Dispose();
+        }
+    }
+
     private class RecordingBox : TextBox
     {
         public int Started { get; private set; }
@@ -570,10 +722,18 @@ internal static class Program
     /// <summary>What an input manager would report, without one.</summary>
     private sealed class ScriptedInterpreter : IAppKitTextInterpreter
     {
-        private readonly Action<NSResponder>? _answer;
+        public ScriptedInterpreter(Action<NSResponder>? answer = null) => Answer = answer;
 
-        public ScriptedInterpreter(Action<NSResponder>? answer = null) => _answer = answer;
+        /// <summary>What the method does with the key; nothing at all means it keeps it.</summary>
+        public Action<NSResponder>? Answer { get; set; }
 
-        public void Interpret(NSEvent theEvent, NSResponder responder) => _answer?.Invoke(responder);
+        /// <summary>How many keys reached the input method, which is the ordering this pins.</summary>
+        public int Calls { get; private set; }
+
+        public void Interpret(NSEvent theEvent, NSResponder responder)
+        {
+            Calls++;
+            Answer?.Invoke(responder);
+        }
     }
 }

@@ -848,16 +848,27 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     }
 
     /// <summary>
-    /// Routes one key press: the library first, then the platform's input manager.
+    /// Routes one key press: the input method first while it holds a mark, then the library, then
+    /// the input manager again for whatever the library declined.
     /// </summary>
     /// <remarks>
     /// <para>
-    /// The order is deliberate and must not change. The library sees the key first, so a shortcut,
-    /// a menu mnemonic or an editing key it owns never reaches the input method - which is also why
-    /// a key it consumes has to reset the input method itself, below. The Command and Control
-    /// checks come next: a Command chord belongs to the menu bar, and a Control chord is the
-    /// library's own accelerator, so neither may be turned into text. Only what is left goes to
-    /// <c>interpretKeyEvents:</c>, which is what drives the input context.
+    /// The order is deliberate and load bearing. <em>While the input method holds marked text</em>
+    /// the key is offered to it first, because the mark is not this client's to keep: a candidate
+    /// list takes Tab and the arrow keys, and taking them out of the input method's hands is what
+    /// made a conversion unreachable (section 7.7 of <c>dev-docs/IME.md</c>). What the method
+    /// declines comes back through <see cref="DoCommandBySelector"/>, which forwards that key to
+    /// the host exactly once - so the library still gets every key the method did not want, in the
+    /// order it would have got it.
+    /// </para>
+    /// <para>
+    /// With no mark live the order is the library's: a shortcut, a menu mnemonic or an editing key
+    /// it owns never reaches the input method - which is also why a key it consumes has to reset
+    /// the input method itself, below. The Command and Control checks come next: a Command chord
+    /// belongs to the menu bar, and a Control chord is the library's own accelerator, so neither
+    /// may be turned into text and neither is offered to the input method even mid-composition.
+    /// Only what is left goes to <c>interpretKeyEvents:</c>, which is what drives the input
+    /// context.
     /// </para>
     /// <para>
     /// There is no raw-text fallback any more. <c>AppKitKeyMap.ToText</c> used to run here and hand
@@ -911,6 +922,24 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
                 }
             }
 
+            if (_composition.HasMarkedText &&
+                (theEvent.ModifierFlags & NSEventModifierMask.CommandKeyMask) == 0 &&
+                (modifiers & Modifiers.Control) == Modifiers.None)
+            {
+                // The input method owns the key while a mark is live. If it declines, AppKit
+                // dispatches a command and DoCommandBySelector forwards that key to the host, so
+                // the library is not skipped - it is second, which is the contract.
+                if (AppKitImeTrace.Enabled)
+                {
+                    AppKitImeTrace.Line(
+                        $"offered {key} to the input method first: a mark is live, " +
+                        $"and the host is only offered what the method declines");
+                }
+
+                Interpret(theEvent, key);
+                return;
+            }
+
             if (key != Key.None && _host.ProcessKeyDown(key, modifiers))
             {
                 if (AppKitImeTrace.Enabled)
@@ -942,28 +971,38 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
                 return;
             }
 
-            _eventBeingInterpreted = theEvent;
-
-            try
-            {
-                _interpreter.Interpret(theEvent, this);
-            }
-            finally
-            {
-                _eventBeingInterpreted = null;
-
-                if (AppKitImeTrace.Enabled)
-                {
-                    AppKitImeTrace.Line($"KEY {key} routed: marked={_composition.HasMarkedText} appKey={AppKitImeTrace.Describe(NSApplication.SharedApplication.KeyWindow)}");
-                }
-
-                // Whatever the input manager did, the document may have changed under it.
-                InvalidateCaretCoordinates();
-            }
+            Interpret(theEvent, key);
         }
         finally
         {
             _keyPathDepth--;
+        }
+    }
+
+    /// <summary>
+    /// Hands one key to AppKit's input manager and restores the per-key state around it.
+    /// </summary>
+    /// <param name="theEvent">The key event, as AppKit delivered it.</param>
+    /// <param name="key">The key it maps to, for the trace.</param>
+    private void Interpret(NSEvent theEvent, Key key)
+    {
+        _eventBeingInterpreted = theEvent;
+
+        try
+        {
+            _interpreter.Interpret(theEvent, this);
+        }
+        finally
+        {
+            _eventBeingInterpreted = null;
+
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line($"KEY {key} routed: marked={_composition.HasMarkedText} appKey={AppKitImeTrace.Describe(NSApplication.SharedApplication.KeyWindow)}");
+            }
+
+            // Whatever the input manager did, the document may have changed under it.
+            InvalidateCaretCoordinates();
         }
     }
 
@@ -1218,6 +1257,20 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
             if (!taken)
             {
                 Trace($"doCommandBySelector {name}: the library did not take {key}");
+            }
+
+            // The method declined this key, so the mark is no longer its to keep: if the host then
+            // acted on the key, the composition is ended here rather than left over a field that
+            // has moved on. With no mark live this is a no-op.
+            if (taken && _composition.HasMarkedText)
+            {
+                if (AppKitImeTrace.Enabled)
+                {
+                    AppKitImeTrace.Line(
+                        $"reset the mark: reason=the input method declined {key} and the host took it");
+                }
+
+                _composition.Reset();
             }
         }
         finally

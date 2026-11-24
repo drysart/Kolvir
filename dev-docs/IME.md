@@ -169,6 +169,13 @@ These are the contract, and each one has a headless test (section 7.1):
    platform's mark can be dropped without this library ever hearing `insertText` or `unmarkText` - a
    candidate list the input method abandons is exactly that case - and a control that observes
    composition otherwise keeps a preedit the box has already dropped.
+10. A key the library consumes never cancels a mark the input method still owns. On macOS that is an
+    ordering rule, not a rule about hooks: while a mark is live the key is offered to the input method
+    first and the library only sees what the method declines, so a key the box then consumes was one
+    the method had already given up (section 6.3). Without it the library took Tab, Enter, the arrows
+    and Escape out of the input method's hands mid-conversion, which on this host is what made a
+    candidate list unreachable - focus moved to the next field and the list closed (section 7.7,
+    item 9).
 
 The rule in section 3 that a key the library consumes clears the preedit first was tested against the
 one case where it might have been wrong - `Enter` during a live composition on macOS, where the input
@@ -182,8 +189,14 @@ composition has no other way to learn that a mark the input method abandoned is 
 The rule is now exonerated on a valid instrument, not only on posted events: in the control sequence of
 the hand run under VNC - `nihongo`, Enter, no Space - the box cleared its preedit on that Enter exactly
 as it does in the failing sequence, and the input method committed anyway (`insertText '日本語'`). So
-clearing the preedit first does not stop a commit, which is what the rule has always claimed and what
-the defect is not.
+clearing the preedit first does not stop a commit, which is what the rule has always claimed.
+
+Invariant 10 is the other half of the same question and was wrong for three rounds of this work, which
+is why it is written down separately: a rule about *what* a consumed key does is not a rule about
+*when* the library may consume one. Every run that looked for the candidate-state failure either used
+an instrument that could not deliver the flow or drove a client that never took Tab, so "the library
+sees every key first" survived as a principle while making a conversion unreachable on this host. The
+fix is in section 6.3; the measurement that found it is section 7.7 item 9.
 
 ## 5. The caret seam
 
@@ -556,24 +569,42 @@ methods map onto the host contract like this.
 | `attributedSubstringForProposedRange:actualRange:`, `validAttributesForMarkedText` | The marked run, clamped to the proposed range, and the twelve attribute names a stock `NSTextView` declares - `NSFont`, `NSUnderline`, `NSColor`, `NSBackgroundColor`, `NSUnderlineColor`, `NSMarkedClauseSegment`, `NSLanguage`, `NSTextInputReplacementRangeAttributeName`, `NSGlyphInfo`, `NSTextAlternatives`, `NSTextInsertionUndoable`, `NSAttachment`. The library holds its own text and draws its own decorations, so the marked run is the only context it can honestly offer; a candidate list that is told "no text at all" has nothing to convert against, and a client that declares no attributes is telling the input method it can render none of the decorations a conversion uses. |
 | `characterIndexForPoint:`, `drawsVerticallyForCharacterAtIndex:`, `baselineDeltaForCharacterAtIndex:`, `fractionOfDistanceThroughGlyphForPoint:`, `attributedString`, `windowLevel`, `documentVisibleRect`, `unionRectInVisibleSelectedRange`, `preferredTextAccessoryPlacement`, `supportsAdaptiveImageGlyph`, `insertAdaptiveImageGlyph:replacementRange:` | The legal minimum. The whole protocol is required, so each of these is answered rather than omitted: the first character index, no vertical layout, zero baselines, no attributed string, the window's level, the view's bounds as the document, and inline image glyphs declined with a trace line. |
 
-- **Key routing.** `KeyDown` keeps its order and only changes what its tail does:
+- **Key routing.** `KeyDown` offers the key to the input method first *while it holds a mark*, and
+  keeps the library's own order the rest of the time:
 
   ```csharp
+  if (_composition.HasMarkedText && no Command and no Control) {
+      InterpretKeyEvents([theEvent]);   // doCommandBySelector: forwards what the method declines
+      return;
+  }
   if (key != Key.None && Host.ProcessKeyDown(key, modifiers)) { reset input method; return; }
   if (Command) return;      // the menu bar owns these
   if (Control) return;      // library shortcuts, never text
   InterpretKeyEvents([theEvent]);
   ```
 
-  `AppKitKeyMap.ToText` is **deleted**. It used to run after the Control check and hand the event's
+  The first branch is not a detail of ordering; it is the fix for a measured defect. A conversion's
+  candidate list is driven by Tab and the arrow keys, and the library takes Tab for focus traversal -
+  so with the library first, a marked field moved the focus to the next control and the candidate list
+  closed, while a stock `NSTextView` under the same hand-typed input gave Tab to the input method and
+  the candidate committed (section 7.7, item 9). What the method declines comes back through
+  `doCommandBySelector:`, which forwards that key to the host exactly once, so the library still sees
+  every key the method did not want - it is second, not skipped. A Command or Control chord is never
+  offered to the method, even mid-composition: those belong to the menu bar and to the library's own
+  accelerators, and neither is text. The Command, Control and consumed-key checks below still run
+  first whenever nothing is marked, which is every key outside a composition.
+- **`AppKitKeyMap.ToText` is deleted.** It used to run after the Control check and hand the event's
   characters to `Host.ProcessTextInput`, which made a dead key both compose and insert its accent -
-  and would have double-inserted every commit once the input manager also delivered it. Section 7.6
-  records the run where restoring that fallback fails the suite with `a dead key inserted "´"` and a
-  commit arriving as `"é´"`.
-- **A consumed key resets the input method.** The library sees a key before the input method does, so
-  a key it consumes never reaches the input manager. The macOS form of GTK's `IMContext.Reset()` and
-  Win32's `CPS_CANCEL` is `NSTextInputContext.discardMarkedText` plus `Host.CancelComposition`, and it
-  runs only while something is held.
+  and would have double-inserted every commit once the input manager also delivered it. The key path
+  above has no raw-text route at all, in either branch, so `insertText:` is the only way a composed
+  character enters a field. Section 7.6 records the run where restoring that fallback fails the suite
+  with `a dead key inserted "´"` and a commit arriving as `"é´"`.
+- **A consumed key resets the input method, but only once the method has let the mark go.** The
+  macOS form of GTK's `IMContext.Reset()` and Win32's `CPS_CANCEL` is
+  `NSTextInputContext.discardMarkedText` plus `Host.CancelComposition`, and it runs only while
+  something is held. With a mark live it cannot run on the way in, because the key has not been
+  offered to the method yet; it runs instead when the method declines a key and the host then acts on
+  it, so a field that moves focus cannot leave a mark behind over the control it moved to.
 - **Re-entrancy.** `interpretKeyEvents:` is synchronous and answers through this same view:
   `doCommandBySelector:` forwards a key into the host, and a host callback can press another key. Two
   guards cover it, and both are read by a test rather than merely relied on:
@@ -902,6 +933,12 @@ What they prove, in the order the invariants are listed in section 4.5:
     fake.
 12. `markedRange`, `selectedRange` and `hasMarkedText` answer what the marked state holds, and the
     protocol methods reach the preedit and the commit.
+13. A key is offered to the input method while a mark is live, and only then: a mark plus a key the
+    method keeps leaves the mark, the preedit and the focus alone; a mark plus a key it declines comes
+    back through `doCommandBySelector:` and reaches the host; and Tab with no mark still traverses the
+    focus. This is invariant 10, through the real `KeyDown` and a scripted interpreter, in a window
+    with two focusable fields so the failure a person saw - the focus moving to the next field - is
+    what the check reads.
 
 The tests were then run against deliberately broken builds, which is the only way to know a green run
 means anything. Each mutation was applied to the test host, built, run, and reverted:
@@ -912,6 +949,7 @@ means anything. Each mutation was applied to the test host, built, run, and reve
 | the key-path depth guard removed | the harness dies with a stack overflow (exit 134), through `KeyDown -> ProcessKeyDown -> OnKeyDown -> KeyDown` |
 | the command-forwarding guard removed | the harness fails: `expected one refusal, saw 0` |
 | every `_discarding` read neutralised | the test host crashes with a stack overflow in the ping-pong case |
+| the marked-first branch of `KeyDown` disabled | the harness fails exactly the two ordering checks (`the input method saw the key 0 time(s)`, twice) and the no-mark check still passes - which is what separates offering the mark first from never offering keys at all |
 
 Measured on the Mac host, on the 2x display, from the harness's own run:
 
@@ -979,36 +1017,57 @@ What is **not** verified, and stays a checklist:
 8. **The password field masks the preedit**, and **the read-only field refuses** a composition. The
    refusal is pinned by a test (`AppKitCompositionTests`, and the harness check), but neither was
    watched on screen. **(unverified)**
-9. **A conversion opened with Space does not commit on this host - in any client tested.** Three
-   clients, one session, Hiragana, the same two sequences typed by hand over VNC, all started through
-   LaunchServices:
+9. **A conversion opened with Space: the commit route was ours to fix, the bare Return is not.**
+   Reproduced by hand over VNC on `macvm` with Hiragana active: `nihongo`, Space, Enter leaves the
+   field empty and commits nothing. What settled it was not another trace of the Return but the two
+   routes a candidate list offers that a bare Return never exercises. Measured in `TextEdit` first,
+   by hand on the same host and session: the candidate list **is** on screen, a **mouse click** on a
+   candidate puts it in the document and the next Enter commits it, and **Tab** moves the focus into
+   the panel where arrows choose and Enter confirms.
 
-   | Client | Launch | Plain Enter | Space then Enter | Log counts |
-   |---|---|---|---|---|
-   | `NSTextView` subclass, logging every call | bundled `ref.app`, `open -n` | commits (`insertText '日本語'`) | **no commit** | `insertText` 1, `unmarkText` 0 |
-   | This backend | bundle, `open -n --args --page text-input` | commits | **no commit** | `insertText` 1, `unmarkText` 0 |
-   | `TextEdit`, by hand | `open -a TextEdit` | commits | **no commit** | - |
-
-   The candidate state looks the same in the two logged clients. Reference, bundled and
-   `open -n`-launched:
+   The same sequences in this client diverged, and it is Tab that carries the measurement: Tab moved
+   the focus to the **next field** and closed the candidate list - the user's words: "as soon as I hit
+   tab, the focus moved to the next textbox and the candidates list went away". The click is not
+   established either way: that run logged one `insertText` in the whole session, the plain-Enter
+   control's, and the report is about Tab, so a click on this client's candidate list is left as an
+   unverified item rather than counted as a second failure. The trace names the Tab cause in one line:
 
    ```
-   ---- key 49 pressed while a mark is live ----
-   setMarkedText '日本号' selected=0,3
-   ---- key 36 pressed while a mark is live ----
-   selectedRange -> 0,3
-   attributedSubstring 0,3 -> '...' actual=0,3
-   selectedRange -> 0,3
-   hasMarkedText -> true
-   KEY code=36 routed: marked=true
-   selectedRange -> 0,3
-   selectedRange -> 0,3
-   markedRange -> 0,3            (the mark was still live when the app was quit)
+   KEY Tab mods=None marked=True ... firstResponder=AppKitSkiaView
+   key Tab taken by the host; the input method never sees it
+   reset the mark: reason=key taken by the host, key=Tab, marked=True
    ```
 
-   This backend's tail is the same shape: four `selectedRange` answers and silence. **So this is not
-   attributable to this backend.** The cause is unresolved, and what a user experiences on this host is
-   still lost uncommitted text: the word disappears when Enter is pressed and nothing is committed.
+   A stock `NSTextView`, bundled and launched the same way, under the same hand-typed input:
+
+   ```
+   KEY code=48 marked=true selected=3,0
+   KEY code=48 routed: marked=true
+   insertText '日本号' replacement=9223372036854775807,0
+   ```
+
+   So the stock client hands Tab to the input manager, the manager moves the focus into the candidate
+   list, and the confirmation commits. This client took Tab for focus traversal *before* the input
+   method saw it, and then reset the mark - a live mark, given up by the client rather than by the
+   method - so the conversion was unreachable by every route at once. **That was this backend's
+   defect**, and it is fixed by making the input method see the key first while it holds a mark
+   (section 6.3, invariant 10): a key the method keeps never reaches the library, and a key it
+   declines comes back through `doCommandBySelector:`. Pinned by three harness checks: a live mark plus
+   a key the method keeps leaves the focus and the preedit alone, a live mark plus a declined key still
+   reaches the host, and Tab with no mark still traverses the focus. Disabling the new branch fails the
+   first two and passes the third (section 7.6).
+
+   **What is not this backend's: the bare Return with a candidate list open.** Three clients - a
+   bundled stock `NSTextView` launched with `open -n`, this backend launched the same way, and
+   `TextEdit` by hand - all commit the plain-Enter flow and all produce no commit for that Return, with
+   the same call shape (`insertText` 1 for the run, `unmarkText` 0, the mark still live after the key).
+   So that key is swallowed by the input method or the host on this machine, not by an answer this
+   client gives, and the cause is unresolved (open question 6). What a user still experiences: pressing
+   Enter on a conversion discards the uncommitted text in this client, where a text-system-backed
+   client leaves the mark on screen to be clicked. The ordering fix removes one of the two reasons the
+   word could not be recovered - the library was taking the conversion's keys - and that is proven at
+   the harness level and by mutation (section 7.6), not yet by a person. The Enter itself still does
+   not commit, in this client or in either reference.
 
    What was ruled out, each by measurement rather than argument:
 
@@ -1018,25 +1077,25 @@ What is **not** verified, and stays a checklist:
    | The client contradicting the input method about what is marked | `hasMarkedText` true and `markedRange` `(0,1)` whenever asked; after Enter it asks `selectedRange` and gets back exactly what it set |
    | Kotoeri's candidate panel taking key status | one `WINDOW became key` line in the whole run, the app's own; every key `ourWindowKey=True` with the view as first responder |
    | The view's `NSTextInputContext` being recreated | one instance for the whole session |
-   | AppKit handing this view `insertNewline:` and its forwarding destroying the preedit | zero `doCommandBySelector` lines in the whole run: the input method kept that Return |
+   | AppKit handing this view `insertNewline:` and its forwarding destroying the preedit | zero `doCommandBySelector` lines in the run: the input method kept that Return |
    | Echoing the marked selection from `selectedRange` | **exonerated**: a stock client answers `0,3`/`0,4`, a full selection, as this client does |
    | The launch path - every failing run was a bundle binary over `ssh`, and `TextEdit` was the only LaunchServices-launched app | **tested and cleared**: bundling the reference and launching both it and this backend with `open -n` reproduced the identical outcomes |
+   | The key path itself: does this client give the input method the keys a conversion needs? | **this one was right, and it was the defect**: Tab never reached the method, so the candidate list could not be reached at all |
 
-   **The `TextEdit` control is withdrawn, for the second time, and both records stay.** An earlier hand
-   run reported that `TextEdit` committed this flow on this host; today, on the same machine and the
-   same source, `TextEdit` lost it too. The earlier report is not reproducible. The first withdrawal
-   was the opposite error: a logged `NSTextView` driven with `System Events` posting appeared to lose
-   the Return, which was then read as "both clients fail" - posted events turned out not to drive this
-   state for any custom client. Both corrections are here because the next person will otherwise
-   repeat one of them.
+   **The `TextEdit` control and the posted-event control both stay on the record, with what each
+   taught.** An earlier hand run reported `TextEdit` committing the flow; a later one, on the same
+   machine and source, lost it. Both are recorded because neither generalises: `TextEdit` commits the
+   plain-Enter flow and the click and Tab routes, and does not commit the bare Return, so "TextEdit
+   commits it" and "TextEdit loses it" were both true statements about different keys. The posted-event
+   comparison - every custom client losing the Return under `System Events` - was measured with an
+   instrument that cannot drive this state at all, and is withdrawn.
 
-   **The next probe needs no build: whether the panel is on screen at all.** Three questions, asked of
-   `TextEdit` with a candidate list open - is a candidate list visible, does clicking a candidate with
-   the mouse commit it, and does Tab followed by Return commit where a bare Return does not. If only
-   the bare Return fails, the defect is in how the input method treats that key in that state; if the
-   panel is not on screen at all, it is the input method failing to present its UI on this host, which
-   would also explain why nothing arrives.
-
+   **The next probe is now the other two routes in this client, by hand, with the fix in place:**
+   `nihongo`, Space, Tab, arrows, Enter, and `nihongo`, Space, click a candidate. If Tab now opens the
+   candidate list and the confirmation commits, the ordering fix is confirmed against the reference
+   under a real keyboard. If it does not, the next instrument is the same reference app logging
+   `NSEvent` key codes for Tab with the panel open, to see whether the method asks for anything this
+   client still does not answer.
 Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
 in this section is a hand run over `ssh` with `screencapture`.
@@ -1047,7 +1106,7 @@ in this section is a hand run over `ssh` with `screencapture`.
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
 | Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
-| macOS | Implemented; covered by section 7.6 | Implemented through NSTextInputClient and driven with the Japanese source on the test host (section 7.7): marked text, conversion to 日本語 and a single commit when no candidate list is open, with the candidate list placed from the caret answer. A conversion opened with Space does not commit on this host **in any client tested** - this backend, a bundled stock NSTextView launched the same way, and TextEdit - so it is not attributable to this backend and the cause is unresolved (open question 6) | **Implemented; candidate-state conversion fails on this host in every client tested** |
+| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and driven with the Japanese source on the test host (section 7.7): marked text, conversion to `日本語` and a single commit when no candidate list is open, the candidate list placed from the caret answer, and the keys a conversion needs reaching the input method while a mark is live. A bare Return with a candidate list open commits nothing here or in a stock `NSTextView` or `TextEdit` on this host, so that key is not attributable to this backend and its cause is unresolved (open question 6) | **Implemented; a bare Return with a candidate list open is an open question on this host** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
 `IMM32` calls behind it were measured against the Microsoft IME that is installed on this
@@ -1065,9 +1124,10 @@ manager does with `interpretKeyEvents:`, because a view with no key window has n
 it. Section 7.7 is that half: a hand run over `ssh` with a real Japanese source, a live console and
 `screencapture`, on the demo's readout, plus a logged subclass of `NSTextView` and a minimal
 from-scratch `NSTextInputClient` as reference clients. Seven of its items are measured and two are
-and one measured item - a conversion opened with Space - is a failure on this host that no client
-has been shown to avoid: a bundled stock `NSTextView` launched the same way, this backend and
-`TextEdit` all lose that Return, and the cause is unresolved.
+and one measured item - a conversion opened with Space - both found and fixed a real defect in this
+backend's key path (it took Tab before the input method could open its candidate list) and left one
+open question that is not this backend's: a bare Return with a candidate list open commits in no
+client on this host, and its cause is unresolved.
 
 Open questions:
 
@@ -1089,13 +1149,13 @@ Open questions:
    after the whole preedit rather than inside it. The index is recorded and handed to the platform
    through the caret seam; repositioning the drawn caret inside the preedit comes with clause
    styling.
-6. **A conversion opened with Space does not commit on this host, in any client tested.** Three
-   clients - a logged bundled `NSTextView` launched with `open -n`, this backend launched the same
-   way, and `TextEdit` by hand - all commit the plain-Enter flow and all lose the Return once a
-   candidate list is open, with the same call shape and the same counts (`insertText` 1,
-   `unmarkText` 0). So this is **not attributable to this backend**, and the cause is unresolved. The
-   user-visible consequence stands and is not filed as cosmetic: on this host, pressing Enter on a
-   conversion discards uncommitted text. Two controls had to be withdrawn to get here - a posted-event
-   `NSTextView` run and an earlier `TextEdit` report - and section 7.7 item 9 keeps both records. The
-   next probe needs no build: whether the candidate panel is on screen at all, whether a mouse click
-   commits a candidate, and whether Tab then Return commits where a bare Return does not.
+6. **A bare Return with a candidate list open commits nothing, in any client tested here.** Three
+   clients - a bundled stock `NSTextView` launched with `open -n`, this backend launched the same way,
+   and `TextEdit` by hand - all commit the plain-Enter flow and all produce no commit for that Return
+   once a candidate list is open, with the same call shape (`insertText` 1 for the run, `unmarkText` 0,
+   the mark still live after the key). The cause is unresolved and it is not an answer this client
+   gives. The routes *around* it are a different question and that one is answered: a click on a
+   candidate and Tab-then-Enter both commit in a text-system-backed client, and both were unreachable
+   here until the key ordering was fixed (section 6.3, invariant 10, section 7.7 item 9). What a user
+   still experiences: pressing that Return discards the uncommitted text in this client, where a
+   text-system-backed client leaves the mark on screen to be clicked.

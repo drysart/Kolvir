@@ -2142,10 +2142,13 @@ and `WM_IME_ENDCOMPOSITION` through Imm32, anchors the candidate window at the s
 (`NSTextInputClient`) and AppKit's own input manager drives it through `interpretKeyEvents:`: marked text
 opens the composition, `insertText:` is the only commit, `discardMarkedText` is how a refusing field
 answers, and `firstRectForCharacterRange:` is the one caret answer - there is no composition form to keep
-in step, as there is on Windows. The key path is the same three steps on all three backends: the library
-sees the key first, a Command or Control chord is never text, and only what is left reaches the platform
-input method. Nothing derives text from the key itself any more, which is what keeps a dead key from
-composing and inserting its accent.
+in step, as there is on Windows. The key path differs from the other two backends in one place, and it
+is the place the platform's own client differs: while the input method holds a mark, the key is offered
+to it first, and the library only sees what the method declines - because a candidate list is driven by
+Tab and the arrow keys, which the library would otherwise take for focus traversal. With no mark live
+the order is the library's. Nothing derives text from the key itself on any backend, which is what keeps
+a dead key from composing and inserting its accent, and on macOS `insertText:` remains the only route a
+composed character takes.
 
 `dev-docs/IME.md` is the design: all three integrations, the invariants, the caret seam, what the tests
 prove and what still needs a real input method to verify. On macOS the AppKit-free half of that
@@ -2156,10 +2159,12 @@ objects on the process's main thread. Neither can reach the input manager itself
 text, the commit and the candidate list were driven by hand over `ssh` with a real Japanese source
 against the demo's readout, and `dev-docs/IME.md` section 7.7 records which of those items were
 measured and which are still a checklist. One of those items is a failure that is *not* this
-backend's: a conversion opened with Space does not commit on the test host in any client tested - this
-one, a bundled stock `NSTextView` launched the same way, and `TextEdit` - so the cause is unresolved
-and a candidate list left open can still lose the uncommitted text there. Section 7.7 item 9 has the
-three-client record and the probe that comes next.
+backend's: a bare Return with a candidate list open commits nothing on the test host in any client
+tested - this one, a bundled stock `NSTextView` launched the same way, and `TextEdit` - so the cause is
+unresolved and pressing it there can still discard the uncommitted text. Section 7.7 item 9 has the
+three-client record and the probe that comes next. The same pass found a defect that *was* this
+backend's and is fixed: it handed Tab to the library before the input method could open its candidate
+list with it, so a conversion could not be reached at all; the key ordering in section 6.3 is the fix.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and
