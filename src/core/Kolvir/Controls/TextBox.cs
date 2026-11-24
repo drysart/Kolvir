@@ -970,9 +970,15 @@ public class TextBox : Control
         // ends the preedit first: the platform's uncommitted text cannot be edited by a key the
         // platform never saw. Keys the box leaves alone - the letters that extend a composition -
         // travel on to the input method with the preedit still in place.
+        //
+        // Through the hook rather than around it: an application control observes a composition
+        // through OnCompositionCancelled, so a preedit dropped silently leaves its own readout
+        // claiming a composition that is over. The platform's mark can be dropped without this box
+        // ever hearing insertText or unmarkText - a candidate list the input method abandons is
+        // exactly that case - so this is the only notification a control author would get.
         if (IsComposing && IsKeyThatEndsComposition(e.Key, control))
         {
-            ClearPreedit();
+            OnCompositionCancelled();
         }
 
         // The history sees the undo keys first, so neither the multi-line keys nor the editing

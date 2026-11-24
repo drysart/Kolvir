@@ -157,6 +157,27 @@ public sealed class CompositionTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AKeyTheBoxConsumesEndsTheCompositionAndTheControlHearsIt()
+    {
+        var box = new RecordingBox();
+        using var scene = HeadlessScene.Create(box, 320f, 80f);
+        box.Focus();
+
+        Assert.IsTrue(scene.Host.BeginComposition());
+        Assert.IsTrue(scene.Host.UpdateComposition("\u306b\u307b\u3093", 3));
+        Assert.AreEqual("\u306b\u307b\u3093", box.PreeditText);
+
+        // The box acts on this key, so the composition ends before the platform's input method can
+        // see it - and the control author has to hear that, or a readout built on the composition
+        // hooks keeps claiming a preedit that is already gone.
+        Assert.IsTrue(scene.Host.ProcessKeyDown(Key.Left, Modifiers.None));
+
+        Assert.AreEqual(1, box.Cancelled, "the end of the composition reached the control");
+        Assert.AreEqual(string.Empty, box.PreeditText, "the preedit went");
+        Assert.AreEqual(string.Empty, box.Text, "nothing was committed");
+    }
+
+    [TestMethod]
     public void AnUpdateDoesNotDisturbTheSelectionOrTheCaret()
     {
         var box = new TextBox("hello") { Dock = DockStyle.Fill };
