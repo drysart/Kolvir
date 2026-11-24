@@ -742,9 +742,13 @@ routing, the host calls and the text box are all the shipped ones. What it prove
 8. `WM_IME_REQUEST` with `IMR_QUERYCHARPOSITION` answers the caret in screen coordinates, with the
    document rectangle and a line height from the field's font, and a click elsewhere in the field
    moves the answer, so the panel follows the caret rather than the window.
-9. `GetGUIThreadInfo` reports this window's caret one pixel square at the same point, which is the
-   measurement that diagnosed the emoji panel landing in the wrong place, and a request the backend
-   does not implement reaches `DefWindowProc` instead of being answered.
+9. Two things this suite no longer asserts, because they describe what the platform does rather than
+   what this backend does: `GetGUIThreadInfo` reporting this window's caret one pixel square at the
+   same point, which is the measurement that diagnosed the emoji panel landing in the wrong place, and
+   a request the backend does not implement reaching `DefWindowProc` instead of being answered. The
+   first is a hand check of shipped behaviour now, not a unit test, and it failed for the desktop's
+   reasons - the foreground rules, a session that is locked or switched - as readily as for any of
+   ours.
 10. The trace proves it is running before anything asks it anything: the first line names the process,
     the window, the executable and the file, and the heartbeat keeps arriving while the real message
     loop pumps. That is what stops a run that produces no file from being read as "the panel never
@@ -789,8 +793,8 @@ tests do not claim to**: what they cover is the message handling, the suppressio
 The calls' real answers are covered by the manual checklist in section 7.5, item by item.
 
 The emoji panel is the other thing only a person can check. A test can prove the answer is right - the
-caret in screen coordinates, the same point from the thread's caret, and both moving with a click - but
-whether the shell's panel appears beside the caret when Win+Period is pressed is the shell's own
+caret in screen coordinates, and the answer following a click - but whether the shell's panel appears
+beside the caret when Win+Period is pressed is the shell's own
 window, its own placement and its own animation, none of which this process can observe. That check is
 by hand: put the caret mid-field, press Win+Period, and see the panel open at the caret rather than at
 the window corner.
