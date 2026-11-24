@@ -1057,18 +1057,52 @@ What is **not** verified, and stays a checklist:
    reaches the host, and Tab with no mark still traverses the focus. Disabling the new branch fails the
    first two and passes the third (section 7.6).
 
-   **What is not this backend's: the bare Return with a candidate list open.** Three clients - a
-   bundled stock `NSTextView` launched with `open -n`, this backend launched the same way, and
-   `TextEdit` by hand - all commit the plain-Enter flow and all produce no commit for that Return, with
-   the same call shape (`insertText` 1 for the run, `unmarkText` 0, the mark still live after the key).
-   So that key is swallowed by the input method or the host on this machine, not by an answer this
-   client gives, and the cause is unresolved (open question 6). What a user still experiences: pressing
-   Enter on a conversion discards the uncommitted text in this client, where a text-system-backed
-   client leaves the mark on screen to be clicked. The ordering fix removes one of the two reasons the
-   word could not be recovered - the library was taking the conversion's keys - and that is proven at
-   the harness level and by mutation (section 7.6), not yet by a person. The Enter itself still does
-   not commit, in this client or in either reference.
+   **The first Return in the candidate state commits nothing, in every client tested; here, a second
+   Return commits.** Three clients - a bundled stock `NSTextView` launched with `open -n`, this
+   backend launched the same way, and `TextEdit` by hand - all commit the plain-Enter flow and all
+   produce no commit for the *first* Return once a candidate list is open, with the same call shape.
+   That key is swallowed by the input method or the host on this machine, not by an answer this client
+   gives, and its cause is unresolved (open question 6). What the acceptance run added is the other
+   half, and it is the useful half: in this client a second Return commits, 4.5 seconds later, with the
+   full shape a commit has when nothing is in the way -
 
+   ```
+   06:21:16.247 offered Enter to the input method first ...   (first Return: two selectedRange answers, no commit)
+   06:21:16.260 KEY Enter routed: marked=True
+   06:21:20.698 KEY Enter ... marked=True
+   06:21:20.698 offered Enter to the input method first ...
+   06:21:20.702 hasMarkedText -> True
+   06:21:20.702 validAttributesForMarkedText -> 12 names   (four times)
+   06:21:20.703 insertText '日本語学' replacement=9223372036854775807,0
+   06:21:20.713 KEY Enter routed: marked=False
+   ```
+
+   So the answer to "what does a user do to get their text" is **press Return again**. That works
+   because of the ordering fix - under the old code the composition was reset on the way in, so the
+   second Return had nothing left to confirm - and it is measured in this client only: the reference
+   and `TextEdit` were quit after their first Return, so whether a second one commits there is
+   unmeasured rather than assumed.
+
+   **The routes around that Return were verified by hand in the same run** (`files/kolvir-accept-0622`
+   in the coordinator's archive; 426 lines, `key Tab taken by the host` count **0** against 1 before the
+   fix, `reset the mark ... marked=True` count **0**):
+
+   | Route | What the log says |
+   |---|---|
+   | Tab with the list open | `offered Tab to the input method first`, then two `selectedRange`, `hasMarkedText -> True`, `validAttributesForMarkedText` five times and `setMarkedText '日本後' candidate=True` - the focus did not move and the candidate list moved its selection instead |
+   | Arrow keys | six of them, each `routed: marked=True` and each followed by a new candidate in `setMarkedText` - so the arrows reached the panel too |
+   | Return twice | no commit, then `insertText '日本語学'` - and the same again for the second composition, `insertText '日本語歌詞'` |
+
+   Six `reset the mark` lines appear in the whole run and all six are
+   `reason=key taken by the host, key=Backspace, marked=False`, from clearing the field between the two
+   sequences. **No reset ran while a mark was live**, which is invariant 10 holding on a real keyboard
+   rather than only in the harness.
+
+   **A mouse click on a candidate is still unverified.** The coordinator's summary called the second
+   sequence the click route, but the log does not support that: `日本語歌詞` arrived as
+   `setMarkedText ... candidate=True` after a Space, and its commit followed an Enter
+   (`06:21:54.462`), so both sequences were keyboard confirmations. `TextEdit` was measured committing
+   a clicked candidate earlier; this client has not been, and the harness cannot reach it.
    What was ruled out, each by measurement rather than argument:
 
    | Hypothesis | How it was settled |
@@ -1090,24 +1124,22 @@ What is **not** verified, and stays a checklist:
    comparison - every custom client losing the Return under `System Events` - was measured with an
    instrument that cannot drive this state at all, and is withdrawn.
 
-   **The acceptance run is the other two routes in this client, by hand, with the fix in place.**
-   Launched through LaunchServices so it is frontmost and the trace variable arrives from the bundle's
-   `LSEnvironment` rather than the shell (`dev-docs/MACOS-TESTRUN.md`):
+   **How the acceptance run was made.** Launched through LaunchServices so it is frontmost and the
+   trace variable arrives from the bundle's `LSEnvironment` rather than the shell
+   (`dev-docs/MACOS-TESTRUN.md`):
 
    ```sh
    open -n ~/work/ime-trace/src/demo/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app --args --page text-input
    ```
 
-   The log is `/tmp/kolvir-ime.log`, written from startup. What decides it is one line: `offered Tab to
-   the input method first: a mark is live` means the new ordering ran, and `key Tab taken by the host;
-   the input method never sees it` means it did not. On screen, success is the focus staying in the field
-   with the candidate list open after Tab, and the confirm committing. The two sequences:
-   `nihongo`, Space, Tab, arrows, Enter; and `nihongo`, Space, click a candidate. If Tab now opens the
-   candidate list and the confirmation commits, the ordering fix is confirmed against the reference
-   under a real keyboard. If it does not, the next instrument is the same reference app logging
-   `NSEvent` key codes for Tab with the panel open, to see whether the method asks for anything this
-   client still does not answer.
-Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
+   The log is `/tmp/kolvir-ime.log`, written from startup. One line decided whether the fix ran:
+   `offered Tab to the input method first: a mark is live` present, and `key Tab taken by the host;
+   the input method never sees it` absent. The sequences were `nihongo`, Space, Tab, arrows, Enter, and
+   `nihongo`, Space, arrows, Enter, Enter. The worktree above was a scratch clone at `d3f59e1` and has
+   since been deleted; the bundle carries `LSEnvironment` only because it was added to its `Info.plist`
+   after building, which is the recipe `MACOS-TESTRUN.md` records.
+
+   Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
 in this section is a hand run over `ssh` with `screencapture`.
 
@@ -1117,7 +1149,7 @@ in this section is a hand run over `ssh` with `screencapture`.
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
 | Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
-| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and driven with the Japanese source on the test host (section 7.7): marked text, conversion to `日本語` and a single commit when no candidate list is open, the candidate list placed from the caret answer, and the keys a conversion needs reaching the input method while a mark is live. A bare Return with a candidate list open commits nothing here or in a stock `NSTextView` or `TextEdit` on this host, so that key is not attributable to this backend and its cause is unresolved (open question 6) | **Implemented; a bare Return with a candidate list open is an open question on this host** |
+| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and **verified by hand with the Japanese source on the test host** (section 7.7): marked text, conversion to `日本語`, a single commit, the candidate list placed from the caret answer, and - after the ordering fix of invariant 10 - Tab and the arrow keys reaching the candidate list, with a conversion committing when Return is pressed twice. A mouse click on a candidate is unverified in this client. The first Return on a conversion commits nothing here or in a stock `NSTextView` or `TextEdit` on this host (open question 6) | **Implemented and verified by hand; first-Return-on-a-conversion open, candidate click unverified** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
 `IMM32` calls behind it were measured against the Microsoft IME that is installed on this
@@ -1137,8 +1169,8 @@ it. Section 7.7 is that half: a hand run over `ssh` with a real Japanese source,
 from-scratch `NSTextInputClient` as reference clients. Seven of its items are measured and two are
 and one measured item - a conversion opened with Space - both found and fixed a real defect in this
 backend's key path (it took Tab before the input method could open its candidate list) and left one
-open question that is not this backend's: a bare Return with a candidate list open commits in no
-client on this host, and its cause is unresolved.
+open question that is not this backend's: the first Return on a conversion commits in no client on
+this host, while a second Return commits here and is what completes the conversion (item 9).
 
 Open questions:
 
@@ -1160,13 +1192,13 @@ Open questions:
    after the whole preedit rather than inside it. The index is recorded and handed to the platform
    through the caret seam; repositioning the drawn caret inside the preedit comes with clause
    styling.
-6. **A bare Return with a candidate list open commits nothing, in any client tested here.** Three
-   clients - a bundled stock `NSTextView` launched with `open -n`, this backend launched the same way,
-   and `TextEdit` by hand - all commit the plain-Enter flow and all produce no commit for that Return
-   once a candidate list is open, with the same call shape (`insertText` 1 for the run, `unmarkText` 0,
-   the mark still live after the key). The cause is unresolved and it is not an answer this client
-   gives. The routes *around* it are a different question and that one is answered: a click on a
-   candidate and Tab-then-Enter both commit in a text-system-backed client, and both were unreachable
-   here until the key ordering was fixed (section 6.3, invariant 10, section 7.7 item 9). What a user
-   still experiences: pressing that Return discards the uncommitted text in this client, where a
-   text-system-backed client leaves the mark on screen to be clicked.
+6. **The first Return on a conversion commits nothing; asking again commits.** With a candidate list
+   open, the first Return produces no commit in this client, in a bundled stock `NSTextView` launched
+   the same way, or in `TextEdit`, so that key is not attributable to this backend and its cause is
+   unresolved. In this client a **second** Return commits, measured by hand over VNC
+   (`insertText '日本語学'`, 4.5 s after the first Return), and it commits because the ordering fix
+   ended the client taking the composition's keys - under the old code the composition was reset on
+   the way in and there was nothing left to confirm. So the working answer for a user is: press Return
+   again. Tab and the arrow keys now reach the candidate list from this client, verified by hand; a
+   mouse click on a candidate is verified in `TextEdit` and **not** in this client (section 7.7,
+   item 9).
