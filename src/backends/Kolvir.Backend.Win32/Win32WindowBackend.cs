@@ -57,6 +57,28 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// <summary>Everything that asked to see this window's messages, empty unless a feature attached one.</summary>
     private readonly Win32MessageFilters _messageFilters = new();
 
+    /// <summary>
+    /// Where the window procedure reads the input method's composition from. Internal, and defaulted to
+    /// the real Imm32 reader, so no application can substitute one and the shipped path cannot be a
+    /// fake; see <see cref="IWin32ImeComposition"/> for why the seam exists at all.
+    /// </summary>
+    internal IWin32ImeComposition ImeComposition { get; set; } = Win32ImeComposition.Instance;
+
+    /// <summary>True while the focused control is holding uncommitted text from the input method.</summary>
+    private bool _composing;
+
+    /// <summary>
+    /// The characters a commit has already inserted, which the input method's own WM_CHAR copies must
+    /// not insert again. Emptied as each one arrives.
+    /// </summary>
+    private string _pendingCommitText = string.Empty;
+
+    /// <summary>
+    /// The high half of a character past the BMP, held until the WM_CHAR that carries its partner
+    /// arrives, because one character cannot be handed over as half a pair.
+    /// </summary>
+    private char? _pendingHighSurrogate;
+
     /// <summary>The model's window, kept so a native window replacement can re-run its hooks.</summary>
     private Window? _modelWindow;
 
@@ -1114,7 +1136,16 @@ public sealed class Win32WindowBackend : IWindowBackend
     {
         var key = MapKey((int)wParam);
         var modifiers = CurrentModifiers();
-        return key != Key.None && _host.ProcessKeyDown(key, modifiers);
+        var handled = key != Key.None && _host.ProcessKeyDown(key, modifiers);
+
+        // The library consumed the key, so the input method never saw it and cannot know the composition
+        // it was holding is over. Resetting it here is what the GTK view does with its input context.
+        if (handled)
+        {
+            CancelImeComposition();
+        }
+
+        return handled;
     }
 
     /// <summary>Maps a logical client point to physical screen pixels, for native menus.</summary>
@@ -1679,6 +1710,32 @@ public sealed class Win32WindowBackend : IWindowBackend
 
             case NativeMethods.WmChar:
                 OnChar(wParam);
+                return IntPtr.Zero;
+
+            case NativeMethods.WmKeyDown:
+            case NativeMethods.WmSysKeyDown:
+                // A keystroke starts new text, so anything a commit still owed is no longer coming and
+                // the expectation must not survive to swallow a character the user actually typed.
+                _pendingCommitText = string.Empty;
+                break;
+
+            case NativeMethods.WmImeSetContext:
+                return OnImeSetContext(hwnd, wParam, lParam);
+
+            case NativeMethods.WmImeStartComposition:
+                OnImeStartComposition(hwnd);
+                return NativeMethods.DefWindowProcW(hwnd, message, wParam, lParam);
+
+            case NativeMethods.WmImeComposition:
+                // Never to DefWindowProc: the default handler is one of the ways the result string
+                // becomes an ordinary WM_CHAR, and the commit has already inserted the text.
+                OnImeComposition(hwnd, lParam);
+                return IntPtr.Zero;
+
+            case NativeMethods.WmImeEndComposition:
+                // A commit has already cleared the preedit, which is what makes this idempotent.
+                _composing = false;
+                _host.CancelComposition();
                 return IntPtr.Zero;
 
             case NativeMethods.WmSetCursor:
@@ -2662,15 +2719,254 @@ public sealed class Win32WindowBackend : IWindowBackend
         return _host.ProcessContextMenu(ScreenToLogical(screen.X, screen.Y));
     }
 
+    /// <summary>
+    /// Turns a <c>WM_CHAR</c> into text for the focused control, dropping the copies that belong to a
+    /// composition commit and pairing a character that arrives in two messages.
+    /// </summary>
     private void OnChar(IntPtr wParam)
     {
         var character = (char)(int)wParam;
-        if (char.IsControl(character))
+
+        // A commit inserted its text through the ordinary text path, and the input method still turns
+        // the same characters into WM_CHAR. Dropping the ones it owes is what stops a commit from
+        // inserting twice.
+        if (ConsumeCommittedChar(character))
+        {
+            return;
+        }
+
+        // WM_CHAR carries UTF-16 code units, so a character past the BMP arrives as two messages. The
+        // high half is held until its partner arrives, which is what keeps such a character whole
+        // instead of handing the host a lone surrogate.
+        if (_pendingHighSurrogate is { } high)
+        {
+            _pendingHighSurrogate = null;
+
+            if (char.IsLowSurrogate(character))
+            {
+                _host.ProcessTextInput(new string(new[] { high, character }));
+                return;
+            }
+
+            // Not a pair, so the held unit was stray and is dropped; this character is handled alone.
+        }
+
+        if (char.IsHighSurrogate(character))
+        {
+            _pendingHighSurrogate = character;
+            return;
+        }
+
+        if (char.IsControl(character) || char.IsLowSurrogate(character))
         {
             return;
         }
 
         _host.ProcessTextInput(character.ToString());
+    }
+
+    /// <summary>
+    /// True when <paramref name="character"/> is the next one a commit has already inserted.
+    /// </summary>
+    /// <remarks>
+    /// Matching is character by character rather than by count, so a WM_CHAR that is not the commit's
+    /// own text clears the expectation and is delivered instead of being swallowed.
+    /// </remarks>
+    private bool ConsumeCommittedChar(char character)
+    {
+        if (_pendingCommitText.Length == 0)
+        {
+            return false;
+        }
+
+        if (_pendingCommitText[0] != character)
+        {
+            _pendingCommitText = string.Empty;
+            return false;
+        }
+
+        _pendingCommitText = _pendingCommitText[1..];
+        return true;
+    }
+
+    /// <summary>
+    /// Stops the system drawing its own composition window, because the library draws the preedit
+    /// itself, and leaves the rest of the message to the default handler.
+    /// </summary>
+    private IntPtr OnImeSetContext(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
+    {
+        // The flag sits in the low 32 bits of the LPARAM and its value is unsigned, so the mask is
+        // applied to the DWORD and the result widened back the way Windows fills an LPARAM.
+        var flags = unchecked((uint)lParam.ToInt64()) & ~NativeMethods.IscShowUiCompositionWindow;
+        return NativeMethods.DefWindowProcW(
+            hwnd,
+            NativeMethods.WmImeSetContext,
+            wParam,
+            new IntPtr(unchecked((int)flags)));
+    }
+
+    /// <summary>
+    /// Asks the focused control to take a composition and, when it does, anchors the input method's
+    /// window at the caret and tells it which font the field uses.
+    /// </summary>
+    private void OnImeStartComposition(IntPtr hwnd)
+    {
+        _composing = _host.BeginComposition();
+
+        if (!_composing)
+        {
+            // A refusal is still answered. The input method keeps its own state consistent, the
+            // preedit is never shown, and the commit still arrives as ordinary text.
+            return;
+        }
+
+        var context = NativeMethods.ImmGetContext(hwnd);
+        if (context == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            PlaceCompositionWindow(context);
+            SetCompositionFont(context);
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    /// <summary>
+    /// Reads what the input method reports and routes it: the uncommitted text to the preedit, the
+    /// committed text through the ordinary text path.
+    /// </summary>
+    private void OnImeComposition(IntPtr hwnd, IntPtr lParam)
+    {
+        var flags = unchecked((uint)lParam.ToInt64());
+        var context = NativeMethods.ImmGetContext(hwnd);
+
+        try
+        {
+            var source = ImeComposition;
+
+            if ((flags & NativeMethods.GcsCompStr) != 0)
+            {
+                if (!_composing)
+                {
+                    // Some input methods report a composition without a start message first.
+                    _composing = _host.BeginComposition();
+                }
+
+                _host.UpdateComposition(source.CompositionString(context), source.CaretPosition(context));
+            }
+
+            if ((flags & NativeMethods.GcsResultStr) != 0)
+            {
+                var committed = source.ResultString(context);
+
+                // The commit inserts the text, and the same characters are still on their way back as
+                // WM_CHAR; remembering them is what lets OnChar drop that second copy.
+                _pendingCommitText += committed;
+                _composing = false;
+                _host.CommitComposition(committed);
+            }
+
+            if (_composing && context != IntPtr.Zero)
+            {
+                // The candidate window follows the caret, which the preedit has just moved.
+                PlaceCompositionWindow(context);
+            }
+        }
+        finally
+        {
+            if (context != IntPtr.Zero)
+            {
+                NativeMethods.ImmReleaseContext(hwnd, context);
+            }
+        }
+    }
+
+    /// <summary>
+    /// Drops a live composition and tells the input method to abandon it as well. This is the Win32
+    /// form of the GTK view resetting its input context after a key the library consumed: the input
+    /// method never saw the key, so it must not carry a half-finished preedit into the next one.
+    /// </summary>
+    private void CancelImeComposition()
+    {
+        if (!_composing)
+        {
+            return;
+        }
+
+        _composing = false;
+
+        var context = NativeMethods.ImmGetContext(_hwnd);
+        if (context != IntPtr.Zero)
+        {
+            try
+            {
+                NativeMethods.ImmNotifyIME(context, NativeMethods.NiCompositionStr, NativeMethods.CpsCancel, 0);
+            }
+            finally
+            {
+                NativeMethods.ImmReleaseContext(_hwnd, context);
+            }
+        }
+
+        _host.CancelComposition();
+    }
+
+    /// <summary>
+    /// Anchors the input method's window at the caret of the focused control: the host answers in
+    /// logical client pixels and a composition form takes device pixels, so the window's scale is the
+    /// only conversion.
+    /// </summary>
+    private void PlaceCompositionWindow(IntPtr context)
+    {
+        if (!_host.TryGetCaretBounds(out var caret))
+        {
+            return;
+        }
+
+        var form = new NativeMethods.COMPOSITIONFORM
+        {
+            dwStyle = NativeMethods.CfsPoint,
+            ptCurrentPos = new NativeMethods.POINT
+            {
+                X = (int)MathF.Round(caret.Left * _scale),
+                Y = (int)MathF.Round(caret.Top * _scale),
+            },
+        };
+
+        NativeMethods.ImmSetCompositionWindow(context, ref form);
+    }
+
+    /// <summary>
+    /// Tells the input method which font to draw its own window in, taken from the focused control so it
+    /// matches the field rather than the system default.
+    /// </summary>
+    private unsafe void SetCompositionFont(IntPtr context)
+    {
+        if (_host.FocusedControl?.EffectiveFont is not { } font)
+        {
+            return;
+        }
+
+        var logFont = new NativeMethods.LOGFONTW
+        {
+            // The input method's window is drawn in device pixels, so the field's logical size is
+            // scaled like everything else on this window.
+            lfHeight = -(int)MathF.Round(font.Size * _scale),
+            lfWeight = font.Weight,
+            lfItalic = (byte)(font.Italic ? 1 : 0),
+            lfCharSet = 1, // DEFAULT_CHARSET
+        };
+
+        // The struct is a local, so its address is stable for the call and the fixed buffer never needs
+        // pinning. Passing the pointer keeps the struct blittable, which matters under NativeAOT.
+        Win32LogFont.SetFaceName(&logFont, font.FamilyName);
+        NativeMethods.ImmSetCompositionFontW(context, ref logFont);
     }
 
     private void UpdateHostSize()

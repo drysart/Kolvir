@@ -57,6 +57,36 @@ internal static class NativeMethods
     internal const uint WmThemeChanged = 0x031A;
     internal const uint WmNull = 0x0000;
 
+    // Input method editor. The message values are from winuser.h and the IMM values from imm.h; the
+    // names below are the ones the composition path reads, and each is copied from the header rather
+    // than from memory, because two of them are easy to get wrong (CFS_POINT is 0x0002, and the
+    // nearby 0x0020 is CFS_FORCE_POSITION; NI_COMPOSITIONSTR is 0x0015).
+    internal const uint WmImeSetContext = 0x0281;
+    internal const uint WmImeStartComposition = 0x010D;
+    internal const uint WmImeEndComposition = 0x010E;
+    internal const uint WmImeComposition = 0x010F;
+
+    /// <summary>The composition string, which is what the user has not committed yet.</summary>
+    internal const uint GcsCompStr = 0x0008;
+
+    /// <summary>Where the input method's own caret sits inside the composition string.</summary>
+    internal const uint GcsCursorPos = 0x0080;
+
+    /// <summary>The committed text of a composition.</summary>
+    internal const uint GcsResultStr = 0x0800;
+
+    /// <summary>
+    /// Set in the <c>WM_IME_SETCONTEXT</c> <c>lParam</c>; clearing it stops the system drawing its own
+    /// composition window over the preedit the library draws.
+    /// </summary>
+    internal const uint IscShowUiCompositionWindow = 0x80000000;
+
+    /// <summary>Position the composition window at a point, which is what <c>ptCurrentPos</c> holds.</summary>
+    internal const uint CfsPoint = 0x0002;
+
+    internal const uint NiCompositionStr = 0x0015;
+    internal const uint CpsCancel = 0x0004;
+
     // Menus.
     internal const uint MfString = 0x00000000;
     internal const uint MfPopup = 0x00000010;
@@ -312,6 +342,18 @@ internal static class NativeMethods
         public int Top;
         public int Right;
         public int Bottom;
+    }
+
+    /// <summary>
+    /// Where <c>ImmSetCompositionWindow</c> puts the input method's window: <c>ptCurrentPos</c> is the
+    /// caret in client coordinates under <see cref="CfsPoint"/>, and <c>rcArea</c> is unused by it.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct COMPOSITIONFORM
+    {
+        public uint dwStyle;
+        public POINT ptCurrentPos;
+        public RECT rcArea;
     }
 
     /// <summary>
@@ -705,6 +747,30 @@ internal static class NativeMethods
 
     [DllImport("user32.dll")]
     internal static extern bool TrackMouseEvent(ref TRACKMOUSEEVENT lpEventTrack);
+
+    // imm32 - text composition. The context is per window and is taken and released around a single
+    // message, so a composition can never outlive the call that asked about it.
+    [DllImport("imm32.dll")]
+    internal static extern IntPtr ImmGetContext(IntPtr hwnd);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmReleaseContext(IntPtr hwnd, IntPtr himc);
+
+    /// <summary>
+    /// Reads part of a composition: the string types size with a null buffer, which is why
+    /// <paramref name="lpBuf"/> is nullable. A negative return is an IMM error, never a length.
+    /// </summary>
+    [DllImport("imm32.dll")]
+    internal static extern int ImmGetCompositionStringW(IntPtr himc, uint dwIndex, byte[]? lpBuf, uint dwBufLen);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmSetCompositionWindow(IntPtr himc, ref COMPOSITIONFORM lpCompositionForm);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmSetCompositionFontW(IntPtr himc, ref LOGFONTW lplf);
+
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmNotifyIME(IntPtr himc, uint dwAction, uint dwIndex, uint dwValue);
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);
