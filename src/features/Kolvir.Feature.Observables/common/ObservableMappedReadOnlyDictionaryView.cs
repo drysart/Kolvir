@@ -55,15 +55,23 @@ namespace Kolvir.Feature.Observables;
 /// </para>
 /// <para>
 /// <b>A record that does not fit the cache heals it.</b> If a change or a removal names a key the view
-/// does not hold, or an add names one it already holds, the storage and the source disagree. The view
-/// answers by rebuilding from the source and delivering one
+/// does not hold, or an add names one it already holds, the storage and the source disagree and the view
+/// cannot describe what happened. It answers by rebuilding from the source and delivering one
 /// <see cref="ObservableDictionaryChangeType.UntrackedChanges"/>, rather than guessing from the
-/// record's fields, so the disagreement is visible and the view heals. That is reachable: a selector
-/// that throws leaves the view behind the source, because the source applies and records its change
-/// first and the exception then escapes the view's translation, which is where the view's own
-/// application of it would have happened. The next record naming that key finds no entry, resyncs and
-/// admits that the change was not described. No test is required for the add-shaped branch, which the
-/// source's own contract makes unreachable; it is there so a broken caller cannot crash a delivery.
+/// record's fields, so the disagreement is visible and the view heals. The add-shaped branch is
+/// unreachable while the source keeps its own contract, which throws before it records a second add for
+/// one key; it is there so a broken caller cannot crash a delivery.
+/// </para>
+/// <para>
+/// <b>A selector that throws has two shapes, and only one of them is announced.</b> The source applies
+/// and records its mutation first, so an exception out of the selector escapes the source's delivery
+/// with the source ahead of the view - and what that leaves behind depends on whether the view had
+/// taken the key in. If it had not (the throw was on an add), there is no entry for the key, so the next
+/// record naming it finds none, rebuilds from the source and admits that the change was not described.
+/// If it had (the throw was on a change), the entry is still there with its previous mapped value, so
+/// the next record naming that key re-maps it and reports that stale value as the old one, and no
+/// untracked record is delivered: a mirror that is stale in the same way stays correct, and the failure
+/// stays silent until the value changes again or an untracked event arrives.
 /// </para>
 /// <para>
 /// <b>The source is not owned.</b> The view subscribes to it and reads it; it never disposes it, because
@@ -78,7 +86,8 @@ namespace Kolvir.Feature.Observables;
 /// changed the source, inside the source dictionary's delivery, at most once per value that arrives or
 /// changes; it must not throw and must not change the source dictionary or this view. A function that
 /// throws propagates out of the source dictionary's delivery, like any other handler's exception, and
-/// leaves this view behind the source until a record naming that key heals it.
+/// leaves this view behind the source until a record naming that key heals it, in one of the two ways
+/// described above.
 /// </para>
 /// <para>
 /// Single-threaded, like every collection in this package: no locks, no cross-thread delivery. It is not

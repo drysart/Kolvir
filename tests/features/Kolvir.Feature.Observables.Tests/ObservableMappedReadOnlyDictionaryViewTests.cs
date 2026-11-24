@@ -690,10 +690,11 @@ public sealed class ObservableMappedReadOnlyDictionaryViewTests
     }
 
     [TestMethod]
-    public void AThrowingSelectorLeavesTheViewBehindAndAChangeHealsIt()
+    public void AThrowingSelectorLeavesTheViewBehindAndAChangeForAnUnheldKeyHealsIt()
     {
-        // The same disagreement on the change path: a change naming a key the view does not hold rebuilds
-        // from the source, which brings the entry in with the mapped value it has now.
+        // A change for a key the view never took in heals exactly as the removal does: there is no
+        // entry, so the view rebuilds from the source, which brings the entry in with the value it maps
+        // to now, and admits that the change was not described.
         using var source = Source();
         var calls = 0;
 
@@ -723,6 +724,60 @@ public sealed class ObservableMappedReadOnlyDictionaryViewTests
         Assert.AreEqual(ObservableDictionaryChangeType.UntrackedChanges, events[0][0].ChangeType);
         Assert.AreEqual(1, view.Count, "and the resync brought the entry in");
         Assert.AreEqual("Y", view["a"], "with the value it maps to now");
+    }
+
+    [TestMethod]
+    public void AThrowingSelectorLeavesTheViewBehindAndAChangeForAHeldKeyReportsTheStaleValue()
+    {
+        // The second shape of a selector failure, and the one that is not announced. The view had taken
+        // the key in, so the throw leaves the entry in place with its previous mapped value while the
+        // source has already recorded the new one. The next record naming that key finds an entry, so
+        // nothing resyncs and nothing is admitted: it re-maps the new value and names the stale one as
+        // the old value, which is exactly what a consumer whose mirror is stale in the same way applies.
+        using var source = Source(("a", "x"));
+        var calls = 0;
+
+        using var view = new ObservableMappedReadOnlyDictionaryView<string, string, string>(
+            source,
+            text =>
+            {
+                calls++;
+                if (calls == 2)
+                {
+                    throw new InvalidOperationException("the selector is not deterministic");
+                }
+
+                return text.ToUpperInvariant();
+            });
+
+        Assert.AreEqual("X", view["a"], "the construction mapped the entry once");
+
+        var events = new List<IReadOnlyList<ObservableDictionaryChange<string, string>>>();
+        view.AddObservableDictionaryChangedHandler(args => events.Add([.. args.Changes]));
+
+        Assert.ThrowsExactly<InvalidOperationException>(
+            () =>
+            {
+                source["a"] = "boom";
+            },
+            "the selector's exception propagates out of the source's delivery");
+
+        Assert.AreEqual("boom", source["a"], "the source applied and recorded the new value first");
+        Assert.AreEqual("X", view["a"], "and the view still holds its old value: the entry exists, it is stale");
+        Assert.AreEqual(0, events.Count, "nothing was applied, so nothing was delivered");
+
+        source["a"] = "y";
+
+        Assert.AreEqual(1, events.Count, "one delivery for the next change");
+        Assert.AreEqual(1, events[0].Count, "one record, and no admission: the key was there, so nothing resynced");
+        Assert.AreEqual(ObservableDictionaryChangeType.ItemChanged, events[0][0].ChangeType);
+        Assert.AreEqual("a", events[0][0].Key);
+        Assert.AreEqual("X", events[0][0].OldValue, "the stale value the view actually held");
+        Assert.AreEqual("Y", events[0][0].NewValue, "and the mapped value the source now holds");
+        Assert.IsFalse(
+            events.Any(items => items.Any(change => change.ChangeType == ObservableDictionaryChangeType.UntrackedChanges)),
+            "a change for a held key never resyncs");
+        Assert.AreEqual("Y", view["a"], "and the view now equals the source");
     }
 
     [TestMethod]
