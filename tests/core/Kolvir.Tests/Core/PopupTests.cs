@@ -634,10 +634,250 @@ public sealed class PopupTests : HeadlessTestBase
         using var scene = HeadlessScene.Create(root, 480f, 320f);
 
         var error = Assert.ThrowsExactly<ArgumentException>(
-            () => scene.Window.ShowPopupAsync(new Panel()));
+            () => scene.Window.ShowPopupAsync(new Panel(), new PopupOptions { Placement = PopupPlacement.Anchor }));
 
         Assert.AreEqual("options", error.ParamName);
         StringAssert.Contains(error.Message, nameof(PopupPlacement.Anchor));
+    }
+
+    [TestMethod]
+    public void AutoResolvesToThePointerWhenTheCallSuppliedNoAnchor()
+    {
+        var (root, _, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        scene.MoveTo(new SKPoint(200f, 150f));
+
+        var content = new Panel();
+        scene.Window.ShowPopupAsync(content, SizedPopup());
+
+        Assert.AreEqual(
+            new SKPoint(200f, 150f),
+            content.GetPositionInHost(),
+            "with no anchor, Auto is the pointer the user is looking at");
+    }
+
+    [TestMethod]
+    public void AutoResolvesToTheAnchorWhenTheCallSuppliedOne()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        scene.MoveTo(new SKPoint(300f, 200f));
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, SizedPopup());
+
+        Assert.AreEqual(
+            new SKPoint(20f, 50f),
+            content.GetPositionInHost(),
+            "with an anchor, Auto hangs the popup from it and ignores the pointer");
+    }
+
+    [TestMethod]
+    public void EveryAlignPlacesThePopupAgainstTheAnchor()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(200f, 150f, 300f, 180f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        scene.MoveTo(new SKPoint(100f, 120f));
+
+        var cases = new (PopupAlign Align, SKPoint Location)[]
+        {
+            (PopupAlign.BelowStart, new SKPoint(200f, 180f)),
+            (PopupAlign.BelowCenter, new SKPoint(230f, 180f)),
+            (PopupAlign.BelowEnd, new SKPoint(260f, 180f)),
+            (PopupAlign.AboveStart, new SKPoint(200f, 120f)),
+            (PopupAlign.AboveCenter, new SKPoint(230f, 120f)),
+            (PopupAlign.AboveEnd, new SKPoint(260f, 120f)),
+            (PopupAlign.RightOf, new SKPoint(300f, 150f)),
+            (PopupAlign.LeftOf, new SKPoint(160f, 150f)),
+            (PopupAlign.AtPointer, new SKPoint(100f, 120f)),
+        };
+
+        foreach (var (align, location) in cases)
+        {
+            var content = new Panel();
+            anchor.ShowPopupAsync(content, new PopupOptions { Align = align, Size = new SKSize(40f, 30f) });
+
+            Assert.AreEqual(location, content.GetPositionInHost(), $"{align} should place the popup at {location}");
+
+            content.ClosePopup();
+        }
+    }
+
+    [TestMethod]
+    public void AClientPointPopupUsesTheAlignAroundThePoint()
+    {
+        var (root, _, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var content = new Panel();
+        scene.Window.ShowPopupAsync(content, new PopupOptions
+        {
+            Placement = PopupPlacement.ClientPoint,
+            Align = PopupAlign.AboveCenter,
+            Offset = new SKPoint(200f, 150f),
+            Size = new SKSize(40f, 30f),
+        });
+
+        Assert.AreEqual(
+            new SKPoint(180f, 120f),
+            content.GetPositionInHost(),
+            "the point acts as a zero-sized anchor, so AboveCenter sits above it and centred on it");
+    }
+
+    [TestMethod]
+    public void ABelowPopupAtTheBottomOfTheAreaFlipsAbove()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 270f, 120f, 300f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions { Size = new SKSize(140f, 90f) });
+
+        Assert.AreEqual(
+            new SKPoint(20f, 180f),
+            content.GetPositionInHost(),
+            "there is no room below, so the popup opens above the anchor instead");
+    }
+
+    [TestMethod]
+    public void APopupThatFitsNeitherWayIsClampedIntoTheArea()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 150f, 120f, 180f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions { Size = new SKSize(140f, 200f) });
+
+        Assert.AreEqual(
+            new SKPoint(20f, 0f),
+            content.GetPositionInHost(),
+            "it flips above and still overhangs, so the clamp pins it to the top of the area");
+    }
+
+    [TestMethod]
+    public void WithFlippingOffThePopupSlidesIntoTheAreaInstead()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 270f, 120f, 300f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions
+        {
+            Size = new SKSize(140f, 90f),
+            FlipIntoView = false,
+        });
+
+        Assert.AreEqual(
+            new SKPoint(20f, 230f),
+            content.GetPositionInHost(),
+            "with no flip the popup stays below the anchor and the clamp is what keeps it in the window");
+    }
+
+    [TestMethod]
+    public void APopupUsesThePlacementAreaItIsGiven()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 270f, 120f, 300f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 400f));
+        OverridePopupService(scene, service);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions { Size = new SKSize(140f, 90f) });
+
+        Assert.AreEqual(
+            new SKPoint(20f, 300f),
+            content.GetPositionInHost(),
+            "the work area has room below the window's bottom edge, so no flip is needed");
+        Assert.AreEqual(1, service.AreaQueries, "the popup asked the service for the area once");
+        Assert.AreSame(scene.Host, service.LastHost, "and asked about the host it belongs to");
+    }
+
+    [TestMethod]
+    public void ANullPlacementAreaKeepsThePopupInsideTheWindow()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(400f, 270f, 470f, 300f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(area: null);
+        OverridePopupService(scene, service);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions { Size = new SKSize(140f, 90f) });
+
+        Assert.AreEqual(
+            new SKPoint(340f, 180f),
+            content.GetPositionInHost(),
+            "null means the popup cannot leave the window, so it flips and then clamps to the client area");
+        Assert.AreEqual(1, service.AreaQueries);
+    }
+
+    [TestMethod]
+    public void APopupInAZoomedSubtreeIsScaledForPlacementToo()
+    {
+        var zoom = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, ScaleFactor = 2f };
+        var anchor = new Button("Zoomed") { Bounds = new SKRect(40f, 60f, 100f, 80f) };
+        zoom.Controls.Add(anchor);
+
+        using var scene = HeadlessScene.Create(zoom, 480f, 320f);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions { Size = new SKSize(40f, 30f) });
+
+        Assert.AreEqual(
+            new SKPoint(80f, 160f),
+            content.GetPositionInHost(),
+            "the anchor's host position and its doubled height decide where the popup hangs");
+    }
+
+    [TestMethod]
+    public void APopupOpenedInsideAPopupIsPlacedInTheOuterPopupsSpace()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 4f, 124f, 34f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var outerOrigin = outerContent.GetPositionInHost();
+
+        var innerContent = new Panel();
+        innerAnchor.ShowPopupAsync(innerContent, new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.AreEqual(
+            new SKPoint(outerOrigin.X + 4f, outerOrigin.Y + 34f),
+            innerContent.GetPositionInHost(),
+            "the inner anchor's own bounds are relative to the popup it sits in, not the window");
+    }
+
+    [TestMethod]
+    public void APopupOpenedInsideAPopupFlipsInTheOuterPopupsSpace()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 120f, 124f, 150f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        Assert.AreEqual(
+            new SKPoint(20f, 50f),
+            outerContent.GetPositionInHost(),
+            "the outer popup fits under the window anchor");
+
+        var innerContent = new Panel();
+        innerAnchor.ShowPopupAsync(innerContent, new PopupOptions { Size = new SKSize(120f, 160f) });
+
+        Assert.AreEqual(
+            new SKPoint(24f, 10f),
+            innerContent.GetPositionInHost(),
+            "below the inner anchor would end at host y 360, so it flips above the anchor at y 170");
     }
 
     [TestMethod]
@@ -722,8 +962,65 @@ public sealed class PopupTests : HeadlessTestBase
         return (root, anchor, other);
     }
 
+    /// <summary>A window with one button at <paramref name="bounds"/>, for measuring placement.</summary>
+    private static (Panel Root, Button Anchor) CreateAnchorTree(SKRect bounds)
+    {
+        var anchor = new Button("Anchor") { Bounds = bounds };
+        var root = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
+
+        root.Controls.Add(anchor);
+
+        return (root, anchor);
+    }
+
     /// <summary>Options with a fixed size, so placement is what a test measures rather than text.</summary>
     private static PopupOptions SizedPopup() => new() { Size = new SKSize(140f, 90f) };
+
+    /// <summary>Puts <paramref name="popup"/> in front of the window's other services for this scene.</summary>
+    private static void OverridePopupService(HeadlessScene scene, IPopupService popup) =>
+        scene.Host.Services = new PopupServiceOverride(scene.Host.Services!, popup);
+
+    /// <summary>The window's services, with <see cref="IPopupService"/> swapped for a test double.</summary>
+    private sealed class PopupServiceOverride : IServiceProvider
+    {
+        private readonly IServiceProvider _inner;
+        private readonly IPopupService _popup;
+
+        public PopupServiceOverride(IServiceProvider inner, IPopupService popup)
+        {
+            _inner = inner;
+            _popup = popup;
+        }
+
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IPopupService) ? _popup : _inner.GetService(serviceType);
+    }
+
+    /// <summary>
+    /// A popup service that supplies no platform window - so the popup takes the overlay path,
+    /// which is the one under test - and answers the placement area with what it was given.
+    /// </summary>
+    private sealed class RecordingPopupService : IPopupService
+    {
+        private readonly SKRect? _area;
+
+        public RecordingPopupService(SKRect? area) => _area = area;
+
+        /// <summary>How many times the placement area was asked for.</summary>
+        public int AreaQueries { get; private set; }
+
+        /// <summary>The host the last area question was about.</summary>
+        public UiHost? LastHost { get; private set; }
+
+        public IPopupWindow? CreatePopup(UiHost ownerHost, bool dismissOnOutsideClick, bool takesPresses) => null;
+
+        public SKRect? GetPlacementArea(UiHost ownerHost)
+        {
+            AreaQueries++;
+            LastHost = ownerHost;
+            return _area;
+        }
+    }
 
     /// <summary>
     /// What an application's <c>await ShowPopupAsync(...)</c> becomes: it resumes under whatever

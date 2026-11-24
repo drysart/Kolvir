@@ -5,14 +5,20 @@ namespace Kolvir;
 /// <summary>What a popup is placed against.</summary>
 public enum PopupPlacement
 {
+    /// <summary>
+    /// Whatever the call supplied: <see cref="Anchor"/> when it named an anchor control, and
+    /// <see cref="Pointer"/> when it did not. The default.
+    /// </summary>
+    Auto = 0,
+
     /// <summary>Against the anchor control the popup was opened from.</summary>
-    Anchor = 0,
+    Anchor = 1,
 
     /// <summary>At a point in the owning host's client coordinates.</summary>
-    ClientPoint = 1,
+    ClientPoint = 2,
 
     /// <summary>At the pointer, where it was the last time it moved over the owning host.</summary>
-    Pointer = 2,
+    Pointer = 3,
 }
 
 /// <summary>Where a popup sits against what it is placed on.</summary>
@@ -50,30 +56,54 @@ public enum PopupAlign
 /// <remarks>
 /// <para>
 /// The default is what a drop-down list or a small dialog wants: under the anchor it was opened
-/// from, dismissed by a press outside it, and closed by Escape.
+/// from, dismissed by a press outside it, and closed by Escape. With no anchor to hang from, the
+/// default is at the pointer, so the simplest overload of the API still opens where the user is
+/// looking.
 /// </para>
 /// <para>
-/// The geometry this version applies is deliberately simple: an anchor popup opens at the anchor's
-/// bottom-left corner plus <see cref="Offset"/>, a client-point popup at that point, and a pointer
-/// popup at the pointer. <see cref="Align"/> and <see cref="FlipIntoView"/> are requests that the
-/// placement step reads; neither moves a popup here.
+/// <see cref="Align"/> is a request. The popup is placed where it asks, but the display wins:
+/// when <see cref="FlipIntoView"/> is set and the popup does not fit, it opens on the opposite side
+/// of the anchor, and it is then clamped so it is fully visible whenever the placement area can
+/// hold it. See <see cref="IPopupService.GetPlacementArea"/> for the area that is used.
 /// </para>
 /// </remarks>
 public sealed class PopupOptions
 {
-    /// <summary>What the popup is placed against. Defaults to <see cref="PopupPlacement.Anchor"/>.</summary>
-    public PopupPlacement Placement { get; set; } = PopupPlacement.Anchor;
+    /// <summary>
+    /// What the popup is placed against. Defaults to <see cref="PopupPlacement.Auto"/>, which is
+    /// <see cref="PopupPlacement.Anchor"/> when the call supplied an anchor control and
+    /// <see cref="PopupPlacement.Pointer"/> when it did not.
+    /// </summary>
+    public PopupPlacement Placement { get; set; } = PopupPlacement.Auto;
 
     /// <summary>
     /// Where the popup hangs from what it is placed on. Defaults to
     /// <see cref="PopupAlign.BelowStart"/>.
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// For <see cref="PopupPlacement.ClientPoint"/> and <see cref="PopupPlacement.Pointer"/> the
+    /// point takes the anchor's place, and is read as a zero-sized anchor: <c>BelowStart</c> puts
+    /// the popup's top-left corner on the point, <c>BelowCenter</c> centres it horizontally on the
+    /// point, and <c>Above*</c> puts its bottom edge on it.
+    /// </para>
+    /// <para>
+    /// <see cref="PopupAlign.AtPointer"/> places the popup's top-left corner at the pointer, which
+    /// is what a context menu opened from an anchor wants. A pointer that has never been over the
+    /// owner surface falls back to the anchor's top-left corner.
+    /// </para>
+    /// </remarks>
     public PopupAlign Align { get; set; } = PopupAlign.BelowStart;
 
     /// <summary>
-    /// A nudge in logical pixels from the placed position: down and right for an anchor, or the
-    /// client point itself for <see cref="PopupPlacement.ClientPoint"/>.
+    /// A nudge applied after the alignment, in logical pixels in the owning host's coordinates.
     /// </summary>
+    /// <remarks>
+    /// For <see cref="PopupPlacement.ClientPoint"/> this value is the client point itself, as it is
+    /// the only place a client-point popup reads its position from. For
+    /// <see cref="PopupPlacement.Anchor"/> and <see cref="PopupPlacement.Pointer"/> it is a nudge
+    /// from the place the alignment chose.
+    /// </remarks>
     public SKPoint Offset { get; set; }
 
     /// <summary>
@@ -106,5 +136,10 @@ public sealed class PopupOptions
     /// Whether the popup flips to the other side of its anchor when it does not fit where it was
     /// asked to go. Defaults to true.
     /// </summary>
+    /// <remarks>
+    /// A <c>Below*</c> request flips to the matching <c>Above*</c>, <c>RightOf</c> flips to
+    /// <c>LeftOf</c> and back. False disables flipping and nothing else: the popup still moves
+    /// along the requested alignment when that keeps it inside the placement area.
+    /// </remarks>
     public bool FlipIntoView { get; set; } = true;
 }

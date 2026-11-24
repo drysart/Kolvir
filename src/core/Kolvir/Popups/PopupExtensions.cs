@@ -1,5 +1,4 @@
 using System.Runtime.CompilerServices;
-using SkiaSharp;
 
 namespace Kolvir;
 
@@ -38,9 +37,11 @@ public static class PopupExtensions
     /// completes when it is dismissed.
     /// </summary>
     /// <remarks>
-    /// There is no anchor control on this overload, so <see cref="PopupOptions.Placement"/> has to
-    /// be something other than <see cref="PopupPlacement.Anchor"/> - the default. Use
-    /// <see cref="PopupPlacement.ClientPoint"/> or <see cref="PopupPlacement.Pointer"/>.
+    /// There is no anchor control on this overload, so <see cref="PopupOptions.Placement"/>'s
+    /// <see cref="PopupPlacement.Auto"/> resolves to <see cref="PopupPlacement.Pointer"/>: the
+    /// default call opens at the pointer, where the user is looking. An explicit
+    /// <see cref="PopupPlacement.Anchor"/> has nothing to hang from and is rejected; use
+    /// <see cref="PopupPlacement.ClientPoint"/> or <see cref="PopupPlacement.Pointer"/> instead.
     /// </remarks>
     /// <param name="window">The window the popup belongs to.</param>
     /// <param name="content">The control to show. It must not already be in a control tree.</param>
@@ -62,6 +63,10 @@ public static class PopupExtensions
     /// Shows <paramref name="content"/> in a popup belonging to <paramref name="window"/> and placed
     /// against <paramref name="anchor"/>.
     /// </summary>
+    /// <remarks>
+    /// The anchor is supplied, so <see cref="PopupOptions.Placement"/>'s
+    /// <see cref="PopupPlacement.Auto"/> resolves to <see cref="PopupPlacement.Anchor"/>.
+    /// </remarks>
     /// <param name="window">The window the popup belongs to.</param>
     /// <param name="content">The control to show. It must not already be in a control tree.</param>
     /// <param name="anchor">The control the popup is placed against.</param>
@@ -69,6 +74,7 @@ public static class PopupExtensions
     /// <exception cref="ArgumentNullException">
     /// <paramref name="content"/> or <paramref name="anchor"/> is null.
     /// </exception>
+    /// <exception cref="ArgumentException"><paramref name="anchor"/> is not in a window.</exception>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="content"/> is already in a control tree or already shown in a popup.
     /// </exception>
@@ -80,6 +86,14 @@ public static class PopupExtensions
     {
         ArgumentNullException.ThrowIfNull(window);
         ArgumentNullException.ThrowIfNull(anchor);
+
+        // Placement needs the anchor's host: it is the coordinate space the popup is placed in and
+        // the host whose area the fit is measured against.
+        if (anchor.Host is null)
+        {
+            throw NotInAWindow(anchor, nameof(anchor));
+        }
+
         return ShowPopup(window, anchor, content, options);
     }
 
@@ -99,8 +113,7 @@ public static class PopupExtensions
     /// <paramref name="anchor"/> or <paramref name="content"/> is null.
     /// </exception>
     /// <exception cref="ArgumentException">
-    /// <paramref name="anchor"/> is not in a window, or <paramref name="options"/> asks for
-    /// <see cref="PopupPlacement.Anchor"/> without an anchor control.
+    /// <paramref name="anchor"/> is not in a window.
     /// </exception>
     /// <exception cref="InvalidOperationException">
     /// <paramref name="content"/> is already in a control tree or already shown in a popup.
@@ -190,8 +203,9 @@ public static class PopupExtensions
         ArgumentNullException.ThrowIfNull(content);
 
         var settings = options ?? new PopupOptions();
+        var placement = ResolvePlacement(settings.Placement, anchor);
 
-        if (settings.Placement == PopupPlacement.Anchor && anchor is null)
+        if (placement == PopupPlacement.Anchor && anchor is null)
         {
             throw new ArgumentException(
                 $"PopupOptions.Placement is {nameof(PopupPlacement.Anchor)}, which needs an anchor control. "
@@ -228,7 +242,7 @@ public static class PopupExtensions
             settings,
             anchor,
             window,
-            Place(settings, anchor, anchor?.Host ?? window!.Host));
+            placement);
 
         surface.Current = session;
         channel.Session = session;
@@ -247,26 +261,14 @@ public static class PopupExtensions
     }
 
     /// <summary>
-    /// Where the popup goes, in the owner host's client coordinates. The whole of the geometry is
-    /// here: placement is deliberately naive for now, so there is one place to make it clever.
+    /// Turns <see cref="PopupPlacement.Auto"/> into the placement the call supports: against the
+    /// anchor when it supplied one, and at the pointer when it did not. Every other value is
+    /// already decided and is returned unchanged.
     /// </summary>
-    private static SKPoint Place(PopupOptions options, Control? anchor, UiHost host)
-    {
-        switch (options.Placement)
-        {
-            case PopupPlacement.ClientPoint:
-                return options.Offset;
-
-            case PopupPlacement.Pointer:
-                return host.MousePosition ?? SKPoint.Empty;
-
-            default:
-                var origin = anchor!.GetPositionInHost();
-                return new SKPoint(
-                    origin.X + options.Offset.X,
-                    origin.Y + anchor.Height + options.Offset.Y);
-        }
-    }
+    private static PopupPlacement ResolvePlacement(PopupPlacement placement, Control? anchor) =>
+        placement == PopupPlacement.Auto
+            ? (anchor is null ? PopupPlacement.Pointer : PopupPlacement.Anchor)
+            : placement;
 
     /// <summary>
     /// The popup surface <paramref name="anchor"/> belongs to: the nearest control at or above it
