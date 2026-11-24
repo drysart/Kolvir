@@ -340,7 +340,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         int caret = CaretOf(textBox);
         int lineIndex = CaretLineOf(lines, caret);
         var line = lines[lineIndex];
-        int at = Math.Clamp(caret, line.Start, line.End);
+        int at = TextCluster.Snap(DisplayText(), Math.Clamp(caret, line.Start, line.End));
 
         float x = content.Left + offset.X + MeasureWidth(font, DisplayText(), line.Start, at);
         float y = content.Top + offset.Y + (lineIndex * font.LineHeight);
@@ -415,8 +415,8 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
                 continue;
             }
 
-            int from = Math.Max(selectionStart, line.Start);
-            int to = Math.Min(selectionEnd, line.End);
+            int from = TextCluster.Snap(display, Math.Max(selectionStart, line.Start));
+            int to = TextCluster.Snap(display, Math.Min(selectionEnd, line.End));
 
             float left = MeasureWidth(font, display, line.Start, from);
             float right = MeasureWidth(font, display, line.Start, to);

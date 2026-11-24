@@ -1994,6 +1994,30 @@ character, and `Ctrl+A`/`C`/`X`/`V` select all, copy, cut and paste. `Enter` is 
 consumed, so a form can still treat it as an accept gesture. The mouse sets the caret,
 drags a selection and supports double click (word) and triple click (everything).
 
+**"Character" means a text element, not a UTF-16 code unit.** An emoji outside the BMP is a
+surrogate pair, an accented letter may be a base plus a combining mark, and some emoji are joined
+sequences, so the field moves, selects, deletes and measures one *element* at a time. Left and Right
+step over a whole emoji; `Backspace` after one removes all of it rather than leaving half a surrogate
+in the value; `Shift` selections, the caret rectangle, the selection rectangles and the click mapping
+all use the same boundaries, so geometry and movement cannot disagree; and an index assigned inside an
+element (`CaretIndex = 2` between the halves of an emoji) snaps back to the boundary before it.
+`TextCluster` is where those boundaries are computed - the parts of the Unicode text segmentation
+algorithm this library can meet: surrogate pairs, combining marks, variation selectors, emoji
+modifiers, zero-width-joiner sequences, tag characters, keycaps, regional-indicator pairs and CR LF.
+
+The defect that prompted it was old: movement stepped by one code unit, which was always wrong. Font
+fallback made it *visible*, because a prefix that ended inside a surrogate pair was measured as half a
+character with a width of its own - some fallback face's - so the caret's x was not monotonic and it
+appeared to jump back and forth while the keys walked it forward. Both halves are fixed, and a test
+walks a field with the arrow keys and asserts that every stop is a boundary and that x never goes
+backwards on the way out or forwards on the way back.
+
+It costs nothing measurable. The boundary walk does not allocate - a measured 0 bytes over a
+10,000-character string - at 2-3 ns per element, and snapping an index to a boundary is 38-71 ns. The
+framework's own `StringInfo.ParseCombiningCharacters` answers the same question by allocating 20-40 KB
+and taking 80-160 us per call on the same strings, which is why a per-keypress call to it was not an
+option.
+
 ```csharp
 var name = new TextBox
 {

@@ -385,7 +385,15 @@ Details that are not visible from the message table:
   successful commit; the fix is in the text pipeline rather than in this backend (see the fallback
   section of `DEVELOPER-GUIDE.md`), because every control that draws a string has the same problem. The
   same applies to an emoji inserted through the panel: it is a character like any other, and it draws
-  from a colour emoji face where the platform has one.
+  from a colour emoji face where the platform has one. Measured on this machine - 533 of 628 inked
+  pixels chromatic - and then **seen by the person testing**: `かんじ` rendered as glyphs and 👌
+  rendered in colour in the demo's field. Nothing is claimed for macOS or Linux colour emoji.
+- **The caret moves by character, not by code unit.** The same run found that the arrow keys stepped
+  into the middle of an emoji, so the caret jumped back and forth once the fallback face gave that
+  half-character a width of its own. That is a defect of the text field rather than of this backend -
+  stepping by a UTF-16 code unit was always wrong - and it is fixed in the core field, where
+  `DEVELOPER-GUIDE.md` describes it. It is recorded here because an input method is what puts
+  characters an index cannot safely step through into the field in the first place.
 - **A refusal is told to the input method, not just the host.** `TextBox.OnCompositionStarted`
   answers false for a read-only or disabled field, so `Host.BeginComposition()` returns false and the
   library holds no preedit - which is invisible to the input method. It started a composition because
@@ -668,20 +676,19 @@ The Japanese language pack and its Microsoft IME are installed on this developme
 person who works on it ran the checklist below with a working IME. What that settled, and what it left
 open, because the difference matters:
 
-- **Confirmed on this machine, with the Microsoft IME, on the build before the fallback commit:**
-  steps 1, 2, 3, 4, 5, 6 and 8 - preedit and preedit caret reaching the control, a commit inserting
-  exactly once, the candidate list opening at the caret on the first conversion, Escape cancelling
-  without inserting, the password field masking the preedit, and the emoji panel landing at the caret
-  with the IME active. Step 4 is the one that mattered most: it confirms the composition form is what
-  positions a real input method's candidate window, not only the emoji panel.
-- **Confirmed failing, then fixed:** step 7. Typing into the read-only field brought up the input
-  method's own composition window, because the refusal was only made to the host (section 6.2). The
-  fix sends the input method the cancel it was owed; **step 7 needs re-running** to confirm the window
-  no longer appears, which no test here can show because it is the input method's own window.
-- **Needs a repeat for a different reason:** everything visual was confirmed on a build that predates
-  the font fallback, so the Japanese text on screen during that run was missing-glyph boxes. The
-  behaviour was judged correct anyway - the readout and the candidate list do not depend on the glyphs -
-  but steps 3 and 4 should be looked at again on a build that draws the characters.
+- **Confirmed on this machine, with the Microsoft IME:** steps 1, 2, 3, 4, 5, 6 and 8 - preedit and
+  preedit caret reaching the control, a commit inserting exactly once, the candidate list opening at
+  the caret on the first conversion, Escape cancelling without inserting, the password field masking
+  the preedit, and the emoji panel landing at the caret with the IME active. Step 4 is the one that
+  mattered most: it confirms the composition form is what positions a real input method's candidate
+  window, not only the emoji panel. The same run, on a build that had the fallback, confirmed that
+  `かんじ` renders as glyphs rather than boxes and that an inserted 👌 draws in colour.
+- **Found by that run, and fixed:** step 7 - typing into the read-only field brought up the input
+  method's own composition window, because the refusal was only made to the host (section 6.2); and,
+  once the emoji was in the field, the arrow keys stepping into the middle of it (section 6.2, and
+  `DEVELOPER-GUIDE.md` for the text field). **Step 7 needs re-running** to confirm the input method's
+  window no longer appears, and the arrow keys need a walk over the same text to confirm the caret
+  moves cleanly - neither is something these tests can show against a real input method.
 - **Still unverified:** whether a real input method answers the cancel with a `WM_IME_ENDCOMPOSITION`
   of its own, and whether its window actually goes away. Neither is observable from the message path
   with no IME to drive, and both are what the step-7 re-run answers.

@@ -558,8 +558,8 @@ public class TextBox : Control
         float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
         float originX = content.Left - _scrollX;
 
-        float left = MathF.Max(originX + MeasureX(display, Math.Clamp(start, 0, display.Length)), content.Left);
-        float right = MathF.Min(originX + MeasureX(display, Math.Clamp(start + length, 0, display.Length)), content.Right);
+        float left = MathF.Max(originX + MeasureX(display, TextCluster.Snap(display, Math.Clamp(start, 0, display.Length))), content.Left);
+        float right = MathF.Min(originX + MeasureX(display, TextCluster.Snap(display, Math.Clamp(start + length, 0, display.Length))), content.Right);
         if (right > left)
         {
             output.Add(new SKRect(left, top, right, top + lineHeight));
@@ -992,12 +992,12 @@ public class TextBox : Control
         switch (e.Key)
         {
             case Key.Left:
-                MoveCaretTo(control ? PreviousWordIndex(_caretIndex) : _caretIndex - 1, shift);
+                MoveCaretTo(control ? PreviousWordIndex(_caretIndex) : TextCluster.Previous(Text, _caretIndex), shift);
                 e.Handled = true;
                 break;
 
             case Key.Right:
-                MoveCaretTo(control ? NextWordIndex(_caretIndex) : _caretIndex + 1, shift);
+                MoveCaretTo(control ? NextWordIndex(_caretIndex) : TextCluster.Next(Text, _caretIndex), shift);
                 e.Handled = true;
                 break;
 
@@ -1024,7 +1024,9 @@ public class TextBox : Control
                 }
                 else if (_caretIndex > 0)
                 {
-                    ReplaceRange(_caretIndex - 1, 1, string.Empty);
+                    // A whole element, so a Backspace after an emoji leaves no lone surrogate behind.
+                    int start = TextCluster.Previous(Text, _caretIndex);
+                    ReplaceRange(start, _caretIndex - start, string.Empty);
                 }
 
                 break;
@@ -1042,7 +1044,8 @@ public class TextBox : Control
                 }
                 else if (_caretIndex < Text.Length)
                 {
-                    ReplaceRange(_caretIndex, 1, string.Empty);
+                    int end = TextCluster.Next(Text, _caretIndex);
+                    ReplaceRange(_caretIndex, end - _caretIndex, string.Empty);
                 }
 
                 break;
@@ -1384,7 +1387,9 @@ public class TextBox : Control
     {
         ActivateCaret();
 
-        _caretIndex = Math.Clamp(index, 0, Text.Length);
+        // The caret never rests inside an element, whatever asked it to move: a click, a key, a word
+        // jump or a platform input method all end up here.
+        _caretIndex = TextCluster.Snap(Text, Math.Clamp(index, 0, Text.Length));
         if (!extendSelection)
         {
             _anchor = _caretIndex;
@@ -1454,7 +1459,10 @@ public class TextBox : Control
             return 0f;
         }
 
-        return EffectiveFont.MeasureWidth(index >= display.Length ? display : display[..index]);
+        // A prefix that ends inside an element measures half a glyph, and with font fallback that half
+        // has a width of its own - which is what made a caret placed inside an emoji jump backwards.
+        int at = TextCluster.Snap(display, index);
+        return EffectiveFont.MeasureWidth(at >= display.Length ? display : display[..at]);
     }
 
     private int IndexFromX(float xInControl)
@@ -1471,9 +1479,10 @@ public class TextBox : Control
             return 0;
         }
 
+        // Only element boundaries are candidates, so a click can never land inside a character.
         float best = float.MaxValue;
         int bestIndex = 0;
-        for (int i = 0; i <= display.Length; i++)
+        for (int i = 0; ;)
         {
             float distance = MathF.Abs(MeasureX(display, i) - target);
             if (distance < best)
@@ -1481,6 +1490,13 @@ public class TextBox : Control
                 best = distance;
                 bestIndex = i;
             }
+
+            if (i >= display.Length)
+            {
+                break;
+            }
+
+            i = TextCluster.Next(display, i);
         }
 
         return bestIndex;
@@ -1500,7 +1516,9 @@ public class TextBox : Control
             i--;
         }
 
-        return i;
+        // A word boundary can land inside an element when the word is made of one, so the answer is
+        // snapped the same way the caret is.
+        return TextCluster.Snap(text, i);
     }
 
     private int NextWordIndex(int index)
@@ -1517,7 +1535,7 @@ public class TextBox : Control
             i++;
         }
 
-        return i;
+        return TextCluster.Snap(text, i);
     }
 
     private (int Start, int Length) WordAt(int index)
