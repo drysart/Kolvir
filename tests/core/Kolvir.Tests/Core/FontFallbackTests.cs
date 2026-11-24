@@ -133,17 +133,30 @@ public sealed class FontFallbackTests
     }
 
     [TestMethod]
-    public void ACharacterNoFaceCoversFallsBackToThePrimaryFaceRatherThanThrowing()
+    public void ACharacterNoInstalledFaceCoversStillMeasuresRatherThanThrowing()
     {
         using var font = TestFont.Create();
 
-        // U+10FFFD is a private-use code point, which no shipping font has a glyph for.
-        const string unassigned = "a\uDBFF\uDFFDb";
+        // U+10FFFD is a private-use code point, which no shipping text font is meant to have a glyph
+        // for. macOS ships a face of last resort that answers for it anyway, so the assertion is not
+        // "it stayed with the primary face" - it is that the character measures, is not thrown on, and
+        // is covered by exactly one run, whichever face that run uses.
+        const string unassigned = "a\U0010FFFDb";
 
         float width = font.MeasureWidth(unassigned);
+        Assert.IsTrue(width > 0f, "an uncovered character still measures");
 
-        Assert.IsTrue(width > 0f, "an uncovered character still measures, as a notdef glyph");
-        Assert.AreEqual(1, font.TextRunCount(unassigned), "and it stays with the primary face");
+        var runs = font.TextRuns(unassigned);
+        Assert.IsTrue(runs.Length >= 1, "the string is covered by at least one run");
+
+        int covered = 0;
+        foreach (var run in runs)
+        {
+            Assert.AreEqual(covered, run.Start, "the runs are contiguous, so no character is lost between them");
+            covered += run.Length;
+        }
+
+        Assert.AreEqual(unassigned.Length, covered, "and together they cover the whole string");
     }
 
     [TestMethod]
