@@ -69,6 +69,28 @@
     <KolvirTargetFrameworks Condition="'$(KolvirAllPlatforms)' != 'true' and '$(KolvirPlatformFramework)' != ''">$(KolvirPlatformFramework);net10.0</KolvirTargetFrameworks>
   </PropertyGroup>
 
+  <!-- The virtual DOM's generator, and the directory the child `dotnet build` that produces it
+       writes to. Three projects shell out to that build - the feature, the second sample and the demo
+       - because a project reference and the `MSBuild` task both inherit the calling build's global
+       properties (each of their targets says why), so its output path is not something MSBuild can
+       work out: it is whatever that separate process wrote. Both halves of the contract live here,
+       once, so the path and the build cannot describe different directories.
+
+       The child build is pinned to AnyCPU, and that pin is the whole point. `Platform` is a global
+       property during a Visual Studio publish and during `dotnet publish -p:Platform=...`, and on
+       Windows it is also an environment variable inside a Developer Command Prompt, which is how
+       vcvars64.bat sets it. A separate process inherits all of that. With `Platform=x64` the SDK
+       writes `bin\x64\<Configuration>\netstandard2.0`; with AnyCPU it writes
+       `bin\<Configuration>\netstandard2.0`. Pinning the platform makes the second the only one, so
+       VirtualDomGeneratorDll - derived from the same Configuration the build is told to use - names
+       the dll that build just wrote rather than a stale copy from some earlier build. -->
+  <PropertyGroup>
+    <VirtualDomGeneratorProject>$(MSBuildThisFileDirectory)src\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj</VirtualDomGeneratorProject>
+    <VirtualDomGeneratorPlatform>AnyCPU</VirtualDomGeneratorPlatform>
+    <VirtualDomGeneratorBuildCommand>dotnet build "$(VirtualDomGeneratorProject)" -c $(Configuration) -p:Platform=$(VirtualDomGeneratorPlatform) --nologo</VirtualDomGeneratorBuildCommand>
+    <VirtualDomGeneratorDll>$(MSBuildThisFileDirectory)src\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll</VirtualDomGeneratorDll>
+  </PropertyGroup>
+
   <!-- A NuGet consumer imports buildTransitive/Kolvir.props from the package automatically. This
 	   repository's projects reference Kolvir by project instead, and a ProjectReference imports no
 	   build assets at all, so the same file is imported here. Keeping the two routes identical is

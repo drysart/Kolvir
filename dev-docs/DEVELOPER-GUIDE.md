@@ -5322,7 +5322,10 @@ every project in the build graph, and a `netstandard2.0` project cannot satisfy 
 with NETSDK1207 on the generator, in an application that never asked for one. A `ProjectReference`
 cannot remove an inherited global property, and neither can the `MSBuild` task, so the sample shells
 out to `dotnet build` for the generator, where the properties are the environment's and not the
-publish's.
+publish's. That environment is the other half of the arrangement: the platform the child build is
+pinned to, the command and the dll path that results all live together in `Directory.Build.props`, so
+a `Platform` inherited from the environment cannot move the output where the `<Analyzer>` item is not
+looking - see [NativeAOT](#nativeaot) for the rule behind it.
 
 ### Observables
 
@@ -6833,6 +6836,20 @@ or right-click **Publish** in Visual Studio. The result is a **single** self-con
 `KolvirDemoApp.exe` (9,270,272 bytes, 8.84 MiB, of which 5.2 MiB is the compressed Skia native
 binary) and an optional `KolvirDemoApp.pdb` for debugging. Nothing else is needed to run it - the
 AOT build opens the real window and renders the demo.
+
+One rule about publish-wide properties, because both failures it prevents were silent until somebody
+published. A Visual Studio **Publish**, and any solution-wide `dotnet publish`, passes the properties
+that shape the output - `PublishAot`, `PublishTrimmed`, `TrimMode`, `SelfContained`,
+`PublishSingleFile`, `RuntimeIdentifier` and their neighbours - as **global** properties, and a global
+reaches every project in the reference graph rather than only the one being published. A project that
+cannot honour one of them has to say so itself: `TreatAsLocalProperty` on the `Project` element is
+what lets the `netstandard2.0` analyzer opt out of trimming, which the SDK otherwise rejects with
+NETSDK1124 before anything compiles. `src/generators/Kolvir.Analyzers/Kolvir.Analyzers.csproj` is the
+model to copy - it lists the lot and says what each one is for - and a new publish-wide property goes
+there at the same time it is added anywhere. The same rule explains the demo's child `dotnet build`
+for the virtual DOM generator: that process inherits `Platform` from the environment, so its output
+path would otherwise move under `bin\x64\` - which is why the platform it is pinned to, the command
+and the dll path all sit together in `Directory.Build.props`.
 
 On Windows this needs the MSVC linker (`link.exe`). The profile switches to
 `IlcUseEnvironmentalTools` automatically once a VC environment is initialized, so the most

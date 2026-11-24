@@ -68,11 +68,6 @@
     <ProjectReference Include="..\..\features\Kolvir.Feature.EffectiveInView\Kolvir.Feature.EffectiveInView.csproj" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <VirtualDomGeneratorProject>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj</VirtualDomGeneratorProject>
-    <VirtualDomGeneratorDll>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll</VirtualDomGeneratorDll>
-  </PropertyGroup>
-
   <!-- Built before the compiler runs, because the manifest in this assembly is what turns into node
        classes: without the dll there is no analyzer and the page would not compile.
 
@@ -82,9 +77,13 @@
        (NETSDK1207). The `MSBuild` task inherits them too, which is not obvious until a nested build
        comes out with no references at all. A new process starts from the environment, which is what a
        generator project needs, and it matches what a consumer of the package gets: the analyzer as a
-       dll, from `analyzers/dotnet/cs`. -->
+       dll, from `analyzers/dotnet/cs`.
+
+       The project, the platform that build is pinned to and the dll it writes are all in
+       Directory.Build.props, so the target and `$(VirtualDomGeneratorDll)` below cannot describe
+       different directories. -->
   <Target Name="BuildVirtualDomGenerator" BeforeTargets="CoreCompile">
-    <Exec Command="dotnet build &quot;$(VirtualDomGeneratorProject)&quot; -c $(Configuration) --nologo" />
+    <Exec Command="$(VirtualDomGeneratorBuildCommand)" />
   </Target>
 
   <ItemGroup>

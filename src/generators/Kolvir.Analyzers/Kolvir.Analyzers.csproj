@@ -1,4 +1,4 @@
-<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;RuntimeIdentifier;SelfContained">
+<Project Sdk="Microsoft.NET.Sdk" TreatAsLocalProperty="PublishAot;PublishTrimmed;TrimMode;PublishSingleFile;PublishReadyToRun;PublishSelfContained;RuntimeIdentifier;SelfContained">
 
   <!-- The union diagnostics: the mistakes around Kolvir.Union<...> that the compiler cannot see.
        It is a project of its own and lives outside `src/features/*` because the pack job globs that
@@ -19,12 +19,37 @@
     <!-- Build-time only: it runs inside the compiler's own host, so AOT analysis does not apply. -->
     <IsAotCompatible>false</IsAotCompatible>
 
-    <!-- A solution-wide `dotnet publish -p:PublishAot=true` passes PublishAot as a global
-         property to every project in the graph, including this netstandard2.0 one, which cannot
-         satisfy it (NETSDK1207). The Project element localizes the values so the properties below
-         win for this project only, and an application's AOT publish builds its analyzer without
-         trying to publish one. -->
+    <!-- A Visual Studio publish, and any solution-wide `dotnet publish`, passes the properties that
+         shape the *output* as global properties, and a global reaches every project in the reference
+         graph rather than only the one being published. This project is in that graph: the rule in
+         Directory.Build.targets references it for every project that reaches core. It cannot honour
+         any of them - it is a netstandard2.0 analyzer, built for the compiler to load, not an
+         application with a runtime to trim, bundle or AOT-compile.
+
+         The rule rather than the instances, because two have failed here already and a third will
+         arrive with whatever property the next publish adds: every property that decides what a
+         publish emits belongs in this list. A global that survives reaches the SDK's framework
+         resolution and stops the build before anything compiles - NETSDK1207 for PublishAot on
+         netstandard2.0, NETSDK1124 for PublishTrimmed on anything below .NET Core 3.0.
+
+         PublishAot and PublishTrimmed are localized *and* set to false below, because their SDK
+         default is not negative in every case (`PublishAot` used to imply trimming). TrimMode travels
+         with PublishTrimmed: it only says how much to trim, which means nothing with trimming off.
+         PublishSingleFile and PublishReadyToRun are the same kind of switch for the same reason -
+         each describes the shape of an application's output, and a library built to be loaded by a
+         compiler has nothing to bundle or precompile. RuntimeIdentifier, SelfContained and its newer
+         spelling PublishSelfContained name the runtime the output is for, and this assembly has none:
+         it is compiled once, for netstandard2.0, and loaded by whichever compiler is running.
+
+         Deliberately absent: EmbedSkiaSharpNative and the feature packages' native switches. Those
+         are this repository's own knobs rather than publish-wide ones, and their targets only run for
+         an AOT publish, which this project never is. -->
     <PublishAot>false</PublishAot>
+    <PublishTrimmed>false</PublishTrimmed>
+    <PublishSingleFile>false</PublishSingleFile>
+    <PublishReadyToRun>false</PublishReadyToRun>
+    <PublishSelfContained>false</PublishSelfContained>
+    <SelfContained>false</SelfContained>
   </PropertyGroup>
 
   <ItemGroup>
