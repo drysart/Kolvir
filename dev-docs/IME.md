@@ -1012,12 +1012,31 @@ What is **not** verified, and stays a checklist:
    the change, the same losing flow leaves `Preedit: ""` instead of the stale mark, and a core test
    fails without it.
 
-   **Next step, and it needs a person at the machine:** the panel-key-status question re-asked under
-   VNC, with the backend logging `NSWindow` key changes and `NSApplication.KeyWindow` on every key and
-   every mark. Posted events cannot reproduce the failing flow for any custom client, so this cannot be
-   settled from a script. If the panel does take key status under VNC, the fix is on the client's
-   window management; if it does not, the difference between this view and a text-system-backed one is
-   where to look next, and the minimal client above is the tool for it - driven under VNC, not posted.
+   **The next step is one manual run, and it is the last one needed.** `KOLVIR_IME_TRACE=<file>` turns
+   on a trace that is off by default and costs nothing when off (`AppKitImeTrace`): every
+   `NSTextInputClient` call with its answer, every key the view routes with the window state at that
+   moment - `NSWindow.IsKeyWindow`, `NSApplication.KeyWindow`, the event's own window and the first
+   responder - every window that becomes or stops being key, and boundaries a reader can grep for
+   (`---- Space pressed while a mark is live ----`, `---- a commit arrived ----`, `---- the input
+   method ended its composition without committing ----`). It prints the path it is writing before the
+   window appears. The run:
+
+   ```sh
+   KOLVIR_IME_TRACE=/tmp/kolvir-ime.log ~/work/ime-trace/src/demo/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp --page text-input
+   ```
+
+   Click the `Name` field, make sure Hiragana is the active source, type `nihongo`, press Space, press
+   Enter, then send back `/tmp/kolvir-ime.log`.
+
+   The log decides between two readings and nothing else. **A `WINDOW became key` line naming a window
+   other than the app's own, around the Space**, means Kotoeri's candidate panel took the key and the
+   fix is this client's window management. **No such line, with the mark still live and the `Enter`
+   lines showing only `selectedRange` queries**, means the client answers something the input method
+   dislikes only in that state; the next step is then to replay the log's exact answer sequence into
+   the minimal `NSTextInputClient` above, under VNC, flipping one answer per build until the outcome
+   changes - that client takes its answers from one place, so bisecting them is a handful of builds.
+   What would make both readings wrong is an `insertText` line with a wrong or duplicated string: that
+   is a commit-path defect, and the commit path is the one thing the harness already pins.
 Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
 in this section is a hand run over `ssh` with `screencapture`.

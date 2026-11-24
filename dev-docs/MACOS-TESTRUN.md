@@ -164,6 +164,22 @@ Launch Services entirely.
 | A check that drives real clicks or keystrokes | `open -n ...app --args --page N`, because it makes the app frontmost - or the launch profile plus the activation step below |
 | Anything at all | build first; `dotnet run` without the profile draws nothing |
 
+## Tracing the input method, when a hand run is the only instrument
+
+`KOLVIR_IME_TRACE=<file>` writes a line-per-call trace of the AppKit text path: every
+`NSTextInputClient` call with its answer, every key with the window state at that moment, and every
+window that gains or loses key status. It is off unless the variable is set, costs nothing when off,
+and prints the path it is writing to before the window appears:
+
+```sh
+KOLVIR_IME_TRACE=/tmp/kolvir-ime.log ~/work/ime-trace/src/demo/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp --page text-input
+```
+
+The inner binary is used rather than `dotnet run` so the variable reaches the app without a wrapper;
+the window may not come to the front, so click the field before typing. Boundaries in the file
+(`---- Space pressed while a mark is live ----`, `---- a commit arrived ----`) mark where one key's
+calls end, so a reader can slice it. `dev-docs/IME.md` section 7.7 is the case this exists for.
+
 ## TCC permissions: what `macvm` needs, and how the failures look
 
 A remote session gets **no** privacy permissions by default. Two are needed, and macOS attributes an
