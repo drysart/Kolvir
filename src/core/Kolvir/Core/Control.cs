@@ -717,6 +717,30 @@ public class Control : IDisposable
     }
 
     /// <summary>
+    /// Where a platform input method should anchor its candidate window for this control, in host
+    /// coordinates. A control with no insertion point of its own answers its own bounds, so a
+    /// backend always has a rectangle to hang the window under.
+    /// </summary>
+    /// <remarks>
+    /// Internal because it exists for the host and the backends behind it, not for applications:
+    /// the host answers the same question with <see cref="UiHost.TryGetCaretBounds"/>, and a text
+    /// box overrides this with its caret.
+    /// </remarks>
+    internal virtual bool TryGetCaretBounds(out SKRect bounds)
+    {
+        var origin = GetPositionInHost();
+        var scale = EffectiveScaleMultiplier;
+
+        bounds = new SKRect(
+            origin.X,
+            origin.Y,
+            origin.X + (Width * scale),
+            origin.Y + (Height * scale));
+
+        return true;
+    }
+
+    /// <summary>
     /// The top-left corner of this control in <paramref name="ancestor"/>'s client coordinates,
     /// including the scroll offsets and zoom of the containers in between.
     /// </summary>
@@ -3126,6 +3150,20 @@ public class Control : IDisposable
         }
     }
 
+    /// <summary>Asks the control to take a composition. Returns true when it does.</summary>
+    internal bool RaiseCompositionStarted() =>
+        EffectiveEnabled && OnCompositionStarted();
+
+    /// <summary>Offers the control the preedit of a composition. Returns true when it is composing.</summary>
+    internal bool RaiseCompositionUpdated(string text, int caretIndex) =>
+        EffectiveEnabled && OnCompositionUpdated(text, caretIndex);
+
+    /// <summary>
+    /// Drops any composition the control holds. It runs even on a disabled control, so a field that
+    /// is disabled mid-composition cannot keep a preedit alive.
+    /// </summary>
+    internal void RaiseCompositionCancelled() => OnCompositionCancelled();
+
     internal void RaiseGotFocus()
     {
         IsFocused = true;
@@ -3289,6 +3327,31 @@ public class Control : IDisposable
     /// <see cref="AddTextInputHandler"/>.
     /// </summary>
     protected virtual void OnTextInput(TextInputEventArgs e) => _textInput?.Invoke(this, e);
+
+    /// <summary>
+    /// Called when a platform input method begins a composition on this control. Returning true
+    /// takes it, which is what lets later updates draw a preedit here; the default declines, so a
+    /// control with no text of its own ignores composition entirely.
+    /// </summary>
+    /// <remarks>
+    /// A commit does not need this: it arrives through <see cref="OnTextInput"/> as ordinary text
+    /// whether the control took the composition or not.
+    /// </remarks>
+    protected virtual bool OnCompositionStarted() => false;
+
+    /// <summary>
+    /// Called with the uncommitted text of a composition and the position of the platform's caret
+    /// inside it. Returning true keeps the composition; the default declines.
+    /// </summary>
+    /// <param name="text">The preedit string, which is not part of <see cref="Text"/>.</param>
+    /// <param name="caretIndex">Where the platform's caret sits inside <paramref name="text"/>.</param>
+    protected virtual bool OnCompositionUpdated(string text, int caretIndex) => false;
+
+    /// <summary>
+    /// Called when a composition ends without a commit, or when the focus moves away. A control
+    /// that took a composition drops its preedit here; the default does nothing.
+    /// </summary>
+    protected virtual void OnCompositionCancelled() { }
 
     /// <summary>
     /// Called when the control receives the keyboard focus. The default raises

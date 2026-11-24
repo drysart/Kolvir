@@ -1416,6 +1416,87 @@ public sealed class UiHost
         });
 
     /// <summary>
+    /// Asks the focused control whether it takes text composition at all, such as a text box that
+    /// is not read-only. A platform input method calls this when it begins a composition.
+    /// </summary>
+    /// <returns>
+    /// True when the control took the composition, false when nothing is focused or the control
+    /// declined.
+    /// </returns>
+    /// <remarks>
+    /// Until a composition begins nothing is held: a control that declines is never touched by a
+    /// preedit, and the commit still arrives through <see cref="ProcessTextInput"/> as ordinary
+    /// text, so a field that refuses composition is simply a field where the preedit is not shown.
+    /// </remarks>
+    public bool BeginComposition() =>
+        Guard(() => _focused?.RaiseCompositionStarted() ?? false, false);
+
+    /// <summary>
+    /// Offers the focused control the uncommitted text of a composition and the position of the
+    /// platform's caret inside it.
+    /// </summary>
+    /// <param name="text">The preedit string. It is not part of the control's value.</param>
+    /// <param name="caretIndex">Where the platform's caret sits inside <paramref name="text"/>.</param>
+    /// <returns>True when the control is composing, false when nothing is focused or it declined.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is null.</exception>
+    public bool UpdateComposition(string text, int caretIndex)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        return Guard(() => _focused?.RaiseCompositionUpdated(text, caretIndex) ?? false, false);
+    }
+
+    /// <summary>
+    /// Ends a composition with <paramref name="text"/>: the focused control drops its preedit and
+    /// the text goes through the ordinary text path.
+    /// </summary>
+    /// <param name="text">The committed text, which may be empty.</param>
+    /// <exception cref="ArgumentNullException"><paramref name="text"/> is null.</exception>
+    /// <remarks>
+    /// The commit is exactly as if the same characters had been typed: it is offered to the input
+    /// sinks first and then inserted by the control, so undo, validation,
+    /// <see cref="TextBox.MaxLength"/> and the autocomplete handler all see an ordinary insert.
+    /// </remarks>
+    public void CommitComposition(string text)
+    {
+        ArgumentNullException.ThrowIfNull(text);
+
+        Guard(() =>
+        {
+            _focused?.RaiseCompositionCancelled();
+            ProcessTextInput(text);
+        });
+    }
+
+    /// <summary>
+    /// Ends a composition without committing anything, leaving the focused control's value and
+    /// undo history exactly as they were.
+    /// </summary>
+    public void CancelComposition() => Guard(() => _focused?.RaiseCompositionCancelled());
+
+    /// <summary>
+    /// The insertion point of the focused control, in host (logical) coordinates, which is where a
+    /// platform input method places its candidate window.
+    /// </summary>
+    /// <param name="bounds">The caret rect, or an empty rect when there is no answer.</param>
+    /// <returns>True when a control answered.</returns>
+    /// <remarks>
+    /// A control with no caret of its own answers its own bounds, so a backend always has a
+    /// sensible rectangle to anchor to. Each backend converts from this host space into the space
+    /// its platform wants, rather than the other way round.
+    /// </remarks>
+    public bool TryGetCaretBounds(out SKRect bounds)
+    {
+        if (_focused is { } control && control.TryGetCaretBounds(out bounds))
+        {
+            return true;
+        }
+
+        bounds = default;
+        return false;
+    }
+
+    /// <summary>
     /// Pushes <paramref name="sink"/> onto the window's input sinks, so it sees keys and typed text
     /// before the focused control does. Dispose the result to remove it again.
     /// </summary>
@@ -1501,6 +1582,11 @@ public sealed class UiHost
         }
 
         var previous = _focused;
+
+        // A composition belongs to the control it started on, so leaving the field ends it. The
+        // preedit is dropped before the control hears about the lost focus, so nothing it does in
+        // response sees a half-finished composition.
+        previous?.RaiseCompositionCancelled();
         previous?.RaiseLostFocus();
 
         // A control's internal selection only lives while it holds focus, so leaving the
