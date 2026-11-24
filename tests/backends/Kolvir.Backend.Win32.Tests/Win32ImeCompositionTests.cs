@@ -70,11 +70,16 @@ public sealed class Win32ImeCompositionTests
 
         public int Caret { get; set; }
 
+        /// <summary>How many times the window asked the input method to abandon its composition.</summary>
+        public int Cancels { get; private set; }
+
         public string CompositionString(IntPtr context) => Composition;
 
         public string ResultString(IntPtr context) => Result;
 
         public int CaretPosition(IntPtr context) => Caret;
+
+        public void Cancel(IntPtr context) => Cancels++;
     }
 
     private static IntPtr Send(IntPtr hwnd, uint message, int wParam = 0, uint lParam = 0) =>
@@ -277,5 +282,130 @@ public sealed class Win32ImeCompositionTests
         Assert.AreEqual(string.Empty, reader.CompositionString(IntPtr.Zero));
         Assert.AreEqual(string.Empty, reader.ResultString(IntPtr.Zero));
         Assert.AreEqual(0, reader.CaretPosition(IntPtr.Zero));
+    }
+
+    [TestMethod]
+    public void TheProductionReaderCancelsNothingWithoutAContext()
+    {
+        // Cancelling on a window with no context must be a no-op rather than a call Imm32 cannot
+        // answer: the refusal path runs for any window, including one that never had a context.
+        Win32ImeComposition.Instance.Cancel(IntPtr.Zero);
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void AReadOnlyFieldRefusesACompositionAndTheInputMethodIsTold() =>
+        RefusalIsSentToTheInputMethod("ime read only", box => box.ReadOnly = true);
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void ADisabledFieldRefusesACompositionAndTheInputMethodIsTold() =>
+        RefusalIsSentToTheInputMethod("ime disabled", box => box.Enabled = false);
+
+    /// <summary>
+    /// A field that will not take a composition has to say so to the input method, not only to the
+    /// host: the input method started the composition because it was asked to, and answering the
+    /// message while keeping quiet leaves its own window on screen over a field that will never take
+    /// the text. That was the read-only failure a person found by hand.
+    /// </summary>
+    private static void RefusalIsSentToTheInputMethod(string title, Action<TextBox> makeUnwilling)
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            var box = new TextBox { Dock = DockStyle.Fill, Text = "fixed" };
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(box);
+
+            var window = new Window(title, panel) { ClientSize = new SKSize(320f, 160f) };
+
+            window.AddShownHandler(_ =>
+            {
+                var backend = (Win32WindowBackend)window.Backend;
+                var ime = new FakeImeComposition();
+                backend.ImeComposition = ime;
+
+                box.Focus();
+                makeUnwilling(box);
+
+                var hwnd = backend.Handle;
+
+                Send(hwnd, NativeMethods.WmImeStartComposition);
+
+                Assert.AreEqual(
+                    1,
+                    ime.Cancels,
+                    "the input method is told to abandon the composition it was allowed to start");
+
+                // The updates that follow a refused start belong to nobody: the preedit is dropped
+                // and so is a result, which the field never said it would take.
+                ime.Composition = "ni";
+                ime.Caret = 2;
+                Send(hwnd, NativeMethods.WmImeComposition, 0, NativeMethods.GcsCompStr);
+                Send(hwnd, NativeMethods.WmImeComposition, 0, NativeMethods.GcsResultStr);
+
+                Assert.AreEqual("fixed", box.Text, "nothing of a refused composition is inserted");
+
+                // One refusal per start, so an input method that keeps offering one cannot amplify it.
+                Send(hwnd, NativeMethods.WmImeStartComposition);
+                Send(hwnd, NativeMethods.WmImeStartComposition);
+
+                Assert.AreEqual(3, ime.Cancels, "one answer per start message, and no more");
+
+                application.Exit();
+            });
+
+            window.Show();
+            application.Run();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void AnAcceptedCompositionIsNotCancelled()
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            var box = new RecordingBox { Dock = DockStyle.Fill };
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(box);
+
+            var window = new Window("ime accepted", panel) { ClientSize = new SKSize(320f, 160f) };
+
+            window.AddShownHandler(_ =>
+            {
+                var backend = (Win32WindowBackend)window.Backend;
+                var ime = new FakeImeComposition();
+                backend.ImeComposition = ime;
+
+                box.Focus();
+
+                var hwnd = backend.Handle;
+
+                Send(hwnd, NativeMethods.WmImeStartComposition);
+
+                Assert.AreEqual(1, box.Started, "the box took the composition");
+                Assert.AreEqual(
+                    0,
+                    ime.Cancels,
+                    "a field that accepts a composition must not have it cancelled underneath it");
+
+                application.Exit();
+            });
+
+            window.Show();
+            application.Run();
+        }
+        finally
+        {
+            application.Dispose();
+        }
     }
 }

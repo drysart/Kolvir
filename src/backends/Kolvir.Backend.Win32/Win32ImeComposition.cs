@@ -35,6 +35,17 @@ internal interface IWin32ImeComposition
     /// <summary>Where the input method's caret sits inside the composition string.</summary>
     /// <param name="context">The window's input context.</param>
     int CaretPosition(IntPtr context);
+
+    /// <summary>
+    /// Abandons the input method's own composition, which is how a field that refuses one says so.
+    /// </summary>
+    /// <param name="context">The window's input context.</param>
+    /// <remarks>
+    /// Declining in the host is invisible to the input method: it started a composition because it was
+    /// asked to, and it keeps its own window on screen over a field that will never take the text
+    /// until it is told to stop. This is the telling.
+    /// </remarks>
+    void Cancel(IntPtr context);
 }
 
 /// <summary>The production reader: <c>ImmGetCompositionStringW</c>, on the window's own context.</summary>
@@ -61,6 +72,18 @@ internal sealed class Win32ImeComposition : IWin32ImeComposition
         // read. A negative answer is an IMM error, and zero is the only sane caret for one.
         var position = NativeMethods.ImmGetCompositionStringW(context, NativeMethods.GcsCursorPos, null, 0);
         return position < 0 ? 0 : position;
+    }
+
+    public void Cancel(IntPtr context)
+    {
+        if (context == IntPtr.Zero)
+        {
+            return;
+        }
+
+        // NI_COMPOSITIONSTR/CPS_CANCEL is the documented "drop the composition you are holding": it
+        // is what Escape does, and it is what makes the input method take its own window down.
+        NativeMethods.ImmNotifyIME(context, NativeMethods.NiCompositionStr, NativeMethods.CpsCancel, 0);
     }
 
     /// <summary>

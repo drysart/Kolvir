@@ -68,6 +68,12 @@ public sealed class Win32WindowBackend : IWindowBackend
     private bool _composing;
 
     /// <summary>
+    /// True while a refusal is being sent to the input method, so a start message provoked by the
+    /// cancel itself cannot recurse.
+    /// </summary>
+    private bool _refusingComposition;
+
+    /// <summary>
     /// The characters a commit has already inserted, which the input method's own WM_CHAR copies must
     /// not insert again. Emptied as each one arrives.
     /// </summary>
@@ -3155,8 +3161,7 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         if (!_composing)
         {
-            // A refusal is still answered. The input method keeps its own state consistent, the
-            // preedit is never shown, and the commit still arrives as ordinary text.
+            RefuseComposition(hwnd);
             return;
         }
 
@@ -3173,6 +3178,50 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
         finally
         {
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    /// <summary>
+    /// Tells the input method that the composition it just started is not wanted: the focused control
+    /// refused it, and the input method has to take its own state and window down rather than keep
+    /// them over a field that will never accept the text.
+    /// </summary>
+    /// <remarks>
+    /// Declining in the host is invisible to the input method - it started a composition because it was
+    /// asked to, and answering the message while keeping quiet leaves its window on screen over a
+    /// read-only field. This is the one place a refusal is made audible. Saying this does not make the
+    /// control refuse the *characters*: an input method that cancels still delivers what the user typed
+    /// as ordinary text on the next key, and the field's own text-input path decides what to do with it.
+    /// </remarks>
+    private void RefuseComposition(IntPtr hwnd)
+    {
+        if (_refusingComposition)
+        {
+            // The cancel itself provoked another start message. Cancelling that too would be a loop,
+            // and an unresponsive input method must not be able to ping-pong the window procedure.
+            Win32ImeLog.Write(
+                $"WM_IME_STARTCOMPOSITION refused while already refusing hwnd=0x{hwnd.ToInt64():X}: "
+                + "another start arrived from the cancel and is not answered");
+            return;
+        }
+
+        var context = NativeMethods.ImmGetContext(hwnd);
+        if (context == IntPtr.Zero)
+        {
+            Win32ImeLog.Write($"WM_IME_STARTCOMPOSITION refused hwnd=0x{hwnd.ToInt64():X}: no input context to cancel on");
+            return;
+        }
+
+        _refusingComposition = true;
+        try
+        {
+            ImeComposition.Cancel(context);
+            Win32ImeLog.Write($"WM_IME_STARTCOMPOSITION refused hwnd=0x{hwnd.ToInt64():X}: composition cancelled");
+        }
+        finally
+        {
+            _refusingComposition = false;
             NativeMethods.ImmReleaseContext(hwnd, context);
         }
     }
@@ -3198,11 +3247,31 @@ public sealed class Win32WindowBackend : IWindowBackend
                     _composing = _host.BeginComposition();
                 }
 
+                if (!_composing)
+                {
+                    // Nothing accepted this composition - read-only, disabled, or a control with no
+                    // preedit - so the update belongs to nobody. Showing it would put uncommitted text
+                    // over a field that will never take the commit.
+                    Win32ImeLog.Write(
+                        $"WM_IME_COMPOSITION dropped hwnd=0x{hwnd.ToInt64():X}: the focused control is not composing");
+                    return;
+                }
+
                 _host.UpdateComposition(source.CompositionString(context), source.CaretPosition(context));
             }
 
             if ((flags & NativeMethods.GcsResultStr) != 0)
             {
+                if (!_composing)
+                {
+                    // A result for a composition this field refused. Inserting it would be text the
+                    // field said it would not take, and the characters still arrive as WM_CHAR for a
+                    // field that accepts ordinary input.
+                    Win32ImeLog.Write(
+                        $"WM_IME_COMPOSITION result dropped hwnd=0x{hwnd.ToInt64():X}: no live composition");
+                    return;
+                }
+
                 var committed = source.ResultString(context);
 
                 // The commit inserts the text, and the same characters are still on their way back as
@@ -3246,7 +3315,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         {
             try
             {
-                NativeMethods.ImmNotifyIME(context, NativeMethods.NiCompositionStr, NativeMethods.CpsCancel, 0);
+                ImeComposition.Cancel(context);
             }
             finally
             {

@@ -267,7 +267,7 @@ because the default handler is one of the ways a committed result becomes a `WM_
 | Message | Value | What the backend does |
 |---|---|---|
 | `WM_IME_SETCONTEXT` | `0x0281` | Clear `ISC_SHOWUICOMPOSITIONWINDOW` (`0x80000000`) in `lParam` so the IME does not draw its own composition window over a library that draws the preedit itself, then pass it to `DefWindowProcW`. The flag is a DWORD in the low half of the `LPARAM`, so it is masked there and the result widened back as `lParam` is. |
-| `WM_IME_STARTCOMPOSITION` | `0x010D` | `ImmGetContext`, `Host.BeginComposition()`, `ImmSetCompositionWindow` at the caret, `ImmSetCompositionFontW` from the focused control's font, `ImmReleaseContext`, then `DefWindowProcW`. A refusal is still answered, so the IME knows the field declined. |
+| `WM_IME_STARTCOMPOSITION` | `0x010D` | `ImmGetContext`, `Host.BeginComposition()`, `ImmSetCompositionWindow` at the caret, `ImmSetCompositionFontW` from the focused control's font, `ImmReleaseContext`, then `DefWindowProcW`. When the control refuses - read-only, disabled - the input method is told with `ImmNotifyIME(NI_COMPOSITIONSTR, CPS_CANCEL)` instead, because declining in the host alone leaves the input method's own window on screen over a field that will never take the text. |
 | `WM_IME_COMPOSITION` | `0x010F` | `GCS_COMPSTR` (`0x0008`): read the composition string and `GCS_CURSORPOS` (`0x0080`), then `Host.UpdateComposition`. `GCS_RESULTSTR` (`0x0800`): read the result string and `Host.CommitComposition`. Then `ImmSetCompositionWindow` from the caret seam so the candidate window follows the caret. |
 | `WM_IME_ENDCOMPOSITION` | `0x010E` | `Host.CancelComposition()`, idempotent because a commit already cleared the preedit. |
 
@@ -386,6 +386,27 @@ Details that are not visible from the message table:
   section of `DEVELOPER-GUIDE.md`), because every control that draws a string has the same problem. The
   same applies to an emoji inserted through the panel: it is a character like any other, and it draws
   from a colour emoji face where the platform has one.
+- **A refusal is told to the input method, not just the host.** `TextBox.OnCompositionStarted`
+  answers false for a read-only or disabled field, so `Host.BeginComposition()` returns false and the
+  library holds no preedit - which is invisible to the input method. It started a composition because
+  it was asked to, and answering the message while staying quiet left its own window on screen over a
+  field that would never accept the text: a person typing into the read-only field saw the input
+  method's window appear, which no test had asked about because no test could. The handler now sends
+  `ImmNotifyIME(context, NI_COMPOSITIONSTR, CPS_CANCEL, 0)` on a refusal, logs it as
+  `WM_IME_STARTCOMPOSITION refused ... composition cancelled`, and while no composition is live a
+  `GCS_COMPSTR` update and a `GCS_RESULTSTR` result are dropped and logged rather than shown or
+  inserted. A start message that arrives *from* the cancel is not answered again, so an input method
+  that re-offers a composition cannot ping-pong the window procedure; that case would log
+  `refused while already refusing`.
+  The narrower fix was chosen over `ImmAssociateContext(hwnd, IntPtr.Zero)`, which would disable the
+  input context for the whole window: the context also answers `WM_IME_REQUEST`, so disabling it would
+  take the emoji panel's positioning with it, and every focus change to a writable field would then
+  have to re-associate it. Cancelling one composition leaves the window's context alone.
+  `WM_IME_ENDCOMPOSITION` arriving as a consequence of the cancel is harmless: that handler clears
+  `_composing` and calls `Host.CancelComposition()`, which is idempotent because there was no preedit
+  to clear. Whether a real input method answers the cancel with an end-composition message is not
+  measured here (section 7.5), and neither is whether the input method's window actually goes away -
+  only the user's re-run of step 7 can say that.
 - **Popups.** `Win32PopupWindow` and `Win32MenuWindow` are deliberately left alone, for the reason
   section 6.4 gives: a non-activating popup never takes the input focus, so no composition can begin
   there.
@@ -583,6 +604,10 @@ routing, the host calls and the text box are all the shipped ones. What it prove
     is logged as `swallowed=False`, which is what lets `TranslateMessage` hand it to an input method,
     and a key the library does handle is logged as `swallowed=True`. A trace that could not distinguish
     those two would read "silent input method" for both.
+14. A field that refuses a composition tells the input method so: a read-only field and a disabled one
+    each send exactly one cancel per start message - three starts, three cancels, no amplification -
+    the preedit and the result that follow are dropped rather than shown or inserted, and a field that
+    *accepts* a composition sends none, so an accepted composition is never cancelled underneath it.
 
 The composition string itself is published through `IWin32ImeComposition`, which is internal and
 defaults to `Win32ImeComposition.Instance`. The seam exists so the message path can be driven where no
@@ -639,13 +664,31 @@ person to look at them, which is section 7.5.
 
 ### 7.5 Verifying with a real input method
 
-The Japanese language pack and its Microsoft IME are installed on this development machine, so the
-real path is reachable by hand - once the IME is composing at all. At the time of writing it was not,
-not even in Notepad (section 6.2), which is why the checklist below is written down rather than ticked.
-The demo's **Text Input** page carries the evidence: the `Name` field
-has a composition readout under it - `Preedit: "..."  |  preedit caret: n  |  last commit: "..."  |
-value: "..."` - plus a `Password` field and a `Read only` field holding
-`Read-only - select, then Ctrl+C`.
+The Japanese language pack and its Microsoft IME are installed on this development machine, and the
+person who works on it ran the checklist below with a working IME. What that settled, and what it left
+open, because the difference matters:
+
+- **Confirmed on this machine, with the Microsoft IME, on the build before the fallback commit:**
+  steps 1, 2, 3, 4, 5, 6 and 8 - preedit and preedit caret reaching the control, a commit inserting
+  exactly once, the candidate list opening at the caret on the first conversion, Escape cancelling
+  without inserting, the password field masking the preedit, and the emoji panel landing at the caret
+  with the IME active. Step 4 is the one that mattered most: it confirms the composition form is what
+  positions a real input method's candidate window, not only the emoji panel.
+- **Confirmed failing, then fixed:** step 7. Typing into the read-only field brought up the input
+  method's own composition window, because the refusal was only made to the host (section 6.2). The
+  fix sends the input method the cancel it was owed; **step 7 needs re-running** to confirm the window
+  no longer appears, which no test here can show because it is the input method's own window.
+- **Needs a repeat for a different reason:** everything visual was confirmed on a build that predates
+  the font fallback, so the Japanese text on screen during that run was missing-glyph boxes. The
+  behaviour was judged correct anyway - the readout and the candidate list do not depend on the glyphs -
+  but steps 3 and 4 should be looked at again on a build that draws the characters.
+- **Still unverified:** whether a real input method answers the cancel with a `WM_IME_ENDCOMPOSITION`
+  of its own, and whether its window actually goes away. Neither is observable from the message path
+  with no IME to drive, and both are what the step-7 re-run answers.
+
+The demo's **Text Input** page carries the evidence: the `Name` field has a composition readout under
+it - `Preedit: "..."  |  preedit caret: n  |  last commit: "..."  | value: "..."` - plus a `Password`
+field and a `Read only` field holding `Read-only - select, then Ctrl+C`.
 
 Setup: run the demo, open **Text Input**, and press **Win+Space** (or use the language bar) until the
 IME is Japanese and in Hiragana mode. The steps below name the readout each one expects.
@@ -672,7 +715,10 @@ IME is Japanese and in Hiragana mode. The steps below name the readout each one 
    candidate list still opens at the caret, and a commit inserts masked characters - the status line
    reads `Password length: 1` for one committed character.
 7. **The read-only field refuses a composition.** Click `Read only`, type `ni`. No preedit appears, the
-   readout stays empty, and the field still reads `Read-only - select, then Ctrl+C`.
+   readout stays empty, and the field still reads `Read-only - select, then Ctrl+C`. The input method's
+   own window must not appear either: that was the failure this step found, and the cancel in section
+   6.2 is the fix. A trace of the same run says `WM_IME_STARTCOMPOSITION refused ... composition
+   cancelled` once per keystroke that tried.
 8. **The emoji panel lands at the caret with the IME active.** With the caret mid-field, press
    **Win+Period**. The panel opens beside the caret. Switch back to English (Win+Space) and repeat: the
    panel must still land at the caret.
@@ -689,7 +735,7 @@ than in the CI suite.
 | Platform | Dead keys / Compose | Daemon-driven IME | Status |
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
-| Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and its UI is the section 7.5 checklist - still unticked, because the IME is only now composing on this machine | **Done** |
+| Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
 | macOS | Designed | Designed | Not implemented |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
