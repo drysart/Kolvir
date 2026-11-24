@@ -179,6 +179,12 @@ saw, and a commit arriving afterwards simply re-inserts through the ordinary tex
 did change is invariant 9: the clear now goes through the hook, because a control that observes
 composition has no other way to learn that a mark the input method abandoned is gone.
 
+The rule is now exonerated on a valid instrument, not only on posted events: in the control sequence of
+the hand run under VNC - `nihongo`, Enter, no Space - the box cleared its preedit on that Enter exactly
+as it does in the failing sequence, and the input method committed anyway (`insertText '日本語'`). So
+clearing the preedit first does not stop a commit, which is what the rule has always claimed and what
+the defect is not.
+
 ## 5. The caret seam
 
 A platform input method places its candidate window against the caret. One call on the host answers
@@ -1012,31 +1018,42 @@ What is **not** verified, and stays a checklist:
    the change, the same losing flow leaves `Preedit: ""` instead of the stale mark, and a core test
    fails without it.
 
-   **The next step is one manual run, and it is the last one needed.** `KOLVIR_IME_TRACE=<file>` turns
-   on a trace that is off by default and costs nothing when off (`AppKitImeTrace`): every
-   `NSTextInputClient` call with its answer, every key the view routes with the window state at that
-   moment - `NSWindow.IsKeyWindow`, `NSApplication.KeyWindow`, the event's own window and the first
-   responder - every window that becomes or stops being key, and boundaries a reader can grep for
-   (`---- Space pressed while a mark is live ----`, `---- a commit arrived ----`, `---- the input
-   method ended its composition without committing ----`). It prints the path it is writing before the
-   window appears. The run:
+   **The hand run under VNC, and what it settled.** Two sequences in one session on an instrumented
+   build: `nihongo` Enter (the control), then `nihongo` Space Enter (the defect).
 
-   ```sh
-   KOLVIR_IME_TRACE=/tmp/kolvir-ime.log ~/work/ime-trace/src/demo/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp --page text-input
-   ```
+   - **The control commits.** `---- Enter pressed while a mark is live (selection 3,0) ----`, then
+     `selectedRange` twice, `hasMarkedText -> True`, `validAttributesForMarkedText` four times,
+     `insertText '日本語'`. So the input method asks two questions about the client's state and then
+     commits, and clearing the preedit first does not stop it (section 4.5).
+   - **The defect delivers no callback at all** - and no command either: **zero
+     `doCommandBySelector` lines in the whole run**, so the reading that AppKit handed this view
+     `insertNewline:` and its forwarding destroyed the preedit is disproved. The input method kept
+     that Return.
+   - **The candidate state stops after four `selectedRange` answers.** In that Return it never asks
+     `hasMarkedText`, `markedRange`, `firstRectForCharacterRange:` or
+     `attributedSubstringForProposedRange:` - the calls it does make in the control - and then goes
+     quiet. `insertText` count for that window: 0.
+   - **The candidate panel never takes the key.** Exactly one `WINDOW became key` line in the whole
+     run, naming the app's own window; every key names `ourWindowKey=True appKey=NSWindow"Kolvir -
+     AppKit" (key)` with the view as first responder.
+   - The marks in order: `n`, `に`, `にh`, `にほ`, `にほn`, `日本語`, `日本語歌詞`.
 
-   Click the `Name` field, make sure Hiragana is the active source, type `nihongo`, press Space, press
-   Enter, then send back `/tmp/kolvir-ime.log`.
+   **The asymmetry that is now the leading question, and it is this section's own change under
+   suspicion.** The control's mark arrives as `selected=3,0` - a caret inside the mark, nothing
+   selected. The candidate state arrives as `selected=0,5` - the whole mark selected - and this client
+   echoes `0,5` back, because a previous round added that on the reasoning that a conversion selects the
+   run. That reasoning was never checked against a reference client, and this run shows the input method
+   reading the answer four times and then going quiet. A stock `NSTextView` may answer its caret
+   (zero-length, at the mark's end) instead of the marked selection, which would mean the echo moved
+   this client the wrong way. **Do not change it before the reference says what the right answer is.**
 
-   The log decides between two readings and nothing else. **A `WINDOW became key` line naming a window
-   other than the app's own, around the Space**, means Kotoeri's candidate panel took the key and the
-   fix is this client's window management. **No such line, with the mark still live and the `Enter`
-   lines showing only `selectedRange` queries**, means the client answers something the input method
-   dislikes only in that state; the next step is then to replay the log's exact answer sequence into
-   the minimal `NSTextInputClient` above, under VNC, flipping one answer per build until the outcome
-   changes - that client takes its answers from one place, so bisecting them is a handful of builds.
-   What would make both readings wrong is an `insertText` line with a wrong or duplicated string: that
-   is a commit-path defect, and the commit path is the one thing the harness already pins.
+   **The next measurement, and it needs the same hand:** the logged `NSTextView` subclass as a small
+   app, typed by a person over VNC with the same two sequences. It answers three things no trace of this
+   client can: whether a stock client commits these keys under a real keyboard, what it answers for
+   `selectedRange` and `markedRange` while a candidate is selected, and which calls it receives that
+   this client does not. Posted events are invalid for this state (see above), so it has to be typed.
+   After that, one behaviour change at a time, each verified by hand - starting with `selectedRange` if
+   the reference disagrees with it.
 Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
 in this section is a hand run over `ssh` with `screencapture`.
