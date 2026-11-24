@@ -165,6 +165,13 @@ These are the contract, and each one has a headless test (section 7.1):
 7. A control that refuses composition still receives the commit as text.
 8. Selection and caret do not move while the preedit grows.
 
+The rule in section 3 that a key the library consumes clears the preedit first was tested against the
+one case where it might have been wrong - `Enter` during a live composition on macOS, where the input
+method is an in-process client of this library and asks the control's own state while it owns a
+candidate list. Exempting `Enter` and `Escape` from the rule changed nothing (section 7.7, item 9), so
+the rule stands as written: the preedit is cleared before the platform can be handed a key it never
+saw, and a commit arriving afterwards simply re-inserts through the ordinary text path.
+
 ## 5. The caret seam
 
 A platform input method places its candidate window against the caret. One call on the host answers
@@ -959,13 +966,38 @@ What is **not** verified, and stays a checklist:
 8. **The password field masks the preedit**, and **the read-only field refuses** a composition. The
    refusal is pinned by a test (`AppKitCompositionTests`, and the harness check), but neither was
    watched on screen. **(unverified)**
-9. **A conversion opened with Space instead of committed on Enter.** Observed twice: with a marked
-   run and Space pressed, the input method re-offered the run as a selected range, and the Enter that
-   followed delivered *no* callback at all to the client - no `insertText`, no `doCommandBySelector`,
-   no `unmarkText` - so the marked text ended with nothing committed. The same Enter after a mark
-   *without* a Space conversion does commit (item 3), so this is specific to the candidate-list state,
-   and it is recorded in section 8 as an open question rather than claimed as working. **(defect
-   observed, cause not isolated)**
+9. **A conversion opened with Space does not commit on macOS - measured, cause not isolated.**
+   With a marked run, Space puts the input method into its candidate state: it re-offers the run as a
+   range it has selected (`setMarkedText 'a' loc=0 len=1`). Enter in that state delivers **no** callback
+   to the client at all - no `insertText`, no `doCommandBySelector`, no `unmarkText` - so the marked
+   text ends with nothing committed. It is not the commit path: leave the state with a letter and the
+   next Enter commits correctly (`setMarkedText 'aい'`, then `insertText 'aい'`), and Escape in the same
+   state reaches the input method (`setMarkedText 'あ'` again, the candidate list cancelled). Five
+   explanations were tested on the Mac host and each was ruled out by measurement:
+
+   | Hypothesis | Test | Result |
+   |---|---|---|
+   | The shared `TextBox` rule clears the preedit for `Enter`/`Escape` before the platform sees the key (section 4.5), so the client tells the input method the document is empty | traced the rule's decision and `ClearPreedit`, then re-ran the flow with `Enter` and `Escape` excluded from the rule | **ruled out twice**: the plain-Enter path commits *after* `box preedit cleared (was 'あ')`, and the Space path still delivers nothing *without* the clearing |
+   | The client contradicts the input method about what is marked | traced `hasMarkedText`, `markedRange`, `selectedRange` and `attributedSubstringForProposedRange:` in call order across Space and Enter | `hasMarkedText` answers true and `markedRange` `(0,1)` whenever asked in that state; after Enter the input method asks `selectedRange` four times and nothing else, and the answer is exactly the range it set |
+   | The candidate panel took key status, so the commit went to another client | logged `NSWindow.IsKeyWindow` and the first responder on every key | key window true and the view the first responder, in both the working and the failing path |
+   | The view's `NSTextInputContext` was recreated, losing the session | logged the context identity on every key and every mark | one instance for the whole session, in both paths |
+   | It is AppKit's own behavior rather than this client's | typed the same keys into a stock `NSTextView` in a 20-line AppKit program on the same machine | the stock view **commits** (`a`, then a newline from the same Enter) where this client delivers nothing, so the difference is in this client |
+
+   The same two answers were also swept before that: `selectedRange` with a zero length (the original
+   code) and echoed back with its length, and `attributedSubstringForProposedRange:` answering `nil`
+   and answering the marked run. None of the four changed the outcome, so all four are in the shipped
+   code on their own merits rather than as the fix. **(defect observed, cause not isolated)**
+
+   What is left untried is a diff against a client that works: a minimal Swift `NSTextInputClient` that
+   logs the answers it is given and the answers it returns, run beside this one, would show which of
+   `firstRectForCharacterRange:` (in the candidate state, where the preedit is the whole mark),
+   `markedRange.location` (hard-coded to `0` rather than the caret's document position),
+   `windowLevel`, `documentVisibleRect` or `validAttributesForMarkedText` Kotoeri acts on there. That is
+   the next step, and it is a reference client rather than another guess in this one.
+
+   One measurement caveat, recorded because it cost a round: a Return posted with `CGEvent` and no
+   unicode string is not reliably delivered in this state, while one posted through `System Events` is.
+   The comparison above uses `System Events` for that reason, and any future run should too.
 
 Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
@@ -1016,12 +1048,16 @@ Open questions:
    after the whole preedit rather than inside it. The index is recorded and handed to the platform
    through the caret seam; repositioning the drawn caret inside the preedit comes with clause
    styling.
-6. **A conversion opened with Space commits nothing on macOS.** Observed twice on the Mac host with
-   Kotoeri: with a marked run, Space made the input method re-offer the run as a selected range, and
-   the Enter after it delivered no callback to the client at all - no `insertText`, no
-   `doCommandBySelector`, no `unmarkText` - so the marked text went away with nothing committed
-   (section 7.7, item 9). The same Enter after a mark with no Space conversion does commit, so the
-   difference is the candidate-list state, not the commit path. Two protocol answers that a
-   conversion exercises were corrected while chasing it - the selection's length and the marked run
-   as the attributed substring - and neither changed the outcome, so the cause is still open. It is
-   not claimed as working.
+6. **A conversion opened with Space commits nothing on macOS.** Observed on the Mac host with
+   Kotoeri: with a marked run, Space puts the input method into its candidate state, and the Enter
+   after it delivers no callback to the client at all, so the marked text goes away with nothing
+   committed. The commit path itself is intact - a letter dismisses the candidate state and the next
+   Enter commits - and the state is specific to that candidate list, not to Enter or to the shared
+   key rule. Five explanations were tested and ruled out, including the one that looked most likely
+   (the `TextBox` preedit clearing before the platform sees the key): section 7.7 item 9 has the
+   table. A stock `NSTextView` on the same machine commits the same keys, so the difference is in
+   this client and the remaining candidates are the answers it gives while a candidate is selected -
+   `firstRectForCharacterRange:` in that state, `markedRange.location`, `windowLevel`,
+   `documentVisibleRect`, `validAttributesForMarkedText`. The way to settle it is a minimal Swift
+   `NSTextInputClient` that logs both the calls and its answers, run beside this one, rather than
+   another guess here. Not claimed as working.
