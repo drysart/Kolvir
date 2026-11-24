@@ -65,7 +65,7 @@ What is missing today:
 
 | # | Step | Scope | Done when |
 | --- | --- | --- | --- |
-| 1 | The UI-thread `SynchronizationContext` | A context installed by `Application.Run()` over the existing dispatch; `Post`, `Send`, `CreateCopy`; restored on exit | `await` of a task completed on the UI thread resumes on the UI thread, asserted by a test |
+| 1 | The UI-thread `SynchronizationContext` | A context installed by `Application.Run()` over the existing dispatch; `Post`, `Send`, `CreateCopy`; restored on exit | A task completed on the UI thread has its continuation run on the UI thread, asserted by a test that drains the posted continuation |
 | 2 | Result and options types | `PopupResult`, `PopupCloseReason`, `PopupOptions`, `PopupAlign`, `PopupPlacement` | The types exist and are documented; no behaviour yet |
 | 3 | The extension surface | `ShowPopupAsync` on `Window` (with and without an anchor) and on `Control`; `ClosePopup`; `AddPopupClosedHandler`/`RemovePopupClosedHandler`; the per-control session table | Showing a control returns a task that completes with the right reason for each dismissal path |
 | 4 | Placement | Anchor/client-point/pointer placement, `PopupAlign`, `Offset`, flip and clamp inside the work area | A popup asked to open below a control at the bottom of the display opens above it |
@@ -96,11 +96,26 @@ Three properties it has to keep, all of them already true of the code it wraps:
 - the context is absent after `Run` returns, so a stray continuation cannot marshal onto a loop that
   has finished.
 
-The headless suite is the other consumer. `HeadlessTestBase` restores process state and runs no loop,
-and the one place a test enters `Application.Run` is `HeadlessScene.RunWhileShown`, which asserts
-from inside a shown handler. A test that awaits a popup therefore either makes that handler async
-and gets the context from this step for free, or installs a dispatcher of its own. That choice is
-made when the step is implemented; open items carries it until then.
+The suites that call `Application.Run()` already run their body under the context, which is where the
+assertion belongs rather than in a new fixture. The tests call it 17 times: five each in
+`Win32CaretPositionTests` and `Win32ImeCompositionTests`, two in `HeadlessSceneTests`, one each in
+`Win32CloseDuringPaintTests`, `Win32LocationChangedTests`, `OverlayAnimationTests` and
+`ToastAnimationTests`, and once inside `HeadlessScene.RunWhileShown`, the helper the core suite
+enters it through.
+
+What a headless test cannot do is await. `HeadlessApplicationBackend.Run()` drains the queue once and
+returns rather than looping, and `Invoke(..., synchronous: false)` only enqueues - the drain is
+documented as "a headless run drains that queue rather than looping, so a test asks for it
+explicitly". So `Post` reaches that queue and a continuation runs only when the test drains, through
+`DrainPending()` or the `TestApplicationBackend.Drain()` wrapper the suite already calls in 20
+places. An `await` inside a shown handler is not a way around it: the handler suspends, `Run` tears
+the application down without the await having resumed, and a continuation drained after that runs
+with no context installed.
+
+The assertion is synchronous and sits inside a shown handler, where the context is current: start the
+operation, complete it, drain, and check that the continuation ran on the same thread. Step 3's tests
+are written the same way - start the task, dismiss, drain, assert - so step 1's done-when is met by
+the same shape rather than by a fixture of its own.
 
 ## Steps 2 and 3 detail - result types and the extension surface
 
@@ -187,7 +202,9 @@ reachable without a call.
 
 Core tests belong in `tests/core/Kolvir.Tests/Core/PopupTests.cs`, which already runs the overlay
 fallback path - the one every application gets before a backend registers, so it is the path the new
-API has to work on everywhere. What those tests must cover:
+API has to work on everywhere. Nothing in these tests awaits: a headless test starts the task,
+dismisses the popup and drains, then asserts on the completed task (step 1 explains why). What those
+tests must cover:
 
 - task completion per reason: `Closed`, `OutsideClick`, `Escape`, `OwnerClosed` and `Cancelled`;
 - `ClosePopup` with and without a value, and `TryGetValue<T>` on both;
@@ -197,8 +214,8 @@ API has to work on everywhere. What those tests must cover:
 - placement: an anchor at the bottom of the work area flips, and a request that does not fit either
   way clamps;
 - Escape, through the forwarded sink;
-- the step-1 `SynchronizationContext`: a continuation after `await ShowPopupAsync` runs on the UI
-  thread.
+- the step-1 `SynchronizationContext`: after the popup closes and the queue is drained, the
+  continuation ran on the UI thread.
 
 The rest needs a real window and a hand check, because the headless suite never has a platform popup
 service:
@@ -222,6 +239,8 @@ Implementation unknowns, not open design questions.
   up with the focus and installs a capture-phase key controller for that reason. Whether a forwarded
   `IInputSink` sees a key before that controller does, and whether a text box inside a popover can be
   typed into, is not stated anywhere in the source and has to be found on a real display.
-- **How the headless suite hosts the step-1 context.** The decision itself is small - an async
-  `RunWhileShown` body, or a dispatcher of the test's own - but it is not made yet, and the step-1
-  done-when cannot be asserted until it is.
+- **How a headless test reaches the drain.** `HeadlessScene` exposes `Backend` as
+  `IApplicationBackend` and has no drain of its own, so a test either casts it to
+  `HeadlessApplicationBackend` or builds the scene over a `TestApplicationBackend` and calls its
+  `Drain()`, which is what `PopupTests` already does for the tool tip. Which one step 3 standardises
+  on is settled when the tests are written; nothing else about the headless context is open.
