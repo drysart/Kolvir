@@ -1038,22 +1038,29 @@ What is **not** verified, and stays a checklist:
      AppKit" (key)` with the view as first responder.
    - The marks in order: `n`, `に`, `にh`, `にほ`, `にほn`, `日本語`, `日本語歌詞`.
 
-   **The asymmetry that is now the leading question, and it is this section's own change under
-   suspicion.** The control's mark arrives as `selected=3,0` - a caret inside the mark, nothing
-   selected. The candidate state arrives as `selected=0,5` - the whole mark selected - and this client
-   echoes `0,5` back, because a previous round added that on the reasoning that a conversion selects the
-   run. That reasoning was never checked against a reference client, and this run shows the input method
-   reading the answer four times and then going quiet. A stock `NSTextView` may answer its caret
-   (zero-length, at the mark's end) instead of the marked selection, which would mean the echo moved
-   this client the wrong way. **Do not change it before the reference says what the right answer is.**
+   **The reference client loses the same Return, and `selectedRange` is exonerated.** The logged
+   `NSTextView` subclass, typed by hand over VNC with the same two sequences, commits the control
+   (`insertText '日本語'`) and loses the candidate Enter exactly as this client does: candidate
+   `setMarkedText '日本語学' selected=0,4`, then on Enter `hasMarkedText -> true`,
+   `selectedRange -> 0,4`, `attributedSubstring 0,4`, `selectedRange -> 0,4`, `hasMarkedText -> true`,
+   and the mark stays live. Run totals: `insertText` 1 (the control), `unmarkText` 0 - the same shape
+   as this client's run. **So a full selection echoed from `selectedRange` is what a stock client
+   answers too** (`0,4` there, `0,3` here), and echoing it is not the mistake. The suspicion recorded
+   here against that change is closed: it stays as shipped.
 
-   **The next measurement, and it needs the same hand:** the logged `NSTextView` subclass as a small
-   app, typed by a person over VNC with the same two sequences. It answers three things no trace of this
-   client can: whether a stock client commits these keys under a real keyboard, what it answers for
-   `selectedRange` and `markedRange` while a candidate is selected, and which calls it receives that
-   this client does not. Posted events are invalid for this state (see above), so it has to be typed.
-   After that, one behaviour change at a time, each verified by hand - starting with `selectedRange` if
-   the reference disagrees with it.
+   **What that reopens is attribution, and there is a confound in every run so far.** Every failing
+   Kolvir run and the failing reference run were started as a bare binary or a bundle binary launched
+   over `ssh`; the only LaunchServices-launched app in the series is `TextEdit`, and `TextEdit` is the
+   one that commits. `MACOS-TESTRUN.md` already records that `open -n <bundle>` is what makes an app
+   frontmost, and that route had never been used for these hand runs. A launch path that changes how
+   the app is presented to the window server is a plausible difference for an input method that
+   attaches a candidate panel, so the next pass measures it rather than reasoning about it: the
+   reference client bundled as a real `.app` and launched with `open -n`, this backend launched with
+   `open -n` with its trace on, and `TextEdit` again today on the same source, the same two sequences
+   each. If the bundled/`open`-launched reference commits and this client does not, the defect is here
+   and the instrument is finally clean; if both commit, the earlier failures were the launch path,
+   which is itself the finding; if `TextEdit` now fails too, the claim that it commits is retracted and
+   the candidate state on this host is the defect.
 Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
 in this section is a hand run over `ssh` with `screencapture`.
