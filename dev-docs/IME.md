@@ -1090,8 +1090,19 @@ What is **not** verified, and stays a checklist:
    comparison - every custom client losing the Return under `System Events` - was measured with an
    instrument that cannot drive this state at all, and is withdrawn.
 
-   **The next probe is now the other two routes in this client, by hand, with the fix in place:**
-   `nihongo`, Space, Tab, arrows, Enter, and `nihongo`, Space, click a candidate. If Tab now opens the
+   **The acceptance run is the other two routes in this client, by hand, with the fix in place.**
+   Launched through LaunchServices so it is frontmost and the trace variable arrives from the bundle's
+   `LSEnvironment` rather than the shell (`dev-docs/MACOS-TESTRUN.md`):
+
+   ```sh
+   open -n ~/work/ime-trace/src/demo/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app --args --page text-input
+   ```
+
+   The log is `/tmp/kolvir-ime.log`, written from startup. What decides it is one line: `offered Tab to
+   the input method first: a mark is live` means the new ordering ran, and `key Tab taken by the host;
+   the input method never sees it` means it did not. On screen, success is the focus staying in the field
+   with the candidate list open after Tab, and the confirm committing. The two sequences:
+   `nihongo`, Space, Tab, arrows, Enter; and `nihongo`, Space, click a candidate. If Tab now opens the
    candidate list and the confirmation commits, the ordering fix is confirmed against the reference
    under a real keyboard. If it does not, the next instrument is the same reference app logging
    `NSEvent` key codes for Tab with the panel open, to see whether the method asks for anything this
