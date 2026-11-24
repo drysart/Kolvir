@@ -140,7 +140,13 @@ public sealed class Win32CaretPositionTests
     }
 
     /// <summary>A real window with a real text box in it, and the body run inside its shown handler.</summary>
-    private static void Run(string title, Action<IntPtr, Window, TextBox> body)
+    /// <param name="title">The window title.</param>
+    /// <param name="body">Runs with keyboard focus and the real message loop underneath it.</param>
+    /// <param name="afterRun">
+    /// Runs once the loop has drained, which is when messages the body posted have been translated and
+    /// dispatched. Reading the trace needs this: the pump writes those lines, not the body.
+    /// </param>
+    private static void Run(string title, Action<IntPtr, Window, TextBox> body, Action? afterRun = null)
     {
         var application = new Application(new Win32ApplicationBackend());
 
@@ -171,6 +177,53 @@ public sealed class Win32CaretPositionTests
 
             window.Show();
             application.Run();
+
+            afterRun?.Invoke();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    /// <summary>
+    /// A real window whose loop ends only after the posted keys have been through the pump, which is
+    /// the one place the key trace is written. <see cref="Run"/> ends by closing its window, and a key
+    /// that arrives after the window is gone is not handled by anything, so its swallowed flag would be
+    /// a lie.
+    /// </summary>
+    private static void RunWithKeys(string title, IntPtr[] keys, Action afterRun)
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            var box = new TextBox { Dock = DockStyle.Fill, Text = "hello world" };
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(box);
+
+            var window = new Window(title, panel) { ClientSize = new SKSize(320f, 160f) };
+
+            window.AddShownHandler(_ =>
+            {
+                var backend = (Win32WindowBackend)window.Backend;
+
+                box.Focus();
+                TakeFocus(backend.Handle);
+
+                foreach (var key in keys)
+                {
+                    NativeMethods.PostMessageW(backend.Handle, NativeMethods.WmKeyDown, key, IntPtr.Zero);
+                }
+
+                // Posted after the keys, so the queue hands them to a live window before the loop ends.
+                NativeMethods.PostQuitMessage(0);
+            });
+
+            window.Show();
+            application.Run();
+
+            afterRun();
         }
         finally
         {
@@ -376,6 +429,51 @@ public sealed class Win32CaretPositionTests
                 trace.Contains("IMR_QUERYCHARPOSITION answered", StringComparison.Ordinal),
                 "with what was answered, which is what tells 'never asked' from 'answered and ignored'");
             Assert.IsTrue(trace.Contains("focus=0x", StringComparison.Ordinal), "and the focus it was asked with");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheTraceRecordsWhetherAKeyReachedTheInputMethod()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-keys-{Guid.NewGuid():N}.log");
+
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+
+        const int vkA = 0x41;
+        const int vkLeft = 0x25;
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+
+            RunWithKeys(
+                "ime key trace",
+                new[] { new IntPtr(vkA), new IntPtr(vkLeft) },
+                () =>
+                {
+                    var trace = System.IO.File.ReadAllText(path);
+
+                    Assert.IsTrue(
+                        trace.Contains("pump WM_KEYDOWN vk=0x41 swallowed=False", StringComparison.Ordinal),
+                        "a letter the library leaves alone reaches TranslateMessage, which is what lets an input "
+                        + "method see it - the opposite would mean no composition can ever start");
+                    Assert.IsTrue(
+                        trace.Contains("pump WM_KEYDOWN vk=0x25 swallowed=True", StringComparison.Ordinal),
+                        "a key the library does handle is logged as swallowed, because it never reaches the "
+                        + "input method");
+                });
         }
         finally
         {

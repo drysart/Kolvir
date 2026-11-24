@@ -49,6 +49,7 @@ internal static class NativeMethods
     internal const uint WmKeyUp = 0x0101;
     internal const uint WmSysKeyDown = 0x0104;
     internal const uint WmChar = 0x0102;
+    internal const uint WmSysChar = 0x0106;
     internal const uint WmSetCursor = 0x0020;
     internal const uint WmMouseLeave = 0x02A3;
     internal const uint WmDpiChanged = 0x02E0;
@@ -65,6 +66,12 @@ internal static class NativeMethods
     internal const uint WmImeStartComposition = 0x010D;
     internal const uint WmImeEndComposition = 0x010E;
     internal const uint WmImeComposition = 0x010F;
+
+    /// <summary>
+    /// A character the input method produced, sent after the composition that carries it. The default
+    /// window procedure turns it into a <c>WM_CHAR</c>, which is one half of the doubling hazard.
+    /// </summary>
+    internal const uint WmImeChar = 0x0286;
 
     /// <summary>The composition string, which is what the user has not committed yet.</summary>
     internal const uint GcsCompStr = 0x0008;

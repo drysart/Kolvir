@@ -485,7 +485,10 @@ public sealed class Win32ApplicationBackend : IApplicationBackend, IWin32Acceler
                 return;
             }
 
-            if (IsKeyHandledByUi(message))
+            var handled = IsKeyHandledByUi(message);
+            TraceKeyMessage(message, handled);
+
+            if (handled)
             {
                 continue;
             }
@@ -528,7 +531,10 @@ public sealed class Win32ApplicationBackend : IApplicationBackend, IWin32Acceler
                 return -1;
             }
 
-            if (IsKeyHandledByUi(message))
+            var handled = IsKeyHandledByUi(message);
+            TraceKeyMessage(message, handled);
+
+            if (handled)
             {
                 continue;
             }
@@ -537,6 +543,46 @@ public sealed class Win32ApplicationBackend : IApplicationBackend, IWin32Acceler
             NativeMethods.DispatchMessageW(ref message);
         }
     }
+
+    /// <summary>
+    /// Logs the messages that decide whether a keystroke ever reaches the input method: the key itself
+    /// and whether the library swallowed it before <c>TranslateMessage</c> could hand it over, the
+    /// character that translation produced, and any character an input method produced itself. Those
+    /// three lines separate "the input method was bypassed" from "the key never arrived", which a trace
+    /// of the <c>WM_IME_*</c> messages alone cannot do.
+    /// </summary>
+    private static void TraceKeyMessage(in NativeMethods.MSG message, bool swallowed)
+    {
+        if (!Win32ImeLog.Enabled)
+        {
+            return;
+        }
+
+        switch (message.message)
+        {
+            case NativeMethods.WmKeyDown:
+            case NativeMethods.WmSysKeyDown:
+                Win32ImeLog.Write(
+                    $"pump {(message.message == NativeMethods.WmKeyDown ? "WM_KEYDOWN" : "WM_SYSKEYDOWN")} "
+                    + $"vk=0x{(int)message.wParam:X2} swallowed={swallowed}");
+                break;
+
+            case NativeMethods.WmChar:
+            case NativeMethods.WmSysChar:
+                Win32ImeLog.Write(
+                    $"pump {(message.message == NativeMethods.WmChar ? "WM_CHAR" : "WM_SYSCHAR")} "
+                    + DescribeCharacter((int)message.wParam));
+                break;
+
+            case NativeMethods.WmImeChar:
+                Win32ImeLog.Write($"pump WM_IME_CHAR {DescribeCharacter((int)message.wParam)}");
+                break;
+        }
+    }
+
+    /// <summary>A character code with the character beside it when it has a visible form.</summary>
+    private static string DescribeCharacter(int code) =>
+        char.IsControl((char)code) ? $"char=0x{code:X4}" : $"char=0x{code:X4} '{(char)code}'";
 
     /// <summary>
     /// Swallowing the key here (instead of in a window procedure) keeps <c>TranslateMessage</c>

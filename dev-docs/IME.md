@@ -354,6 +354,15 @@ Details that are not visible from the message table:
   have explained a fixed screen position, and that can only be checked if the pointer is recorded at
   the same moments. The composition form was behind a third switch while it was an experiment; it is
   behaviour now, and the switch was removed rather than left as a way to turn the fix off.
+- **The key path is traced too.** A trace of the `WM_IME_*` messages alone cannot tell "the input
+  method was bypassed" from "the keystroke never reached the window": both look like silence. So the
+  message pump logs the three lines that separate them, whenever the trace is on - `pump WM_KEYDOWN
+  vk=0x4E swallowed=False` for the key and whether the library consumed it before `TranslateMessage`
+  could hand it over, `pump WM_CHAR char=0x006E 'n'` for the character translation produced, and `pump
+  WM_IME_CHAR char=0x3053 'こ'` for a character an input method produced itself. A bypassed input
+  method reads as `WM_KEYDOWN` then latin `WM_CHAR`; a working one reads as `WM_KEYDOWN` then
+  `WM_IME_*`; a key the library swallowed reads as `swallowed=True` with nothing after it. This is the
+  instrument the first real composition attempt needs, and a test pins it (section 7.3, item 13).
 - **The trace proves it is running, twice over.** The first version of it wrote only when an IME
   message arrived, and the first real run produced no file at all - which is indistinguishable from
   the feature not being in the build, the variable not reaching the process, or the panel never
@@ -374,6 +383,36 @@ Details that are not visible from the message table:
 - **Popups.** `Win32PopupWindow` and `Win32MenuWindow` are deliberately left alone, for the reason
   section 6.4 gives: a non-activating popup never takes the input focus, so no composition can begin
   there.
+
+**What a TSF input method needs from a legacy window, as far as this machine can show.** The Japanese
+IME here has no `IMM32` file (`ImmGetIMEFileNameW` and `ImmGetDescriptionW` are both empty for
+`00000411`), so it can only reach an app like this one through the CUAS bridge that `msctf.dll`
+provides. The measurements about that bridge, kept apart from what is still assumed:
+
+- A focused window has an IME context, and `ImmGetContext` per message is enough for every call this
+  backend makes - including `ImmSetCompositionStringW`, which stores a string once the context is the
+  thread's active one (section 6.2, measurement above). `ImmAssociateContext` at creation is not
+  needed for that: the default context exists as soon as the window has focus.
+- Posted `WM_KEYDOWN`s taken through `TranslateMessage` produce an ordinary `WM_CHAR` and no
+  composition at all, with either the Japanese or the English layout, and `ImmSetOpenStatus(himc, TRUE)`
+  leaves `ImmGetOpenStatus` false and the conversion mode at `IME_CMODE_NATIVE`. Nothing in the
+  `IMM32` surface turns Japanese input on for this window.
+- The same thing happens in **Notepad**, which is the decisive control: the machine's Japanese IME does
+  not compose in a stock application either. So the absence of `WM_IME_STARTCOMPOSITION` in a Kolvir
+  trace says nothing about this backend, and neither the key path nor the
+  `ISC_SHOWUICOMPOSITIONWINDOW` handling can be blamed for it.
+- Unverified until the IME composes somewhere, and worth knowing in this order. First, whether
+  clearing `ISC_SHOWUICOMPOSITIONWINDOW` suppresses a CUAS-bridged TSF IME's own preedit UI - the flag
+  names the composition window rather than the candidate window, and if a trace ever shows a preedit in
+  the readout with no input method UI on screen, this is the first thing to revert. Second, whether a
+  real composition needs the context made active, as the synthesized string did. Third, whether CUAS
+  wants anything else of the window. Answering `WM_IME_REQUEST` is not a precondition: Flutter never
+  answers it and composes.
+- For the record: one traced run with no composition running was asked `IMR_QUERYCHARPOSITION` **123
+  times in 71 seconds** where earlier runs were asked four to six times. Nothing in this backend's
+  per-message path calls into `Imm32` when the caret has not moved, so that polling is not ours. The
+  next trace should check whether those requests line up with the 500 ms heartbeat (142 ticks in the
+  same 71 seconds) or are independent of it; if they are ours, the cost is worth knowing.
 
 Two hazards, both fixed in this branch:
 
@@ -534,6 +573,10 @@ routing, the host calls and the text box are all the shipped ones. What it prove
     `IMR_QUERYCHARPOSITION` answers with; a window with nothing focused leaves it untouched; and a
     message that does not move the caret does not re-issue it, which the test proves by writing a
     marker only it knows and checking the marker survives.
+13. The key path is traced at the pump, where the decision is made: a letter the library leaves alone
+    is logged as `swallowed=False`, which is what lets `TranslateMessage` hand it to an input method,
+    and a key the library does handle is logged as `swallowed=True`. A trace that could not distinguish
+    those two would read "silent input method" for both.
 
 The composition string itself is published through `IWin32ImeComposition`, which is internal and
 defaults to `Win32ImeComposition.Instance`. The seam exists so the message path can be driven where no
@@ -591,7 +634,9 @@ person to look at them, which is section 7.5.
 ### 7.5 Verifying with a real input method
 
 The Japanese language pack and its Microsoft IME are installed on this development machine, so the
-real path is reachable by hand. The demo's **Text Input** page carries the evidence: the `Name` field
+real path is reachable by hand - once the IME is composing at all. At the time of writing it was not,
+not even in Notepad (section 6.2), which is why the checklist below is written down rather than ticked.
+The demo's **Text Input** page carries the evidence: the `Name` field
 has a composition readout under it - `Preedit: "..."  |  preedit caret: n  |  last commit: "..."  |
 value: "..."` - plus a `Password` field and a `Read only` field holding
 `Read-only - select, then Ctrl+C`.
@@ -636,7 +681,7 @@ than in the CI suite.
 | Platform | Dead keys / Compose | Daemon-driven IME | Status |
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
-| Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), its UI is the section 7.5 checklist | **Done** |
+| Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and its UI is the section 7.5 checklist - still unticked, because the IME is only now composing on this machine | **Done** |
 | macOS | Designed | Designed | Not implemented |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
