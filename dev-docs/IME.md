@@ -257,6 +257,12 @@ drawing area is the client widget of the input context.
 - **Popups.** `Gtk4PopupWindow` (`:362`) forwards its keys to the owner host and is deliberately
   left alone: a non-activating popup never takes the input focus, so a composition cannot begin
   there, and its text arrives through the owner host's ordinary text path.
+- **Fallback, and what it means here.** Whatever a composition or the emoji chooser inserts is drawn
+  by the core text pipeline, which since this branch splits a string into runs and draws a character
+  with a face that covers it (`DEVELOPER-GUIDE.md`, fonts). On GTK4 that is the same code as on
+  Windows, so an emoji or a Japanese word should now be glyphs rather than boxes - but it is
+  unverified on this host, for the reasons the candidate-window bullet and section 7.4 give: no engine
+  for a composition to come out of, and no emoji insertion exercised.
 
 ### 6.2 Win32 (implemented)
 

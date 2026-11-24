@@ -2126,7 +2126,11 @@ it on `Ctrl+Period`. It is anchored at the caret seam, its text is inserted thro
 `UiHost.ProcessTextInput` so undo, validation, `MaxLength` and every `OnTextInput` override see typed
 text, and focus is handed back to the drawing area when it closes, because a popover takes the
 keyboard focus while it is up. The action it runs is installed on the drawing area as
-`emoji.insert-emoji`, so a menu can invoke the same path.
+`emoji.insert-emoji`, so a menu can invoke the same path. What the chooser inserts is an ordinary
+character, so a glyph the field's primary face does not have - emoji, or Japanese from another input
+method - is drawn by the core's font fallback rather than as a missing-glyph box. That path is shared
+with Windows and macOS; on this Linux host it is unverified, because no emoji insertion and no
+candidate window could be exercised there (`dev-docs/IME.md` section 6.1).
 
 ### Multi-line text
 
