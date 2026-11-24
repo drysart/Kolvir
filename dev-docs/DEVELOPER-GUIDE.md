@@ -5322,10 +5322,11 @@ every project in the build graph, and a `netstandard2.0` project cannot satisfy 
 with NETSDK1207 on the generator, in an application that never asked for one. A `ProjectReference`
 cannot remove an inherited global property, and neither can the `MSBuild` task, so the sample shells
 out to `dotnet build` for the generator, where the properties are the environment's and not the
-publish's. That environment is the other half of the arrangement: the platform the child build is
-pinned to, the command and the dll path that results all live together in `Directory.Build.props`, so
-a `Platform` inherited from the environment cannot move the output where the `<Analyzer>` item is not
-looking - see [NativeAOT](#nativeaot) for the rule behind it.
+publish's. That environment is the other half of the arrangement: the platform and configuration the
+child build is pinned to, the command and the dll path that results all live together in
+`Directory.Build.props`, so neither a `Platform` inherited from the environment nor a `Configuration`
+the outer build never defaulted can move the output where the `<Analyzer>` item is not looking - see
+[NativeAOT](#nativeaot) for the rule behind it.
 
 ### Observables
 
@@ -6848,8 +6849,11 @@ NETSDK1124 before anything compiles. `src/generators/Kolvir.Analyzers/Kolvir.Ana
 model to copy - it lists the lot and says what each one is for - and a new publish-wide property goes
 there at the same time it is added anywhere. The same rule explains the demo's child `dotnet build`
 for the virtual DOM generator: that process inherits `Platform` from the environment, so its output
-path would otherwise move under `bin\x64\` - which is why the platform it is pinned to, the command
-and the dll path all sit together in `Directory.Build.props`.
+path would otherwise move under `bin\x64\`, which is why the platform and configuration it is pinned
+to, the command and the dll path sit together as constants in `Directory.Build.props`. None of those
+constants reads `$(Configuration)`, and that is the second half of the rule: MSBuild expands a
+property where it is assigned, and a props file is read before the SDK applies its defaults, so a
+plain `dotnet build` - which passes no configuration at all - would bake in an empty one.
 
 On Windows this needs the MSVC linker (`link.exe`). The profile switches to
 `IlcUseEnvironmentalTools` automatically once a VC environment is initialized, so the most

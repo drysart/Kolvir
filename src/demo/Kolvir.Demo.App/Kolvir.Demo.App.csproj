@@ -79,9 +79,10 @@
        generator project needs, and it matches what a consumer of the package gets: the analyzer as a
        dll, from `analyzers/dotnet/cs`.
 
-       The project, the platform that build is pinned to and the dll it writes are all in
-       Directory.Build.props, so the target and `$(VirtualDomGeneratorDll)` below cannot describe
-       different directories. -->
+       The project, the platform and configuration that build is pinned to and the dll it writes are
+       all constants in Directory.Build.props, so this target and `$(VirtualDomGeneratorDll)` below
+       cannot describe different directories. Nothing here reads `$(Configuration)` either: a property
+       is expanded where it is assigned, and this project file is evaluated before the SDK defaults it. -->
   <Target Name="BuildVirtualDomGenerator" BeforeTargets="CoreCompile">
     <Exec Command="$(VirtualDomGeneratorBuildCommand)" />
   </Target>

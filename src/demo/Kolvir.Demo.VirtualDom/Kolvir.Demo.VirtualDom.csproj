@@ -54,8 +54,10 @@
 
   <!-- A project reference to the generator inherits global publish properties, and a netstandard2.0
        project cannot satisfy PublishAot. Building it in a child dotnet process is the same arrangement
-       the existing demo uses, and the project, the pinned platform and the dll that results all come
-       from Directory.Build.props so this target and `$(VirtualDomGeneratorDll)` cannot drift apart. -->
+       the existing demo uses, and the project, the pinned platform and configuration and the dll that
+       results all come from Directory.Build.props - as constants, so this target and
+       `$(VirtualDomGeneratorDll)` cannot drift apart and neither reads `$(Configuration)`, which a
+       plain build has not defaulted yet. -->
   <Target Name="BuildVirtualDomGenerator" BeforeTargets="CoreCompile">
     <Exec Command="$(VirtualDomGeneratorBuildCommand)" />
   </Target>

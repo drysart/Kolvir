@@ -350,6 +350,13 @@ jobs:
       # this is the guard: the same command a Publish click produces, with the generator's output
       # deleted first so no pre-existing copy can mask the second failure.
       #
+      # The plain `dotnet build` first is not a warm-up. Every other command in this workflow passes
+      # `-c`, and that is exactly the global that hid a contract depending on `Configuration`: MSBuild
+      # expands a property reference where it is assigned, so a plain build - which passes no
+      # configuration at all - saw an empty one, and the child build was invoked as `-c` with nothing
+      # after it. Two builds, one with no properties and one with the publish's, keep both readings
+      # honest, and they are cheap next to the publish.
+      #
       # `vcvars64.bat` is what puts the linker on the path - NativeAOT cannot link without it - and it
       # is found through vswhere so this pins no edition or version. Only the generator's bin and obj
       # are cleared: re-restoring every project would add time without testing anything this step is
@@ -373,6 +380,13 @@ jobs:
 
           if exist src\generators\Kolvir.Feature.VirtualDom.Generators\bin rmdir /s /q src\generators\Kolvir.Feature.VirtualDom.Generators\bin
           if exist src\generators\Kolvir.Feature.VirtualDom.Generators\obj rmdir /s /q src\generators\Kolvir.Feature.VirtualDom.Generators\obj
+
+          rem Nothing on the command line but the project: no -c, no -p. This is the ordinary build,
+          rem and it must work before the publish does.
+          dotnet build src\demo\Kolvir.Demo.App\Kolvir.Demo.App.csproj
+          if errorlevel 1 exit /b 1
+          dotnet build src\demo\Kolvir.Demo.VirtualDom\Kolvir.Demo.VirtualDom.csproj
+          if errorlevel 1 exit /b 1
 
           dotnet publish src\demo\Kolvir.Demo.App\Kolvir.Demo.App.csproj -c Release -p:Platform=AnyCPU ^
             -p:PublishAot=true -p:PublishTrimmed=true -p:TrimMode=full -p:SelfContained=true ^
