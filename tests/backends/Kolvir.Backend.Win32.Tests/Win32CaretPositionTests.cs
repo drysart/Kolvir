@@ -389,6 +389,59 @@ public sealed class Win32CaretPositionTests
     }
 
     [TestMethod]
+    [Timeout(30000)]
+    public void AWindowWithNothingFocusedStillAnswersFromItsClientOrigin()
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            // No focusable control at all: this is the demo at startup, and the state in which the shell
+            // has no anchor and falls back to the bottom-right corner of the screen.
+            var window = new Window("ime unfocused", new Panel { Dock = DockStyle.Fill })
+            {
+                ClientSize = new SKSize(320f, 160f),
+            };
+
+            window.AddShownHandler(_ =>
+            {
+                try
+                {
+                    var hwnd = ((Win32WindowBackend)window.Backend).Handle;
+
+                    Assert.IsFalse(window.Host.TryGetCaretBounds(out SKRect _), "nothing is focused, so there is no caret");
+
+                    var (returned, answer) = Ask(hwnd, NativeMethods.ImrQueryCharPosition);
+                    var size = Marshal.SizeOf<NativeMethods.IMECHARPOSITION>();
+
+                    Assert.AreEqual(size, returned, "the request is still answered rather than left to DefWindowProc");
+
+                    Assert.IsTrue(NativeMethods.GetClientRect(hwnd, out var client));
+                    var origin = new NativeMethods.POINT();
+                    NativeMethods.ClientToScreen(hwnd, ref origin);
+
+                    Assert.AreEqual(origin.X, answer.pt.X, "the answer is the client origin in screen coordinates");
+                    Assert.AreEqual(origin.Y, answer.pt.Y);
+                    Assert.AreEqual(origin.X + client.Right, answer.rcDocument.Right);
+                    Assert.AreEqual(origin.Y + client.Bottom, answer.rcDocument.Bottom);
+                    Assert.IsTrue(answer.cLineHeight >= 1, "with a line height, so the shell has somewhere to put it");
+                }
+                finally
+                {
+                    application.Exit();
+                }
+            });
+
+            window.Show();
+            application.Run();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    [TestMethod]
     public void TheDiagnosticTraceAndItsExperimentsAreOffByDefault()
     {
         var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);

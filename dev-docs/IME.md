@@ -315,6 +315,13 @@ Details that are not visible from the message table:
   `hwndCaret == 0` with an empty `rcCaret` while the seam answered a caret, which is why the emoji
   panel anchored to the window instead of the field. After it, `hwndCaret` is the focused window and
   `rcCaret` is the seam's point in client coordinates.
+- **Nothing focused still answers.** `UiHost.TryGetCaretBounds` answers nothing when no control has
+  the focus, and a window that refuses the request hands the shell its no-anchor fallback, which is
+  the bottom-right corner of the screen. Measured with the demo app: its startup page focuses no
+  text box, `IMR_QUERYCHARPOSITION` arrives about 50 ms after the window is shown, and the first
+  version answered `DefWindowProc`. The client area's top-left, in screen coordinates, is the honest
+  answer for a window whose controls hold no caret, so that is what it answers now, with the theme's
+  line height and the same document rectangle.
 - **The trace.** A run can be told to write every IME message to a file, which is what decides between
   "the application is never asked" and "it answers and is ignored" - different problems with different
   fixes. `KOLVIR_IME_LOG=1` writes `kolvir-ime.log` beside the executable, or the variable holds a
@@ -488,6 +495,8 @@ routing, the host calls and the text box are all the shipped ones. What it prove
     the window, the executable and the file, and the heartbeat keeps arriving while the real message
     loop pumps. That is what stops a run that produces no file from being read as "the panel never
     asked".
+11. A window with nothing focused still answers the request, from its client origin in screen
+    coordinates, instead of refusing and handing the shell its no-anchor fallback.
 
 The composition string itself is published through `IWin32ImeComposition`, which is internal and
 defaults to `Win32ImeComposition.Instance`. That is forced by a measurement rather than chosen for
@@ -518,9 +527,11 @@ the window corner.
 What the report says so far is worth stating precisely, because it narrows the question. When the panel
 is misplaced it opens in the **bottom-right corner of the screen**, not near the window and not near
 the field: that is the shell's fallback when it has no anchor at all, so the fault is not a caret
-answered in the wrong space, which would put the panel in the wrong place *near* the field. The trace
-has already shown the request arriving and being answered correctly (section 6.2), which leaves two
-hypotheses, and they look different in a trace:
+answered in the wrong space, which would put the panel in the wrong place *near* the field. One way to
+reach that fallback is now fixed: a window with no focused control used to refuse the request, and the
+demo's startup page focuses no text box, so pressing the key there answered nothing. With a text box
+focused the request is answered correctly (section 6.2), which leaves two hypotheses, and they look
+different in a trace:
 
 - **(a) The shell asks over IMM and discards the answer.** A good trace under this hypothesis has the
   `IMR_QUERYCHARPOSITION` line - or a second one, possibly with a larger `dwCharPos`, at the moment the

@@ -2892,15 +2892,26 @@ public sealed class Win32WindowBackend : IWindowBackend
             return IntPtr.Zero;
         }
 
-        if (!_host.TryGetCaretBounds(out var caret) || !NativeMethods.GetClientRect(hwnd, out var client))
+        if (!NativeMethods.GetClientRect(hwnd, out var client))
         {
-            Win32ImeLog.Write("  IMR_QUERYCHARPOSITION: no caret to answer with, DefWindowProc");
+            Win32ImeLog.Write("  IMR_QUERYCHARPOSITION: no client rectangle, DefWindowProc");
             return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmImeRequest, wParam, lParam);
         }
 
-        var origin = LogicalToScreen(new SKPoint(caret.Left, caret.Top));
         var document = new NativeMethods.POINT();
         NativeMethods.ClientToScreen(hwnd, ref document);
+
+        // A window with nothing focused still has to answer. The shell's fallback when it has no anchor
+        // at all is the bottom-right corner of the screen, which is what a report of "the panel opens in
+        // the corner" looks like, so the client area's top-left is the honest answer for a window whose
+        // controls hold no caret.
+        var anchored = _host.TryGetCaretBounds(out var caret);
+        var origin = anchored ? LogicalToScreen(new SKPoint(caret.Left, caret.Top)) : document;
+
+        if (!anchored)
+        {
+            Win32ImeLog.Write("  IMR_QUERYCHARPOSITION: nothing is focused, answering from the client origin");
+        }
 
         // dwCharPos stays as the caller set it: it names a character of the composition, and this
         // library commits text rather than holding a composition string of its own. dwSize is never
@@ -2927,18 +2938,18 @@ public sealed class Win32WindowBackend : IWindowBackend
     }
 
     /// <summary>
-    /// The height of a line in <paramref name="control"/>'s font, in device pixels, or the fallback the
-    /// caret is one pixel of when nothing is focused.
+    /// The height of a line in <paramref name="control"/>'s font, in device pixels, or the theme's own
+    /// line height when nothing with a font is focused, because a zero line height would tell an input
+    /// method there is nowhere to put its window.
     /// </summary>
     private uint LineHeightOf(Control? control)
     {
-        var height = control?.EffectiveFont.LineHeight ?? 0f;
+        var height = (control?.EffectiveFont ?? Theme.DefaultFont).LineHeight;
         if (height <= 0f && _host.TryGetCaretBounds(out var caret))
         {
             height = caret.Height;
         }
 
-        // A zero line height would tell an input method there is nowhere to put its window.
         return (uint)Math.Max(1, MathF.Round(height * _scale));
     }
 
