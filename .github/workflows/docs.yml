@@ -107,6 +107,9 @@ jobs:
     permissions:
       pages: write
       id-token: write
+      # Only so the first step can delete this run's stale `github-pages` artifacts; without that the
+      # job cannot be rerun at all. See that step.
+      actions: write
     environment:
       name: github-pages
       url: ${{ steps.deploy.outputs.page_url }}
@@ -116,6 +119,31 @@ jobs:
       group: pages
       cancel-in-progress: false
     steps:
+      # `upload-pages-artifact` runs in this job, so every attempt of this job uploads one more
+      # artifact named "github-pages" into the same run, and `deploy-pages` deploys only when exactly
+      # one exists. Attempt 1 of run 45447073038 failed, and attempts 2 and 3 - reruns of that job -
+      # failed with "Multiple artifacts named github-pages were unexpectedly found for this workflow
+      # run. Artifact count is 3", because each rerun added its own artifact on top of the previous
+      # ones. That made the job structurally un-rerunnable: a rerun could never succeed, so one
+      # transient failure left the run permanently red and the only recovery was a whole new run
+      # (45463995769). Deleting this run's github-pages artifacts first means a rerun starts from
+      # zero, which is what makes rerunning this job a safe thing to do during an incident.
+      - name: Delete github-pages artifacts left by an earlier attempt
+        shell: bash
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+          RUN_ID: ${{ github.run_id }}
+        run: |
+          set -euo pipefail
+          gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+            --jq '.artifacts[] | select(.name == "github-pages") | .id' |
+            while read -r id; do
+              echo "deleting the github-pages artifact $id left by an earlier attempt"
+              gh api --method DELETE "repos/$REPO/actions/artifacts/$id"
+            done
+          echo "run $RUN_ID holds no github-pages artifact now"
+
       # The site is published a directory below its root so a per-release directory can sit beside it
       # later, and the root becomes a redirect into it. Every link in the built HTML is relative, so
       # the guide works unchanged at that depth.
@@ -136,28 +164,45 @@ jobs:
         with:
           path: site
 
-      # actions/deploy-pages resolves the artifact through the artifacts API the moment
-      # upload-pages-artifact finishes, and that lookup can lose the race: run 45030034324 uploaded
-      # "github-pages" successfully and failed 20ms later with "No artifacts named github-pages were
-      # found". Wait until the API lists it, so the deploy step sees it on its first request.
-      - name: Wait for the packaged site to reach the artifacts API
+      # `deploy-pages` lists the run's artifacts and then fetches that one artifact's own metadata
+      # URL, and it is that second call that can lose the race with the artifacts API. Attempt 1 of
+      # run 45447073038 was exactly this: the upload reported "Artifact github-pages successfully
+      # finalized" (8,647,023 bytes) and the step below had already seen it listed, yet the action
+      # died with "Fetching artifact metadata failed ... No artifacts named github-pages were found
+      # for this workflow run". Listing the artifact does not prove that its metadata URL answers, so
+      # this resolves the artifact's id from the listing and then polls the metadata URL itself.
+      #
+      # It also requires the listing to show exactly one artifact, which is what `deploy-pages`
+      # demands: a leftover duplicate is then reported here, clearly, instead of inside the action as
+      # "Multiple artifacts named github-pages were unexpectedly found". And if this attempt never
+      # produced an artifact at all - the upload failed, or the wait ran out - this fails rather than
+      # warning and deploying anyway, which is how the previous version of this step could have
+      # published something other than what this run built.
+      - name: Wait for the packaged site to be readable through the artifacts API
         shell: bash
         env:
           GH_TOKEN: ${{ github.token }}
           REPO: ${{ github.repository }}
           RUN_ID: ${{ github.run_id }}
         run: |
+          set -euo pipefail
           for attempt in $(seq 1 30); do
-            listed=$(gh api "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
-              --jq '[.artifacts[] | select(.name == "github-pages" and .expired == false)] | length' \
-              2>/dev/null || echo 0)
-            if [ "$listed" -ge 1 ]; then
-              echo "the github-pages artifact is listed after $attempt attempt(s)"
+            mapfile -t ids < <(gh api --paginate "repos/$REPO/actions/runs/$RUN_ID/artifacts" \
+              --jq '.artifacts[] | select(.name == "github-pages" and .expired == false) | .id' \
+              2>/dev/null || true)
+            if [ "${#ids[@]}" -gt 1 ]; then
+              echo "::error::expected exactly one github-pages artifact in run $RUN_ID but found ${#ids[@]} (${ids[*]}), so deploy-pages would refuse this run; the cleanup step should have left none, so this means this attempt uploaded twice"
+              exit 1
+            fi
+            if [ "${#ids[@]}" -eq 1 ] && \
+               gh api "repos/$REPO/actions/artifacts/${ids[0]}" --jq .id >/dev/null 2>&1; then
+              echo "the github-pages artifact ${ids[0]} is readable after $attempt attempt(s)"
               exit 0
             fi
             sleep 2
           done
-          echo "::warning::the github-pages artifact never appeared in the artifacts API; deploying anyway"
+          echo "::error::the github-pages artifact never became readable through the artifacts API, which is the call deploy-pages would have failed on; failing here rather than deploying whatever else the API happened to return"
+          exit 1
 
       - name: Deploy to Pages
         id: deploy
