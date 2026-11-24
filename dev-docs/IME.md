@@ -326,6 +326,20 @@ Details that are not visible from the message table:
   visibility flag the thread exposes (`GUI_CARETBLINKING`), and `KOLVIR_IME_REFRESH_COMPOSITIONFORM=1`
   keeps the input context's composition form at the caret outside a composition, in case the input
   stack anchors on the context instead of asking.
+- **The trace proves it is running, twice over.** The first version of it wrote only when an IME
+  message arrived, and the first real run produced no file at all - which is indistinguishable from
+  the feature not being in the build, the variable not reaching the process, or the panel never
+  messaging the window. An empty log is not evidence of absence, so the trace now has two things that
+  do not depend on an input method existing. A **startup line** is written as soon as the window
+  exists: `trace enabled pid=... hwnd=... class=... exe=... log=... heartbeat=500ms`, so the file
+  existing proves the instrumented build ran, that the variable arrived, and where it wrote. And a
+  **heartbeat** is written every 500 ms while tracing is on, carrying `GetGUIThreadInfo`'s
+  `hwndCaret` and `rcCaret`, `GetFocus()`, and whether a composition is live. The heartbeat is what
+  makes a run correlatable in wall-clock time: a gap in it around the instant Win+Period was pressed,
+  with no IME line in the gap, is positive evidence that the panel never messaged this process, which
+  is the discriminator an empty file cannot give. Both are switched on with the log, never on their
+  own, because a heartbeat without the log has nowhere to go and a log without the heartbeat cannot
+  be shown to be alive.
 - **`dwSize` is respected.** A request whose incoming `dwSize` is smaller than the structure is
   refused with `0` and left untouched, rather than written past what its caller allocated. Gecko and
   Chromium both discard such an answer; real callers send the full size, which the trace confirmed.
@@ -470,6 +484,10 @@ routing, the host calls and the text box are all the shipped ones. What it prove
 9. `GetGUIThreadInfo` reports this window's caret one pixel square at the same point, which is the
    measurement that diagnosed the emoji panel landing in the wrong place, and a request the backend
    does not implement reaches `DefWindowProc` instead of being answered.
+10. The trace proves it is running before anything asks it anything: the first line names the process,
+    the window, the executable and the file, and the heartbeat keeps arriving while the real message
+    loop pumps. That is what stops a run that produces no file from being read as "the panel never
+    asked".
 
 The composition string itself is published through `IWin32ImeComposition`, which is internal and
 defaults to `Win32ImeComposition.Instance`. That is forced by a measurement rather than chosen for
@@ -497,17 +515,27 @@ window, its own placement and its own animation, none of which this process can 
 by hand: put the caret mid-field, press Win+Period, and see the panel open at the caret rather than at
 the window corner.
 
-The trace in section 6.2 settles the part a person cannot: it records each `IMR_QUERYCHARPOSITION` with
-the incoming `dwSize` and the answer. On this machine it showed the request arriving on the focused
-window and being answered correctly, which rules out both "the application is never asked" and "the
-answer is malformed". What a trace cannot say is what the panel does with the answer, so a report from
-a real session is read like this: if the trace has no `IMR_QUERYCHARPOSITION` line for the run, the
-panel took another channel; if it has the line and the panel still sits at the window, the shell
-discarded a correct IMM answer, and the documented remedy is the lighter TSF route -
-`ITfContextOwner.GetTextExt` with a document manager and a context, explicitly not a full text store.
-`KOLVIR_IME_SHOW_CARET` and `KOLVIR_IME_REFRESH_COMPOSITIONFORM` are the two switches run one at a
-time for that second case: a panel that anchors on the thread caret needs the first, and one that
-anchors on the context's composition form needs the second.
+What the report says so far is worth stating precisely, because it narrows the question. When the panel
+is misplaced it opens in the **bottom-right corner of the screen**, not near the window and not near
+the field: that is the shell's fallback when it has no anchor at all, so the fault is not a caret
+answered in the wrong space, which would put the panel in the wrong place *near* the field. The trace
+has already shown the request arriving and being answered correctly (section 6.2), which leaves two
+hypotheses, and they look different in a trace:
+
+- **(a) The shell asks over IMM and discards the answer.** A good trace under this hypothesis has the
+  `IMR_QUERYCHARPOSITION` line - or a second one, possibly with a larger `dwCharPos`, at the moment the
+  panel opens - with a well-formed answer, heartbeats on both sides of it, and the panel still in the
+  corner. That is the case for the lighter TSF route: `ITfContextOwner.GetTextExt` with a document
+  manager and a context, explicitly not a full text store.
+- **(b) The panel positions from TSF text extents and never uses this channel.** A good trace under
+  this hypothesis is the opposite: heartbeats continuing across the moment Win+Period is pressed and
+  **no** `WM_IME_REQUEST` line anywhere near it, the only IME traffic being the burst that arrives with
+  focus. The heartbeat gap-free run with no IME line in it is the positive evidence, and it means the
+  IMM work cannot fix the placement no matter how correct it is.
+
+The two switches, `KOLVIR_IME_SHOW_CARET` and `KOLVIR_IME_REFRESH_COMPOSITIONFORM`, are for a variant
+of (a): a panel that reads the thread caret needs the first, and one that anchors on the context's
+composition form needs the second, so a run with each one alone says which anchor it is reaching for.
 
 ## 8. Status and open questions
 

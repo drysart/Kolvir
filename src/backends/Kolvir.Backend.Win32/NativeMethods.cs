@@ -816,6 +816,24 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern IntPtr GetFocus();
 
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct GUITHREADINFO
+    {
+        public uint cbSize;
+        public uint flags;
+        public IntPtr hwndActive;
+        public IntPtr hwndFocus;
+        public IntPtr hwndCapture;
+        public IntPtr hwndMenuOwner;
+        public IntPtr hwndMoveSize;
+        public IntPtr hwndCaret;
+        public RECT rcCaret;
+    }
+
+    /// <summary>The thread's input state, which is where a diagnostic finds the caret Windows would report.</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);
 

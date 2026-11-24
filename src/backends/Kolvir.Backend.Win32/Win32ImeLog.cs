@@ -27,6 +27,12 @@ internal static class Win32ImeLog
 
     private static readonly object Gate = new();
 
+    /// <summary>The window timer that writes the heartbeat, which is why the id must not collide.</summary>
+    internal const nuint HeartbeatTimerId = 0x4B56;
+
+    /// <summary>Half a second: often enough to correlate a run, rare enough not to dominate the file.</summary>
+    internal const uint HeartbeatMilliseconds = 500;
+
     /// <summary>True when a log file was asked for. The variable is read per call, not cached.</summary>
     internal static bool Enabled => ResolvePath() is not null;
 
@@ -36,6 +42,16 @@ internal static class Win32ImeLog
     /// <summary>True when <c>KOLVIR_IME_REFRESH_COMPOSITIONFORM</c> asked for the extra positioning.</summary>
     internal static bool RefreshCompositionForm =>
         IsOn(Environment.GetEnvironmentVariable(RefreshCompositionFormVariable));
+
+    /// <summary>
+    /// The first line of a traced run, written when the window exists: it proves three things at once -
+    /// the instrumented build is running, the variable reached this process, and where the file is. A
+    /// trace that only writes once a message arrives cannot tell "never asked" from "logger off".
+    /// </summary>
+    internal static void WriteStartup(IntPtr hwnd, string windowClass) =>
+        Write(
+            $"trace enabled pid={Environment.ProcessId} hwnd=0x{hwnd.ToInt64():X} class={windowClass} "
+            + $"exe={AppContext.BaseDirectory} log={ResolvePath()} heartbeat={HeartbeatMilliseconds}ms");
 
     internal static void Write(string line)
     {

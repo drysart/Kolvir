@@ -1261,6 +1261,18 @@ public sealed class Win32WindowBackend : IWindowBackend
         }
 
         UpdateHostSize();
+
+        // The trace proves it is running before anything interesting happens: the file existing says the
+        // instrumented build started, that the variable reached this process, and where it wrote. A
+        // trace that only writes when a message arrives cannot tell "never asked" from "logger off".
+        Win32ImeLog.WriteStartup(_hwnd, _className);
+        if (Win32ImeLog.Enabled)
+        {
+            // The heartbeat is what makes a run correlatable in wall-clock time, and its absence around
+            // the instant Win+Period is pressed is positive evidence that nothing messaged this process.
+            NativeMethods.SetTimer(_hwnd, Win32ImeLog.HeartbeatTimerId, Win32ImeLog.HeartbeatMilliseconds, IntPtr.Zero);
+        }
+
         return true;
     }
 
@@ -1749,6 +1761,15 @@ public sealed class Win32WindowBackend : IWindowBackend
                 // A keystroke starts new text, so anything a commit still owed is no longer coming and
                 // the expectation must not survive to swallow a character the user actually typed.
                 _pendingCommitText = string.Empty;
+                break;
+
+            case NativeMethods.WmTimer:
+                if ((nuint)wParam == Win32ImeLog.HeartbeatTimerId)
+                {
+                    WriteImeHeartbeat();
+                    return IntPtr.Zero;
+                }
+
                 break;
 
             case NativeMethods.WmSetFocus:
@@ -3040,6 +3061,28 @@ public sealed class Win32WindowBackend : IWindowBackend
         NativeMethods.WmImeSetContext or NativeMethods.WmImeStartComposition
         or NativeMethods.WmImeEndComposition or NativeMethods.WmImeComposition
         or NativeMethods.WmImeRequest;
+
+    /// <summary>
+    /// One line every half second while tracing: what the thread's caret looks like right now and
+    /// whether a composition is live. It proves the trace is alive, and it puts a timestamp on every
+    /// moment of the run, so the instant the emoji panel was asked for can be found by looking for a gap
+    /// with no IME line in it - which is positive evidence that the panel never messaged this process.
+    /// </summary>
+    private void WriteImeHeartbeat()
+    {
+        var info = new NativeMethods.GUITHREADINFO
+        {
+            cbSize = (uint)Marshal.SizeOf<NativeMethods.GUITHREADINFO>(),
+        };
+
+        NativeMethods.GetGUIThreadInfo(0, ref info);
+
+        Win32ImeLog.Write(
+            $"heartbeat caretWindow=0x{info.hwndCaret.ToInt64():X} "
+            + $"rcCaret={info.rcCaret.Left},{info.rcCaret.Top},{info.rcCaret.Right},{info.rcCaret.Bottom} "
+            + $"focus=0x{NativeMethods.GetFocus().ToInt64():X} composing={_composing} "
+            + $"caret=0x{_caretWindow.ToInt64():X} hasFocus={_hasKeyboardFocus}");
+    }
 
     /// <summary>Destroys the thread's caret if this window is the one that created it.</summary>
     private void ReleaseCaret()

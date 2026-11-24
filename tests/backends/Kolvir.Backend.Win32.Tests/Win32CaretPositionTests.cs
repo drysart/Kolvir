@@ -280,6 +280,75 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    public void TheTraceProvesItIsRunningBeforeAnythingIsAsked()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-heartbeat-{Guid.NewGuid():N}.log");
+
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+
+            var box = new TextBox { Dock = DockStyle.Fill, Text = "hello world" };
+            var panel = new Panel { Dock = DockStyle.Fill };
+            panel.Controls.Add(box);
+
+            var window = new Window("ime heartbeat", panel) { ClientSize = new SKSize(320f, 160f) };
+
+            window.AddShownHandler(_ =>
+            {
+                box.Focus();
+                box.CaretIndex = 5;
+                TakeFocus(((Win32WindowBackend)window.Backend).Handle);
+            });
+
+            window.Show();
+
+            // The window timer only fires while the real loop pumps, so this test waits in the loop
+            // rather than inside a handler, which is also how a user's run spends its time.
+            using var timer = new System.Threading.Timer(
+                _ => application.BeginInvoke(() => application.Exit()),
+                null,
+                1600,
+                System.Threading.Timeout.Infinite);
+
+            application.Run();
+
+            Assert.IsTrue(System.IO.File.Exists(path), "tracing wrote its file as soon as the window existed");
+
+            var lines = System.IO.File.ReadAllLines(path);
+
+            Assert.IsTrue(lines.Length > 0, "the trace is not empty");
+            Assert.IsTrue(
+                lines[0].Contains("trace enabled pid=", StringComparison.Ordinal),
+                "the first line proves the instrumented build, the variable and the file, before anything is asked");
+            Assert.IsTrue(lines[0].Contains(path, StringComparison.Ordinal), "and says where it is writing");
+
+            var heartbeats = lines.Where(line => line.Contains(" heartbeat ", StringComparison.Ordinal)).ToArray();
+
+            Assert.IsTrue(heartbeats.Length >= 2, $"the heartbeat runs while the loop runs (saw {heartbeats.Length})");
+            Assert.IsTrue(
+                heartbeats[0].Contains("rcCaret=", StringComparison.Ordinal),
+                "and carries the caret Windows would report, which is the point of it");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+            application.Dispose();
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
     public void TheDiagnosticTraceWritesWhatItSeesAndStopsWhenUnset()
     {
         var path = System.IO.Path.Combine(
