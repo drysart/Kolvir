@@ -295,6 +295,26 @@ Details that are not visible from the message table:
   field's family, size scaled to device pixels, weight and italic, so the input method's own window
   matches the field instead of the system default. The face-name buffer is shared with the font
   dialog (`Win32LogFont`), which is why that helper moved out of the dialog service.
+- **The insertion point, for an input method's own UI.** The emoji panel (Win+Period), the touch
+  keyboard and a candidate window all ask Windows where the caret is before they appear, and Windows
+  answers from two places that a library drawing its own caret has to fill in.
+  - **The thread's system caret.** `CreateCaret(hwnd, IntPtr.Zero, 1, 1)` and `SetCaretPos`, with no
+    `ShowCaret` at all: the library draws the caret, and a second blinking one would be a regression.
+    The caret exists only while the window holds the keyboard focus, is recreated by a second Kolvir
+    window that takes it (a caret belongs to one window and a thread has one), and is destroyed with
+    the window. It is a push rather than a pull, so the sync runs after every message rather than at
+    a list of call sites: a key, a click, a composition step and a relayout can each move the caret.
+  - **`WM_IME_REQUEST` with `IMR_QUERYCHARPOSITION`.** An `IMECHARPOSITION` with `dwSize` set, the
+    caller's `dwCharPos` left as it was, `pt` in screen coordinates, `cLineHeight` from the field's
+    font and `rcDocument` the client rectangle on screen; answering means returning the structure's
+    size. Every other `IMR_` value reaches `DefWindowProc` untouched, because swallowing a request
+    the backend does not implement would hide it.
+
+  Both read the same seam, `Host.TryGetCaretBounds`, so they cannot disagree about where the caret
+  is. Measured on this machine before the caret existed: `GetGUIThreadInfo` reported
+  `hwndCaret == 0` with an empty `rcCaret` while the seam answered a caret, which is why the emoji
+  panel anchored to the window instead of the field. After it, `hwndCaret` is the focused window and
+  `rcCaret` is the seam's point in client coordinates.
 - **Popups.** `Win32PopupWindow` and `Win32MenuWindow` are deliberately left alone, for the reason
   section 6.4 gives: a non-activating popup never takes the input focus, so no composition can begin
   there.
@@ -422,6 +442,12 @@ routing, the host calls and the text box are all the shipped ones. What it prove
    rather than two lone surrogates.
 7. The window backend's composition reader defaults to the Imm32 one, so the seam cannot quietly ship a
    fake, and the real reader answers an empty string and a zero caret when a window has no context.
+8. `WM_IME_REQUEST` with `IMR_QUERYCHARPOSITION` answers the caret in screen coordinates, with the
+   document rectangle and a line height from the field's font, and a click elsewhere in the field
+   moves the answer, so the panel follows the caret rather than the window.
+9. `GetGUIThreadInfo` reports this window's caret one pixel square at the same point, which is the
+   measurement that diagnosed the emoji panel landing in the wrong place, and a request the backend
+   does not implement reaches `DefWindowProc` instead of being answered.
 
 The composition string itself is published through `IWin32ImeComposition`, which is internal and
 defaults to `Win32ImeComposition.Instance`. That is forced by a measurement rather than chosen for
@@ -442,6 +468,13 @@ asked, and `ImmNotifyIME` cancelling a live composition are all unexercised here
 has no input method to answer them. The message handling around them is covered; the calls' answers
 are not.
 
+The emoji panel is the other thing only a person can check. A test can prove the answer is right - the
+caret in screen coordinates, the same point from the thread's caret, and both moving with a click - but
+whether the shell's panel appears beside the caret when Win+Period is pressed is the shell's own
+window, its own placement and its own animation, none of which this process can observe. That check is
+by hand: put the caret mid-field, press Win+Period, and see the panel open at the caret rather than at
+the window corner.
+
 ## 8. Status and open questions
 
 | Platform | Dead keys / Compose | Daemon-driven IME | Status |
@@ -453,7 +486,9 @@ are not.
 No input method is installed on the Windows development machine used for this branch: only `en-US`
 with the generic `0409:00000409` layout. The Win32 path is therefore proved against a synthesized
 composition driven through the real messages, not against a Japanese, Chinese or Korean IME. Its
-candidate window, its clauses and its own preedit UI are unverified, exactly as they are on GTK4.
+candidate window, its clauses and its own preedit UI are unverified, exactly as they are on GTK4. The
+emoji panel's placement is the same kind of limit: the answers it reads are tested, but the panel
+itself is checked by hand (section 7.4).
 
 Open questions:
 

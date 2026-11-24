@@ -76,6 +76,15 @@ internal static class NativeMethods
     internal const uint GcsResultStr = 0x0800;
 
     /// <summary>
+    /// What an input method asks the focused window about the caret. The emoji panel and the touch
+    /// keyboard send it before they decide where to appear.
+    /// </summary>
+    internal const uint WmImeRequest = 0x0288;
+
+    /// <summary>The one <c>WM_IME_REQUEST</c> this backend answers: where the caret is on screen.</summary>
+    internal const uint ImrQueryCharPosition = 0x0006;
+
+    /// <summary>
     /// Set in the <c>WM_IME_SETCONTEXT</c> <c>lParam</c>; clearing it stops the system drawing its own
     /// composition window over the preedit the library draws.
     /// </summary>
@@ -354,6 +363,21 @@ internal static class NativeMethods
         public uint dwStyle;
         public POINT ptCurrentPos;
         public RECT rcArea;
+    }
+
+    /// <summary>
+    /// The answer to <c>IMR_QUERYCHARPOSITION</c>: where the caret is, in screen coordinates, and the
+    /// client rectangle it sits in. The caller sets <c>dwSize</c> and <c>dwCharPos</c>; the window
+    /// procedure fills the rest.
+    /// </summary>
+    [StructLayout(LayoutKind.Sequential)]
+    internal struct IMECHARPOSITION
+    {
+        public uint dwSize;
+        public uint dwCharPos;
+        public POINT pt;
+        public uint cLineHeight;
+        public RECT rcDocument;
     }
 
     /// <summary>
@@ -771,6 +795,18 @@ internal static class NativeMethods
 
     [DllImport("imm32.dll")]
     internal static extern bool ImmNotifyIME(IntPtr himc, uint dwAction, uint dwIndex, uint dwValue);
+
+    // user32 - the thread's system caret. The library draws its own caret, so this one is created
+    // one pixel square and never shown: it exists only so anything that asks the thread where the
+    // insertion point is (an input method, the emoji panel, the touch keyboard) has an answer.
+    [DllImport("user32.dll")]
+    internal static extern bool CreateCaret(IntPtr hwnd, IntPtr hBitmap, int nWidth, int nHeight);
+
+    [DllImport("user32.dll")]
+    internal static extern bool SetCaretPos(int x, int y);
+
+    [DllImport("user32.dll")]
+    internal static extern bool DestroyCaret();
 
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);

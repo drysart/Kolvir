@@ -79,6 +79,16 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// </summary>
     private char? _pendingHighSurrogate;
 
+    /// <summary>True while this window holds the thread's keyboard focus, which is when a caret exists.</summary>
+    private bool _hasKeyboardFocus;
+
+    /// <summary>The window the thread's system caret was created for, or zero when there is none.</summary>
+    private IntPtr _caretWindow;
+
+    /// <summary>Where the system caret was last put, so a message that changed nothing costs no call.</summary>
+    private int _caretX = int.MinValue;
+    private int _caretY = int.MinValue;
+
     /// <summary>The model's window, kept so a native window replacement can re-run its hooks.</summary>
     private Window? _modelWindow;
 
@@ -1110,6 +1120,7 @@ public sealed class Win32WindowBackend : IWindowBackend
             // Before the window goes away, so the modal handover happens while this window is
             // still the foreground one; see RestoreModalOwner.
             RestoreModalOwner();
+            ReleaseCaret();
             NativeMethods.DestroyWindow(_hwnd);
             _hwnd = IntPtr.Zero;
         }
@@ -1554,6 +1565,22 @@ public sealed class Win32WindowBackend : IWindowBackend
 
     private IntPtr HandleMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
     {
+        try
+        {
+            return HandleWindowMessage(hwnd, message, wParam, lParam);
+        }
+        finally
+        {
+            // The system caret follows the drawn one after every message rather than at a list of
+            // call sites: a key, a click, a composition step and a relayout can each move the
+            // insertion point, and anything that asks the thread where the caret is - an input
+            // method, the emoji panel, the touch keyboard - must never read a stale position.
+            SyncCaret();
+        }
+    }
+
+    private IntPtr HandleWindowMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    {
         // Messages raised while CreateWindowExW is still running arrive before _hwnd is assigned.
         if (_hwnd == IntPtr.Zero)
         {
@@ -1719,8 +1746,23 @@ public sealed class Win32WindowBackend : IWindowBackend
                 _pendingCommitText = string.Empty;
                 break;
 
+            case NativeMethods.WmSetFocus:
+                // The caret is per thread and exists only while a window of this thread has the focus,
+                // so it is created here and dropped in WM_KILLFOCUS. It is never shown: the library
+                // draws its own, and a second blinking caret would be a regression.
+                _hasKeyboardFocus = true;
+                break;
+
+            case NativeMethods.WmKillFocus:
+                _hasKeyboardFocus = false;
+                ReleaseCaret();
+                break;
+
             case NativeMethods.WmImeSetContext:
                 return OnImeSetContext(hwnd, wParam, lParam);
+
+            case NativeMethods.WmImeRequest:
+                return OnImeRequest(hwnd, wParam, lParam);
 
             case NativeMethods.WmImeStartComposition:
                 OnImeStartComposition(hwnd);
@@ -1767,6 +1809,8 @@ public sealed class Win32WindowBackend : IWindowBackend
                 // A window that is being replaced is not this window going away.
                 if (hwnd == _hwnd)
                 {
+                    // The thread's caret belongs to a window that is about to stop existing.
+                    ReleaseCaret();
                     _hwnd = IntPtr.Zero;
                 }
 
@@ -2787,6 +2831,122 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         _pendingCommitText = _pendingCommitText[1..];
         return true;
+    }
+
+    /// <summary>
+    /// Answers what an input method asks about the caret. The emoji panel and the touch keyboard send
+    /// <c>IMR_QUERYCHARPOSITION</c> before they decide where to appear, and a window that does not
+    /// answer leaves them anchored to the window instead of to the insertion point.
+    /// </summary>
+    private unsafe IntPtr OnImeRequest(IntPtr hwnd, IntPtr wParam, IntPtr lParam)
+    {
+        // Only one request is answered here. Everything else belongs to the default handler, and
+        // swallowing a request the backend does not implement would hide it.
+        if ((uint)wParam != NativeMethods.ImrQueryCharPosition || lParam == IntPtr.Zero)
+        {
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmImeRequest, wParam, lParam);
+        }
+
+        if (!_host.TryGetCaretBounds(out var caret) || !NativeMethods.GetClientRect(hwnd, out var client))
+        {
+            return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmImeRequest, wParam, lParam);
+        }
+
+        var position = (NativeMethods.IMECHARPOSITION*)lParam;
+        var size = (uint)sizeof(NativeMethods.IMECHARPOSITION);
+
+        var origin = LogicalToScreen(new SKPoint(caret.Left, caret.Top));
+        var document = new NativeMethods.POINT();
+        NativeMethods.ClientToScreen(hwnd, ref document);
+
+        // dwCharPos stays as the caller set it: it names a character of the composition, and this
+        // library commits text rather than holding a composition string of its own.
+        position->dwSize = size;
+        position->pt = origin;
+        position->cLineHeight = LineHeightOf(_host.FocusedControl);
+        position->rcDocument = new NativeMethods.RECT
+        {
+            Left = document.X,
+            Top = document.Y,
+            Right = document.X + client.Right,
+            Bottom = document.Y + client.Bottom,
+        };
+
+        // The size is how an application says it handled the request.
+        return new IntPtr((int)size);
+    }
+
+    /// <summary>
+    /// The height of a line in <paramref name="control"/>'s font, in device pixels, or the fallback the
+    /// caret is one pixel of when nothing is focused.
+    /// </summary>
+    private uint LineHeightOf(Control? control)
+    {
+        var height = control?.EffectiveFont.LineHeight ?? 0f;
+        if (height <= 0f && _host.TryGetCaretBounds(out var caret))
+        {
+            height = caret.Height;
+        }
+
+        // A zero line height would tell an input method there is nowhere to put its window.
+        return (uint)Math.Max(1, MathF.Round(height * _scale));
+    }
+
+    /// <summary>
+    /// Keeps the thread's system caret on the focused control's insertion point.
+    /// </summary>
+    /// <remarks>
+    /// The caret is created one pixel square and never shown - the library draws its own - so it exists
+    /// only to answer the question "where is the insertion point" for anything that asks the thread
+    /// rather than the window: an input method's candidate window, the emoji panel, the touch keyboard.
+    /// A caret belongs to one window and a thread has one, so a second Kolvir window that takes the
+    /// focus recreates it. This is a push, so it runs after every message rather than on a list of
+    /// events: a key, a click, a composition step and a relayout can each move the caret.
+    /// </remarks>
+    private void SyncCaret()
+    {
+        if (_hwnd == IntPtr.Zero || !_hasKeyboardFocus)
+        {
+            return;
+        }
+
+        if (_caretWindow != _hwnd)
+        {
+            ReleaseCaret();
+            NativeMethods.CreateCaret(_hwnd, IntPtr.Zero, 1, 1);
+            _caretWindow = _hwnd;
+        }
+
+        if (!_host.TryGetCaretBounds(out var caret))
+        {
+            return;
+        }
+
+        var x = (int)MathF.Round(caret.Left * _scale);
+        var y = (int)MathF.Round(caret.Top * _scale);
+
+        if (x == _caretX && y == _caretY)
+        {
+            return;
+        }
+
+        NativeMethods.SetCaretPos(x, y);
+        _caretX = x;
+        _caretY = y;
+    }
+
+    /// <summary>Destroys the thread's caret if this window is the one that created it.</summary>
+    private void ReleaseCaret()
+    {
+        if (_caretWindow == IntPtr.Zero)
+        {
+            return;
+        }
+
+        NativeMethods.DestroyCaret();
+        _caretWindow = IntPtr.Zero;
+        _caretX = int.MinValue;
+        _caretY = int.MinValue;
     }
 
     /// <summary>
