@@ -86,6 +86,34 @@ public sealed class AppKitCompositionTests
     }
 
     [TestMethod]
+    public void AConversionSelectionIsKeptAndClampedToTheMark()
+    {
+        var box = new RecordingBox { Dock = DockStyle.Fill };
+        using var scene = new AppKitImeScene(box);
+        box.Focus();
+
+        var composition = new AppKitComposition(scene.Host, () => { });
+
+        // A conversion in progress selects the run it is converting, so the selection has a length
+        // even though its location is the caret the library draws.
+        composition.SetMarkedText("\u65e5\u672c\u8a9e", 0, 3);
+        Assert.AreEqual(0, composition.SelectedLocation);
+        Assert.AreEqual(3, composition.SelectedLength);
+        Assert.AreEqual(3, composition.MarkedLength);
+
+        composition.SetMarkedText("\u65e5\u672c\u8a9e", 1, 9);
+        Assert.AreEqual(1, composition.SelectedLocation);
+        Assert.AreEqual(2, composition.SelectedLength, "a selection past the mark ends at its end");
+
+        composition.SetMarkedText("\u65e5\u672c\u8a9e", 2, 0);
+        Assert.AreEqual(0, composition.SelectedLength, "an ordinary caret selects nothing");
+
+        composition.SetMarkedText("\u65e5\u672c\u8a9e", 0, 3);
+        composition.InsertText("\u65e5\u672c\u8a9e");
+        Assert.AreEqual(0, composition.SelectedLength, "a commit leaves no selection behind");
+    }
+
+    [TestMethod]
     public void InsertTextCommitsExactlyOnceThroughTheOrdinaryPath()
     {
         var box = new RecordingBox { Dock = DockStyle.Fill };

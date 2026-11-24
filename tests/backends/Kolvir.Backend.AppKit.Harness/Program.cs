@@ -52,6 +52,7 @@ internal static class Program
         Check("a key that re-enters the key path is refused", AKeyPressedAgainIsRefused);
         Check("a command that re-enters the key path is refused", ACommandTheHostReissuesIsRefused);
         Check("the protocol methods reach the marked text and the commit", TheProtocolReachesTheComposition);
+        Check("the selection and the document context answer the marked run", TheSelectionAndContextAnswerTheMark);
         Check("a refused composition is discarded and holds nothing", ARefusedCompositionHoldsNothing);
         Check("the caret answer matches ConvertRectToScreen", TheCaretAnswerMatchesThePlatform);
 
@@ -222,6 +223,55 @@ internal static class Program
         if (scene.Box.Preedit.Length != 0 || scene.Box.Text != "\u65e5\u672c")
         {
             throw new InvalidOperationException("a cancel did not leave the field exactly as it was");
+        }
+    }
+
+    /// <summary>
+    /// A conversion in progress selects the run it is converting, and a candidate list asks the
+    /// client for the text around the caret. Both answers come from the marked run, which is the
+    /// only text this client holds while composing.
+    /// </summary>
+    private static void TheSelectionAndContextAnswerTheMark()
+    {
+        using var scene = new Scene();
+
+        scene.View.SetMarkedText(
+            new NSString("\u306b\u307b\u3093\u3054"),
+            new NSRange(0, 3),
+            new NSRange(0, 0));
+
+        var selection = scene.View.SelectedRange;
+        if (selection.Location != 0 || selection.Length != 3)
+        {
+            throw new InvalidOperationException(
+                $"the selected range came back as {selection.Location},{selection.Length}");
+        }
+
+        var whole = scene.View.GetAttributedSubstring(new NSRange(0, 5), out var actual);
+        if (whole?.Value != "\u306b\u307b\u3093\u3054" || actual.Location != 0 || actual.Length != 4)
+        {
+            throw new InvalidOperationException(
+                $"a range over the mark answered \"{whole?.Value}\" as {actual.Location},{actual.Length}");
+        }
+
+        var tail = scene.View.GetAttributedSubstring(new NSRange(3, 2), out var tailRange);
+        if (tail?.Value != "\u3054" || tailRange.Location != 3 || tailRange.Length != 1)
+        {
+            throw new InvalidOperationException(
+                $"a range past the end answered \"{tail?.Value}\" as {tailRange.Location},{tailRange.Length}");
+        }
+
+        var nothing = scene.View.GetAttributedSubstring(new NSRange(9, 4), out var nothingRange);
+        if (nothing?.Value != string.Empty || nothingRange.Location != NSRange.NotFound)
+        {
+            throw new InvalidOperationException(
+                $"a range outside the mark answered \"{nothing?.Value}\" as {nothingRange.Location}");
+        }
+
+        // The value is still the field's own, and the mark is still not in it.
+        if (scene.Box.Text.Length != 0)
+        {
+            throw new InvalidOperationException("the context answer inserted text");
         }
     }
 

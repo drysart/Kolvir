@@ -32,6 +32,7 @@ internal sealed class AppKitComposition
 
     private string _marked = string.Empty;
     private int _selected;
+    private int _selectedLength;
     private bool _composing;
 
     /// <summary>
@@ -67,6 +68,13 @@ internal sealed class AppKitComposition
     /// <summary>Where the input method's caret sits inside <see cref="MarkedText"/>.</summary>
     public int SelectedLocation => _selected;
 
+    /// <summary>
+    /// How much of <see cref="MarkedText"/> the input method has selected, which is what a
+    /// conversion in progress covers. It is answered back to AppKit unchanged; the preedit caret
+    /// the library draws is <see cref="SelectedLocation"/>.
+    /// </summary>
+    public int SelectedLength => _selectedLength;
+
     /// <summary>True once a control accepted the composition, whether or not text is marked yet.</summary>
     public bool IsComposing => _composing;
 
@@ -79,7 +87,11 @@ internal sealed class AppKitComposition
     /// </summary>
     /// <param name="text">The preedit string.</param>
     /// <param name="selectedLocation">The caret inside <paramref name="text"/>, in UTF-16 code units.</param>
-    public void SetMarkedText(string text, int selectedLocation)
+    /// <param name="selectedLength">
+    /// How much of the preedit the input method has selected. A conversion in progress selects the
+    /// run it is converting, so this is not always zero even though the caret is its start.
+    /// </param>
+    public void SetMarkedText(string text, int selectedLocation, int selectedLength = 0)
     {
         ArgumentNullException.ThrowIfNull(text);
 
@@ -120,6 +132,7 @@ internal sealed class AppKitComposition
 
         _marked = text;
         _selected = Math.Clamp(selectedLocation, 0, text.Length);
+        _selectedLength = Math.Clamp(selectedLength, 0, text.Length - _selected);
     }
 
     /// <summary>
@@ -179,6 +192,7 @@ internal sealed class AppKitComposition
     {
         _marked = string.Empty;
         _selected = 0;
+        _selectedLength = 0;
         _composing = false;
     }
 

@@ -963,11 +963,17 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     /// the composition, and every later one updates it.
     /// </summary>
     /// <param name="text">The marked string.</param>
-    /// <param name="selectedRange">The caret inside <paramref name="text"/>, in UTF-16 code units.</param>
+    /// <param name="selectedRange">
+    /// The range the input method has selected inside <paramref name="text"/>, in UTF-16 code
+    /// units. Its location is the preedit caret; its length is the run a conversion covers.
+    /// </param>
     /// <param name="replacementRange">Ignored, as for <see cref="InsertText"/>.</param>
     public void SetMarkedText(NSObject text, NSRange selectedRange, NSRange replacementRange)
     {
-        _composition.SetMarkedText(TextOf(text), (int)selectedRange.Location);
+        _composition.SetMarkedText(
+            TextOf(text),
+            (int)selectedRange.Location,
+            (int)selectedRange.Length);
 
         // The preedit is drawn in front of the caret, so its width moves the answer too.
         InvalidateCaretCoordinates();
@@ -987,12 +993,14 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
         _composition.HasMarkedText ? new NSRange(0, _composition.MarkedLength) : NoRange;
 
     /// <summary>
-    /// The selection inside the marked text. The library holds no editable selection of its own
-    /// while composing, so this is the preedit caret the input manager last reported.
+    /// The selection inside the marked text, which is the range the input method last reported: its
+    /// location is the preedit caret, and its length is the run a conversion covers. The library
+    /// holds no editable selection of its own while composing, so there is nothing else to answer
+    /// with, and answering a length the input method did not set would contradict it.
     /// </summary>
     public NSRange SelectedRange =>
         _composition.HasMarkedText
-            ? new NSRange(_composition.SelectedLocation, 0)
+            ? new NSRange(_composition.SelectedLocation, _composition.SelectedLength)
             : NoRange;
 
     /// <summary>
@@ -1195,13 +1203,38 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     // ---- NSTextInputClient: the rest of the protocol, answered at its legal minimum ----------
 
     /// <summary>
-    /// The library holds its own text, so there is no attributed substring to hand back. Answering
-    /// nothing with <see cref="NSRange.NotFound"/> is the documented way to say so.
+    /// The only text this client holds is the marked text, so the answer is the part of it the
+    /// proposed range covers.
     /// </summary>
+    /// <param name="proposedRange">The document range being asked about.</param>
+    /// <param name="actualRange">The part of it the answer describes, or <see cref="NSRange.NotFound"/>.</param>
+    /// <remarks>
+    /// Answering nothing is legal, and it is what this method did while the composition was being
+    /// built. A candidate list asks for the run it is converting, though, and a client that says it
+    /// holds no text at all hands the input method no context to convert - so the mark is offered
+    /// instead, clamped to the range asked about. The field's own value is still invisible to the
+    /// input method, which is the same decision the other backends make for a preedit held outside
+    /// <c>Text</c>.
+    /// </remarks>
     public NSAttributedString GetAttributedSubstring(NSRange proposedRange, out NSRange actualRange)
     {
-        actualRange = NoRange;
-        return null!;
+        string marked = _composition.MarkedText;
+
+        // A proposed range is a document range: it can name text that does not exist, and it can be
+        // NotFound, whose location is all ones. The intersection is taken in wide arithmetic so
+        // neither case can overflow.
+        ulong markedLength = (ulong)marked.Length;
+        ulong from = Math.Min((ulong)proposedRange.Location, markedLength);
+        ulong to = from + Math.Min((ulong)proposedRange.Length, markedLength - from);
+
+        if (to <= from)
+        {
+            actualRange = NoRange;
+            return new NSAttributedString(string.Empty);
+        }
+
+        actualRange = new NSRange((nint)from, (nint)(to - from));
+        return new NSAttributedString(marked.Substring((int)from, (int)(to - from)));
     }
 
     /// <summary>
