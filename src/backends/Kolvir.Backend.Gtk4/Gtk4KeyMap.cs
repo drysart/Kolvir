@@ -29,6 +29,12 @@ internal static class Gtk4KeyMap
     private const uint KeyKpEnter = 0xFF8D;
     private const uint KeyDelete = 0xFFFF;
 
+    /// <summary>
+    /// The key value of the period key. The library's <see cref="Key"/> names no punctuation, so
+    /// this is the only place the marker key for the emoji action can be recognised.
+    /// </summary>
+    public const uint KeyPeriod = 0x002E;
+
     public static Key Map(uint keyval)
     {
         if (keyval is >= 'a' and <= 'z')
