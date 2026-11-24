@@ -1027,10 +1027,11 @@ What is **not** verified, and stays a checklist:
 
    The same sequences in this client diverged, and it is Tab that carries the measurement: Tab moved
    the focus to the **next field** and closed the candidate list - the user's words: "as soon as I hit
-   tab, the focus moved to the next textbox and the candidates list went away". The click is not
-   established either way: that run logged one `insertText` in the whole session, the plain-Enter
-   control's, and the report is about Tab, so a click on this client's candidate list is left as an
-   unverified item rather than counted as a second failure. The trace names the Tab cause in one line:
+   tab, the focus moved to the next textbox and the candidates list went away". The click was not
+   established by that run - it logged one `insertText` in the whole session, the plain-Enter
+   control's, and the report was about Tab - so it is not counted there as a second failure; a later
+   run measured it, and it is recorded below with the rest of the routes. The trace names the Tab cause
+   in one line:
 
    ```
    KEY Tab mods=None marked=True ... firstResponder=AppKitSkiaView
@@ -1083,26 +1084,32 @@ What is **not** verified, and stays a checklist:
    and `TextEdit` were quit after their first Return, so whether a second one commits there is
    unmeasured rather than assumed.
 
-   **The routes around that Return were verified by hand in the same run** (`files/kolvir-accept-0622`
-   in the coordinator's archive; 426 lines, `key Tab taken by the host` count **0** against 1 before the
-   fix, `reset the mark ... marked=True` count **0**):
+   **The routes around that Return were verified by hand, in two runs.** Both are in the coordinator's
+   archive: `files/kolvir-accept-0622.log` (426 lines, keyboard) and `files/kolvir-click-0714.log` (180
+   lines, click). The keyboard run has `key Tab taken by the host` count **0** against 1 before the
+   fix, and `reset the mark ... marked=True` count **0**:
 
    | Route | What the log says |
    |---|---|
    | Tab with the list open | `offered Tab to the input method first`, then two `selectedRange`, `hasMarkedText -> True`, `validAttributesForMarkedText` five times and `setMarkedText '日本後' candidate=True` - the focus did not move and the candidate list moved its selection instead |
    | Arrow keys | six of them, each `routed: marked=True` and each followed by a new candidate in `setMarkedText` - so the arrows reached the panel too |
    | Return twice | no commit, then `insertText '日本語学'` - and the same again for the second composition, `insertText '日本語歌詞'` |
+   | A mouse click on a candidate | `setMarkedText '日本語訳' selected=0,4 candidate=True` with **no key event before it**, then the same two Returns: none, then `insertText '日本語訳'` |
 
-   Six `reset the mark` lines appear in the whole run and all six are
+   Six `reset the mark` lines appear in the keyboard run and all six are
    `reason=key taken by the host, key=Backspace, marked=False`, from clearing the field between the two
    sequences. **No reset ran while a mark was live**, which is invariant 10 holding on a real keyboard
    rather than only in the harness.
 
-   **A mouse click on a candidate is still unverified.** The coordinator's summary called the second
-   sequence the click route, but the log does not support that: `日本語歌詞` arrived as
-   `setMarkedText ... candidate=True` after a Space, and its commit followed an Enter
-   (`06:21:54.462`), so both sequences were keyboard confirmations. `TextEdit` was measured committing
-   a clicked candidate earlier; this client has not been, and the harness cannot reach it.
+   Two things follow from the click, and both close a question rather than open one. A click arrives as
+   **the same call a conversion makes** - marked text with the whole run selected, no key involved - so
+   the underlined preedit a person sees after clicking is this client's own drawing, and there is no
+   separate mouse path to test. And the commit it produces is **the same `insertText` with
+   `replacement = NSNotFound`** the keyboard route produces, so the hypothesis that a candidate commits
+   through a replacement *range* - a second geometry that could disagree with the caret answer - does
+   not exist here. No route into a field remains that a keystroke does not also exercise. The click run
+   also took two Returns, identical to the keyboard run, which is what makes "press Return again" the
+   right thing to tell a user rather than a workaround seen once.
    What was ruled out, each by measurement rather than argument:
 
    | Hypothesis | How it was settled |
@@ -1135,7 +1142,8 @@ What is **not** verified, and stays a checklist:
    The log is `/tmp/kolvir-ime.log`, written from startup. One line decided whether the fix ran:
    `offered Tab to the input method first: a mark is live` present, and `key Tab taken by the host;
    the input method never sees it` absent. The sequences were `nihongo`, Space, Tab, arrows, Enter, and
-   `nihongo`, Space, arrows, Enter, Enter. The worktree above was a scratch clone at `d3f59e1` and has
+   `nihongo`, Space, arrows, Enter, Enter; a third run, on `6c9414d`, was `nihongo`, Space, a click on a
+   candidate, then Enter, Enter. The worktree above was a scratch clone and has
    since been deleted; the bundle carries `LSEnvironment` only because it was added to its `Info.plist`
    after building, which is the recipe `MACOS-TESTRUN.md` records.
 
@@ -1149,7 +1157,7 @@ in this section is a hand run over `ssh` with `screencapture`.
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
 | Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
-| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and **verified by hand with the Japanese source on the test host** (section 7.7): marked text, conversion to `日本語`, a single commit, the candidate list placed from the caret answer, and - after the ordering fix of invariant 10 - Tab and the arrow keys reaching the candidate list, with a conversion committing when Return is pressed twice. A mouse click on a candidate is unverified in this client. The first Return on a conversion commits nothing here or in a stock `NSTextView` or `TextEdit` on this host (open question 6) | **Implemented and verified by hand; first-Return-on-a-conversion open, candidate click unverified** |
+| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and **verified by hand with the Japanese source on the test host** (section 7.7): marked text, conversion to `日本語`, a single commit, the candidate list placed from the caret answer, and - after the ordering fix of invariant 10 - Tab, the arrow keys and a mouse click all reaching the candidate list, with a conversion committing when Return is pressed twice. The first Return on a conversion commits nothing here or in a stock `NSTextView` or `TextEdit` on this host (open question 6) | **Implemented and verified by hand; the first Return on a conversion is the one open behaviour** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
 `IMM32` calls behind it were measured against the Microsoft IME that is installed on this
@@ -1199,6 +1207,7 @@ Open questions:
    (`insertText '日本語学'`, 4.5 s after the first Return), and it commits because the ordering fix
    ended the client taking the composition's keys - under the old code the composition was reset on
    the way in and there was nothing left to confirm. So the working answer for a user is: press Return
-   again. Tab and the arrow keys now reach the candidate list from this client, verified by hand; a
-   mouse click on a candidate is verified in `TextEdit` and **not** in this client (section 7.7,
-   item 9).
+   again. Tab, the arrow keys and a mouse click all reach the candidate list from this client, verified
+   by hand in two runs; the click arrives as marked text with no key event and commits through the same
+   `insertText` with `replacement = NSNotFound` the keyboard route produces, so there is no second
+   commit geometry to disagree with the caret answer (section 7.7, item 9).

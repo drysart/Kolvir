@@ -2164,9 +2164,10 @@ this one, a bundled stock `NSTextView` launched the same way, and `TextEdit` - s
 unresolved; in this client a second Return commits, and that is what completes a conversion. The same
 pass found a defect that *was* this backend's and is fixed: it handed Tab to the library before the
 input method could open its candidate list with it, so a conversion could not be reached at all; the
-key ordering in section 6.3 is the fix, and Tab, the arrows and Return-twice were then confirmed by
-hand. A mouse click on a candidate is verified in `TextEdit` and not yet in this client. Section 7.7
-item 9 has the whole record.
+key ordering in section 6.3 is the fix, and Tab, the arrows, a mouse click and Return-twice were then
+confirmed by hand. A clicked candidate arrives as marked text with no key event and commits through the
+same `insertText` with `replacement = NSNotFound` the keyboard route produces, so there is no second
+commit geometry. Section 7.7 item 9 has the whole record.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and
