@@ -14,12 +14,14 @@ This file is deliberately ASCII-only, like `OBSERVABLES.md` and `OBSERVABLE-COLL
 
 ## 1. The problem
 
-The input pipeline is one-way and stateless. A backend derives characters from the keyboard and
-hands them over, and the library has no way to hold text that is not committed yet.
+The input pipeline was, and on Windows and macOS still is, one-way and stateless. A backend derives
+characters from the keyboard and hands them over, and the library has no way to hold text that is
+not committed yet.
 
-- **GTK4.** `Gtk4SkiaView.OnKeyPressed` (`../../src/backends/Kolvir.Backend.Gtk4/Gtk4SkiaView.cs:1092`)
-  maps the key value to text with `Gtk4KeyMap.MapText(args.Keyval, args.State)` and calls
-  `Host.ProcessTextInput(text)`. No `Gtk.IMContext` exists in the backend at all.
+- **GTK4.** Before this change,
+  `Gtk4SkiaView.OnKeyPressed` (`../../src/backends/Kolvir.Backend.Gtk4/Gtk4SkiaView.cs:1092` at the
+  baseline commit) mapped the key value to text with `Gtk4KeyMap.MapText(args.Keyval, args.State)`
+  and called `Host.ProcessTextInput(text)`. No `Gtk.IMContext` existed in the backend at all.
 - **macOS.** `AppKitSkiaView.KeyDown` (`../../src/backends/Kolvir.Backend.AppKit/AppKitSkiaView.cs:782`)
   takes `AppKitKeyMap.ToText(theEvent)` after the key and the Command/Control checks. The view does
   not adopt `NSTextInputClient`, so `interpretKeyEvents:` is never called.
@@ -138,6 +140,7 @@ The preedit string and its internal caret index live beside the committed value:
   while composing.
 - The preedit is drawn at the caret, in the field's text colour, with the field's font and a single
   underline. The caret is drawn after it, so the visual order is committed text, preedit, caret.
+  The placeholder is hidden while a preedit is shown, so only one text sits at the caret.
 - A single-line box scrolls far enough that the preedit's end is inside the field. A multi-line box
   draws the preedit on the caret's line from the caret and clips.
 - A movement or editing key cancels the preedit first and then does its normal work.
