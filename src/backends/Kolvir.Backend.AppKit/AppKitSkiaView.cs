@@ -132,6 +132,26 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
         // state behind that lives outside this view so a test can drive it without an NSView.
         _composition = new AppKitComposition(host, DiscardMarkedText);
 
+        // A hand run can be the only way to see what the input method does once its candidate list
+        // is open, so the windows that take and lose the keyboard are traced when a file was asked
+        // for. Nothing is registered otherwise.
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"view created; app key window {AppKitImeTrace.Describe(NSApplication.SharedApplication.KeyWindow)}");
+            NSNotificationCenter.DefaultCenter.AddObserver(
+                NSWindow.DidBecomeKeyNotification,
+                n => AppKitImeTrace.Line($"WINDOW became key: {AppKitImeTrace.Describe(n.Object as NSWindow)}"));
+            NSNotificationCenter.DefaultCenter.AddObserver(
+                NSWindow.DidResignKeyNotification,
+                n => AppKitImeTrace.Line($"WINDOW resigned key: {AppKitImeTrace.Describe(n.Object as NSWindow)}"));
+            NSNotificationCenter.DefaultCenter.AddObserver(
+                NSApplication.DidBecomeActiveNotification,
+                _ => AppKitImeTrace.Line("APP became active"));
+            NSNotificationCenter.DefaultCenter.AddObserver(
+                NSApplication.DidResignActiveNotification,
+                _ => AppKitImeTrace.Line("APP resigned active"));
+        }
+
         if (!hardwareAcceleration)
         {
             _gfxReason = "cpu (disabled)";
@@ -866,6 +886,20 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
             var modifiers = ModifiersFrom(theEvent);
             var key = AppKitKeyMap.ToKey(theEvent.KeyCode);
 
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line(
+                    $"KEY {key} mods={modifiers} marked={_composition.HasMarkedText} " +
+                    $"ourWindowKey={Window?.IsKeyWindow} appKey={AppKitImeTrace.Describe(NSApplication.SharedApplication.KeyWindow)} " +
+                    $"eventWindow={AppKitImeTrace.Describe(theEvent.Window)} " +
+                    $"firstResponder={Window?.FirstResponder?.GetType().Name ?? "none"}");
+
+                if (_composition.HasMarkedText && key is Key.Space or Key.Enter or Key.Escape)
+                {
+                    AppKitImeTrace.Boundary($"{key} pressed while a mark is live");
+                }
+            }
+
             if (key != Key.None && _host.ProcessKeyDown(key, modifiers))
             {
                 // The input method never saw this key, so whatever it was composing cannot survive
@@ -900,6 +934,11 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
             finally
             {
                 _eventBeingInterpreted = null;
+
+                if (AppKitImeTrace.Enabled)
+                {
+                    AppKitImeTrace.Line($"KEY {key} routed: marked={_composition.HasMarkedText} appKey={AppKitImeTrace.Describe(NSApplication.SharedApplication.KeyWindow)}");
+                }
 
                 // Whatever the input manager did, the document may have changed under it.
                 InvalidateCaretCoordinates();
@@ -952,6 +991,12 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     /// </remarks>
     public void InsertText(NSObject text, NSRange replacementRange)
     {
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"insertText '{TextOf(text)}' replacement={replacementRange.Location},{replacementRange.Length}");
+            AppKitImeTrace.Boundary("a commit arrived");
+        }
+
         _composition.InsertText(TextOf(text));
 
         // The commit moved the caret, which is where the next candidate window or viewer goes.
@@ -970,6 +1015,11 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     /// <param name="replacementRange">Ignored, as for <see cref="InsertText"/>.</param>
     public void SetMarkedText(NSObject text, NSRange selectedRange, NSRange replacementRange)
     {
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"setMarkedText '{TextOf(text)}' selected={selectedRange.Location},{selectedRange.Length} replacement={replacementRange.Location},{replacementRange.Length}");
+        }
+
         _composition.SetMarkedText(
             TextOf(text),
             (int)selectedRange.Location,
@@ -983,14 +1033,46 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     /// The input manager ended its composition without committing. The preedit goes and nothing is
     /// inserted, so no value, caret or undo entry changes.
     /// </summary>
-    public void UnmarkText() => _composition.UnmarkText();
+    public void UnmarkText()
+    {
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line("unmarkText");
+            AppKitImeTrace.Boundary("the input method ended its composition without committing");
+        }
+
+        _composition.UnmarkText();
+    }
 
     /// <summary>True while the input manager holds marked text for this view.</summary>
-    public bool HasMarkedText => _composition.HasMarkedText;
+    public bool HasMarkedText
+    {
+        get
+        {
+            var marked = _composition.HasMarkedText;
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line($"hasMarkedText -> {marked}");
+            }
+
+            return marked;
+        }
+    }
 
     /// <summary>The marked range, or <see cref="NSRange.NotFound"/> when there is none.</summary>
-    public NSRange MarkedRange =>
-        _composition.HasMarkedText ? new NSRange(0, _composition.MarkedLength) : NoRange;
+    public NSRange MarkedRange
+    {
+        get
+        {
+            var range = _composition.HasMarkedText ? new NSRange(0, _composition.MarkedLength) : NoRange;
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line($"markedRange -> {range.Location},{range.Length}");
+            }
+
+            return range;
+        }
+    }
 
     /// <summary>
     /// The selection inside the marked text, which is the range the input method last reported: its
@@ -998,10 +1080,22 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     /// holds no editable selection of its own while composing, so there is nothing else to answer
     /// with, and answering a length the input method did not set would contradict it.
     /// </summary>
-    public NSRange SelectedRange =>
-        _composition.HasMarkedText
-            ? new NSRange(_composition.SelectedLocation, _composition.SelectedLength)
-            : NoRange;
+    public NSRange SelectedRange
+    {
+        get
+        {
+            var range = _composition.HasMarkedText
+                ? new NSRange(_composition.SelectedLocation, _composition.SelectedLength)
+                : NoRange;
+
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line($"selectedRange -> {range.Location},{range.Length}");
+            }
+
+            return range;
+        }
+    }
 
     /// <summary>
     /// Where the caret is, in screen points - the one answer macOS uses to place a candidate window
@@ -1023,6 +1117,14 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
         // count upwards. AppKit does the view-to-window and window-to-screen steps.
         var bottomInView = IsFlipped ? new CGPoint(0d, Bounds.Height) : CGPoint.Empty;
         var origin = window.ConvertPointToScreen(ConvertPointToView(bottomInView, null!));
+
+        if (AppKitImeTrace.Enabled)
+        {
+            var answer = AppKitImeGeometry.ToScreenRect(caret, Bounds.Height, origin);
+            AppKitImeTrace.Line($"firstRect {characterRange.Location},{characterRange.Length} -> {answer.Left},{answer.Top} {answer.Width}x{answer.Height} in screen points");
+            actualRange = characterRange;
+            return answer;
+        }
 
         actualRange = characterRange;
         return AppKitImeGeometry.ToScreenRect(caret, Bounds.Height, origin);
@@ -1227,6 +1329,11 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
         ulong from = Math.Min((ulong)proposedRange.Location, markedLength);
         ulong to = from + Math.Min((ulong)proposedRange.Length, markedLength - from);
 
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"attributedSubstring {proposedRange.Location},{proposedRange.Length} requested; mark is {marked.Length} units");
+        }
+
         if (to <= from)
         {
             actualRange = NoRange;
@@ -1258,7 +1365,18 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
     /// ignore the attributes, exactly as before, because the field draws its own text.
     /// </para>
     /// </remarks>
-    public NSString[] ValidAttributesForMarkedText => MarkedTextAttributes;
+    public NSString[] ValidAttributesForMarkedText
+    {
+        get
+        {
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line($"validAttributesForMarkedText -> {MarkedTextAttributes.Length} names");
+            }
+
+            return MarkedTextAttributes;
+        }
+    }
 
     /// <summary>The attribute names <c>NSTextView</c> declares, which is the set a client that works returns.</summary>
     private static readonly NSString[] MarkedTextAttributes =
