@@ -176,6 +176,12 @@ public sealed class Application
 `Run()` returns the exit code so `Main` can `return app.Run();`. Calling it twice throws; calling
 `Exit()` before `Run()` makes the loop return immediately (the standard "cancel startup" escape).
 
+A `SynchronizationContext` is installed for the duration of `Run()` and removed when it returns, so
+an `await` in application code resumes on the UI thread instead of on a thread pool thread. Its
+`Post` is `BeginInvoke` and its `Send` is `Invoke`, so a continuation follows exactly the rules
+those two describe, including the exception path in section 4.1.1. Nothing new is marshalled: the
+context is a convenience over the two entry points, not a third one.
+
 #### 4.1.1 Exceptions
 
 Every exception that escapes UI-thread code reaches `UnhandledException`; anything a handler does
