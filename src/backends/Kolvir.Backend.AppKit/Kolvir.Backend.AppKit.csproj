@@ -26,4 +26,12 @@
     <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- The two halves of the macOS text-composition suite: the AppKit-free one runs under
+         `dotnet test`, and the view-level one is a console program because AppKit only builds its
+         objects on the process's main thread. -->
+    <InternalsVisibleTo Include="Kolvir.Backend.AppKit.Tests" />
+    <InternalsVisibleTo Include="Kolvir.Backend.AppKit.Harness" />
+  </ItemGroup>
+
 </Project>

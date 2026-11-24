@@ -3,6 +3,7 @@ using CoreGraphics;
 using Foundation;
 using ObjCRuntime;
 using SkiaSharp;
+using System.Runtime.InteropServices;
 
 namespace Kolvir.Backend.AppKit;
 
@@ -22,8 +23,14 @@ namespace Kolvir.Backend.AppKit;
 /// than <see cref="NSView.DrawRect(CGRect)"/>: AppKit then asks for a layer update and never
 /// allocates a backing store of its own.
 /// </para>
+/// <para>
+/// The view is also the process's text input client (<see cref="INSTextInputClient"/>), which is
+/// what lets a dead key, an Option composition or an IME syllable reach a text box as marked text
+/// and a commit instead of as raw key characters. Read <c>dev-docs/IME.md</c> section 6.3 before
+/// changing <see cref="KeyDown"/>: the order of the checks there is load bearing three times over.
+/// </para>
 /// </summary>
-internal sealed class AppKitSkiaView : NSView
+internal sealed class AppKitSkiaView : NSView, INSTextInputClient
 {
     /// <summary>Set <c>KOLVIR_DEBUG=1</c> to trace host work to stderr, which helps on odd setups.</summary>
     private static readonly bool DebugTrace =
@@ -56,7 +63,19 @@ internal sealed class AppKitSkiaView : NSView
     private static readonly string[] DragTypes = [FileUrlType, PlainTextType];
 
     private readonly UiHost _host;
+    private readonly AppKitComposition _composition;
     private bool _useHardwareAcceleration;
+
+    private IAppKitTextInterpreter _interpreter = AppKitTextInterpreter.Instance;
+
+    /// <summary>The event the input manager is being handed, for the commands it sends back.</summary>
+    private NSEvent? _eventBeingInterpreted;
+
+    /// <summary>How deep the key path currently is, which is what makes a re-entry a refusal.</summary>
+    private int _keyPathDepth;
+
+    /// <summary>True while a command the input manager declined is being forwarded to the host.</summary>
+    private bool _forwardingCommand;
 
     private NSTrackingArea? _trackingArea;
     private bool _tracksPointerInBackgroundWindow;
@@ -108,6 +127,10 @@ internal sealed class AppKitSkiaView : NSView
         _host = host;
         _useHardwareAcceleration = hardwareAcceleration;
         _deviceKey = deviceKey;
+
+        // macOS reports a composition as marked text and ends it with a commit or a cancel; the
+        // state behind that lives outside this view so a test can drive it without an NSView.
+        _composition = new AppKitComposition(host, DiscardMarkedText);
 
         if (!hardwareAcceleration)
         {
@@ -189,6 +212,26 @@ internal sealed class AppKitSkiaView : NSView
 
     /// <summary>The platform independent UI host this view paints.</summary>
     public UiHost Host => _host;
+
+    /// <summary>
+    /// The seam that hands a key to AppKit's input manager. It exists for the reason
+    /// <see cref="IAppKitTextInterpreter"/> gives; production never sets it.
+    /// </summary>
+    internal IAppKitTextInterpreter TextInterpreter
+    {
+        get => _interpreter;
+        set => _interpreter = value ?? throw new ArgumentNullException(nameof(value));
+    }
+
+    /// <summary>The marked text state this view mirrors for the input manager.</summary>
+    internal AppKitComposition Composition => _composition;
+
+    /// <summary>
+    /// How many times a re-entrant call into the key path has been refused. The guard is the
+    /// difference between a command the input manager sends back and a ping-pong between the two,
+    /// so it is read by a test rather than merely relied on.
+    /// </summary>
+    internal int ReentrancyRefusals { get; private set; }
 
     /// <summary>
     /// What this view is presenting with, for a one-line diagnostic: <c>metal</c> when the Metal
@@ -715,10 +758,14 @@ internal sealed class AppKitSkiaView : NSView
     {
         Window?.MakeFirstResponder(this);
         _host.ProcessMouseDown(PointFrom(theEvent), MouseButtons.Left, ModifiersFrom(theEvent), ClickCountFrom(theEvent));
+        InvalidateCaretCoordinates();
     }
 
-    public override void MouseUp(NSEvent theEvent) =>
+    public override void MouseUp(NSEvent theEvent)
+    {
         _host.ProcessMouseUp(PointFrom(theEvent), MouseButtons.Left, ModifiersFrom(theEvent));
+        InvalidateCaretCoordinates();
+    }
 
     public override void MouseDragged(NSEvent theEvent) => MoveTo(theEvent);
 
@@ -777,37 +824,90 @@ internal sealed class AppKitSkiaView : NSView
             : WheelLineHeight);
 
         _host.ProcessMouseWheel(PointFrom(theEvent), delta, ModifiersFrom(theEvent));
+        InvalidateCaretCoordinates();
     }
 
+    /// <summary>
+    /// Routes one key press: the library first, then the platform's input manager.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The order is deliberate and must not change. The library sees the key first, so a shortcut,
+    /// a menu mnemonic or an editing key it owns never reaches the input method - which is also why
+    /// a key it consumes has to reset the input method itself, below. The Command and Control
+    /// checks come next: a Command chord belongs to the menu bar, and a Control chord is the
+    /// library's own accelerator, so neither may be turned into text. Only what is left goes to
+    /// <c>interpretKeyEvents:</c>, which is what drives the input context.
+    /// </para>
+    /// <para>
+    /// There is no raw-text fallback any more. <c>AppKitKeyMap.ToText</c> used to run here and hand
+    /// the event's characters straight to the field, which double-inserted as soon as the input
+    /// manager also committed them - and made a dead key both compose and insert its accent.
+    /// <c>insertText:</c> is the only route a composed character takes.
+    /// </para>
+    /// </remarks>
     public override void KeyDown(NSEvent theEvent)
     {
-        var modifiers = ModifiersFrom(theEvent);
-        var key = AppKitKeyMap.ToKey(theEvent.KeyCode);
-
-        if (key != Key.None && _host.ProcessKeyDown(key, modifiers))
+        // `interpretKeyEvents:` can call `doCommandBySelector:` synchronously, which forwards the
+        // key into the host, which can re-enter this method. Win32 needed the same guard so a
+        // cancel could not ping-pong the window procedure; here it also keeps a host callback that
+        // synthesizes a key from recursing. The count is a test's observable.
+        if (_keyPathDepth > 0)
         {
+            ReentrancyRefusals++;
+            Trace("KeyDown refused: already handling a key (a command re-entered the key path)");
             return;
         }
 
-        // Command combinations belong to the menu bar. Anything the menu did not claim must not
-        // fall through to text input, or Cmd+D would type a "d".
-        if ((theEvent.ModifierFlags & NSEventModifierMask.CommandKeyMask) != 0)
-        {
-            return;
-        }
+        _keyPathDepth++;
 
-        // Control combinations are the library's own shortcuts; they never produce text.
-        if ((modifiers & Modifiers.Control) != Modifiers.None)
+        try
         {
-            return;
-        }
+            var modifiers = ModifiersFrom(theEvent);
+            var key = AppKitKeyMap.ToKey(theEvent.KeyCode);
 
-        // Everything else is text. The characters already carry the effect of Shift, the keyboard
-        // layout and Option dead keys, so nothing has to be composed here.
-        var text = AppKitKeyMap.ToText(theEvent);
-        if (text.Length > 0)
+            if (key != Key.None && _host.ProcessKeyDown(key, modifiers))
+            {
+                // The input method never saw this key, so whatever it was composing cannot survive
+                // it: the field has already dropped its preedit, and the input manager's own state
+                // is reset here. This is GTK's IMContext.Reset and Win32's CPS_CANCEL.
+                _composition.Reset();
+
+                // The key may have moved the caret, which is what a candidate window anchors to.
+                InvalidateCaretCoordinates();
+                return;
+            }
+
+            // Command combinations belong to the menu bar. Anything the menu did not claim must not
+            // fall through to text input, or Cmd+D would type a "d".
+            if ((theEvent.ModifierFlags & NSEventModifierMask.CommandKeyMask) != 0)
+            {
+                return;
+            }
+
+            // Control combinations are the library's own shortcuts; they never produce text.
+            if ((modifiers & Modifiers.Control) != Modifiers.None)
+            {
+                return;
+            }
+
+            _eventBeingInterpreted = theEvent;
+
+            try
+            {
+                _interpreter.Interpret(theEvent, this);
+            }
+            finally
+            {
+                _eventBeingInterpreted = null;
+
+                // Whatever the input manager did, the document may have changed under it.
+                InvalidateCaretCoordinates();
+            }
+        }
+        finally
         {
-            _host.ProcessTextInput(text);
+            _keyPathDepth--;
         }
     }
 
@@ -819,6 +919,334 @@ internal sealed class AppKitSkiaView : NSView
             _host.ProcessKeyUp(key, ModifiersFrom(theEvent));
         }
     }
+
+    /// <summary>
+    /// A composition cannot outlive the focus. AppKit asks before the view stops being the first
+    /// responder, which is the one moment both the input manager and the control still know about
+    /// the composition, so it is ended here rather than on the next key.
+    /// </summary>
+    /// <remarks>
+    /// The host already cancels a composition when the focused control changes
+    /// (<see cref="UiHost.SetFocus"/>), so this is about the input manager's own marked text when
+    /// the window itself loses the keyboard.
+    /// </remarks>
+    public override bool ResignFirstResponder()
+    {
+        _composition.Reset();
+        return base.ResignFirstResponder();
+    }
+
+    /// <summary>The range a text input client answers when it has no marked text.</summary>
+    private static readonly NSRange NoRange = new(NSRange.NotFound, 0);
+
+    /// <summary>
+    /// The input manager's commit: the final text of a composition, or an emoji, or any character
+    /// it produced itself. <see cref="UiHost.CommitComposition"/> routes it through the ordinary
+    /// text path, so undo, validation, <c>MaxLength</c> and the autocomplete handler all see typing.
+    /// </summary>
+    /// <param name="text">A string or an attributed string; the library draws its own attributes.</param>
+    /// <param name="replacementRange">Ignored: v1 always commits at the caret, as section 3 records.</param>
+    /// <remarks>
+    /// This is the only commit route for a composed character. Nothing else in this view inserts
+    /// text, which is what keeps a dead key from composing and inserting the accent as well.
+    /// </remarks>
+    public void InsertText(NSObject text, NSRange replacementRange)
+    {
+        _composition.InsertText(TextOf(text));
+
+        // The commit moved the caret, which is where the next candidate window or viewer goes.
+        InvalidateCaretCoordinates();
+    }
+
+    /// <summary>
+    /// The input manager's preedit: the text so far and the caret inside it. The first call opens
+    /// the composition, and every later one updates it.
+    /// </summary>
+    /// <param name="text">The marked string.</param>
+    /// <param name="selectedRange">The caret inside <paramref name="text"/>, in UTF-16 code units.</param>
+    /// <param name="replacementRange">Ignored, as for <see cref="InsertText"/>.</param>
+    public void SetMarkedText(NSObject text, NSRange selectedRange, NSRange replacementRange)
+    {
+        _composition.SetMarkedText(TextOf(text), (int)selectedRange.Location);
+
+        // The preedit is drawn in front of the caret, so its width moves the answer too.
+        InvalidateCaretCoordinates();
+    }
+
+    /// <summary>
+    /// The input manager ended its composition without committing. The preedit goes and nothing is
+    /// inserted, so no value, caret or undo entry changes.
+    /// </summary>
+    public void UnmarkText() => _composition.UnmarkText();
+
+    /// <summary>True while the input manager holds marked text for this view.</summary>
+    public bool HasMarkedText => _composition.HasMarkedText;
+
+    /// <summary>The marked range, or <see cref="NSRange.NotFound"/> when there is none.</summary>
+    public NSRange MarkedRange =>
+        _composition.HasMarkedText ? new NSRange(0, _composition.MarkedLength) : NoRange;
+
+    /// <summary>
+    /// The selection inside the marked text. The library holds no editable selection of its own
+    /// while composing, so this is the preedit caret the input manager last reported.
+    /// </summary>
+    public NSRange SelectedRange =>
+        _composition.HasMarkedText
+            ? new NSRange(_composition.SelectedLocation, 0)
+            : NoRange;
+
+    /// <summary>
+    /// Where the caret is, in screen points - the one answer macOS uses to place a candidate window
+    /// or the character viewer.
+    /// </summary>
+    /// <param name="characterRange">The range the caller asks about; the answer is the caret.</param>
+    /// <param name="actualRange">The range the answer describes, or <see cref="NSRange.NotFound"/>.</param>
+    /// <returns>The caret rectangle in screen points, or an empty rectangle with no caret.</returns>
+    public CGRect GetFirstRect(NSRange characterRange, out NSRange actualRange)
+    {
+        if (!_host.TryGetCaretBounds(out var caret) || Window is not { } window)
+        {
+            actualRange = NoRange;
+            return CGRect.Empty;
+        }
+
+        // The view is flipped, so a host rectangle is already in its own coordinate system; what is
+        // missing is where the view's bottom edge sits on the screen, because screen coordinates
+        // count upwards. AppKit does the view-to-window and window-to-screen steps.
+        var bottomInView = IsFlipped ? new CGPoint(0d, Bounds.Height) : CGPoint.Empty;
+        var origin = window.ConvertPointToScreen(ConvertPointToView(bottomInView, null!));
+
+        actualRange = characterRange;
+        return AppKitImeGeometry.ToScreenRect(caret, Bounds.Height, origin);
+    }
+
+    /// <summary>
+    /// The input manager declined a key and turned it into a command. The library already offered
+    /// the key at the top of <see cref="KeyDown"/>, so this forwards the same key once more to
+    /// whatever holds the focus now, which is what keeps a command the text box would have handled
+    /// from disappearing into a beep.
+    /// </summary>
+    /// <param name="selector">The command, such as <c>deleteBackward:</c> or <c>moveLeft:</c>.</param>
+    [Export("doCommandBySelector:")]
+    public void DoCommandBySelector(Selector? selector)
+    {
+        var name = selector?.Name ?? string.Empty;
+
+        // The host callback can re-enter here. Without this, a command that moves the focus to a
+        // control which answers by issuing another command never returns.
+        if (_forwardingCommand)
+        {
+            ReentrancyRefusals++;
+            Trace($"doCommandBySelector {name} refused: a command is already being forwarded");
+            return;
+        }
+
+        var key = KeyForCommand(name, _eventBeingInterpreted);
+        if (key == Key.None)
+        {
+            Trace($"doCommandBySelector {name}: nothing to forward");
+            return;
+        }
+
+        var modifiers = _eventBeingInterpreted is { } theEvent
+            ? AppKitKeyMap.ToModifiers(theEvent.ModifierFlags)
+            : Modifiers.None;
+
+        _forwardingCommand = true;
+
+        try
+        {
+            if (!_host.ProcessKeyDown(key, modifiers))
+            {
+                Trace($"doCommandBySelector {name}: the library did not take {key}");
+            }
+        }
+        finally
+        {
+            _forwardingCommand = false;
+        }
+    }
+
+    /// <summary>
+    /// The text of a mark, whether the input manager handed it over as a string or as an attributed
+    /// string. The library draws the preedit with the field's own font and colour, so the
+    /// attributes are not used.
+    /// </summary>
+    private static string TextOf(NSObject? text) => text switch
+    {
+        null => string.Empty,
+        NSAttributedString attributed => attributed.Value ?? string.Empty,
+        _ => text.ToString() ?? string.Empty,
+    };
+
+    /// <summary>
+    /// The key a declined command stands for. The selector name is authoritative where it is known,
+    /// and the event the manager was interpreting is the fallback, which is what makes a state the
+    /// input method leaves behind answerable at all.
+    /// </summary>
+    private static Key KeyForCommand(string selector, NSEvent? theEvent)
+    {
+        switch (selector)
+        {
+            case "insertNewline:":
+            case "insertNewlineIgnoringFieldEditor:":
+            case "insertParagraphSeparator:":
+                return Key.Enter;
+
+            case "insertTab:":
+            case "insertBacktab:":
+                return Key.Tab;
+
+            case "deleteBackward:":
+            case "deleteBackwardByDecomposingPreviousCharacter:":
+                return Key.Backspace;
+
+            case "deleteForward:":
+            case "deleteWordBackward:":
+            case "deleteWordForward:":
+            case "deleteToBeginningOfLine:":
+            case "deleteToEndOfLine:":
+                return Key.Delete;
+
+            case "moveLeft:":
+            case "moveLeftAndModifySelection:":
+            case "moveWordLeft:":
+            case "moveWordLeftAndModifySelection:":
+            case "moveToBeginningOfLine:":
+            case "moveToBeginningOfLineAndModifySelection:":
+                return Key.Left;
+
+            case "moveRight:":
+            case "moveRightAndModifySelection:":
+            case "moveWordRight:":
+            case "moveWordRightAndModifySelection:":
+            case "moveToEndOfLine:":
+            case "moveToEndOfLineAndModifySelection:":
+                return Key.Right;
+
+            case "moveUp:":
+            case "moveUpAndModifySelection:":
+            case "moveToBeginningOfParagraph:":
+            case "moveToBeginningOfDocument:":
+                return Key.Up;
+
+            case "moveDown:":
+            case "moveDownAndModifySelection:":
+            case "moveToEndOfParagraph:":
+            case "moveToEndOfDocument:":
+                return Key.Down;
+
+            case "cancelOperation:":
+                return Key.Escape;
+
+            // The manager says "I did nothing with this one", which is not a key for the library.
+            case "noop:":
+            case "complete:":
+                return Key.None;
+
+            default:
+                return theEvent is { } keyEvent ? AppKitKeyMap.ToKey(keyEvent.KeyCode) : Key.None;
+        }
+    }
+
+    /// <summary>
+    /// Tells AppKit's input context that its marked text is no longer welcome, which is the macOS
+    /// answer to a field that refuses a composition.
+    /// </summary>
+    /// <remarks>
+    /// The context may not exist yet - a view with no window has none - and that is not a failure:
+    /// there is then nothing on screen to take down.
+    /// </remarks>
+    private void DiscardMarkedText()
+    {
+        try
+        {
+            InputContext?.DiscardMarkedText();
+        }
+        catch (Exception ex)
+        {
+            Trace($"discarding marked text failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    /// <summary>
+    /// Tells the input system that the caret may have moved, so the rectangle it asks for next is
+    /// not one it cached. <c>NSTextInputContext</c> documents this as the client's job whenever the
+    /// document's visual coordinates change, and says that <c>handleEvent:</c> is only an implicit
+    /// notification - a click or a key the input manager never sees is neither.
+    /// </summary>
+    /// <remarks>
+    /// This is the macOS counterpart of the Win32 defect where the emoji panel's anchor was written
+    /// only during a composition and was stale otherwise: here the anchor is answered on demand,
+    /// but the system is still allowed to cache the answer.
+    /// </remarks>
+    private void InvalidateCaretCoordinates()
+    {
+        try
+        {
+            InputContext?.InvalidateCharacterCoordinates();
+        }
+        catch (Exception ex)
+        {
+            Trace($"invalidating the caret coordinates failed: {ex.GetType().Name}: {ex.Message}");
+        }
+    }
+
+    // ---- NSTextInputClient: the rest of the protocol, answered at its legal minimum ----------
+
+    /// <summary>
+    /// The library holds its own text, so there is no attributed substring to hand back. Answering
+    /// nothing with <see cref="NSRange.NotFound"/> is the documented way to say so.
+    /// </summary>
+    public NSAttributedString GetAttributedSubstring(NSRange proposedRange, out NSRange actualRange)
+    {
+        actualRange = NoRange;
+        return null!;
+    }
+
+    /// <summary>
+    /// The attributes the input manager may put inside marked text. Empty is legal, and the
+    /// library draws the preedit itself, so it is also the honest answer.
+    /// </summary>
+    public NSString[] ValidAttributesForMarkedText => [];
+
+    /// <summary>No attributed string holds this view's text.</summary>
+    public NSAttributedString AttributedString => null!;
+
+    /// <summary>The window's level, so the input manager can attach a panel to it.</summary>
+    public NSWindowLevel WindowLevel => Window?.Level ?? NSWindowLevel.Normal;
+
+    /// <summary>No range is visible in a rectangle of its own; the caret answer covers this.</summary>
+    public CGRect UnionRectInVisibleSelectedRange => CGRect.Empty;
+
+    /// <summary>The whole view is the document as far as a candidate window is concerned.</summary>
+    public CGRect DocumentVisibleRect => Bounds;
+
+    /// <summary>The library draws its own caret, so there is no accessory to place.</summary>
+    public NSTextCursorAccessoryPlacement PreferredTextAccessoryPlacement =>
+        NSTextCursorAccessoryPlacement.Unspecified;
+
+    /// <summary>Inline image glyphs are not drawn by the library.</summary>
+    public bool SupportsAdaptiveImageGlyph => false;
+
+    /// <summary>
+    /// An inline image (a Genmoji, say) cannot be drawn by the library, so it is dropped rather
+    /// than inserted as the wrong character.
+    /// </summary>
+    public void InsertAdaptiveImageGlyph(NSAdaptiveImageGlyph adaptiveImageGlyph, NSRange replacementRange) =>
+        Trace("an inline image glyph was declined: the library draws text only");
+
+    /// <summary>The library has no character index to answer with, so the first one is the answer.</summary>
+    public nuint GetCharacterIndex(CGPoint point) => 0;
+
+    /// <summary>Vertical layout is not something the library implements.</summary>
+    public bool DrawsVertically(nuint charIndex) => false;
+
+    /// <summary>No baseline offset applies to a caret the library draws at the text baseline.</summary>
+    public NFloat GetBaselineDelta(nuint charIndex) => (NFloat)0;
+
+    /// <summary>Glyph-distance metrics are not used by anything the library draws.</summary>
+    public NFloat GetFractionOfDistanceThroughGlyph(CGPoint point) => (NFloat)0;
 
     /// <summary>Called when a drag enters the view, and says whether the view would take the drop.</summary>
     public override NSDragOperation DraggingEntered(INSDraggingInfo sender)
