@@ -790,6 +790,13 @@ internal static class NativeMethods
     [DllImport("imm32.dll")]
     internal static extern bool ImmSetCompositionWindow(IntPtr himc, ref COMPOSITIONFORM lpCompositionForm);
 
+    /// <summary>
+    /// Reads back the form <see cref="ImmSetCompositionWindow"/> stored, which is what the tests use to
+    /// show the form follows the caret. A context nothing has set yet answers false.
+    /// </summary>
+    [DllImport("imm32.dll")]
+    internal static extern bool ImmGetCompositionWindow(IntPtr himc, out COMPOSITIONFORM lpCompositionForm);
+
     [DllImport("imm32.dll")]
     internal static extern bool ImmSetCompositionFontW(IntPtr himc, ref LOGFONTW lplf);
 

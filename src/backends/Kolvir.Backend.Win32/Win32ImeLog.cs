@@ -14,18 +14,17 @@ namespace Kolvir.Backend.Win32;
 /// the executable, or <c>KOLVIR_IME_LOG</c> to a full path for a specific file.
 /// </para>
 /// <para>
-/// Two switches select the experiments that a log may exonerate, so a run reports which one was on:
+/// One switch selects the experiment that a log may exonerate, so a run reports whether it was on:
 /// <c>KOLVIR_IME_SHOW_CARET=1</c> shows the one-pixel system caret once it is positioned, which is the
-/// only visibility signal the thread exposes, and <c>KOLVIR_IME_REFRESH_COMPOSITIONFORM=1</c> keeps the
-/// input context's composition form at the caret outside a composition, in case the input stack reads
-/// it as an anchor.
+/// only visibility signal the thread exposes. The composition form is not behind a switch: keeping it
+/// at the caret outside a composition is behaviour, not an experiment, because the emoji panel reads it
+/// and an unset form sits at the client origin.
 /// </para>
 /// </remarks>
 internal static class Win32ImeLog
 {
     internal const string PathVariable = "KOLVIR_IME_LOG";
     internal const string ShowCaretVariable = "KOLVIR_IME_SHOW_CARET";
-    internal const string RefreshCompositionFormVariable = "KOLVIR_IME_REFRESH_COMPOSITIONFORM";
     internal const string TestPointVariable = "KOLVIR_IME_TEST_POINT";
 
     private static readonly object Gate = new();
@@ -41,10 +40,6 @@ internal static class Win32ImeLog
 
     /// <summary>True when <c>KOLVIR_IME_SHOW_CARET</c> asked for the system caret to be visible.</summary>
     internal static bool ShowCaret => IsOn(Environment.GetEnvironmentVariable(ShowCaretVariable));
-
-    /// <summary>True when <c>KOLVIR_IME_REFRESH_COMPOSITIONFORM</c> asked for the extra positioning.</summary>
-    internal static bool RefreshCompositionForm =>
-        IsOn(Environment.GetEnvironmentVariable(RefreshCompositionFormVariable));
 
     /// <summary>
     /// A screen point to answer <c>IMR_QUERYCHARPOSITION</c> with instead of the caret, or null.

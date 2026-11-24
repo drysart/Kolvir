@@ -497,27 +497,164 @@ public sealed class Win32CaretPositionTests
     }
 
     [TestMethod]
+    [Timeout(30000)]
+    public void TheCompositionFormFollowsTheCaretOutsideAComposition() => Run(
+        "ime composition form",
+        (hwnd, window, box) =>
+        {
+            box.CaretIndex = 5;
+            Settle(hwnd);
+
+            var answer = Ask(hwnd, NativeMethods.ImrQueryCharPosition).Answer;
+            var expectedX = answer.pt.X - answer.rcDocument.Left;
+            var expectedY = answer.pt.Y - answer.rcDocument.Top;
+
+            var (found, form) = CompositionForm(hwnd);
+
+            Assert.IsTrue(found, "the form is set even though no composition ever started");
+            Assert.AreEqual(NativeMethods.CfsPoint, form.dwStyle, "anchored at a point");
+            Assert.AreEqual(expectedX, form.ptCurrentPos.X, "at the caret the request answers with");
+            Assert.AreEqual(expectedY, form.ptCurrentPos.Y);
+        });
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheCompositionFormIsNotSetWhenNothingIsFocused()
+    {
+        var application = new Application(new Win32ApplicationBackend());
+
+        try
+        {
+            var window = new Window("ime form unfocused", new Panel { Dock = DockStyle.Fill })
+            {
+                ClientSize = new SKSize(320f, 160f),
+            };
+
+            window.AddShownHandler(_ =>
+            {
+                try
+                {
+                    var hwnd = ((Win32WindowBackend)window.Backend).Handle;
+
+                    Assert.IsFalse(window.Host.TryGetCaretBounds(out SKRect _), "nothing is focused");
+
+                    // A marker only this test knows about: nothing focused must leave it exactly as it
+                    // is, which is independent of whatever a previous test on this thread left behind.
+                    SetCompositionForm(hwnd, 5, 5);
+                    Settle(hwnd);
+                    Settle(hwnd);
+
+                    var (found, form) = CompositionForm(hwnd);
+
+                    Assert.IsTrue(found);
+                    Assert.AreEqual(5, form.ptCurrentPos.X, "a window with no caret leaves the form alone");
+                    Assert.AreEqual(5, form.ptCurrentPos.Y);
+                }
+                finally
+                {
+                    application.Exit();
+                }
+            });
+
+            window.Show();
+            application.Run();
+        }
+        finally
+        {
+            application.Dispose();
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void AnUnmovedCaretDoesNotRewriteTheCompositionForm() => Run(
+        "ime form stable",
+        (hwnd, window, box) =>
+        {
+            box.CaretIndex = 5;
+            Settle(hwnd);
+
+            Assert.IsTrue(CompositionForm(hwnd).Found, "the form is set to begin with");
+
+            // Write a marker only this test knows about. If a message that does not move the caret
+            // re-issued the update, the marker would be overwritten with the caret again.
+            SetCompositionForm(hwnd, 5, 5);
+
+            Settle(hwnd);
+            Settle(hwnd);
+
+            var (found, form) = CompositionForm(hwnd);
+
+            Assert.IsTrue(found);
+            Assert.AreEqual(5, form.ptCurrentPos.X, "an unmoved caret does not re-issue the update");
+            Assert.AreEqual(5, form.ptCurrentPos.Y);
+        });
+
+    /// <summary>Stores a composition window form the test can recognise, so a rewrite is visible.</summary>
+    private static void SetCompositionForm(IntPtr hwnd, int x, int y)
+    {
+        var context = NativeMethods.ImmGetContext(hwnd);
+        Assert.AreNotEqual(IntPtr.Zero, context, "the window has an input context");
+
+        try
+        {
+            var marker = new NativeMethods.COMPOSITIONFORM
+            {
+                dwStyle = NativeMethods.CfsPoint,
+                ptCurrentPos = new NativeMethods.POINT { X = x, Y = y },
+            };
+
+            Assert.IsTrue(NativeMethods.ImmSetCompositionWindow(context, ref marker), "the marker is stored");
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    /// <summary>What the window's input context holds for its composition window right now.</summary>
+    private static (bool Found, NativeMethods.COMPOSITIONFORM Form) CompositionForm(IntPtr hwnd)
+    {
+        var context = NativeMethods.ImmGetContext(hwnd);
+
+        if (context == IntPtr.Zero)
+        {
+            return (false, default);
+        }
+
+        try
+        {
+            var found = NativeMethods.ImmGetCompositionWindow(context, out var form);
+            return (found, form);
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(hwnd, context);
+        }
+    }
+
+    [TestMethod]
     public void TheDiagnosticTraceAndItsExperimentsAreOffByDefault()
     {
         var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
         var previousShow = Environment.GetEnvironmentVariable(Win32ImeLog.ShowCaretVariable);
-        var previousRefresh = Environment.GetEnvironmentVariable(Win32ImeLog.RefreshCompositionFormVariable);
+        var previousPoint = Environment.GetEnvironmentVariable(Win32ImeLog.TestPointVariable);
 
         try
         {
             Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, null);
             Environment.SetEnvironmentVariable(Win32ImeLog.ShowCaretVariable, null);
-            Environment.SetEnvironmentVariable(Win32ImeLog.RefreshCompositionFormVariable, null);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, null);
 
             Assert.IsFalse(Win32ImeLog.Enabled, "nothing is written unless a log was asked for");
-            Assert.IsFalse(Win32ImeLog.ShowCaret, "and neither experiment runs unless asked for");
-            Assert.IsFalse(Win32ImeLog.RefreshCompositionForm);
+            Assert.IsFalse(Win32ImeLog.ShowCaret, "and the caret experiment runs only when asked for");
+            Assert.IsNull(Win32ImeLog.TestPoint, "and nothing is overridden");
         }
         finally
         {
             Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
             Environment.SetEnvironmentVariable(Win32ImeLog.ShowCaretVariable, previousShow);
-            Environment.SetEnvironmentVariable(Win32ImeLog.RefreshCompositionFormVariable, previousRefresh);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, previousPoint);
         }
     }
 

@@ -328,29 +328,32 @@ Details that are not visible from the message table:
   screen, with the window at a different origin and the pointer elsewhere, so the panel really does
   position from `IMR_QUERYCHARPOSITION`. That rules out both the pointer hypothesis and the idea that
   the panel uses TSF text extents instead (section 7.4).
-- **The composition form is only ever set inside a composition.** `ImmSetCompositionWindow` runs on
-  `WM_IME_STARTCOMPOSITION`, on each composition update, and - behind a diagnostic switch - on a caret
-  sync that moved the caret. On a machine with no IME installed no composition ever starts, so in the
-  shipped default the form is **never set**: the context keeps its default, `ptCurrentPos` at the
-  client origin with a zero `rcArea`. `ImmSetCandidateWindow` is never called at all. That matters
-  because it is the one piece of per-context state a consumer could read, and it is stale until
-  something starts a composition (section 7.4).
+- **The composition form follows the caret from the moment there is one.** `ImmSetCompositionWindow`
+  is written on the caret sync in `SyncCaret`, which runs in the `finally` of `HandleMessage`, so one
+  place covers keys, clicks, composition messages and relayout. It runs only when the rounded caret
+  point changed - the same condition `SetCaretPos` already uses - so a message that does not move the
+  caret costs nothing, and it does not run at all when no control has a caret. This was the root cause
+  of a real defect: the form used to be written only inside a composition, which on a machine with no
+  IME never happens, so it sat at the context default - `ptCurrentPos` at the client origin with a
+  zero `rcArea`. The emoji panel reads this form, which is why the **first** open of a run landed at
+  the window's top-left corner and every later one, after a composition had started and our handler
+  had written the form, landed at the caret. Section 7.4 records how that was found. `ImmSetCandidateWindow`
+  is still never called; nothing has needed it.
 - **The trace.** A run can be told to write every IME message to a file, which is what decides between
   "the application is never asked" and "it answers and is ignored" - different problems with different
   fixes. `KOLVIR_IME_LOG=1` writes `kolvir-ime.log` beside the executable, or the variable holds a
   path. Each line carries the message, `GetFocus()` against the window, the `IMR_` value, and for
   `IMR_QUERYCHARPOSITION` the incoming `dwSize` and `dwCharPos` read before anything is written, then
   the answer. It is off by default and costs one environment read per IME message when it is.
-  Two switches select the experiments a trace can exonerate, and a report should say which was on:
-  `KOLVIR_IME_SHOW_CARET=1` shows the one-pixel caret once it is positioned, which sets the only
-  visibility flag the thread exposes (`GUI_CARETBLINKING`), and `KOLVIR_IME_REFRESH_COMPOSITIONFORM=1`
-  keeps the input context's composition form at the caret outside a composition, in case the input
-  stack anchors on the context instead of asking. A third, `KOLVIR_IME_TEST_POINT=x,y`, answers
-  `IMR_QUERYCHARPOSITION` with exactly that screen point while filling the rest as usual, and says so
-  on the answer line: a run at a point nowhere near the field decides whether the shell uses the point
-  at all. Every line that reports an answer also carries the mouse pointer's position, because one
-  hypothesis for a panel that lands in a fixed screen position is that it falls back to the pointer,
-  and that can only be checked if the pointer is recorded at the same moments.
+  Two switches remain, both diagnostic and both off by default. `KOLVIR_IME_SHOW_CARET=1` shows the
+  one-pixel caret once it is positioned, which sets the only visibility flag the thread exposes
+  (`GUI_CARETBLINKING`). `KOLVIR_IME_TEST_POINT=x,y` answers `IMR_QUERYCHARPOSITION` with exactly that
+  screen point while filling the rest as usual, and says so on the answer line: a run at a point
+  nowhere near the field decides whether the shell uses the point at all. Every line that reports an
+  answer also carries the mouse pointer's position, because a panel that fell back to the pointer would
+  have explained a fixed screen position, and that can only be checked if the pointer is recorded at
+  the same moments. The composition form was behind a third switch while it was an experiment; it is
+  behaviour now, and the switch was removed rather than left as a way to turn the fix off.
 - **The trace proves it is running, twice over.** The first version of it wrote only when an IME
   message arrived, and the first real run produced no file at all - which is indistinguishable from
   the feature not being in the build, the variable not reaching the process, or the panel never
@@ -515,6 +518,10 @@ routing, the host calls and the text box are all the shipped ones. What it prove
     asked".
 11. A window with nothing focused still answers the request, from its client origin in screen
     coordinates, instead of refusing and handing the shell its no-anchor fallback.
+12. The composition window form follows the caret with no composition running, at the same point
+    `IMR_QUERYCHARPOSITION` answers with; a window with nothing focused leaves it untouched; and a
+    message that does not move the caret does not re-issue it, which the test proves by writing a
+    marker only it knows and checking the marker survives.
 
 The composition string itself is published through `IWin32ImeComposition`, which is internal and
 defaults to `Win32ImeComposition.Instance`. That is forced by a measurement rather than chosen for
@@ -542,41 +549,27 @@ window, its own placement and its own animation, none of which this process can 
 by hand: put the caret mid-field, press Win+Period, and see the panel open at the caret rather than at
 the window corner.
 
-What the report says so far, updated as the runs came in. Three traced runs answered `pt=640,234`
-(nothing focused), `pt=2220,493` (nothing focused, the window had moved) and `pt=2341,556` (a focused
-box, exactly the caret) and the panel landed in the same place on the screen each time - but that was
-before the point was shown to be honoured, and the constant position in those runs has a simpler
-explanation below. The decisive runs were two: answering `100,100` put the panel in the screen's
-top-left corner, and answering `1900,1000` put it in the middle of the screen with the window at a
-different origin and the pointer elsewhere. So `IMR_QUERYCHARPOSITION` is the channel, and two
-hypotheses are dead: the panel does not fall back to the mouse pointer, and it does not position from
-TSF text extents. A point near a screen corner is not evidence on its own, because an honoured answer
-and a no-anchor fallback look identical there.
+What the report says, and how it was found, because the path matters more than the conclusion.
+`IMR_QUERYCHARPOSITION` was being asked and answered correctly the whole time - `pt=2341,556` at the
+caret in an early run - and that was not enough. A test point of `100,100` proved nothing: an honoured
+answer in a screen corner and a no-anchor fallback look identical there. `1900,1000` landing mid-screen,
+with the window at a different origin and the pointer elsewhere, proved the answered point is what
+places the panel. The observation that located the real channel was that **identical answers produced
+different placements**: one baseline run answered `pt=780,537` at every open - 22:32:33.163, 38.983,
+39.732, 45.776, 50.707 and 53.867 - with the caret at client 140,303 throughout, and the user reported
+the **first** open misplaced ("almost left aligned to the window and just below the menubar") and every
+later open correct. Identical answers cannot produce two placements unless something else places the
+first one, and the composition form was the only per-context state this backend can influence.
 
-What remains is that **the first open of a run is placed differently from every later one, with
-identical answers**. One baseline run answered `pt=780,537` at every open - 22:32:33.163, 38.983,
-39.732, 45.776, 50.707 and 53.867 - with the caret at client 140,303 the whole time, and the user
-reports the first open "almost left aligned to the window and just below the menubar" and the second
-and later opens correct. Identical answers producing different placements means the first open is
-placed from something other than the answer.
+The fix is in section 6.2: the form is kept at the caret from the moment there is one, in the same
+sync that moves the thread caret, so it is never stale. The confirming run was the switch that existed
+at the time: with the form written ahead of the first open, the panel landed at the caret on the first
+open and still at the caret on the second, after typing had moved it. The switch is gone; the behaviour
+is not.
 
-The code says where to look. The only per-context state this backend can influence is the
-composition form, and in the shipped default it is **never set on a machine with no IME**: it is
-written on `WM_IME_STARTCOMPOSITION`, on composition updates, and behind a diagnostic switch on a
-caret sync, and no composition ever starts here. A consumer reading the form therefore sees the
-context default - `ptCurrentPos` at the client origin, `rcArea` zero - which is exactly "left-aligned
-to the window, just below the title bar". Nothing else in this backend changes between the first and
-the sixth open: the thread caret is synced after every message, the query answers were identical, and
-`ImmSetCandidateWindow` is never called by either side. So the composition form is the one channel
-that can be stale at the first open and current afterwards, either because the first open starts a
-composition that our own handler then positions, or because the shell writes the form itself.
-
-That is what the `KOLVIR_IME_REFRESH_COMPOSITIONFORM=1` run decides: with the form kept at the caret
-before any composition starts, the first open should be placed like the rest. A trace of that run also
-answers the sub-question directly - if a `WM_IME_STARTCOMPOSITION` appears between the first and
-second open, our own handler is what fixed them from then on. The trace does not log `WM_IME_NOTIFY`,
-so a candidate-window channel through that message would not be visible; nothing observed so far
-suggests it, and it is the one blind spot worth knowing about.
+What that leaves unverified is the input method's own UI rather than its position: a real IME's
+candidate list, its clause attributes and its own preedit styling. Those need an IME installed (section
+7.5) and a person to look at them.
 
 ## 8. Status and open questions
 

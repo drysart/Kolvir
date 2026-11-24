@@ -3012,13 +3012,11 @@ public sealed class Win32WindowBackend : IWindowBackend
                 $"caret client={x},{y} screen={screen.X},{screen.Y} focus=0x{NativeMethods.GetFocus().ToInt64():X}");
         }
 
-        if (Win32ImeLog.RefreshCompositionForm)
-        {
-            // Experiment 2: keep the context's composition form at the caret even with no composition
-            // active, in case the input stack reads it as an anchor instead of asking.
-            RefreshCompositionFormAt(x, y);
-            Win32ImeLog.Write("  composition form refreshed outside a composition (KOLVIR_IME_REFRESH_COMPOSITIONFORM)");
-        }
+        // The composition window follows the caret from the moment there is one, not only while a
+        // composition is running. The emoji panel reads this form, and an unset one sits at the client
+        // origin - which is why the first open of a run landed at the window's top-left corner while
+        // every later open, after our composition handler had written the form, landed at the caret.
+        UpdateCompositionWindow(x, y);
 
         if (Win32ImeLog.ShowCaret && !_caretShown)
         {
@@ -3030,10 +3028,15 @@ public sealed class Win32WindowBackend : IWindowBackend
     }
 
     /// <summary>
-    /// Keeps the input context's composition form at the caret with no composition active, which is one
-    /// of the two experiments for an input method that anchors on the context rather than asking.
+    /// Puts the input context's composition window at the caret with no composition active.
     /// </summary>
-    private void RefreshCompositionFormAt(int x, int y)
+    /// <remarks>
+    /// This runs only when the rounded caret point changed, so a message that did not move the caret
+    /// costs nothing. The calls themselves are cheap - about 1.4 microseconds for
+    /// <c>ImmGetContext</c>, <c>ImmSetCompositionWindow</c> and <c>ImmReleaseContext</c> together,
+    /// measured on this machine - and a caret move is at most a few per second.
+    /// </remarks>
+    private void UpdateCompositionWindow(int x, int y)
     {
         var context = NativeMethods.ImmGetContext(_hwnd);
         if (context == IntPtr.Zero)
