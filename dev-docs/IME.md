@@ -315,6 +315,20 @@ Details that are not visible from the message table:
   `hwndCaret == 0` with an empty `rcCaret` while the seam answered a caret, which is why the emoji
   panel anchored to the window instead of the field. After it, `hwndCaret` is the focused window and
   `rcCaret` is the seam's point in client coordinates.
+- **The trace.** A run can be told to write every IME message to a file, which is what decides between
+  "the application is never asked" and "it answers and is ignored" - different problems with different
+  fixes. `KOLVIR_IME_LOG=1` writes `kolvir-ime.log` beside the executable, or the variable holds a
+  path. Each line carries the message, `GetFocus()` against the window, the `IMR_` value, and for
+  `IMR_QUERYCHARPOSITION` the incoming `dwSize` and `dwCharPos` read before anything is written, then
+  the answer. It is off by default and costs one environment read per IME message when it is.
+  Two switches select the experiments a trace can exonerate, and a report should say which was on:
+  `KOLVIR_IME_SHOW_CARET=1` shows the one-pixel caret once it is positioned, which sets the only
+  visibility flag the thread exposes (`GUI_CARETBLINKING`), and `KOLVIR_IME_REFRESH_COMPOSITIONFORM=1`
+  keeps the input context's composition form at the caret outside a composition, in case the input
+  stack anchors on the context instead of asking.
+- **`dwSize` is respected.** A request whose incoming `dwSize` is smaller than the structure is
+  refused with `0` and left untouched, rather than written past what its caller allocated. Gecko and
+  Chromium both discard such an answer; real callers send the full size, which the trace confirmed.
 - **Popups.** `Win32PopupWindow` and `Win32MenuWindow` are deliberately left alone, for the reason
   section 6.4 gives: a non-activating popup never takes the input focus, so no composition can begin
   there.
@@ -353,6 +367,14 @@ method installed does, and they are why section 7.3 substitutes a reader:
   here rather than retried.
 - Ignored on purpose: the input method's candidate window, its clause attributes
   (`GCS_COMPCLAUSE`, `GCS_COMPATTR`) and its own preedit styling.
+- Measured with the trace on, against a real focused window on an English-only machine: the shell
+  does ask. `WM_IME_REQUEST` with `IMR_QUERYCHARPOSITION` arrived four to five times within 300 ms of
+  the window taking the focus, every time on the focused window with `GetFocus()` matching, with
+  `dwSize` = 36 and `dwCharPos` = 0, and our answer was `pt` in screen coordinates equal to the seam
+  converted by `ClientToScreen`, `rcDocument` the client rectangle on screen and `cLineHeight` 35.
+  So the request is answered correctly. Whether the shell then places its emoji panel with that answer
+  is the one thing this machine could not be made to show (section 7.4), and the trace is what a
+  report from a real session settles.
 
 ### 6.3 macOS (designed, not implemented)
 
@@ -474,6 +496,18 @@ whether the shell's panel appears beside the caret when Win+Period is pressed is
 window, its own placement and its own animation, none of which this process can observe. That check is
 by hand: put the caret mid-field, press Win+Period, and see the panel open at the caret rather than at
 the window corner.
+
+The trace in section 6.2 settles the part a person cannot: it records each `IMR_QUERYCHARPOSITION` with
+the incoming `dwSize` and the answer. On this machine it showed the request arriving on the focused
+window and being answered correctly, which rules out both "the application is never asked" and "the
+answer is malformed". What a trace cannot say is what the panel does with the answer, so a report from
+a real session is read like this: if the trace has no `IMR_QUERYCHARPOSITION` line for the run, the
+panel took another channel; if it has the line and the panel still sits at the window, the shell
+discarded a correct IMM answer, and the documented remedy is the lighter TSF route -
+`ITfContextOwner.GetTextExt` with a document manager and a context, explicitly not a full text store.
+`KOLVIR_IME_SHOW_CARET` and `KOLVIR_IME_REFRESH_COMPOSITIONFORM` are the two switches run one at a
+time for that second case: a panel that anchors on the thread caret needs the first, and one that
+anchors on the context's composition form needs the second.
 
 ## 8. Status and open questions
 

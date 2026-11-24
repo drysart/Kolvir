@@ -89,6 +89,9 @@ public sealed class Win32WindowBackend : IWindowBackend
     private int _caretX = int.MinValue;
     private int _caretY = int.MinValue;
 
+    /// <summary>True once a diagnostic run has shown the system caret.</summary>
+    private bool _caretShown;
+
     /// <summary>The model's window, kept so a native window replacement can re-run its hooks.</summary>
     private Window? _modelWindow;
 
@@ -1587,6 +1590,8 @@ public sealed class Win32WindowBackend : IWindowBackend
             _hwnd = hwnd;
         }
 
+        LogImeMessage(hwnd, message, wParam, lParam);
+
         // Anything that asked to see the window's messages sees them first, and can stop the message
         // here. The check is against the snapshot, which is empty for a window no feature attached
         // to, so an application that opts into nothing pays one comparison per message.
@@ -1751,11 +1756,13 @@ public sealed class Win32WindowBackend : IWindowBackend
                 // so it is created here and dropped in WM_KILLFOCUS. It is never shown: the library
                 // draws its own, and a second blinking caret would be a regression.
                 _hasKeyboardFocus = true;
+                Win32ImeLog.Write($"WM_SETFOCUS hwnd=0x{hwnd.ToInt64():X}: caret on the next message");
                 break;
 
             case NativeMethods.WmKillFocus:
                 _hasKeyboardFocus = false;
                 ReleaseCaret();
+                Win32ImeLog.Write($"WM_KILLFOCUS hwnd=0x{hwnd.ToInt64():X}: caret released");
                 break;
 
             case NativeMethods.WmImeSetContext:
@@ -2844,24 +2851,40 @@ public sealed class Win32WindowBackend : IWindowBackend
         // swallowing a request the backend does not implement would hide it.
         if ((uint)wParam != NativeMethods.ImrQueryCharPosition || lParam == IntPtr.Zero)
         {
+            Win32ImeLog.Write($"  request wParam=0x{unchecked((uint)wParam):X4} is not IMR_QUERYCHARPOSITION: DefWindowProc");
             return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmImeRequest, wParam, lParam);
+        }
+
+        var size = (uint)sizeof(NativeMethods.IMECHARPOSITION);
+        var position = (NativeMethods.IMECHARPOSITION*)lParam;
+
+        // The caller sizes the structure it allocated. An incoming size below ours means it expects a
+        // smaller one, so writing ours would run past its buffer; Gecko and Chromium both answer
+        // nothing in that case rather than a structure the caller will discard.
+        var incomingSize = position->dwSize;
+        var incomingCharPos = position->dwCharPos;
+
+        if (incomingSize < size)
+        {
+            Win32ImeLog.Write(
+                $"  IMR_QUERYCHARPOSITION rejected: incoming dwSize={incomingSize} < {size} charPos={incomingCharPos}");
+            return IntPtr.Zero;
         }
 
         if (!_host.TryGetCaretBounds(out var caret) || !NativeMethods.GetClientRect(hwnd, out var client))
         {
+            Win32ImeLog.Write("  IMR_QUERYCHARPOSITION: no caret to answer with, DefWindowProc");
             return NativeMethods.DefWindowProcW(hwnd, NativeMethods.WmImeRequest, wParam, lParam);
         }
-
-        var position = (NativeMethods.IMECHARPOSITION*)lParam;
-        var size = (uint)sizeof(NativeMethods.IMECHARPOSITION);
 
         var origin = LogicalToScreen(new SKPoint(caret.Left, caret.Top));
         var document = new NativeMethods.POINT();
         NativeMethods.ClientToScreen(hwnd, ref document);
 
         // dwCharPos stays as the caller set it: it names a character of the composition, and this
-        // library commits text rather than holding a composition string of its own.
-        position->dwSize = size;
+        // library commits text rather than holding a composition string of its own. dwSize is never
+        // shrunk below what the caller allocated.
+        position->dwSize = Math.Max(incomingSize, size);
         position->pt = origin;
         position->cLineHeight = LineHeightOf(_host.FocusedControl);
         position->rcDocument = new NativeMethods.RECT
@@ -2871,6 +2894,12 @@ public sealed class Win32WindowBackend : IWindowBackend
             Right = document.X + client.Right,
             Bottom = document.Y + client.Bottom,
         };
+
+        Win32ImeLog.Write(
+            $"  IMR_QUERYCHARPOSITION answered: in dwSize={incomingSize} charPos={incomingCharPos} -> "
+            + $"pt={position->pt.X},{position->pt.Y} line={position->cLineHeight} "
+            + $"doc={position->rcDocument.Left},{position->rcDocument.Top},{position->rcDocument.Right},{position->rcDocument.Bottom} "
+            + $"size={position->dwSize} result={size}");
 
         // The size is how an application says it handled the request.
         return new IntPtr((int)size);
@@ -2933,7 +2962,84 @@ public sealed class Win32WindowBackend : IWindowBackend
         NativeMethods.SetCaretPos(x, y);
         _caretX = x;
         _caretY = y;
+
+        if (Win32ImeLog.Enabled)
+        {
+            var screen = new NativeMethods.POINT { X = x, Y = y };
+            NativeMethods.ClientToScreen(_hwnd, ref screen);
+            Win32ImeLog.Write(
+                $"caret client={x},{y} screen={screen.X},{screen.Y} focus=0x{NativeMethods.GetFocus().ToInt64():X}");
+        }
+
+        if (Win32ImeLog.RefreshCompositionForm)
+        {
+            // Experiment 2: keep the context's composition form at the caret even with no composition
+            // active, in case the input stack reads it as an anchor instead of asking.
+            RefreshCompositionFormAt(x, y);
+            Win32ImeLog.Write("  composition form refreshed outside a composition (KOLVIR_IME_REFRESH_COMPOSITIONFORM)");
+        }
+
+        if (Win32ImeLog.ShowCaret && !_caretShown)
+        {
+            // Experiment 1: the only visibility signal a thread exposes is GUI_CARETBLINKING, which
+            // ShowCaret sets. Nothing extra is drawn - the caret is still one pixel, under ours.
+            _caretShown = NativeMethods.ShowCaret(_hwnd);
+            Win32ImeLog.Write($"  ShowCaret -> {_caretShown} (KOLVIR_IME_SHOW_CARET)");
+        }
     }
+
+    /// <summary>
+    /// Keeps the input context's composition form at the caret with no composition active, which is one
+    /// of the two experiments for an input method that anchors on the context rather than asking.
+    /// </summary>
+    private void RefreshCompositionFormAt(int x, int y)
+    {
+        var context = NativeMethods.ImmGetContext(_hwnd);
+        if (context == IntPtr.Zero)
+        {
+            return;
+        }
+
+        try
+        {
+            PlaceCompositionWindow(context, x, y);
+        }
+        finally
+        {
+            NativeMethods.ImmReleaseContext(_hwnd, context);
+        }
+    }
+
+    /// <summary>
+    /// One line per IME message when the trace is on. This is what decides between "the application was
+    /// never asked" and "it answered and was ignored", which are different problems with different
+    /// fixes.
+    /// </summary>
+    private static void LogImeMessage(IntPtr hwnd, uint message, IntPtr wParam, IntPtr lParam)
+    {
+        if (!Win32ImeLog.Enabled || !IsImeMessage(message))
+        {
+            return;
+        }
+
+        var name = message switch
+        {
+            NativeMethods.WmImeSetContext => "WM_IME_SETCONTEXT",
+            NativeMethods.WmImeStartComposition => "WM_IME_STARTCOMPOSITION",
+            NativeMethods.WmImeEndComposition => "WM_IME_ENDCOMPOSITION",
+            NativeMethods.WmImeComposition => "WM_IME_COMPOSITION",
+            _ => "WM_IME_REQUEST",
+        };
+
+        Win32ImeLog.Write(
+            $"{name} hwnd=0x{hwnd.ToInt64():X} focus=0x{NativeMethods.GetFocus().ToInt64():X} "
+            + $"wParam=0x{unchecked((uint)wParam.ToInt64()):X4} lParam=0x{lParam.ToInt64():X}");
+    }
+
+    private static bool IsImeMessage(uint message) => message is
+        NativeMethods.WmImeSetContext or NativeMethods.WmImeStartComposition
+        or NativeMethods.WmImeEndComposition or NativeMethods.WmImeComposition
+        or NativeMethods.WmImeRequest;
 
     /// <summary>Destroys the thread's caret if this window is the one that created it.</summary>
     private void ReleaseCaret()
@@ -2947,6 +3053,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         _caretWindow = IntPtr.Zero;
         _caretX = int.MinValue;
         _caretY = int.MinValue;
+        _caretShown = false;
     }
 
     /// <summary>
@@ -3089,14 +3196,19 @@ public sealed class Win32WindowBackend : IWindowBackend
             return;
         }
 
+        PlaceCompositionWindow(
+            context,
+            (int)MathF.Round(caret.Left * _scale),
+            (int)MathF.Round(caret.Top * _scale));
+    }
+
+    /// <summary>Positions the input method's window at a point already in device client pixels.</summary>
+    private static void PlaceCompositionWindow(IntPtr context, int x, int y)
+    {
         var form = new NativeMethods.COMPOSITIONFORM
         {
             dwStyle = NativeMethods.CfsPoint,
-            ptCurrentPos = new NativeMethods.POINT
-            {
-                X = (int)MathF.Round(caret.Left * _scale),
-                Y = (int)MathF.Round(caret.Top * _scale),
-            },
+            ptCurrentPos = new NativeMethods.POINT { X = x, Y = y },
         };
 
         NativeMethods.ImmSetCompositionWindow(context, ref form);

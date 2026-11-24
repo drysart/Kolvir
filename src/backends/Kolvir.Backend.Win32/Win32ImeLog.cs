@@ -1,0 +1,72 @@
+namespace Kolvir.Backend.Win32;
+
+/// <summary>
+/// A one-line-per-IME-message trace, off unless asked for, for finding out why an input method puts its
+/// own window where it does. It answers the one question a bug report cannot: whether the application
+/// is asked at all, and what it answers when it is.
+/// </summary>
+/// <remarks>
+/// <para>
+/// It writes to a file rather than to a debug channel because the application that hits this is a
+/// windowed one with no console attached. Set <c>KOLVIR_IME_LOG=1</c> for <c>kolvir-ime.log</c> beside
+/// the executable, or <c>KOLVIR_IME_LOG</c> to a full path for a specific file.
+/// </para>
+/// <para>
+/// Two switches select the experiments that a log may exonerate, so a run reports which one was on:
+/// <c>KOLVIR_IME_SHOW_CARET=1</c> shows the one-pixel system caret once it is positioned, which is the
+/// only visibility signal the thread exposes, and <c>KOLVIR_IME_REFRESH_COMPOSITIONFORM=1</c> keeps the
+/// input context's composition form at the caret outside a composition, in case the input stack reads
+/// it as an anchor.
+/// </para>
+/// </remarks>
+internal static class Win32ImeLog
+{
+    internal const string PathVariable = "KOLVIR_IME_LOG";
+    internal const string ShowCaretVariable = "KOLVIR_IME_SHOW_CARET";
+    internal const string RefreshCompositionFormVariable = "KOLVIR_IME_REFRESH_COMPOSITIONFORM";
+
+    private static readonly object Gate = new();
+
+    /// <summary>True when a log file was asked for. The variable is read per call, not cached.</summary>
+    internal static bool Enabled => ResolvePath() is not null;
+
+    /// <summary>True when <c>KOLVIR_IME_SHOW_CARET</c> asked for the system caret to be visible.</summary>
+    internal static bool ShowCaret => IsOn(Environment.GetEnvironmentVariable(ShowCaretVariable));
+
+    /// <summary>True when <c>KOLVIR_IME_REFRESH_COMPOSITIONFORM</c> asked for the extra positioning.</summary>
+    internal static bool RefreshCompositionForm =>
+        IsOn(Environment.GetEnvironmentVariable(RefreshCompositionFormVariable));
+
+    internal static void Write(string line)
+    {
+        if (ResolvePath() is not { } path)
+        {
+            return;
+        }
+
+        try
+        {
+            lock (Gate)
+            {
+                File.AppendAllText(path, $"{DateTime.Now:HH:mm:ss.fff} {line}{Environment.NewLine}");
+            }
+        }
+        catch
+        {
+            // A diagnostic must never break the message path it is watching.
+        }
+    }
+
+    private static string? ResolvePath()
+    {
+        var value = Environment.GetEnvironmentVariable(PathVariable);
+        if (string.IsNullOrWhiteSpace(value) || value == "0")
+        {
+            return null;
+        }
+
+        return IsOn(value) ? System.IO.Path.Combine(AppContext.BaseDirectory, "kolvir-ime.log") : value;
+    }
+
+    private static bool IsOn(string? value) => value is "1" or "true" or "TRUE" or "True";
+}

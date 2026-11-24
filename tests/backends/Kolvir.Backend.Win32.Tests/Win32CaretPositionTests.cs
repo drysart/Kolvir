@@ -40,6 +40,21 @@ public sealed class Win32CaretPositionTests
     [DllImport("user32.dll")]
     private static extern bool GetGUIThreadInfo(uint idThread, ref GUITHREADINFO lpgui);
 
+    [DllImport("user32.dll")]
+    private static extern IntPtr GetForegroundWindow();
+
+    [DllImport("user32.dll")]
+    private static extern bool SetForegroundWindow(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern IntPtr SetFocus(IntPtr hwnd);
+
+    [DllImport("user32.dll")]
+    private static extern uint GetWindowThreadProcessId(IntPtr hwnd, out uint processId);
+
+    [DllImport("user32.dll")]
+    private static extern bool AttachThreadInput(uint idAttach, uint idAttachTo, bool attach);
+
     /// <summary>The scale the backend works at, from the same place it reads it: the window's DPI.</summary>
     private static float ScaleOf(IntPtr hwnd) => NativeMethods.GetDpiForWindow(hwnd) / 96f;
 
@@ -59,7 +74,11 @@ public sealed class Win32CaretPositionTests
     private static IntPtr PointParam(int x, int y) => new((y << 16) | (x & 0xFFFF));
 
     /// <summary>Asks the window what an input method asks it, and hands back what it filled in.</summary>
-    private static (int Returned, NativeMethods.IMECHARPOSITION Answer) Ask(IntPtr hwnd, uint request, uint charPos = 0)
+    private static (int Returned, NativeMethods.IMECHARPOSITION Answer) Ask(
+        IntPtr hwnd,
+        uint request,
+        uint charPos = 0,
+        uint? dwSize = null)
     {
         var size = Marshal.SizeOf<NativeMethods.IMECHARPOSITION>();
         var buffer = Marshal.AllocHGlobal(size);
@@ -67,7 +86,11 @@ public sealed class Win32CaretPositionTests
         try
         {
             Marshal.StructureToPtr(
-                new NativeMethods.IMECHARPOSITION { dwSize = (uint)size, dwCharPos = charPos },
+                new NativeMethods.IMECHARPOSITION
+                {
+                    dwSize = dwSize ?? (uint)size,
+                    dwCharPos = charPos,
+                },
                 buffer,
                 false);
 
@@ -95,6 +118,27 @@ public sealed class Win32CaretPositionTests
         return (info.hwndCaret, info);
     }
 
+    /// <summary>
+    /// Gives the window the keyboard focus. A background process may not take the foreground on its
+    /// own, and without it the window never sees <c>WM_SETFOCUS</c>, which is what creates the caret, so
+    /// the test attaches to the foreground thread the way a shell does.
+    /// </summary>
+    private static void TakeFocus(IntPtr hwnd)
+    {
+        var foregroundThread = GetWindowThreadProcessId(GetForegroundWindow(), out uint _);
+        var ourThread = GetWindowThreadProcessId(hwnd, out uint _);
+
+        if (foregroundThread != ourThread)
+        {
+            AttachThreadInput(ourThread, foregroundThread, true);
+            SetForegroundWindow(hwnd);
+            SetFocus(hwnd);
+            AttachThreadInput(ourThread, foregroundThread, false);
+        }
+
+        Assert.AreEqual(hwnd, NativeMethods.GetFocus(), "the window holds the keyboard focus, which a caret requires");
+    }
+
     /// <summary>A real window with a real text box in it, and the body run inside its shown handler.</summary>
     private static void Run(string title, Action<IntPtr, Window, TextBox> body)
     {
@@ -113,7 +157,9 @@ public sealed class Win32CaretPositionTests
                 try
                 {
                     var backend = (Win32WindowBackend)window.Backend;
+
                     box.Focus();
+                    TakeFocus(backend.Handle);
 
                     body(backend.Handle, window, box);
                 }
@@ -231,4 +277,89 @@ public sealed class Win32CaretPositionTests
             returned, "an unimplemented request reaches DefWindowProc instead of being answered here");
         Assert.AreEqual(0u, answer.dwCharPos, "and nothing this backend fills in is written to it");
     });
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void TheDiagnosticTraceWritesWhatItSeesAndStopsWhenUnset()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-trace-{Guid.NewGuid():N}.log");
+
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+
+            Run("ime trace", (hwnd, window, box) =>
+            {
+                box.CaretIndex = 5;
+                Ask(hwnd, NativeMethods.ImrQueryCharPosition);
+            });
+
+            Assert.IsTrue(System.IO.File.Exists(path), "the trace goes to the file the variable names");
+
+            var trace = System.IO.File.ReadAllText(path);
+
+            Assert.IsTrue(trace.Contains("WM_IME_REQUEST", StringComparison.Ordinal), "the message is logged");
+            Assert.IsTrue(
+                trace.Contains("IMR_QUERYCHARPOSITION answered", StringComparison.Ordinal),
+                "with what was answered, which is what tells 'never asked' from 'answered and ignored'");
+            Assert.IsTrue(trace.Contains("focus=0x", StringComparison.Ordinal), "and the focus it was asked with");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    public void TheDiagnosticTraceAndItsExperimentsAreOffByDefault()
+    {
+        var previous = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+        var previousShow = Environment.GetEnvironmentVariable(Win32ImeLog.ShowCaretVariable);
+        var previousRefresh = Environment.GetEnvironmentVariable(Win32ImeLog.RefreshCompositionFormVariable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, null);
+            Environment.SetEnvironmentVariable(Win32ImeLog.ShowCaretVariable, null);
+            Environment.SetEnvironmentVariable(Win32ImeLog.RefreshCompositionFormVariable, null);
+
+            Assert.IsFalse(Win32ImeLog.Enabled, "nothing is written unless a log was asked for");
+            Assert.IsFalse(Win32ImeLog.ShowCaret, "and neither experiment runs unless asked for");
+            Assert.IsFalse(Win32ImeLog.RefreshCompositionForm);
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previous);
+            Environment.SetEnvironmentVariable(Win32ImeLog.ShowCaretVariable, previousShow);
+            Environment.SetEnvironmentVariable(Win32ImeLog.RefreshCompositionFormVariable, previousRefresh);
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
+    public void ARequestSizedSmallerThanTheStructureIsRefused() => Run(
+        "ime small request",
+        (hwnd, window, box) =>
+        {
+            box.CaretIndex = 5;
+
+            // Gecko and Chromium both discard an answer whose caller expected a smaller structure, and
+            // writing ours would run past what it allocated. Real callers send the full size, which is
+            // what the trace shows, so this only guards the contract.
+            var (returned, answer) = Ask(hwnd, NativeMethods.ImrQueryCharPosition, dwSize: 8);
+
+            Assert.AreEqual(0, returned, "a structure too small to fill is refused rather than written");
+            Assert.AreEqual(8u, answer.dwSize, "and the caller's own size is left exactly as it was");
+            Assert.AreEqual(0, answer.pt.X, "with nothing written into it");
+            Assert.AreEqual(0, answer.pt.Y);
+        });
 }

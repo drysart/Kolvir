@@ -808,6 +808,14 @@ internal static class NativeMethods
     [DllImport("user32.dll")]
     internal static extern bool DestroyCaret();
 
+    /// <summary>Makes the thread's caret visible; only a diagnostic experiment ever calls it.</summary>
+    [DllImport("user32.dll")]
+    internal static extern bool ShowCaret(IntPtr hwnd);
+
+    /// <summary>The window of this thread that holds the keyboard focus, for the IME trace.</summary>
+    [DllImport("user32.dll")]
+    internal static extern IntPtr GetFocus();
+
     [DllImport("user32.dll", CharSet = CharSet.Unicode)]
     internal static extern bool SystemParametersInfoW(uint uiAction, uint uiParam, ref RECT pvParam, uint fWinIni);
 
