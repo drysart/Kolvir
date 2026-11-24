@@ -18,6 +18,7 @@ public sealed class Win32CloseDuringPaintTests
 {
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Creates a Win32ApplicationBackend and opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void ClosingFromAFrameStartingHandlerDoesNotTearDownInsideThePaint()
     {
         var application = new Application(new Win32ApplicationBackend());

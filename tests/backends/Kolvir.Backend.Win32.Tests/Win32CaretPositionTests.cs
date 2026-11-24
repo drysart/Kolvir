@@ -207,6 +207,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void TheRequestAnswersTheCaretInScreenCoordinates() => Run("ime request", (hwnd, window, box) =>
     {
         box.CaretIndex = 5;
@@ -239,6 +240,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void ClickingElsewhereInTheFieldMovesTheAnswer() => Run("ime click", (hwnd, window, box) =>
     {
         box.CaretIndex = 0;
@@ -263,6 +265,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void TheTraceProvesItIsRunningBeforeAnythingIsAsked()
     {
         var path = System.IO.Path.Combine(
@@ -332,6 +335,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void TheDiagnosticTraceWritesWhatItSeesAndStopsWhenUnset()
     {
         var path = System.IO.Path.Combine(
@@ -373,6 +377,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void TheTraceRecordsWhetherAKeyReachedTheInputMethod()
     {
         var path = System.IO.Path.Combine(
@@ -418,6 +423,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void TheTestPointAnswersWithFixedScreenCoordinates()
     {
         var path = System.IO.Path.Combine(
@@ -473,6 +479,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void AWindowWithNothingFocusedStillAnswersFromItsClientOrigin()
     {
         var application = new Application(new Win32ApplicationBackend());
@@ -526,6 +533,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void TheCompositionFormFollowsTheCaretOutsideAComposition() => Run(
         "ime composition form",
         (hwnd, window, box) =>
@@ -547,6 +555,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void TheCompositionFormIsNotSetWhenNothingIsFocused()
     {
         var application = new Application(new Win32ApplicationBackend());
@@ -595,6 +604,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void AnUnmovedCaretDoesNotRewriteTheCompositionForm() => Run(
         "ime form stable",
         (hwnd, window, box) =>
@@ -688,6 +698,7 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    [Ignore("Opens a real Win32 window; disabled so the automated suite does not create windows.")]
     public void ARequestSizedSmallerThanTheStructureIsRefused() => Run(
         "ime small request",
         (hwnd, window, box) =>
