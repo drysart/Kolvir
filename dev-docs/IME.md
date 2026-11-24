@@ -2,10 +2,9 @@
 
 `APPLICATION-MODEL.md` section 10 lists "IME / dead keys / composed input" as a Tier-3 gap with one
 sentence beside it and no design behind it. This document is that design. It covers the three
-platforms, but only GTK4 is implemented in this branch: Windows and macOS are designed here and
-left open.
+platforms: GTK4 and Win32 are implemented, and macOS is designed here and left open.
 
-Status of this document: **GTK4 implemented, Win32 and macOS designed but not implemented.**
+Status of this document: **GTK4 and Win32 implemented, macOS designed but not implemented.**
 Sections 1 to 5 are the model every platform shares; section 6 is per platform; section 7 is what
 proves it; section 8 is the progress table and the questions this design deliberately leaves open.
 
@@ -14,9 +13,9 @@ This file is deliberately ASCII-only, like `OBSERVABLES.md` and `OBSERVABLE-COLL
 
 ## 1. The problem
 
-The input pipeline was, and on Windows and macOS still is, one-way and stateless. A backend derives
-characters from the keyboard and hands them over, and the library has no way to hold text that is
-not committed yet.
+The input pipeline was, and on macOS still is, one-way and stateless. A backend derives characters
+from the keyboard and hands them over, and the library has no way to hold text that is not committed
+yet.
 
 - **GTK4.** Before this change,
   `Gtk4SkiaView.OnKeyPressed` (`../../src/backends/Kolvir.Backend.Gtk4/Gtk4SkiaView.cs:1092` at the
@@ -25,8 +24,11 @@ not committed yet.
 - **macOS.** `AppKitSkiaView.KeyDown` (`../../src/backends/Kolvir.Backend.AppKit/AppKitSkiaView.cs:782`)
   takes `AppKitKeyMap.ToText(theEvent)` after the key and the Command/Control checks. The view does
   not adopt `NSTextInputClient`, so `interpretKeyEvents:` is never called.
-- **Windows.** `Win32WindowBackend` has a case for `WM_CHAR` (`:1680`, handled by `OnChar` at
-  `:2665`) and none for any `WM_IME_*` message in `HandleMessage` (`:1509`).
+- **Windows.** Before this change, `Win32WindowBackend` had a case for `WM_CHAR` (handled by
+  `OnChar`) and none for any `WM_IME_*` message in `HandleMessage`: a key became a single UTF-16
+  unit, and one past the BMP arrived as two lone surrogates. Nothing asked the input method for a
+  composition, so a dead key, a Compose sequence or an IME syllable reached the field as nothing or
+  as the raw key text.
 
 What that costs is not a missing nicety. A dead key on a `us-intl` layout, a Compose sequence, an
 accent typed through Option on macOS, or a syllable typed through ibus or fcitx, all of it produces
@@ -130,7 +132,8 @@ typed text does.
 
 `UiHost.SetFocus` cancels the previous control's composition before it raises lost-focus. A
 composition belongs to the control it started on: leaving the field ends it, and the candidate
-window the platform may be showing is reset by the backend's own focus handling (section 6.1).
+window the platform may be showing is reset by the backend's own focus handling (sections 6.1 and
+6.2).
 
 ### 4.4 `TextBox`
 
@@ -255,36 +258,81 @@ drawing area is the client widget of the input context.
   left alone: a non-activating popup never takes the input focus, so a composition cannot begin
   there, and its text arrives through the owner host's ordinary text path.
 
-### 6.2 Win32 (designed, not implemented)
+### 6.2 Win32 (implemented)
 
 The window procedure gets four messages. `WM_IME_SETCONTEXT` and `WM_IME_STARTCOMPOSITION` are
-offered to `DefWindowProcW` after the library has done its part.
+offered to `DefWindowProcW` after the library has done its part; `WM_IME_COMPOSITION` never is,
+because the default handler is one of the ways a committed result becomes a `WM_CHAR`.
 
 | Message | Value | What the backend does |
 |---|---|---|
-| `WM_IME_SETCONTEXT` | `0x0281` | Clear `ISC_SHOWUICOMPOSITIONWINDOW` (`0x1`) in `lParam` so the IME does not draw its own composition window over a library that draws the preedit itself, then pass it on. |
-| `WM_IME_STARTCOMPOSITION` | `0x010D` | `ImmGetContext`, `Host.BeginComposition()`, `ImmReleaseContext`. A refusal is still answered, so the IME knows the field declined. |
-| `WM_IME_COMPOSITION` | `0x010F` | `GCS_COMPSTR` (`0x8`): read the composition string and `GCS_CURSORPOS` (`0x80`), then `Host.UpdateComposition`. `GCS_RESULTSTR` (`0x800`): read the result string and `Host.CommitComposition`. Then `ImmSetCompositionWindow` from the caret seam so the candidate window follows the caret. |
-| `WM_IME_ENDCOMPOSITION` | `0x010E` | `Host.CancelComposition()`. |
+| `WM_IME_SETCONTEXT` | `0x0281` | Clear `ISC_SHOWUICOMPOSITIONWINDOW` (`0x80000000`) in `lParam` so the IME does not draw its own composition window over a library that draws the preedit itself, then pass it to `DefWindowProcW`. The flag is a DWORD in the low half of the `LPARAM`, so it is masked there and the result widened back as `lParam` is. |
+| `WM_IME_STARTCOMPOSITION` | `0x010D` | `ImmGetContext`, `Host.BeginComposition()`, `ImmSetCompositionWindow` at the caret, `ImmSetCompositionFontW` from the focused control's font, `ImmReleaseContext`, then `DefWindowProcW`. A refusal is still answered, so the IME knows the field declined. |
+| `WM_IME_COMPOSITION` | `0x010F` | `GCS_COMPSTR` (`0x0008`): read the composition string and `GCS_CURSORPOS` (`0x0080`), then `Host.UpdateComposition`. `GCS_RESULTSTR` (`0x0800`): read the result string and `Host.CommitComposition`. Then `ImmSetCompositionWindow` from the caret seam so the candidate window follows the caret. |
+| `WM_IME_ENDCOMPOSITION` | `0x010E` | `Host.CancelComposition()`, idempotent because a commit already cleared the preedit. |
 
-Imm32 calls: `ImmGetContext`, `ImmReleaseContext`, `ImmGetCompositionStringW`,
-`ImmSetCompositionWindow`. The caret goes into `COMPOSITIONFORM.ptCurrentPos` in client
-coordinates.
+Imm32 calls: `ImmGetContext`, `ImmReleaseContext`, `ImmGetCompositionStringW` (sized with a null
+buffer, then read), `ImmSetCompositionWindow`, `ImmSetCompositionFontW`, and `ImmNotifyIME` with
+`NI_COMPOSITIONSTR` (`0x0015`) and `CPS_CANCEL` (`0x0004`). The caret goes into
+`COMPOSITIONFORM.ptCurrentPos` under `CFS_POINT` (`0x0002`), in client coordinates. The constants
+are copied from `winuser.h` and `imm.h` rather than from memory, and two of them are easy to get
+wrong: `CFS_POINT` is `0x0002` while `0x0020` is `CFS_FORCE_POSITION`, and `NI_COMPOSITIONSTR` is
+`0x0015` while `0x000B` is not an `NI_` value at all.
 
-Two hazards, both real and both already visible in this codebase:
+Details that are not visible from the message table:
+
+- **Context per message.** Every handler takes `ImmGetContext` for one message and releases it in a
+  `finally`, so a composition can never outlive the call that asked about it. A window with no
+  context (`IntPtr.Zero`) still reaches the host: the preedit and the commit are the library's, and
+  only the positioning is lost.
+- **A composition that skips its start.** Some input methods send `WM_IME_COMPOSITION` without
+  `WM_IME_STARTCOMPOSITION` first, so the first `GCS_COMPSTR` opens the composition if none is open.
+- **A consumed key resets the input method.** The library sees a key before the input method does, so
+  a key it consumes never reaches it. The Win32 form of the GTK view's `IMContext.Reset()` is
+  `ImmNotifyIME(NI_COMPOSITIONSTR, CPS_CANCEL)` plus `Host.CancelComposition()` when the window
+  procedure's key path reports that the UI took the key.
+- **Font.** `ImmSetCompositionFontW` is filled from `UiHost.FocusedControl.EffectiveFont`: the
+  field's family, size scaled to device pixels, weight and italic, so the input method's own window
+  matches the field instead of the system default. The face-name buffer is shared with the font
+  dialog (`Win32LogFont`), which is why that helper moved out of the dialog service.
+- **Popups.** `Win32PopupWindow` and `Win32MenuWindow` are deliberately left alone, for the reason
+  section 6.4 gives: a non-activating popup never takes the input focus, so no composition can begin
+  there.
+
+Two hazards, both fixed in this branch:
 
 1. **A commit also produces `WM_CHAR`.** Translating a `GCS_RESULTSTR` composition produces an
    ordinary `WM_CHAR` for the same text, so committing in the window procedure and letting `WM_CHAR`
-   through doubles the text. The codebase already documents the same hazard for keys at
-   `Win32ApplicationBackend.cs:543` ("Swallowing the key here ... keeps `TranslateMessage` from also
-   turning it into a `WM_CHAR`, which would double up text input"), so the fix lives in the same
-   place: the message loop suppresses the `WM_CHAR` that belongs to a commit, or the window
-   procedure consumes the composition and sets a flag the loop honours.
-2. **`OnChar` truncates astral characters.** `OnChar` casts `(char)(int)wParam`, which turns a
-   surrogate-pair code point into a lone surrogate. A composition commit is the realistic way to get
-   an astral character into a window, so this has to be fixed with the composition work: use
-   `WM_UNICHAR`/`UTF-32` or build the string from `char.ConvertFromUtf32`, and drop `.Length == 2`
-   strings only when both halves are genuinely a pair.
+   through inserts the text twice. This is the same hazard the message loop documents for keys
+   (`Win32ApplicationBackend.cs:543`: "Swallowing the key here ... keeps `TranslateMessage` from also
+   turning it into a `WM_CHAR`, which would double up text input"). The fix is in `OnChar`: a commit
+   appends its text to a pending queue and `OnChar` drops a `WM_CHAR` whose character matches the head
+   of it. Matching is character by character rather than by count, so a `WM_CHAR` that is not the
+   commit's own text clears the queue and is delivered; a `WM_KEYDOWN`, a `WM_SYSKEYDOWN` and a new
+   composition clear it too, so a leftover expectation cannot swallow a character the user typed.
+   The test in section 7.3 fails with six characters against three if this is removed.
+2. **`OnChar` truncated astral characters.** `OnChar` cast `(char)(int)wParam`, which turns a
+   surrogate-pair code point into a lone surrogate. `WM_CHAR` carries UTF-16 code units, so a
+   character past the BMP genuinely arrives as two messages: `OnChar` now holds the high half and
+   emits the pair when the partner arrives, and drops a lone half. A composition commit is the
+   realistic way to get such a character into a window.
+
+**Measured, versus assumed, on this machine.** The measured facts are what a machine with no input
+method installed does, and they are why section 7.3 substitutes a reader:
+
+- `Get-WinUserLanguageList` is `en-US` alone, with the generic `0409:00000409` layout: no Japanese,
+  Chinese or Korean IME exists here, so nothing below was proved with a real one.
+- `ImmGetContext` still returns a valid context on such a machine, and `ImmIsIME` still answers TRUE
+  for `0x0409:00000409`, which makes "no context" a poor test of "no IME".
+- `ImmGetProperty(hkl, IGP_SETCOMPSTR)` is `0`, so the installed layout does not support setting a
+  composition string at all. With both the composition and the reading buffer supplied at their
+  documented lengths, `ImmSetCompositionStringW(SCS_SETSTR)` answers TRUE and
+  `ImmGetCompositionStringW` then reads `0` bytes for `GCS_COMPSTR`, `GCS_COMPREADSTR`,
+  `GCS_CURSORPOS` and `GCS_RESULTSTR`. A first attempt that passed only the composition buffer
+  answered FALSE, which reads exactly like "no IME installed" and is why the call shape is recorded
+  here rather than retried.
+- Ignored on purpose: the input method's candidate window, its clause attributes
+  (`GCS_COMPCLAUSE`, `GCS_COMPATTR`) and its own preedit styling.
 
 ### 6.3 macOS (designed, not implemented)
 
@@ -320,8 +368,8 @@ the same keyboard.
 
 ### 7.1 Headless tests
 
-The backends cannot be driven from a test, so the core is pinned by headless tests that call the
-four host methods and the caret seam directly:
+The core is pinned by headless tests that call the four host methods and the caret seam directly,
+because that contract is the same on every platform and no backend is needed to state it:
 
 1. Each method routes to the focused control, and does nothing when nothing is focused.
 2. A control that refuses composition still receives the commit as text.
@@ -353,25 +401,59 @@ The evidence is the demo's text page, which shows the preedit text, the preedit 
 last commit. A screenshot of that readout, before and after the commit, is the proof; a headed run
 without it proves nothing.
 
-### 7.3 What cannot be automated
+### 7.3 The Win32 test, and what it proves
+
+`tests/backends/Kolvir.Backend.Win32.Tests/Win32ImeCompositionTests.cs` creates a real window, focuses
+a real text box and sends the real `WM_IME_*` messages to its real window procedure, so the message
+routing, the host calls and the text box are all the shipped ones. What it proves:
+
+1. `WM_IME_STARTCOMPOSITION` asks the focused control for a composition, and a `GCS_COMPSTR` update
+   reaches the preedit with the input method's caret index while `Text` stays empty.
+2. A `GCS_RESULTSTR` commit arrives through the ordinary text path: the value and the caret are
+   exactly what typing the same text would produce.
+3. The `WM_CHAR` messages for those same characters do not insert the text a second time. This is the
+   assertion that catches the doubling hazard: with the suppression removed, the run reports six
+   characters where three were committed.
+4. A `WM_CHAR` that is not the commit's own text is still delivered, so the suppression is not a
+   blanket mute.
+5. `WM_IME_ENDCOMPOSITION` without a commit leaves no text, no preedit and no undo entry, and a repeat
+   of it changes nothing.
+6. An astral character, which arrives as two `WM_CHAR` messages, reaches the field as one character
+   rather than two lone surrogates.
+7. The window backend's composition reader defaults to the Imm32 one, so the seam cannot quietly ship a
+   fake, and the real reader answers an empty string and a zero caret when a window has no context.
+
+The composition string itself is published through `IWin32ImeComposition`, which is internal and
+defaults to `Win32ImeComposition.Instance`. That is forced by a measurement rather than chosen for
+convenience, and the measurement is in section 6.2: on a machine with no IME the installed layout has
+`IGP_SETCOMPSTR == 0`, so `ImmSetCompositionStringW(SCS_SETSTR)` answers TRUE and stores nothing, and
+`ImmGetCompositionStringW` reads zero bytes even when both the composition and the reading buffer are
+supplied. What the test therefore does **not** cover is listed in section 7.4.
+
+### 7.4 What cannot be automated
 
 A real input method's candidate window, its clause behaviour and its own preedit styling. Those are
 the platform's UI, not the library's, and every platform draws them differently. They are verified
 by hand, if at all, and they are the reasons section 8 leaves clause styling open.
 
-On the Linux host used for this work even the by-hand check could not be made: `ibus` is installed
-but no engine is (`ibus-hangul`, `ibus-pinyin`, `ibus-anthy` and `ibus-libpinyin` are all absent) and
-`sudo` needs a password, while `gtk-im-context-simple` draws no candidate window by design. The
-cursor-location maintenance described in section 6.1 is therefore reasoned from the order the
-signals arrive in, not an observed candidate-window move.
+On Windows this is also where the Imm32 reads themselves sit: `ImmGetCompositionStringW` returning a
+real composition string, `ImmSetCompositionWindow` putting the input method's window where it was
+asked, and `ImmNotifyIME` cancelling a live composition are all unexercised here, because this machine
+has no input method to answer them. The message handling around them is covered; the calls' answers
+are not.
 
 ## 8. Status and open questions
 
 | Platform | Dead keys / Compose | Daemon-driven IME | Status |
 |---|---|---|---|
-| GTK4 | Implemented | Implemented | **Done in this branch** |
-| Win32 | Designed | Designed | Not implemented |
+| GTK4 | Implemented | Implemented | **Done** |
+| Win32 | Implemented and covered by section 7.3 | Implemented, but untestable on a machine with no IME (section 6.2) | **Done** |
 | macOS | Designed | Designed | Not implemented |
+
+No input method is installed on the Windows development machine used for this branch: only `en-US`
+with the generic `0409:00000409` layout. The Win32 path is therefore proved against a synthesized
+composition driven through the real messages, not against a Japanese, Chinese or Korean IME. Its
+candidate window, its clauses and its own preedit UI are unverified, exactly as they are on GTK4.
 
 Open questions:
 

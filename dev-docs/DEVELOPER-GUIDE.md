@@ -2088,8 +2088,12 @@ A control opts in by overriding `OnCompositionStarted`, `OnCompositionUpdated` a
 receives the commit as ordinary text. A focus change cancels, and a key the text box acts on cancels
 the preedit first, because the library sees a key before the platform's input method does.
 
-This is implemented for GTK4 only. `dev-docs/IME.md` is the design: the Win32 and macOS
-integrations, the invariants, the caret seam, and what is still open.
+This is implemented for GTK4 and for Windows. On GTK4 the view drives a `Gtk.IMContext`; on Windows
+the window procedure answers `WM_IME_SETCONTEXT`, `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION` and
+`WM_IME_ENDCOMPOSITION` through Imm32, anchors the candidate window at the same caret, and drops the
+`WM_CHAR` copies a commit would otherwise insert twice. macOS is still designed only.
+`dev-docs/IME.md` is the design: all three integrations, the invariants, the caret seam, what the tests
+prove and what still needs a real input method to verify.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and
