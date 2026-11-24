@@ -570,6 +570,10 @@ methods map onto the host contract like this.
   the call while staying quiet would leave the input method's own underline over a field that will
   never take the text, so the marked text is discarded instead, once per offered mark. A commit still
   arrives as ordinary text, which the field declines; the text is not the composition's to withhold.
+  A commit that arrives *while* the marked text is being taken down is dropped rather than inserted,
+  which is what Win32 does with a result for a refused composition: the input method's answer to
+  `discardMarkedText` is `unmarkText`, not `insertText`, so the case is a client's defensive guard
+  rather than a path a conforming input method takes.
 - **Caret and candidate window agree, by construction.** macOS has one channel, not two: the system
   asks the client for the caret through `firstRectForCharacterRange:actualRange:` and positions both a
   candidate window and the character (emoji) viewer from that answer. Unlike Win32 there is no
