@@ -70,8 +70,9 @@ Non-goals:
   two sets of one item). The batch keeps what happened. 8.5 records the question.
 - Filtered or sorted views over a list (5.3), and ordered or sorted variants of any of the three (open
   question 8.11). Both need the record format to settle first. Projection is no longer on this list: the
-  list's view, which never drops and never reorders an item, is 5.4, and the set's view, which collapses
-  inner items that map to one item, is 6.5.
+  list's view, which never drops and never reorders an item, is 5.4; the set's view, which collapses
+  inner items that map to one item, is 6.5; and the dictionary's view, which is record for record again
+  because a key is unique, is 7.5.
 
 ## 2. The list: type model
 
@@ -1243,7 +1244,136 @@ Which record marks what:
 | `DictionaryCleared` | yes | yes | every watched key |
 | `UntrackedChanges` | yes | yes | every watched key |
 
-### 7.5 What is left for a later pass
+### 7.5 The mapped view
+
+`ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>` is a read-only view over another
+observable dictionary that projects every value through a function - the dictionary's `Select`, the
+counterpart of 5.4 and 6.5:
+
+```csharp
+namespace Kolvir.Feature.Observables;
+
+public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
+    : IReadOnlyObservableDictionary<TKey, TOuter>, IObservableChangeTarget<ObservableDictionaryChange<TKey, TOuter>, ...>
+    where TKey : notnull
+{
+    public ObservableMappedReadOnlyDictionaryView(
+        IReadOnlyObservableDictionary<TKey, TInner> inner,
+        Func<TInner, TOuter> selector);
+
+    public bool IsDisposed { get; }
+    public IEqualityComparer<TKey> Comparer { get; }
+    public int Count { get; }
+    public IEnumerable<TKey> Keys { get; }
+    public IEnumerable<TOuter> Values { get; }
+    public TOuter this[TKey key] { get; }
+    public bool ContainsKey(TKey key);
+    public bool TryGetValue(TKey key, out TOuter value);
+    public bool Contains(KeyValuePair<TKey, TOuter> item);
+    public void CopyTo(KeyValuePair<TKey, TOuter>[] array, int arrayIndex);
+    public IEnumerator<KeyValuePair<TKey, TOuter>> GetEnumerator();
+    public IDisposable AddObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TOuter>> handler);
+    public void RemoveObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TOuter>> handler);
+    public void Dispose();
+}
+```
+
+`Contains` and `CopyTo` are not on `IReadOnlyDictionary<TKey, TValue>` - nor is the set view's
+`CopyTo` on `IReadOnlySet<T>` - but they are kept for the reason 5.4 gives about the list view's
+scans: a consumer handed any of the three views should find the same scans in each. Both publish the
+contents dependency, and both delegate to the storage, so the BCL's equality and argument rules are
+the ones that answer. The write surface, `ChangeBatchDepth`, `MaxCollectionBatchSize`, a factory and
+`Refresh`/`Remap` are absent for the reasons 5.4 gives.
+
+**Record for record, exactly as the list's view is.** A key is unique, so every entry's value has
+exactly one mapped counterpart: nothing collapses, nothing merges, and no entry can arrive already
+present under another identity. The set's projection is not injective and has to count; this one has
+nothing to count. The whole cache is one `Dictionary<TKey, TOuter>`, keyed by the source key and built
+with the source's comparer, and every source record becomes exactly one view record:
+
+| Source record | The mapped dictionary | The record the view delivers |
+| --- | --- | --- |
+| `ItemAdded` with `k` | `selector(NewValue)` added at `k` | `ItemAdded` with `k` and the mapped value |
+| `ItemRemoved` with `k` | the cached value for `k` dropped | `ItemRemoved` with `k` and the cached value |
+| `ItemChanged` with `k` | `selector(NewValue)` replaces the cached value | `ItemChanged` with `k`, the cached old value and the mapped new one |
+| `DictionaryCleared` | emptied | `DictionaryCleared`, carrying nothing |
+| `UntrackedChanges` | rebuilt from the source | `UntrackedChanges` |
+
+An unknown change type falls into the untracked row rather than throwing, as in 5.4 and 6.5.
+
+**There is no `TOuter` comparer, and no comparer argument.** The key is the identity and the value is
+not, so a dictionary may hold the same value under two keys and that is a normal dictionary. The view
+is built with the source's key comparer and `Comparer` answers that same comparer, which is what
+`IReadOnlyObservableDictionary<TKey, TValue>` requires and what a consumer building a mirror has to
+use. An outer comparer for symmetry with 6.5 would make two keys one entry, which is not a projection
+- it is a different collection. For the same reason `TOuter` is unconstrained: a value may be null.
+
+**The call count is the caching claim.** The function runs once per source entry at construction, once
+per add, once per change, never on a removal, never on a clear, and once per source entry on a resync.
+A removal costs nothing because the record names the key and the view is keyed by the key: what came
+out is the value the cache already held, not something to derive again. A test asserts that count,
+because it is the difference between a projection that is cached and one that re-derives on every
+event.
+
+**A record that does not fit the cache heals it.** If a change or removal names a key the view does
+not hold, or an add names one it already holds, the cache and the source disagree and the view cannot
+describe what happened. It rebuilds from the source and delivers one `UntrackedChanges`, rather than
+mapping the record's `OldValue` - which would invent a removal for an entry the view never had - or
+dropping the record. The disagreement is visible and the view heals. The add-shaped branch is
+unreachable while the source keeps its own contract, which throws before it records a second add for
+one key; it exists so that a broken caller cannot crash a delivery.
+
+That is a real recovery guarantee, and a throwing selector is how it is reached: the source applies
+and records its own mutation first, so an exception out of the selector leaves the view behind the
+source, and the next record naming that key finds no entry and resyncs. A well-behaved selector never
+sees this branch; a view that has been left behind does.
+
+**One source delivery is one view delivery**, with the records in the source's order. The view's batch
+is its own, at the package default cap, and knows nothing about a source whose owner raised its own,
+so the three cases are 5.4's and 6.5's: a source left at the default cannot out-describe the view, so
+its event arrives intact, exactly the cap included because the check is strictly greater; a default
+source that goes past its own cap has already collapsed at the source and is passed on as one
+`UntrackedChanges`; and a source tuned above the default collapses here to one `UntrackedChanges`
+while the cache is complete - every record was applied before it was recorded - so the count, the
+contents and every watched key are marked even though the description is gone. Unlike the set's, the
+exact-cap case needs no distinct-outer care, because every source record has exactly one translated
+record.
+
+**Reads publish the same three questions** (5.1, 7.2.4), from the view's own dependency table:
+
+| Read | Depends on |
+| --- | --- |
+| `Count`, `Keys` | structure |
+| `this[k]`, `TryGetValue`, `ContainsKey` | the entry for `k` |
+| `Values`, enumeration, `Contains(pair)`, `CopyTo` | contents |
+
+The indexer publishes only when the key is there and throws `KeyNotFoundException` otherwise, and
+`TryGetValue` and `ContainsKey` publish before answering, both exactly as 7.4 says of the dictionary -
+including the departure from "publish before the check". `IsDisposed` and `Comparer` publish nothing,
+and `Keys` and `Values` are the storage's live views, so enumerating one during a mutation throws.
+Which of the view's own records marks what is 7.4's table, because the records are the dictionary's:
+
+| Record | structure | contents | entries marked |
+| --- | --- | --- | --- |
+| `ItemAdded` with `k` | yes | yes | `k` |
+| `ItemRemoved` with `k` | yes | yes | `k` |
+| `ItemChanged` with `k` | no | yes | `k` |
+| `DictionaryCleared` | yes | yes | every watched key |
+| `UntrackedChanges` | yes | yes | every watched key |
+
+**The source is not owned**, and everything else follows 5.4 and 3.9: `Dispose` unsubscribes, drops
+what had not been delivered, delivers one last empty event and lets its handlers go, and a source
+disposed first leaves the view readable with its last contents. The selector runs on the thread that
+changed the source, at most once per value that arrives or changes; it must not throw and must not
+change either dictionary or the view, and a throw propagates out of the source's delivery and leaves
+the view behind the source until a record naming that key heals it. Single-threaded, and not an
+`IObservableEventSource` for the reason 3.8 gives.
+
+**What is not here.** A filtered or sorted view of a dictionary is not designed: a dictionary's
+records carry no order, and a filter over one is a different membership rule rather than a
+translation, as 6.5 says of a set. There is no `Observable.MapDictionary` factory, for 5.4's reason.
+
+### 7.6 What is left for a later pass
 
 - A sorted dictionary, or one whose enumeration order is a promise: both need an order to report,
   which is `Move`-shaped (open question 8.11).
@@ -1286,7 +1416,7 @@ Which record marks what:
 10. **A value comparer for the dictionary** (7.2.2). `ItemChanged` is decided with
     `EqualityComparer<TValue>.Default` in the first version; a per-dictionary `IEqualityComparer<TValue>`
     is the obvious follow-up if a model ever needs it, and it is one more field.
-11. **Sorted and ordered variants are out of scope** (5.3, 6.2.3, 7.5). An ordered collection has to
+11. **Sorted and ordered variants are out of scope** (5.3, 6.2.3, 7.6). An ordered collection has to
     report where an item went, which is the list's `Move` with a different mutation surface; none of
     the three here promises an order, and the dictionary's enumeration order is the storage's.
 12. **A shared non-generic marker.** `IObservableCollection` - `IsDisposed`, `Count`,
@@ -1362,6 +1492,7 @@ treatment:
 | **A removal reports the value that was there** | `Remove(k)` records the value it removed; `Remove(pair)` with a mismatched value raises nothing and leaves the entry alone; a `Clear` of a non-empty dictionary is one record with nothing in it |
 | **A mapped view's records are the source's records translated** | Applying a view's records to a mirror of the mapped type ends equal to the view, after inserts, appends, removals, replacements, moves and a clear, and `args.List` is the view itself; a move leaves the selector's call count alone while a replacement adds exactly one, and a removal adds none; a batch on the source arrives as one delivery with the records in order, a batch at exactly the view's cap arrives with every record, and a source whose cap was raised above the default collapses to one untracked record with the mapped list still complete; an untracked source event rebuilds the view from the source and is delivered as one `UntrackedChanges` record; an index reader is not woken by a change to another index; disposing the view unsubscribes from the source and leaves it usable, while a disposed source leaves the view readable with its last contents |
 | **A mapped set view's records are the source's records translated, with duplicates collapsed** | A mirror built only from the view's records ends equal to the view after an add that introduces a mapped item, adds that collapse, partial removals, a last removal, a union, a symmetric difference and a clear - and `args.Set` is the view itself; a collapsing add and a removal that leaves another inner item on the same mapped item each raise nothing, while the last removal names the instance the view already held and a removal whose mapping finds nothing the view holds resyncs and ends the event with `UntrackedChanges`; a batch on the source arrives as one delivery in order, a source event at exactly the view's cap arrives with every record, a source left at the default that goes past its own cap collapses there and is passed on as one untracked record with the view rebuilt, and a source tuned above the default collapses here to one untracked record with the view complete; an untracked event wakes the count, the contents and every watched item; `Count` is not woken by a change that leaves the size alone, and a `Contains` read through `IReadOnlyObservableSet<TOuter>` is woken by exactly its own item; disposing the view unsubscribes from the source and leaves it usable, while a disposed source leaves the view readable with its last contents |
+| **A mapped dictionary view's records are the source's records translated** | A mirror built only from the view's records ends equal to the view after adds, changes, removals and a clear, and `args.Dictionary` is the view itself; an add and a change map exactly once while a removal and a clear map none, and a removal names the value the view already held; a throwing selector leaves the view behind the source, and the next record naming that key - a removal or a change - rebuilds the view and ends the event with `UntrackedChanges`; a batch on the source arrives as one delivery in order, a source event at exactly the view's cap arrives with every record, a source left at the default that goes past its own cap collapses there and is passed on as one untracked record with the view rebuilt, and a source tuned above the default collapses here with the contents intact; `Count` and `Keys` are the structure and are not woken by a value change, a `TryGetValue` read is woken by exactly its own key, and `Values`, enumeration, `Contains(pair)` and `CopyTo` are the contents; the indexer of an absent key throws and publishes nothing while `TryGetValue` of one is woken when the key appears; disposing the view unsubscribes from the source and leaves it usable, while a disposed source leaves the view readable with its last contents |
 | **Enumeration is a snapshot of the version, not of the contents** | Mutating during `foreach` throws `InvalidOperationException`; reading after it throws is fine; a `CopyTo` during a mutation is the same failure rather than a torn array |
 
 The demo pages are the other half: each applies records to a mirror and asserts equality against the
@@ -1386,3 +1517,4 @@ by the producer.
 | 13-14 | Done | Both pages, with the guide passages beside them. The set page renders a chip per tag from a constant list, so the board itself reads nothing and renders once; a chip asks `Contains(its own tag)` and nothing else, so a toggle moves one chip and leaves the others alone, while the line above it reads `Count` and moves with every change of size. Beside those two sits the third read: a contents line that enumerates the set, which is why it re-renders on every change and why an item no chip asks about - the sixty a bulk add brings - is visible at all; an earlier version showed only the five constant chips, so a bulk add moved the count with nothing on the page to account for it. Both pages also group their buttons into one row per kind of change, because a single row of seven docked left clipped instead of wrapping once the window was narrower. The dictionary page puts the three reads side by side: a line on `Count`, a key list on `Keys`, and a row per key on `TryGetValue`, so editing a value moves one row and a key arriving moves the list. Both keep a mirror under the buttons that is built only from the records and says whether it still matches, which is what makes `UntrackedChanges` visible rather than theoretical: `Add sixty at once` is one batch past `MaxCollectionBatchSize` (the set's own `UnionWith` opens the batch; the dictionary page opens one), and the mirror is rebuilt from the collection rather than from the record. Rendering both headlessly (`--page observable-set`, `--page observable-dictionary`) caught nothing this time, so the two composition tests were added to the Virtual DOM suite instead: a chip woken by its own membership question and by nothing else, and a row woken by its own key while its parent wakes for a key arriving or leaving - the arrangement the pages stand on, which no dependency test in the observables suite can prove. Suites: 198 in the observables suite - the list's 129 unchanged through the extraction of the shared core, which is the evidence that the core is the core, then 35 for the set and 34 for the dictionary - and 86 in the Virtual DOM suite, which is the list's composition test beside these two |
 | 15 | Done | `ObservableMappedReadOnlyListView<TInner, TOuter>` (5.4), the first derived view: a `public sealed` class over `IReadOnlyObservableList<TOuter>` and `IObservableChangeTarget`, on the shared core unchanged - `ObservableChangeBatch` wired to itself for the queue, the cap and the disposal, `ObservableListDependencies` for the same three questions, and the existing `ObservableListChange` factories for the record - with a parallel cached `List<TOuter>` that maps an add and a replacement once each and never maps a move or a removal. One source delivery is one view delivery, an untracked source event rebuilds the cache, the source is never disposed, and a source disposed first leaves the view readable with its last contents. 22 tests in `ObservableMappedReadOnlyListViewTests`: the cache against every record kind, the call count across move, change and removal, one delivery per source batch and the cap's three cases (a source event at exactly the default arrives with every record, one above the default is the source collapsing and being passed on, and a source tuned above the default is the view collapsing with the contents intact), the three dependencies, unsubscribe on disposal, the full disposed contract, and the null arguments. Suites: 220 in the observables suite - the 198 from step 13-14 unchanged and 22 new - with the core and every other feature suite untouched |
 | 16 | Done | `ObservableMappedReadOnlySetView<TInner, TOuter>` (6.5), the set's projection and the first view whose translation is not record for record: a set projection is not injective, so the view counts - a `HashSet<TOuter>` of distinct mapped items beside a `Dictionary<TOuter, int>` of multiplicities, both on the view's comparer and both touched only through one private pair of helpers - and emits `ItemAdded` only on the first inner item for a mapped item, `ItemRemoved` with the stored instance only on the last, `SetCleared` only for a view that was not empty, and `UntrackedChanges` after a rebuild. A source change that leaves the view unchanged raises no event at all. On the shared core unchanged: `ObservableChangeBatch` wired to itself, `ObservableSetDependencies<TOuter>` for the count, the item and the contents, the existing `ObservableSetChange` factories for the records, and the six scans delegated to the storage. 25 tests in `ObservableMappedReadOnlySetViewTests`: the counted cache against every record kind, the collapsing add and partial removal that raise nothing, the stored instance in the last removal, an impure selector whose removal resyncs with the admission that ends the event, one delivery per source batch and the cap's three cases (a source event at exactly the default arrives with every record, a source left at the default that goes past it collapses at the source and is passed on as one untracked record, and a source tuned above the default collapses here with the contents intact), a replay into a mirror, the three dependencies, the comparer's default, unsubscribe on disposal, the full disposed contract, and the null arguments. Suites: 245 in the observables suite - the 220 from step 15 unchanged and 25 new - with the core and every other feature suite untouched |
+| 17 | Done | `ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>` (7.5), the dictionary's projection and the second record-for-record view: one cached `Dictionary<TKey, TOuter>` keyed with the source's own comparer, an add and a change each mapping exactly once, a removal and a clear mapping nothing because the record names the key and the view is keyed by it, and `UntrackedChanges` after a rebuild. No outer comparer and an unconstrained `TOuter`, because the key is the identity and the value is not, so equal and null values may sit under different keys. A record that does not fit the cache - a change or removal for a key not held, or an add for one held - rebuilds and admits it, which is the documented recovery a throwing selector reaches. `Contains` and `CopyTo` are kept for parity with the other two views and publish the contents. On the shared core unchanged: `ObservableChangeBatch` wired to itself, `ObservableDictionaryDependencies<TKey, TOuter>` for the structure, the key and the contents, and the existing `ObservableDictionaryChange` factories for the records. 30 tests in `ObservableMappedReadOnlyDictionaryViewTests`: the cached translation against every record kind with its call counts, the throwing-selector recovery on both the removal and the change path, one delivery per source batch and the cap's three cases (a source event at exactly the default arrives with every record, one above the default is the source collapsing and being passed on, and a source tuned above the default collapses here with the contents intact), a replay into a mirror, the three dependencies, equal and null values under different keys, the source's key comparer, `Contains` and `CopyTo`, unsubscribe on disposal, the full disposed contract, and the null arguments. Suites: 275 in the observables suite - the 245 from step 16 unchanged and 30 new - with the core and every other feature suite untouched |
