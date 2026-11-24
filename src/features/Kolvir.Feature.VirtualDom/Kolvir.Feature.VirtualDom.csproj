@@ -46,22 +46,23 @@
        inherits this build's global properties - a nested build under `dotnet pack` came out with no
        reference assemblies at all - and there is no reliable way to un-inherit all of them. A new
        process starts from the environment, which is exactly what a generator project needs, and `dotnet
-       build` restores first, so a fresh checkout works. -->
-  <PropertyGroup>
-    <VirtualDomGeneratorProject>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj</VirtualDomGeneratorProject>
-    <VirtualDomGeneratorDll>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll</VirtualDomGeneratorDll>
-  </PropertyGroup>
+       build` restores first, so a fresh checkout works.
 
+       The project, the platform and configuration that build is pinned to and the dll it writes are
+       all constants in Directory.Build.props, so this target and `$(VirtualDomGeneratorDll)` below
+       cannot describe different directories. Nothing here reads `$(Configuration)` either: a property
+       is expanded where it is assigned, and this project file is evaluated before the SDK defaults it. -->
   <Target Name="BuildVirtualDomGenerator" BeforeTargets="GenerateNuspec">
-    <Exec Command="dotnet build &quot;$(VirtualDomGeneratorProject)&quot; -c $(Configuration) --nologo" />
+    <Exec Command="$(VirtualDomGeneratorBuildCommand)" />
   </Target>
 
   <!-- Packed from the generator's own output: a project reference does not hand its output path to the
        referencing project, and there is no target in the pack graph that exposes one. The path is
-       stable because the generator's target framework is fixed at netstandard2.0, and a missing file
-       fails the pack rather than shipping a package with no generator in it. Added once rather than
-       per target framework: pack runs once, and the analyzer is one assembly whichever framework a
-       consumer ends up binding. -->
+       derived in Directory.Build.props from the same configuration and platform the child build above
+       is given, and it is stable because the generator's target framework is fixed at netstandard2.0;
+       a missing file fails the pack rather than shipping a package with no generator in it. Added once
+       rather than per target framework: pack runs once, and the analyzer is one assembly whichever
+       framework a consumer ends up binding. -->
   <ItemGroup>
     <None Include="$(VirtualDomGeneratorDll)"
           Pack="true"

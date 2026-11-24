@@ -32,7 +32,7 @@ on:
       - 'src/features/**'
       - 'src/generators/**'
       - 'tests/**'
-      - 'src/demo/Kolvir.Demo.App/Fonts/**'
+      - 'src/demo/**'
       - 'Directory.Build.props'
       - 'Directory.Build.targets'
   workflow_dispatch:
@@ -339,6 +339,73 @@ jobs:
             --logger "trx;LogFileName=badges-win32.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The publish no test would ever exercise, and therefore the one that broke twice: a Visual
+      # Studio Publish (and any solution-wide `dotnet publish`) passes the properties that shape the
+      # output as *global* properties, and a global reaches every project in the reference graph
+      # rather than only the one being published. That broke the netstandard2.0 union analyzer, which
+      # cannot be trimmed (NETSDK1124), and the child `dotnet build` that produces the virtual DOM
+      # generator, which inherits `Platform` from this environment and writes to a platform folder the
+      # `<Analyzer>` item does not name (CS0006). Both are silent in a build and loud only here, so
+      # this is the guard: the same command a Publish click produces, with the generator's output
+      # deleted first so no pre-existing copy can mask the second failure.
+      #
+      # The plain `dotnet build` first is not a warm-up. Every other command in this workflow passes
+      # `-c`, and that is exactly the global that hid a contract depending on `Configuration`: MSBuild
+      # expands a property reference where it is assigned, so a plain build - which passes no
+      # configuration at all - saw an empty one, and the child build was invoked as `-c` with nothing
+      # after it. Two builds, one with no properties and one with the publish's, keep both readings
+      # honest, and they are cheap next to the publish.
+      #
+      # `vcvars64.bat` is what puts the linker on the path - NativeAOT cannot link without it - and it
+      # is found through vswhere so this pins no edition or version. Only the generator's bin and obj
+      # are cleared: re-restoring every project would add time without testing anything this step is
+      # about, since `dotnet publish` restores what it needs anyway.
+      #
+      # One warning is expected and is not this step's business: IL2104 on `SharpGen.Runtime`, which
+      # arrives with Vortice and predates everything here. Warnings do not fail a publish, and nothing
+      # below turns them into errors - `-p:TrimmerSingleWarn=false` would bury the log in the
+      # individual cases behind that summary, so it is deliberately left at its default.
+      - name: Publish the demo with NativeAOT as Visual Studio does
+        if: runner.os == 'Windows'
+        shell: cmd
+        run: |
+          for /f "usebackq tokens=*" %%i in (`"%ProgramFiles(x86)%\Microsoft Visual Studio\Installer\vswhere.exe" -latest -products * -requires Microsoft.VisualStudio.Component.VC.Tools.x86.x64 -property installationPath`) do set "VSPATH=%%i"
+          if not defined VSPATH (
+            echo Could not find a Visual Studio with the C++ toolset; native linking needs one.
+            exit /b 1
+          )
+          call "%VSPATH%\VC\Auxiliary\Build\vcvars64.bat" >nul
+          if errorlevel 1 exit /b 1
+
+          if exist src\generators\Kolvir.Feature.VirtualDom.Generators\bin rmdir /s /q src\generators\Kolvir.Feature.VirtualDom.Generators\bin
+          if exist src\generators\Kolvir.Feature.VirtualDom.Generators\obj rmdir /s /q src\generators\Kolvir.Feature.VirtualDom.Generators\obj
+
+          rem Nothing on the command line but the project: no -c, no -p. This is the ordinary build,
+          rem and it must work before the publish does.
+          dotnet build src\demo\Kolvir.Demo.App\Kolvir.Demo.App.csproj
+          if errorlevel 1 exit /b 1
+          dotnet build src\demo\Kolvir.Demo.VirtualDom\Kolvir.Demo.VirtualDom.csproj
+          if errorlevel 1 exit /b 1
+
+          dotnet publish src\demo\Kolvir.Demo.App\Kolvir.Demo.App.csproj -c Release -p:Platform=AnyCPU ^
+            -p:PublishAot=true -p:PublishTrimmed=true -p:TrimMode=full -p:SelfContained=true ^
+            -p:RuntimeIdentifier=win-x64 -p:PublishReadyToRun=false
+          if errorlevel 1 exit /b 1
+
+          rem A native image is tens of megabytes; the apphost this would fall back to if AOT quietly
+          rem stopped happening is a few hundred kilobytes, so a size check separates the two.
+          set "EXE=src\demo\Kolvir.Demo.App\bin\Release\net10.0-windows\win-x64\publish\KolvirDemoApp.exe"
+          if not exist "%EXE%" (
+            echo The publish produced no KolvirDemoApp.exe under publish\.
+            exit /b 1
+          )
+          for %%F in ("%EXE%") do set "EXE_BYTES=%%~zF"
+          if %EXE_BYTES% LSS 1000000 (
+            echo KolvirDemoApp.exe is %EXE_BYTES% bytes, which is an apphost rather than a native image.
+            exit /b 1
+          )
+          echo KolvirDemoApp.exe is %EXE_BYTES% bytes of native code.
 
       # MSBuild and test diagnostics are not workflow annotations, so lift the failing test names
       # into the job summary: that is readable without downloading the artifact.

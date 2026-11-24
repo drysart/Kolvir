@@ -52,16 +52,14 @@
     <ProjectReference Include="..\..\features\Kolvir.Feature.Observables\Kolvir.Feature.Observables.csproj" />
   </ItemGroup>
 
-  <PropertyGroup>
-    <VirtualDomGeneratorProject>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\Kolvir.Feature.VirtualDom.Generators.csproj</VirtualDomGeneratorProject>
-    <VirtualDomGeneratorDll>$(MSBuildThisFileDirectory)..\..\generators\Kolvir.Feature.VirtualDom.Generators\bin\$(Configuration)\netstandard2.0\Kolvir.Feature.VirtualDom.Generators.dll</VirtualDomGeneratorDll>
-  </PropertyGroup>
-
   <!-- A project reference to the generator inherits global publish properties, and a netstandard2.0
        project cannot satisfy PublishAot. Building it in a child dotnet process is the same arrangement
-       the existing demo uses. -->
+       the existing demo uses, and the project, the pinned platform and configuration and the dll that
+       results all come from Directory.Build.props - as constants, so this target and
+       `$(VirtualDomGeneratorDll)` cannot drift apart and neither reads `$(Configuration)`, which a
+       plain build has not defaulted yet. -->
   <Target Name="BuildVirtualDomGenerator" BeforeTargets="CoreCompile">
-    <Exec Command="dotnet build &quot;$(VirtualDomGeneratorProject)&quot; -c $(Configuration) --nologo" />
+    <Exec Command="$(VirtualDomGeneratorBuildCommand)" />
   </Target>
 
   <ItemGroup>
