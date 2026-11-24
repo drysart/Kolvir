@@ -710,7 +710,7 @@ public class TextBox : Control
             // the glyphs is drawn here, so the order is the same on a one-line field.
             var area = Viewport.Text;
             PaintUnderText(canvas, area);
-            multiline.Paint(this, canvas, Viewport, _placeholderText);
+            multiline.Paint(this, canvas, Viewport, _preeditText.Length == 0 ? _placeholderText : string.Empty);
             PaintPreedit(canvas, area);
             PaintCaret(canvas, area);
             return;
@@ -737,7 +737,10 @@ public class TextBox : Control
 
         string text = display;
         var color = EffectiveForeColor;
-        if (text.Length == 0 && !string.IsNullOrEmpty(_placeholderText))
+
+        // The placeholder is for an empty field, not for one a platform input method is filling in:
+        // showing it under the preedit puts two texts at the same caret.
+        if (text.Length == 0 && _preeditText.Length == 0 && !string.IsNullOrEmpty(_placeholderText))
         {
             text = _placeholderText;
             color = Theme.Placeholder;

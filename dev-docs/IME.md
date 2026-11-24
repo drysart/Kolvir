@@ -205,9 +205,12 @@ drawing area is the client widget of the input context.
   `GTK_IM_MODULE` meaningless, which is exactly what the live proof relies on.
 - **Preedit reporting.** `UsePreedit` decides whether the context reports uncommitted text to the
   application to draw, and a plain `DrawingArea` is not a `GtkEntry`, so the default is not taken
-  on trust: the value that makes `PreeditChanged` fire is measured on the Linux host and set
-  explicitly. Without it, commits would still arrive and the integration would look correct while
-  the preedit never appeared.
+  on trust. Measured on the Linux host with `GTK_IM_MODULE=gtk-im-context-simple` and a `us-intl`
+  layout: with `SetUsePreedit(true)` the dead key emits `PreeditStart`, `PreeditChanged` with the
+  pending accent, and `PreeditEnd` on the commit; with `SetUsePreedit(false)` no preedit signal
+  occurs at all and the dead key is committed as the bare accent. The view therefore sets `true`
+  explicitly: without it, commits still arrive and the integration looks correct while the preedit
+  never appears.
 - **Key routing.** `OnKeyPressed` keeps `ProcessKeyDown` first, exactly as it is today. What the
   library did not consume goes to the input context:
 
@@ -226,10 +229,11 @@ drawing area is the client widget of the input context.
   `GetPreeditString(...)` and calls `Host.UpdateComposition(text, caret)`; `PreeditEnd` calls
   `Host.CancelComposition()`, which is idempotent because a commit already cleared the preedit.
 - **Caret units.** GTK documents the preedit cursor position but the unit (characters or UTF-8
-  bytes) is not something this design takes on trust. The implementation is verified against a
-  multi-byte preedit, and converts defensively: the value is clamped into the string, and a value
-  past the character count is treated as a byte offset and mapped back to a character boundary,
-  keeping a surrogate pair whole.
+  bytes) is not something this design takes on trust. Measured with a `us-intl` dead key: the
+  preedit is the acute accent, one character and two UTF-8 bytes, and the context reported a cursor
+  position of 1, so the unit is characters. The implementation still converts defensively: the
+  value is clamped into the string, and a value past the character count is treated as a byte
+  offset and mapped back to a character boundary, keeping a surrogate pair whole.
 - **Candidate window.** `SetCursorLocation` is called on preedit start and on every change, from
   `Host.TryGetCaretBounds`, in widget coordinates.
 - **Focus.** A `Gtk.EventControllerFocus` on the drawing area does `FocusIn` when it gains focus and
@@ -328,9 +332,10 @@ daemon: a dead-key layout (`us-intl`) or a Compose sequence (`compose:ralt`) dri
 send the dead key or `Multi_key` and the following letters; where synthetic input is unavailable,
 the run is done by hand.
 
-Two things are measured on that host rather than assumed, and recorded here: whether
-`PreeditChanged` fires with the context's default `UsePreedit`, and whether the preedit cursor
-position counts characters or UTF-8 bytes when the preedit is multi-byte.
+Two things are measured on that host rather than assumed, and recorded here: `PreeditChanged`
+fires only with `SetUsePreedit(true)` (with `false`, the dead key commits the bare accent and no
+preedit signal occurs), and the preedit cursor position counts characters (a one-character,
+two-byte accent reported 1).
 
 The evidence is the demo's text page, which shows the preedit text, the preedit caret index and the
 last commit. A screenshot of that readout, before and after the commit, is the proof; a headed run
