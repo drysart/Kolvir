@@ -17,7 +17,7 @@ The tiers were set when the library had twelve controls and they still describe 
 | Tier | Contents | State |
 | --- | --- | --- |
 | 1 - common input | `CheckBox`, `RadioButton`, `ProgressBar`, `GroupBox` | shipped |
-| 2 - popup-based | the popup layer (`IPopupService`, `Popup`, one popup window per backend), `ComboBox`, `TabControl`/`TabPage`, `ToolTip` | shipped |
+| 2 - popup-based | the popup layer (`IPopupService`, `Popup`, one popup window per backend), `ComboBox`, `TabControl`/`TabPage`, `ToolTip` | shipped; the planned public popup API is described in [POPUPS.md](POPUPS.md) |
 | 2b - unlocked by the popup layer | in-library menus, `DateTimePicker`, text-box autocomplete, drag previews | in-library menus, `DateTimePicker` and text-box autocomplete shipped; drag previews in section 3 |
 | 3 - large list controls | `VirtualList` (the shared row base), `ListView`, `TreeView` | shipped |
 | 4 - small widgets | `NumericUpDown`, `TrackBar`, `LinkLabel`, `StatusStrip`/`ToolStrip` | shipped |
