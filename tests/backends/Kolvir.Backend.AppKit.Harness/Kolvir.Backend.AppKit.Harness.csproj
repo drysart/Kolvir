@@ -26,6 +26,9 @@
     <RootNamespace>Kolvir.Backend.AppKit.Harness</RootNamespace>
     <IsPackable>false</IsPackable>
     <IsAotCompatible>false</IsAotCompatible>
+    <!-- Same reason as the sibling test project: this program builds AppKit objects, but none whose
+         behaviour an Xcode version selects, and it is run by hand on a Mac host rather than in CI. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
   </PropertyGroup>
 
   <ItemGroup>

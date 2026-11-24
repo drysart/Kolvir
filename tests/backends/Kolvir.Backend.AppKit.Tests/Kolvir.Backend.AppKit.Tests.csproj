@@ -31,6 +31,12 @@
     <IsTestProject>true</IsTestProject>
     <IsAotCompatible>false</IsAotCompatible>
     <EnableMSTestRunner>false</EnableMSTestRunner>
+    <!-- The macOS SDK insists on an exactly matching Xcode before it will produce an app bundle, and
+         this suite binds no API an Xcode version could change: it creates no NSView and touches only
+         Foundation's NSRange and CoreGraphics' rectangle. Enforcing the match would turn a green
+         platform red on a runner image that moved to a newer Xcode for reasons nothing here can
+         affect, which is the one thing a platform suite must not do. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
   </PropertyGroup>
 
   <ItemGroup>
