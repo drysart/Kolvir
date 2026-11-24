@@ -390,6 +390,61 @@ public sealed class Win32CaretPositionTests
 
     [TestMethod]
     [Timeout(30000)]
+    public void TheTestPointAnswersWithFixedScreenCoordinates()
+    {
+        var path = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(),
+            $"kolvir-ime-testpoint-{Guid.NewGuid():N}.log");
+
+        var previousLog = Environment.GetEnvironmentVariable(Win32ImeLog.PathVariable);
+        var previousPoint = Environment.GetEnvironmentVariable(Win32ImeLog.TestPointVariable);
+
+        try
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, path);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, "100,100");
+
+            Run("ime test point", (hwnd, window, box) =>
+            {
+                box.CaretIndex = 5;
+
+                var (returned, answer) = Ask(hwnd, NativeMethods.ImrQueryCharPosition);
+                var size = Marshal.SizeOf<NativeMethods.IMECHARPOSITION>();
+
+                Assert.AreEqual(size, returned, "the request is still answered");
+                Assert.AreEqual(100, answer.pt.X, "the point is answered exactly as asked");
+                Assert.AreEqual(100, answer.pt.Y);
+
+                Assert.IsTrue(NativeMethods.GetClientRect(hwnd, out var client));
+                var origin = new NativeMethods.POINT();
+                NativeMethods.ClientToScreen(hwnd, ref origin);
+
+                Assert.AreEqual(origin.X, answer.rcDocument.Left, "while the document rectangle stays the real one");
+                Assert.AreEqual(origin.Y + client.Bottom, answer.rcDocument.Bottom);
+                Assert.IsTrue(answer.cLineHeight >= 1, "and the line height is still filled in");
+            });
+
+            var trace = System.IO.File.ReadAllText(path);
+
+            Assert.IsTrue(
+                trace.Contains("testPoint=100,100 (KOLVIR_IME_TEST_POINT)", StringComparison.Ordinal),
+                "the answer line says the override was used, so a run reports it");
+            Assert.IsTrue(trace.Contains("pointer=", StringComparison.Ordinal), "and carries the pointer position");
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable(Win32ImeLog.PathVariable, previousLog);
+            Environment.SetEnvironmentVariable(Win32ImeLog.TestPointVariable, previousPoint);
+
+            if (System.IO.File.Exists(path))
+            {
+                System.IO.File.Delete(path);
+            }
+        }
+    }
+
+    [TestMethod]
+    [Timeout(30000)]
     public void AWindowWithNothingFocusedStillAnswersFromItsClientOrigin()
     {
         var application = new Application(new Win32ApplicationBackend());

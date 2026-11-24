@@ -332,7 +332,12 @@ Details that are not visible from the message table:
   `KOLVIR_IME_SHOW_CARET=1` shows the one-pixel caret once it is positioned, which sets the only
   visibility flag the thread exposes (`GUI_CARETBLINKING`), and `KOLVIR_IME_REFRESH_COMPOSITIONFORM=1`
   keeps the input context's composition form at the caret outside a composition, in case the input
-  stack anchors on the context instead of asking.
+  stack anchors on the context instead of asking. A third, `KOLVIR_IME_TEST_POINT=x,y`, answers
+  `IMR_QUERYCHARPOSITION` with exactly that screen point while filling the rest as usual, and says so
+  on the answer line: a run at a point nowhere near the field decides whether the shell uses the point
+  at all. Every line that reports an answer also carries the mouse pointer's position, because one
+  hypothesis for a panel that lands in a fixed screen position is that it falls back to the pointer,
+  and that can only be checked if the pointer is recorded at the same moments.
 - **The trace proves it is running, twice over.** The first version of it wrote only when an IME
   message arrived, and the first real run produced no file at all - which is indistinguishable from
   the feature not being in the build, the variable not reaching the process, or the panel never
@@ -524,29 +529,34 @@ window, its own placement and its own animation, none of which this process can 
 by hand: put the caret mid-field, press Win+Period, and see the panel open at the caret rather than at
 the window corner.
 
-What the report says so far is worth stating precisely, because it narrows the question. When the panel
-is misplaced it opens in the **bottom-right corner of the screen**, not near the window and not near
-the field: that is the shell's fallback when it has no anchor at all, so the fault is not a caret
-answered in the wrong space, which would put the panel in the wrong place *near* the field. One way to
-reach that fallback is now fixed: a window with no focused control used to refuse the request, and the
-demo's startup page focuses no text box, so pressing the key there answered nothing. With a text box
-focused the request is answered correctly (section 6.2), which leaves two hypotheses, and they look
-different in a trace:
+What the report says so far is worth stating precisely, because it narrows the question. Three traced
+runs answered `pt=640,234` (nothing focused), `pt=2220,493` (nothing focused, the window had moved) and
+`pt=2341,556` (a focused box, exactly the caret) - and the panel landed in the **same place on the
+screen** every time. So the point in the answer is apparently not what places the panel, while
+answering it did stop the bottom-right fallback, so something in the answer is read. Three hypotheses
+fit, and they look different in a trace:
 
-- **(a) The shell asks over IMM and discards the answer.** A good trace under this hypothesis has the
-  `IMR_QUERYCHARPOSITION` line - or a second one, possibly with a larger `dwCharPos`, at the moment the
-  panel opens - with a well-formed answer, heartbeats on both sides of it, and the panel still in the
-  corner. That is the case for the lighter TSF route: `ITfContextOwner.GetTextExt` with a document
-  manager and a context, explicitly not a full text store.
+- **(a) The shell asks over IMM, reads the answer, and discards the point.** A good trace under this
+  hypothesis has the `IMR_QUERYCHARPOSITION` line with a well-formed answer, heartbeats on both sides
+  of it, and the panel in a position that is neither the answer nor the pointer. That is the case for
+  the lighter TSF route: `ITfContextOwner.GetTextExt` with a document manager and a context,
+  explicitly not a full text store.
+- **(a2) The panel falls back to the mouse pointer when it has no usable text extent.** A fixed screen
+  position across runs whose answers were hundreds of pixels apart fits this exactly, if the pointer
+  was in the same place each time. A good trace under it has the panel where the heartbeats say the
+  pointer was, and it is decided by `KOLVIR_IME_TEST_POINT=100,100`: answering with a point nowhere
+  near the field either moves the panel there - the point is honoured and the defect is an offset to
+  measure - or leaves it at the pointer, which names the fallback.
 - **(b) The panel positions from TSF text extents and never uses this channel.** A good trace under
-  this hypothesis is the opposite: heartbeats continuing across the moment Win+Period is pressed and
-  **no** `WM_IME_REQUEST` line anywhere near it, the only IME traffic being the burst that arrives with
-  focus. The heartbeat gap-free run with no IME line in it is the positive evidence, and it means the
-  IMM work cannot fix the placement no matter how correct it is.
+  this hypothesis is the opposite of both: heartbeats continuing across the moment Win+Period is
+  pressed and **no** `WM_IME_REQUEST` line anywhere near it, the only IME traffic being the burst that
+  arrives with focus. The gap-free run with no IME line in it is the positive evidence, and it means
+  the IMM work cannot fix the placement no matter how correct it is.
 
-The two switches, `KOLVIR_IME_SHOW_CARET` and `KOLVIR_IME_REFRESH_COMPOSITIONFORM`, are for a variant
-of (a): a panel that reads the thread caret needs the first, and one that anchors on the context's
-composition form needs the second, so a run with each one alone says which anchor it is reaching for.
+The other two switches, `KOLVIR_IME_SHOW_CARET` and `KOLVIR_IME_REFRESH_COMPOSITIONFORM`, rule out a
+variant of (a) in which the panel reads an anchor other than the request: a panel that uses the
+thread caret is affected by the first, and one that anchors on the context's composition form by the
+second, so a run with each one alone says which anchor it is reaching for.
 
 ## 8. Status and open questions
 

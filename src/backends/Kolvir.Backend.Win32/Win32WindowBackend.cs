@@ -2913,6 +2913,14 @@ public sealed class Win32WindowBackend : IWindowBackend
             Win32ImeLog.Write("  IMR_QUERYCHARPOSITION: nothing is focused, answering from the client origin");
         }
 
+        // A diagnostic run can answer with fixed screen coordinates instead, which is what decides
+        // whether the shell uses the point at all or places the panel somewhere of its own choosing.
+        var testPoint = Win32ImeLog.TestPoint;
+        if (testPoint is { } point)
+        {
+            origin = new NativeMethods.POINT { X = (int)point.X, Y = (int)point.Y };
+        }
+
         // dwCharPos stays as the caller set it: it names a character of the composition, and this
         // library commits text rather than holding a composition string of its own. dwSize is never
         // shrunk below what the caller allocated.
@@ -2931,7 +2939,8 @@ public sealed class Win32WindowBackend : IWindowBackend
             $"  IMR_QUERYCHARPOSITION answered: in dwSize={incomingSize} charPos={incomingCharPos} -> "
             + $"pt={position->pt.X},{position->pt.Y} line={position->cLineHeight} "
             + $"doc={position->rcDocument.Left},{position->rcDocument.Top},{position->rcDocument.Right},{position->rcDocument.Bottom} "
-            + $"size={position->dwSize} result={size}");
+            + $"size={position->dwSize} result={size} pointer={PointerText()}"
+            + (testPoint is null ? string.Empty : $" testPoint={position->pt.X},{position->pt.Y} (KOLVIR_IME_TEST_POINT)"));
 
         // The size is how an application says it handled the request.
         return new IntPtr((int)size);
@@ -3073,11 +3082,18 @@ public sealed class Win32WindowBackend : IWindowBackend
         or NativeMethods.WmImeEndComposition or NativeMethods.WmImeComposition
         or NativeMethods.WmImeRequest;
 
+    /// <summary>The pointer position as text for the trace, or "?" when the system will not say.</summary>
+    private static string PointerText() =>
+        NativeMethods.GetCursorPos(out var pointer) ? $"{pointer.X},{pointer.Y}" : "?";
+
     /// <summary>
     /// One line every half second while tracing: what the thread's caret looks like right now and
     /// whether a composition is live. It proves the trace is alive, and it puts a timestamp on every
     /// moment of the run, so the instant the emoji panel was asked for can be found by looking for a gap
     /// with no IME line in it - which is positive evidence that the panel never messaged this process.
+    /// The pointer is in the line because one hypothesis for a panel that lands in a fixed screen
+    /// position is that it falls back to the mouse pointer, and a run can only be checked against that
+    /// if the pointer is recorded at the same moments.
     /// </summary>
     private void WriteImeHeartbeat()
     {
@@ -3092,7 +3108,7 @@ public sealed class Win32WindowBackend : IWindowBackend
             $"heartbeat caretWindow=0x{info.hwndCaret.ToInt64():X} "
             + $"rcCaret={info.rcCaret.Left},{info.rcCaret.Top},{info.rcCaret.Right},{info.rcCaret.Bottom} "
             + $"focus=0x{NativeMethods.GetFocus().ToInt64():X} composing={_composing} "
-            + $"caret=0x{_caretWindow.ToInt64():X} hasFocus={_hasKeyboardFocus}");
+            + $"caret=0x{_caretWindow.ToInt64():X} hasFocus={_hasKeyboardFocus} pointer={PointerText()}");
     }
 
     /// <summary>Destroys the thread's caret if this window is the one that created it.</summary>
