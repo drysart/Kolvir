@@ -104,16 +104,30 @@ trap that cost time: the app never starts, and the absence of an error suggests 
 
 ## The route that works: `dotnet run` with the `mac` launch profile
 
-`../src/demo/Kolvir.Demo.App/Properties/launchSettings.json` carries a `mac` profile whose `commandName` is
+`src/demo/Kolvir.Demo.App/Properties/launchSettings.json` carries a `mac` profile whose `commandName` is
 `Executable` and whose `executablePath` is the bundle's binary. With it, `dotnet run` launches the
-app properly, and arguments after `--` reach it:
+app properly, and arguments after `--` reach it.
+
+**`executablePath` is resolved against the directory `dotnet run` is started in, not against the
+project.** The child process is then given the *project* directory as its working directory, which is
+why the path has to carry the `src/demo/` segment even though the working directory does not. So the
+command is written from the repository root:
 
 ```sh
-dotnet run --project Kolvir.Demo.App --launch-profile mac -- --page 38
+dotnet run --project src/demo/Kolvir.Demo.App --launch-profile mac -- --page 38
 ```
 
-Measured: the process stays alive, and `pgrep -fl KolvirDemoApp` shows the binary running with
-`--page 38`. This is the preferred route.
+Measured from the repository root: the process stays alive, and `pgrep -fl KolvirDemoApp` shows the
+binary running with `--page 38`. Started from `src/demo` with `--project Kolvir.Demo.App`, the same
+profile fails before the app starts, with the doubled path in the message:
+
+```
+An error occurred trying to start process 'src/demo/Kolvir.Demo.App/bin/.../KolvirDemoApp' with
+working directory 'src/demo/Kolvir.Demo.App'. No such file or directory
+```
+
+That message is the only sign: no window, no status line, and a `--page` selector that silently never
+runs, which reads exactly like a broken page. This is the preferred route.
 
 **One caveat, measured:** an app launched this way does **not** come to the front. `lsappinfo front`
 reported Finder while the demo was running. That is fine for looking at a window yourself, and fine
@@ -145,10 +159,26 @@ Launch Services entirely.
 
 | Need | Route |
 | --- | --- |
-| A normal run while developing | `dotnet run --launch-profile mac -- --page N` |
+| A normal run while developing | from the repository root: `dotnet run --project src/demo/Kolvir.Demo.App --launch-profile mac -- --page N` |
 | A headless render or a harness with no input | the inner binary directly, or the launch profile |
-| A check that drives real clicks or keystrokes | `open -n ...app --args --page N`, because it makes the app frontmost |
+| A check that drives real clicks or keystrokes | `open -n ...app --args --page N`, because it makes the app frontmost - or the launch profile plus the activation step below |
 | Anything at all | build first; `dotnet run` without the profile draws nothing |
+
+## Tracing the input method, when a hand run is the only instrument
+
+`KOLVIR_IME_TRACE=<file>` writes a line-per-call trace of the AppKit text path: every
+`NSTextInputClient` call with its answer, every key with the window state at that moment, and every
+window that gains or loses key status. It is off unless the variable is set, costs nothing when off,
+and prints the path it is writing to before the window appears:
+
+```sh
+KOLVIR_IME_TRACE=/tmp/kolvir-ime.log ~/work/ime-trace/src/demo/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app/Contents/MacOS/KolvirDemoApp --page text-input
+```
+
+The inner binary is used rather than `dotnet run` so the variable reaches the app without a wrapper;
+the window may not come to the front, so click the field before typing. Boundaries in the file
+(`---- Space pressed while a mark is live ----`, `---- a commit arrived ----`) mark where one key's
+calls end, so a reader can slice it. `dev-docs/IME.md` section 7.7 is the case this exists for.
 
 ## TCC permissions: what `macvm` needs, and how the failures look
 

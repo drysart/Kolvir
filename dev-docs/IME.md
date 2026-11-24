@@ -2,28 +2,29 @@
 
 `APPLICATION-MODEL.md` section 10 lists "IME / dead keys / composed input" as a Tier-3 gap with one
 sentence beside it and no design behind it. This document is that design. It covers the three
-platforms: GTK4 and Win32 are implemented, and macOS is designed here and left open.
+platforms, and all three are implemented.
 
-Status of this document: **GTK4 and Win32 implemented, macOS designed but not implemented.**
-Sections 1 to 5 are the model every platform shares; section 6 is per platform; section 7 is what
-proves it; section 8 is the progress table and the questions this design deliberately leaves open.
+Status of this document: **GTK4, Win32 and macOS implemented.** Sections 1 to 5 are the model every
+platform shares; section 6 is per platform; section 7 is what proves it; section 8 is the progress
+table and the questions this design deliberately leaves open.
 
 This file is deliberately ASCII-only, like `OBSERVABLES.md` and `OBSERVABLE-COLLECTIONS.md`: write
 "section 3.4" rather than a section sign, and "<-" rather than an arrow.
 
 ## 1. The problem
 
-The input pipeline was, and on macOS still is, one-way and stateless. A backend derives characters
-from the keyboard and hands them over, and the library has no way to hold text that is not committed
+The input pipeline used to be one-way and stateless on every platform. A backend derived characters
+from the keyboard and handed them over, and the library had no way to hold text that is not committed
 yet.
 
 - **GTK4.** Before this change,
   `Gtk4SkiaView.OnKeyPressed` (`../../src/backends/Kolvir.Backend.Gtk4/Gtk4SkiaView.cs:1092` at the
   baseline commit) mapped the key value to text with `Gtk4KeyMap.MapText(args.Keyval, args.State)`
   and called `Host.ProcessTextInput(text)`. No `Gtk.IMContext` existed in the backend at all.
-- **macOS.** `AppKitSkiaView.KeyDown` (`../../src/backends/Kolvir.Backend.AppKit/AppKitSkiaView.cs:782`)
-  takes `AppKitKeyMap.ToText(theEvent)` after the key and the Command/Control checks. The view does
-  not adopt `NSTextInputClient`, so `interpretKeyEvents:` is never called.
+- **macOS.** Before this change,
+  `AppKitSkiaView.KeyDown` (`../../src/backends/Kolvir.Backend.AppKit/AppKitSkiaView.cs:782` at the
+  baseline commit) took `AppKitKeyMap.ToText(theEvent)` after the key and the Command/Control
+  checks. The view did not adopt `NSTextInputClient`, so `interpretKeyEvents:` was never called.
 - **Windows.** Before this change, `Win32WindowBackend` had a case for `WM_CHAR` (handled by
   `OnChar`) and none for any `WM_IME_*` message in `HandleMessage`: a key became a single UTF-16
   unit, and one past the BMP arrived as two lone surrogates. Nothing asked the input method for a
@@ -163,6 +164,39 @@ These are the contract, and each one has a headless test (section 7.1):
 6. A focus change cancels.
 7. A control that refuses composition still receives the commit as text.
 8. Selection and caret do not move while the preedit grows.
+9. However a composition ends, an application control hears it through `OnCompositionCancelled`. The
+   box's rule for a key it consumes goes through that hook rather than around it, because the
+   platform's mark can be dropped without this library ever hearing `insertText` or `unmarkText` - a
+   candidate list the input method abandons is exactly that case - and a control that observes
+   composition otherwise keeps a preedit the box has already dropped.
+10. A key the library consumes never cancels a mark the input method still owns. On macOS that is an
+    ordering rule, not a rule about hooks: while a mark is live the key is offered to the input method
+    first and the library only sees what the method declines, so a key the box then consumes was one
+    the method had already given up (section 6.3). Without it the library took Tab, Enter, the arrows
+    and Escape out of the input method's hands mid-conversion, which on this host is what made a
+    candidate list unreachable - focus moved to the next field and the list closed (section 7.7,
+    item 9).
+
+The rule in section 3 that a key the library consumes clears the preedit first was tested against the
+one case where it might have been wrong - `Enter` during a live composition on macOS, where the input
+method is an in-process client of this library and asks the control's own state while it owns a
+candidate list. Exempting `Enter` and `Escape` from the rule changed nothing (section 7.7, item 9), so
+the rule stands as written: the preedit is cleared before the platform can be handed a key it never
+saw, and a commit arriving afterwards simply re-inserts through the ordinary text path. What the test
+did change is invariant 9: the clear now goes through the hook, because a control that observes
+composition has no other way to learn that a mark the input method abandoned is gone.
+
+The rule is now exonerated on a valid instrument, not only on posted events: in the control sequence of
+the hand run under VNC - `nihongo`, Enter, no Space - the box cleared its preedit on that Enter exactly
+as it does in the failing sequence, and the input method committed anyway (`insertText '日本語'`). So
+clearing the preedit first does not stop a commit, which is what the rule has always claimed.
+
+Invariant 10 is the other half of the same question and was wrong for three rounds of this work, which
+is why it is written down separately: a rule about *what* a consumed key does is not a rule about
+*when* the library may consume one. Every run that looked for the candidate-state failure either used
+an instrument that could not deliver the flow or drove a client that never took Tab, so "the library
+sees every key first" survived as a principle while making a conversion unreachable on this host. The
+fix is in section 6.3; the measurement that found it is section 7.7 item 9.
 
 ## 5. The caret seam
 
@@ -190,11 +224,20 @@ The result is in host logical pixels, not device pixels. What each consumer does
 | Platform | Space the API wants | Conversion from host logical |
 |---|---|---|
 | Win32 | Client coordinates of the window (`COMPOSITIONFORM.ptCurrentPos`) | Multiply by the window's scale for device pixels; the origin is already the client origin. |
-| macOS | Screen coordinates, bottom-left origin | Multiply by the backing scale, flip Y against the view's height, add the window's screen origin. |
+| macOS | Screen coordinates, bottom-left origin, in points | Add the view's bottom edge on the screen to the caret, flipped against the view's height. The display's backing scale is **not** applied: both the caret and the screen are in points. |
 | GTK4 | Widget coordinates of the client widget (`gtk_im_context_set_cursor_location`) | GTK positions widgets in logical pixels, so the host rect is already in the right space. |
 
 A non-text control answers its own bounds rather than nothing, so a backend that asks while a
 button has the focus still gets a sensible rectangle to anchor a candidate window to.
+
+The macOS row is a correction, not a restatement. This document used to say "multiply by the backing
+scale, flip Y against the view's height, add the window's screen origin", and that parenthetical was
+wrong: AppKit's screen coordinate system is measured in *points*, and
+`firstRectForCharacterRange:actualRange:` answers in it (its header says "The return value is in the
+screen coordinate"). Multiplying by the backing scale would put the answer twice as far from the
+window's corner on a Retina display, and a candidate window would hang beside the field rather than
+under the caret. Section 6.3 states the conversion the backend actually uses, and section 7.6 has the
+numbers it was measured at.
 
 ## 6. Per platform
 
@@ -510,27 +553,125 @@ result, because the first reading of the API was wrong about *why* the reads cam
   is the one thing this machine could not be made to show (section 7.4), and the trace is what a
   report from a real session settles.
 
-### 6.3 macOS (designed, not implemented)
+### 6.3 macOS (implemented)
 
-`AppKitSkiaView` adopts `NSTextInputClient` and answers:
+`AppKitSkiaView` is the process's text input client: `NSView, INSTextInputClient`. The protocol's
+methods map onto the host contract like this.
 
-- `insertText:replacementRange:` -> `Host.CommitComposition`.
-- `setMarkedText:selectedRange:replacementRange:` -> `Host.BeginComposition` (once) then
-  `Host.UpdateComposition` with the marked string and the selected range's location.
-- `unmarkText` -> `Host.CancelComposition`.
-- `hasMarkedText`, `markedRange`, `selectedRange` -> the field's state.
-- `firstRectForCharacterRange:actualRange:` -> the candidate-window seam, from
-  `Host.TryGetCaretBounds`, converted to screen coordinates (backing scale, Y flipped against the
-  view's height, plus the window's screen origin).
-- `doCommandBySelector:` -> forwards a key the input method declined as a command.
-- `attributedSubstringForProposedRange:actualRange:` and `validAttributesForMarkedText` -> the
-  minimum a conforming client must answer; the first returns nothing useful (the library holds its
-  own text) and the second an empty array, which is legal.
+| Protocol method | What the backend does |
+|---|---|
+| `insertText:replacementRange:` | `Host.CommitComposition` with the string - an `NSString`, or an `NSAttributedString`'s value. The attributes are dropped: the field draws its own text. Then the marked state is cleared and the caret coordinates invalidated. |
+| `setMarkedText:selectedRange:replacementRange:` | Empty text cancels. Otherwise `Host.BeginComposition` on the first call and `Host.UpdateComposition(text, selectedRange.location)` on every one, so the composition opens once and then updates. `selectedRange.length` is kept as well: a conversion selects the run it is converting, so a real input method sends a non-empty selection there even though the caret the library draws is its location (section 7.7). |
+| `unmarkText` | `Host.CancelComposition`, idempotent because a commit already cleared the preedit. |
+| `hasMarkedText`, `markedRange`, `selectedRange` | The local marked state: the marked range is `{0, length}`, the selection is the range the input method last reported - its location is the preedit caret and its length the run a conversion covers - and both are `{NSNotFound, 0}` when nothing is marked. |
+| `firstRectForCharacterRange:actualRange:` | `Host.TryGetCaretBounds`, converted to screen points (below). |
+| `doCommandBySelector:` | The key the input manager declined, forwarded as `ProcessKeyDown`. |
+| `attributedSubstringForProposedRange:actualRange:`, `validAttributesForMarkedText` | The marked run, clamped to the proposed range, and the twelve attribute names a stock `NSTextView` declares - `NSFont`, `NSUnderline`, `NSColor`, `NSBackgroundColor`, `NSUnderlineColor`, `NSMarkedClauseSegment`, `NSLanguage`, `NSTextInputReplacementRangeAttributeName`, `NSGlyphInfo`, `NSTextAlternatives`, `NSTextInsertionUndoable`, `NSAttachment`. The library holds its own text and draws its own decorations, so the marked run is the only context it can honestly offer; a candidate list that is told "no text at all" has nothing to convert against, and a client that declares no attributes is telling the input method it can render none of the decorations a conversion uses. |
+| `characterIndexForPoint:`, `drawsVerticallyForCharacterAtIndex:`, `baselineDeltaForCharacterAtIndex:`, `fractionOfDistanceThroughGlyphForPoint:`, `attributedString`, `windowLevel`, `documentVisibleRect`, `unionRectInVisibleSelectedRange`, `preferredTextAccessoryPlacement`, `supportsAdaptiveImageGlyph`, `insertAdaptiveImageGlyph:replacementRange:` | The legal minimum. The whole protocol is required, so each of these is answered rather than omitted: the first character index, no vertical layout, zero baselines, no attributed string, the window's level, the view's bounds as the document, and inline image glyphs declined with a trace line. |
 
-`KeyDown` changes shape but not order: `ProcessKeyDown` first, then the Command check, then the
-Control check, and only what is left goes to `InterpretKeyEvents`, which is what drives the input
-context. Dead keys and Option compositions then arrive as marked text and a commit instead of the
-raw key text; the existing `AppKitKeyMap.ToText` fallback is removed from that path.
+- **Key routing.** `KeyDown` offers the key to the input method first *while it holds a mark*, and
+  keeps the library's own order the rest of the time:
+
+  ```csharp
+  if (_composition.HasMarkedText && no Command and no Control) {
+      InterpretKeyEvents([theEvent]);   // doCommandBySelector: forwards what the method declines
+      return;
+  }
+  if (key != Key.None && Host.ProcessKeyDown(key, modifiers)) { reset input method; return; }
+  if (Command) return;      // the menu bar owns these
+  if (Control) return;      // library shortcuts, never text
+  InterpretKeyEvents([theEvent]);
+  ```
+
+  The first branch is not a detail of ordering; it is the fix for a measured defect. A conversion's
+  candidate list is driven by Tab and the arrow keys, and the library takes Tab for focus traversal -
+  so with the library first, a marked field moved the focus to the next control and the candidate list
+  closed, while a stock `NSTextView` under the same hand-typed input gave Tab to the input method and
+  the candidate committed (section 7.7, item 9). What the method declines comes back through
+  `doCommandBySelector:`, which forwards that key to the host exactly once, so the library still sees
+  every key the method did not want - it is second, not skipped. A Command or Control chord is never
+  offered to the method, even mid-composition: those belong to the menu bar and to the library's own
+  accelerators, and neither is text. The Command, Control and consumed-key checks below still run
+  first whenever nothing is marked, which is every key outside a composition.
+- **`AppKitKeyMap.ToText` is deleted.** It used to run after the Control check and hand the event's
+  characters to `Host.ProcessTextInput`, which made a dead key both compose and insert its accent -
+  and would have double-inserted every commit once the input manager also delivered it. The key path
+  above has no raw-text route at all, in either branch, so `insertText:` is the only way a composed
+  character enters a field. Section 7.6 records the run where restoring that fallback fails the suite
+  with `a dead key inserted "´"` and a commit arriving as `"é´"`.
+- **A consumed key resets the input method, but only once the method has let the mark go.** The
+  macOS form of GTK's `IMContext.Reset()` and Win32's `CPS_CANCEL` is
+  `NSTextInputContext.discardMarkedText` plus `Host.CancelComposition`, and it runs only while
+  something is held. With a mark live it cannot run on the way in, because the key has not been
+  offered to the method yet; it runs instead when the method declines a key and the host then acts on
+  it, so a field that moves focus cannot leave a mark behind over the control it moved to.
+- **Re-entrancy.** `interpretKeyEvents:` is synchronous and answers through this same view:
+  `doCommandBySelector:` forwards a key into the host, and a host callback can press another key. Two
+  guards cover it, and both are read by a test rather than merely relied on:
+  - a key-path depth counter, so a nested `KeyDown` is refused instead of recursing;
+  - a command-forwarding flag, so a command the host answers with another command cannot ping-pong.
+
+  Both refusals increment `AppKitSkiaView.ReentrancyRefusals` and are traced under
+  `KOLVIR_DEBUG=1`. The event being interpreted is held in a field, so the forward is deterministic
+  rather than read from `NSApplication.CurrentEvent`, which is global and wrong under nesting. The
+  marked-text state carries a third guard (`_discarding`) so the `unmarkText` AppKit sends in answer
+  to a refusal cannot start the exchange again.
+- **A refusal is told to the input method.** `TextBox.OnCompositionStarted` answers false for a
+  read-only or disabled field, so `Host.BeginComposition` returns false and nothing is held. Answering
+  the call while staying quiet would leave the input method's own underline over a field that will
+  never take the text, so the marked text is discarded instead, once per offered mark. A commit still
+  arrives as ordinary text, which the field declines; the text is not the composition's to withhold.
+  A commit that arrives *while* the marked text is being taken down is dropped rather than inserted,
+  which is what Win32 does with a result for a refused composition: the input method's answer to
+  `discardMarkedText` is `unmarkText`, not `insertText`, so the case is a client's defensive guard
+  rather than a path a conforming input method takes.
+- **Caret and candidate window agree, by construction.** macOS has one channel, not two: the system
+  asks the client for the caret through `firstRectForCharacterRange:actualRange:` and positions both a
+  candidate window and the character (emoji) viewer from that answer. Unlike Win32 there is no
+  composition form to keep in step - `ImmSetCompositionWindow` and `IMR_QUERYCHARPOSITION` are two
+  pieces of state a library can let disagree, and macOS has no client-side equivalent of the first.
+  The backend adds the one thing the platform asks of a client: `NSTextInputContext`'s
+  `invalidateCharacterCoordinates` is sent when the caret may have moved - after a click, a wheel
+  turn, a consumed key, a commit or a preedit change - because the header says the client must say so
+  whenever the document's visual coordinates change and that `handleEvent:` is only an implicit
+  notification. A click or a key the input manager never sees is neither.
+  **The system does use this answer.** Measured on the Mac host with Hiragana active: the caret answer
+  for a marked run at the start of the field was `(352, 712.2)` screen points, the candidate list
+  opened under the field at that X, and with the answer deliberately offset by `(+200, -100)` the
+  same list moved with it - X by the offset it was given, Y downwards, which is the direction the
+  offset was in. So the panel is placed from `firstRectForCharacterRange:`, not from a second piece
+  of client-side state, and on macOS there is no composition form that could drift away from it.
+- **The coordinate conversion, and its numbers.** The view is flipped, so a host rectangle is already
+  in the view's own coordinate system, measured downwards like the host's. What is missing is where the
+  view's *bottom* edge sits on the screen, because screen coordinates count upwards:
+
+  ```
+  bottom = ConvertPointToScreen(ConvertPointToView((0, Bounds.Height), nil))   // screen points
+  answer = (bottom.X + caret.Left, bottom.Y + (Bounds.Height - caret.Bottom),
+            caret.Width, caret.Height)
+  ```
+
+  No backing scale appears anywhere, and `AppKitImeGeometry` is the only place this arithmetic lives.
+  Measured on the 2x display of the Mac host, through a real `NSWindow` (section 7.6): a caret at host
+  `(8, 33.5)-(9.5, 46.5)` in a 320 point tall view whose bottom-left is at screen `(100, 127)` answers
+  `(108, 400.5)-(109.5, 413.5)`, which is exactly what `NSWindow.ConvertRectToScreen` says for the same
+  rectangle. Scaling the vertical offset by the 2x backing factor instead of by 1 would answer `674`
+  for that Y - a candidate window 273 points above the caret it belongs to, and higher still on a
+  larger display.
+- **Focus.** `ResignFirstResponder` resets the composition and discards the marked text, so a
+  composition cannot outlive the focus. The core already cancels on a focus change between controls
+  (section 4.3); this covers the window losing the keyboard.
+- **Menu accelerators.** AppKit consumes a Command chord before any view sees it, so the Edit menu
+  feeds accelerators straight into the host. That path resets the composition first, or the marked text
+  would survive a Cmd+X and the view would keep answering `hasMarkedText`.
+- **Popups.** `AppKitPopupWindow` is left alone, for the reason section 6.4 gives: a non-activating
+  popup never takes the input focus, so no composition can begin there.
+- **Fallback.** What a composition or the character viewer inserts is drawn by the core text pipeline,
+  which splits a string into runs and draws a character with a face that covers it
+  (`DEVELOPER-GUIDE.md`, fonts). That is the same code as on Windows and GTK4. Measured on the Mac host
+  with Hiragana active: a commit of `日本語` drew as three glyphs in the field, and the readout under it
+  reported `last commit: "日本語"  |  value: "日本語"` with `Name: 日本語 (3/24)` - three characters, one
+  commit, no doubling (section 7.7).
 
 ### 6.4 Why popups are out of scope
 
@@ -676,6 +817,11 @@ What that leaves unverified is the input method's own UI rather than its positio
 candidate list, its clause attributes and its own preedit styling. Those need an IME installed and a
 person to look at them, which is section 7.5.
 
+On macOS the same limit applies to the input manager rather than to a message protocol: the backend's
+own methods are covered by section 7.6, and what `interpretKeyEvents:` then does with a real input
+source - the marked text a person sees, the candidate window, the character viewer - is section 7.7.
+None of that could be driven on the Mac test host, for the reason that section records.
+
 ### 7.5 Verifying with a real input method
 
 The Japanese language pack and its Microsoft IME are installed on this development machine, and the
@@ -743,13 +889,279 @@ ones section 7.4 cannot reach. A test could be written for steps 1-5 the same wa
 installed, so it belongs behind a capability check (`GCS_COMPSTR` reading back empty means no IME) rather
 than in the CI suite.
 
+### 7.6 The macOS tests, and what they prove
+
+There are two halves, and they are separate for a measured reason rather than for tidiness. AppKit
+throws `AppKitThreadAccessException` for an `NSView`, an `NSEvent` or an `NSWindow` created anywhere but
+the process's main thread, and MSTest runs test methods on a pool thread - including when the test
+assembly is started through its own `.app` bundle, which was tried: the pure asserts passed and the
+first `new NSView(...)` failed with that exception. So:
+
+- `tests/backends/Kolvir.Backend.AppKit.Tests` (`net10.0-macos`, `[TestCategory("Platform.AppKit")]`)
+  is the AppKit-free half and runs under `dotnet test`. It creates a real application, a real host and
+  a real control tree on the headless backend, and drives `AppKitComposition` and
+  `AppKitImeGeometry` directly. The only substitution is the callback that would be
+  `NSTextInputContext.discardMarkedText`, so a refusal can be counted.
+- `tests/backends/Kolvir.Backend.AppKit.Harness` is the view-level half: a console program whose `Main`
+  *is* the main thread. It builds a real `AppKitSkiaView`, real `NSEvent`s and, for the caret answer, a
+  real `NSWindow`. It prints one line per check and exits non-zero when any fails. It is not in CI,
+  because it needs a view - and therefore a main thread - rather than because it needs a display.
+
+What they prove, in the order the invariants are listed in section 4.5:
+
+1. Marked text opens the composition once and updates it in place: two `setMarkedText:` calls produce
+   one start, two updates, and a value that is still empty.
+2. The preedit caret is the selected range's location, clamped into the mark, including inside a
+   multi-unit string.
+3. `insertText:` commits exactly once through the ordinary path - same value, same caret, one text
+   input, one undo entry, `MaxLength` applied to the commit and not to the preedit.
+4. `unmarkText` leaves the value and the caret exactly as they were, adds no undo entry, and answers a
+   second call without touching the host again.
+5. A read-only field never opens a composition, keeps no marked text, is told to drop the mark once per
+   offered one, and still receives the commit as text; a field made read-only *during* a composition is
+   taken down cleanly.
+6. A key the library consumes resets the input method, through the same field, exactly once.
+7. A discard that re-offers a mark does not ping-pong.
+8. The caret answer is the conversion in section 6.3, numerically, and the shipped answer equals
+   `NSWindow.ConvertRectToScreen` for the same rectangle on the host's 2x display.
+9. A dead key whose input manager reports nothing inserts nothing, and a commit it reports inserts
+   exactly one character - the two halves of "there is no second text path", driven through the real
+   `KeyDown` with a real event.
+10. A re-entrant key press and a re-issued command are each refused exactly once, and the outer
+    operation still completes.
+11. The default interpreter is AppKit's own `interpretKeyEvents:`, so the seam cannot quietly ship a
+    fake.
+12. `markedRange`, `selectedRange` and `hasMarkedText` answer what the marked state holds, and the
+    protocol methods reach the preedit and the commit.
+13. A key is offered to the input method while a mark is live, and only then: a mark plus a key the
+    method keeps leaves the mark, the preedit and the focus alone; a mark plus a key it declines comes
+    back through `doCommandBySelector:` and reaches the host; and Tab with no mark still traverses the
+    focus. This is invariant 10, through the real `KeyDown` and a scripted interpreter, in a window
+    with two focusable fields so the failure a person saw - the focus moving to the next field - is
+    what the check reads.
+
+The tests were then run against deliberately broken builds, which is the only way to know a green run
+means anything. Each mutation was applied to the test host, built, run, and reverted:
+
+| Mutation | Result |
+|---|---|
+| `AppKitKeyMap.ToText` restored after `InterpretKeyEvents` | the harness fails: `a dead key inserted "´"` and the commit arrives as `"é´"` (2 code units) |
+| the key-path depth guard removed | the harness dies with a stack overflow (exit 134), through `KeyDown -> ProcessKeyDown -> OnKeyDown -> KeyDown` |
+| the command-forwarding guard removed | the harness fails: `expected one refusal, saw 0` |
+| every `_discarding` read neutralised | the test host crashes with a stack overflow in the ping-pong case |
+| the marked-first branch of `KeyDown` disabled | the harness fails exactly the two ordering checks (`the input method saw the key 0 time(s)`, twice) and the no-mark check still passes - which is what separates offering the mark first from never offering keys at all |
+
+Measured on the Mac host, on the 2x display, from the harness's own run:
+
+```
+caret L=8 T=33.5 R=9.5 B=46.5            (host points, from the top)
+bounds h=320 flipped=True                 (the view is flipped, like the host space)
+bottom-left on screen=100,125             (NSWindow.ConvertPointToScreen of the view's bottom edge)
+answer L=108 T=398.5 R=109.5 B=411.5      (what firstRectForCharacterRange answers)
+```
+
+`NSWindow.ConvertRectToScreen` for the same caret in the view's coordinates answers the same rectangle,
+and a Y multiplied by the backing scale would have been `921.5`.
+
+What the two halves do **not** cover is the input manager itself. `InterpretKeyEvents` needs a key
+window with an input context; the harness scripts that one step, as the Win32 suite scripts the Imm32
+read, and the shipped path is exercised only against a real input method - section 7.7.
+
+### 7.7 Verifying macOS with a real input method
+
+This was first attempted with the Mac host's console at the login window and no CJK input source
+enabled, and nothing could be driven: `/dev/console` was owned by `root`, the session record reported
+`kCGSSessionOnConsoleKey` false, and synthesized clicks and keystrokes arrived at the login session
+rather than the application. It was then re-run with the console logged in, the demo launched over
+`ssh`, and a real input method: `AppleEnabledInputSources` already listed
+`com.apple.inputmethod.Kotoeri.RomajiTyping`, so nothing on the host had to be reconfigured - the
+source was switched with `Ctrl+Space`, used, and switched back.
+
+The evidence surface is the demo's **Text Input** page, as on Windows: the `Name` field has a readout
+under it - `Preedit: "..."  |  preedit caret: n  |  last commit: "..."  |  value: "..."` - plus a
+`Password` field and a `Read only` field. Run it from the repository root with
+`dotnet run --project src/demo/Kolvir.Demo.App --launch-profile mac -- --page text-input`; the launch
+profile's `executablePath` is written for that directory, and the section "The route that works" in
+`MACOS-TESTRUN.md` records why.
+
+What was **measured**, with screenshots of that readout:
+
+1. **A dead key composes instead of inserting.** `Option+E` in the `Name` field left the field showing
+   a bare acute accent, the readout `Preedit: "´"  |  preedit caret: 1  |  value: ""`. The accent was
+   not inserted as a character: the value stayed empty. **Verified.**
+2. **The commit is the only text path, and it inserts once.** Pressing `E` after that accent gave
+   `last commit: "é"  |  value: "é"` with the status line `Name: é (1/24)` - one character, not two, so
+   nothing else also inserted it. **Verified.**
+3. **A daemon-driven IME composes, converts and commits.** With the Japanese source active, typing
+   `nihongo` produced marked runs `n`, `に`, `にほ`, ... and settled at `日本語`, then Enter gave
+   `last commit: "日本語"  |  value: "日本語"` and `Name: 日本語 (3/24)`. Three characters, one commit,
+   drawn as glyphs. The trace of the same run shows exactly one `insertText` for it. **Verified.**
+4. **The candidate list is positioned from the caret answer.** With a marked run at the start of the
+   field the caret answer was `(352, 712.2)` screen points and the candidate list opened under the
+   field at that X; offsetting the answer by `(+200, -100)` moved the list with it. **Verified**
+   (section 6.3 records what this settles).
+5. **Escape cancels without inserting.** With marked text present, Escape left the field's value
+   unchanged and inserted nothing. **Verified.** Note that the input method may consume the first
+   Escape to undo a conversion step and re-offer the mark; a second Escape or a deleted character ends
+   the composition. That is the input method's own state machine, not the client's.
+6. **`--page text-input` opens the page and the readout is drawn.** The readout line is visible below
+   the three fields and updates live with each composition step, on the frame every screenshot was
+   taken from. **Verified.**
+
+What is **not** verified, and stays a checklist:
+
+7. **The character viewer opens at the caret.** `Ctrl+Cmd+Space` was never pressed, so the emoji
+   panel's placement is unobserved. Its input - the caret answer - is now pinned as the answer the
+   candidate list uses (item 4), which is as far as this can be taken without a person at the machine.
+   **(unverified)**
+8. **The password field masks the preedit**, and **the read-only field refuses** a composition. The
+   refusal is pinned by a test (`AppKitCompositionTests`, and the harness check), but neither was
+   watched on screen. **(unverified)**
+9. **A candidate conversion confirms in two steps, and this client was breaking the second one.**
+   Reported by hand over VNC on `macvm` with Hiragana active: `nihongo`, Space, Enter, and the word
+   disappeared - "it looked like it was working until I hit enter, then the word disappeared." A macOS
+   conversion takes **two** Returns: the first commits the conversion inside the composition, the
+   second ends the composition and the text lands, exactly as `TextEdit` and a stock `NSTextView` do
+   it. So the report was never about a missing commit path; it was about a client that made the second
+   Return the user always presses unable to complete. Finding that took asking the routes a candidate
+   list offers rather than tracing the Return again: measured in `TextEdit` first, by hand on the same
+   host and session, the candidate list **is** on screen, a **mouse click** on a candidate puts it in
+   the document and the confirming Return commits it, and **Tab** moves the focus into the panel where
+   arrows choose and Enter confirms.
+
+   The same sequences in this client diverged, and it is Tab that carries the measurement: Tab moved
+   the focus to the **next field** and closed the candidate list - the user's words: "as soon as I hit
+   tab, the focus moved to the next textbox and the candidates list went away". The click was not
+   established by that run - it logged one `insertText` in the whole session, the plain-Enter
+   control's, and the report was about Tab - so it is not counted there as a second failure; a later
+   run measured it, and it is recorded below with the rest of the routes. The trace names the Tab cause
+   in one line:
+
+   ```
+   KEY Tab mods=None marked=True ... firstResponder=AppKitSkiaView
+   key Tab taken by the host; the input method never sees it
+   reset the mark: reason=key taken by the host, key=Tab, marked=True
+   ```
+
+   A stock `NSTextView`, bundled and launched the same way, under the same hand-typed input:
+
+   ```
+   KEY code=48 marked=true selected=3,0
+   KEY code=48 routed: marked=true
+   insertText '日本号' replacement=9223372036854775807,0
+   ```
+
+   So the stock client hands Tab to the input manager, the manager moves the focus into the candidate
+   list, and the confirmation commits. This client took Tab for focus traversal *before* the input
+   method saw it, and then reset the mark - a live mark, given up by the client rather than by the
+   method - so the conversion was unreachable by every route at once. **That was this backend's
+   defect**, and it is fixed by making the input method see the key first while it holds a mark
+   (section 6.3, invariant 10): a key the method keeps never reaches the library, and a key it
+   declines comes back through `doCommandBySelector:`. Pinned by three harness checks: a live mark plus
+   a key the method keeps leaves the focus and the preedit alone, a live mark plus a declined key still
+   reaches the host, and Tab with no mark still traverses the focus. Disabling the new branch fails the
+   first two and passes the third (section 7.6).
+
+   **A candidate conversion confirms in two steps, and that is the input method's normal behaviour.**
+   The first Return commits the *conversion* inside the composition - the run becomes the chosen kanji
+   and stays as marked text - and the second Return ends the composition and the text lands. `TextEdit`
+   and a stock `NSTextView` do exactly the same, on this host and anywhere else: a person who converts
+   Japanese presses Return twice, and no application treats the second one as unusual. In our runs the
+   candidate was already the marked text by then, because the arrows or a click had moved the
+   selection, so the first Return asked the client for its state and left the mark unchanged:
+
+   ```
+   06:21:16.247 offered Enter to the input method first ...
+   06:21:16.247 selectedRange -> 0,4
+   06:21:16.249 selectedRange -> 0,4
+   06:21:16.260 KEY Enter routed: marked=True                        (the conversion step: no commit, mark kept)
+   06:21:20.698 KEY Enter ... marked=True
+   06:21:20.702 hasMarkedText -> True
+   06:21:20.702 validAttributesForMarkedText -> 12 names   (four times)
+   06:21:20.703 insertText '日本語学'                                 (the second step: the text lands)
+   ```
+
+   **This is what the ordering defect broke, and it is why the fix matters more than "Tab works now".**
+   Under the old key order the first Return was taken by the library, so the field dropped its preedit
+   and the composition was reset while the input method still held the mark. The second Return - the
+   one every macOS user presses - then had no composition left to complete, and the word disappeared.
+   The client was breaking a two-step confirmation that every other application supports, which is
+   exactly the report that opened this: "it looked like it was working until I hit enter, then the word
+   disappeared." That report is now explained rather than mysterious.
+
+   Three clients behaving identically in the candidate state is therefore **evidence of the normal
+   protocol**, not of a fault in the environment: each answers the conversion step with
+   `selectedRange` and no `insertText`, and each commits on the step that ends the composition. Both of
+   this client's routes were measured doing it, and the second one was only reachable after the fix.
+
+   | Route | What the log says |
+   |---|---|
+   | Tab with the list open | `offered Tab to the input method first`, then two `selectedRange`, `hasMarkedText -> True`, `validAttributesForMarkedText` five times and `setMarkedText '日本後' candidate=True` - the focus did not move and the candidate list moved its selection instead |
+   | Arrow keys | six of them, each `routed: marked=True` and each followed by a new candidate in `setMarkedText` - so the arrows reached the panel too |
+   | Two Returns, keyboard route | the conversion step, then `insertText '日本語学'`; the same again for the second composition, `insertText '日本語歌詞'` |
+   | A mouse click on a candidate | `setMarkedText '日本語訳' selected=0,4 candidate=True` with **no key event before it**, then the same two steps, ending in `insertText '日本語訳'` |
+
+   Six `reset the mark` lines appear in the keyboard run and all six are
+   `reason=key taken by the host, key=Backspace, marked=False`, from clearing the field between the two
+   sequences. **No reset ran while a mark was live**, which is invariant 10 holding on a real keyboard
+   rather than only in the harness.
+
+   Two things follow from the click, and both close a question. A click arrives as **the same call a
+   conversion makes** - marked text with the whole run selected, no key involved - so the underlined
+   preedit a person sees after clicking is this client's own drawing, and there is no separate mouse
+   path to test. And the commit it produces is **the same `insertText` with
+   `replacement = NSNotFound`** the keyboard route produces, so a candidate does not commit through a
+   replacement *range*: there is no second geometry that could disagree with the caret answer, and no
+   route into a field that a keystroke does not also exercise.
+   What was ruled out, each by measurement rather than argument:
+
+   | Hypothesis | How it was settled |
+   |---|---|
+   | The shared `TextBox` preedit-clearing rule (section 4.5) | **exonerated on a valid instrument**: in the control the box cleared its preedit on that Enter and the commit arrived anyway |
+   | The client contradicting the input method about what is marked | `hasMarkedText` true and `markedRange` `(0,1)` whenever asked; after Enter it asks `selectedRange` and gets back exactly what it set |
+   | Kotoeri's candidate panel taking key status | one `WINDOW became key` line in the whole run, the app's own; every key `ourWindowKey=True` with the view as first responder |
+   | The view's `NSTextInputContext` being recreated | one instance for the whole session |
+   | AppKit handing this view `insertNewline:` and its forwarding destroying the preedit | zero `doCommandBySelector` lines in the run: the input method kept that Return |
+   | Echoing the marked selection from `selectedRange` | **exonerated**: a stock client answers `0,3`/`0,4`, a full selection, as this client does |
+   | The launch path - every failing run was a bundle binary over `ssh`, and `TextEdit` was the only LaunchServices-launched app | **tested and cleared**: bundling the reference and launching both it and this backend with `open -n` reproduced the identical outcomes |
+   | The key path itself: does this client give the input method the keys a conversion needs? | **this one was right, and it was the defect**: Tab never reached the method, so the candidate list could not be reached at all |
+
+   **The `TextEdit` control and the posted-event control both stay on the record, with what each
+   taught.** An earlier hand run reported `TextEdit` committing the flow; a later one, on the same
+   machine and source, appeared to lose it. Both are recorded because neither generalises: `TextEdit`
+   commits the plain-Enter flow, a click and Tab-then-confirm, and its *first* Return in the candidate
+   state is the conversion step that lands nothing - so "TextEdit commits it" and "TextEdit loses it"
+   were both true statements about different keys, and neither was a fault. The posted-event
+   comparison - every custom client losing the Return under `System Events` - was measured with an
+   instrument that cannot drive this state at all, and is withdrawn.
+
+   **How the acceptance run was made.** Launched through LaunchServices so it is frontmost and the
+   trace variable arrives from the bundle's `LSEnvironment` rather than the shell
+   (`dev-docs/MACOS-TESTRUN.md`):
+
+   ```sh
+   open -n ~/work/ime-trace/src/demo/Kolvir.Demo.App/bin/Debug/net10.0-macos/osx-arm64/KolvirDemoApp.app --args --page text-input
+   ```
+
+   The log is `/tmp/kolvir-ime.log`, written from startup. One line decided whether the fix ran:
+   `offered Tab to the input method first: a mark is live` present, and `key Tab taken by the host;
+   the input method never sees it` absent. The sequences were `nihongo`, Space, Tab, arrows, Enter, and
+   `nihongo`, Space, arrows, Enter, Enter; a third run, on `6c9414d`, was `nihongo`, Space, a click on a
+   candidate, then Enter, Enter. The worktree above was a scratch clone and has
+   since been deleted; the bundle carries `LSEnvironment` only because it was added to its `Info.plist`
+   after building, which is the recipe `MACOS-TESTRUN.md` records.
+
+   Steps 1-6 are the ones the harness cannot reach, because it scripts the input manager. What CI still
+cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
+in this section is a hand run over `ssh` with `screencapture`.
+
 ## 8. Status and open questions
 
 | Platform | Dead keys / Compose | Daemon-driven IME | Status |
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
 | Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
-| macOS | Designed | Designed | Not implemented |
+| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and **verified by hand with the Japanese source on the test host** (section 7.7): marked text, conversion to `日本語`, a single commit, the candidate list placed from the caret answer, and - after the ordering fix of invariant 10 - Tab, the arrow keys and a mouse click all reaching the candidate list while the two-step confirmation completes, which is the input method's normal behaviour and what `TextEdit` does too | **Done** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
 `IMM32` calls behind it were measured against the Microsoft IME that is installed on this
@@ -758,6 +1170,20 @@ window, its clauses and its preedit styling - which is a person's job, not a tes
 the checklist, and it is the only place those items are claimed. CI cannot help here; the hosted
 runners carry no input method. The emoji panel's placement is the same kind of limit: the answers it
 reads are tested, and the panel itself was confirmed by hand on this machine (section 7.4).
+
+The macOS path is proved differently, and the difference is worth being precise about. There is no
+message protocol to synthesize: the backend is the text input client, so the protocol methods, the key
+routing, the refusal, the re-entrancy guards and the caret arithmetic are all driven directly, and the
+suite fails when any of them is removed (section 7.6). What that cannot show is what AppKit's own input
+manager does with `interpretKeyEvents:`, because a view with no key window has no input context to drive
+it. Section 7.7 is that half: a hand run over `ssh` with a real Japanese source, a live console and
+`screencapture`, on the demo's readout, plus a logged subclass of `NSTextView` and a minimal
+from-scratch `NSTextInputClient` as reference clients. Seven of its items are measured and two are
+and one measured item - a conversion opened with Space - exposed a real defect in this backend's key
+path: it took Tab, and the first Return, before the input method could use them, so the second Return
+that completes every macOS conversion had nothing left to confirm and the word vanished. With the
+ordering fixed (section 6.3, invariant 10) the normal two-step confirmation works, and the item records
+it rather than leaving it an open question (item 9).
 
 Open questions:
 
@@ -779,3 +1205,4 @@ Open questions:
    after the whole preedit rather than inside it. The index is recorded and handed to the platform
    through the caret seam; repositioning the drawn caret inside the preedit comes with clause
    styling.
+

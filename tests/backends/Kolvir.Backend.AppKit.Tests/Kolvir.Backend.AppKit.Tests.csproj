@@ -1,0 +1,55 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- macOS-only tests for the AppKit backend's text composition. Two things make this project
+       unlike the portable suites and unlike the Win32 one:
+
+       - It targets net10.0-macos, because it exercises the AppKit backend, and the macOS SDK wants
+         an ApplicationId, a RuntimeIdentifier and a self-contained build before it will produce a
+         test host at all. That is also why it is not in Kolvir.slnx: on Windows the SDK resolves the
+         host's win-x64 as the runtime identifier of an executable net10.0-macos project, and there is
+         no macOS runtime pack for it, so listing these two projects there would break the Windows
+         solution build. They are run by path, which is what the Tests workflow does.
+       - It never creates an NSView. AppKit throws AppKitThreadAccessException for anything built
+         off the process's main thread, and a test runs on a pool thread, so everything here is the
+         AppKit-free half: the marked-text state machine and the caret arithmetic. The view-level
+         half - KeyDown routing, the re-entrancy guard, the real conversion - is
+         tests/backends/Kolvir.Backend.AppKit.Harness, which runs on the main thread. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0-macos</TargetFramework>
+    <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+    <ApplicationId>dev.kolvir.appkit.tests</ApplicationId>
+    <RuntimeIdentifier>$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <!-- The tests are not trimmed: a linker pass over MSTest costs more than it saves and hides
+         reflection-driven discovery behind trim warnings. -->
+    <LinkMode>None</LinkMode>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Backend.AppKit.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+    <!-- The macOS SDK insists on an exactly matching Xcode before it will produce an app bundle, and
+         this suite binds no API an Xcode version could change: it creates no NSView and touches only
+         Foundation's NSRange and CoreGraphics' rectangle. Enforcing the match would turn a green
+         platform red on a runner image that moved to a newer Xcode for reasons nothing here can
+         affect, which is the one thing a platform suite must not do. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.AppKit\Kolvir.Backend.AppKit.csproj" />
+    <!-- A real UiHost with a real control tree, without a window server: the composition tests are
+         about routing, not about AppKit's own objects. -->
+    <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>

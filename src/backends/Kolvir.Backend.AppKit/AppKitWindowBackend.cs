@@ -789,6 +789,25 @@ public sealed class AppKitWindowBackend : IWindowBackend
     internal void ReportStatistics() => _view?.ReportStatistics();
 
     /// <summary>
+    /// Ends any composition the view is showing without inserting anything.
+    /// </summary>
+    /// <remarks>
+    /// A menu's key equivalent is consumed by AppKit before the view sees the key, so the Edit menu
+    /// feeds the accelerator straight into the host. The focused control drops its own preedit for
+    /// an editing key, but the input manager's marked text would otherwise survive a Cmd+X and
+    /// leave the view answering <c>hasMarkedText</c> for a composition that is over.
+    /// </remarks>
+    internal void ResetInputComposition()
+    {
+        if (AppKitImeTrace.Enabled)
+        {
+            AppKitImeTrace.Line($"reset the mark: reason=a menu accelerator took the key, marked={_view?.Composition.HasMarkedText}");
+        }
+
+        _view?.Composition.Reset();
+    }
+
+    /// <summary>
     /// Makes the window a drag destination, and takes it back out again when set to null. A window
     /// that is never given a sink is never registered for any dragged type, which is what keeps the
     /// cost of being a drag destination off an application that never asked for one.

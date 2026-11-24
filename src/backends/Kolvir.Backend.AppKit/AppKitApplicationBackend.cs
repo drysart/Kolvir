@@ -588,6 +588,9 @@ public sealed class AppKitApplicationBackend : IApplicationBackend, IAppKitAccel
     {
         if (_activeWindow is { } window)
         {
+            // The view never saw the key, so the input method did not either: a composition that
+            // was live when the menu took it has to be taken down here.
+            window.ResetInputComposition();
             window.Host.ProcessKeyDown(key, Modifiers.Control);
         }
     }

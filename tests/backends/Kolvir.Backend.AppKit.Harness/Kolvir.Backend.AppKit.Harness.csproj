@@ -1,0 +1,39 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The view-level half of the macOS text-composition suite.
+
+       It is a console program rather than an MSTest project for a measured reason: AppKit throws
+       AppKitThreadAccessException for anything created off the process's main thread, and MSTest
+       runs test methods on a pool thread - including when the test assembly is started through its
+       own .app bundle. A program whose Main is the main thread is the only place an NSView, an
+       NSEvent or an NSWindow can exist, so the checks that need those live here and the AppKit-free
+       ones live in the sibling Tests project.
+
+       Run it as the bundle's binary, not through `dotnet test`:
+         ./bin/Debug/net10.0-macos/osx-arm64/Kolvir.Backend.AppKit.Harness.app/Contents/MacOS/Kolvir.Backend.AppKit.Harness
+       It prints one line per check and exits non-zero when any of them fails. -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-macos</TargetFramework>
+    <SupportedOSPlatformVersion>14.0</SupportedOSPlatformVersion>
+    <ApplicationId>dev.kolvir.appkit.harness</ApplicationId>
+    <RuntimeIdentifier>$(NETCoreSdkPortableRuntimeIdentifier)</RuntimeIdentifier>
+    <SelfContained>true</SelfContained>
+    <LinkMode>None</LinkMode>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Backend.AppKit.Harness</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsAotCompatible>false</IsAotCompatible>
+    <!-- Same reason as the sibling test project: this program builds AppKit objects, but none whose
+         behaviour an Xcode version selects, and it is run by hand on a Mac host rather than in CI. -->
+    <ValidateXcodeVersion>false</ValidateXcodeVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.AppKit\Kolvir.Backend.AppKit.csproj" />
+    <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>

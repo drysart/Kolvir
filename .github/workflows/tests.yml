@@ -1,12 +1,13 @@
 name: Tests
 
-# Every suite is a portable net10.0 assembly, so none of them needs a window server or a display: the
-# tests drive Kolvir through the headless backend, the animation suite drives its own clock and frame
-# source rather than a real timer, the image suites drive their timelines with a hand-advanced
-# TimeProvider, and the generator suite compiles a source string in memory rather than building
-# anything at all. The matrix is the point rather than a formality - the same tests run on all three
-# platforms, which is what keeps the portable claims honest, and a control that only behaves on one of
-# them fails here.
+# Every suite is a portable net10.0 assembly, or the AppKit backend's net10.0-macos one, and none of
+# them needs a window server or a display: the tests drive Kolvir through the headless backend, the
+# animation suite drives its own clock and frame source rather than a real timer, the image suites
+# drive their timelines with a hand-advanced TimeProvider, the generator suite compiles a source
+# string in memory rather than building anything at all, and the AppKit suite stays on the
+# AppKit-free side of that backend for exactly this reason. The matrix is the point rather than a
+# formality - the same tests run on all three platforms, which is what keeps the portable claims
+# honest, and a control that only behaves on one of them fails here.
 #
 # What differs per platform is what gets *compiled* beside the suites. A feature package builds for the
 # platform the job is on plus the portable framework, from KolvirTargetFrameworks in
@@ -296,6 +297,27 @@ jobs:
           set -o pipefail
           dotnet test tests/backends/Kolvir.Backend.Win32.Tests/Kolvir.Backend.Win32.Tests.csproj --no-restore --nologo \
             --logger "trx;LogFileName=win32.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The AppKit backend's own suite is macOS-only, and it is the one platform suite that needs a
+      # macOS SDK feature beyond the workload: the test host is an app bundle, so the project names
+      # an ApplicationId and a RuntimeIdentifier for itself (see its csproj). It creates no NSView -
+      # AppKit only builds its objects on the process's main thread and a test runs on a pool thread
+      # - so it needs no window server and cannot fail a runner for that reason. The view-level half
+      # is tests/backends/Kolvir.Backend.AppKit.Harness, a console program run by hand on the Mac
+      # host, because it does need a view and therefore a main thread.
+      - name: Restore the AppKit backend tests
+        if: runner.os == 'macOS'
+        run: dotnet restore tests/backends/Kolvir.Backend.AppKit.Tests/Kolvir.Backend.AppKit.Tests.csproj --nologo
+
+      - name: Test the AppKit backend
+        if: runner.os == 'macOS'
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test tests/backends/Kolvir.Backend.AppKit.Tests/Kolvir.Backend.AppKit.Tests.csproj --no-restore --nologo \
+            --logger "trx;LogFileName=appkit.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

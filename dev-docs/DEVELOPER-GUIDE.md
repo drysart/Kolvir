@@ -254,6 +254,29 @@ The `Tests` workflow runs it on the Windows leg only. It drives the GL fallback 
 probe that always fails, which is what a machine with no OpenGL ICD looks like; the accelerated
 path needs a real driver and is verified by hand through the demo's measured-rendering page.
 
+The AppKit backend has a macOS-only suite for the same kind of reason, in two pieces:
+
+```
+dotnet test tests/backends/Kolvir.Backend.AppKit.Tests/Kolvir.Backend.AppKit.Tests.csproj
+tests/backends/Kolvir.Backend.AppKit.Harness/bin/Debug/net10.0-macos/osx-arm64/Kolvir.Backend.AppKit.Harness.app/Contents/MacOS/Kolvir.Backend.AppKit.Harness
+```
+
+The test project is the AppKit-free half - the marked-text state machine and the caret arithmetic - and
+it runs under `dotnet test` on the macOS leg. The harness is a console program instead of a test
+project, and that is measured rather than stylistic: AppKit throws `AppKitThreadAccessException` for an
+`NSView` created off the process's main thread, and a test framework runs test methods on a pool
+thread. The harness's `Main` is the main thread, so it builds a real view and a real `NSWindow`, prints
+one line per check and exits non-zero on failure. Because the two halves exist for that reason, the
+test project needs no window server and cannot fail a runner for lacking one. Add an AppKit test with
+`[TestCategory("Platform.AppKit")]`, and put anything that needs an `NSView` in the harness.
+
+Neither project is in `Kolvir.slnx`, and that is not an oversight: both are *executable* `net10.0-macos`
+projects, and on Windows the macOS SDK resolves the host's `win-x64` as their runtime identifier, for
+which no macOS runtime pack exists (`NETSDK1082`). The AppKit library builds on any host because a
+library needs no runtime identifier; an app bundle does. Listing them would turn `dotnet build
+Kolvir.slnx` red on Windows for a reason unrelated to any change, so they are run by path - which is
+what the workflow does, and what the line above shows.
+
 `Kolvir.Feature.Animations.Tests` is wired the same way and for the same reasons - `Feature` and
 `Animations` categories, the same filter, plain `net10.0` on every platform. What its tests drive is
 the same code production runs: a
@@ -2112,12 +2135,41 @@ A control opts in by overriding `OnCompositionStarted`, `OnCompositionUpdated` a
 receives the commit as ordinary text. A focus change cancels, and a key the text box acts on cancels
 the preedit first, because the library sees a key before the platform's input method does.
 
-This is implemented for GTK4 and for Windows. On GTK4 the view drives a `Gtk.IMContext`; on Windows
-the window procedure answers `WM_IME_SETCONTEXT`, `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION` and
-`WM_IME_ENDCOMPOSITION` through Imm32, anchors the candidate window at the same caret, and drops the
-`WM_CHAR` copies a commit would otherwise insert twice. macOS is still designed only.
+This is implemented for GTK4, for Windows and for macOS. On GTK4 the view drives a `Gtk.IMContext`; on
+Windows the window procedure answers `WM_IME_SETCONTEXT`, `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION`
+and `WM_IME_ENDCOMPOSITION` through Imm32, anchors the candidate window at the same caret, and drops the
+`WM_CHAR` copies a commit would otherwise insert twice. On macOS the view is the text input client
+(`NSTextInputClient`) and AppKit's own input manager drives it through `interpretKeyEvents:`: marked text
+opens the composition, `insertText:` is the only commit, `discardMarkedText` is how a refusing field
+answers, and `firstRectForCharacterRange:` is the one caret answer - there is no composition form to keep
+in step, as there is on Windows. The key path differs from the other two backends in one place, and it
+is the place the platform's own client differs: while the input method holds a mark, the key is offered
+to it first, and the library only sees what the method declines - because a candidate list is driven by
+Tab and the arrow keys, which the library would otherwise take for focus traversal. With no mark live
+the order is the library's. Nothing derives text from the key itself on any backend, which is what keeps
+a dead key from composing and inserting its accent, and on macOS `insertText:` remains the only route a
+composed character takes.
+
 `dev-docs/IME.md` is the design: all three integrations, the invariants, the caret seam, what the tests
-prove and what still needs a real input method to verify.
+prove and what still needs a real input method to verify. On macOS the AppKit-free half of that
+(marked text, the refusal, the caret arithmetic, the re-entrancy guards) runs under `dotnet test`
+through `tests/backends/Kolvir.Backend.AppKit.Tests`, and the view-level half is
+`tests/backends/Kolvir.Backend.AppKit.Harness`, a console program because AppKit only builds its
+objects on the process's main thread. Neither can reach the input manager itself: on macOS the marked
+text, the commit and the candidate list were driven by hand over `ssh` with a real Japanese source
+against the demo's readout, and `dev-docs/IME.md` section 7.7 records which of those items were
+measured and which are still a checklist. One of those items is where the real defect was, and the
+shape of it is worth stating because it reads like a bug that is not one: **a macOS conversion takes
+two Returns by design** - the first confirms the conversion inside the composition, leaving the chosen
+kanji as marked text, and the second ends the composition so the text lands. `TextEdit` and a stock
+`NSTextView` do the same, and no application treats the second Return as unusual; do not read it as a
+workaround. What was wrong here is that this backend took the first Return, and Tab, before the input
+method could use them, so the composition was reset while the input method still held the mark and the
+second Return - the one a person presses - had nothing left to complete. The key ordering in section
+6.3 is the fix, and Tab, the arrows, a mouse click and the two-step confirmation were then verified by
+hand. A clicked candidate arrives as marked text with no key event and commits through the same
+`insertText` with `replacement = NSNotFound` the keyboard route produces, so there is no second commit
+geometry. Section 7.7 item 9 has the whole record.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and

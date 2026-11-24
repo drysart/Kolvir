@@ -146,40 +146,6 @@ internal static class AppKitKeyMap
     }
 
     /// <summary>
-    /// The text an event inserts. Modifier-only keys and the non-text keys (arrows, Escape, Return,
-    /// function keys) arrive as control characters or private-use code points; those are dropped
-    /// because the UI library handles them through <see cref="Key"/> instead.
-    /// </summary>
-    public static string ToText(NSEvent evt)
-    {
-        // The characters already carry the effect of Shift, the keyboard layout and Option dead
-        // keys (Option+E then E gives an accented letter), so they are used as they arrive.
-        var characters = evt.Characters;
-
-        if (string.IsNullOrEmpty(characters))
-        {
-            return string.Empty;
-        }
-
-        return ContainsOnlyText(characters) ? characters : string.Empty;
-    }
-
-    private static bool ContainsOnlyText(string characters)
-    {
-        foreach (var c in characters)
-        {
-            // C0 controls, Delete, and the function-key range (NSUpArrowFunctionKey and friends,
-            // which start at U+F700) never represent typed text.
-            if (c < 0x20 || c == 0x7F || (c >= 0xF700 && c <= 0xF8FF))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
-
-    /// <summary>
     /// The key equivalent character for a shortcut key, or null for a key AppKit cannot spell that
     /// way. AppKit describes a menu shortcut as a character rather than a key code, which is why
     /// the arrows and the other non-text keys use the function-key code points.
