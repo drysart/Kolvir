@@ -1,3 +1,4 @@
+using System.Text;
 using SkiaSharp;
 
 namespace Kolvir.Backend.Gtk4;
@@ -65,6 +66,7 @@ public sealed class Gtk4SkiaView : IDisposable
     private readonly Gtk.DrawingArea _area;
     private readonly Gtk.Picture _picture;
     private readonly Gtk.GLArea? _glArea;
+    private readonly Gtk.IMContext _im;
     private readonly GLib.SourceFunc _redrawIdle;
     private readonly GLib.SourceFunc _pictureIdle;
     private readonly GLib.SourceFunc _notifyMetrics;
@@ -90,6 +92,9 @@ public sealed class Gtk4SkiaView : IDisposable
     private int _metricsWidth;
     private int _metricsHeight;
     private int _metricsScale;
+
+    /// <summary>True while the input method has told the host about uncommitted text.</summary>
+    private bool _composing;
 
     private bool _inDraw;
     private bool _redrawPending;
@@ -202,6 +207,21 @@ public sealed class Gtk4SkiaView : IDisposable
         Host.AddInvalidatedHandler(OnHostInvalidated);
         Host.AddCursorChangedHandler(OnHostCursorChanged);
         Theme.AddChangedHandler(OnThemeChanged);
+
+        // The input method drives the same text path a keystroke does: it decides whether a key is a
+        // composition step or ordinary text, and answers with preedit signals or a commit. The
+        // multicontext is the object that selects an implementation from GTK_IM_MODULE and falls back
+        // to the simple context; Gtk.IMContext is only its base class.
+        _im = Gtk.IMMulticontext.New();
+        _im.SetClientWidget(_area);
+
+        // A drawing area is not a GtkEntry, so this is stated rather than inherited. The simplest
+        // context honours it by reporting the preedit for us to draw instead of showing none.
+        _im.SetUsePreedit(true);
+        _im.OnCommit += OnImCommit;
+        _im.OnPreeditStart += OnImPreeditStart;
+        _im.OnPreeditChanged += OnImPreeditChanged;
+        _im.OnPreeditEnd += OnImPreeditEnd;
 
         AttachInput();
     }
@@ -472,6 +492,12 @@ public sealed class Gtk4SkiaView : IDisposable
         _frame?.Dispose();
         _frame = null;
         _framePixels = IntPtr.Zero;
+
+        _im.OnCommit -= OnImCommit;
+        _im.OnPreeditStart -= OnImPreeditStart;
+        _im.OnPreeditChanged -= OnImPreeditChanged;
+        _im.OnPreeditEnd -= OnImPreeditEnd;
+        _im.Dispose();
 
         _gl?.Dispose();
         _gl = null;
@@ -1006,6 +1032,23 @@ public sealed class Gtk4SkiaView : IDisposable
         key.OnKeyPressed += OnKeyPressed;
         key.OnKeyReleased += OnKeyReleased;
         _area.AddController(key);
+
+        // A composition cannot outlive the focus: the input method is told when the drawing area
+        // gains or loses it, and any preedit the host still holds is dropped on the way out.
+        var focus = Gtk.EventControllerFocus.New();
+        focus.OnEnter += OnFocusEnter;
+        focus.OnLeave += OnFocusLeave;
+        _area.AddController(focus);
+    }
+
+    private void OnFocusEnter(Gtk.EventControllerFocus sender, EventArgs args) => _im.FocusIn();
+
+    private void OnFocusLeave(Gtk.EventControllerFocus sender, EventArgs args)
+    {
+        _composing = false;
+        Host.CancelComposition();
+        _im.FocusOut();
+        _im.Reset();
     }
 
     private void OnPressed(Gtk.GestureClick gesture, Gtk.GestureClick.PressedSignalArgs args)
@@ -1088,7 +1131,13 @@ public sealed class Gtk4SkiaView : IDisposable
         return Host.ProcessMouseWheel(_pointer, delta, Gtk4KeyMap.MapModifiers(sender.GetCurrentEventState()));
     }
 
-    /// <summary>Forwards a key press; returns true when the UI consumed it.</summary>
+    /// <summary>Forwards a key press; returns true when the UI or the input method consumed it.</summary>
+    /// <remarks>
+    /// The library sees the key first, so a shortcut, a menu mnemonic or an editing key it owns is
+    /// never handed to the input method. Everything it leaves alone belongs to the input method,
+    /// which decides whether the key is a composition step (a dead key, a Compose sequence) or
+    /// ordinary text, and answers by emitting <c>Commit</c> or the preedit signals.
+    /// </remarks>
     private bool OnKeyPressed(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyPressedSignalArgs args)
     {
         var modifiers = ModifiersOf(args.Keyval, args.State);
@@ -1096,17 +1145,119 @@ public sealed class Gtk4SkiaView : IDisposable
 
         if (key != Key.None && Host.ProcessKeyDown(key, modifiers))
         {
+            // The key ended whatever the input method was composing, because it never saw it. Reset
+            // the context so its own state does not carry the composition into the next key.
+            if (_composing)
+            {
+                _composing = false;
+                _im.Reset();
+            }
+
             return true;
         }
 
-        var text = Gtk4KeyMap.MapText(args.Keyval, args.State);
-        if (text is null)
+        return sender.GetCurrentEvent() is { } keyEvent && _im.FilterKeypress(keyEvent);
+    }
+
+    private void OnImCommit(Gtk.IMContext sender, Gtk.IMContext.CommitSignalArgs args)
+    {
+        _composing = false;
+        Host.CommitComposition(args.Str ?? string.Empty);
+    }
+
+    private void OnImPreeditStart(Gtk.IMContext sender, EventArgs args)
+    {
+        _composing = Host.BeginComposition();
+        if (_composing)
         {
-            return false;
+            MoveImCursor();
+        }
+    }
+
+    private void OnImPreeditChanged(Gtk.IMContext sender, EventArgs args)
+    {
+        sender.GetPreeditString(out var text, out var attributes, out int cursor);
+
+        // The attribute list is ours to release: it describes clause styling, which v1 does not use.
+        attributes?.Dispose();
+
+        Host.UpdateComposition(text, ToCharacterIndex(text, cursor));
+        _composing = text.Length > 0;
+
+        if (_composing)
+        {
+            MoveImCursor();
+        }
+    }
+
+    private void OnImPreeditEnd(Gtk.IMContext sender, EventArgs args)
+    {
+        _composing = false;
+        Host.CancelComposition();
+    }
+
+    /// <summary>
+    /// Tells the input method where the candidate window belongs: at the caret of the focused
+    /// control, in the drawing area's own coordinates, which are the host's logical pixels.
+    /// </summary>
+    private void MoveImCursor()
+    {
+        if (!Host.TryGetCaretBounds(out var caret))
+        {
+            return;
         }
 
-        Host.ProcessTextInput(text);
-        return true;
+        _im.SetCursorLocation(new Gdk.Rectangle
+        {
+            X = (int)MathF.Round(caret.Left),
+            Y = (int)MathF.Round(caret.Top),
+            Width = Math.Max(1, (int)MathF.Round(caret.Width)),
+            Height = Math.Max(1, (int)MathF.Round(caret.Height)),
+        });
+    }
+
+    /// <summary>
+    /// Converts the context's preedit caret position to an index into <paramref name="text"/>.
+    /// </summary>
+    /// <remarks>
+    /// The unit is measured on the Linux host rather than assumed, and this converts defensively
+    /// either way: a position is pulled back to a character boundary so it never splits a surrogate
+    /// pair, and a position past the end of the string can only be a UTF-8 byte offset, which is
+    /// mapped back to the character it falls inside. A multi-byte preedit is the case that tells the
+    /// two apart.
+    /// </remarks>
+    private static int ToCharacterIndex(string text, int position)
+    {
+        if (position <= 0)
+        {
+            return 0;
+        }
+
+        if (position < text.Length)
+        {
+            return char.IsLowSurrogate(text[position]) ? position - 1 : position;
+        }
+
+        if (position == text.Length)
+        {
+            return position;
+        }
+
+        int bytes = 0;
+        for (int i = 0; i < text.Length;)
+        {
+            int chars = char.IsSurrogatePair(text, i) ? 2 : 1;
+            int size = Encoding.UTF8.GetByteCount(text.AsSpan(i, chars));
+            if (bytes + size > position)
+            {
+                return i;
+            }
+
+            bytes += size;
+            i += chars;
+        }
+
+        return text.Length;
     }
 
     private void OnKeyReleased(Gtk.EventControllerKey sender, Gtk.EventControllerKey.KeyReleasedSignalArgs args)

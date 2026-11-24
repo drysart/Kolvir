@@ -33,6 +33,14 @@ public class TextBox : Control
     private char _passwordChar = '\u2022';
 
     /// <summary>
+    /// The uncommitted text of a platform input method, and where the platform's caret sits inside
+    /// it. Deliberately outside <see cref="Text"/>: a preedit is a proposal, so nothing that reads
+    /// the value - validation, undo, <see cref="MaxLength"/>, the text-changed event - sees it.
+    /// </summary>
+    private string _preeditText = string.Empty;
+    private int _preeditCaretIndex;
+
+    /// <summary>
     /// True while <see cref="ReplaceRange"/> is assigning <see cref="Text"/> on the user's behalf,
     /// so the setter knows the change is already recorded as that edit rather than as a
     /// programmatic assignment.
@@ -235,23 +243,74 @@ public class TextBox : Control
     {
         get
         {
+            SKRect bounds;
+
             if (MultilineFeature is { } multiline)
             {
-                return multiline.GetCaretBounds(this, Viewport);
+                bounds = multiline.GetCaretBounds(this, Viewport);
             }
-
-            var content = TextRect;
-            if (content.Width <= 0f || content.Height <= 0f)
+            else
             {
-                return SKRect.Empty;
+                var content = TextRect;
+                if (content.Width <= 0f || content.Height <= 0f)
+                {
+                    return SKRect.Empty;
+                }
+
+                float lineHeight = EffectiveFont.LineHeight;
+                float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
+                float x = content.Left - _scrollX + MeasureX(DisplayText, _caretIndex);
+                bounds = new SKRect(x, top, x + _caret.Width, top + lineHeight);
             }
 
-            float lineHeight = EffectiveFont.LineHeight;
-            float top = content.Top + MathF.Max(0f, (content.Height - lineHeight) / 2f);
-            float x = content.Left - _scrollX + MeasureX(DisplayText, _caretIndex);
-            return new SKRect(x, top, x + _caret.Width, top + lineHeight);
+            // The preedit is drawn in front of the committed text, so the caret follows it: the
+            // drawn caret, the autocomplete list and the platform's candidate window all agree.
+            float preedit = CurrentPreeditWidth;
+            return preedit > 0f
+                ? new SKRect(bounds.Left + preedit, bounds.Top, bounds.Right + preedit, bounds.Bottom)
+                : bounds;
         }
     }
+
+    /// <summary>The caret in host coordinates, which is what a platform input method anchors to.</summary>
+    internal override bool TryGetCaretBounds(out SKRect bounds)
+    {
+        var caret = CaretBounds;
+        if (caret.IsEmpty)
+        {
+            bounds = default;
+            return false;
+        }
+
+        var origin = GetPositionInHost();
+        var scale = EffectiveScaleMultiplier;
+        bounds = new SKRect(
+            origin.X + (caret.Left * scale),
+            origin.Y + (caret.Top * scale),
+            origin.X + (caret.Right * scale),
+            origin.Y + (caret.Bottom * scale));
+
+        return true;
+    }
+
+    /// <summary>True while the field holds uncommitted text from a platform input method.</summary>
+    internal bool IsComposing => _preeditText.Length > 0;
+
+    /// <summary>The uncommitted text, held outside <see cref="Text"/>.</summary>
+    internal string PreeditText => _preeditText;
+
+    /// <summary>Where the platform's caret sits inside <see cref="PreeditText"/>.</summary>
+    internal int PreeditCaretIndex => _preeditCaretIndex;
+
+    /// <summary>The preedit as it is painted: a password field masks it like the value.</summary>
+    private string PreeditDisplay =>
+        _isPassword && _preeditText.Length > 0
+            ? new string(_passwordChar, _preeditText.Length)
+            : _preeditText;
+
+    /// <summary>How wide the painted preedit is, in the box's own logical pixels.</summary>
+    private float CurrentPreeditWidth =>
+        _preeditText.Length == 0 ? 0f : EffectiveFont.MeasureWidth(PreeditDisplay);
 
     /// <summary>Index of the insertion point (0 .. <see cref="Control.Text"/>.Length).</summary>
     public int CaretIndex
@@ -651,7 +710,8 @@ public class TextBox : Control
             // the glyphs is drawn here, so the order is the same on a one-line field.
             var area = Viewport.Text;
             PaintUnderText(canvas, area);
-            multiline.Paint(this, canvas, Viewport, _placeholderText);
+            multiline.Paint(this, canvas, Viewport, _preeditText.Length == 0 ? _placeholderText : string.Empty);
+            PaintPreedit(canvas, area);
             PaintCaret(canvas, area);
             return;
         }
@@ -677,7 +737,10 @@ public class TextBox : Control
 
         string text = display;
         var color = EffectiveForeColor;
-        if (text.Length == 0 && !string.IsNullOrEmpty(_placeholderText))
+
+        // The placeholder is for an empty field, not for one a platform input method is filling in:
+        // showing it under the preedit puts two texts at the same caret.
+        if (text.Length == 0 && _preeditText.Length == 0 && !string.IsNullOrEmpty(_placeholderText))
         {
             text = _placeholderText;
             color = Theme.Placeholder;
@@ -695,6 +758,8 @@ public class TextBox : Control
         }
 
         canvas.Restore();
+
+        PaintPreedit(canvas, content);
 
         PaintCaret(canvas, content);
     }
@@ -743,6 +808,53 @@ public class TextBox : Control
         }
 
         SpanFeature?.Paint(this, canvas);
+        canvas.Restore();
+    }
+
+    /// <summary>
+    /// Draws the uncommitted text of a platform input method at the caret: the field's own font and
+    /// text colour, one underline, and the caret drawn after it. Clipped to the area the text is
+    /// laid out in, so a preedit past the right edge of a multi-line field clips rather than
+    /// re-flowing the document.
+    /// </summary>
+    private void PaintPreedit(SKCanvas canvas, SKRect area)
+    {
+        if (_preeditText.Length == 0 || area.Width <= 0f || area.Height <= 0f)
+        {
+            return;
+        }
+
+        var caret = CaretBounds;
+        if (caret.IsEmpty)
+        {
+            return;
+        }
+
+        var text = PreeditDisplay;
+        float width = EffectiveFont.MeasureWidth(text);
+        if (width <= 0f)
+        {
+            return;
+        }
+
+        // The caret rect already sits after the preedit, so the run starts one preedit-width back.
+        float left = caret.Left - width;
+        float baseline = caret.Top + EffectiveFont.BaselineOffset;
+        var color = EffectiveEnabled ? EffectiveForeColor : Theme.DisabledForeground;
+
+        canvas.Save();
+        canvas.ClipRect(area);
+
+        using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = color };
+        canvas.DrawText(text, left, baseline, SKTextAlign.Left, EffectiveFont.SkFont, paint);
+
+        // One underline for the whole run: v1 has no clause model, so a single underline is all the
+        // preedit has to say.
+        paint.Style = SKPaintStyle.Stroke;
+        paint.StrokeWidth = 1f;
+        float underline = baseline + 2f;
+        canvas.DrawLine(left, underline, left + width, underline, paint);
+
         canvas.Restore();
     }
 
@@ -854,6 +966,15 @@ public class TextBox : Control
         bool shift = (e.Modifiers & Modifiers.Shift) != 0;
         bool control = (e.Modifiers & Modifiers.Control) != 0;
 
+        // The library sees a key before the platform's input method does, so a key this box acts on
+        // ends the preedit first: the platform's uncommitted text cannot be edited by a key the
+        // platform never saw. Keys the box leaves alone - the letters that extend a composition -
+        // travel on to the input method with the preedit still in place.
+        if (IsComposing && IsKeyThatEndsComposition(e.Key, control))
+        {
+            ClearPreedit();
+        }
+
         // The history sees the undo keys first, so neither the multi-line keys nor the editing
         // commands below can shadow Ctrl+Z / Ctrl+Y / Ctrl+Shift+Z. Control is the library's
         // accelerator modifier; on macOS a Command chord never reaches the view at all, so the
@@ -949,6 +1070,20 @@ public class TextBox : Control
     }
 
     /// <summary>
+    /// True for the keys the box acts on itself: a caret move, an edit, or a command. A key this
+    /// returns false for is left to the platform input method, which is what lets a composition
+    /// continue while the user keeps typing.
+    /// </summary>
+    private static bool IsKeyThatEndsComposition(Key key, bool control) => key switch
+    {
+        Key.Left or Key.Right or Key.Up or Key.Down => true,
+        Key.Home or Key.End or Key.PageUp or Key.PageDown => true,
+        Key.Backspace or Key.Delete or Key.Enter or Key.Tab or Key.Escape => true,
+        Key.A or Key.C or Key.X or Key.V => control,
+        _ => false,
+    };
+
+    /// <summary>
     /// Inserts typed text at the caret, replacing the selection. The text is sanitised first, so a
     /// single-line box drops control characters and a multi-line box normalises line breaks, and
     /// nothing is inserted into a read-only box or when the text is empty.
@@ -968,8 +1103,64 @@ public class TextBox : Control
             return;
         }
 
+        // A commit ends a composition before it inserts, and an ordinary keystroke after a
+        // composition that was cancelled elsewhere must not leave a preedit on screen.
+        ClearPreedit();
+
         InsertText(text);
         e.Handled = true;
+    }
+
+    /// <summary>
+    /// Takes a composition when the field can be written to, so a read-only or disabled box shows
+    /// no preedit. It still receives the commit as ordinary text, because a commit is not optional.
+    /// </summary>
+    protected override bool OnCompositionStarted()
+    {
+        if (ReadOnly || !EffectiveEnabled)
+        {
+            return false;
+        }
+
+        ClearPreedit();
+        return true;
+    }
+
+    /// <summary>
+    /// Holds the preedit and its caret outside the value. Nothing here touches
+    /// <see cref="Control.Text"/>, the selection, the undo history or the text-changed event.
+    /// </summary>
+    protected override bool OnCompositionUpdated(string text, int caretIndex)
+    {
+        if (ReadOnly || !EffectiveEnabled)
+        {
+            return false;
+        }
+
+        _preeditText = text;
+        _preeditCaretIndex = Math.Clamp(caretIndex, 0, _preeditText.Length);
+
+        // A single-line field follows the preedit the way it follows the caret; a multi-line field
+        // keeps the caret visible and lets the preedit clip at the right edge.
+        EnsureCaretVisible();
+        Invalidate();
+
+        return true;
+    }
+
+    /// <summary>Drops the preedit without touching the value, the selection or the undo history.</summary>
+    protected override void OnCompositionCancelled() => ClearPreedit();
+
+    private void ClearPreedit()
+    {
+        if (_preeditText.Length == 0 && _preeditCaretIndex == 0)
+        {
+            return;
+        }
+
+        _preeditText = string.Empty;
+        _preeditCaretIndex = 0;
+        Invalidate();
     }
 
     /// <summary>
@@ -1229,7 +1420,7 @@ public class TextBox : Control
             return;
         }
 
-        float caretX = MeasureX(DisplayText, _caretIndex);
+        float caretX = MeasureX(DisplayText, _caretIndex) + CurrentPreeditWidth;
         if (caretX - _scrollX > width - HorizontalCaretPadding)
         {
             _scrollX = caretX - width + HorizontalCaretPadding;
@@ -1251,7 +1442,7 @@ public class TextBox : Control
         }
 
         float width = TextRect.Width;
-        float textWidth = EffectiveFont.MeasureWidth(DisplayText);
+        float textWidth = EffectiveFont.MeasureWidth(DisplayText) + CurrentPreeditWidth;
         float max = MathF.Max(0f, textWidth - width + HorizontalCaretPadding + _caret.Width);
         _scrollX = Math.Clamp(_scrollX, 0f, max);
     }

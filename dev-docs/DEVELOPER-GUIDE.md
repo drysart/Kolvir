@@ -2066,6 +2066,31 @@ city.AutoCompleteCustomSource.Add("Amsterdam");
 city.AutoCompleteCustomSource.Add("Athens");
 ```
 
+### Text composition
+
+A text box can hold text a platform input method has not committed yet: the preedit of a dead key,
+a Compose sequence, or an IME syllable. The preedit is drawn at the caret and kept outside `Text`,
+so the value, the selection, undo, validation, `MaxLength` and the text-changed event never see it.
+The commit goes through the ordinary text path, so it is indistinguishable from typing.
+
+The host methods are what a backend calls, in the order a platform reports them:
+
+| Member | Behaviour |
+| --- | --- |
+| `UiHost.BeginComposition()` | Asks the focused control to take a composition. False when nothing is focused, or when the control declines - a read-only or disabled field. |
+| `UiHost.UpdateComposition(text, caretIndex)` | The preedit and the platform's caret inside it. Touches neither `Text` nor the selection. |
+| `UiHost.CommitComposition(text)` | Drops the preedit, then routes the text through `ProcessTextInput`, so the input sinks and the control see typed text. |
+| `UiHost.CancelComposition()` | Drops the preedit and leaves nothing behind, including no undo entry. |
+| `UiHost.TryGetCaretBounds(out SKRect)` | The caret of the focused control in host coordinates, which is where a candidate window belongs. A control with no caret answers its own bounds. |
+
+A control opts in by overriding `OnCompositionStarted`, `OnCompositionUpdated` and
+`OnCompositionCancelled`. The defaults decline, so a non-text control ignores composition and still
+receives the commit as ordinary text. A focus change cancels, and a key the text box acts on cancels
+the preedit first, because the library sees a key before the platform's input method does.
+
+This is implemented for GTK4 only. `dev-docs/IME.md` is the design: the Win32 and macOS
+integrations, the invariants, the caret seam, and what is still open.
+
 ### Multi-line text
 
 `Multiline` turns the same `TextBox` into a multi-line editor. It is an opt-in extension in
