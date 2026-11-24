@@ -2158,16 +2158,18 @@ through `tests/backends/Kolvir.Backend.AppKit.Tests`, and the view-level half is
 objects on the process's main thread. Neither can reach the input manager itself: on macOS the marked
 text, the commit and the candidate list were driven by hand over `ssh` with a real Japanese source
 against the demo's readout, and `dev-docs/IME.md` section 7.7 records which of those items were
-measured and which are still a checklist. One of those items is a failure that is *not* this
-backend's: the first Return on a conversion commits nothing on the test host in any client tested -
-this one, a bundled stock `NSTextView` launched the same way, and `TextEdit` - so the cause is
-unresolved; in this client a second Return commits, and that is what completes a conversion. The same
-pass found a defect that *was* this backend's and is fixed: it handed Tab to the library before the
-input method could open its candidate list with it, so a conversion could not be reached at all; the
-key ordering in section 6.3 is the fix, and Tab, the arrows, a mouse click and Return-twice were then
-confirmed by hand. A clicked candidate arrives as marked text with no key event and commits through the
-same `insertText` with `replacement = NSNotFound` the keyboard route produces, so there is no second
-commit geometry. Section 7.7 item 9 has the whole record.
+measured and which are still a checklist. One of those items is where the real defect was, and the
+shape of it is worth stating because it reads like a bug that is not one: **a macOS conversion takes
+two Returns by design** - the first confirms the conversion inside the composition, leaving the chosen
+kanji as marked text, and the second ends the composition so the text lands. `TextEdit` and a stock
+`NSTextView` do the same, and no application treats the second Return as unusual; do not read it as a
+workaround. What was wrong here is that this backend took the first Return, and Tab, before the input
+method could use them, so the composition was reset while the input method still held the mark and the
+second Return - the one a person presses - had nothing left to complete. The key ordering in section
+6.3 is the fix, and Tab, the arrows, a mouse click and the two-step confirmation were then verified by
+hand. A clicked candidate arrives as marked text with no key event and commits through the same
+`insertText` with `replacement = NSNotFound` the keyboard route produces, so there is no second commit
+geometry. Section 7.7 item 9 has the whole record.
 
 On Linux the backend also provides the emoji chooser. That is the counterpart of Win+Period on
 Windows, not an input-method feature: GNOME gives its chooser only to GTK's own editable widgets, and

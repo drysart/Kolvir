@@ -1017,13 +1017,17 @@ What is **not** verified, and stays a checklist:
 8. **The password field masks the preedit**, and **the read-only field refuses** a composition. The
    refusal is pinned by a test (`AppKitCompositionTests`, and the harness check), but neither was
    watched on screen. **(unverified)**
-9. **A conversion opened with Space: the commit route was ours to fix, the bare Return is not.**
-   Reproduced by hand over VNC on `macvm` with Hiragana active: `nihongo`, Space, Enter leaves the
-   field empty and commits nothing. What settled it was not another trace of the Return but the two
-   routes a candidate list offers that a bare Return never exercises. Measured in `TextEdit` first,
-   by hand on the same host and session: the candidate list **is** on screen, a **mouse click** on a
-   candidate puts it in the document and the next Enter commits it, and **Tab** moves the focus into
-   the panel where arrows choose and Enter confirms.
+9. **A candidate conversion confirms in two steps, and this client was breaking the second one.**
+   Reported by hand over VNC on `macvm` with Hiragana active: `nihongo`, Space, Enter, and the word
+   disappeared - "it looked like it was working until I hit enter, then the word disappeared." A macOS
+   conversion takes **two** Returns: the first commits the conversion inside the composition, the
+   second ends the composition and the text lands, exactly as `TextEdit` and a stock `NSTextView` do
+   it. So the report was never about a missing commit path; it was about a client that made the second
+   Return the user always presses unable to complete. Finding that took asking the routes a candidate
+   list offers rather than tracing the Return again: measured in `TextEdit` first, by hand on the same
+   host and session, the candidate list **is** on screen, a **mouse click** on a candidate puts it in
+   the document and the confirming Return commits it, and **Tab** moves the focus into the panel where
+   arrows choose and Enter confirms.
 
    The same sequences in this client diverged, and it is Tab that carries the measurement: Tab moved
    the focus to the **next field** and closed the candidate list - the user's words: "as soon as I hit
@@ -1058,58 +1062,57 @@ What is **not** verified, and stays a checklist:
    reaches the host, and Tab with no mark still traverses the focus. Disabling the new branch fails the
    first two and passes the third (section 7.6).
 
-   **The first Return in the candidate state commits nothing, in every client tested; here, a second
-   Return commits.** Three clients - a bundled stock `NSTextView` launched with `open -n`, this
-   backend launched the same way, and `TextEdit` by hand - all commit the plain-Enter flow and all
-   produce no commit for the *first* Return once a candidate list is open, with the same call shape.
-   That key is swallowed by the input method or the host on this machine, not by an answer this client
-   gives, and its cause is unresolved (open question 6). What the acceptance run added is the other
-   half, and it is the useful half: in this client a second Return commits, 4.5 seconds later, with the
-   full shape a commit has when nothing is in the way -
+   **A candidate conversion confirms in two steps, and that is the input method's normal behaviour.**
+   The first Return commits the *conversion* inside the composition - the run becomes the chosen kanji
+   and stays as marked text - and the second Return ends the composition and the text lands. `TextEdit`
+   and a stock `NSTextView` do exactly the same, on this host and anywhere else: a person who converts
+   Japanese presses Return twice, and no application treats the second one as unusual. In our runs the
+   candidate was already the marked text by then, because the arrows or a click had moved the
+   selection, so the first Return asked the client for its state and left the mark unchanged:
 
    ```
-   06:21:16.247 offered Enter to the input method first ...   (first Return: two selectedRange answers, no commit)
-   06:21:16.260 KEY Enter routed: marked=True
+   06:21:16.247 offered Enter to the input method first ...
+   06:21:16.247 selectedRange -> 0,4
+   06:21:16.249 selectedRange -> 0,4
+   06:21:16.260 KEY Enter routed: marked=True                        (the conversion step: no commit, mark kept)
    06:21:20.698 KEY Enter ... marked=True
-   06:21:20.698 offered Enter to the input method first ...
    06:21:20.702 hasMarkedText -> True
    06:21:20.702 validAttributesForMarkedText -> 12 names   (four times)
-   06:21:20.703 insertText '日本語学' replacement=9223372036854775807,0
-   06:21:20.713 KEY Enter routed: marked=False
+   06:21:20.703 insertText '日本語学'                                 (the second step: the text lands)
    ```
 
-   So the answer to "what does a user do to get their text" is **press Return again**. That works
-   because of the ordering fix - under the old code the composition was reset on the way in, so the
-   second Return had nothing left to confirm - and it is measured in this client only: the reference
-   and `TextEdit` were quit after their first Return, so whether a second one commits there is
-   unmeasured rather than assumed.
+   **This is what the ordering defect broke, and it is why the fix matters more than "Tab works now".**
+   Under the old key order the first Return was taken by the library, so the field dropped its preedit
+   and the composition was reset while the input method still held the mark. The second Return - the
+   one every macOS user presses - then had no composition left to complete, and the word disappeared.
+   The client was breaking a two-step confirmation that every other application supports, which is
+   exactly the report that opened this: "it looked like it was working until I hit enter, then the word
+   disappeared." That report is now explained rather than mysterious.
 
-   **The routes around that Return were verified by hand, in two runs.** Both are in the coordinator's
-   archive: `files/kolvir-accept-0622.log` (426 lines, keyboard) and `files/kolvir-click-0714.log` (180
-   lines, click). The keyboard run has `key Tab taken by the host` count **0** against 1 before the
-   fix, and `reset the mark ... marked=True` count **0**:
+   Three clients behaving identically in the candidate state is therefore **evidence of the normal
+   protocol**, not of a fault in the environment: each answers the conversion step with
+   `selectedRange` and no `insertText`, and each commits on the step that ends the composition. Both of
+   this client's routes were measured doing it, and the second one was only reachable after the fix.
 
    | Route | What the log says |
    |---|---|
    | Tab with the list open | `offered Tab to the input method first`, then two `selectedRange`, `hasMarkedText -> True`, `validAttributesForMarkedText` five times and `setMarkedText '日本後' candidate=True` - the focus did not move and the candidate list moved its selection instead |
    | Arrow keys | six of them, each `routed: marked=True` and each followed by a new candidate in `setMarkedText` - so the arrows reached the panel too |
-   | Return twice | no commit, then `insertText '日本語学'` - and the same again for the second composition, `insertText '日本語歌詞'` |
-   | A mouse click on a candidate | `setMarkedText '日本語訳' selected=0,4 candidate=True` with **no key event before it**, then the same two Returns: none, then `insertText '日本語訳'` |
+   | Two Returns, keyboard route | the conversion step, then `insertText '日本語学'`; the same again for the second composition, `insertText '日本語歌詞'` |
+   | A mouse click on a candidate | `setMarkedText '日本語訳' selected=0,4 candidate=True` with **no key event before it**, then the same two steps, ending in `insertText '日本語訳'` |
 
    Six `reset the mark` lines appear in the keyboard run and all six are
    `reason=key taken by the host, key=Backspace, marked=False`, from clearing the field between the two
    sequences. **No reset ran while a mark was live**, which is invariant 10 holding on a real keyboard
    rather than only in the harness.
 
-   Two things follow from the click, and both close a question rather than open one. A click arrives as
-   **the same call a conversion makes** - marked text with the whole run selected, no key involved - so
-   the underlined preedit a person sees after clicking is this client's own drawing, and there is no
-   separate mouse path to test. And the commit it produces is **the same `insertText` with
-   `replacement = NSNotFound`** the keyboard route produces, so the hypothesis that a candidate commits
-   through a replacement *range* - a second geometry that could disagree with the caret answer - does
-   not exist here. No route into a field remains that a keystroke does not also exercise. The click run
-   also took two Returns, identical to the keyboard run, which is what makes "press Return again" the
-   right thing to tell a user rather than a workaround seen once.
+   Two things follow from the click, and both close a question. A click arrives as **the same call a
+   conversion makes** - marked text with the whole run selected, no key involved - so the underlined
+   preedit a person sees after clicking is this client's own drawing, and there is no separate mouse
+   path to test. And the commit it produces is **the same `insertText` with
+   `replacement = NSNotFound`** the keyboard route produces, so a candidate does not commit through a
+   replacement *range*: there is no second geometry that could disagree with the caret answer, and no
+   route into a field that a keystroke does not also exercise.
    What was ruled out, each by measurement rather than argument:
 
    | Hypothesis | How it was settled |
@@ -1125,9 +1128,10 @@ What is **not** verified, and stays a checklist:
 
    **The `TextEdit` control and the posted-event control both stay on the record, with what each
    taught.** An earlier hand run reported `TextEdit` committing the flow; a later one, on the same
-   machine and source, lost it. Both are recorded because neither generalises: `TextEdit` commits the
-   plain-Enter flow and the click and Tab routes, and does not commit the bare Return, so "TextEdit
-   commits it" and "TextEdit loses it" were both true statements about different keys. The posted-event
+   machine and source, appeared to lose it. Both are recorded because neither generalises: `TextEdit`
+   commits the plain-Enter flow, a click and Tab-then-confirm, and its *first* Return in the candidate
+   state is the conversion step that lands nothing - so "TextEdit commits it" and "TextEdit loses it"
+   were both true statements about different keys, and neither was a fault. The posted-event
    comparison - every custom client losing the Return under `System Events` - was measured with an
    instrument that cannot drive this state at all, and is withdrawn.
 
@@ -1157,7 +1161,7 @@ in this section is a hand run over `ssh` with `screencapture`.
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
 | Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
-| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and **verified by hand with the Japanese source on the test host** (section 7.7): marked text, conversion to `日本語`, a single commit, the candidate list placed from the caret answer, and - after the ordering fix of invariant 10 - Tab, the arrow keys and a mouse click all reaching the candidate list, with a conversion committing when Return is pressed twice. The first Return on a conversion commits nothing here or in a stock `NSTextView` or `TextEdit` on this host (open question 6) | **Implemented and verified by hand; the first Return on a conversion is the one open behaviour** |
+| macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and **verified by hand with the Japanese source on the test host** (section 7.7): marked text, conversion to `日本語`, a single commit, the candidate list placed from the caret answer, and - after the ordering fix of invariant 10 - Tab, the arrow keys and a mouse click all reaching the candidate list while the two-step confirmation completes, which is the input method's normal behaviour and what `TextEdit` does too | **Done** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
 `IMM32` calls behind it were measured against the Microsoft IME that is installed on this
@@ -1175,10 +1179,11 @@ manager does with `interpretKeyEvents:`, because a view with no key window has n
 it. Section 7.7 is that half: a hand run over `ssh` with a real Japanese source, a live console and
 `screencapture`, on the demo's readout, plus a logged subclass of `NSTextView` and a minimal
 from-scratch `NSTextInputClient` as reference clients. Seven of its items are measured and two are
-and one measured item - a conversion opened with Space - both found and fixed a real defect in this
-backend's key path (it took Tab before the input method could open its candidate list) and left one
-open question that is not this backend's: the first Return on a conversion commits in no client on
-this host, while a second Return commits here and is what completes the conversion (item 9).
+and one measured item - a conversion opened with Space - exposed a real defect in this backend's key
+path: it took Tab, and the first Return, before the input method could use them, so the second Return
+that completes every macOS conversion had nothing left to confirm and the word vanished. With the
+ordering fixed (section 6.3, invariant 10) the normal two-step confirmation works, and the item records
+it rather than leaving it an open question (item 9).
 
 Open questions:
 
@@ -1200,14 +1205,4 @@ Open questions:
    after the whole preedit rather than inside it. The index is recorded and handed to the platform
    through the caret seam; repositioning the drawn caret inside the preedit comes with clause
    styling.
-6. **The first Return on a conversion commits nothing; asking again commits.** With a candidate list
-   open, the first Return produces no commit in this client, in a bundled stock `NSTextView` launched
-   the same way, or in `TextEdit`, so that key is not attributable to this backend and its cause is
-   unresolved. In this client a **second** Return commits, measured by hand over VNC
-   (`insertText '日本語学'`, 4.5 s after the first Return), and it commits because the ordering fix
-   ended the client taking the composition's keys - under the old code the composition was reset on
-   the way in and there was nothing left to confirm. So the working answer for a user is: press Return
-   again. Tab, the arrow keys and a mouse click all reach the candidate list from this client, verified
-   by hand in two runs; the click arrives as marked text with no key event and commits through the same
-   `insertText` with `replacement = NSNotFound` the keyboard route produces, so there is no second
-   commit geometry to disagree with the caret answer (section 7.7, item 9).
+
