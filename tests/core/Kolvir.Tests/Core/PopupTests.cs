@@ -1380,6 +1380,45 @@ public sealed class PopupTests : HeadlessTestBase
         Assert.IsTrue(innerTask.IsCompletedSuccessfully);
     }
 
+    // `IPopupWindow` is public - it is the advanced popup control seam - so `OutsidePress` is a
+    // default interface member rather than a required one: a popup window written against an earlier
+    // version of the interface keeps compiling, and keeps the dismissal it always had. What it does
+    // not get is the chain rule, because the portable layer is never told where a press landed.
+    // LegacyPopupWindow below is that shape on purpose: it never writes the member, so this test
+    // failing to compile is itself the compatibility assertion.
+
+    [TestMethod]
+    public void APopupWindowThatDoesNotReportPressesKeepsClosingOneLevelPerDismissal()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new LegacyPopupService();
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.IsNull(
+            ((IPopupWindow)service.Windows[1]).OutsidePress,
+            "the default implementation reports nothing, so the assignment the popup layer makes is a no-op");
+
+        service.Windows[1].RaiseDismissed();
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the platform's own dismissal still closes the popup");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.IsFalse(outerTask.IsCompleted, "and it closes one level: the chain rule is what this backend does not get");
+
+        service.Windows[0].RaiseDismissed();
+
+        Assert.IsTrue(outerTask.IsCompletedSuccessfully, "the next dismissal takes the level above");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, outerTask.Result.Reason);
+    }
+
     [TestMethod]
     public void ClosingAParentPopupWindowClosesThePopupOpenedInsideIt()
     {
@@ -2138,6 +2177,76 @@ public sealed class PopupTests : HeadlessTestBase
         /// that window's client coordinates, to the chain. Returns whether a level was closed.
         /// </summary>
         public bool RaiseOutsidePress(SKPoint point) => OutsidePress?.Invoke(point) ?? false;
+    }
+
+    /// <summary>
+    /// A popup service that hands out <see cref="LegacyPopupWindow"/> surfaces: the shape a popup
+    /// window written against an earlier version of <see cref="IPopupWindow"/> has, with no
+    /// <c>OutsidePress</c> of its own.
+    /// </summary>
+    private sealed class LegacyPopupService : IPopupService
+    {
+        /// <summary>The surfaces handed out, in the order they were asked for.</summary>
+        public List<LegacyPopupWindow> Windows { get; } = [];
+
+        public IPopupWindow? CreatePopup(UiHost windowHost, bool dismissOnOutsideClick, bool takesPresses)
+        {
+            var window = new LegacyPopupWindow(dismissOnOutsideClick, takesPresses);
+            Windows.Add(window);
+            return window;
+        }
+
+        public SKRect? GetPlacementArea(UiHost windowHost) => new SKRect(0f, 0f, 480f, 320f);
+    }
+
+    /// <summary>
+    /// A stand-in for a popup window written before <see cref="IPopupWindow.OutsidePress"/> existed:
+    /// it implements the interface and never mentions the member, which only compiles because that
+    /// member has a default implementation. It hosts and places the popup's content the way the
+    /// recording stand-in does, so what it exercises is the interface's default and not a stub that
+    /// would fail anyway.
+    /// </summary>
+    private sealed class LegacyPopupWindow : IPopupWindow
+    {
+        private readonly UiHost _host = new();
+
+        public LegacyPopupWindow(bool dismissesOnOutsideClick, bool takesPresses)
+        {
+            DismissesOnOutsideClick = dismissesOnOutsideClick;
+            TakesPresses = takesPresses;
+        }
+
+        public UiHost Host => _host;
+
+        public bool DismissesOnOutsideClick { get; }
+
+        public bool TakesPresses { get; }
+
+        public event Action<object>? Dismissed;
+
+        public void Show(UiHost windowHost, SKPoint location, SKSize size)
+        {
+            _host.Services = windowHost.Services;
+            _host.SetClientSize(size.Width, size.Height);
+        }
+
+        public void UpdateBounds(SKPoint location, SKSize size)
+        {
+            _host.SetClientSize(size.Width, size.Height);
+        }
+
+        public void Hide()
+        {
+        }
+
+        public void Dispose()
+        {
+            _host.Root = null;
+            Dismissed = null;
+        }
+
+        /// <summary>The platform closing the surface on the user's behalf.</summary>
+        public void RaiseDismissed() => Dismissed?.Invoke(this);
     }
 
     /// <summary>

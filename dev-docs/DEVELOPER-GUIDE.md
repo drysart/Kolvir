@@ -1735,6 +1735,16 @@ a backend whether to swallow the press: false means nothing closed, and the pres
 GTK4 needs nothing of its own there: its popovers take no grab, so the press arrives at the portable
 catcher, which is a control in the window's own tree and reports the same point.
 
+`OutsidePress` is a **default interface member** that reports nothing, and its answer is the one
+`IPopupWindow` implementation that an application has to choose between. A popup window written
+against an earlier version of the interface keeps compiling and keeps working - its popups are
+dismissed by the platform raising `Dismissed`, one level per press, which is what every backend did
+before the rule existed. What it does not get is the rule itself: a press behind a stack of its
+popups closes only the innermost, because the portable layer is never told where the press landed.
+Reporting the press is how a backend opts in, and it must then honour the answer - swallow the press
+when one closed, deliver it when none did - or the popup and the window behind it will disagree about
+who owns the click.
+
 GTK4 needs two things of its own, because a popover is styled and painted by the toolkit rather
 than by the backend:
 

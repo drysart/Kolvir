@@ -43,18 +43,33 @@ public interface IPopupWindow : IDisposable
     /// The popup layer assigns this while the popup is shown. It walks the chain of popups from the
     /// innermost level outward, closes every level the point is outside of, and stops at the first
     /// level the point is inside or the first level that does not dismiss on an outside press. A
-    /// backend therefore reports the press instead of dismissing the popup itself, which keeps the
-    /// platform presentation and the overlay presentation on one rule instead of two.
+    /// backend that reports its presses therefore follows the same rule the overlay presentation
+    /// does, instead of one of its own.
     /// </para>
     /// <para>
     /// The answer is whether the press closed a level, which is what tells the backend whether the
-    /// press belonged to a popup - and so must be swallowed - or to whatever it landed on. A backend
-    /// that never sees the press does not call this at all: GTK4's popovers take no grab, so the
-    /// press reaches the portable dismiss catcher, which is a control in the window's own tree and
-    /// knows the point.
+    /// press belonged to a popup - and so must be swallowed - or to whatever it landed on.
+    /// </para>
+    /// <para>
+    /// The default takes nothing and reports nothing, so a popup window written against an earlier
+    /// version of this interface still compiles and still works: its popups are dismissed the way
+    /// they always were, by the platform raising <see cref="Dismissed"/>, one level per press. What
+    /// such a backend does not get is the chain rule this member exists for - a press behind a stack
+    /// of its popups closes only the innermost, because the portable layer is never told where the
+    /// press landed and cannot decide how many levels it is outside of. Reporting the press is how a
+    /// backend opts in; every popup window in this repository does. A backend that never sees the
+    /// press needs nothing: GTK4's popovers take no grab, so the press reaches the portable dismiss
+    /// catcher, which is a control in the window's own tree and reports the point itself.
     /// </para>
     /// </remarks>
-    Func<SKPoint, bool>? OutsidePress { get; set; }
+    Func<SKPoint, bool>? OutsidePress
+    {
+        get => null;
+
+        // Left empty on purpose: the default is "this backend does not report presses", which is a
+        // working backend rather than a broken one - see the remarks on the property.
+        set { }
+    }
 
     /// <summary>
     /// Whether the popup takes the pointer at all, as opposed to passing it through to whatever it

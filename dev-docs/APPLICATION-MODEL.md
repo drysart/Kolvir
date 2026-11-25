@@ -362,6 +362,9 @@ than claiming to draw a window it does not draw). Two consequences worth knowing
   popup - and the session walks the chain outward, because the rectangle `TryGetPopupBounds` reports is
   already in the window's client coordinates at every level. GTK4 needs nothing of its own there: its
   popovers take no grab, so the press reaches the portable catcher, which reports the same point.
+  `IPopupWindow.OutsidePress` is a default interface member that reports nothing, so a popup window
+  written outside the library against the earlier interface still compiles and keeps the older
+  behaviour - one level per dismissal - rather than the rule; see the Developer Guide.
 
 Closing a popup still takes everything opened from it down with it, so the two rules do not contradict
 each other: a press takes the levels it is outside of, and a close takes the subtree under it.
