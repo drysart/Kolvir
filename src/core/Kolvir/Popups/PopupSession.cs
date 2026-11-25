@@ -99,6 +99,8 @@ internal sealed class PopupSession
 
     private Popup? _popup;
     private PopupResult? _result;
+    private PopupInputSink? _sink;
+    private IDisposable? _inputToken;
     private IDisposable? _popupToken;
     private IDisposable? _windowToken;
     private IDisposable? _displayedToken;
@@ -126,6 +128,17 @@ internal sealed class PopupSession
 
     /// <summary>The surface this popup owns, which is where a popup opened inside it belongs.</summary>
     public PopupSurface Surface { get; }
+
+    /// <summary>
+    /// The host whose input sinks see the keyboard while this popup is open.
+    /// </summary>
+    /// <remarks>
+    /// It is the window's host, because no backend popup window takes the keyboard and the keys
+    /// therefore keep arriving at the window that owns it. A popup opened inside another popup has
+    /// no window of its own to name, so it listens where the popup it sits in listens - which puts
+    /// both sinks on the same host and lets the newer one answer first.
+    /// </remarks>
+    public UiHost? KeyHost => _window?.Host ?? _surface.Parent?.KeyHost;
 
     /// <summary>Completes with the result the popup closed with.</summary>
     public Task<PopupResult> Completion => _completion.Task;
@@ -161,6 +174,25 @@ internal sealed class PopupSession
         }
 
         popup.Show(location);
+
+        ListenForKey();
+    }
+
+    /// <summary>
+    /// Takes the keyboard for as long as the popup is open: a sink on the host the keys arrive at,
+    /// which forwards them into the popup's own tree, and the focus put inside that tree so there is
+    /// something to forward to.
+    /// </summary>
+    private void ListenForKey()
+    {
+        if (KeyHost is not { } host)
+        {
+            return;
+        }
+
+        _sink = new PopupInputSink(this, _content, _anchor, _options.EscapeCloses);
+        _inputToken = host.AddInputSink(_sink);
+        _sink.FocusContent();
     }
 
     /// <summary>
@@ -220,6 +252,14 @@ internal sealed class PopupSession
             Surface.Current = null;
         }
 
+        // The surface this popup was shown on holds one popup at a time, so it has to forget this
+        // one too: a session that has closed but is still in Current looks like a popup that is
+        // open at that level, which would keep the level below from taking the keyboard back.
+        if (ReferenceEquals(_surface.Current, this))
+        {
+            _surface.Current = null;
+        }
+
         Detach();
 
         _completion.TrySetResult(result);
@@ -252,12 +292,25 @@ internal sealed class PopupSession
             Surface.Current = null;
         }
 
+        if (ReferenceEquals(_surface.Current, this))
+        {
+            _surface.Current = null;
+        }
+
         Detach();
     }
 
     /// <summary>Releases every hook the session holds and disposes the popup.</summary>
     private void Detach()
     {
+        // The keyboard is given up before the popup goes away, so no key can arrive while the
+        // content is being taken down, and so the focus the popup took has somewhere to go back to.
+        _inputToken?.Dispose();
+        _inputToken = null;
+
+        _sink?.Dispose();
+        _sink = null;
+
         _popupToken?.Dispose();
         _popupToken = null;
 

@@ -123,6 +123,12 @@ public sealed class PopupOptions
     public SKSize? MaximumSize { get; set; }
 
     /// <summary>Whether Escape closes the popup. Defaults to true.</summary>
+    /// <remarks>
+    /// Escape is consumed either way while a popup is showing. With this true it dismisses the popup
+    /// and completes the task with <see cref="PopupCloseReason.Escape"/>; with it false the popup
+    /// stays open and the key goes nowhere, because handing it on would let the control behind the
+    /// popup dismiss or cancel something the user never saw.
+    /// </remarks>
     public bool EscapeCloses { get; set; } = true;
 
     /// <summary>

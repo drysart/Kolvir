@@ -327,6 +327,18 @@ same declaration into a real key equivalent. This works because AppKit never rep
 matching item claims the key even when it is disabled, so a greyed-out command does not fall through
 to the control that has focus.
 
+**Keyboard forwarding.** `UiHost.AddInputSink(IInputSink)` is the seam through which something that
+is not the focused control can take the keyboard: the sinks are asked before the menu bar and before
+the focused control, for key presses and for typed text. An open menu uses it, and so does a shown
+popup - no backend popup takes the keyboard, so the window that has it does the forwarding. While a
+popup is open the focus goes to the first tab stop in its content, Escape dismisses it (unless
+`PopupOptions.EscapeCloses` says otherwise) and stays with the popup either way, Tab and Shift+Tab
+cycle the popup's own controls without reaching the window behind it, and everything else is
+delivered to the control inside the popup that has the focus. A popup opened from inside a popup is
+owned by the window and placed relative to its anchor, and it takes the keyboard over from the popup
+it was opened in for as long as it is open; the sink each popup registers on the window goes away
+with it, whichever of the five dismissal paths ended it.
+
 ### 4.4 Screens
 
 ```csharp

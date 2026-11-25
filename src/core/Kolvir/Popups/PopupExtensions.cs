@@ -15,6 +15,13 @@ namespace Kolvir;
 /// lives in a table keyed by the control, since an extension cannot add a field to it.
 /// </para>
 /// <para>
+/// While the popup is open the keyboard is forwarded into it: the focus goes to the first tab stop in
+/// the content, Escape dismisses the popup unless <see cref="PopupOptions.EscapeCloses"/> says
+/// otherwise, Tab and Shift+Tab cycle the popup's own controls, and every other key and typed
+/// character reaches the control inside it that has the focus. Nothing of that depends on the
+/// platform: no backend popup takes the keyboard, so the window that has it hands the keys on.
+/// </para>
+/// <para>
 /// One popup belongs to one owner surface at a time. A surface is a window, or a popup: a popup
 /// whose anchor sits inside another popup belongs to that popup, so opening a menu from a menu
 /// cancels only the level it was opened from and leaves the level above it alone. That is what makes

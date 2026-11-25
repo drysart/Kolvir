@@ -949,6 +949,221 @@ public sealed class PopupTests : HeadlessTestBase
         Assert.AreEqual(new SKPoint(200f, 150f), content.GetPositionInHost());
     }
 
+    // The keyboard a popup borrows while it is open. No backend popup takes the focus, so the
+    // window that has it forwards: these drive the window's own input entry points, which is what
+    // every backend calls.
+
+    [TestMethod]
+    public void AKeyReachesTheFocusedControlInsideThePopup()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var spy = new KeySpy();
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(spy);
+
+        anchor.ShowPopupAsync(content, SizedPopup());
+
+        Assert.IsTrue(spy.IsFocused, "opening the popup puts the keyboard into its own tree");
+        Assert.AreSame(spy, scene.Host.FocusedControl);
+
+        scene.Key(Key.A);
+
+        CollectionAssert.AreEqual(new[] { Key.A }, spy.Keys.ToArray(), "the key arrives at that control");
+    }
+
+    [TestMethod]
+    public void TypedTextReachesATextBoxInsideThePopup()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var textBox = new TextBox { Bounds = new SKRect(4f, 4f, 124f, 34f) };
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(textBox);
+
+        anchor.ShowPopupAsync(content, SizedPopup());
+
+        Assert.IsTrue(textBox.IsFocused, "the text box is the first tab stop in the popup");
+
+        scene.Type("Pop");
+
+        Assert.AreEqual("Pop", textBox.Text, "what the user types lands in the field they can see");
+    }
+
+    [TestMethod]
+    public void EscapeClosesThePopupAndCompletesWithEscape()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(new KeySpy());
+
+        var task = anchor.ShowPopupAsync(content, SizedPopup());
+
+        scene.Key(Key.Escape);
+
+        Assert.IsTrue(task.IsCompletedSuccessfully, "Escape is one of the five ways a popup ends");
+        Assert.AreEqual(PopupCloseReason.Escape, task.Result.Reason);
+        Assert.IsNull(content.Host, "and the popup is gone");
+    }
+
+    [TestMethod]
+    public void EscapeLeavesThePopupOpenAndGoesNowhereWhenItDoesNotClose()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var ownerSpy = new KeySpy { Bounds = new SKRect(200f, 200f, 260f, 224f) };
+        root.Controls.Add(ownerSpy);
+
+        var popupSpy = new KeySpy();
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(popupSpy);
+
+        var task = anchor.ShowPopupAsync(content, new PopupOptions
+        {
+            Size = new SKSize(140f, 90f),
+            EscapeCloses = false,
+        });
+
+        scene.Key(Key.Escape);
+
+        Assert.IsFalse(task.IsCompleted, "the popup was told to ignore Escape");
+        Assert.IsNotNull(content.Host, "so it is still showing");
+        Assert.AreEqual(0, popupSpy.Keys.Count, "and the key is not handed to a control inside it");
+        Assert.AreEqual(0, ownerSpy.Keys.Count, "nor to the control the window had focused");
+    }
+
+    [TestMethod]
+    public void TabCyclesThePopupsOwnControlsAndNotTheWindowBehindIt()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var ownerSpy = new KeySpy { Bounds = new SKRect(200f, 200f, 260f, 224f) };
+        root.Controls.Add(ownerSpy);
+
+        var first = new KeySpy();
+        var second = new KeySpy();
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(first);
+        content.Controls.Add(second);
+
+        anchor.ShowPopupAsync(content, SizedPopup());
+
+        Assert.IsTrue(first.IsFocused, "the popup starts on its first tab stop");
+
+        scene.Key(Key.Tab);
+        Assert.IsTrue(second.IsFocused, "Tab moves to the next control in the popup");
+        Assert.IsFalse(ownerSpy.IsFocused, "and never to one behind it");
+
+        scene.Key(Key.Tab);
+        Assert.IsTrue(first.IsFocused, "Tab wraps round to the first control rather than leaving");
+
+        scene.Key(Key.Tab, Modifiers.Shift);
+        Assert.IsTrue(second.IsFocused, "Shift+Tab wraps the other way");
+        Assert.IsTrue(scene.Host.FocusedControl is Control focused && (ReferenceEquals(focused, first) || ReferenceEquals(focused, second)),
+            "the window's focus stays inside the popup throughout");
+    }
+
+    [TestMethod]
+    public void ThePopupGivesTheKeyboardBackWhenItCloses()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var ownerSpy = new KeySpy { Bounds = new SKRect(200f, 200f, 260f, 224f) };
+        root.Controls.Add(ownerSpy);
+        ownerSpy.Focus();
+
+        var popupSpy = new KeySpy();
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(popupSpy);
+
+        var task = anchor.ShowPopupAsync(content, SizedPopup());
+        Assert.IsTrue(popupSpy.IsFocused, "the popup has the keyboard while it is open");
+
+        content.ClosePopup();
+
+        Assert.AreEqual(PopupCloseReason.Closed, task.Result.Reason);
+        Assert.IsTrue(anchor.IsFocused, "the control that opened the popup takes the focus back");
+
+        ownerSpy.Focus();
+        scene.Key(Key.A);
+
+        Assert.AreEqual(1, ownerSpy.Keys.Count, "the window's controls hear keys again");
+        Assert.AreEqual(0, popupSpy.Keys.Count, "and the popup that closed hears nothing");
+    }
+
+    [TestMethod]
+    public void APopupOpenedInsideAPopupRoutesKeysToTheInnermostOne()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var outerSpy = new KeySpy();
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 40f, 124f, 70f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(outerSpy);
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, SizedPopup());
+        Assert.IsTrue(outerSpy.IsFocused, "the outer popup holds the keyboard first");
+
+        var innerSpy = new KeySpy();
+        var innerContent = new Panel { Padding = Thickness.Empty };
+        innerContent.Controls.Add(innerSpy);
+
+        var innerTask = innerAnchor.ShowPopupAsync(innerContent, SizedPopup());
+        Assert.IsTrue(innerSpy.IsFocused, "the popup opened inside it takes the keyboard over");
+
+        scene.Key(Key.A);
+
+        Assert.AreEqual(1, innerSpy.Keys.Count, "the key goes to the innermost popup");
+        Assert.AreEqual(0, outerSpy.Keys.Count, "and not to the one it sits in");
+
+        scene.Key(Key.Escape);
+
+        Assert.AreEqual(PopupCloseReason.Escape, innerTask.Result.Reason);
+        Assert.IsFalse(outerTask.IsCompleted, "Escape unwinds one level at a time");
+
+        scene.Key(Key.Escape);
+
+        Assert.AreEqual(PopupCloseReason.Escape, outerTask.Result.Reason, "and the next press takes the level above");
+    }
+
+    /// <summary>A control that records the keys and the typed text that reach it, and takes both.</summary>
+    private sealed class KeySpy : Control
+    {
+        public KeySpy()
+        {
+            TabStop = true;
+            MinimumSize = new SKSize(40f, 24f);
+        }
+
+        /// <summary>The keys this control was given, in order.</summary>
+        public List<Key> Keys { get; } = new();
+
+        /// <summary>Everything typed into this control, as it arrived.</summary>
+        public string Typed { get; private set; } = string.Empty;
+
+        protected override void OnKeyDown(KeyEventArgs e)
+        {
+            base.OnKeyDown(e);
+            Keys.Add(e.Key);
+            e.Handled = true;
+        }
+
+        protected override void OnTextInput(TextInputEventArgs e)
+        {
+            base.OnTextInput(e);
+            Typed += e.Text;
+        }
+    }
+
     /// <summary>A window with an anchor near the top left and another button well away from it.</summary>
     private static (Panel Root, Button Anchor, Button Other) CreatePopupTree()
     {
