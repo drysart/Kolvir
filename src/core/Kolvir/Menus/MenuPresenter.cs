@@ -410,12 +410,13 @@ public sealed class MenuPresenter : IContextMenuPresenter
                 ? point
                 : new SKPoint(point.X * scale, point.Y * scale);
 
-        /// <summary>The area a popup may use: the display, or the window when it is painted inside it.</summary>
-        private static SKRect PlacementArea(UiHost host)
-        {
-            var service = host.GetService<IPopupService>() ?? PopupService.Current;
-            return service?.GetPlacementArea(host) ?? ClientOf(host);
-        }
+        /// <summary>
+        /// The area a popup may use: the display's work area when the platform answers for it, and the
+        /// window's client area when it does not - moved into this host's coordinates, which is what
+        /// a menu's own placement works in. It is the same answer the popup API places against, so a
+        /// menu opened by a right-click inside a popup may leave that popup.
+        /// </summary>
+        private static SKRect PlacementArea(UiHost host) => PopupGeometry.PlacementArea(host);
 
         private static SKRect ClientOf(UiHost host) => new(
             0f,

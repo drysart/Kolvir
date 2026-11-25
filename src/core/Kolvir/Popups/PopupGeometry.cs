@@ -15,6 +15,12 @@ namespace Kolvir;
 /// the outer popup's position every time the window moves.
 /// </para>
 /// <para>
+/// The area the fit and the clamp work against is the exception, and only in where it comes from:
+/// it is the display's, which the platform answers for the window, and it is moved into the anchor's
+/// space here. A popup opened inside a popup is a surface of its own, so the rectangle the popup it
+/// was opened from occupies is not the limit of where it may go.
+/// </para>
+/// <para>
 /// The popup's own size comes from <see cref="Popup.MeasureContent"/>, which is the host-space
 /// size: the content and <see cref="PopupOptions.Size"/> are logical, and
 /// <see cref="Popup.ScaleFactor"/> turns them into the room the popup actually takes. That is what
@@ -177,17 +183,35 @@ internal static class PopupGeometry
 
     /// <summary>
     /// The area a popup may occupy, in <paramref name="host"/>'s client coordinates: the display's
-    /// work area when the platform answers for it, and the host's own client area when it does not.
+    /// work area when the platform answers for it, and the window's own client area when it does not.
     /// </summary>
-    private static SKRect PlacementArea(UiHost host)
+    /// <remarks>
+    /// The question is put to the window, not to the host the anchor happens to sit in: a popup
+    /// opened inside another popup is still a surface of the window, so the room it may use is the
+    /// room the window has, not the rectangle the parent popup occupies. The platform answers in
+    /// the window's coordinates, so the answer is moved into the anchor's before the fit and the
+    /// clamp use it - the same translation the popup's own location gets on the way out.
+    /// </remarks>
+    internal static SKRect PlacementArea(UiHost host)
     {
-        var service = host.GetService<IPopupService>() ?? PopupService.Current;
+        var windowHost = host.WindowHost;
+        var service = windowHost.GetService<IPopupService>() ?? PopupService.Current;
 
-        return service?.GetPlacementArea(host) ?? new SKRect(
+        var area = service?.GetPlacementArea(windowHost) ?? new SKRect(
             0f,
             0f,
-            MathF.Max(1f, host.ClientSize.Width),
-            MathF.Max(1f, host.ClientSize.Height));
+            MathF.Max(1f, windowHost.ClientSize.Width),
+            MathF.Max(1f, windowHost.ClientSize.Height));
+
+        var origin = host.OriginInWindowHost;
+
+        return origin == default
+            ? area
+            : new SKRect(
+                area.Left - origin.X,
+                area.Top - origin.Y,
+                area.Right - origin.X,
+                area.Bottom - origin.Y);
     }
 
     private static SKPoint Add(SKPoint point, SKPoint offset) =>

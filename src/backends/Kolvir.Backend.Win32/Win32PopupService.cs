@@ -10,13 +10,13 @@ namespace Kolvir.Backend.Win32;
 /// </summary>
 internal sealed class Win32PopupService : IPopupService
 {
-    public IPopupWindow? CreatePopup(UiHost ownerHost, bool dismissOnOutsideClick, bool takesPresses)
+    public IPopupWindow? CreatePopup(UiHost windowHost, bool dismissOnOutsideClick, bool takesPresses)
     {
-        ArgumentNullException.ThrowIfNull(ownerHost);
+        ArgumentNullException.ThrowIfNull(windowHost);
 
         // A popup needs a native window to be owned by, which only exists once the owner has been
         // shown. Returning null falls back to drawing the popup inside the window.
-        if (ownerHost.Window?.Backend is not Win32WindowBackend backend || backend.Handle == IntPtr.Zero)
+        if (windowHost.Window?.Backend is not Win32WindowBackend backend || backend.Handle == IntPtr.Zero)
         {
             return null;
         }
@@ -25,11 +25,11 @@ internal sealed class Win32PopupService : IPopupService
     }
 
     /// <inheritdoc />
-    public SKRect? GetPlacementArea(UiHost ownerHost)
+    public SKRect? GetPlacementArea(UiHost windowHost)
     {
-        ArgumentNullException.ThrowIfNull(ownerHost);
+        ArgumentNullException.ThrowIfNull(windowHost);
 
-        if (ownerHost.Window?.Backend is not Win32WindowBackend backend || backend.Handle == IntPtr.Zero)
+        if (windowHost.Window?.Backend is not Win32WindowBackend backend || backend.Handle == IntPtr.Zero)
         {
             return null;
         }

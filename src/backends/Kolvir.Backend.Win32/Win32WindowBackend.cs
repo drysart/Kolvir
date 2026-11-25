@@ -1621,14 +1621,16 @@ public sealed class Win32WindowBackend : IWindowBackend
         // A press on the window that dismisses a popup belongs to that popup: it closes it and
         // stops there, so the control underneath does not also act on it. That is what makes
         // clicking the combo box that owns an open drop-down close it rather than reopen it, and it
-        // is what the overlay presentation gets from its dismiss catcher. A wheel turn and a move
-        // or a resize are not presses, so they dismiss and are still delivered.
+        // is what the overlay presentation gets from its dismiss catcher. A press closes the
+        // innermost popup of a chain and leaves the ones it was opened from up; a wheel turn and a
+        // move or a resize are not presses, so they dismiss every popup of the window and are still
+        // delivered.
         switch (message)
         {
             case NativeMethods.WmLButtonDown:
             case NativeMethods.WmRButtonDown:
             case NativeMethods.WmMButtonDown:
-                if (Win32PopupWindow.DismissForOwner(hwnd))
+                if (Win32PopupWindow.DismissInnermostForOwner(hwnd))
                 {
                     return IntPtr.Zero;
                 }
