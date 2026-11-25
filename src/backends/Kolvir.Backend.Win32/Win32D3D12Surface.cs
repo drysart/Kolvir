@@ -350,12 +350,19 @@ internal sealed unsafe class Win32D3D12Device : IDisposable
 /// Vulkan one over GL: the buffers are released and reallocated rather than a drawable being kept per
 /// size the window has ever had.
 /// </para>
+/// <para>
+/// The chain is one frame behind the window while a resize is being applied - the client area changes
+/// with <c>WM_SIZE</c>, and the buffer at the new size only exists once this tier has rebuilt it and
+/// presented. <see cref="D3D12.ScalingNone"/> is what makes that frame read as an unfinished edge
+/// rather than a rescaled picture; the reasoning is on the constant.
+/// </para>
 /// </remarks>
 internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 {
-    private Win32D3D12Surface(Win32D3D12Device device, IntPtr factory, IntPtr swapChain, uint bufferCount, IntPtr frameLatency, int width, int height)
+    private Win32D3D12Surface(Win32D3D12Device device, IntPtr hwnd, IntPtr factory, IntPtr swapChain, uint bufferCount, IntPtr frameLatency, int width, int height)
     {
         _device = device;
+        _hwnd = hwnd;
         _factory = factory;
         _swapChain = swapChain;
         _bufferCount = bufferCount;
@@ -370,6 +377,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
     private readonly Win32D3D12Device _device;
     private readonly uint _bufferCount;
     private readonly IntPtr _frameLatency;
+    private readonly IntPtr _hwnd;
     private IntPtr _factory;
     private IntPtr _swapChain;
     private int _width;
@@ -402,6 +410,13 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
     public string Renderer => _device.Renderer;
 
     public string DeviceKey => _device.AdapterKey;
+
+    /// <summary>What the chain currently holds: the buffer size it is presenting at, and its scaling.</summary>
+    /// <remarks>
+    /// The tier tracks the size it asked for in <c>_width</c>/<c>_height</c>; this asks DXGI instead, so
+    /// a test can tell "the resize was accepted" from "the tier believes the resize was accepted".
+    /// </remarks>
+    internal (int Width, int Height, int Scaling) Chain => D3D12.Describe(_swapChain);
 
     public bool MakeCurrent() => true;
 
@@ -456,7 +471,7 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
             return null;
         }
 
-        var surface = new Win32D3D12Surface(device, factory, swapChain, bufferCount, frameLatency, width, height);
+        var surface = new Win32D3D12Surface(device, hwnd, factory, swapChain, bufferCount, frameLatency, width, height);
 
         surface._skia = GRContext.CreateDirect3D(new GRD3DBackendContext
         {
@@ -735,7 +750,31 @@ internal sealed unsafe class Win32D3D12Surface : IWin32GpuSurface
 
         _width = width;
         _height = height;
+        TraceResize(width, height);
         return CreateRetained();
+    }
+
+    /// <summary>
+    /// Reports where the chain and the window's client area stand after a resize.
+    /// </summary>
+    /// <remarks>
+    /// The client area has already changed by the time <c>WM_SIZE</c> arrives, so the frame between the
+    /// window resize and the next present is the one that runs at the old size. The line says both
+    /// numbers, which is what tells a later reader whether a sign of the chain lagging the client area
+    /// is the expected single frame or something worse.
+    /// </remarks>
+    private void TraceResize(int width, int height)
+    {
+        if (!Win32GlTrace.IsEnabled)
+        {
+            return;
+        }
+
+        var client = default(NativeMethods.RECT);
+        NativeMethods.GetClientRect(_hwnd, out client);
+        var (chainWidth, chainHeight, _) = D3D12.Describe(_swapChain);
+        Win32GlTrace.Write(
+            $"kolvir-d3d12: resize {width}x{height} chain {chainWidth}x{chainHeight} client {client.Right}x{client.Bottom}");
     }
 
     public Win32PresentResult Present()

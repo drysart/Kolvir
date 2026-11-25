@@ -43,8 +43,37 @@ internal static unsafe class D3D12
     /// <summary><c>DXGI_USAGE_RENDER_TARGET_OUTPUT</c>.</summary>
     internal const uint UsageRenderTargetOutput = 0x20;
 
-    /// <summary><c>DXGI_SCALING_STRETCH</c>: the window's client area is already the size DXGI is asked for.</summary>
-    internal const int ScalingStretch = 0;
+    /// <summary>
+    /// <c>DXGI_SCALING_NONE</c>: a buffer that is not the client area's size is shown at its own size
+    /// from the top-left corner rather than magnified to fill the window.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The chain is resized from <c>WM_SIZE</c>, and the window's client area has already changed by the
+    /// time that message arrives, so between a resize step and the frame it produces the compositor is
+    /// still showing the previous buffer. Something has to be done with that one frame, and the two
+    /// choices are not equivalent:
+    /// </para>
+    /// <para>
+    /// <c>STRETCH</c> magnifies the old buffer to the new client area, so every intermediate size of a
+    /// drag is drawn rescaled - the content visibly grows and shrinks between steps, which reads as a
+    /// jitter of the whole picture. <c>NONE</c> leaves the old buffer at its own size, anchored at the
+    /// top-left, so the content stays exactly where and at the size it will be next frame: growing
+    /// leaves a strip the buffer does not cover yet, and shrinking clips at the edge. Nothing moves.
+    /// </para>
+    /// <para>
+    /// The cost is that unfilled strip. DXGI does not paint it, so it shows as black for that frame;
+    /// there is no way to make it match the frame that is about to arrive, because the pixels for the
+    /// new size do not exist yet. That was measured and the trade was made deliberately: a steady
+    /// picture with a torn edge for one frame beats a whole picture that is scaled wrong for that
+    /// frame.
+    /// </para>
+    /// <para>
+    /// <c>DXGI_SCALING_NONE</c> is only valid for a flip-model swap chain, which this tier always
+    /// uses; a bitblt chain would refuse the description.
+    /// </para>
+    /// </remarks>
+    internal const int ScalingNone = 1;
 
     /// <summary>
     /// <c>DXGI_SWAP_CHAIN_FLAG_FRAME_LATENCY_WAITABLE_OBJECT</c>: the chain hands out a handle that is
@@ -93,6 +122,7 @@ internal static unsafe class D3D12
     private const int SlotFactory2CreateSwapChainForHwnd = 15;
     private const int SlotSwapChainPresent = 8;
     private const int SlotSwapChainGetBuffer = 9;
+    private const int SlotSwapChainGetDesc1 = 18;
     private const int SlotSwapChainResizeBuffers = 13;
     private const int SlotSwapChain3GetCurrentBackBufferIndex = 36;
     private const int SlotSwapChain2SetMaximumFrameLatency = 31;
@@ -381,7 +411,7 @@ internal static unsafe class D3D12
             SampleDesc = new DxgiSampleDesc { Count = 1, Quality = 0 },
             BufferUsage = UsageRenderTargetOutput,
             BufferCount = bufferCount,
-            Scaling = ScalingStretch,
+            Scaling = ScalingNone,
             SwapEffect = swapEffect,
             AlphaMode = AlphaModeIgnore,
             Flags = flags,
@@ -421,6 +451,19 @@ internal static unsafe class D3D12
     {
         var resize = (delegate* unmanaged[Stdcall]<IntPtr, uint, uint, uint, int, uint, int>)(*(IntPtr**)swapChain)[SlotSwapChainResizeBuffers];
         return resize(swapChain, bufferCount, (uint)width, (uint)height, FormatBgra8Unorm, 0);
+    }
+
+    /// <summary>Reads back the size and scaling a swap chain is actually holding.</summary>
+    /// <returns>The buffer width, height and <c>DXGI_SCALING</c>, or zeros when the chain will not say.</returns>
+    internal static (int Width, int Height, int Scaling) Describe(IntPtr swapChain)
+    {
+        // GetDesc1, not GetDesc: the older description is a different - and larger - struct, and filling
+        // it through this pointer would write past the end of it.
+        var get = (delegate* unmanaged[Stdcall]<IntPtr, DxgiSwapChainDesc1*, int>)(*(IntPtr**)swapChain)[SlotSwapChainGetDesc1];
+        DxgiSwapChainDesc1 description = default;
+        return get(swapChain, &description) == 0
+            ? ((int)description.Width, (int)description.Height, description.Scaling)
+            : (0, 0, 0);
     }
 
     /// <summary>Gets the buffer a flip-model swap chain wants drawn into next.</summary>

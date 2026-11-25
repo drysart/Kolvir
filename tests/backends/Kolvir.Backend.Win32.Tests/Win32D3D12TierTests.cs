@@ -207,6 +207,10 @@ public sealed class Win32D3D12TierTests
             IntPtr swapChain = D3D12.CreateSwapChainForHwnd(factory, queue, hwnd, 64, 64, D3D12.SwapEffectFlipDiscard, 2, 0, out int chainResult);
             Assert.AreNotEqual(IntPtr.Zero, swapChain, $"the swap chain was created (0x{chainResult:X8})");
 
+            // DXGI_SCALING_NONE is part of the shipped description, and a chain that refused it would
+            // only show up here as a create failure with no field named - so it is read back.
+            Assert.AreEqual(D3D12.ScalingNone, D3D12.Describe(swapChain).Scaling, "the chain is described with DXGI_SCALING_NONE");
+
             D3D12.Release(ref swapChain);
             D3D12.Release(ref queue);
             D3D12.Release(ref device);
@@ -248,6 +252,18 @@ public sealed class Win32D3D12TierTests
             {
                 Assert.AreEqual("d3d12", surface.Tier);
 
+                // The scaling is a decision, not a detail: with STRETCH every intermediate size of a
+                // drag magnifies the previous buffer to the new client area, which reads as the whole
+                // picture jittering. NONE leaves that one frame at its own size, so only the edge the
+                // buffer has not covered yet is wrong. The reasoning is on D3D12.ScalingNone - do not
+                // "fix" this back.
+                Assert.AreEqual(
+                    D3D12.ScalingNone,
+                    surface.Chain.Scaling,
+                    "the chain is created with DXGI_SCALING_NONE on purpose");
+
+                Assert.AreEqual((320, 200), (surface.Chain.Width, surface.Chain.Height), "the chain starts at the size it was built for");
+
                 for (int frame = 0; frame < 5; frame++)
                 {
                     surface.Surface!.Canvas.Clear(new SKColor((byte)(frame * 20), 40, 90));
@@ -255,6 +271,7 @@ public sealed class Win32D3D12TierTests
                 }
 
                 Assert.IsTrue(surface.Resize(360, 220), "the chain resizes after frames have been presented");
+                Assert.AreEqual((360, 220), (surface.Chain.Width, surface.Chain.Height), "the chain holds the size it was resized to");
                 Assert.AreEqual(Win32PresentResult.Presented, surface.Present(), "and presents again at the new size");
             }
             finally
