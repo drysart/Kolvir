@@ -1144,6 +1144,30 @@ the 512-byte resolution step 1 describes, so it is the change and not the bounda
 weighed: the change is portable managed code with no per-platform surface, so the larger-page images
 have nothing of their own to pay for it.
 
+The one measured AppKit exception sits in the same feature. A click on a character in the system's
+character palette takes the application's activation for about half a second before the commit
+arrives, so the popup window keeps itself open when the application that took the activation is the
+palette (`AppKitActivation.IsTextInputSurface`); see `APPLICATION-MODEL.md` for the rule and the
+measurement. By the letter of section 4 this is **rung 2, not rung 1**: `AppKitActivation` is internal
+and nothing it is made of is a member an application would have to name, but `AppKitPopupWindow` is
+reached from `AppKitPopupService`, which the window backend registers, so the rule is linked into
+every macOS application whether or not it ever shows a popup - and the fixture proves it, because
+`Kolvir.Minimal` shows no popup and pays anyway. Unlike a true rung 2 there is no opt-in line an
+application can delete to get the cost back. Measured on osx-arm64 only, which is the only one of the
+three this change can be weighed on here: `Kolvir.Minimal` publishes at 4,911,152 bytes against
+4,894,720 at `3ee9d41`, so 16,432 bytes, 0.34 percent, both from build roots of equal length
+(17 characters), by the same command and the same SDK, one after the other. The delta is a page
+rather than a code size: the arm64 image is quantised to 16 KB pages, and `size -m` shows the change
+itself as 36 bytes of `__text` and 6,208 bytes of `__const` - the marshalling metadata of
+`NSWorkspace.FrontmostApplication`, the one new binding the rule needs - crossing into a fresh page.
+It is well above the 512-byte resolution step 1 describes, so it is the change and not the boundary,
+and the same predicate written as a pattern match rather than a call measured the same 4,911,152
+bytes. `-p:TrimmerSingleWarn=false` reported no IL2xxx or IL3xxx warning. The owner accepted this cost
+for the popup feature's text-input behaviour: it is the only measured cost here that is not
+attributable to code, it is the price of the one thing a non-activating popup cannot do without a
+system binding, and it is stated rather than argued away because the rung rule says an application
+that never opens a popup should not pay for it.
+
 ## 9. Checklist for a new feature
 
 - [ ] Does any always-retained type (a control, a backend view, `UiHost`, `Application`)

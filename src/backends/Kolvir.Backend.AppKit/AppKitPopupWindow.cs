@@ -262,7 +262,33 @@ internal sealed class AppKitPopupWindow : IPopupWindow
 
         _resignObserver ??= NSNotificationCenter.DefaultCenter.AddObserver(
             NSApplication.DidResignActiveNotification,
-            _ => Dismiss());
+            _ => DismissUnlessTypingIntoAField());
+    }
+
+    /// <summary>
+    /// Dismisses the popup when the application losing activation means the user went somewhere else
+    /// - which is every application but the system's character palette, whose click is a character
+    /// committed into the field that has the keyboard. See <see cref="AppKitActivation"/> for the
+    /// measurement: the palette hands the activation back with the commit, about half a second later,
+    /// so dismissing on it would close the popup before the character arrives.
+    /// </summary>
+    private void DismissUnlessTypingIntoAField()
+    {
+        var frontmost = NSWorkspace.SharedWorkspace.FrontmostApplication;
+
+        if (AppKitActivation.IsTextInputSurface(frontmost?.BundleIdentifier))
+        {
+            if (AppKitImeTrace.Enabled)
+            {
+                AppKitImeTrace.Line(
+                    "popup kept: the character palette took activation, so the click is a commit " +
+                    "into the field that has the keyboard");
+            }
+
+            return;
+        }
+
+        Dismiss();
     }
 
     /// <summary>
