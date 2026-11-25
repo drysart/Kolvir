@@ -6060,6 +6060,14 @@ section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,9
 bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
 shipped `libSkiaSharp.dll` already contains the Direct3D backend.
 
+The `DXGI_SCALING_NONE` decision and its read-back cost 1,024 bytes on the same floor: 3,884,032 ->
+3,885,056, published from build roots of equal path length, and the same figure came out of two
+different root pairs - so it is content rather than the 512-byte `FileAlignment` boundary moving. The
+tier is part of the Win32 backend, which every Win32 application that opens a window references, so it
+sits on none of the three rungs in section 4 of that policy: it is always retained on that platform and
+the cost is measured instead of avoided. The resize diagnostic is behind `KOLVIR_GL_TRACE`, so an
+untraced build pays one empty call per resize and no native call.
+
 The tests pin the tier order, the diagnostic line and the software-adapter refusal, and the production
 probe is exercised for real (the libraries load, the adapter list is walked). The present path is
 covered too, on the software adapter the diagnostic switch admits: a window, a flip swap chain, a Skia
