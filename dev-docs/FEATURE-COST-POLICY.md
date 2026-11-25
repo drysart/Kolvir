@@ -957,6 +957,16 @@ Claims about cost are worth nothing without a number. Every feature lands with:
 1. **A size measurement.** Publish a minimal application that does not use the feature with
    `PublishTrimmed` and `PublishAot`, on `win-x64`, `linux-x64` and `osx-arm64`, and compare against
    the baseline below. The delta is quoted in the pull request.
+   **Publish both commits from build roots of equal path length.** The native image embeds the
+   absolute path of `native\Kolvir.Minimal.pdb` as a literal string, so the executable grows with the
+   length of the directory the work was built in, and because a PE image is padded to
+   `FileAlignment` the size moves in steps of 512 bytes: one commit published from a 35, a 76 and a
+   129 character root measured 3,877,376 once and 3,877,888 twice. Two consequences for whoever
+   reads a number afterwards. A delta smaller than 512 bytes is below this method's resolution and is
+   reported as such - "no measurable difference at 512-byte resolution" - rather than as a precise
+   figure. And a delta that comes out at exactly 512 or 1,024 bytes depending on where it was built
+   is the padding boundary moving rather than the code changing: publish it again from roots of
+   equal length before quoting it.
 2. **A warning review.** Build with `-p:TrimmerSingleWarn=false` and read the IL2xxx/IL3xxx output
    for the new code. That is where accidental rooting shows up first.
 3. **A startup check.** Confirm that an application which does not use the feature performs no new
@@ -979,7 +989,9 @@ The fixture is NativeAOT with no publish profile, so `-c Release -r <rid>` is th
 configuration. `-p:EmbedSkiaSharpNative=false` produces the loose row, which is the one features are
 measured on, because it is where the library's own contribution is visible; the default publish
 embeds the Skia blob and that fixed cost swamps it. Restore walks the backend selector's three
-frameworks, so the publishing machine needs the macOS workload.
+frameworks, so the publishing machine needs the macOS workload. What the command does not pin is
+where the work is built, and that is the other half of a comparable measurement: both commits come
+from build roots of equal length, for the reason step 1 gives.
 
 | Measurement | win-x64 | linux-x64 | osx-arm64 |
 |---|---|---|---|
@@ -1118,14 +1130,19 @@ takes, so the fixture - which shows no popup - never allocates one. The fixture 
 3,880,960 bytes on win-x64 against 3,877,376 at `acba401`: 3,584 bytes, 0.09 percent, which is the
 sink loop, the held-key map's code and whatever the linker placed differently around them. Both rows
 were published one after the other, in one session, by the same command -
-`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, SDK 10.0.403, ILCompiler 10.0.14. `acba401`
-and `df9a6fb`, the layer below it, publish at the same 3,877,376 bytes, which is the only thing a
-demo-only change between them could produce. The 3,877,888 recorded for `df9a6fb` when that layer
-measured it is 512 bytes above what this machine reproduces for the same source, in two output
-directories and on both commits, and it could not be reproduced; the chain is 3,877,376 for both
-heads, and this layer's delta is 3,584 bytes, or 3,072 if it is quoted against the recorded figure
-instead. Only win-x64 was weighed: the change is portable managed code with no per-platform
-surface, so the larger-page images have nothing of their own to pay for it.
+`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, SDK 10.0.403, ILCompiler 10.0.14 - and from
+build roots of equal length, which is what makes the difference the code rather than the directory it
+was built in. `acba401` and `df9a6fb`, the layer below it, publish at the same 3,877,376 bytes, which
+is the only thing a demo-only change between them can produce. The 3,877,888 that layer recorded for
+`df9a6fb` is the same source from a longer build root rather than a different measurement of the
+code: the image carries the absolute path of `native\Kolvir.Minimal.pdb`, so that commit publishes
+3,877,376 from a 35 character root and 3,877,888 from roots of 76 and of 129 characters. The
+canonical pair that layer settled on is therefore `51cde9d` at 3,876,864 and `df9a6fb` at 3,877,376
+from equal roots - a delta of 512 bytes, 0.013 percent - and the pair for this layer is `acba401` at
+3,877,376 and this head at 3,880,960. The 3,584 bytes here is seven alignment steps, well clear of
+the 512-byte resolution step 1 describes, so it is the change and not the boundary. Only win-x64 was
+weighed: the change is portable managed code with no per-platform surface, so the larger-page images
+have nothing of their own to pay for it.
 
 ## 9. Checklist for a new feature
 
