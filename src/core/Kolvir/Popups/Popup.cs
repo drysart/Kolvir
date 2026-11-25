@@ -422,7 +422,13 @@ public sealed class Popup : IDisposable
         }
     }
 
-    private SKSize MeasureContent()
+    /// <summary>
+    /// The size the popup occupies, in host coordinates: <see cref="Size"/> or what the content
+    /// measures, scaled by <see cref="ScaleFactor"/>. Placement reads it before the popup is shown
+    /// to decide whether it fits, so the fit and the drawing cannot disagree about how much room
+    /// the popup takes.
+    /// </summary>
+    internal SKSize MeasureContent()
     {
         SKSize size;
 

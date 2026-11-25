@@ -1,5 +1,3 @@
-using SkiaSharp;
-
 namespace Kolvir;
 
 /// <summary>
@@ -95,7 +93,7 @@ internal sealed class PopupSession
     private readonly PopupOptions _options;
     private readonly Control? _anchor;
     private readonly Window? _window;
-    private readonly SKPoint _location;
+    private readonly PopupPlacement _placement;
     private readonly TaskCompletionSource<PopupResult> _completion =
         new(TaskCreationOptions.RunContinuationsAsynchronously);
 
@@ -113,14 +111,14 @@ internal sealed class PopupSession
         PopupOptions options,
         Control? anchor,
         Window? window,
-        SKPoint location)
+        PopupPlacement placement)
     {
         _content = content;
         _channel = channel;
         _options = options;
         _anchor = anchor;
         _window = window;
-        _location = location;
+        _placement = placement;
         _surface = surface;
 
         Surface = PopupSurface.ForSession(this);
@@ -135,23 +133,11 @@ internal sealed class PopupSession
     /// <summary>Raised once this popup has closed, so a popup it owns closes with it.</summary>
     public event Action? Closed;
 
-    /// <summary>Creates the popup, hooks its dismissal paths and shows it.</summary>
+    /// <summary>Creates the popup, works out where it goes, hooks its dismissal paths and shows it.</summary>
     public void Show()
     {
-        var popup = _anchor is { } anchor ? new Popup(anchor) : new Popup(_window!.Host);
-
-        popup.Content = _content;
-        popup.DismissOnOutsideClick = _options.DismissOnOutsideClick;
-
-        if (_options.Size is { } size)
-        {
-            popup.Size = size;
-        }
-
-        if (_options.MaximumSize is { } maximum)
-        {
-            popup.MaximumSize = maximum;
-        }
+        var popup = CreatePopup();
+        var location = PopupGeometry.Resolve(popup, _options, _placement, _anchor, popup.Host);
 
         _popup = popup;
         _popupToken = popup.AddClosedHandler(OnPopupClosed);
@@ -174,7 +160,36 @@ internal sealed class PopupSession
             _displayedToken = anchorControl.AddDisplayedChangedHandler(OnAnchorDisplayedChanged);
         }
 
-        popup.Show(_location);
+        popup.Show(location);
+    }
+
+    /// <summary>
+    /// Builds the popup and gives it everything the options ask for except the location, which is
+    /// worked out once the popup can measure itself.
+    /// </summary>
+    private Popup CreatePopup()
+    {
+        var popup = _anchor is { } anchor ? new Popup(anchor) : new Popup(_window!.Host);
+
+        popup.Content = _content;
+        popup.DismissOnOutsideClick = _options.DismissOnOutsideClick;
+
+        if (_options.Size is { } size)
+        {
+            popup.Size = size;
+        }
+
+        if (_options.MaximumSize is { } maximum)
+        {
+            popup.MaximumSize = maximum;
+        }
+
+        // The popup is drawn at the zoom of the subtree it was opened from, so it reads as part of
+        // that subtree rather than as chrome at the window's scale. Placement then works with the
+        // size that results, which is the room the popup really takes on the host.
+        popup.ScaleFactor = _anchor?.EffectiveScaleMultiplier ?? 1f;
+
+        return popup;
     }
 
     /// <summary>Completes with <see cref="PopupCloseReason.Cancelled"/> and closes the popup.</summary>
