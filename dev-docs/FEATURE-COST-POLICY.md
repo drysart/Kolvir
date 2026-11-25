@@ -957,6 +957,16 @@ Claims about cost are worth nothing without a number. Every feature lands with:
 1. **A size measurement.** Publish a minimal application that does not use the feature with
    `PublishTrimmed` and `PublishAot`, on `win-x64`, `linux-x64` and `osx-arm64`, and compare against
    the baseline below. The delta is quoted in the pull request.
+   **Publish both commits from build roots of equal path length.** The native image embeds the
+   absolute path of `native\Kolvir.Minimal.pdb` as a literal string, so the executable grows with the
+   length of the directory the work was built in, and because a PE image is padded to
+   `FileAlignment` the size moves in steps of 512 bytes: one commit published from a 35, a 76 and a
+   129 character root measured 3,877,376 once and 3,877,888 twice. Two consequences for whoever
+   reads a number afterwards. A delta smaller than 512 bytes is below this method's resolution and is
+   reported as such - "no measurable difference at 512-byte resolution" - rather than as a precise
+   figure. And a delta that comes out at exactly 512 or 1,024 bytes depending on where it was built
+   is the padding boundary moving rather than the code changing: publish it again from roots of
+   equal length before quoting it.
 2. **A warning review.** Build with `-p:TrimmerSingleWarn=false` and read the IL2xxx/IL3xxx output
    for the new code. That is where accidental rooting shows up first.
 3. **A startup check.** Confirm that an application which does not use the feature performs no new
@@ -979,7 +989,9 @@ The fixture is NativeAOT with no publish profile, so `-c Release -r <rid>` is th
 configuration. `-p:EmbedSkiaSharpNative=false` produces the loose row, which is the one features are
 measured on, because it is where the library's own contribution is visible; the default publish
 embeds the Skia blob and that fixed cost swamps it. Restore walks the backend selector's three
-frameworks, so the publishing machine needs the macOS workload.
+frameworks, so the publishing machine needs the macOS workload. What the command does not pin is
+where the work is built, and that is the other half of a comparable measurement: both commits come
+from build roots of equal length, for the reason step 1 gives.
 
 | Measurement | win-x64 | linux-x64 | osx-arm64 |
 |---|---|---|---|
@@ -1102,6 +1114,59 @@ lifecycle the badge watches so that an attention request ends when the user come
 (`Application.AddWindowOpenedHandler`, `Window.AddActivatedHandler`). The surface
 is an extension block on `Application`, per section 5, because a separate assembly cannot add a
 member to a type in `Kolvir`. See [APP-BADGING.md](APP-BADGING.md).
+
+The popup API is rung 1 in all of its parts, including the two that touch an always-retained type,
+and it is the worked example of what that costs when the seam itself grows. `ShowPopupAsync`,
+`ClosePopup`, `AddPopupClosedHandler` and `TryGetPopupBounds` are extension methods on `Window` and
+`Control` (section 5), so an application that never shows a popup reaches none of them: the per-control
+table they keep is a `ConditionalWeakTable` in a class nothing else names, and `Popup`, `PopupSession`
+and `PopupInputSink` are internal and are retained only when a call site brings them in. The one
+new always-retained member is `IInputSink.ProcessKeyUp`, added as a default interface implementation
+returning false: the interface's slot and the short loop in `UiHost.ProcessKeyUp` that offers a
+release to the sinks are retained by every application, and `MenuView`, `Overlay` and any implementer
+outside the library keep compiling and keep their behaviour without a line of change. The field
+`UiHost` keeps for the keys a sink is holding is a `Dictionary` created on the first press a sink
+takes, so the fixture - which shows no popup - never allocates one. The fixture publishes at
+3,880,960 bytes on win-x64 against 3,877,376 at `acba401`: 3,584 bytes, 0.09 percent, which is the
+sink loop, the held-key map's code and whatever the linker placed differently around them. Both rows
+were published one after the other, in one session, by the same command -
+`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, SDK 10.0.403, ILCompiler 10.0.14 - and from
+build roots of equal length, which is what makes the difference the code rather than the directory it
+was built in. `acba401` and `df9a6fb`, the layer below it, publish at the same 3,877,376 bytes, which
+is the only thing a demo-only change between them can produce. The 3,877,888 that layer recorded for
+`df9a6fb` is the same source from a longer build root rather than a different measurement of the
+code: the image carries the absolute path of `native\Kolvir.Minimal.pdb`, so that commit publishes
+3,877,376 from a 35 character root and 3,877,888 from roots of 76 and of 129 characters. The
+canonical pair that layer settled on is therefore `51cde9d` at 3,876,864 and `df9a6fb` at 3,877,376
+from equal roots - a delta of 512 bytes, 0.013 percent - and the pair for this layer is `acba401` at
+3,877,376 and this head at 3,880,960. The 3,584 bytes here is seven alignment steps, well clear of
+the 512-byte resolution step 1 describes, so it is the change and not the boundary. Only win-x64 was
+weighed: the change is portable managed code with no per-platform surface, so the larger-page images
+have nothing of their own to pay for it.
+
+The one measured AppKit exception sits in the same feature. A click on a character in the system's
+character palette takes the application's activation for about half a second before the commit
+arrives, so the popup window keeps itself open when the application that took the activation is the
+palette (`AppKitActivation.IsTextInputSurface`); see `APPLICATION-MODEL.md` for the rule and the
+measurement. By the letter of section 4 this is **rung 2, not rung 1**: `AppKitActivation` is internal
+and nothing it is made of is a member an application would have to name, but `AppKitPopupWindow` is
+reached from `AppKitPopupService`, which the window backend registers, so the rule is linked into
+every macOS application whether or not it ever shows a popup - and the fixture proves it, because
+`Kolvir.Minimal` shows no popup and pays anyway. Unlike a true rung 2 there is no opt-in line an
+application can delete to get the cost back. Measured on osx-arm64 only, which is the only one of the
+three this change can be weighed on here: `Kolvir.Minimal` publishes at 4,911,152 bytes against
+4,894,720 at `3ee9d41`, so 16,432 bytes, 0.34 percent, both from build roots of equal length
+(17 characters), by the same command and the same SDK, one after the other. The delta is a page
+rather than a code size: the arm64 image is quantised to 16 KB pages, and `size -m` shows the change
+itself as 36 bytes of `__text` and 6,208 bytes of `__const` - the marshalling metadata of
+`NSWorkspace.FrontmostApplication`, the one new binding the rule needs - crossing into a fresh page.
+It is well above the 512-byte resolution step 1 describes, so it is the change and not the boundary,
+and the same predicate written as a pattern match rather than a call measured the same 4,911,152
+bytes. `-p:TrimmerSingleWarn=false` reported no IL2xxx or IL3xxx warning. The owner accepted this cost
+for the popup feature's text-input behaviour: it is the only measured cost here that is not
+attributable to code, it is the price of the one thing a non-activating popup cannot do without a
+system binding, and it is stated rather than argued away because the rung rule says an application
+that never opens a popup should not pay for it.
 
 ## 9. Checklist for a new feature
 

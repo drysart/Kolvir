@@ -581,9 +581,11 @@ public sealed class DemoUi
         ("observable-dictionary", "Observable dictionary", demo => new ObservableDictionaryPage(demo)),
         ("effective-in-view", "Effective in view", demo => new EffectiveInViewPage(demo)),
 
-        // Kept last in the table so that every page above it keeps the position a screenshot script
-        // names with --page <position>.
+        // graphics-acceleration keeps the position every page above it depends on, so a screenshot
+        // script that names a page by --page <position> still finds the same page. New pages go
+        // after it for the same reason: a page appended here renumbers nothing above it.
         ("graphics-acceleration", "Graphics acceleration", demo => new GraphicsAccelerationPage(demo)),
+        ("popups", "Popups", demo => new PopupPage(demo)),
     };
 
     /// <summary>

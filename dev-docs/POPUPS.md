@@ -1,14 +1,20 @@
 # The popup API - implementation plan
 
+Written before the work and kept as a record of it: the popup API has since shipped, and the shipped
+behaviour - including the three design changes made during implementation, `PopupPlacement.Auto` as
+the default, the key-up phase on the input-sink seam, and `TryGetPopupBounds` plus the 512-byte
+measurement rule - lives in [APPLICATION-MODEL.md](APPLICATION-MODEL.md) and
+[FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md).
+
 Kolvir can already show an arbitrary control in a popup surface; what it cannot do is offer that as a
 first-class API. `ComboBox`, `DateTimePicker`, `ToolTip` and the menu system each build a `Popup`
 themselves and each re-implement placement, keyboard forwarding and close results. This plan adds an
 additive, extension-method API for the common case - show this control over there, tell me how it
 ended - while leaving `IPopupService`/`Popup` untouched for callers that need control.
 
-Status of this document: planned, nothing implemented. It covers two independent pieces of work: the
-UI-thread `SynchronizationContext` (step 1), which is a prerequisite and has nothing to do with
-popups, and the popup API itself (steps 2-5).
+Status of this document: planned, and every step in it has since shipped. It covers two independent
+pieces of work: the UI-thread `SynchronizationContext` (step 1), which is a prerequisite and has
+nothing to do with popups, and the popup API itself (steps 2-5).
 
 ## What already exists
 

@@ -68,6 +68,13 @@ public sealed class Win32WindowBackend : IWindowBackend
     private bool _composing;
 
     /// <summary>
+    /// The host that accepted the live composition. It is not always this window's host: a popup never
+    /// takes the activation, so the composition is offered to the popup's own tree and the answer has
+    /// to keep going there even if the focus moves before the composition ends.
+    /// </summary>
+    private UiHost? _composingHost;
+
+    /// <summary>
     /// True while a refusal is being sent to the input method, so a start message provoked by the
     /// cancel itself cannot recurse.
     /// </summary>
@@ -1618,17 +1625,18 @@ public sealed class Win32WindowBackend : IWindowBackend
             return IntPtr.Zero;
         }
 
-        // A press on the window that dismisses a popup belongs to that popup: it closes it and
-        // stops there, so the control underneath does not also act on it. That is what makes
-        // clicking the combo box that owns an open drop-down close it rather than reopen it, and it
-        // is what the overlay presentation gets from its dismiss catcher. A wheel turn and a move
-        // or a resize are not presses, so they dismiss and are still delivered.
+        // A press on the window that belongs to a popup is reported to it: it closes the levels of the
+        // chain the press is outside of (the portable layer decides how many) and stops there, so the
+        // control underneath does not also act on it. That is what makes clicking the combo box that
+        // owns an open drop-down close it rather than reopen it, and it is what the overlay
+        // presentation gets from its dismiss catcher. A wheel turn and a move or a resize are not
+        // presses, so they dismiss every popup of the window and are still delivered.
         switch (message)
         {
             case NativeMethods.WmLButtonDown:
             case NativeMethods.WmRButtonDown:
             case NativeMethods.WmMButtonDown:
-                if (Win32PopupWindow.DismissForOwner(hwnd))
+                if (Win32PopupWindow.ReportOutsidePress(hwnd, ToLogical(lParam)))
                 {
                     return IntPtr.Zero;
                 }
@@ -1809,10 +1817,16 @@ public sealed class Win32WindowBackend : IWindowBackend
                 return IntPtr.Zero;
 
             case NativeMethods.WmImeEndComposition:
+            {
                 // A commit has already cleared the preedit, which is what makes this idempotent.
+                // The composition belongs to the host that accepted it, not to whatever has the
+                // focus now.
+                var ending = _composingHost ?? _host;
                 _composing = false;
-                _host.CancelComposition();
+                _composingHost = null;
+                ending.CancelComposition();
                 return IntPtr.Zero;
+            }
 
             case NativeMethods.WmSetCursor:
                 if (NativeMethods.LowWord(lParam) == NativeMethods.HtClient)
@@ -2911,8 +2925,22 @@ public sealed class Win32WindowBackend : IWindowBackend
         // at all is the bottom-right corner of the screen, which is what a report of "the panel opens in
         // the corner" looks like, so the client area's top-left is the honest answer for a window whose
         // controls hold no caret.
-        var anchored = _host.TryGetCaretBounds(out var caret);
-        var origin = anchored ? LogicalToScreen(new SKPoint(caret.Left, caret.Top)) : document;
+        var anchored = TryGetImeCaret(out var caretScreen, out var lineHeight);
+        var origin = anchored ? caretScreen : document;
+
+        if (lineHeight <= 0)
+        {
+            lineHeight = Math.Max(1, (int)MathF.Round(Theme.DefaultFont.LineHeight * _scale));
+        }
+
+        if (Win32ImeLog.Enabled)
+        {
+            var focused = InputHost.FocusedControl;
+            Win32ImeLog.Write(
+                $"  focused={focused?.GetType().Name ?? "<none>"} "
+                + $"popup={(GetKeyboardPopup() is null ? "no" : "yes")} "
+                + $"caret={(anchored ? $"{caretScreen.X},{caretScreen.Y}" : "-")}");
+        }
 
         if (!anchored)
         {
@@ -2932,7 +2960,7 @@ public sealed class Win32WindowBackend : IWindowBackend
         // shrunk below what the caller allocated.
         position->dwSize = Math.Max(incomingSize, size);
         position->pt = origin;
-        position->cLineHeight = LineHeightOf(_host.FocusedControl);
+        position->cLineHeight = (uint)lineHeight;
         position->rcDocument = new NativeMethods.RECT
         {
             Left = document.X,
@@ -2953,19 +2981,66 @@ public sealed class Win32WindowBackend : IWindowBackend
     }
 
     /// <summary>
-    /// The height of a line in <paramref name="control"/>'s font, in device pixels, or the theme's own
-    /// line height when nothing with a font is focused, because a zero line height would tell an input
-    /// method there is nowhere to put its window.
+    /// The control tree that owns the keyboard for this window: the innermost live popup's when a
+    /// popup is open with something focusable in it, otherwise the window's own.
     /// </summary>
-    private uint LineHeightOf(Control? control)
+    /// <remarks>
+    /// A popup is shown without activating, so Windows still considers this window the focused one and
+    /// every input message arrives here. The caret and the composition, though, belong to the popup's
+    /// tree - which is why an input method's questions are answered from there while one is open.
+    /// </remarks>
+    private UiHost InputHost => GetKeyboardPopup()?.Host ?? _host;
+
+    /// <summary>The popup currently forwarding the keyboard, or null when the window has it.</summary>
+    private Win32PopupWindow? GetKeyboardPopup() =>
+        Win32PopupWindow.TryGetKeyboardPopup(_hwnd, out var popup) ? popup : null;
+
+    /// <summary>
+    /// The caret an input method should anchor to, in physical screen pixels, with the line height in
+    /// device pixels. It comes from the popup's tree while a popup holds the keyboard, because that is
+    /// where the user's caret is even though the owner window is the one Windows calls focused.
+    /// </summary>
+    private bool TryGetImeCaret(out NativeMethods.POINT screen, out int lineHeight)
     {
-        var height = (control?.EffectiveFont ?? Theme.DefaultFont).LineHeight;
-        if (height <= 0f && _host.TryGetCaretBounds(out var caret))
+        if (GetKeyboardPopup() is { } popup && popup.TryGetImeCaret(out screen, out lineHeight))
+        {
+            return true;
+        }
+
+        screen = default;
+        lineHeight = 0;
+
+        if (!_host.TryGetCaretBounds(out var caret))
+        {
+            return false;
+        }
+
+        screen = LogicalToScreen(new SKPoint(caret.Left, caret.Top));
+
+        var height = (_host.FocusedControl?.EffectiveFont ?? Theme.DefaultFont).LineHeight;
+        if (height <= 0f)
         {
             height = caret.Height;
         }
 
-        return (uint)Math.Max(1, MathF.Round(height * _scale));
+        lineHeight = Math.Max(1, (int)MathF.Round(height * _scale));
+        return true;
+    }
+
+    /// <summary>The caret in the client coordinates a composition form and the system caret take.</summary>
+    private bool TryGetImeCaretClient(out int x, out int y, out int lineHeight)
+    {
+        if (!TryGetImeCaret(out var screen, out lineHeight))
+        {
+            x = 0;
+            y = 0;
+            return false;
+        }
+
+        NativeMethods.ScreenToClient(_hwnd, ref screen);
+        x = screen.X;
+        y = screen.Y;
+        return true;
     }
 
     /// <summary>
@@ -2993,13 +3068,10 @@ public sealed class Win32WindowBackend : IWindowBackend
             _caretWindow = _hwnd;
         }
 
-        if (!_host.TryGetCaretBounds(out var caret))
+        if (!TryGetImeCaretClient(out var x, out var y, out _))
         {
             return;
         }
-
-        var x = (int)MathF.Round(caret.Left * _scale);
-        var y = (int)MathF.Round(caret.Top * _scale);
 
         if (x == _caretX && y == _caretY)
         {
@@ -3157,7 +3229,9 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// </summary>
     private void OnImeStartComposition(IntPtr hwnd)
     {
-        _composing = _host.BeginComposition();
+        var host = InputHost;
+        _composing = host.BeginComposition();
+        _composingHost = _composing ? host : null;
 
         if (!_composing)
         {
@@ -3238,13 +3312,18 @@ public sealed class Win32WindowBackend : IWindowBackend
         try
         {
             var source = ImeComposition;
+            var host = _composingHost ?? InputHost;
 
             if ((flags & NativeMethods.GcsCompStr) != 0)
             {
                 if (!_composing)
                 {
                     // Some input methods report a composition without a start message first.
-                    _composing = _host.BeginComposition();
+                    _composing = host.BeginComposition();
+                    if (_composing)
+                    {
+                        _composingHost = host;
+                    }
                 }
 
                 if (!_composing)
@@ -3257,7 +3336,7 @@ public sealed class Win32WindowBackend : IWindowBackend
                     return;
                 }
 
-                _host.UpdateComposition(source.CompositionString(context), source.CaretPosition(context));
+                host.UpdateComposition(source.CompositionString(context), source.CaretPosition(context));
             }
 
             if ((flags & NativeMethods.GcsResultStr) != 0)
@@ -3278,7 +3357,8 @@ public sealed class Win32WindowBackend : IWindowBackend
                 // WM_CHAR; remembering them is what lets OnChar drop that second copy.
                 _pendingCommitText += committed;
                 _composing = false;
-                _host.CommitComposition(committed);
+                _composingHost = null;
+                host.CommitComposition(committed);
             }
 
             if (_composing && context != IntPtr.Zero)
@@ -3310,6 +3390,9 @@ public sealed class Win32WindowBackend : IWindowBackend
 
         _composing = false;
 
+        var closing = _composingHost ?? InputHost;
+        _composingHost = null;
+
         var context = NativeMethods.ImmGetContext(_hwnd);
         if (context != IntPtr.Zero)
         {
@@ -3323,7 +3406,7 @@ public sealed class Win32WindowBackend : IWindowBackend
             }
         }
 
-        _host.CancelComposition();
+        closing.CancelComposition();
     }
 
     /// <summary>
@@ -3333,15 +3416,12 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// </summary>
     private void PlaceCompositionWindow(IntPtr context)
     {
-        if (!_host.TryGetCaretBounds(out var caret))
+        if (!TryGetImeCaretClient(out var x, out var y, out _))
         {
             return;
         }
 
-        PlaceCompositionWindow(
-            context,
-            (int)MathF.Round(caret.Left * _scale),
-            (int)MathF.Round(caret.Top * _scale));
+        PlaceCompositionWindow(context, x, y);
     }
 
     /// <summary>Positions the input method's window at a point already in device client pixels.</summary>
@@ -3362,7 +3442,7 @@ public sealed class Win32WindowBackend : IWindowBackend
     /// </summary>
     private unsafe void SetCompositionFont(IntPtr context)
     {
-        if (_host.FocusedControl?.EffectiveFont is not { } font)
+        if (InputHost.FocusedControl?.EffectiveFont is not { } font)
         {
             return;
         }

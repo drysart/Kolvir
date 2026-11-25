@@ -154,13 +154,21 @@ internal sealed class Gtk4PopupWindow : IPopupWindow
     /// <inheritdoc />
     public bool TakesPresses => _takesPresses;
 
+    /// <summary>
+    /// Never raised here: a popover takes no grab, so a press outside it goes to the portable dismiss
+    /// catcher instead, which reports the point to the chain from the window's own tree. The property
+    /// is part of the seam because the platforms that do see the press themselves - Win32 and
+    /// macOS - report it through it, and one rule for how many levels a press closes lives there.
+    /// </summary>
+    public Func<SKPoint, bool>? OutsidePress { get; set; }
+
     /// <inheritdoc />
     public event Action<object>? Dismissed;
 
     /// <inheritdoc />
-    public void Show(UiHost ownerHost, SKPoint location, SKSize size)
+    public void Show(UiHost windowHost, SKPoint location, SKSize size)
     {
-        ArgumentNullException.ThrowIfNull(ownerHost);
+        ArgumentNullException.ThrowIfNull(windowHost);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (_popover.GetVisible())
@@ -171,7 +179,7 @@ internal sealed class Gtk4PopupWindow : IPopupWindow
 
         // The popup's tree resolves services from the same container as the window it belongs to,
         // so a control inside a popup that opens a popup of its own finds the service too.
-        _host.Services = ownerHost.Services;
+        _host.Services = windowHost.Services;
 
         Apply(location, size);
 

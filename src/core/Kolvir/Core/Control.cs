@@ -3134,12 +3134,15 @@ public class Control : IDisposable
         return e.Handled;
     }
 
-    internal void RaiseKeyUp(KeyEventArgs e)
+    /// <summary>Delivers a key release. Returns true when the control consumed the key.</summary>
+    internal bool RaiseKeyUp(KeyEventArgs e)
     {
         if (EffectiveEnabled)
         {
             OnKeyUp(e);
         }
+
+        return e.Handled;
     }
 
     internal void RaiseTextInput(TextInputEventArgs e)

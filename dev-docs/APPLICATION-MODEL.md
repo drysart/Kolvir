@@ -176,6 +176,12 @@ public sealed class Application
 `Run()` returns the exit code so `Main` can `return app.Run();`. Calling it twice throws; calling
 `Exit()` before `Run()` makes the loop return immediately (the standard "cancel startup" escape).
 
+A `SynchronizationContext` is installed for the duration of `Run()` and removed when it returns, so
+an `await` in application code resumes on the UI thread instead of on a thread pool thread. Its
+`Post` is `BeginInvoke` and its `Send` is `Invoke`, so a continuation follows exactly the rules
+those two describe, including the exception path in section 4.1.1. Nothing new is marshalled: the
+context is a convenience over the two entry points, not a third one.
+
 #### 4.1.1 Exceptions
 
 Every exception that escapes UI-thread code reaches `UnhandledException`; anything a handler does
@@ -320,6 +326,76 @@ same declaration into a real key equivalent. This works because AppKit never rep
 `Modifiers.Control`, so `Matches` stays an exact comparison and no key is claimed twice. A
 matching item claims the key even when it is disabled, so a greyed-out command does not fall through
 to the control that has focus.
+
+**Keyboard forwarding.** `UiHost.AddInputSink(IInputSink)` is the seam through which something that
+is not the focused control can take the keyboard: the sinks are asked before the menu bar and before
+the focused control, for key presses and for typed text. An open menu uses it, and so does a shown
+popup - no backend popup takes the keyboard, so the window that has it does the forwarding. While a
+popup is open the focus goes to the first tab stop in its content, Escape dismisses it (unless
+`PopupOptions.EscapeCloses` says otherwise) and stays with the popup either way, Tab and Shift+Tab
+cycle the popup's own controls without reaching the window behind it, and everything else is
+delivered to the control inside the popup that has the focus. A popup opened from inside a popup is
+owned by the window and placed relative to its anchor, and it takes the keyboard over from the popup
+it was opened in for as long as it is open; the sink each popup registers on the window goes away
+with it, whichever of the five dismissal paths ended it.
+
+**Nested popups.** A popup opened from a control that is itself in a popup is a surface of the window,
+not of the popup it hangs off: on Windows and macOS it is a second owned window of the same window, on
+GTK4 a second popover of the same drawing area, and the platform is handed one position - the popup's
+top left corner in the *window's* client coordinates - whichever control opened it. The popup layer
+does that conversion, because it is the only place that knows both facts: where the anchor sits is
+measured in the anchor's own host's coordinates, and the host behind a popup records where it sits in
+the window (the `UiHost` that draws a popup keeps its window's host and its own origin in it, rather
+than claiming to draw a window it does not draw). Two consequences worth knowing:
+
+- The fit and the clamp are against the display's work area, not against the rectangle of the popup the
+  new one was opened from. A drop-down, a tool tip or a popup API call anchored near the bottom or right
+  of a popup flips or slides against the screen, and may therefore hang past the edge of the popup it
+  was opened from.
+- A press outside closes **every** level it is outside of, and stops at the first level it is inside:
+  pressing the window behind a stack of two popups closes both at once, while pressing the parent popup
+  but outside the popup opened from it closes only that popup. A level whose `DismissOnOutsideClick` is
+  false keeps itself open and stops the walk, so a popup that ignored a press is not taken down by it and
+  neither are the popups it was opened from. The rule lives in the popup layer rather than in a backend:
+  each presentation reports the press with the point it landed on - the dismiss catcher that covers the
+  window for an overlaid popup, and the owning window's message procedure or event monitor for a platform
+  popup - and the session walks the chain outward, because the rectangle `TryGetPopupBounds` reports is
+  already in the window's client coordinates at every level. GTK4 needs nothing of its own there: its
+  popovers take no grab, so the press reaches the portable catcher, which reports the same point.
+  `IPopupWindow.OutsidePress` is a default interface member that reports nothing, so a popup window
+  written outside the library against the earlier interface still compiles and keeps the older
+  behaviour - one level per dismissal - rather than the rule; see the Developer Guide.
+
+Closing a popup still takes everything opened from it down with it, so the two rules do not contradict
+each other: a press takes the levels it is outside of, and a close takes the subtree under it.
+
+**A popup, losing activation, and the character palette.** A press is not the only thing that dismisses
+a popup: a popup that never takes activation has to close when the application loses it, because a
+click in another process's window is not a press this process sees and "whoever is frontmost now is
+where the user went" is all that is left to observe. macOS's character palette - "Emoji & Symbols",
+Control-Command-Space - is the exception, and it is the one case where the user did not go anywhere.
+The palette is a process of its own (`com.apple.CharacterPaletteIM`), so a click on a character in it
+is geometrically a click outside every window we own, and it deactivates the application: measured on
+macOS 27.2, with a text box inside a popup holding the keyboard, the palette is frontmost for about
+0.6 seconds before macOS re-activates us and delivers the commit to the field that had the keyboard -
+the field inside the popup, because a popup borrows the window's keyboard rather than taking its own.
+Dismissing on that deactivation closes the popup one commit too early and drops the character, so the
+deactivation caused by the palette does not dismiss; every other one - Finder for the desktop, another
+application, the Dock - still does, as does one this cannot attribute, which is why the rule is a
+positive test for the palette (`AppKitActivation.IsTextInputSurface`) rather than a negative test for
+everybody else. The press monitor is not involved and never sees the click: it is a local monitor, so
+it only ever sees events delivered to this process, which is also why the fix is a condition on when
+a deactivation dismisses rather than a change to the chain rule above.
+
+**A popup asked where it is while its window moves.** On macOS, and only there, a popup reports as not
+showing for the one run-loop pass in which its owning window is moved: `TryGetPopupBounds` answers false
+there, while the popup is alive and follows the window correctly, and the answer is back on the next
+pass. It is a measured window rather than a defect left open - the platform verification pass, driven on
+a real macOS display with injected events, found no other fault in the library and logged this as one
+line during the move - and it is documented rather than closed because closing it means teaching a popup
+window to answer for a state AppKit has not settled yet: for that pass the rectangle is not "somewhere
+else", it is a question the platform cannot take yet. A caller that places something beside a popup
+follows a move one pass late; the popup itself still follows it on time.
 
 ### 4.4 Screens
 

@@ -72,6 +72,14 @@ internal sealed class Win32PopupWindow : IPopupWindow
     private bool _dismissing;
     private bool _disposed;
 
+    /// <summary>
+    /// Where this popup comes in the order the live popups were created, which is the order a chain
+    /// of them nests in: the innermost popup of a chain is the one created last.
+    /// </summary>
+    private readonly long _sequence = Interlocked.Increment(ref _nextSequence);
+
+    private static long _nextSequence;
+
     private long _lastClickTime;
     private int _clickCount;
     private int _lastClickX;
@@ -92,9 +100,75 @@ internal sealed class Win32PopupWindow : IPopupWindow
 
     public UiHost Host => _host;
 
+    /// <summary>
+    /// The popup whose control tree has the keyboard for <paramref name="ownerHwnd"/>: the innermost
+    /// live popup - the one opened last - whose tree has a focused control.
+    /// </summary>
+    /// <remarks>
+    /// A popup never takes the activation, so the owning window stays the focused window and every
+    /// input message arrives there. The control tree that owns the keyboard is the popup's, though, and
+    /// what a platform input method asks about - where the caret is, and which control takes a
+    /// composition - has to be answered from that tree rather than from the control that opened the
+    /// popup. A popup with nothing focusable in it is skipped, so a tooltip cannot hide the field the
+    /// user is typing into.
+    /// </remarks>
+    internal static bool TryGetKeyboardPopup(IntPtr ownerHwnd, out Win32PopupWindow? popup)
+    {
+        popup = null;
+
+        foreach (var window in Live.Values)
+        {
+            if (window._ownerHwnd != ownerHwnd || window._host.FocusedControl is null)
+            {
+                continue;
+            }
+
+            if (popup is null || window._sequence > popup._sequence)
+            {
+                popup = window;
+            }
+        }
+
+        return popup is not null;
+    }
+
+    /// <summary>
+    /// The caret of the control this popup's tree has focused, in physical screen pixels, and that
+    /// control's line height in device pixels. False when nothing in the popup has the focus.
+    /// </summary>
+    internal bool TryGetImeCaret(out NativeMethods.POINT screen, out int lineHeight)
+    {
+        screen = default;
+        lineHeight = 0;
+
+        if (_hwnd == IntPtr.Zero || _host.FocusedControl is not { } focused
+            || !_host.TryGetCaretBounds(out var caret))
+        {
+            return false;
+        }
+
+        screen = new NativeMethods.POINT
+        {
+            X = _windowX + (int)MathF.Round(caret.Left * _scale),
+            Y = _windowY + (int)MathF.Round(caret.Top * _scale),
+        };
+
+        var height = focused.EffectiveFont.LineHeight;
+        if (height <= 0f)
+        {
+            height = caret.Height;
+        }
+
+        lineHeight = Math.Max(1, (int)MathF.Round(height * _scale));
+        return true;
+    }
+
     public bool DismissesOnOutsideClick { get; }
 
     public bool TakesPresses { get; }
+
+    /// <inheritdoc />
+    public Func<SKPoint, bool>? OutsidePress { get; set; }
 
     public event Action<object>? Dismissed;
 
@@ -130,9 +204,42 @@ internal sealed class Win32PopupWindow : IPopupWindow
         return owned.Count > 0;
     }
 
-    public void Show(UiHost ownerHost, SKPoint location, SKSize size)
+    /// <summary>
+    /// Hands a press that landed on the owning window, at <paramref name="point"/> in that window's
+    /// own logical client coordinates, to the innermost popup the window owns.
+    /// </summary>
+    /// <returns>Whether a popup took the press, which is what tells the caller the press it is
+    /// handling belonged to that popup rather than to what it landed on.</returns>
+    /// <remarks>
+    /// A press on the owning window is delivered to that window rather than to the popup floating
+    /// above it, so the owner is what has to notice and report it. What the press closes is not
+    /// decided here: the popup it is handed to knows its parent, so the portable layer walks the
+    /// chain from the innermost level outward and closes every level the point is outside of - the
+    /// rule both presentations share, stated once.
+    /// </remarks>
+    public static bool ReportOutsidePress(IntPtr ownerHwnd, SKPoint point)
     {
-        ArgumentNullException.ThrowIfNull(ownerHost);
+        Win32PopupWindow? innermost = null;
+
+        foreach (var window in Live.Values)
+        {
+            if (window._ownerHwnd != ownerHwnd || window.OutsidePress is null)
+            {
+                continue;
+            }
+
+            if (innermost is null || window._sequence > innermost._sequence)
+            {
+                innermost = window;
+            }
+        }
+
+        return innermost?.OutsidePress?.Invoke(point) ?? false;
+    }
+
+    public void Show(UiHost windowHost, SKPoint location, SKSize size)
+    {
+        ArgumentNullException.ThrowIfNull(windowHost);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (_hwnd != IntPtr.Zero)
@@ -146,14 +253,14 @@ internal sealed class Win32PopupWindow : IPopupWindow
             return;
         }
 
-        var backend = ownerHost.Window?.Backend as Win32WindowBackend;
+        var backend = windowHost.Window?.Backend as Win32WindowBackend;
         _ownerHwnd = backend?.Handle ?? IntPtr.Zero;
         _toScreen = backend is null ? null : backend.LogicalToScreen;
-        _scale = ownerHost.Window?.ScaleFactor ?? 1f;
+        _scale = windowHost.Window?.ScaleFactor ?? 1f;
 
         // The popup's tree resolves services from the same container as the window it belongs to,
         // so a control that opens a popup of its own finds the service that way too.
-        _host.Services = ownerHost.Services;
+        _host.Services = windowHost.Services;
         _host.SetClientSize(size.Width, size.Height);
 
         var (width, height) = PhysicalSize(size);

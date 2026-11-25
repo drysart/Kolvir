@@ -34,6 +34,8 @@ public sealed class UiHost
 
     private static int _paintDepth;
     private Window? _window;
+    private UiHost? _windowHost;
+    private SKPoint _originInWindowHost;
     private IDisposable? _windowShownToken;
     private IDisposable? _windowClosedToken;
     private Action<object, ContextMenuEventArgs>? _contextMenuOpening;
@@ -42,6 +44,9 @@ public sealed class UiHost
     private MenuBarView? _menuBar;
     private List<Control>? _overlays;
     private List<IInputSink>? _inputSinks;
+
+    /// <summary>The keys whose press an input sink took, and the sink that took it.</summary>
+    private Dictionary<Key, IInputSink>? _keysTakenBySinks;
     private SKSize _clientSize;
     private Control? _hovered;
     private readonly List<Control> _hoverChain = [];
@@ -370,6 +375,40 @@ public sealed class UiHost
         _windowClosedToken?.Dispose();
         _windowShownToken = null;
         _windowClosedToken = null;
+    }
+
+    /// <summary>
+    /// The host of the window this host belongs to: this host for one a window draws into, and the
+    /// window's host for one a platform popup window draws into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A popup is a surface of its own, so its host has no <see cref="Window"/> and is not the
+    /// window's client space either. What a platform layer needs is both of the things it lacks:
+    /// the window, because that is what owns the surface and what converts to screen pixels, and
+    /// where the popup's own top left corner sits inside it, because everything the popup draws and
+    /// hit tests is positioned in the popup's coordinates.
+    /// </para>
+    /// <para>
+    /// It is deliberately not <see cref="Window"/> that carries this. A host's <see cref="Window"/>
+    /// says which window the host draws, and a popup host draws a popup - so the two facts are
+    /// separate rather than one property that would have to mean two things.
+    /// </para>
+    /// </remarks>
+    internal UiHost WindowHost => _windowHost ?? this;
+
+    /// <summary>The origin of this host's client space in <see cref="WindowHost"/>'s client space.</summary>
+    internal SKPoint OriginInWindowHost => _originInWindowHost;
+
+    /// <summary>
+    /// Records where a popup window's host sits in the window that owns it: the window's host, and
+    /// the popup's top left corner in that host's coordinates. Called by the popup layer as it
+    /// hands a surface to the platform.
+    /// </summary>
+    internal void PlaceInWindow(UiHost windowHost, SKPoint origin)
+    {
+        _windowHost = windowHost;
+        _originInWindowHost = origin;
     }
 
     /// <summary>Resolves <typeparamref name="TService"/> from <see cref="Services"/>, or null when there is none.</summary>
@@ -1368,8 +1407,11 @@ public sealed class UiHost
     /// </remarks>
     public bool ProcessKeyDown(Key key, Modifiers modifiers = Modifiers.None) => Guard(() =>
     {
-        if (ProcessKeyInSinks(key, modifiers))
+        if (FindSinkForKeyDown(key, modifiers) is { } taker)
         {
+            // The press belongs to the sink that took it. Which sink, and whether it is still
+            // listening, is what ProcessKeyUp needs to decide where the release goes.
+            (_keysTakenBySinks ??= [])[key] = taker;
             return true;
         }
 
@@ -1394,11 +1436,50 @@ public sealed class UiHost
         return _focused?.RaiseKeyDown(new KeyEventArgs(key, modifiers)) ?? false;
     }, false);
 
-    /// <summary>Routes a key release to the focused control.</summary>
+    /// <summary>
+    /// Routes a key release to the input sinks and then to the focused control.
+    /// </summary>
     /// <param name="key">The key that was released.</param>
     /// <param name="modifiers">The modifier keys held while it was released.</param>
+    /// <remarks>
+    /// <para>
+    /// The sinks are asked first, in the same order as for the press - newest first - so an open
+    /// popup completes a keyboard activation inside itself instead of the window's own focused
+    /// control doing so: a <see cref="Button"/> raises its click on key-up.
+    /// </para>
+    /// <para>
+    /// A sink that declines a release has declined a press the same way, so the release carries on
+    /// down the same chain and ends at the focused control, which is where a declined press ends.
+    /// The one thing that changes is a sink that took the press and has gone by the release: Escape
+    /// closes the popup its sink was forwarding into, and that popup keeps the release even though
+    /// nothing is left to answer for it. A second popup - the level above - and the control behind
+    /// must not act on the second half of a keystroke the popup already took.
+    /// </para>
+    /// </remarks>
     public void ProcessKeyUp(Key key, Modifiers modifiers = Modifiers.None) =>
-        Guard(() => _focused?.RaiseKeyUp(new KeyEventArgs(key, modifiers)));
+        Guard(() =>
+        {
+            if (ProcessKeyUpInSinks(key, modifiers))
+            {
+                _keysTakenBySinks?.Remove(key);
+                return;
+            }
+
+            if (_keysTakenBySinks is { } taken && taken.TryGetValue(key, out var taker))
+            {
+                taken.Remove(key);
+
+                if (_inputSinks?.Contains(taker) != true)
+                {
+                    return;
+                }
+            }
+
+            if (_focused is { } focused)
+            {
+                focused.RaiseKeyUp(new KeyEventArgs(key, modifiers));
+            }
+        });
 
     /// <summary>
     /// Routes typed text to the focused control, after the input sinks have been offered it.
@@ -1497,8 +1578,8 @@ public sealed class UiHost
     }
 
     /// <summary>
-    /// Pushes <paramref name="sink"/> onto the window's input sinks, so it sees keys and typed text
-    /// before the focused control does. Dispose the result to remove it again.
+    /// Pushes <paramref name="sink"/> onto the window's input sinks, so it sees keys, their releases
+    /// and typed text before the focused control does. Dispose the result to remove it again.
     /// </summary>
     public IDisposable AddInputSink(IInputSink sink)
     {
@@ -1522,10 +1603,43 @@ public sealed class UiHost
     }
 
     /// <summary>
-    /// Offers a key to the sinks, newest first. A sink may remove itself while it handles the key,
+    /// Offers a key to the sinks, newest first, and answers with the one that took it. A sink may
+    /// remove itself while it handles the key, so the walk re-reads the live list rather than a copy
+    /// of it.
+    /// </summary>
+    private IInputSink? FindSinkForKeyDown(Key key, Modifiers modifiers)
+    {
+        if (_inputSinks is not { Count: > 0 } sinks)
+        {
+            return null;
+        }
+
+        for (var i = sinks.Count - 1; i >= 0; i--)
+        {
+            if (i >= sinks.Count)
+            {
+                continue;
+            }
+
+            // Read before the call: a sink that handles the key may close a popup, and closing one
+            // takes its sink off this list, so the index it was found at need not be valid any more.
+            var sink = sinks[i];
+
+            if (sink.ProcessKeyDown(key, modifiers))
+            {
+                return sink;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Offers a key release to the sinks, newest first, the same way a press is offered. A sink may
+    /// remove itself while it handles the release - Escape closing the popup that had the press -
     /// so the walk re-reads the live list rather than a copy of it.
     /// </summary>
-    private bool ProcessKeyInSinks(Key key, Modifiers modifiers)
+    private bool ProcessKeyUpInSinks(Key key, Modifiers modifiers)
     {
         if (_inputSinks is not { Count: > 0 } sinks)
         {
@@ -1534,7 +1648,7 @@ public sealed class UiHost
 
         for (var i = sinks.Count - 1; i >= 0; i--)
         {
-            if (i < sinks.Count && sinks[i].ProcessKeyDown(key, modifiers))
+            if (i < sinks.Count && sinks[i].ProcessKeyUp(key, modifiers))
             {
                 return true;
             }
@@ -1982,6 +2096,23 @@ public sealed class UiHost
             : ((current + direction) % focusable.Count + focusable.Count) % focusable.Count;
 
         SetFocus(focusable[next]);
+    }
+
+    /// <summary>
+    /// The controls Tab reaches under <paramref name="root"/>, in the order it reaches them, by the
+    /// same rules <see cref="MoveFocus"/> uses for the window's own tree.
+    /// </summary>
+    /// <remarks>
+    /// A popup walks its content with this instead of moving the window's focus: the popup's tree is
+    /// not the window's tree, so <see cref="MoveFocus"/> would step onto the controls behind it.
+    /// </remarks>
+    /// <param name="root">The top of the subtree to walk, or null for nothing.</param>
+    /// <returns>The tab stops, empty when there are none.</returns>
+    internal static List<Control> CollectTabStops(Control? root)
+    {
+        var stops = new List<Control>();
+        CollectFocusable(root, stops);
+        return stops;
     }
 
     /// <summary>

@@ -39,6 +39,8 @@ public sealed class Popup : IDisposable
     private Control? _shownContent;
     private ScaledPopupHost? _wrapper;
     private SKPoint _location;
+    private SKSize _measuredSize;
+    private SKPoint _ownerOffset;
     private float _scaleFactor = 1f;
     private bool _open;
     private bool _disposed;
@@ -164,8 +166,52 @@ public sealed class Popup : IDisposable
     /// </summary>
     internal Control? DismissCatcher => _catcher;
 
-    /// <summary>Where the popup's top left corner sits, in the owning host's coordinates.</summary>
+    /// <summary>
+    /// What a press outside the popup does, or null for closing this popup. It is given the press in
+    /// the client coordinates of the window the popup belongs to, and answers whether the press
+    /// closed a level.
+    /// </summary>
+    /// <remarks>
+    /// A press outside a popup is outside every popup that was opened from it as well, so which
+    /// levels it closes is a question only the popup API can answer, and it answers it by walking the
+    /// chain from the innermost level outward. A popup shown for its own sake - a drop-down list, a
+    /// tooltip, a menu - has no levels below it, so it keeps the default.
+    /// </remarks>
+    internal Func<SKPoint, bool>? OutsidePress { get; set; }
+
+    /// <summary>
+    /// Where the popup's top left corner sits, in the coordinates of the host it is anchored in -
+    /// the window's for a popup opened from the window, and the parent popup's for one opened from
+    /// inside another popup.
+    /// </summary>
     public SKPoint Location => _location;
+
+    /// <summary>
+    /// The rectangle the popup occupies, in the client coordinates of the window it belongs to:
+    /// where it really landed, which is the location after any flip and clamp rather than the one
+    /// asked for.
+    /// </summary>
+    /// <remarks>
+    /// The location is in the coordinate space of the host the popup was placed in, which is the
+    /// window's for a popup opened from the window and the parent popup's for one opened inside
+    /// another popup - the space <see cref="Location"/> reports. Moving it into the window's space
+    /// is the same translation the popup itself applies on the way out, because a popup host's
+    /// client space is the window's, moved. The size is the host-space size
+    /// <see cref="MeasureContent"/> returned, so a scaled popup's rectangle is the room it takes.
+    /// </remarks>
+    internal SKRect BoundsInWindow
+    {
+        get
+        {
+            var topLeft = ToWindow(_location);
+
+            return new SKRect(
+                topLeft.X,
+                topLeft.Y,
+                topLeft.X + _measuredSize.Width,
+                topLeft.Y + _measuredSize.Height);
+        }
+    }
 
     /// <summary>Raised after the popup closed, whether by <see cref="Close"/> or by the platform.</summary>
     public IDisposable AddClosedHandler(Action<object> handler)
@@ -206,6 +252,11 @@ public sealed class Popup : IDisposable
         var host = Host ?? throw new InvalidOperationException("The popup is not attached to a window.");
 
         _location = location;
+
+        // Where the anchor's own coordinate space starts in the window the popup ends up belonging
+        // to. Zero for a popup anchored in the window; the parent popup's position for one anchored
+        // inside another popup, since everything it is asked to place is measured from there.
+        _ownerOffset = host.OriginInWindowHost;
 
         // The content is hosted in a zoom wrapper rather than the wrapper being taught to the
         // backend: painting and hit testing inside the popup then come from the same container
@@ -255,7 +306,7 @@ public sealed class Popup : IDisposable
 
         if (_window is not null)
         {
-            _window.UpdateBounds(location, MeasureContent());
+            _window.UpdateBounds(ToWindow(location), MeasureContent());
             return;
         }
 
@@ -337,8 +388,14 @@ public sealed class Popup : IDisposable
 
     private bool TryShowInWindow(UiHost host, Control content, SKPoint location)
     {
-        var service = host.GetService<IPopupService>() ?? PopupService.Current;
-        var window = service?.CreatePopup(host, DismissOnOutsideClick, TakesPresses ?? DismissOnOutsideClick);
+        // A popup opened from a control inside another popup hangs off that popup, but the surface
+        // it is shown in is the window's: a platform popup belongs to the window, is ordered above
+        // it and out with it, and is placed in the window's coordinates. Both of those come from the
+        // window's own host, which is also the one that can say where the display is.
+        var windowHost = host.WindowHost;
+        var origin = ToWindow(location);
+        var service = windowHost.GetService<IPopupService>() ?? PopupService.Current;
+        var window = service?.CreatePopup(windowHost, DismissOnOutsideClick, TakesPresses ?? DismissOnOutsideClick);
 
         if (window is null)
         {
@@ -347,6 +404,15 @@ public sealed class Popup : IDisposable
 
         _window = window;
         ActualPresentation = PopupPresentation.Window;
+
+        // The backend reports the press it sees on the owning window rather than dismissing the popup
+        // itself, so how many levels go is decided by the chain rather than by the platform.
+        window.OutsidePress = ReportOutsidePress;
+
+        // The popup's own host is a coordinate space of its own, and a popup opened inside this one
+        // is placed in it. Recording where it sits is what lets that level convert to the window
+        // without walking anything at show time.
+        window.Host.PlaceInWindow(windowHost, origin);
 
         // A popup window is composited per pixel on every platform, so its surface starts out
         // empty and only what the content paints shows. Clearing it to the theme background
@@ -359,7 +425,7 @@ public sealed class Popup : IDisposable
 
         try
         {
-            window.Show(host, location, MeasureContent());
+            window.Show(windowHost, origin, MeasureContent());
         }
         catch
         {
@@ -422,7 +488,13 @@ public sealed class Popup : IDisposable
         }
     }
 
-    private SKSize MeasureContent()
+    /// <summary>
+    /// The size the popup occupies, in host coordinates: <see cref="Size"/> or what the content
+    /// measures, scaled by <see cref="ScaleFactor"/>. Placement reads it before the popup is shown
+    /// to decide whether it fits, so the fit and the drawing cannot disagree about how much room
+    /// the popup takes.
+    /// </summary>
+    internal SKSize MeasureContent()
     {
         SKSize size;
 
@@ -444,12 +516,50 @@ public sealed class Popup : IDisposable
 
         // Size and MaximumSize are content-space values; the window or overlay the popup occupies
         // is that size scaled, which is also the size the screen-fitting decision must use.
-        return _scaleFactor == 1f
+        var hostSize = _scaleFactor == 1f
             ? size
             : new SKSize(size.Width * _scaleFactor, size.Height * _scaleFactor);
+
+        // Kept so that BoundsInWindow can answer with the room the popup was last given rather than
+        // measuring the content again - which is what a caller asking where it landed must get.
+        _measuredSize = hostSize;
+
+        return hostSize;
     }
 
     private void OnWindowDismissed(object sender) => Close();
+
+    /// <summary>
+    /// A location in the coordinates of the host the popup is anchored in, expressed in the
+    /// coordinates of the window the surface belongs to.
+    /// </summary>
+    /// <remarks>
+    /// A popup's own host is the same size on screen as the window's host is for the same number of
+    /// logical pixels - the platform scales the surface by the window's scale factor - so this is a
+    /// translation and never a scale. That is why the size the popup asks for needs no conversion:
+    /// the popup host's client space is the window's, moved.
+    /// </remarks>
+    private SKPoint ToWindow(SKPoint location) => new(_ownerOffset.X + location.X, _ownerOffset.Y + location.Y);
+
+    /// <summary>Runs what a press outside the popup asks for: <see cref="OutsidePress"/>, else closing it.</summary>
+    /// <remarks>
+    /// The press arrives here from the one presentation that saw it - the dismiss catcher that covers
+    /// the window for an overlaid popup, or the backend for a popup window that the platform drew -
+    /// and it always arrives with the point it landed on, so both presentations go through the same
+    /// decision about how many levels it closes.
+    /// </remarks>
+    /// <param name="point">The press, in the client coordinates of the window the popup belongs to.</param>
+    /// <returns>Whether the press closed a level.</returns>
+    internal bool ReportOutsidePress(SKPoint point)
+    {
+        if (OutsidePress is { } handler)
+        {
+            return handler(point);
+        }
+
+        Close();
+        return true;
+    }
 }
 
 /// <summary>
@@ -505,7 +615,18 @@ internal sealed class PopupDismissCatcher : Control
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        _popup.Close();
+
+        // The event is in this control's own space, and this control is arranged to fill its host, so
+        // the press is a host point to start with; the host knows where its own space starts in the
+        // window's, which is the space the popup layer compares rectangles in.
+        var host = Host;
+        var point = host is null
+            ? e.Location
+            : new SKPoint(
+                host.OriginInWindowHost.X + e.Location.X,
+                host.OriginInWindowHost.Y + e.Location.Y);
+
+        _popup.ReportOutsidePress(point);
     }
 
     protected override void OnLayout()

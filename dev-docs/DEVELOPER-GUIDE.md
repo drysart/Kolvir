@@ -1687,7 +1687,7 @@ content inside the owning window.
 | `Presentation` | `Auto` (the default), `Window` or `Overlay`; `ActualPresentation` reports which one happened |
 | `IPopupService` | The platform seam: `CreatePopup(ownerHost, dismissOnOutsideClick)` returns an `IPopupWindow` or `null` |
 | `PopupService.Current` | The process-wide service, registered by the backend next to the other adapters |
-| `IPopupWindow` | `Host`, `DismissesOnOutsideClick`, `Dismissed`, `Show(ownerHost, location, size)`, `UpdateBounds`, `Hide` |
+| `IPopupWindow` | `Host`, `DismissesOnOutsideClick`, `TakesPresses`, `OutsidePress`, `Dismissed`, `Show(ownerHost, location, size)`, `UpdateBounds`, `Hide` |
 
 When no service is registered - or when it declines, because the owner is not on screen yet - the
 popup falls back to the host's overlay layer, which paints it above the root control and routes
@@ -1711,18 +1711,39 @@ is on screen and how the screen is arranged:
 | Headless | None; popups stay on the overlay path |
 
 A popup window is never activated and never takes focus, so the owning control keeps the keyboard
-while its drop-down is open. Dismissal is the platform's job too: a press outside the popup, a
-scroll or a resize closes it, and `Dismissed` tells `Popup` to raise its `Closed` event.
+while its drop-down is open. Wheel, pointer motion and resize are not presses: each dismisses every
+popup the window owns, through `Dismissed`, which tells `Popup` to raise its `Closed` event.
 
-The press that dismisses a popup belongs to the popup: it is consumed, not delivered to whatever it
+The press that closes a popup belongs to the popup: it is consumed, not delivered to whatever it
 landed on. That is what the overlay presentation gets from its dismiss catcher, which covers the
 window and swallows the click, and a platform window has to match it - otherwise a press on the
 control that opened a pop-up both closes and reaches that control, which acts on a pop-up that is
 already gone. A combo box is where it shows: it reopens its list on the very click that closed it.
-So the Win32 window procedure returns without dispatching the button press that dismissed a popup,
-the AppKit local monitor returns `nil` for it, and on GTK4 `Gtk.Popover.Autohide` grabs the pointer
-so the press never reaches the window behind the popover. Wheel, pointer motion and resize are not
-presses: they dismiss the popup and are still delivered.
+So the Win32 window procedure returns without dispatching a button press a popup took, the AppKit
+local monitor returns `nil` for one, and the catcher is the topmost control for an overlaid popup.
+
+How many levels one press closes is the popup layer's answer, not a backend's. Both presentations
+report the press with the point it landed on - `IPopupWindow.OutsidePress` for a popup window, and
+`PopupDismissCatcher` for an overlaid one - and `PopupSession` walks the chain from the innermost
+level outward: every level the point is outside of completes with `OutsideClick`, and the walk stops
+at the first level the point is inside or the first level whose `DismissOnOutsideClick` is false, so
+an opting-out popup is not taken down by a press it ignored and neither is the popup above it. The
+rectangle the walk compares against is `Popup.BoundsInWindow`, which every level reports in the
+window's client coordinates - that is what a popup host's origin in the window is recorded for - so
+no level has to be converted into the space of the one below it. The walk's answer is also what tells
+a backend whether to swallow the press: false means nothing closed, and the press is delivered.
+GTK4 needs nothing of its own there: its popovers take no grab, so the press arrives at the portable
+catcher, which is a control in the window's own tree and reports the same point.
+
+`OutsidePress` is a **default interface member** that reports nothing, and its answer is the one
+`IPopupWindow` implementation that an application has to choose between. A popup window written
+against an earlier version of the interface keeps compiling and keeps working - its popups are
+dismissed by the platform raising `Dismissed`, one level per press, which is what every backend did
+before the rule existed. What it does not get is the rule itself: a press behind a stack of its
+popups closes only the innermost, because the portable layer is never told where the press landed.
+Reporting the press is how a backend opts in, and it must then honour the answer - swallow the press
+when one closed, deliver it when none did - or the popup and the window behind it will disagree about
+who owns the click.
 
 GTK4 needs two things of its own, because a popover is styled and painted by the toolkit rather
 than by the backend:
