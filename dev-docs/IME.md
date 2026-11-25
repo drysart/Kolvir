@@ -664,8 +664,13 @@ methods map onto the host contract like this.
 - **Menu accelerators.** AppKit consumes a Command chord before any view sees it, so the Edit menu
   feeds accelerators straight into the host. That path resets the composition first, or the marked text
   would survive a Cmd+X and the view would keep answering `hasMarkedText`.
-- **Popups.** `AppKitPopupWindow` is left alone, for the reason section 6.4 gives: a non-activating
-  popup never takes the input focus, so no composition can begin there.
+- **Popups.** `AppKitPopupWindow` is left alone for the composition itself, for the reason section 6.4
+  gives: a non-activating popup never takes the input focus, so no composition can begin there. What it
+  does answer for is staying alive long enough to receive the commit: a click on a character in the
+  character palette deactivates the application for about half a second, and a popup that dismissed on
+  that deactivation was gone before `insertText` arrived, so the character was dropped and the popup
+  closed as if the user had clicked elsewhere. `AppKitPopupWindow` therefore does not dismiss on the
+  deactivation the palette causes; `APPLICATION-MODEL.md` states the rule and the measurement.
 - **Fallback.** What a composition or the character viewer inserts is drawn by the core text pipeline,
   which splits a string into runs and draws a character with a face that covers it
   (`DEVELOPER-GUIDE.md`, fonts). That is the same code as on Windows and GTK4. Measured on the Mac host

@@ -1144,6 +1144,23 @@ the 512-byte resolution step 1 describes, so it is the change and not the bounda
 weighed: the change is portable managed code with no per-platform surface, so the larger-page images
 have nothing of their own to pay for it.
 
+The one measured AppKit exception sits in the same feature. A click on a character in the system's
+character palette takes the application's activation for about half a second before the commit
+arrives, so the popup window keeps itself open when the application that took the activation is the
+palette (`AppKitActivation.IsTextInputSurface`); see `APPLICATION-MODEL.md` for the measurement and
+the rule. It is rung 1: `AppKitActivation` is internal, no always-retained type names it, and its only
+caller is the resign observer of `AppKitPopupWindow`, which an application that never shows a popup
+does not reach. Measured on osx-arm64 only, which is the only one of the three this change can be
+weighed on here: `Kolvir.Minimal` publishes at 4,911,152 bytes against 4,894,720 at `3ee9d41`, so
+16,432 bytes, 0.34 percent, both from build roots of equal length (17 characters), by the same
+command and the same SDK, one after the other. The delta is a page rather than a code size: the arm64
+image is quantised to 16 KB pages, and `size -m` shows the change itself as 36 bytes of `__text` and
+6,208 bytes of `__const` - the marshalling metadata of `NSWorkspace.FrontmostApplication`, the one new
+binding the rule needs - crossing into a fresh page. It is well above the 512-byte resolution step 1
+describes, so it is the change and not the boundary, and the same predicate written as a pattern
+match rather than a call measured the same 4,911,152 bytes. `-p:TrimmerSingleWarn=false` reported no
+IL2xxx or IL3xxx warning.
+
 ## 9. Checklist for a new feature
 
 - [ ] Does any always-retained type (a control, a backend view, `UiHost`, `Application`)
