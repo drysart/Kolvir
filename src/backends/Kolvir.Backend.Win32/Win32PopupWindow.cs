@@ -100,6 +100,69 @@ internal sealed class Win32PopupWindow : IPopupWindow
 
     public UiHost Host => _host;
 
+    /// <summary>
+    /// The popup whose control tree has the keyboard for <paramref name="ownerHwnd"/>: the innermost
+    /// live popup - the one opened last - whose tree has a focused control.
+    /// </summary>
+    /// <remarks>
+    /// A popup never takes the activation, so the owning window stays the focused window and every
+    /// input message arrives there. The control tree that owns the keyboard is the popup's, though, and
+    /// what a platform input method asks about - where the caret is, and which control takes a
+    /// composition - has to be answered from that tree rather than from the control that opened the
+    /// popup. A popup with nothing focusable in it is skipped, so a tooltip cannot hide the field the
+    /// user is typing into.
+    /// </remarks>
+    internal static bool TryGetKeyboardPopup(IntPtr ownerHwnd, out Win32PopupWindow? popup)
+    {
+        popup = null;
+
+        foreach (var window in Live.Values)
+        {
+            if (window._ownerHwnd != ownerHwnd || window._host.FocusedControl is null)
+            {
+                continue;
+            }
+
+            if (popup is null || window._sequence > popup._sequence)
+            {
+                popup = window;
+            }
+        }
+
+        return popup is not null;
+    }
+
+    /// <summary>
+    /// The caret of the control this popup's tree has focused, in physical screen pixels, and that
+    /// control's line height in device pixels. False when nothing in the popup has the focus.
+    /// </summary>
+    internal bool TryGetImeCaret(out NativeMethods.POINT screen, out int lineHeight)
+    {
+        screen = default;
+        lineHeight = 0;
+
+        if (_hwnd == IntPtr.Zero || _host.FocusedControl is not { } focused
+            || !_host.TryGetCaretBounds(out var caret))
+        {
+            return false;
+        }
+
+        screen = new NativeMethods.POINT
+        {
+            X = _windowX + (int)MathF.Round(caret.Left * _scale),
+            Y = _windowY + (int)MathF.Round(caret.Top * _scale),
+        };
+
+        var height = focused.EffectiveFont.LineHeight;
+        if (height <= 0f)
+        {
+            height = caret.Height;
+        }
+
+        lineHeight = Math.Max(1, (int)MathF.Round(height * _scale));
+        return true;
+    }
+
     public bool DismissesOnOutsideClick { get; }
 
     public bool TakesPresses { get; }
