@@ -13,7 +13,9 @@ namespace Kolvir;
 /// The application is the composition root: it builds the service container from the backend's
 /// platform services plus the application's own registrations, then runs the backend's loop. Every
 /// public member is UI-thread only; <see cref="Invoke"/> and <see cref="BeginInvoke"/> are the only
-/// cross-thread entry points.
+/// cross-thread entry points. For the duration of <see cref="Run()"/> a
+/// <see cref="System.Threading.SynchronizationContext"/> is installed over those two, so an
+/// <c>await</c> in application code resumes on the UI thread; it is removed when the loop ends.
 /// </para>
 /// <para>
 /// Disposing the application is the teardown path for one that never ran, such as a headless
@@ -413,6 +415,12 @@ public sealed partial class Application : IDisposable
         _uiThreadId = Environment.CurrentManagedThreadId;
         _running = true;
 
+        // Installed after the thread id, because a Send from another thread asks CheckAccess whether
+        // it may run inline, and removed in the finally below. A process that is not inside a loop
+        // has no context, so nothing that outlives the loop can marshal onto it.
+        var previousContext = SynchronizationContext.Current;
+        SynchronizationContext.SetSynchronizationContext(UiSynchronizationContext.Instance);
+
         try
         {
             if (!_exitRequested)
@@ -450,6 +458,12 @@ public sealed partial class Application : IDisposable
         {
             _running = false;
             TearDown();
+
+            // Put back last, so teardown runs with the context still current: a hook or a window's
+            // disposal may post work, and a post made once the loop has ended is dropped harmlessly
+            // rather than resumed on a pool thread against a tree being disposed. Anything posted
+            // after this point has no application at all and is dropped before it is queued.
+            SynchronizationContext.SetSynchronizationContext(previousContext);
         }
 
         _fault?.Throw();
