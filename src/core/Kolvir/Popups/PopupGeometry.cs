@@ -192,7 +192,7 @@ internal static class PopupGeometry
     /// the window's coordinates, so the answer is moved into the anchor's before the fit and the
     /// clamp use it - the same translation the popup's own location gets on the way out.
     /// </remarks>
-    private static SKRect PlacementArea(UiHost host)
+    internal static SKRect PlacementArea(UiHost host)
     {
         var windowHost = host.WindowHost;
         var service = windowHost.GetService<IPopupService>() ?? PopupService.Current;
