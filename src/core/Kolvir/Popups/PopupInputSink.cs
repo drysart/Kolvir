@@ -26,6 +26,15 @@ namespace Kolvir;
 /// <see cref="MenuView"/> pays for a control it hosts in a row. Every key the popup does take, and
 /// all typed text, stops here.
 /// </para>
+/// <para>
+/// Both halves of a keystroke are forwarded, because a control inside the popup may act on either.
+/// A <see cref="Button"/> marks itself pressed on the press and raises its click on the release, so
+/// forwarding only presses leaves it lit and silent - and forwarding only presses would also let the
+/// focused control behind the popup complete a keystroke the popup had taken. Escape and Tab are
+/// answered here in both directions: Escape belongs to the popup showing, whether it closed on it or
+/// stayed, and Tab's press was used to move inside the popup. A declined release is declined the
+/// same way a declined press is, so the window's shortcuts behave the same in both phases.
+/// </para>
 /// </remarks>
 internal sealed class PopupInputSink : IInputSink, IDisposable
 {
@@ -94,6 +103,42 @@ internal sealed class PopupInputSink : IInputSink, IDisposable
         }
 
         return Target()?.RaiseKeyDown(new KeyEventArgs(key, modifiers)) == true;
+    }
+
+    /// <inheritdoc />
+    public bool ProcessKeyUp(Key key, Modifiers modifiers)
+    {
+        if (_disposed)
+        {
+            return false;
+        }
+
+        // The same rule as for the press: while a popup opened inside this one is up, the keyboard
+        // is that popup's, and the level below must not see its release as well.
+        if (_session.Surface.Current is { } nested && !nested.Completion.IsCompleted)
+        {
+            return false;
+        }
+
+        // Escape is the popup's in both phases. The press either closed it - and this sink is then
+        // already gone - or was swallowed, and its release must not reach the popup underneath or
+        // the control behind, which would dismiss something the user never saw.
+        if (key == Key.Escape)
+        {
+            return true;
+        }
+
+        // Tab's press moved the focus inside the popup, so its release is the popup's too rather
+        // than the window's, where it would be a Tab nobody pressed in that tree.
+        if (key == Key.Tab)
+        {
+            return true;
+        }
+
+        // A control that acts on the release - a Button raises its click here - gets it, and a
+        // control that declines it declines the way it declines a press: the release carries on
+        // down the window's own chain instead of stopping here.
+        return Target()?.RaiseKeyUp(new KeyEventArgs(key, modifiers)) == true;
     }
 
     /// <inheritdoc />

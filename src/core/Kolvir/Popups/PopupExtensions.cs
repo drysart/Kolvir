@@ -1,4 +1,5 @@
 using System.Runtime.CompilerServices;
+using SkiaSharp;
 
 namespace Kolvir;
 
@@ -19,7 +20,13 @@ namespace Kolvir;
 /// the content, Escape dismisses the popup unless <see cref="PopupOptions.EscapeCloses"/> says
 /// otherwise, Tab and Shift+Tab cycle the popup's own controls, and every other key and typed
 /// character reaches the control inside it that has the focus. Nothing of that depends on the
-/// platform: no backend popup takes the keyboard, so the window that has it hands the keys on.
+/// platform: no backend popup takes the keyboard, so the window that has it hands the keys on. Both
+/// halves of a keystroke are handed on, so a control that acts on the release - a
+/// <see cref="Button"/>, a <see cref="CheckBox"/> - works inside a popup as it does in a window.
+/// </para>
+/// <para>
+/// <see cref="TryGetPopupBounds"/> answers the question the options cannot: where the popup really
+/// landed once the display had its say, in the owning window's client coordinates.
 /// </para>
 /// <para>
 /// One popup belongs to one owner surface at a time. A surface is a window, or a popup: a popup
@@ -160,6 +167,57 @@ public static class PopupExtensions
         {
             session.Complete(result ?? PopupResult.Closed());
         }
+    }
+
+    /// <summary>
+    /// Asks where a popup showing <paramref name="content"/> ended up: its rectangle in the client
+    /// coordinates of the window that owns it, after any flip and clamp.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is the answer the arguments cannot give: <see cref="PopupOptions.Align"/>,
+    /// <see cref="PopupOptions.Offset"/> and <see cref="PopupOptions.Size"/> are requests, and the
+    /// display has the last word - the popup flips to the far side of its anchor when it does not
+    /// fit, and is then moved inside the placement area. A caller that wants to draw something
+    /// beside a popup, or to show the user that the flip happened, needs the rectangle that
+    /// resulted rather than the one that was asked for.
+    /// </para>
+    /// <para>
+    /// The space is the owning window's client coordinates - the space
+    /// <see cref="Control.GetPositionInHost"/> reports for a control on the window's own tree, and
+    /// the one <see cref="PopupPlacement.ClientPoint"/> is read in when the window is the popup's
+    /// owner. Deliberately not the space the popup was placed in: a popup opened from a control
+    /// inside another popup is placed in the parent popup's coordinates, and a caller that has to
+    /// know which level it is at to read a rectangle would get this wrong. The popup layer already
+    /// records where a popup's own host sits in the window (a popup host's client space is the
+    /// window's, moved), so the answer is translated here and every popup reports in the same space,
+    /// one level deep or five.
+    /// </para>
+    /// <para>
+    /// The size is the room the popup takes, so <see cref="PopupOptions.Size"/> and the content have
+    /// already been multiplied by the subtree's scale. The rectangle is only meaningful while the
+    /// popup is showing: a control that is in no popup, or whose popup has closed, is answered with
+    /// false, which is what makes this safe to call from a closed handler.
+    /// </para>
+    /// </remarks>
+    /// <param name="content">The control the popup was shown with.</param>
+    /// <param name="bounds">The popup's rectangle in the owning window's client coordinates.</param>
+    /// <returns>True when <paramref name="content"/> is showing in a popup; false otherwise.</returns>
+    /// <exception cref="ArgumentNullException"><paramref name="content"/> is null.</exception>
+    public static bool TryGetPopupBounds(this Control content, out SKRect bounds)
+    {
+        ArgumentNullException.ThrowIfNull(content);
+
+        if (Channels.TryGetValue(content, out var channel)
+            && channel.Session is { } session
+            && session.Bounds is { } resolved)
+        {
+            bounds = resolved;
+            return true;
+        }
+
+        bounds = default;
+        return false;
     }
 
     /// <summary>

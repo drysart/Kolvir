@@ -39,6 +39,7 @@ public sealed class Popup : IDisposable
     private Control? _shownContent;
     private ScaledPopupHost? _wrapper;
     private SKPoint _location;
+    private SKSize _measuredSize;
     private SKPoint _ownerOffset;
     private float _scaleFactor = 1f;
     private bool _open;
@@ -182,6 +183,33 @@ public sealed class Popup : IDisposable
     /// inside another popup.
     /// </summary>
     public SKPoint Location => _location;
+
+    /// <summary>
+    /// The rectangle the popup occupies, in the client coordinates of the window it belongs to:
+    /// where it really landed, which is the location after any flip and clamp rather than the one
+    /// asked for.
+    /// </summary>
+    /// <remarks>
+    /// The location is in the coordinate space of the host the popup was placed in, which is the
+    /// window's for a popup opened from the window and the parent popup's for one opened inside
+    /// another popup - the space <see cref="Location"/> reports. Moving it into the window's space
+    /// is the same translation the popup itself applies on the way out, because a popup host's
+    /// client space is the window's, moved. The size is the host-space size
+    /// <see cref="MeasureContent"/> returned, so a scaled popup's rectangle is the room it takes.
+    /// </remarks>
+    internal SKRect BoundsInWindow
+    {
+        get
+        {
+            var topLeft = ToWindow(_location);
+
+            return new SKRect(
+                topLeft.X,
+                topLeft.Y,
+                topLeft.X + _measuredSize.Width,
+                topLeft.Y + _measuredSize.Height);
+        }
+    }
 
     /// <summary>Raised after the popup closed, whether by <see cref="Close"/> or by the platform.</summary>
     public IDisposable AddClosedHandler(Action<object> handler)
@@ -482,9 +510,15 @@ public sealed class Popup : IDisposable
 
         // Size and MaximumSize are content-space values; the window or overlay the popup occupies
         // is that size scaled, which is also the size the screen-fitting decision must use.
-        return _scaleFactor == 1f
+        var hostSize = _scaleFactor == 1f
             ? size
             : new SKSize(size.Width * _scaleFactor, size.Height * _scaleFactor);
+
+        // Kept so that BoundsInWindow can answer with the room the popup was last given rather than
+        // measuring the content again - which is what a caller asking where it landed must get.
+        _measuredSize = hostSize;
+
+        return hostSize;
     }
 
     private void OnWindowDismissed(object sender) => Close();

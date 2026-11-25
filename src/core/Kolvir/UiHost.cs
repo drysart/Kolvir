@@ -44,6 +44,9 @@ public sealed class UiHost
     private MenuBarView? _menuBar;
     private List<Control>? _overlays;
     private List<IInputSink>? _inputSinks;
+
+    /// <summary>The keys whose press an input sink took, and the sink that took it.</summary>
+    private Dictionary<Key, IInputSink>? _keysTakenBySinks;
     private SKSize _clientSize;
     private Control? _hovered;
     private readonly List<Control> _hoverChain = [];
@@ -1404,8 +1407,11 @@ public sealed class UiHost
     /// </remarks>
     public bool ProcessKeyDown(Key key, Modifiers modifiers = Modifiers.None) => Guard(() =>
     {
-        if (ProcessKeyInSinks(key, modifiers))
+        if (FindSinkForKeyDown(key, modifiers) is { } taker)
         {
+            // The press belongs to the sink that took it. Which sink, and whether it is still
+            // listening, is what ProcessKeyUp needs to decide where the release goes.
+            (_keysTakenBySinks ??= [])[key] = taker;
             return true;
         }
 
@@ -1430,11 +1436,50 @@ public sealed class UiHost
         return _focused?.RaiseKeyDown(new KeyEventArgs(key, modifiers)) ?? false;
     }, false);
 
-    /// <summary>Routes a key release to the focused control.</summary>
+    /// <summary>
+    /// Routes a key release to the input sinks and then to the focused control.
+    /// </summary>
     /// <param name="key">The key that was released.</param>
     /// <param name="modifiers">The modifier keys held while it was released.</param>
+    /// <remarks>
+    /// <para>
+    /// The sinks are asked first, in the same order as for the press - newest first - so an open
+    /// popup completes a keyboard activation inside itself instead of the window's own focused
+    /// control doing so: a <see cref="Button"/> raises its click on key-up.
+    /// </para>
+    /// <para>
+    /// A sink that declines a release has declined a press the same way, so the release carries on
+    /// down the same chain and ends at the focused control, which is where a declined press ends.
+    /// The one thing that changes is a sink that took the press and has gone by the release: Escape
+    /// closes the popup its sink was forwarding into, and that popup keeps the release even though
+    /// nothing is left to answer for it. A second popup - the level above - and the control behind
+    /// must not act on the second half of a keystroke the popup already took.
+    /// </para>
+    /// </remarks>
     public void ProcessKeyUp(Key key, Modifiers modifiers = Modifiers.None) =>
-        Guard(() => _focused?.RaiseKeyUp(new KeyEventArgs(key, modifiers)));
+        Guard(() =>
+        {
+            if (ProcessKeyUpInSinks(key, modifiers))
+            {
+                _keysTakenBySinks?.Remove(key);
+                return;
+            }
+
+            if (_keysTakenBySinks is { } taken && taken.TryGetValue(key, out var taker))
+            {
+                taken.Remove(key);
+
+                if (_inputSinks?.Contains(taker) != true)
+                {
+                    return;
+                }
+            }
+
+            if (_focused is { } focused)
+            {
+                focused.RaiseKeyUp(new KeyEventArgs(key, modifiers));
+            }
+        });
 
     /// <summary>
     /// Routes typed text to the focused control, after the input sinks have been offered it.
@@ -1533,8 +1578,8 @@ public sealed class UiHost
     }
 
     /// <summary>
-    /// Pushes <paramref name="sink"/> onto the window's input sinks, so it sees keys and typed text
-    /// before the focused control does. Dispose the result to remove it again.
+    /// Pushes <paramref name="sink"/> onto the window's input sinks, so it sees keys, their releases
+    /// and typed text before the focused control does. Dispose the result to remove it again.
     /// </summary>
     public IDisposable AddInputSink(IInputSink sink)
     {
@@ -1558,10 +1603,43 @@ public sealed class UiHost
     }
 
     /// <summary>
-    /// Offers a key to the sinks, newest first. A sink may remove itself while it handles the key,
+    /// Offers a key to the sinks, newest first, and answers with the one that took it. A sink may
+    /// remove itself while it handles the key, so the walk re-reads the live list rather than a copy
+    /// of it.
+    /// </summary>
+    private IInputSink? FindSinkForKeyDown(Key key, Modifiers modifiers)
+    {
+        if (_inputSinks is not { Count: > 0 } sinks)
+        {
+            return null;
+        }
+
+        for (var i = sinks.Count - 1; i >= 0; i--)
+        {
+            if (i >= sinks.Count)
+            {
+                continue;
+            }
+
+            // Read before the call: a sink that handles the key may close a popup, and closing one
+            // takes its sink off this list, so the index it was found at need not be valid any more.
+            var sink = sinks[i];
+
+            if (sink.ProcessKeyDown(key, modifiers))
+            {
+                return sink;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// Offers a key release to the sinks, newest first, the same way a press is offered. A sink may
+    /// remove itself while it handles the release - Escape closing the popup that had the press -
     /// so the walk re-reads the live list rather than a copy of it.
     /// </summary>
-    private bool ProcessKeyInSinks(Key key, Modifiers modifiers)
+    private bool ProcessKeyUpInSinks(Key key, Modifiers modifiers)
     {
         if (_inputSinks is not { Count: > 0 } sinks)
         {
@@ -1570,7 +1648,7 @@ public sealed class UiHost
 
         for (var i = sinks.Count - 1; i >= 0; i--)
         {
-            if (i < sinks.Count && sinks[i].ProcessKeyDown(key, modifiers))
+            if (i < sinks.Count && sinks[i].ProcessKeyUp(key, modifiers))
             {
                 return true;
             }
