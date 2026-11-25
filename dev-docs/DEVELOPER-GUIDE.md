@@ -5939,8 +5939,8 @@ integrated GPU's output cannot present the frames a device on the discrete card 
 prints every adapter and marks the one chosen, and a refusal names it, so a machine that fails says
 which adapter it tried.
 
-Two things about the swap chain are requirements rather than preferences, and both were learned the
-hard way - a refusal from the create call is `DXGI_ERROR_INVALID_CALL`, which names neither:
+The swap chain's description has requirements rather than preferences, and several were learned the
+hard way - a refusal from the create call is `DXGI_ERROR_INVALID_CALL`, which names none of them:
 
 - **It has to be a flip model.** Direct3D 12 will not present through a bitblt swap chain, so the
   ladder is `FLIP_DISCARD` and then `FLIP_SEQUENTIAL`, with a final `FLIP_DISCARD` at two buffers for
@@ -5953,6 +5953,19 @@ hard way - a refusal from the create call is `DXGI_ERROR_INVALID_CALL`, which na
 - **`AlphaMode` has to be `DXGI_ALPHA_MODE_IGNORE`, which is 3.** The neighbouring value, 2
   (`STRAIGHT`), is refused, and because both are small integers a transposed constant is invisible in
   the description until DXGI rejects the whole thing.
+- **`Scaling` is `DXGI_SCALING_NONE`, deliberately.** The chain is resized from `WM_SIZE`, and the
+  window's client area has already changed when that message arrives, so for the frame between a
+  resize step and the present it produces the compositor is still showing the previous buffer. With
+  `DXGI_SCALING_STRETCH` that frame is magnified to the new client area, which makes everything on
+  screen grow and shrink as the pointer moves - measured on this host as 8.6-9.1% of the
+  fixed-width navigation panel's pixels disagreeing with the frame that settles, at every step of a
+  drag. `DXGI_SCALING_NONE` leaves the previous buffer at its own size, anchored top-left, and the
+  same measurement is 0 pixels: the content does not move, and the only thing wrong for that one
+  frame is the edge the buffer has not covered yet. Growing leaves that strip black - DXGI does not
+  paint it, and the pixels for the new size do not exist yet - and shrinking clips at the edge with
+  the content in exactly the right place. Steady picture with a torn edge was chosen over a whole
+  picture that is scaled wrong; it is a choice about which artifact is least bad, not a fix for the
+  one-frame lag. `NONE` is only valid on a flip-model chain, which this tier always uses.
 
 Presenting has two of its own, and both showed up as a window that opened, drew nothing and died:
 
@@ -6027,6 +6040,19 @@ call, which is where the display's pacing appears - a present that sits at one r
 the tier is waiting for the display rather than for anything it did. `buffers` is the count the chain
 was made with, because a chain that fell to the two-buffer rung behaves differently under a drag.
 
+Every resize also writes one line saying what the chain and the client area ended up at, which is the
+line to read when a resize looks wrong:
+
+```
+kolvir-d3d12: resize 1966x1623 chain 1966x1623 client 1966x1623
+```
+
+The two sizes agree once the resize has been applied. What the line cannot show is the frame between
+the window changing and that resize: the client area has already moved, the chain has not, and the
+compositor is displaying the previous buffer at its own size - which is why `Scaling` is `NONE`.
+A chain that disagrees with the requested size here is a resize DXGI did not apply as asked, and that
+is the sign to chase rather than the one-frame lag.
+
 It talks to `dxgi.dll` and `d3d12.dll` through raw vtable calls reached by explicit slot number, the
 way the Vulkan tier reaches its entry points through the loader: no wrapper package and no interop
 dependency. Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, the command in
@@ -6034,13 +6060,23 @@ section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)): 8,911,360 -> 8,9
 bytes, and no new native asset - `d3d12.dll` and `dxgi.dll` are operating-system components, and the
 shipped `libSkiaSharp.dll` already contains the Direct3D backend.
 
+The `DXGI_SCALING_NONE` decision and its read-back cost 1,024 bytes on the same floor: 3,884,032 ->
+3,885,056, published from build roots of equal path length, and the same figure came out of two
+different root pairs - so it is content rather than the 512-byte `FileAlignment` boundary moving. The
+tier is part of the Win32 backend, which every Win32 application that opens a window references, so it
+sits on none of the three rungs in section 4 of that policy: it is always retained on that platform and
+the cost is measured instead of avoided. The resize diagnostic is behind `KOLVIR_GL_TRACE`, so an
+untraced build pays one empty call per resize and no native call.
+
 The tests pin the tier order, the diagnostic line and the software-adapter refusal, and the production
 probe is exercised for real (the libraries load, the adapter list is walked). The present path is
 covered too, on the software adapter the diagnostic switch admits: a window, a flip swap chain, a Skia
-context, five frames, a resize and a frame at the new size. That is what catches a wrong slot or a
-leaked buffer reference without a GPU in the machine - both faults it was written for appeared exactly
-there. What it still cannot prove is speed: how a real GPU presents is read off the `gfx:` line and the
-**Measured rendering** page.
+context, five frames, a resize and a frame at the new size - and the chain is read back to check that it
+was described with `DXGI_SCALING_NONE` and holds the size it was resized to, so neither the decision
+about the scaling nor the resize invariant can be changed by accident. That is what catches a wrong slot
+or a leaked buffer reference without a GPU in the machine - both faults it was written for appeared
+exactly there. What it still cannot prove is speed: how a real GPU presents is read off the `gfx:` line
+and the **Measured rendering** page.
 
 Measured cost on the `Kolvir.Minimal` floor (Windows x64, NativeAOT, Skia loose, the command in
 section 8 of [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md)):
