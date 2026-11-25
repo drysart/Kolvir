@@ -5,13 +5,19 @@ namespace Kolvir.Demo;
 
 /// <summary>
 /// The popups page: the public popup API end to end - placement, flipping and clamping, content that
-/// takes the keyboard, a popup opened from inside a popup, and every result a dismissal can report.
+/// takes the keyboard, a popup opened from inside a popup, where a popup ended up, and every result a
+/// dismissal can report.
 /// </summary>
 /// <remarks>
 /// <para>
 /// Every button here calls <c>ShowPopupAsync</c> for real, and the readout shows the
 /// <see cref="PopupResult"/> that call completed with. A reason on this page is the library's answer
 /// rather than a description of one.
+/// </para>
+/// <para>
+/// The popups that report a rectangle read it back with <c>TryGetPopupBounds</c> as soon as the
+/// show returns, and the label inside the popup is filled from that read: the options above are the
+/// request, and these are the display's answer after the flip and the clamp.
 /// </para>
 /// <para>
 /// Content is built for each show, because a control has one home at a time. The exception is the
@@ -50,7 +56,8 @@ internal sealed class PopupPage : DemoPage
         card.Controls.Add(new Label(
             "Each button opens a real ShowPopupAsync. The result it completes with lands in the " +
             "readout below and in the status line: the reason, and the value when there is one. " +
-            "Place one, push one at the edge, type in one, open one from inside another.")
+            "Place one, push one at the edge, type in and tab around one, fire the button in one " +
+            "with Enter, open one from inside another, and read back where it landed.")
         {
             Dock = XDock.Top,
             AutoSize = false,
@@ -88,16 +95,18 @@ internal sealed class PopupPage : DemoPage
         card.Controls.Add(AlignRow(PopupAlign.AboveStart, PopupAlign.AboveCenter, PopupAlign.AboveEnd));
         card.Controls.Add(AlignRow(PopupAlign.RightOf, PopupAlign.LeftOf, PopupAlign.AtPointer));
 
-        card.Controls.Add(ScrollCaption("Flip, clamp, offset and size - the display has the last word"));
+        card.Controls.Add(ScrollCaption("Flip, clamp, offset and size - the display has the last word, and it can be read back"));
         card.Controls.Add(BuildWideRow());
         card.Controls.Add(BuildOptionsRow());
 
         card.Controls.Add(ScrollCaption(
-            "Content and keyboard - a tooltip, a menu with a text box, and a popup inside a popup"));
+            "Content and keyboard - a tooltip, a menu with a text box, a popup inside a popup, and a "
+            + "button Enter and Space fire"));
         var content = ControlsRow();
         content.Controls.Add(PageButton("Rich tooltip", ShowTooltip));
         content.Controls.Add(PageButton("Context menu with a text box", ShowContextMenu));
         content.Controls.Add(BuildNestedButton());
+        content.Controls.Add(PageButton("Button in a popup", ShowKeyboardActivation));
         card.Controls.Add(content);
 
         card.Controls.Add(ScrollCaption("Results - every reason, with and without a value"));
@@ -169,6 +178,12 @@ internal sealed class PopupPage : DemoPage
     private Panel BuildWideRow()
     {
         var row = ControlsRow(34f);
+
+        var landed = PageButton("Where it landed", anchor => ShowResolvedBounds(anchor, tall: false));
+        row.Controls.Add(landed);
+
+        var flipped = PageButton("Where it flipped", anchor => ShowResolvedBounds(anchor, tall: true));
+        row.Controls.Add(flipped);
 
         var wide = PageButton("Wide from the right edge", ShowWide);
         wide.Dock = XDock.Right;
@@ -499,6 +514,140 @@ internal sealed class PopupPage : DemoPage
         _ = ShowAndReportAsync(
             "Context menu",
             () => anchor.ShowPopupAsync(BuildContextMenuContent(), Sized(320f, 220f)));
+    }
+
+    /// <summary>
+    /// A popup whose first button fires from Enter or Space, so the reader can prove the keyboard
+    /// reaches a control inside a popup and not only the controls behind it.
+    /// </summary>
+    private void ShowKeyboardActivation(Button anchor)
+    {
+        if (OwnerWindow is null)
+        {
+            NoWindow();
+            return;
+        }
+
+        var content = PopupCard();
+        content.Controls.Add(PopupTitle("Keyboard activation"));
+        content.Controls.Add(PopupCaption(
+            "Tab moves between these two buttons and stays in the popup. Enter or Space fires the " +
+            "one that has the focus - on the release of the key, which is why the count moves then."));
+
+        var activations = 0;
+        var count = new Label("Activations: 0")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Font = Theme.EmphasizedFont,
+            ForeColor = ThemeColor.Foreground,
+            Margin = new Thickness(0f, 0f, 0f, 8f),
+        };
+
+        var activate = new Button("Activate (Enter or Space)")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = ButtonStyle.Primary,
+            Margin = new Thickness(0f, 0f, 0f, 8f),
+        };
+
+        activate.AddClickHandler(_ =>
+        {
+            activations++;
+            count.Text = $"Activations: {activations}";
+            Report($"The button inside the popup fired {activations} time(s) from the keyboard.");
+        });
+
+        var close = new Button("Close the popup")
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Style = ButtonStyle.Secondary,
+            Margin = new Thickness(0f),
+        };
+
+        close.AddClickHandler(_ => content.ClosePopup());
+
+        content.Controls.Add(count);
+        content.Controls.Add(activate);
+        content.Controls.Add(close);
+
+        _ = ShowAndReportAsync(
+            "Keyboard activation",
+            () => anchor.ShowPopupAsync(content, Sized(340f, 200f)));
+    }
+
+    /// <summary>
+    /// Shows a popup and fills a label inside it with the rectangle it really occupies, read through
+    /// <c>TryGetPopupBounds</c> once the show has returned.
+    /// </summary>
+    /// <param name="anchor">The button the popup is placed against.</param>
+    /// <param name="tall">
+    /// Whether to ask for a popup too tall to fit below the button, so that the flip is what decides
+    /// where it goes.
+    /// </param>
+    private void ShowResolvedBounds(Button anchor, bool tall)
+    {
+        if (OwnerWindow is null)
+        {
+            NoWindow();
+            return;
+        }
+
+        const float width = 260f;
+        float height = tall ? 560f : 150f;
+
+        var content = PopupCard();
+        content.Controls.Add(PopupTitle($"Requested {width:0}x{height:0}, BelowStart"));
+
+        var resolved = PopupCaption("Resolved bounds: not read yet.");
+        content.Controls.Add(resolved);
+
+        var hint = PopupCaption(tall
+            ? "There is no room for this below the button, so FlipIntoView decides where it opens."
+            : "There is room for this below the button, so it opens where the align asked.");
+        content.Controls.Add(hint);
+
+        var close = new Button("Close")
+        {
+            Dock = XDock.Bottom,
+            AutoSize = true,
+            Style = ButtonStyle.Secondary,
+            Margin = new Thickness(0f),
+        };
+
+        close.AddClickHandler(_ => content.ClosePopup());
+        content.Controls.Add(close);
+
+        var task = anchor.ShowPopupAsync(content, new PopupOptions
+        {
+            Align = PopupAlign.BelowStart,
+            Size = new SKSize(width, height),
+        });
+
+        // Read in the same space the numbers are printed in, so the comparison below is honest: the
+        // anchor's own place in the window is what the requested rectangle starts from.
+        var at = anchor.GetPositionInHost();
+        var requestedTop = at.Y + anchor.Height;
+
+        if (content.TryGetPopupBounds(out var bounds))
+        {
+            resolved.Text =
+                $"Resolved, window client: left {bounds.Left:0}, top {bounds.Top:0}, " +
+                $"{bounds.Width:0} by {bounds.Height:0}.";
+            hint.Text = bounds.Top < at.Y
+                ? $"Asked for top {requestedTop:0}; it starts at {bounds.Top:0}, above the button's own " +
+                  $"top edge at {at.Y:0} - the flip moved it to the other side of the anchor."
+                : $"Asked for top {requestedTop:0}; it starts at {bounds.Top:0}, below the button, " +
+                  "so no flip was needed.";
+        }
+        else
+        {
+            resolved.Text = "Resolved bounds: the popup is not showing, so there are none to read.";
+        }
+
+        _ = ShowAndReportAsync(tall ? "Resolved bounds (tall)" : "Resolved bounds", () => task);
     }
 
     private void ShowOkCancel(Button anchor)

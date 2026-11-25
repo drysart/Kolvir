@@ -1,3 +1,5 @@
+using SkiaSharp;
+
 namespace Kolvir;
 
 /// <summary>
@@ -142,6 +144,13 @@ internal sealed class PopupSession
 
     /// <summary>Completes with the result the popup closed with.</summary>
     public Task<PopupResult> Completion => _completion.Task;
+
+    /// <summary>
+    /// The rectangle the popup occupies, in the owning window's client coordinates, or null when
+    /// this popup is not showing. It is where the popup really landed: the place after the flip and
+    /// the clamp, at the size it was measured at.
+    /// </summary>
+    public SKRect? Bounds => _result is null && _popup is { IsOpen: true } popup ? popup.BoundsInWindow : null;
 
     /// <summary>Raised once this popup has closed, so a popup it owns closes with it.</summary>
     public event Action? Closed;

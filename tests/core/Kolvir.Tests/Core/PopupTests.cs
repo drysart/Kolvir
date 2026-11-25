@@ -880,6 +880,130 @@ public sealed class PopupTests : HeadlessTestBase
             "below the inner anchor would end at host y 360, so it flips above the anchor at y 170");
     }
 
+    // Where a popup landed. The options are the request; TryGetPopupBounds is the answer to what
+    // the display did with it, and it is read in the owning window's client coordinates so a caller
+    // never has to know which level of a popup chain the control it holds is at.
+
+    [TestMethod]
+    public void TheResolvedBoundsOfAShownPopupAreReadable()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions { Size = new SKSize(140f, 90f) });
+
+        Assert.IsTrue(content.TryGetPopupBounds(out var bounds), "a shown popup has a rectangle");
+        Assert.AreEqual(
+            new SKRect(20f, 50f, 160f, 140f),
+            bounds,
+            "the anchor is at (20,20)-(120,50), so the default align hangs the popup under it");
+    }
+
+    [TestMethod]
+    public void TheResolvedBoundsFollowTheFlip()
+    {
+        var (root, flippedAnchor) = CreateAnchorTree(new SKRect(20f, 270f, 120f, 300f));
+        var fittingAnchor = new Button("Fits") { Bounds = new SKRect(200f, 40f, 300f, 70f) };
+        root.Controls.Add(fittingAnchor);
+
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var fitting = new Panel();
+        fittingAnchor.ShowPopupAsync(fitting, new PopupOptions { Size = new SKSize(140f, 90f) });
+
+        Assert.IsTrue(fitting.TryGetPopupBounds(out var unchanged));
+        Assert.AreEqual(
+            new SKRect(200f, 70f, 340f, 160f),
+            unchanged,
+            "with room below, the rectangle is where the align asked for");
+
+        var flipped = new Panel();
+        flippedAnchor.ShowPopupAsync(flipped, new PopupOptions { Size = new SKSize(140f, 90f) });
+
+        Assert.IsTrue(flipped.TryGetPopupBounds(out var afterFlip));
+        Assert.AreEqual(
+            new SKRect(20f, 180f, 160f, 270f),
+            afterFlip,
+            "the anchor is 20 pixels from the bottom of a 320-tall window, so the popup opens above it");
+        Assert.AreNotEqual(
+            new SKRect(20f, 300f, 160f, 390f),
+            afterFlip,
+            "and not the rectangle the BelowStart align asked for");
+    }
+
+    [TestMethod]
+    public void ABoundsReadForAPopupInsideAPopupIsInTheWindowsSpace()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+
+        var innerContent = new Panel();
+        innerAnchor.ShowPopupAsync(innerContent, new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.IsTrue(innerContent.TryGetPopupBounds(out var bounds));
+        Assert.AreEqual(
+            new SKRect(service.Windows[1].Location.X, service.Windows[1].Location.Y,
+                service.Windows[1].Location.X + 120f, service.Windows[1].Location.Y + 60f),
+            bounds,
+            "the read is the rectangle the platform was given, so a popup placed in its parent's "
+            + "coordinates is reported in the window's without the caller adding the parent's origin");
+        Assert.AreEqual(
+            new SKRect(24f, 110f, 144f, 170f),
+            bounds,
+            "24,110 is where the inner popup sits in the window; 4,30 would be its place inside the outer one");
+    }
+
+    [TestMethod]
+    public void TheResolvedBoundsIncludeTheScaleOfTheSubtree()
+    {
+        var zoom = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty, ScaleFactor = 2f };
+        var anchor = new Button("Zoomed") { Bounds = new SKRect(40f, 60f, 100f, 80f) };
+        zoom.Controls.Add(anchor);
+
+        using var scene = HeadlessScene.Create(zoom, 480f, 320f);
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, new PopupOptions { Size = new SKSize(40f, 30f) });
+
+        Assert.IsTrue(content.TryGetPopupBounds(out var bounds));
+        Assert.AreEqual(
+            new SKRect(80f, 160f, 160f, 220f),
+            bounds,
+            "the rectangle is the room the popup takes, so a 40x30 popup at 2.0 is 80x60");
+    }
+
+    [TestMethod]
+    public void AControlThatIsNotInAPopupHasNoBoundsToReport()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var loose = new Panel { Bounds = new SKRect(10f, 10f, 60f, 40f) };
+        root.Controls.Add(loose);
+
+        Assert.IsFalse(loose.TryGetPopupBounds(out var none), "nothing is showing it in a popup");
+        Assert.AreEqual(default(SKRect), none, "and the out parameter is left empty rather than stale");
+
+        var content = new Panel();
+        anchor.ShowPopupAsync(content, SizedPopup());
+        Assert.IsTrue(content.TryGetPopupBounds(out _));
+
+        content.ClosePopup();
+
+        Assert.IsFalse(content.TryGetPopupBounds(out var closed), "a closed popup has no rectangle to report");
+        Assert.AreEqual(default(SKRect), closed);
+    }
+
     [TestMethod]
     public void APopupInsideAPopupIsHandedToThePlatformInTheWindowsCoordinates()
     {
@@ -1251,17 +1375,234 @@ public sealed class PopupTests : HeadlessTestBase
         Assert.AreEqual(PopupCloseReason.Escape, outerTask.Result.Reason, "and the next press takes the level above");
     }
 
+    // The release half of a keystroke. A Button and a CheckBox act on it, so a sink that forwarded
+    // only presses left every control inside a popup untouchable from the keyboard.
+
+    [TestMethod]
+    public void TheReleaseOfAKeyFiresAButtonInsideThePopupExactlyOnce()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var button = new Button("Fire");
+        var clicks = 0;
+        button.AddClickHandler(_ => clicks++);
+
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(button);
+
+        anchor.ShowPopupAsync(content, SizedPopup());
+
+        Assert.IsTrue(button.IsFocused, "the button is the popup's only tab stop");
+
+        scene.Key(Key.Enter);
+
+        Assert.IsTrue(button.IsPressed, "the press marks the button pressed, which is what it shows");
+        Assert.AreEqual(0, clicks, "and a press on its own raises nothing");
+
+        scene.KeyUp(Key.Enter);
+
+        Assert.AreEqual(1, clicks, "the release is the click a keyboard activation raises");
+        Assert.IsFalse(button.IsPressed, "and the pressed state is cleared with it");
+
+        scene.TypeKey(Key.Space);
+
+        Assert.AreEqual(2, clicks, "Space activates it the same way, once per keystroke");
+        Assert.IsFalse(button.IsPressed);
+    }
+
+    [TestMethod]
+    public void TheReleaseOfSpaceTogglesACheckBoxInsideThePopup()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var check = new CheckBox("Take it");
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(check);
+
+        anchor.ShowPopupAsync(content, SizedPopup());
+
+        Assert.IsTrue(check.IsFocused, "the check box is the popup's first tab stop");
+
+        scene.Key(Key.Space);
+
+        Assert.IsTrue(check.IsPressed, "the press marks it pressed");
+        Assert.IsFalse(check.Checked, "and a toggle flips on the release, as it does in the window");
+
+        scene.KeyUp(Key.Space);
+
+        Assert.IsTrue(check.Checked, "the release flips it once");
+        Assert.IsFalse(check.IsPressed);
+
+        scene.TypeKey(Key.Space);
+
+        Assert.IsFalse(check.Checked, "and the next keystroke flips it back, once");
+    }
+
+    [TestMethod]
+    public void AReleaseThePopupsControlDeclinesGoesOnToTheWindow()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        // A window popup, so the window's own focus is a control outside the popup: that is what
+        // makes "the release went on" observable rather than a second delivery to the same control.
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var owner = new KeySpy(handlesKeys: false) { Bounds = new SKRect(240f, 240f, 340f, 270f) };
+        root.Controls.Add(owner);
+        owner.Focus();
+
+        var popupSpy = new KeySpy(handlesKeys: false);
+        var content = new Panel { Padding = Thickness.Empty };
+        content.Controls.Add(popupSpy);
+
+        anchor.ShowPopupAsync(content, SizedPopup());
+
+        Assert.IsTrue(popupSpy.IsFocused, "the popup has the keyboard");
+        Assert.AreSame(owner, scene.Host.FocusedControl, "and the window's own focus is still outside it");
+
+        scene.TypeKey(Key.A);
+
+        CollectionAssert.AreEqual(new[] { Key.A }, popupSpy.Keys, "the popup's control was offered the press once");
+        CollectionAssert.AreEqual(new[] { Key.A }, popupSpy.Releases, "and the release once");
+        CollectionAssert.AreEqual(new[] { Key.A }, owner.Keys.ToArray(), "the window hears the press the popup declined");
+        CollectionAssert.AreEqual(new[] { Key.A }, owner.Releases.ToArray(), "and its release, so both halves behave alike");
+    }
+
+    [TestMethod]
+    public void TheReleaseOfEscapeClosesNothingAndGoesNowhere()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var owner = new KeySpy(handlesKeys: false);
+        root.Controls.Add(owner);
+        owner.Focus();
+
+        var closed = new List<PopupResult>();
+        var content = new Panel { Padding = Thickness.Empty };
+        content.AddPopupClosedHandler((_, result) => closed.Add(result));
+        content.Controls.Add(new KeySpy());
+
+        var task = anchor.ShowPopupAsync(content, SizedPopup());
+
+        scene.Key(Key.Escape);
+
+        Assert.AreEqual(PopupCloseReason.Escape, task.Result.Reason, "the press closes it");
+        Assert.AreEqual(1, closed.Count, "and reports that once");
+
+        scene.KeyUp(Key.Escape);
+
+        Assert.AreEqual(1, closed.Count, "its release closes nothing a second time");
+        Assert.AreEqual(0, owner.Releases.Count, "and does not reach the control behind it");
+
+        scene.TypeKey(Key.Escape);
+
+        Assert.AreEqual(0, owner.Keys.Count, "the same for a whole keystroke with no popup left");
+    }
+
+    [TestMethod]
+    public void TheReleaseOfTheEscapeThatClosedTheInnerPopupLeavesTheOuterOneOpen()
+    {
+        var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 40f, 124f, 70f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, SizedPopup());
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel { Padding = Thickness.Empty }, SizedPopup());
+
+        scene.Key(Key.Escape);
+
+        Assert.AreEqual(PopupCloseReason.Escape, innerTask.Result.Reason, "the press closes the innermost level");
+
+        scene.KeyUp(Key.Escape);
+
+        Assert.IsFalse(outerTask.IsCompleted, "and its release does not take the level above");
+
+        scene.Key(Key.Escape);
+
+        Assert.AreEqual(PopupCloseReason.Escape, outerTask.Result.Reason, "the next press does");
+    }
+
+    [TestMethod]
+    public void EveryCloseRouteGivesTheKeyboardAndItsReleaseBack()
+    {
+        var (root, anchor, other) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var owner = new KeySpy { Bounds = new SKRect(200f, 200f, 260f, 224f) };
+        root.Controls.Add(owner);
+
+        // Each route is applied to a fresh popup whose control took a whole keystroke, so the host
+        // has a press of its own on record; afterwards the window must hear both halves of the next
+        // one, which is what says no sink was left behind on any of the five paths.
+        AssertSinkIsGone("application close", content => content.ClosePopup());
+        AssertSinkIsGone("Escape", content => scene.TypeKey(Key.Escape));
+        AssertSinkIsGone("outside press", content => scene.ClickAt(scene.CenterOf(other)));
+
+        AssertSinkIsGone("replacement", content =>
+        {
+            var replacement = new Panel();
+            anchor.ShowPopupAsync(replacement, SizedPopup());
+            replacement.ClosePopup();
+        });
+
+        void AssertSinkIsGone(string route, Action<Panel> close)
+        {
+            var popupSpy = new KeySpy();
+            var content = new Panel { Padding = Thickness.Empty };
+            content.Controls.Add(popupSpy);
+
+            var task = anchor.ShowPopupAsync(content, SizedPopup());
+
+            scene.TypeKey(Key.A);
+
+            Assert.AreEqual(1, popupSpy.Keys.Count, $"{route}: the popup took the press");
+            Assert.AreEqual(1, popupSpy.Releases.Count, $"{route}: and its release");
+
+            close(content);
+
+            Assert.IsTrue(task.IsCompleted, $"{route}: the popup closed");
+
+            owner.Focus();
+            owner.Keys.Clear();
+            owner.Releases.Clear();
+
+            scene.TypeKey(Key.B);
+
+            Assert.AreEqual(1, owner.Keys.Count, $"{route}: the window hears a press again");
+            Assert.AreEqual(1, owner.Releases.Count, $"{route}: and its release");
+            Assert.AreEqual(1, popupSpy.Keys.Count, $"{route}: the closed popup hears nothing");
+            Assert.AreEqual(1, popupSpy.Releases.Count, $"{route}: in either phase");
+        }
+    }
+
     /// <summary>A control that records the keys and the typed text that reach it, and takes both.</summary>
     private sealed class KeySpy : Control
     {
-        public KeySpy()
+        private readonly bool _handlesKeys;
+
+        public KeySpy(bool handlesKeys = true)
         {
+            _handlesKeys = handlesKeys;
             TabStop = true;
             MinimumSize = new SKSize(40f, 24f);
         }
 
         /// <summary>The keys this control was given, in order.</summary>
         public List<Key> Keys { get; } = new();
+
+        /// <summary>The keys whose release this control was given, in order.</summary>
+        public List<Key> Releases { get; } = new();
 
         /// <summary>Everything typed into this control, as it arrived.</summary>
         public string Typed { get; private set; } = string.Empty;
@@ -1270,7 +1611,14 @@ public sealed class PopupTests : HeadlessTestBase
         {
             base.OnKeyDown(e);
             Keys.Add(e.Key);
-            e.Handled = true;
+            e.Handled = _handlesKeys;
+        }
+
+        protected override void OnKeyUp(KeyEventArgs e)
+        {
+            base.OnKeyUp(e);
+            Releases.Add(e.Key);
+            e.Handled = _handlesKeys;
         }
 
         protected override void OnTextInput(TextInputEventArgs e)
