@@ -352,13 +352,32 @@ than claiming to draw a window it does not draw). Two consequences worth knowing
   new one was opened from. A drop-down, a tool tip or a popup API call anchored near the bottom or right
   of a popup flips or slides against the screen, and may therefore hang past the edge of the popup it
   was opened from.
-- A press outside closes **one** level: the innermost popup that is open, leaving the popup it was
-  opened from up for the next press. That is the rule the in-window presentation always had, because
-  its innermost dismiss catcher is the one on top; on Windows and macOS the platform's own dismissal is
-  now the innermost popup's rather than every popup the window owns.
+- A press outside closes **every** level it is outside of, and stops at the first level it is inside:
+  pressing the window behind a stack of two popups closes both at once, while pressing the parent popup
+  but outside the popup opened from it closes only that popup. A level whose `DismissOnOutsideClick` is
+  false keeps itself open and stops the walk, so a popup that ignored a press is not taken down by it and
+  neither are the popups it was opened from. The rule lives in the popup layer rather than in a backend:
+  each presentation reports the press with the point it landed on - the dismiss catcher that covers the
+  window for an overlaid popup, and the owning window's message procedure or event monitor for a platform
+  popup - and the session walks the chain outward, because the rectangle `TryGetPopupBounds` reports is
+  already in the window's client coordinates at every level. GTK4 needs nothing of its own there: its
+  popovers take no grab, so the press reaches the portable catcher, which reports the same point.
+  `IPopupWindow.OutsidePress` is a default interface member that reports nothing, so a popup window
+  written outside the library against the earlier interface still compiles and keeps the older
+  behaviour - one level per dismissal - rather than the rule; see the Developer Guide.
 
 Closing a popup still takes everything opened from it down with it, so the two rules do not contradict
-each other: a press takes one level away at a time, and a close takes the subtree under it.
+each other: a press takes the levels it is outside of, and a close takes the subtree under it.
+
+**A popup asked where it is while its window moves.** On macOS, and only there, a popup reports as not
+showing for the one run-loop pass in which its owning window is moved: `TryGetPopupBounds` answers false
+there, while the popup is alive and follows the window correctly, and the answer is back on the next
+pass. It is a measured window rather than a defect left open - the platform verification pass, driven on
+a real macOS display with injected events, found no other fault in the library and logged this as one
+line during the move - and it is documented rather than closed because closing it means teaching a popup
+window to answer for a state AppKit has not settled yet: for that pass the rectangle is not "somewhere
+else", it is a question the platform cannot take yet. A caller that places something beside a popup
+follows a move one pass late; the popup itself still follows it on time.
 
 ### 4.4 Screens
 

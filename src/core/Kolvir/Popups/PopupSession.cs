@@ -163,7 +163,7 @@ internal sealed class PopupSession
 
         _popup = popup;
         _popupToken = popup.AddClosedHandler(OnPopupClosed);
-        popup.OutsidePress = DismissInnermost;
+        popup.OutsidePress = DismissFromOutsidePress;
 
         // A popup that was itself opened from inside a popup belongs to that popup, not to the
         // window, so the level above closing takes it down as well.
@@ -353,17 +353,36 @@ internal sealed class PopupSession
         Complete(PopupResult.Dismissed(OwnerIsGone() ? PopupCloseReason.OwnerClosed : PopupCloseReason.OutsideClick));
 
     /// <summary>
-    /// Closes the innermost level of this chain: the deepest popup still open below this one, or this
-    /// one when nothing is open below it.
+    /// Closes every level of this chain the press at <paramref name="point"/> is outside of, from the
+    /// innermost outward, and stops at the first level it is inside of.
     /// </summary>
     /// <remarks>
-    /// A press outside a popup is outside every popup that was opened from it too, so the level it
-    /// belongs to is the one the user was working in rather than every level at once. The overlay
-    /// presentation already behaves that way, because the innermost catcher is the one on top of the
-    /// window; stating it here is what keeps a platform popup - which the platform dismisses itself,
-    /// without asking - on the same rule.
+    /// <para>
+    /// A press behind a stack of popups is outside all of them, so it closes them all at once; a
+    /// press inside the parent but outside the popup opened from it closes only that popup, because
+    /// the parent is the level the user was working in. The walk starts at the innermost level of
+    /// the chain rather than at this one, so it does not matter which level a backend reported the
+    /// press to.
+    /// </para>
+    /// <para>
+    /// The comparison is in the owning window's client coordinates, which is the space
+    /// <see cref="Popup.BoundsInWindow"/> is already in for every level - a popup placed in its
+    /// parent's space reports where it really sits in the window, one level deep or five. That is
+    /// what <see cref="UiHost.WindowHost"/> and <see cref="UiHost.OriginInWindowHost"/> exist for,
+    /// and it is why no level has to be converted to the level below it here.
+    /// </para>
+    /// <para>
+    /// A level that does not dismiss on an outside press stops the walk without closing anything:
+    /// a popup that opts out must not be taken down by a press it ignored, and neither must the
+    /// popups it was opened from.
+    /// </para>
     /// </remarks>
-    private void DismissInnermost()
+    /// <param name="point">The press, in the owning window's client coordinates.</param>
+    /// <returns>
+    /// Whether the press closed a level, which is what tells a backend whether the press belonged to
+    /// a popup rather than to whatever it landed on.
+    /// </returns>
+    private bool DismissFromOutsidePress(SKPoint point)
     {
         var innermost = this;
 
@@ -372,7 +391,27 @@ internal sealed class PopupSession
             innermost = child;
         }
 
-        innermost.Complete(PopupResult.Dismissed(PopupCloseReason.OutsideClick));
+        var dismissed = false;
+
+        for (var level = innermost; level is not null; level = level._surface.Parent)
+        {
+            if (level.Bounds is not { } bounds)
+            {
+                // Nothing is showing at this level, so there is nothing to close and nothing to
+                // stop for; a level above it can still be open.
+                continue;
+            }
+
+            if (bounds.Contains(point.X, point.Y) || !level._options.DismissOnOutsideClick)
+            {
+                break;
+            }
+
+            level.Complete(PopupResult.Dismissed(PopupCloseReason.OutsideClick));
+            dismissed = true;
+        }
+
+        return dismissed;
     }
 
     private void OnWindowClosed(object sender) =>
