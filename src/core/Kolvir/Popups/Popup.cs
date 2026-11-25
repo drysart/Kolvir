@@ -176,7 +176,11 @@ public sealed class Popup : IDisposable
     /// </remarks>
     internal Action? OutsidePress { get; set; }
 
-    /// <summary>Where the popup's top left corner sits, in the owning host's coordinates.</summary>
+    /// <summary>
+    /// Where the popup's top left corner sits, in the coordinates of the host it is anchored in -
+    /// the window's for a popup opened from the window, and the parent popup's for one opened from
+    /// inside another popup.
+    /// </summary>
     public SKPoint Location => _location;
 
     /// <summary>Raised after the popup closed, whether by <see cref="Close"/> or by the platform.</summary>

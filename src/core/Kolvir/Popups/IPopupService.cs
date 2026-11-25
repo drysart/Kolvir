@@ -61,7 +61,10 @@ public interface IPopupWindow : IDisposable
     /// </remarks>
     void Show(UiHost windowHost, SKPoint location, SKSize size);
 
-    /// <summary>Resizes an open popup, keeping its anchor where it is.</summary>
+    /// <summary>
+    /// Moves and resizes an open popup, with <paramref name="location"/> in the same coordinate space
+    /// <see cref="Show"/> takes.
+    /// </summary>
     void UpdateBounds(SKPoint location, SKSize size);
 
     /// <summary>Hides the popup without disposing it.</summary>
