@@ -1985,6 +1985,23 @@ public sealed class UiHost
     }
 
     /// <summary>
+    /// The controls Tab reaches under <paramref name="root"/>, in the order it reaches them, by the
+    /// same rules <see cref="MoveFocus"/> uses for the window's own tree.
+    /// </summary>
+    /// <remarks>
+    /// A popup walks its content with this instead of moving the window's focus: the popup's tree is
+    /// not the window's tree, so <see cref="MoveFocus"/> would step onto the controls behind it.
+    /// </remarks>
+    /// <param name="root">The top of the subtree to walk, or null for nothing.</param>
+    /// <returns>The tab stops, empty when there are none.</returns>
+    internal static List<Control> CollectTabStops(Control? root)
+    {
+        var stops = new List<Control>();
+        CollectFocusable(root, stops);
+        return stops;
+    }
+
+    /// <summary>
     /// Collects the controls Tab can reach, in the order it reaches them.
     /// </summary>
     /// <remarks>
