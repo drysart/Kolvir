@@ -1616,9 +1616,18 @@ public sealed class UiHost
 
         for (var i = sinks.Count - 1; i >= 0; i--)
         {
-            if (i < sinks.Count && sinks[i].ProcessKeyDown(key, modifiers))
+            if (i >= sinks.Count)
             {
-                return sinks[i];
+                continue;
+            }
+
+            // Read before the call: a sink that handles the key may close a popup, and closing one
+            // takes its sink off this list, so the index it was found at need not be valid any more.
+            var sink = sinks[i];
+
+            if (sink.ProcessKeyDown(key, modifiers))
+            {
+                return sink;
             }
         }
 

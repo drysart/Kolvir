@@ -1103,6 +1103,24 @@ lifecycle the badge watches so that an attention request ends when the user come
 is an extension block on `Application`, per section 5, because a separate assembly cannot add a
 member to a type in `Kolvir`. See [APP-BADGING.md](APP-BADGING.md).
 
+The popup API is rung 1 in all of its parts, including the two that touch an always-retained type,
+and it is the worked example of what that costs when the seam itself grows. `ShowPopupAsync`,
+`ClosePopup`, `AddPopupClosedHandler` and `TryGetPopupBounds` are extension methods on `Window` and
+`Control` (section 5), so an application that never shows a popup reaches none of them: the per-control
+table they keep is a `ConditionalWeakTable` in a class nothing else names, and `Popup`, `PopupSession`
+and `PopupInputSink` are internal and are retained only when a call site brings them in. The one
+new always-retained member is `IInputSink.ProcessKeyUp`, added as a default interface implementation
+returning false: the interface's slot and the short loop in `UiHost.ProcessKeyUp` that offers a
+release to the sinks are retained by every application, and `MenuView`, `Overlay` and any implementer
+outside the library keep compiling and keep their behaviour without a line of change. The field
+`UiHost` keeps for the keys a sink is holding is a `Dictionary` created on the first press a sink
+takes, so the fixture - which shows no popup - never allocates one. The fixture publishes at
+3,880,960 bytes on win-x64 against 3,877,376 at `acba401`, both from worktrees whose paths have the
+same length and both with `-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`: 3,584 bytes, 0.09
+percent, which is the sink loop, the held-key map's code and whatever the linker placed differently
+around them. Only win-x64 was weighed: the change is portable managed code with no per-platform
+surface, so the larger-page images have nothing of their own to pay for it.
+
 ## 9. Checklist for a new feature
 
 - [ ] Does any always-retained type (a control, a backend view, `UiHost`, `Application`)

@@ -123,10 +123,12 @@ internal sealed class PopupPage : DemoPage
         card.Controls.Add(BuildHandlerRow());
 
         // Declared last on purpose: a docked child takes its edge in declaration order, so by now the
-        // only edge left is the bottom of the card, where the flip demo needs its button.
+        // only edge left is the bottom of the card, where the flip demo needs its button. The popup
+        // it opens is too tall for the room under it, so it lands above the button - and says so,
+        // with the rectangle it really occupies.
         var bottom = ControlsRow(32f);
         bottom.Margin = new Thickness(0f, 4f, 0f, 0f);
-        bottom.Controls.Add(PageButton("Tall from the bottom edge", ShowTallFromBottom));
+        bottom.Controls.Add(PageButton("Tall from the bottom edge", anchor => ShowResolvedBounds(anchor, tall: true)));
         card.Controls.Add(bottom);
 
         return card;
@@ -179,11 +181,7 @@ internal sealed class PopupPage : DemoPage
     {
         var row = ControlsRow(34f);
 
-        var landed = PageButton("Where it landed", anchor => ShowResolvedBounds(anchor, tall: false));
-        row.Controls.Add(landed);
-
-        var flipped = PageButton("Where it flipped", anchor => ShowResolvedBounds(anchor, tall: true));
-        row.Controls.Add(flipped);
+        row.Controls.Add(PageButton("Where it landed", anchor => ShowResolvedBounds(anchor, tall: false)));
 
         var wide = PageButton("Wide from the right edge", ShowWide);
         wide.Dock = XDock.Right;
@@ -408,8 +406,6 @@ internal sealed class PopupPage : DemoPage
 
     private void ShowTallFromTop(Button anchor) => ShowTall(anchor, PopupAlign.AboveStart);
 
-    private void ShowTallFromBottom(Button anchor) => ShowTall(anchor, PopupAlign.BelowStart);
-
     private void ShowTall(Button anchor, PopupAlign align)
     {
         if (OwnerWindow is null)
@@ -596,17 +592,23 @@ internal sealed class PopupPage : DemoPage
         }
 
         const float width = 260f;
-        float height = tall ? 560f : 150f;
+        float height = tall ? 560f : 170f;
 
         var content = PopupCard();
         content.Controls.Add(PopupTitle($"Requested {width:0}x{height:0}, BelowStart"));
 
+        // Two lines are reserved rather than measured: the text is filled in after the show, and an
+        // auto-sized label that grows then is a layout pass the popup it sits in has already run.
         var resolved = PopupCaption("Resolved bounds: not read yet.");
+        resolved.AutoSize = false;
+        resolved.Height = 32f;
         content.Controls.Add(resolved);
 
         var hint = PopupCaption(tall
             ? "There is no room for this below the button, so FlipIntoView decides where it opens."
             : "There is room for this below the button, so it opens where the align asked.");
+        hint.AutoSize = false;
+        hint.Height = 46f;
         content.Controls.Add(hint);
 
         var close = new Button("Close")

@@ -1473,6 +1473,30 @@ public sealed class PopupTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void ASinkThatTakesTheOtherSinkAwayWhileHandlingAKeyStillAnswers()
+    {
+        var (root, _) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var older = new SinkProbe(consumes: true);
+        using var olderToken = scene.Host.AddInputSink(older);
+
+        // The newest sink takes the older one off the host while it answers. The walk it was found
+        // at is shorter by then, which is the case a popup closing on Escape produces.
+        var newest = new SinkProbe(() =>
+        {
+            olderToken.Dispose();
+            return true;
+        });
+
+        using var newestToken = scene.Host.AddInputSink(newest);
+
+        Assert.IsTrue(scene.Host.ProcessKeyDown(Key.A), "the sink's answer is the press's answer");
+        Assert.AreEqual(1, newest.KeyDownCalls, "the sink that took the key was asked once");
+        Assert.AreEqual(0, older.KeyDownCalls, "and the one taken away was never reached");
+    }
+
+    [TestMethod]
     public void TheReleaseOfEscapeClosesNothingAndGoesNowhere()
     {
         var (root, anchor) = CreateAnchorTree(new SKRect(20f, 20f, 120f, 50f));
@@ -1496,6 +1520,7 @@ public sealed class PopupTests : HeadlessTestBase
 
         Assert.AreEqual(PopupCloseReason.Escape, task.Result.Reason, "the press closes it");
         Assert.AreEqual(1, closed.Count, "and reports that once");
+        Assert.AreEqual(0, owner.Keys.Count, "the press is the popup's and stops there");
 
         scene.KeyUp(Key.Escape);
 
@@ -1584,6 +1609,34 @@ public sealed class PopupTests : HeadlessTestBase
             Assert.AreEqual(1, popupSpy.Keys.Count, $"{route}: the closed popup hears nothing");
             Assert.AreEqual(1, popupSpy.Releases.Count, $"{route}: in either phase");
         }
+    }
+
+    /// <summary>
+    /// A sink with a counter, so a test can see the order the window's walk reached it in. It names
+    /// no release handler: an implementer outside the library compiles unchanged, which is what the
+    /// default interface member is for.
+    /// </summary>
+    private sealed class SinkProbe : IInputSink
+    {
+        private readonly Func<bool>? _onKeyDown;
+
+        public SinkProbe(bool consumes)
+            : this(() => consumes)
+        {
+        }
+
+        public SinkProbe(Func<bool> onKeyDown) => _onKeyDown = onKeyDown;
+
+        /// <summary>How many presses this sink was offered.</summary>
+        public int KeyDownCalls { get; private set; }
+
+        public bool ProcessKeyDown(Key key, Modifiers modifiers)
+        {
+            KeyDownCalls++;
+            return _onKeyDown?.Invoke() ?? false;
+        }
+
+        public bool ProcessTextInput(string text) => false;
     }
 
     /// <summary>A control that records the keys and the typed text that reach it, and takes both.</summary>
