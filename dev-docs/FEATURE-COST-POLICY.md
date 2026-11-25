@@ -1115,10 +1115,16 @@ release to the sinks are retained by every application, and `MenuView`, `Overlay
 outside the library keep compiling and keep their behaviour without a line of change. The field
 `UiHost` keeps for the keys a sink is holding is a `Dictionary` created on the first press a sink
 takes, so the fixture - which shows no popup - never allocates one. The fixture publishes at
-3,880,960 bytes on win-x64 against 3,877,376 at `acba401`, both from worktrees whose paths have the
-same length and both with `-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`: 3,584 bytes, 0.09
-percent, which is the sink loop, the held-key map's code and whatever the linker placed differently
-around them. Only win-x64 was weighed: the change is portable managed code with no per-platform
+3,880,960 bytes on win-x64 against 3,877,376 at `acba401`: 3,584 bytes, 0.09 percent, which is the
+sink loop, the held-key map's code and whatever the linker placed differently around them. Both rows
+were published one after the other, in one session, by the same command -
+`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, SDK 10.0.403, ILCompiler 10.0.14. `acba401`
+and `df9a6fb`, the layer below it, publish at the same 3,877,376 bytes, which is the only thing a
+demo-only change between them could produce. The 3,877,888 recorded for `df9a6fb` when that layer
+measured it is 512 bytes above what this machine reproduces for the same source, in two output
+directories and on both commits, and it could not be reproduced; the chain is 3,877,376 for both
+heads, and this layer's delta is 3,584 bytes, or 3,072 if it is quoted against the recorded figure
+instead. Only win-x64 was weighed: the change is portable managed code with no per-platform
 surface, so the larger-page images have nothing of their own to pay for it.
 
 ## 9. Checklist for a new feature
