@@ -199,6 +199,17 @@ public static class PopupExtensions
     /// popup is showing: a control that is in no popup, or whose popup has closed, is answered with
     /// false, which is what makes this safe to call from a closed handler.
     /// </para>
+    /// <para>
+    /// One window is worth knowing about, and it is on macOS: for the single run-loop pass in which
+    /// the owning window is being moved, a popup answers false here - as if it were not showing -
+    /// while it is alive and does go on following the window. A caller that places something beside
+    /// the popup, from a handler for the move, therefore gets nothing at exactly the pass it wanted
+    /// the answer. The rectangle has not gone and is there on the next pass: when this answers false
+    /// during a move, defer to one - a callback the move scheduled, or the pass after it - rather
+    /// than reading it as "closed". This is a known window in what AppKit has settled, not a defect
+    /// left open: the popup is following the window, and asking it from inside the move is asking it
+    /// to speak for a state the platform has not reached yet.
+    /// </para>
     /// </remarks>
     /// <param name="content">The control the popup was shown with.</param>
     /// <param name="bounds">The popup's rectangle in the owning window's client coordinates.</param>

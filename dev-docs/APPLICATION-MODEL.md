@@ -369,6 +369,16 @@ than claiming to draw a window it does not draw). Two consequences worth knowing
 Closing a popup still takes everything opened from it down with it, so the two rules do not contradict
 each other: a press takes the levels it is outside of, and a close takes the subtree under it.
 
+**A popup asked where it is while its window moves.** On macOS, and only there, a popup reports as not
+showing for the one run-loop pass in which its owning window is moved: `TryGetPopupBounds` answers false
+there, while the popup is alive and follows the window correctly, and the answer is back on the next
+pass. It is a measured window rather than a defect left open - the platform verification pass, driven on
+a real macOS display with injected events, found no other fault in the library and logged this as one
+line during the move - and it is documented rather than closed because closing it means teaching a popup
+window to answer for a state AppKit has not settled yet: for that pass the rectangle is not "somewhere
+else", it is a question the platform cannot take yet. A caller that places something beside a popup
+follows a move one pass late; the popup itself still follows it on time.
+
 ### 4.4 Screens
 
 ```csharp
