@@ -464,9 +464,23 @@ Details that are not visible from the message table:
   to clear. Whether a real input method answers the cancel with an end-composition message is not
   measured here (section 7.5), and neither is whether the input method's window actually goes away -
   only the user's re-run of step 7 can say that.
-- **Popups.** `Win32PopupWindow` and `Win32MenuWindow` are deliberately left alone, for the reason
-  section 6.4 gives: a non-activating popup never takes the input focus, so no composition can begin
-  there.
+- **Popups answer from their own tree.** A popup never takes the activation, so this window's
+  procedure receives every `WM_IME_*` message and stays the focused window; the control tree that
+  owns the keyboard, though, is the popup's, whose own `UiHost` holds the focused control (layer 4
+  forwards into it through `PopupInputSink`). Answering an input method from the owner's tree anchors
+  the emoji panel to the button that opened the popup, and `Host.BeginComposition()` on that button
+  refuses, so the panel's `GCS_RESULTSTR` is dropped as "no live composition" and the emoji is never
+  inserted. The backend therefore resolves the innermost live popup the window owns
+  (`Win32PopupWindow.TryGetKeyboardPopup`) and asks *its* host for the caret
+  (`TryGetImeCaret`, converted from the popup's own origin and scale to physical screen pixels) and
+  for the composition (`Begin`/`Update`/`Commit`/`CancelComposition`). The host that accepted a
+  composition is remembered, so an end message that arrives after the focus moved still cancels the
+  right control. A popup with nothing focusable in it is skipped, so a tooltip cannot hide the field
+  the user is typing into. Both the system caret and `IMR_QUERYCHARPOSITION` read this one answer.
+  Measured on this machine with the demo's "Context menu with a text box" popup: before the change
+  `pt` was the anchor button's corner and the emoji's result was dropped; after it `pt` is the popup
+  field's caret and the emoji is inserted into that field (section 7.8). `Win32MenuWindow` is still
+  left alone: it pumps its own modal loop, so it is not in the owner's message path at all.
 
 **What a TSF input method needs from a legacy window, as far as this machine can show.** The Japanese
 IME here has no `IMM32` file (`ImmGetIMEFileNameW` and `ImmGetDescriptionW` are both empty for
@@ -673,13 +687,17 @@ methods map onto the host contract like this.
   reported `last commit: "日本語"  |  value: "日本語"` with `Name: 日本語 (3/24)` - three characters, one
   commit, no doubling (section 7.7).
 
-### 6.4 Why popups are out of scope
+### 6.4 Popups
 
-A platform input method attaches to the widget that holds the input focus. A non-activating popup
-(menus, suggestion lists, tooltips) never takes focus, so no composition can begin on it, and the
-popup's keys are forwarded to the host that owns it, where the focused control's own composition
-already applies. Adding an input context per popup would create a second, competing composition for
-the same keyboard.
+A platform input method attaches to the window that holds the input focus. A non-activating popup
+never takes that focus, so the popup's window never receives an input-method message and no
+composition begins *there* - but that does not make popups irrelevant. The owner window is the
+focused window, so the messages arrive in its procedure while the keyboard belongs to the popup's
+tree. The answer is not a second input context per popup, which would create a competing composition
+for the same keyboard, but to answer from the tree that holds the keyboard: the caret comes from the
+popup's focused control and the composition is offered to the popup's host. Win32 does that
+(section 6.2). The macOS and GTK4 halves of this report are owned separately; sections 6.1 and 6.3
+still describe their current popup handling.
 
 ## 7. Verification
 
@@ -1161,12 +1179,43 @@ What is **not** verified, and stays a checklist:
 cannot cover is exactly this: a hosted runner has no input session and no input method, so everything
 in this section is a hand run over `ssh` with `screencapture`.
 
+### 7.8 The Win32 popup hand check
+
+A popup containing a text box is the one case that separates "IME input works" from "the platform
+and the library agree about which control is being typed into", and it is a hand check for the same
+reason the emoji panel always is: the thing under test is the shell's own UI.
+
+1. Run the demo on Windows and show the **Popups** page (`--page popups`). In **Content and
+   keyboard**, press **Context menu with a text box**. The popup opens and the box inside it already
+   holds the keyboard (it is the popup's first tab stop).
+2. With that box focused, press Win+Period. The emoji panel must open at the **box's caret**, not at
+   the button that opened the popup. A popup near the bottom of the screen makes the panel flip
+   upwards; that is placement, not a defect.
+3. Click any emoji. It must be inserted into the popup's box at the caret, exactly as typing it
+   would be, and the box must keep the keyboard afterwards - type a letter to confirm.
+4. Close the popup and repeat step 2 on a field in the window itself. The panel must land at that
+   field's caret; repeating the covered path is what tells "the popup case" from "IME input is
+   broken on this machine".
+
+Measured at `3ee9d41` and after the fix, with `KOLVIR_IME_LOG=1` on this machine:
+
+| Step | Before | After |
+|---|---|---|
+| 2, the answer | `IMR_QUERYCHARPOSITION` answered `pt` at the anchor button's corner (`1348,1340`) | `pt` at the popup field's caret (`1388,1515`) |
+| 3, the commit | `WM_IME_STARTCOMPOSITION refused: composition cancelled`, then `WM_IME_COMPOSITION result dropped: no live composition`; the field did not change | the composition is accepted and the emoji is inserted; the caret moves by the glyph's advance |
+| 3, the trace | - | `WM_IME_STARTCOMPOSITION`, `WM_IME_COMPOSITION` with `lParam=0x800`, `WM_IME_ENDCOMPOSITION`, and no `WM_CHAR` after it |
+
+The last row is worth knowing on its own: on this machine the emoji panel's commit is a
+`GCS_RESULTSTR` composition and produces no second copy as `WM_CHAR`, so the ordinary-text path that
+carries the emoji is the commit itself, not the suppression of section 6.2's second hazard. A field
+inside a popup therefore has to accept a composition; a refusal is the whole bug.
+
 ## 8. Status and open questions
 
 | Platform | Dead keys / Compose | Daemon-driven IME | Status |
 |---|---|---|---|
 | GTK4 | Implemented | Implemented | **Done** |
-| Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2 | **Done** |
+| Win32 | Implemented and covered by section 7.3 | Implemented; the `IMM32` reads answer with the Microsoft IME installed (section 6.2), and the section 7.5 checklist was run by hand with it - steps 1-6 and 8 confirmed, step 7 found a refusal the input method never heard and the fix is the cancel in 6.2; the popup text-box case is fixed and hand-checked (section 7.8) | **Done** |
 | macOS | Implemented; covered by section 7.6 | Implemented through `NSTextInputClient` and **verified by hand with the Japanese source on the test host** (section 7.7): marked text, conversion to `日本語`, a single commit, the candidate list placed from the caret answer, and - after the ordering fix of invariant 10 - Tab, the arrow keys and a mouse click all reaching the candidate list while the two-step confirmation completes, which is the input method's normal behaviour and what `TextEdit` does too | **Done** |
 
 The Win32 path is proved against a synthesized composition driven through the real messages, and the
