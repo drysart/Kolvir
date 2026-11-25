@@ -339,6 +339,27 @@ owned by the window and placed relative to its anchor, and it takes the keyboard
 it was opened in for as long as it is open; the sink each popup registers on the window goes away
 with it, whichever of the five dismissal paths ended it.
 
+**Nested popups.** A popup opened from a control that is itself in a popup is a surface of the window,
+not of the popup it hangs off: on Windows and macOS it is a second owned window of the same window, on
+GTK4 a second popover of the same drawing area, and the platform is handed one position - the popup's
+top left corner in the *window's* client coordinates - whichever control opened it. The popup layer
+does that conversion, because it is the only place that knows both facts: where the anchor sits is
+measured in the anchor's own host's coordinates, and the host behind a popup records where it sits in
+the window (the `UiHost` that draws a popup keeps its window's host and its own origin in it, rather
+than claiming to draw a window it does not draw). Two consequences worth knowing:
+
+- The fit and the clamp are against the display's work area, not against the rectangle of the popup the
+  new one was opened from. A drop-down, a tool tip or a popup API call anchored near the bottom or right
+  of a popup flips or slides against the screen, and may therefore hang past the edge of the popup it
+  was opened from.
+- A press outside closes **one** level: the innermost popup that is open, leaving the popup it was
+  opened from up for the next press. That is the rule the in-window presentation always had, because
+  its innermost dismiss catcher is the one on top; on Windows and macOS the platform's own dismissal is
+  now the innermost popup's rather than every popup the window owns.
+
+Closing a popup still takes everything opened from it down with it, so the two rules do not contradict
+each other: a press takes one level away at a time, and a close takes the subtree under it.
+
 ### 4.4 Screens
 
 ```csharp

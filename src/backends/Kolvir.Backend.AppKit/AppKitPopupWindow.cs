@@ -13,7 +13,10 @@ namespace Kolvir.Backend.AppKit;
 /// <para>
 /// The window is a child of the owning window, which is AppKit's ownership model: a child window is
 /// ordered above its parent, is ordered out with it, and is released with it. That is what lets a
-/// drop-down hang past the edge of the window it belongs to, over other applications.
+/// drop-down hang past the edge of the window it belongs to, over other applications. A popup
+/// opened from a control inside another popup is a child of the same window rather than of that
+/// popup, so it is owned, ordered and released the same way, and the platform layer never has to
+/// know that chains of popups exist.
 /// </para>
 /// <para>
 /// It never becomes key or main, so the control that opened the popup keeps the keyboard: the popup
@@ -22,8 +25,23 @@ namespace Kolvir.Backend.AppKit;
 /// </remarks>
 internal sealed class AppKitPopupWindow : IPopupWindow
 {
-    /// <summary>Every popup currently on screen, so a press can be recognised as being on one.</summary>
+    /// <summary>Every popup currently on screen, in the order they were shown.</summary>
     private static readonly List<AppKitPopupWindow> Live = new();
+
+    /// <summary>
+    /// The one local monitor that turns a press outside the popups into a dismissal, installed the
+    /// first time a popup that dismisses is shown. It is shared rather than one per popup because
+    /// which level a press belongs to is a question about the whole set: a press outside a chain of
+    /// popups closes the innermost one only, and a monitor per popup would have each of them answer
+    /// for itself and take the chain down at once.
+    /// </summary>
+    /// <remarks>
+    /// It is not removed when the last popup goes. A monitor is a callback rather than a timer, and
+    /// with no popup live it returns every event untouched - so an application that has shown one
+    /// popup pays one delegate call per press for the rest of its life, and a removal that had to
+    /// happen from inside the monitor's own dispatch would be the more dangerous trade.
+    /// </remarks>
+    private static NSObject? _pressMonitor;
 
     private readonly UiHost _host = new();
     private readonly bool _dismissOnOutsideClick;
@@ -32,7 +50,6 @@ internal sealed class AppKitPopupWindow : IPopupWindow
     private PopupWindow? _window;
     private AppKitSkiaView? _view;
     private NSWindow? _ownerWindow;
-    private NSObject? _clickMonitor;
     private NSObject? _resignObserver;
     private bool _dismissing;
     private bool _disposed;
@@ -56,9 +73,9 @@ internal sealed class AppKitPopupWindow : IPopupWindow
     public event Action<object>? Dismissed;
 
     /// <inheritdoc />
-    public void Show(UiHost ownerHost, SKPoint location, SKSize size)
+    public void Show(UiHost windowHost, SKPoint location, SKSize size)
     {
-        ArgumentNullException.ThrowIfNull(ownerHost);
+        ArgumentNullException.ThrowIfNull(windowHost);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (_window is not null)
@@ -67,14 +84,14 @@ internal sealed class AppKitPopupWindow : IPopupWindow
             return;
         }
 
-        if (ownerHost.Window?.Backend is not AppKitWindowBackend { Window: { } owner })
+        if (windowHost.Window?.Backend is not AppKitWindowBackend { Window: { } owner })
         {
             return;
         }
 
         // The popup's tree resolves services from the same container as the window it belongs to,
         // so a control inside a popup that opens a popup of its own finds the service too.
-        _host.Services = ownerHost.Services;
+        _host.Services = windowHost.Services;
         _host.SetClientSize(size.Width, size.Height);
 
         var window = new PopupWindow(
@@ -230,12 +247,12 @@ internal sealed class AppKitPopupWindow : IPopupWindow
 
     private void InstallObservers()
     {
-        if (_dismissOnOutsideClick && _clickMonitor is null)
+        if (_dismissOnOutsideClick && _pressMonitor is null)
         {
             // A local monitor sees every press the application dispatches, before it reaches the
             // window it landed on, which is the only way a non-activating popup can tell that the
             // press was meant for something else.
-            _clickMonitor = NSEvent.AddLocalMonitorForEventsMatchingMask(
+            _pressMonitor = NSEvent.AddLocalMonitorForEventsMatchingMask(
                 NSEventMask.LeftMouseDown | NSEventMask.RightMouseDown | NSEventMask.OtherMouseDown,
                 OnLocalMouseDown);
         }
@@ -245,14 +262,12 @@ internal sealed class AppKitPopupWindow : IPopupWindow
             _ => Dismiss());
     }
 
+    /// <summary>
+    /// Releases this popup's own observers. The press monitor is shared by every popup and outlives
+    /// them; see <see cref="_pressMonitor"/>.
+    /// </summary>
     private void RemoveObservers()
     {
-        if (_clickMonitor is { } monitor)
-        {
-            _clickMonitor = null;
-            NSEvent.RemoveMonitor(monitor);
-        }
-
         if (_resignObserver is { } observer)
         {
             _resignObserver = null;
@@ -261,31 +276,50 @@ internal sealed class AppKitPopupWindow : IPopupWindow
         }
     }
 
-    private NSEvent OnLocalMouseDown(NSEvent theEvent)
+    private static NSEvent OnLocalMouseDown(NSEvent theEvent)
     {
-        if (_window is null || _disposed)
-        {
-            return theEvent;
-        }
-
         // A press inside any popup of ours belongs to that popup. A submenu is a window of its own,
-        // so without this a press in a submenu would look like a press outside the menu it hangs
-        // off and close the whole chain before the submenu saw it.
+        // and so is a popup opened inside a popup: without this a press inside one would look like a
+        // press outside another and close it.
         if (IsPopupWindow(theEvent.Window))
         {
             return theEvent;
         }
 
-        // A press that is not on a popup dismisses it and belongs to the popup: it stops there
-        // rather than being delivered to whatever it landed on, which is what the Win32 and
-        // overlay presentations do too. Without that, a press on the control that opened the popup
-        // closes it and then reaches that control, which acts on a popup that is already gone - a
-        // combo box reopens its list on the same click that closed it.
-        Dismiss();
+        var innermost = Innermost();
 
-        // Returning null is how a local monitor swallows the event, which the binding does not
-        // express in its delegate signature.
+        if (innermost is null)
+        {
+            return theEvent;
+        }
+
+        // A press outside the popups belongs to the innermost one and closes only it, which leaves
+        // the popup it was opened from up - a press that reaches past a chain of popups takes the
+        // level the user was working in, not every level at once. The press belongs to the popup
+        // too: it stops there rather than being delivered to whatever it landed on, which is what
+        // the Win32 and overlay presentations do. Returning null is how a local monitor swallows the
+        // event, which the binding does not express in its delegate signature.
+        innermost.Dismiss();
         return null!;
+    }
+
+    /// <summary>
+    /// The popup a press outside them all belongs to: the innermost of the popups that dismiss on an
+    /// outside press, which is the one shown last.
+    /// </summary>
+    private static AppKitPopupWindow? Innermost()
+    {
+        for (var i = Live.Count - 1; i >= 0; i--)
+        {
+            var popup = Live[i];
+
+            if (popup._window is not null && popup._dismissOnOutsideClick)
+            {
+                return popup;
+            }
+        }
+
+        return null;
     }
 
     private static bool IsPopupWindow(NSWindow? window)
@@ -317,8 +351,8 @@ internal sealed class AppKitPopupWindow : IPopupWindow
 
         try
         {
-            // Removed before the handler runs: the popup disposes this window from inside it, and
-            // a monitor must not be removed while it is the one being dispatched.
+            // Removed before the handler runs: the popup disposes this window from inside it, and an
+            // observer must not be removed while it is the one being dispatched.
             RemoveObservers();
             Dismissed?.Invoke(this);
         }

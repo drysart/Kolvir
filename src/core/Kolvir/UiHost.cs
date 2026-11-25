@@ -34,6 +34,8 @@ public sealed class UiHost
 
     private static int _paintDepth;
     private Window? _window;
+    private UiHost? _windowHost;
+    private SKPoint _originInWindowHost;
     private IDisposable? _windowShownToken;
     private IDisposable? _windowClosedToken;
     private Action<object, ContextMenuEventArgs>? _contextMenuOpening;
@@ -370,6 +372,40 @@ public sealed class UiHost
         _windowClosedToken?.Dispose();
         _windowShownToken = null;
         _windowClosedToken = null;
+    }
+
+    /// <summary>
+    /// The host of the window this host belongs to: this host for one a window draws into, and the
+    /// window's host for one a platform popup window draws into.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A popup is a surface of its own, so its host has no <see cref="Window"/> and is not the
+    /// window's client space either. What a platform layer needs is both of the things it lacks:
+    /// the window, because that is what owns the surface and what converts to screen pixels, and
+    /// where the popup's own top left corner sits inside it, because everything the popup draws and
+    /// hit tests is positioned in the popup's coordinates.
+    /// </para>
+    /// <para>
+    /// It is deliberately not <see cref="Window"/> that carries this. A host's <see cref="Window"/>
+    /// says which window the host draws, and a popup host draws a popup - so the two facts are
+    /// separate rather than one property that would have to mean two things.
+    /// </para>
+    /// </remarks>
+    internal UiHost WindowHost => _windowHost ?? this;
+
+    /// <summary>The origin of this host's client space in <see cref="WindowHost"/>'s client space.</summary>
+    internal SKPoint OriginInWindowHost => _originInWindowHost;
+
+    /// <summary>
+    /// Records where a popup window's host sits in the window that owns it: the window's host, and
+    /// the popup's top left corner in that host's coordinates. Called by the popup layer as it
+    /// hands a surface to the platform.
+    /// </summary>
+    internal void PlaceInWindow(UiHost windowHost, SKPoint origin)
+    {
+        _windowHost = windowHost;
+        _originInWindowHost = origin;
     }
 
     /// <summary>Resolves <typeparamref name="TService"/> from <see cref="Services"/>, or null when there is none.</summary>

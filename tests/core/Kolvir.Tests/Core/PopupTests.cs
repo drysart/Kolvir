@@ -881,6 +881,122 @@ public sealed class PopupTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void APopupInsideAPopupIsHandedToThePlatformInTheWindowsCoordinates()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.AreEqual(2, service.Windows.Count, "each level asked the platform for a surface");
+
+        var outer = service.Windows[0];
+        var inner = service.Windows[1];
+
+        Assert.AreSame(scene.Host, service.LastCreatedFor, "the surface is asked of the window's host");
+        Assert.AreSame(scene.Host, outer.ShownFor, "a popup opened from the window is shown against the window");
+        Assert.AreSame(
+            scene.Host,
+            inner.ShownFor,
+            "and one opened from inside a popup is shown against the same window, not against that popup");
+        Assert.AreEqual(
+            new SKPoint(20f, 50f),
+            outer.Location,
+            "the outer popup opens under the anchor in the window's own coordinates");
+        Assert.AreEqual(
+            new SKPoint(24f, 110f),
+            inner.Location,
+            "the inner popup's place inside the outer popup, moved by where the outer popup sits");
+        Assert.AreEqual(new SKSize(120f, 60f), inner.Size, "the size the popup asked for needs no conversion");
+    }
+
+    [TestMethod]
+    public void APopupInsideAPopupFitsAgainstTheDisplayNotThePopupItSitsIn()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        // The display's work area is the whole window here, so the only limit that can flip the
+        // inner popup is the bottom of the display - the parent popup ends well above it.
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 200f, 124f, 230f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 250f) });
+        innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.AreEqual(new SKPoint(20f, 50f), service.Windows[0].Location, "the outer popup sits under its anchor");
+        Assert.AreEqual(
+            new SKPoint(24f, 190f),
+            service.Windows[1].Location,
+            "below the inner anchor would end at window y 340, past the bottom of the display at y 320, so "
+            + "the inner popup flips above it - a clamp to the parent popup, which ends at window y 300, "
+            + "would have slid it up to y 240 instead");
+        Assert.AreEqual(2, service.AreaQueries, "each level asked about the display once");
+        Assert.AreSame(scene.Host, service.LastHost, "and asked about the window, whatever popup it was opened in");
+    }
+
+    [TestMethod]
+    public void AnOutsidePressClosesTheInnermostPopupAndLeavesTheOneAboveIt()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        scene.ClickAt(new SKPoint(400f, 300f));
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the innermost popup is the one the press belongs to");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.IsFalse(outerTask.IsCompleted, "the popup it was opened from is left alone");
+        Assert.IsFalse(service.Windows[0].IsDisposed, "and its surface is still up");
+        Assert.IsTrue(service.Windows[1].IsDisposed, "while the inner one's is gone");
+    }
+
+    [TestMethod]
+    public void ClosingAParentPopupWindowClosesThePopupOpenedInsideIt()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        service.Windows[0].RaiseDismissed();
+
+        Assert.IsTrue(outerTask.IsCompletedSuccessfully, "the platform took the outer popup away");
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "and the popup opened inside it went with it");
+        Assert.AreEqual(PopupCloseReason.OwnerClosed, innerTask.Result.Reason);
+        Assert.IsTrue(service.Windows[1].IsDisposed, "its surface is gone too");
+    }
+
+    [TestMethod]
     public void AnAnchorThatIsNotInAWindowIsRejected()
     {
         var anchor = new Button("Nowhere");
@@ -1212,14 +1328,19 @@ public sealed class PopupTests : HeadlessTestBase
     }
 
     /// <summary>
-    /// A popup service that supplies no platform window - so the popup takes the overlay path,
-    /// which is the one under test - and answers the placement area with what it was given.
+    /// A popup service that answers the placement area with what it was given, and - when asked to -
+    /// supplies a stand-in for a platform popup window so a test can see what the platform is handed.
     /// </summary>
     private sealed class RecordingPopupService : IPopupService
     {
         private readonly SKRect? _area;
+        private readonly bool _serveWindows;
 
-        public RecordingPopupService(SKRect? area) => _area = area;
+        public RecordingPopupService(SKRect? area, bool serveWindows = false)
+        {
+            _area = area;
+            _serveWindows = serveWindows;
+        }
 
         /// <summary>How many times the placement area was asked for.</summary>
         public int AreaQueries { get; private set; }
@@ -1227,14 +1348,102 @@ public sealed class PopupTests : HeadlessTestBase
         /// <summary>The host the last area question was about.</summary>
         public UiHost? LastHost { get; private set; }
 
-        public IPopupWindow? CreatePopup(UiHost ownerHost, bool dismissOnOutsideClick, bool takesPresses) => null;
+        /// <summary>The host the last <see cref="CreatePopup"/> question was about.</summary>
+        public UiHost? LastCreatedFor { get; private set; }
 
-        public SKRect? GetPlacementArea(UiHost ownerHost)
+        /// <summary>The surfaces handed out, in the order they were asked for.</summary>
+        public List<RecordingPopupWindow> Windows { get; } = [];
+
+        public IPopupWindow? CreatePopup(UiHost windowHost, bool dismissOnOutsideClick, bool takesPresses)
+        {
+            LastCreatedFor = windowHost;
+
+            if (!_serveWindows)
+            {
+                return null;
+            }
+
+            var window = new RecordingPopupWindow(dismissOnOutsideClick, takesPresses);
+            Windows.Add(window);
+            return window;
+        }
+
+        public SKRect? GetPlacementArea(UiHost windowHost)
         {
             AreaQueries++;
-            LastHost = ownerHost;
+            LastHost = windowHost;
             return _area;
         }
+    }
+
+    /// <summary>
+    /// A stand-in for a platform popup window that records what it was shown with and can report that
+    /// the platform dismissed it. It hosts the popup's content the way a real one does, so placement
+    /// and layout inside the popup behave as they would on a display.
+    /// </summary>
+    private sealed class RecordingPopupWindow : IPopupWindow
+    {
+        private readonly UiHost _host = new();
+
+        public RecordingPopupWindow(bool dismissesOnOutsideClick, bool takesPresses)
+        {
+            DismissesOnOutsideClick = dismissesOnOutsideClick;
+            TakesPresses = takesPresses;
+        }
+
+        public UiHost Host => _host;
+
+        public bool DismissesOnOutsideClick { get; }
+
+        public bool TakesPresses { get; }
+
+        /// <summary>Host the popup was shown against.</summary>
+        public UiHost? ShownFor { get; private set; }
+
+        /// <summary>Where it was shown, in <see cref="ShownFor"/>'s coordinates.</summary>
+        public SKPoint Location { get; private set; }
+
+        /// <summary>The size it was shown at.</summary>
+        public SKSize Size { get; private set; }
+
+        /// <summary>Whether the popup layer has disposed this surface.</summary>
+        public bool IsDisposed { get; private set; }
+
+        public event Action<object>? Dismissed;
+
+        public void Show(UiHost windowHost, SKPoint location, SKSize size)
+        {
+            ShownFor = windowHost;
+            Location = location;
+            Size = size;
+
+            // What every backend does for the popup's own tree, and what makes the popup's content
+            // measurable and placed: it resolves services from the window and draws at the size the
+            // popup asked for.
+            _host.Services = windowHost.Services;
+            _host.SetClientSize(size.Width, size.Height);
+        }
+
+        public void UpdateBounds(SKPoint location, SKSize size)
+        {
+            Location = location;
+            Size = size;
+            _host.SetClientSize(size.Width, size.Height);
+        }
+
+        public void Hide()
+        {
+        }
+
+        public void Dispose()
+        {
+            IsDisposed = true;
+            _host.Root = null;
+            Dismissed = null;
+        }
+
+        /// <summary>The platform closing the surface on the user's behalf.</summary>
+        public void RaiseDismissed() => Dismissed?.Invoke(this);
     }
 
     /// <summary>

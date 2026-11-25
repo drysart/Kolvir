@@ -72,6 +72,14 @@ internal sealed class Win32PopupWindow : IPopupWindow
     private bool _dismissing;
     private bool _disposed;
 
+    /// <summary>
+    /// Where this popup comes in the order the live popups were created, which is the order a chain
+    /// of them nests in: the innermost popup of a chain is the one created last.
+    /// </summary>
+    private readonly long _sequence = Interlocked.Increment(ref _nextSequence);
+
+    private static long _nextSequence;
+
     private long _lastClickTime;
     private int _clickCount;
     private int _lastClickX;
@@ -130,9 +138,48 @@ internal sealed class Win32PopupWindow : IPopupWindow
         return owned.Count > 0;
     }
 
-    public void Show(UiHost ownerHost, SKPoint location, SKSize size)
+    /// <summary>
+    /// Closes the innermost popup owned by <paramref name="ownerHwnd"/>, which is the one created
+    /// last.
+    /// </summary>
+    /// <returns>Whether a popup was dismissed, which is what tells the caller the press it is
+    /// handling belonged to that popup.</returns>
+    /// <remarks>
+    /// A press outside a chain of popups is outside every level of it, so it belongs to the level the
+    /// user was working in rather than to all of them: closing the whole chain on one press would
+    /// take down a menu the user only clicked past. The level above is left open and the next press
+    /// takes it, which is the same one-level-at-a-time rule the overlay presentation gets for free
+    /// from the innermost catcher being the one on top of the window.
+    /// </remarks>
+    public static bool DismissInnermostForOwner(IntPtr ownerHwnd)
     {
-        ArgumentNullException.ThrowIfNull(ownerHost);
+        Win32PopupWindow? innermost = null;
+
+        foreach (var window in Live.Values)
+        {
+            if (window._ownerHwnd != ownerHwnd || !window.DismissesOnOutsideClick)
+            {
+                continue;
+            }
+
+            if (innermost is null || window._sequence > innermost._sequence)
+            {
+                innermost = window;
+            }
+        }
+
+        if (innermost is null)
+        {
+            return false;
+        }
+
+        innermost.Dismiss();
+        return true;
+    }
+
+    public void Show(UiHost windowHost, SKPoint location, SKSize size)
+    {
+        ArgumentNullException.ThrowIfNull(windowHost);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (_hwnd != IntPtr.Zero)
@@ -146,14 +193,14 @@ internal sealed class Win32PopupWindow : IPopupWindow
             return;
         }
 
-        var backend = ownerHost.Window?.Backend as Win32WindowBackend;
+        var backend = windowHost.Window?.Backend as Win32WindowBackend;
         _ownerHwnd = backend?.Handle ?? IntPtr.Zero;
         _toScreen = backend is null ? null : backend.LogicalToScreen;
-        _scale = ownerHost.Window?.ScaleFactor ?? 1f;
+        _scale = windowHost.Window?.ScaleFactor ?? 1f;
 
         // The popup's tree resolves services from the same container as the window it belongs to,
         // so a control that opens a popup of its own finds the service that way too.
-        _host.Services = ownerHost.Services;
+        _host.Services = windowHost.Services;
         _host.SetClientSize(size.Width, size.Height);
 
         var (width, height) = PhysicalSize(size);

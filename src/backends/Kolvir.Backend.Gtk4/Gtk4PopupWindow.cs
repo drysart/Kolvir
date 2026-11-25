@@ -158,9 +158,9 @@ internal sealed class Gtk4PopupWindow : IPopupWindow
     public event Action<object>? Dismissed;
 
     /// <inheritdoc />
-    public void Show(UiHost ownerHost, SKPoint location, SKSize size)
+    public void Show(UiHost windowHost, SKPoint location, SKSize size)
     {
-        ArgumentNullException.ThrowIfNull(ownerHost);
+        ArgumentNullException.ThrowIfNull(windowHost);
         ObjectDisposedException.ThrowIf(_disposed, this);
 
         if (_popover.GetVisible())
@@ -171,7 +171,7 @@ internal sealed class Gtk4PopupWindow : IPopupWindow
 
         // The popup's tree resolves services from the same container as the window it belongs to,
         // so a control inside a popup that opens a popup of its own finds the service too.
-        _host.Services = ownerHost.Services;
+        _host.Services = windowHost.Services;
 
         Apply(location, size);
 

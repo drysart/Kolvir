@@ -154,6 +154,7 @@ internal sealed class PopupSession
 
         _popup = popup;
         _popupToken = popup.AddClosedHandler(OnPopupClosed);
+        popup.OutsidePress = DismissInnermost;
 
         // A popup that was itself opened from inside a popup belongs to that popup, not to the
         // window, so the level above closing takes it down as well.
@@ -341,6 +342,29 @@ internal sealed class PopupSession
     /// </summary>
     private void OnPopupClosed(object sender) =>
         Complete(PopupResult.Dismissed(OwnerIsGone() ? PopupCloseReason.OwnerClosed : PopupCloseReason.OutsideClick));
+
+    /// <summary>
+    /// Closes the innermost level of this chain: the deepest popup still open below this one, or this
+    /// one when nothing is open below it.
+    /// </summary>
+    /// <remarks>
+    /// A press outside a popup is outside every popup that was opened from it too, so the level it
+    /// belongs to is the one the user was working in rather than every level at once. The overlay
+    /// presentation already behaves that way, because the innermost catcher is the one on top of the
+    /// window; stating it here is what keeps a platform popup - which the platform dismisses itself,
+    /// without asking - on the same rule.
+    /// </remarks>
+    private void DismissInnermost()
+    {
+        var innermost = this;
+
+        while (innermost.Surface.Current is { } child)
+        {
+            innermost = child;
+        }
+
+        innermost.Complete(PopupResult.Dismissed(PopupCloseReason.OutsideClick));
+    }
 
     private void OnWindowClosed(object sender) =>
         Complete(PopupResult.Dismissed(PopupCloseReason.OwnerClosed));
