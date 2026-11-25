@@ -369,6 +369,24 @@ than claiming to draw a window it does not draw). Two consequences worth knowing
 Closing a popup still takes everything opened from it down with it, so the two rules do not contradict
 each other: a press takes the levels it is outside of, and a close takes the subtree under it.
 
+**A popup, losing activation, and the character palette.** A press is not the only thing that dismisses
+a popup: a popup that never takes activation has to close when the application loses it, because a
+click in another process's window is not a press this process sees and "whoever is frontmost now is
+where the user went" is all that is left to observe. macOS's character palette - "Emoji & Symbols",
+Control-Command-Space - is the exception, and it is the one case where the user did not go anywhere.
+The palette is a process of its own (`com.apple.CharacterPaletteIM`), so a click on a character in it
+is geometrically a click outside every window we own, and it deactivates the application: measured on
+macOS 27.2, with a text box inside a popup holding the keyboard, the palette is frontmost for about
+0.6 seconds before macOS re-activates us and delivers the commit to the field that had the keyboard -
+the field inside the popup, because a popup borrows the window's keyboard rather than taking its own.
+Dismissing on that deactivation closes the popup one commit too early and drops the character, so the
+deactivation caused by the palette does not dismiss; every other one - Finder for the desktop, another
+application, the Dock - still does, as does one this cannot attribute, which is why the rule is a
+positive test for the palette (`AppKitActivation.IsTextInputSurface`) rather than a negative test for
+everybody else. The press monitor is not involved and never sees the click: it is a local monitor, so
+it only ever sees events delivered to this process, which is also why the fix is a condition on when
+a deactivation dismisses rather than a change to the chain rule above.
+
 **A popup asked where it is while its window moves.** On macOS, and only there, a popup reports as not
 showing for the one run-loop pass in which its owning window is moved: `TryGetPopupBounds` answers false
 there, while the popup is alive and follows the window correctly, and the answer is back on the next
