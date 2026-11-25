@@ -399,9 +399,31 @@ internal sealed class PopupPage : DemoPage
             align.ToString(),
             "Anchored to this button. Click outside or press Esc to dismiss it.");
 
-        _ = ShowAndReportAsync(
-            $"Align {align}",
-            () => anchor.ShowPopupAsync(content, Sized(190f, 100f)));
+        // The resolved rectangle, printed in the popup itself: nine buttons on one page are hard to
+        // tell apart by eye, and the numbers show that Above, RightOf, LeftOf and AtPointer really
+        // land somewhere other than BelowStart.
+        var resolved = PopupCaption("Resolved bounds: not read yet.");
+        resolved.AutoSize = false;
+        resolved.Height = 32f;
+        content.Controls.Add(resolved);
+
+        var options = Sized(190f, 100f);
+        options.Align = align;
+
+        var task = anchor.ShowPopupAsync(content, options);
+
+        if (content.TryGetPopupBounds(out var bounds))
+        {
+            resolved.Text =
+                $"Resolved, window client: left {bounds.Left:0}, top {bounds.Top:0}, " +
+                $"{bounds.Width:0} by {bounds.Height:0}.";
+        }
+        else
+        {
+            resolved.Text = "Resolved bounds: the popup is not showing, so there are none to read.";
+        }
+
+        _ = ShowAndReportAsync($"Align {align}", () => task);
     }
 
     private void ShowTallFromTop(Button anchor) => ShowTall(anchor, PopupAlign.AboveStart);
