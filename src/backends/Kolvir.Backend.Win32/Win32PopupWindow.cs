@@ -104,6 +104,9 @@ internal sealed class Win32PopupWindow : IPopupWindow
 
     public bool TakesPresses { get; }
 
+    /// <inheritdoc />
+    public Func<SKPoint, bool>? OutsidePress { get; set; }
+
     public event Action<object>? Dismissed;
 
     /// <summary>Closes every popup owned by <paramref name="ownerHwnd"/>.</summary>
@@ -139,25 +142,25 @@ internal sealed class Win32PopupWindow : IPopupWindow
     }
 
     /// <summary>
-    /// Closes the innermost popup owned by <paramref name="ownerHwnd"/>, which is the one created
-    /// last.
+    /// Hands a press that landed on the owning window, at <paramref name="point"/> in that window's
+    /// own logical client coordinates, to the innermost popup the window owns.
     /// </summary>
-    /// <returns>Whether a popup was dismissed, which is what tells the caller the press it is
-    /// handling belonged to that popup.</returns>
+    /// <returns>Whether a popup took the press, which is what tells the caller the press it is
+    /// handling belonged to that popup rather than to what it landed on.</returns>
     /// <remarks>
-    /// A press outside a chain of popups is outside every level of it, so it belongs to the level the
-    /// user was working in rather than to all of them: closing the whole chain on one press would
-    /// take down a menu the user only clicked past. The level above is left open and the next press
-    /// takes it, which is the same one-level-at-a-time rule the overlay presentation gets for free
-    /// from the innermost catcher being the one on top of the window.
+    /// A press on the owning window is delivered to that window rather than to the popup floating
+    /// above it, so the owner is what has to notice and report it. What the press closes is not
+    /// decided here: the popup it is handed to knows its parent, so the portable layer walks the
+    /// chain from the innermost level outward and closes every level the point is outside of - the
+    /// rule both presentations share, stated once.
     /// </remarks>
-    public static bool DismissInnermostForOwner(IntPtr ownerHwnd)
+    public static bool ReportOutsidePress(IntPtr ownerHwnd, SKPoint point)
     {
         Win32PopupWindow? innermost = null;
 
         foreach (var window in Live.Values)
         {
-            if (window._ownerHwnd != ownerHwnd || !window.DismissesOnOutsideClick)
+            if (window._ownerHwnd != ownerHwnd || window.OutsidePress is null)
             {
                 continue;
             }
@@ -168,13 +171,7 @@ internal sealed class Win32PopupWindow : IPopupWindow
             }
         }
 
-        if (innermost is null)
-        {
-            return false;
-        }
-
-        innermost.Dismiss();
-        return true;
+        return innermost?.OutsidePress?.Invoke(point) ?? false;
     }
 
     public void Show(UiHost windowHost, SKPoint location, SKSize size)

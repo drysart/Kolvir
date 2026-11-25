@@ -901,6 +901,49 @@ public sealed class PopupTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void EveryAlignIsCarriedThroughTheShowToTheRectangleThePopupOccupies()
+    {
+        var anchor = new Button("Anchor") { Bounds = new SKRect(200f, 100f, 300f, 130f) };
+        var root = new Panel { Dock = DockStyle.Fill, Padding = Thickness.Empty };
+        root.Controls.Add(anchor);
+
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        // The pointer sits well away from the anchor, so AtPointer has a place of its own to land on
+        // and cannot be mistaken for one of the aligns measured against the anchor.
+        scene.MoveTo(new SKPoint(400f, 220f));
+
+        var expected = new Dictionary<PopupAlign, SKRect>
+        {
+            [PopupAlign.BelowStart] = new SKRect(200f, 130f, 260f, 190f),
+            [PopupAlign.BelowCenter] = new SKRect(220f, 130f, 280f, 190f),
+            [PopupAlign.BelowEnd] = new SKRect(240f, 130f, 300f, 190f),
+            [PopupAlign.AboveStart] = new SKRect(200f, 40f, 260f, 100f),
+            [PopupAlign.AboveCenter] = new SKRect(220f, 40f, 280f, 100f),
+            [PopupAlign.AboveEnd] = new SKRect(240f, 40f, 300f, 100f),
+            [PopupAlign.RightOf] = new SKRect(300f, 100f, 360f, 160f),
+            [PopupAlign.LeftOf] = new SKRect(140f, 100f, 200f, 160f),
+            [PopupAlign.AtPointer] = new SKRect(400f, 220f, 460f, 280f),
+        };
+
+        var seen = new List<SKRect>();
+
+        foreach (var align in Enum.GetValues<PopupAlign>())
+        {
+            var content = new Panel();
+            anchor.ShowPopupAsync(content, new PopupOptions { Align = align, Size = new SKSize(60f, 60f) });
+
+            Assert.IsTrue(content.TryGetPopupBounds(out var bounds), $"{align}: a shown popup has a rectangle");
+            Assert.AreEqual(expected[align], bounds, $"{align} is not where its own align asks for");
+
+            seen.Add(bounds);
+            content.ClosePopup();
+        }
+
+        Assert.AreEqual(9, seen.Distinct().Count(), "every align lands somewhere of its own");
+    }
+
+    [TestMethod]
     public void TheResolvedBoundsFollowTheFlip()
     {
         var (root, flippedAnchor) = CreateAnchorTree(new SKRect(20f, 270f, 120f, 300f));
@@ -1071,8 +1114,57 @@ public sealed class PopupTests : HeadlessTestBase
         Assert.AreSame(scene.Host, service.LastHost, "and asked about the window, whatever popup it was opened in");
     }
 
+    // A press outside a chain of popups closes every level the press is outside of and stops at the
+    // first level it is inside of - or at the first level that opted out of closing on an outside
+    // press. Both presentations go through the same walk: the overlay catcher reports the press it
+    // swallowed, and a platform window reports the press on the owning window, each with its point in
+    // the window's client coordinates.
+
     [TestMethod]
-    public void AnOutsidePressClosesTheInnermostPopupAndLeavesTheOneAboveIt()
+    public void APressOutsideAChainOfOverlaidPopupsClosesEveryLevel()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        scene.ClickAt(new SKPoint(400f, 300f));
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the press is outside the innermost popup");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.IsTrue(outerTask.IsCompletedSuccessfully, "and it is outside the popup that one was opened from too");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, outerTask.Result.Reason);
+    }
+
+    [TestMethod]
+    public void APressInsideTheParentPopupClosesOnlyTheChildOpenedFromIt()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        // The outer popup ends at (220, 200) and the inner one at (144, 170), so this point is inside
+        // the parent and outside the child.
+        scene.ClickAt(new SKPoint(200f, 190f));
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the press is outside the child");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.IsFalse(outerTask.IsCompleted, "and inside the parent, which is the level the user was working in");
+    }
+
+    [TestMethod]
+    public void AWindowPopupReportsAnOutsidePressWithItsPointAndTheChainClosesEveryLevel()
     {
         var (root, anchor, _) = CreatePopupTree();
         using var scene = HeadlessScene.Create(root, 480f, 320f);
@@ -1087,13 +1179,205 @@ public sealed class PopupTests : HeadlessTestBase
         var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
         var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
 
+        // What the owning window's message procedure does with a press it receives.
+        Assert.IsTrue(
+            service.Windows[1].RaiseOutsidePress(new SKPoint(400f, 300f)),
+            "the press was taken, so the window must not also deliver it");
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the innermost level heard the press");
+        Assert.IsTrue(outerTask.IsCompletedSuccessfully, "and so did the level it was opened from");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason, "the innermost level reports the press");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, outerTask.Result.Reason, "and so does the level it was opened from");
+        Assert.IsTrue(service.Windows[0].IsDisposed, "both surfaces are gone");
+        Assert.IsTrue(service.Windows[1].IsDisposed);
+    }
+
+    [TestMethod]
+    public void AWindowPopupPressInsideTheParentClosesOnlyTheChild()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.IsTrue(service.Windows[1].RaiseOutsidePress(new SKPoint(200f, 190f)), "the press was taken by the child");
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the point is outside the child");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.IsFalse(outerTask.IsCompleted, "the point is inside the parent, so the walk stops there");
+        Assert.IsFalse(service.Windows[0].IsDisposed);
+        Assert.IsTrue(service.Windows[1].IsDisposed);
+    }
+
+    [TestMethod]
+    public void APressInsideAThreeLevelChainClosesTheTwoLevelsItIsOutsideOf()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        // Outer (20,50)-(220,200), middle (24,110)-(184,230), inner (28,134)-(108,174).
+        var middleAnchor = new Button("Middle") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(middleAnchor);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 4f, 44f, 24f) };
+        var middleContent = new Panel { Padding = Thickness.Empty };
+        middleContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var middleTask = middleAnchor.ShowPopupAsync(middleContent, new PopupOptions { Size = new SKSize(160f, 120f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(80f, 40f) });
+
+        // Inside the outer popup and outside the two opened from it, so the walk goes through both of
+        // them and stops at the level the press landed in.
+        Assert.IsTrue(service.Windows[2].RaiseOutsidePress(new SKPoint(200f, 190f)));
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the innermost level is outside it");
+        Assert.IsTrue(middleTask.IsCompletedSuccessfully, "and so is the one below");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.AreEqual(PopupCloseReason.OutsideClick, middleTask.Result.Reason);
+        Assert.IsFalse(outerTask.IsCompleted, "the walk stops at the level the press landed in");
+        Assert.IsFalse(service.Windows[0].IsDisposed);
+        Assert.IsTrue(service.Windows[1].IsDisposed);
+        Assert.IsTrue(service.Windows[2].IsDisposed);
+    }
+
+    [TestMethod]
+    public void APressOutsideAThreeLevelChainClosesAllThreeLevels()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var middleAnchor = new Button("Middle") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(middleAnchor);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 4f, 44f, 24f) };
+        var middleContent = new Panel { Padding = Thickness.Empty };
+        middleContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var middleTask = middleAnchor.ShowPopupAsync(middleContent, new PopupOptions { Size = new SKSize(160f, 120f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(80f, 40f) });
+
+        Assert.IsTrue(service.Windows[2].RaiseOutsidePress(new SKPoint(450f, 300f)));
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the innermost level is outside it");
+        Assert.IsTrue(middleTask.IsCompletedSuccessfully, "and so is the one below");
+        Assert.IsTrue(outerTask.IsCompletedSuccessfully, "and the one below that");
+        Assert.AreEqual(3, service.Windows.Count(w => w.IsDisposed), "one press took the whole chain down");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.AreEqual(PopupCloseReason.OutsideClick, middleTask.Result.Reason);
+        Assert.AreEqual(PopupCloseReason.OutsideClick, outerTask.Result.Reason);
+    }
+
+    [TestMethod]
+    public void ALevelThatDoesNotDismissOnAnOutsidePressStopsTheWalk()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions
+        {
+            Size = new SKSize(120f, 60f),
+            DismissOnOutsideClick = false,
+        });
+
+        Assert.IsFalse(
+            service.Windows[1].RaiseOutsidePress(new SKPoint(400f, 300f)),
+            "nothing closed, so the press is not the popup's to take");
+
+        Assert.IsFalse(innerTask.IsCompleted, "the level that opts out keeps itself open");
+        Assert.IsFalse(outerTask.IsCompleted, "and the walk stops there rather than closing the popup above it");
+        Assert.IsFalse(service.Windows[0].IsDisposed);
+        Assert.IsFalse(service.Windows[1].IsDisposed);
+    }
+
+    [TestMethod]
+    public void AnOptingOutParentIsLeftOpenWhenTheChildTakesThePress()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions
+        {
+            Size = new SKSize(200f, 150f),
+            DismissOnOutsideClick = false,
+        });
+        var innerTask = innerAnchor.ShowPopupAsync(new Panel(), new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.IsTrue(service.Windows[1].RaiseOutsidePress(new SKPoint(400f, 300f)), "the child closed");
+
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the child is outside the press");
+        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
+        Assert.IsFalse(outerTask.IsCompleted, "the level above opted out, so the walk stops at it");
+        Assert.IsFalse(service.Windows[0].IsDisposed);
+    }
+
+    [TestMethod]
+    public void EveryLevelAPressClosesIsReportedOnceWithOutsideClick()
+    {
+        var (root, anchor, _) = CreatePopupTree();
+        using var scene = HeadlessScene.Create(root, 480f, 320f);
+
+        var service = new RecordingPopupService(new SKRect(0f, 0f, 480f, 320f), serveWindows: true);
+        OverridePopupService(scene, service);
+
+        var innerAnchor = new Button("Inner") { Bounds = new SKRect(4f, 30f, 124f, 60f) };
+        var outerContent = new Panel { Padding = Thickness.Empty };
+        outerContent.Controls.Add(innerAnchor);
+
+        var innerContent = new Panel();
+        var outerReasons = new List<PopupCloseReason>();
+        var innerReasons = new List<PopupCloseReason>();
+        outerContent.AddPopupClosedHandler((_, result) => outerReasons.Add(result.Reason));
+        innerContent.AddPopupClosedHandler((_, result) => innerReasons.Add(result.Reason));
+
+        var outerTask = anchor.ShowPopupAsync(outerContent, new PopupOptions { Size = new SKSize(200f, 150f) });
+        var innerTask = innerAnchor.ShowPopupAsync(innerContent, new PopupOptions { Size = new SKSize(120f, 60f) });
+
+        Assert.IsTrue(service.Windows[1].RaiseOutsidePress(new SKPoint(400f, 300f)));
         scene.ClickAt(new SKPoint(400f, 300f));
 
-        Assert.IsTrue(innerTask.IsCompletedSuccessfully, "the innermost popup is the one the press belongs to");
-        Assert.AreEqual(PopupCloseReason.OutsideClick, innerTask.Result.Reason);
-        Assert.IsFalse(outerTask.IsCompleted, "the popup it was opened from is left alone");
-        Assert.IsFalse(service.Windows[0].IsDisposed, "and its surface is still up");
-        Assert.IsTrue(service.Windows[1].IsDisposed, "while the inner one's is gone");
+        CollectionAssert.AreEqual(
+            new[] { PopupCloseReason.OutsideClick },
+            innerReasons,
+            "the child was closed by the press, once, and a second press closes nothing");
+        CollectionAssert.AreEqual(
+            new[] { PopupCloseReason.OutsideClick },
+            outerReasons,
+            "and so was its parent");
+        Assert.IsTrue(outerTask.IsCompletedSuccessfully);
+        Assert.IsTrue(innerTask.IsCompletedSuccessfully);
     }
 
     [TestMethod]
@@ -1798,6 +2082,9 @@ public sealed class PopupTests : HeadlessTestBase
 
         public bool TakesPresses { get; }
 
+        /// <summary>What the popup layer decided a press outside this popup does.</summary>
+        public Func<SKPoint, bool>? OutsidePress { get; set; }
+
         /// <summary>Host the popup was shown against.</summary>
         public UiHost? ShownFor { get; private set; }
 
@@ -1845,6 +2132,12 @@ public sealed class PopupTests : HeadlessTestBase
 
         /// <summary>The platform closing the surface on the user's behalf.</summary>
         public void RaiseDismissed() => Dismissed?.Invoke(this);
+
+        /// <summary>
+        /// What a backend does with a press it saw on the owning window: hands it, with its point in
+        /// that window's client coordinates, to the chain. Returns whether a level was closed.
+        /// </summary>
+        public bool RaiseOutsidePress(SKPoint point) => OutsidePress?.Invoke(point) ?? false;
     }
 
     /// <summary>

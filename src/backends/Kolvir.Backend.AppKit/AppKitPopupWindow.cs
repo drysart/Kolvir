@@ -29,11 +29,11 @@ internal sealed class AppKitPopupWindow : IPopupWindow
     private static readonly List<AppKitPopupWindow> Live = new();
 
     /// <summary>
-    /// The one local monitor that turns a press outside the popups into a dismissal, installed the
-    /// first time a popup that dismisses is shown. It is shared rather than one per popup because
-    /// which level a press belongs to is a question about the whole set: a press outside a chain of
-    /// popups closes the innermost one only, and a monitor per popup would have each of them answer
-    /// for itself and take the chain down at once.
+    /// The one local monitor that turns a press outside the popups into a report to the popup chain,
+    /// installed the first time a popup that dismisses is shown. It is shared rather than one per
+    /// popup because the press belongs to the chain, not to whichever window happens to be on top: a
+    /// monitor per popup would have each of them answer for itself and take the chain down level by
+    /// level, or twice.
     /// </summary>
     /// <remarks>
     /// It is not removed when the last popup goes. A monitor is a callback rather than a timer, and
@@ -65,6 +65,9 @@ internal sealed class AppKitPopupWindow : IPopupWindow
 
     /// <inheritdoc />
     public bool DismissesOnOutsideClick => _dismissOnOutsideClick;
+
+    /// <inheritdoc />
+    public Func<SKPoint, bool>? OutsidePress { get; set; }
 
     /// <inheritdoc />
     public bool TakesPresses => _takesPresses;
@@ -288,24 +291,31 @@ internal sealed class AppKitPopupWindow : IPopupWindow
 
         var innermost = Innermost();
 
-        if (innermost is null)
+        if (innermost?.OutsidePress is not { } outsidePress || innermost._ownerWindow is not { } owner)
         {
             return theEvent;
         }
 
-        // A press outside the popups belongs to the innermost one and closes only it, which leaves
-        // the popup it was opened from up - a press that reaches past a chain of popups takes the
-        // level the user was working in, not every level at once. The press belongs to the popup
-        // too: it stops there rather than being delivered to whatever it landed on, which is what
-        // the Win32 and overlay presentations do. Returning null is how a local monitor swallows the
-        // event, which the binding does not express in its delegate signature.
-        innermost.Dismiss();
-        return null!;
+        // AppKit reports the press in screen points with y growing up from the bottom of the primary
+        // display, and the portable layer compares it with rectangles in the owner's logical client
+        // space - so it is converted here with the same helpers the popup itself is placed with.
+        var screen = theEvent.LocationInWindow;
+        var client = AppKitApplicationBackend.ClientOriginOf(owner);
+        var point = new SKPoint(
+            (float)(screen.X - client.X),
+            (float)(AppKitApplicationBackend.PrimaryHeightFor(owner) - screen.Y - client.Y));
+
+        // The popup chain decides how many levels the press closes, walking outward from the
+        // innermost one and stopping where the press landed. A press that closed nothing - one
+        // inside a popup's rectangle, or one a popup opted out of - is delivered rather than
+        // swallowed, so the control underneath still hears it; returning null is how a local monitor
+        // swallows the event, which the binding does not express in its delegate signature.
+        return outsidePress(point) ? null! : theEvent;
     }
 
     /// <summary>
-    /// The popup a press outside them all belongs to: the innermost of the popups that dismiss on an
-    /// outside press, which is the one shown last.
+    /// The popup a press outside them all belongs to: the innermost one still showing, whether or not
+    /// it dismisses, because a level that opts out has to stop the walk rather than be skipped.
     /// </summary>
     private static AppKitPopupWindow? Innermost()
     {
@@ -313,7 +323,7 @@ internal sealed class AppKitPopupWindow : IPopupWindow
         {
             var popup = Live[i];
 
-            if (popup._window is not null && popup._dismissOnOutsideClick)
+            if (popup._window is not null && popup.OutsidePress is not null)
             {
                 return popup;
             }

@@ -20,16 +20,41 @@ public interface IPopupWindow : IDisposable
     UiHost Host { get; }
 
     /// <summary>
-    /// Whether the platform raised <see cref="Dismissed"/> when the pointer went down outside the
-    /// popup or the owning window lost activation, so the popup closes itself.
+    /// Whether a press outside the popup closes it, which the popup layer reads from
+    /// <see cref="PopupOptions.DismissOnOutsideClick"/>. A popup that says false - a tooltip - keeps
+    /// itself open and lets the press reach whatever it landed on.
     /// </summary>
     /// <remarks>
-    /// The press that dismisses a popup belongs to the popup and is not delivered to whatever it
-    /// landed on, so a control that owns an open popup does not act on the same click that closed
-    /// it. The overlay presentation gets that from the control it paints behind the popup; a
-    /// platform window has to consume the press itself.
+    /// The press that closes a popup belongs to the popup and is not delivered to whatever it landed
+    /// on, so a control that owns an open popup does not act on the same click that closed it. Where
+    /// the press landed is reported through <see cref="OutsidePress"/> rather than acted on here: the
+    /// portable layer owns the rule for how many levels of a chain one press closes, so no backend
+    /// decides that alone. Losing activation is not a press and still dismisses the popup through
+    /// <see cref="Dismissed"/>.
     /// </remarks>
     bool DismissesOnOutsideClick { get; }
+
+    /// <summary>
+    /// Told about a press that landed outside this popup, at a point in the client coordinates of the
+    /// window the popup belongs to.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The popup layer assigns this while the popup is shown. It walks the chain of popups from the
+    /// innermost level outward, closes every level the point is outside of, and stops at the first
+    /// level the point is inside or the first level that does not dismiss on an outside press. A
+    /// backend therefore reports the press instead of dismissing the popup itself, which keeps the
+    /// platform presentation and the overlay presentation on one rule instead of two.
+    /// </para>
+    /// <para>
+    /// The answer is whether the press closed a level, which is what tells the backend whether the
+    /// press belonged to a popup - and so must be swallowed - or to whatever it landed on. A backend
+    /// that never sees the press does not call this at all: GTK4's popovers take no grab, so the
+    /// press reaches the portable dismiss catcher, which is a control in the window's own tree and
+    /// knows the point.
+    /// </para>
+    /// </remarks>
+    Func<SKPoint, bool>? OutsidePress { get; set; }
 
     /// <summary>
     /// Whether the popup takes the pointer at all, as opposed to passing it through to whatever it

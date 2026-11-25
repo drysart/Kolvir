@@ -167,15 +167,17 @@ public sealed class Popup : IDisposable
     internal Control? DismissCatcher => _catcher;
 
     /// <summary>
-    /// What a press outside the popup does, or null for closing this popup.
+    /// What a press outside the popup does, or null for closing this popup. It is given the press in
+    /// the client coordinates of the window the popup belongs to, and answers whether the press
+    /// closed a level.
     /// </summary>
     /// <remarks>
     /// A press outside a popup is outside every popup that was opened from it as well, so which
-    /// level it belongs to is a question only the popup API can answer: it closes the innermost
-    /// level still open. A popup shown for its own sake - a drop-down list, a tooltip, a menu - has
-    /// no levels below it, so it keeps the default.
+    /// levels it closes is a question only the popup API can answer, and it answers it by walking the
+    /// chain from the innermost level outward. A popup shown for its own sake - a drop-down list, a
+    /// tooltip, a menu - has no levels below it, so it keeps the default.
     /// </remarks>
-    internal Action? OutsidePress { get; set; }
+    internal Func<SKPoint, bool>? OutsidePress { get; set; }
 
     /// <summary>
     /// Where the popup's top left corner sits, in the coordinates of the host it is anchored in -
@@ -403,6 +405,10 @@ public sealed class Popup : IDisposable
         _window = window;
         ActualPresentation = PopupPresentation.Window;
 
+        // The backend reports the press it sees on the owning window rather than dismissing the popup
+        // itself, so how many levels go is decided by the chain rather than by the platform.
+        window.OutsidePress = ReportOutsidePress;
+
         // The popup's own host is a coordinate space of its own, and a popup opened inside this one
         // is placed in it. Recording where it sits is what lets that level convert to the window
         // without walking anything at show time.
@@ -536,15 +542,23 @@ public sealed class Popup : IDisposable
     private SKPoint ToWindow(SKPoint location) => new(_ownerOffset.X + location.X, _ownerOffset.Y + location.Y);
 
     /// <summary>Runs what a press outside the popup asks for: <see cref="OutsidePress"/>, else closing it.</summary>
-    internal void DismissFromOutsidePress()
+    /// <remarks>
+    /// The press arrives here from the one presentation that saw it - the dismiss catcher that covers
+    /// the window for an overlaid popup, or the backend for a popup window that the platform drew -
+    /// and it always arrives with the point it landed on, so both presentations go through the same
+    /// decision about how many levels it closes.
+    /// </remarks>
+    /// <param name="point">The press, in the client coordinates of the window the popup belongs to.</param>
+    /// <returns>Whether the press closed a level.</returns>
+    internal bool ReportOutsidePress(SKPoint point)
     {
         if (OutsidePress is { } handler)
         {
-            handler();
-            return;
+            return handler(point);
         }
 
         Close();
+        return true;
     }
 }
 
@@ -601,7 +615,18 @@ internal sealed class PopupDismissCatcher : Control
     protected override void OnMouseDown(MouseEventArgs e)
     {
         base.OnMouseDown(e);
-        _popup.DismissFromOutsidePress();
+
+        // The event is in this control's own space, and this control is arranged to fill its host, so
+        // the press is a host point to start with; the host knows where its own space starts in the
+        // window's, which is the space the popup layer compares rectangles in.
+        var host = Host;
+        var point = host is null
+            ? e.Location
+            : new SKPoint(
+                host.OriginInWindowHost.X + e.Location.X,
+                host.OriginInWindowHost.Y + e.Location.Y);
+
+        _popup.ReportOutsidePress(point);
     }
 
     protected override void OnLayout()
