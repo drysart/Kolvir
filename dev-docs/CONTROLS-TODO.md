@@ -31,6 +31,7 @@ in a popup, places it against an anchor, a client point or the pointer, hands it
 long as it is open - Escape, Tab and typed text included - and completes with the
 `PopupCloseReason` that ended it. `ClosePopup` ends one from application code, and
 `AddPopupClosedHandler` listens for how any popup showing a control ended.
+Planned before the work and kept as the record of the decisions and their reasons: [POPUPS.md](POPUPS.md).
 
 ## 2. What "done" means
 
