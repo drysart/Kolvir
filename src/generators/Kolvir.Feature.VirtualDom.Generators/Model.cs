@@ -123,7 +123,10 @@ internal sealed record ControlModel(
 /// A node class name two controls wanted, which is emitted as one inert placeholder class instead.
 /// </summary>
 /// <param name="Name">The class name in dispute.</param>
-/// <param name="Accessibility">The accessibility the class gets, from the first control that claimed it.</param>
+/// <param name="Accessibility">
+/// The accessibility the class gets: public when any contender is public, internal when every one of
+/// them is internal.
+/// </param>
 /// <param name="Contenders">One claim per contender: the control type's identity.</param>
 internal sealed record TypePlaceholderModel(string Name, string Accessibility, ImmutableArray<string> Contenders);
 

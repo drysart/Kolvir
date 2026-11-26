@@ -810,9 +810,14 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             // Two controls, one name: neither node class is emitted, and the name becomes a placeholder
             // that reports its own use rather than producing one of the two and quietly dropping the
             // other.
+            //
+            // The placeholder is as visible as the most visible contender. A public control wants a
+            // public name, and a placeholder that were internal instead would turn the conflict the
+            // analyzer reports into an inconsistency the compiler reports: a public control's node name
+            // is something a public declaration elsewhere in the application may use.
             perManifestPlaceholders[list[0].Manifest].Add(new TypePlaceholderModel(
                 list[0].Control.NodeName,
-                list[0].Control.Accessibility,
+                list.Any(entry => entry.Control.Accessibility == "public") ? "public" : "internal",
                 [.. list.Select(entry => entry.Control.ControlMetadataName)]));
         }
 

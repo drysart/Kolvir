@@ -4933,7 +4933,8 @@ Three rules make a sweep predictable:
 
 | Rule | Why |
 | --- | --- |
-| A control that cannot become a node is skipped **silently** - abstract, generic, not `public`, or without an accessible parameterless constructor. | A node is built with `new T()`. There is nothing an application could do about a control that cannot answer that, so a diagnostic would be a message with no remedy. |
+| A control that cannot become a node is skipped **silently** - abstract, generic, without an accessible parameterless constructor, or unreachable from the generated code. | A node is built with `new T()`. There is nothing an application could do about a control that cannot answer that, so a diagnostic would be a message with no remedy. |
+| Reachability is judged where the node is written: a control declared in the application's own assembly may be `internal` or `protected internal` and gets a node of the same accessibility, while a control from a referenced assembly must be `public`, and a `private` or `private protected` nested type never qualifies. | The node class is emitted into the application's own assembly, so internal is reachable there and nowhere else. |
 | A control named by an explicit `[VirtualDom(typeof(X))]` **anywhere in the compilation** is left to that attribute. | That is what makes the attribute safe to add to a manifest that already lists controls: those keep the names they were given, and the duplicate-registration error two entries for one control still give. |
 | A node class is named after the control's simple name, so two controls called `Button` collide. | VD014 reports a use of the contested name; rename one by registering it explicitly with `Name`. Nothing is generated for either control until then. |
 
