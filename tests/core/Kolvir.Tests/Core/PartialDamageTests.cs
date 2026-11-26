@@ -69,7 +69,7 @@ public sealed class PartialDamageTests : HeadlessTestBase
 
     public TestContext TestContext { get; set; } = null!;
 
-    [DataTestMethod]
+    [TestMethod]
     [DataRow("a rounded corner cut in half")]
     [DataRow("the hairline ring cut along an edge")]
     [DataRow("a rectangle through the text")]
