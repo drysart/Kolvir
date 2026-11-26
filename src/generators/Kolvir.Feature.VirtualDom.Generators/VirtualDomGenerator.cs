@@ -1,4 +1,4 @@
-﻿using System.Collections.Immutable;
+using System.Collections.Immutable;
 
 using System.Linq;
 using System.Text;
@@ -48,6 +48,13 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
     {
+        // The reference documentation the build hands in (see the feature's buildTransitive targets).
+        // One index for the compilation: which file documents which assembly does not depend on the
+        // compilation, and parsing stays deferred until a member is asked about.
+        var documentation = context.AdditionalTextsProvider
+            .Collect()
+            .Select(static (texts, _) => DocumentationIndex.Create(texts));
+
         var manifests = context.SyntaxProvider
             .ForAttributeWithMetadataName(
                 AttributeName,
@@ -65,7 +72,8 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         // Once per compilation rather than once per manifest: both walks are the expensive half of this
         // generator, and their answers are the same for every manifest the compilation declares.
         var catalog = context.CompilationProvider
-            .Select(static (compilation, cancellationToken) => ExtensionCatalog.Scan(compilation, cancellationToken));
+            .Combine(documentation)
+            .Select(static (input, cancellationToken) => ExtensionCatalog.Scan(input.Left, input.Right, cancellationToken));
 
         // The sweep's half of the same discipline: what a [VirtualDomAll] manifest has to emit for.
         // Only walked when a manifest actually sweeps - a compilation that registers its controls by
@@ -77,10 +85,11 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                     : ControlCatalog.Empty);
 
         context.RegisterSourceOutput(
-            manifests.Combine(sweeps).Combine(catalog).Combine(controls),
+            manifests.Combine(sweeps).Combine(catalog).Combine(controls).Combine(documentation),
             static (productionContext, input) => Emit(
                 productionContext,
-                input.Left.Left.Left,
+                input.Left.Left.Left.Left,
+                input.Left.Left.Left.Right,
                 input.Left.Left.Right,
                 input.Left.Right,
                 input.Right));
@@ -248,10 +257,18 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 AddHandler: null,
                 RemoveHandler: null,
                 Container: null,
-                Accessor: property.Name));
+                Accessor: property.Name,
+
+                // A control declared in the compilation being built has its documentation here, when
+                // the project parses doc comments at all - without GenerateDocumentationFile the
+                // compiler has discarded them and this is empty. A control from a reference never has
+                // any here; its ID and assembly are what the emit step looks up instead.
+                Documentation: DocumentationCleaner.Clean(property.GetDocumentationCommentXml()),
+                DocumentationId: property.GetDocumentationCommentId(),
+                DocumentationAssembly: property.ContainingAssembly?.Name));
         }
 
-        foreach (var (name, add, remove, handlerType) in HandlerPairs(control))
+        foreach (var (name, add, remove, handlerType, documentation, documentationId, documentationAssembly) in HandlerPairs(control))
         {
             if (ReservedNames.Contains(name))
             {
@@ -282,7 +299,10 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 AddHandler: add,
                 RemoveHandler: remove,
                 Container: null,
-                Accessor: name));
+                Accessor: name,
+                Documentation: documentation,
+                DocumentationId: documentationId,
+                DocumentationAssembly: documentationAssembly));
         }
 
         return properties.ToImmutable();
@@ -399,6 +419,38 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         return control with { Properties = properties.ToImmutable(), Placeholders = placeholders.ToImmutable() };
     }
 
+    /// <summary>
+    /// Fills in the documentation of every member whose text has to come from a reference's XML file.
+    /// </summary>
+    /// <remarks>
+    /// A member declared in the compilation being built carries its own documentation and was read
+    /// while the model was built. A member of a referenced assembly does not, so it is looked up here,
+    /// by documentation ID in that assembly's file - which is why this runs at emit time: the model
+    /// walk has no access to the additional files, and the sweep's models are built here anyway.
+    /// </remarks>
+    private static ControlModel Documentate(ControlModel control, DocumentationIndex documentation)
+    {
+        if (!control.Properties.Any(property => property.Documentation is null && property.DocumentationId is not null))
+        {
+            return control;
+        }
+
+        var properties = ImmutableArray.CreateBuilder<PropertyModel>(control.Properties.Length);
+
+        foreach (var property in control.Properties)
+        {
+            properties.Add(
+                property.Documentation is null
+                    && property.DocumentationId is { } id
+                    && property.DocumentationAssembly is { } assembly
+                    && documentation.MemberOf(assembly, id) is { } text
+                    ? property with { Documentation = text }
+                    : property);
+        }
+
+        return control with { Properties = properties.ToImmutable() };
+    }
+
     private static OverrideModel? FindOverride(ExtensionMember member, ImmutableArray<OverrideModel> overrides)
     {
         foreach (var candidate in overrides)
@@ -492,7 +544,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     /// <summary>
     /// Finds the <c>AddXxxHandler</c>/<c>RemoveXxxHandler</c> pairs Kolvir uses instead of events.
     /// </summary>
-    private static IEnumerable<(string Name, string Add, string Remove, string HandlerType)> HandlerPairs(
+    private static IEnumerable<(string Name, string Add, string Remove, string HandlerType, string? Documentation, string? DocumentationId, string? DocumentationAssembly)> HandlerPairs(
         INamedTypeSymbol control)
     {
         var methods = new List<IMethodSymbol>();
@@ -539,7 +591,14 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
 
             var display = handlerType.ToDisplayString(Formats.Type);
 
-            yield return (kind, add.Name, remove.Name, display.EndsWith("?", StringComparison.Ordinal) ? display : display + "?");
+            yield return (
+                kind,
+                add.Name,
+                remove.Name,
+                display.EndsWith("?", StringComparison.Ordinal) ? display : display + "?",
+                DocumentationCleaner.Clean(add.GetDocumentationCommentXml()),
+                add.GetDocumentationCommentId(),
+                add.ContainingAssembly?.Name);
         }
     }
 
@@ -602,7 +661,8 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         ImmutableArray<ManifestModel?> models,
         ImmutableArray<ManifestModel?> sweeps,
         ExtensionCatalog catalog,
-        ControlCatalog controls)
+        ControlCatalog controls,
+        DocumentationIndex documentation)
     {
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
@@ -740,8 +800,9 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             if (list.Count == 1)
             {
                 var single = list[0];
-                perManifestControls[single.Manifest].Add(
-                    Resolve(single.Control, catalog, manifests[single.Manifest].Overrides, diagnostics));
+                perManifestControls[single.Manifest].Add(Documentate(
+                    Resolve(single.Control, catalog, manifests[single.Manifest].Overrides, diagnostics),
+                    documentation));
 
                 continue;
             }
@@ -749,9 +810,14 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             // Two controls, one name: neither node class is emitted, and the name becomes a placeholder
             // that reports its own use rather than producing one of the two and quietly dropping the
             // other.
+            //
+            // The placeholder is as visible as the most visible contender. A public control wants a
+            // public name, and a placeholder that were internal instead would turn the conflict the
+            // analyzer reports into an inconsistency the compiler reports: a public control's node name
+            // is something a public declaration elsewhere in the application may use.
             perManifestPlaceholders[list[0].Manifest].Add(new TypePlaceholderModel(
                 list[0].Control.NodeName,
-                list[0].Control.Accessibility,
+                list.Any(entry => entry.Control.Accessibility == "public") ? "public" : "internal",
                 [.. list.Select(entry => entry.Control.ControlMetadataName)]));
         }
 
@@ -857,7 +923,8 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 RemoveHandler: member.RemoveHandler,
                 Container: member.Container,
                 Accessor: member.Name,
-                Receiver: member.ReceiverType);
+                Receiver: member.ReceiverType,
+                Documentation: member.Documentation);
     }
 }
 

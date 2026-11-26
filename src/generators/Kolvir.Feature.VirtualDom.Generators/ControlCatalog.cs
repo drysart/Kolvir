@@ -9,11 +9,20 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// </summary>
 /// <remarks>
 /// <para>
-/// A control qualifies when a node could be built from it: public, concrete, non-generic, derived from
-/// <c>Kolvir.Control</c>, and constructible without arguments. Everything else is dropped without a
-/// diagnostic. There is nothing an application could do about a control that is abstract or that has
-/// no parameterless constructor - the node factory is <c>new T()</c> - so reporting one would be a
-/// message with no remedy, and the sweep is a declaration rather than an instruction to review a list.
+/// A control qualifies when a node could be built from it: concrete, non-generic, derived from
+/// <c>Kolvir.Control</c>, reachable from the generated code, and constructible without arguments.
+/// Everything else is dropped without a diagnostic. There is nothing an application could do about a
+/// control that is abstract or that has no parameterless constructor - the node factory is
+/// <c>new T()</c> - so reporting one would be a message with no remedy, and the sweep is a
+/// declaration rather than an instruction to review a list.
+/// </para>
+/// <para>
+/// Reachable means reachable from <em>where the node is written</em>: the node class is emitted into
+/// the compilation's own assembly, so a control declared there may be <c>public</c>, <c>internal</c> or
+/// <c>protected internal</c> and the node is emitted with the same accessibility. A control in a
+/// referenced assembly has to be <c>public</c>, because nothing else is reachable from another
+/// assembly. A <c>private</c> or <c>private protected</c> nested control is out either way: reaching it
+/// would need the derivation the node class does not have.
 /// </para>
 /// <para>
 /// The walk is the narrowed one: the compilation's own assembly plus the assemblies that can name
@@ -67,22 +76,32 @@ internal sealed record ControlCatalog(ImmutableArray<INamedTypeSymbol> Controls)
 
     private static bool Eligible(INamedTypeSymbol type, INamedTypeSymbol control, Compilation compilation) =>
         type.TypeKind == TypeKind.Class
-        && type.DeclaredAccessibility == Accessibility.Public
         && !type.IsAbstract
         && type.Arity == 0
         && Derives(type, control)
+        && Accessible(type, compilation)
         && type.InstanceConstructors.Any(constructor =>
             constructor.Parameters.Length == 0 && Accessible(constructor, type, compilation));
 
     /// <summary>
-    /// Whether the generated code could call the constructor. The node classes are emitted into the
-    /// compilation's own assembly, so an internal constructor counts for a control declared there and
-    /// only a public one counts for a control in a referenced assembly.
+    /// Whether the generated code could name the control. The node classes are emitted into the
+    /// compilation's own assembly, so an internal or protected-internal control counts when it is
+    /// declared there and only a public one counts when it comes from a referenced assembly.
+    /// </summary>
+    private static bool Accessible(INamedTypeSymbol type, Compilation compilation) =>
+        Reachable(type.DeclaredAccessibility, type, compilation);
+
+    /// <summary>
+    /// Whether the generated code could call the constructor. The same rule as for a type: declared in
+    /// the compilation's own assembly is reachable from the node class, wherever it is public.
     /// </summary>
     private static bool Accessible(IMethodSymbol constructor, INamedTypeSymbol type, Compilation compilation) =>
-        constructor.DeclaredAccessibility == Accessibility.Public
-        || (constructor.DeclaredAccessibility is Accessibility.Internal or Accessibility.ProtectedOrInternal
-            && SymbolEqualityComparer.Default.Equals(type.ContainingAssembly, compilation.Assembly));
+        Reachable(constructor.DeclaredAccessibility, type, compilation);
+
+    private static bool Reachable(Accessibility accessibility, INamedTypeSymbol owner, Compilation compilation) =>
+        accessibility == Accessibility.Public
+        || (accessibility is Accessibility.Internal or Accessibility.ProtectedOrInternal
+            && SymbolEqualityComparer.Default.Equals(owner.ContainingAssembly, compilation.Assembly));
 
     private static bool Derives(INamedTypeSymbol type, INamedTypeSymbol control)
     {

@@ -54,6 +54,7 @@ internal static class Names
 /// <param name="ReceiverInterfaces">The interfaces the receiver implements, for the same reason.</param>
 /// <param name="UnsetLiteral">The pristine value a <c>[VNodePropertyUnsetValue]</c> declared, as a C# literal, or null.</param>
 /// <param name="ReceiverType">The receiver as generated code writes it, which is what an actuator casts the control to.</param>
+/// <param name="Documentation">The member's documentation, reduced to what is valid on a property, or null.</param>
 internal sealed record ExtensionMember(
     string Container,
     string ContainerMetadataName,
@@ -65,7 +66,8 @@ internal sealed record ExtensionMember(
     ImmutableArray<string> ReceiverChain,
     ImmutableArray<string> ReceiverInterfaces,
     string? UnsetLiteral,
-    string ReceiverType)
+    string ReceiverType,
+    string? Documentation = null)
 {
     internal bool IsEvent => AddHandler is not null;
 
@@ -106,13 +108,17 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
 
     /// <summary>Finds every extension member in the assemblies the compilation can draw one from.</summary>
     /// <param name="compilation">The compilation whose references are scanned.</param>
+    /// <param name="documentation">The reference documentation, for the docs a member carries.</param>
     /// <param name="cancellationToken">Cancels the walk.</param>
     /// <returns>The members found, and whether the narrowing had to be given up.</returns>
-    internal static ExtensionCatalog Scan(Compilation compilation, CancellationToken cancellationToken)
+    internal static ExtensionCatalog Scan(
+        Compilation compilation,
+        DocumentationIndex documentation,
+        CancellationToken cancellationToken)
     {
         var members = ImmutableArray.CreateBuilder<ExtensionMember>();
 
-        if (!Read(TypeWalk.Around(compilation, ControlTypeName), members, cancellationToken))
+        if (!Read(TypeWalk.Around(compilation, ControlTypeName), members, documentation, cancellationToken))
         {
             return new ExtensionCatalog(members.ToImmutable(), false);
         }
@@ -120,7 +126,7 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
         // A receiver that resolved to nothing means the narrowed set was missing an assembly, which is
         // the one thing the construction above can be wrong about. Everything is read instead.
         members.Clear();
-        Read(TypeWalk.Every(compilation), members, cancellationToken);
+        Read(TypeWalk.Every(compilation), members, documentation, cancellationToken);
 
         return new ExtensionCatalog(members.ToImmutable(), true);
     }
@@ -129,6 +135,7 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
     private static bool Read(
         ImmutableArray<IAssemblySymbol> assemblies,
         ImmutableArray<ExtensionMember>.Builder members,
+        DocumentationIndex documentation,
         CancellationToken cancellationToken)
     {
         var unresolved = false;
@@ -143,11 +150,11 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
                 {
                     if (member is INamedTypeSymbol { TypeKind: TypeKind.Extension } block)
                     {
-                        unresolved |= ReadBlock(type, block, members);
+                        unresolved |= ReadBlock(type, block, members, documentation);
                     }
                 }
 
-                unresolved |= ReadHandlerPairs(type, members);
+                unresolved |= ReadHandlerPairs(type, members, documentation);
             }
         }
 
@@ -158,7 +165,8 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
     private static bool ReadBlock(
         INamedTypeSymbol container,
         INamedTypeSymbol block,
-        ImmutableArray<ExtensionMember>.Builder members)
+        ImmutableArray<ExtensionMember>.Builder members,
+        DocumentationIndex documentation)
     {
         // The block's receiver: the parameter the compiler modelled the block on. It is the reason the
         // pin is on 5.x - 4.14 has no such API and cannot see these members in metadata at all.
@@ -183,7 +191,15 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
                 continue;
             }
 
-            members.Add(Member(container, receiver, property.Name, property.Type, null, null, Values.Unset(property)));
+            members.Add(Member(
+                container,
+                receiver,
+                property.Name,
+                property.Type,
+                null,
+                null,
+                Values.Unset(property),
+                documentation.Member(property)));
         }
 
         return false;
@@ -196,7 +212,10 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
     /// both report <see cref="IMethodSymbol.IsExtensionMethod"/>. So the pair is found without reading a
     /// block symbol at all, which is what makes this half work the same way on every Roslyn version.
     /// </remarks>
-    private static bool ReadHandlerPairs(INamedTypeSymbol container, ImmutableArray<ExtensionMember>.Builder members)
+    private static bool ReadHandlerPairs(
+        INamedTypeSymbol container,
+        ImmutableArray<ExtensionMember>.Builder members,
+        DocumentationIndex documentation)
     {
         var unresolved = false;
         var methods = container.GetMembers().OfType<IMethodSymbol>()
@@ -258,7 +277,8 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
                 Chain(receiver),
                 [.. receiver.AllInterfaces.Select(@interface => @interface.ToDisplayString(Formats.Metadata))],
                 UnsetLiteral: null,
-                receiver.ToDisplayString(Formats.Type)));
+                receiver.ToDisplayString(Formats.Type),
+                documentation.Member(add)));
         }
 
         return unresolved;
@@ -271,7 +291,8 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
         ITypeSymbol type,
         string? addHandler,
         string? removeHandler,
-        string? unsetLiteral = null) =>
+        string? unsetLiteral = null,
+        string? documentation = null) =>
         new(
             container.ToDisplayString(Formats.Type),
             container.ToDisplayString(Formats.Metadata),
@@ -283,7 +304,8 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
             Chain(receiver),
             [.. receiver.AllInterfaces.Select(@interface => @interface.ToDisplayString(Formats.Metadata))],
             unsetLiteral,
-            receiver.ToDisplayString(Formats.Type));
+            receiver.ToDisplayString(Formats.Type),
+            documentation);
 
     /// <summary>The receiver and the base classes it can be applied to, in the order they are searched.</summary>
     private static ImmutableArray<string> Chain(ITypeSymbol receiver)

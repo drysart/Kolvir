@@ -258,10 +258,20 @@ into that class's namespace. The attribute names nothing and takes nothing; the 
 the list.
 
 **What qualifies.** A control is swept when a node could be built from it: derived from `Control`,
-`public`, concrete, non-generic, and constructible without arguments. Everything else is skipped
-without a diagnostic, a warning or a comment. There is no remedy an application could apply - the node
-factory is `new T()`, and a control that cannot answer that is one no node could describe - so a
-message about it would be noise nobody can act on.
+concrete, non-generic, reachable from the generated code, and constructible without arguments.
+Everything else is skipped without a diagnostic, a warning or a comment. There is no remedy an
+application could apply - the node factory is `new T()`, and a control that cannot answer that is one
+no node could describe - so a message about it would be noise nobody can act on.
+
+**Reachable means reachable from where the node is written.** The node classes are emitted into the
+compilation's own assembly, so a control declared there may be `public`, `internal` or `protected
+internal`: an application's own `internal class MyButton : Button` gets a node, and that node class is
+emitted `internal` to match - a public node class naming an internal control would not compile. A
+control in a referenced assembly still has to be `public`, because nothing else is reachable across an
+assembly boundary, and a `private` or `private protected` nested control is out either way: reaching it
+would need the derivation the node class does not have. A name two controls dispute is emitted as a
+placeholder that is as visible as the most visible of them, so a public contender keeps the conflict a
+diagnostic rather than turning it into a compiler error about inconsistency.
 
 **Where it looks.** The narrowed walk of section 2, for the reason given there and one more: the sweep is
 the part of this feature that would otherwise be tempted to walk every type in the closure. An
@@ -499,3 +509,8 @@ window creation do no work for any of it: the generator and the analyzer are com
 node classes are ordinary code reachable only where an application names them. The one run-time
 effect first use adds is that assigning an extension handler member installs it for the rest of the
 process - no startup work, and nothing at all for a member nobody touches.
+
+What the node classes later gained - the documentation of the control property they expose, read from
+the reference's XML file because the compiler attaches no documentation provider to a reference - and
+the row and column styles a table can now assign, are in `dev-docs/VNODE-DOCUMENTATION.md`, including
+what each costs in generated source and per-edit generator time.

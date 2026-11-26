@@ -180,5 +180,6 @@
 	   application publishes with AOT, so importing them here changes nothing about the library, the
 	   backends, the tests or a normal demo run. -->
   <Import Project="$(MSBuildThisFileDirectory)src\features\Kolvir.Feature.Svg\buildTransitive\Kolvir.Feature.Svg.targets" />
+  <Import Project="$(MSBuildThisFileDirectory)src\features\Kolvir.Feature.VirtualDom\buildTransitive\Kolvir.Feature.VirtualDom.targets" />
 
 </Project>

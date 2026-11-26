@@ -104,6 +104,216 @@ public sealed class SweepTests
     }
 
     [TestMethod]
+    public void ASweepEmitsANodeForAControlTheApplicationDeclaresInternal()
+    {
+        var generated = VirtualDomCompiler.Build("""
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace TestApp
+            {
+                internal sealed class Gauge : Kolvir.Control
+                {
+                    internal Gauge()
+                    {
+                    }
+                }
+            }
+
+            namespace Host
+            {
+                [VirtualDomAll]
+                internal partial class All;
+            }
+            """);
+
+        Assert.IsEmpty(generated.Ids, string.Join("\n", generated.Ids));
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+
+        // The node class is emitted into the same assembly, so an internal control is reachable and
+        // needs no exclusion. The node follows the control's accessibility: a public node class naming
+        // an internal control would not compile.
+        StringAssert.Contains(generated.Source, "internal sealed class VGauge : global::Kolvir.Feature.VirtualDom.VNode");
+        StringAssert.Contains(generated.Source, "typeof(global::TestApp.Gauge)");
+    }
+
+    [TestMethod]
+    public void ASweepStillEmitsAPublicNodeForAPublicControl()
+    {
+        var generated = VirtualDomCompiler.Build("""
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace TestApp
+            {
+                public sealed class Gauge : Kolvir.Control
+                {
+                }
+            }
+
+            namespace Host
+            {
+                [VirtualDomAll]
+                internal partial class All;
+            }
+            """);
+
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+        StringAssert.Contains(generated.Source, "public sealed class VGauge : global::Kolvir.Feature.VirtualDom.VNode");
+    }
+
+    [TestMethod]
+    public void ASweepEmitsANodeForAProtectedInternalControlNestedInThisAssembly()
+    {
+        // protected internal is reachable from inside the assembly, which is where the node is written.
+        var generated = VirtualDomCompiler.Build("""
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace TestApp
+            {
+                public sealed class Holder : Kolvir.Control
+                {
+                    protected internal sealed class Inner : Kolvir.Control
+                    {
+                    }
+                }
+            }
+
+            namespace Host
+            {
+                [VirtualDomAll]
+                internal partial class All;
+            }
+            """);
+
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+        StringAssert.Contains(generated.Source, "internal sealed class VInner : global::Kolvir.Feature.VirtualDom.VNode");
+        StringAssert.Contains(generated.Source, "typeof(global::TestApp.Holder.Inner)");
+    }
+
+    [TestMethod]
+    public void ASweepLeavesOutAControlNoGeneratedCodeCouldName()
+    {
+        var library = VirtualDomCompiler.Library(
+            "Secrets",
+            """
+            using Kolvir;
+
+            namespace Widgets
+            {
+                internal sealed class Concealed : Control
+                {
+                }
+            }
+            """,
+            referencesKolvir: true);
+
+        var generated = VirtualDomCompiler.Build([library], """
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace TestApp
+            {
+                public sealed class Visible : Kolvir.Control
+                {
+                    private sealed class Hidden : Kolvir.Control
+                    {
+                    }
+
+                    private protected sealed class Guarded : Kolvir.Control
+                    {
+                    }
+                }
+            }
+
+            namespace Host
+            {
+                [VirtualDomAll]
+                internal partial class All;
+            }
+            """);
+
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+
+        // Internal only counts where the node is written, so a referenced assembly's internal control
+        // stays out; private and private protected nested types are unreachable in either case,
+        // because reaching them would need the derivation the node class does not have.
+        Assert.IsFalse(generated.Source.Contains("VConcealed", StringComparison.Ordinal), "an internal control in a referenced assembly has no node");
+        Assert.IsFalse(generated.Source.Contains("VHidden", StringComparison.Ordinal), "a nested private control has no node");
+        Assert.IsFalse(generated.Source.Contains("VGuarded", StringComparison.Ordinal), "a nested private protected control has no node");
+
+        // The reachable one in the same compilation is still swept, which is what makes the three
+        // assertions above statements about accessibility rather than about a sweep that found nothing.
+        StringAssert.Contains(generated.Source, "sealed class VVisible");
+    }
+
+    [TestMethod]
+    public void APlaceholderIsAsVisibleAsTheMostVisibleContender()
+    {
+        // A public contender forces a public name: an application may hold a public declaration that
+        // uses it, and an internal placeholder would turn the VD014 conflict into a compiler error
+        // about inconsistency.
+        var mixed = VirtualDomCompiler.Build("""
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace Acme
+            {
+                public sealed class Sparkline : Kolvir.Control
+                {
+                }
+            }
+
+            namespace Widgets
+            {
+                internal sealed class Sparkline : Kolvir.Control
+                {
+                }
+            }
+
+            namespace Host
+            {
+                [VirtualDomAll]
+                internal partial class All;
+            }
+            """);
+
+        Assert.IsEmpty(mixed.CompileErrors, string.Join("\n", mixed.CompileErrors));
+        StringAssert.Contains(mixed.Source, "public sealed class VSparkline;");
+
+        // Every contender internal: the placeholder may be internal too, and stays out of the public
+        // surface the disputed name never asked for.
+        var privateEverywhere = VirtualDomCompiler.Build("""
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace Acme
+            {
+                internal sealed class Sparkline : Kolvir.Control
+                {
+                }
+            }
+
+            namespace Widgets
+            {
+                internal sealed class Sparkline : Kolvir.Control
+                {
+                }
+            }
+
+            namespace Host
+            {
+                [VirtualDomAll]
+                internal partial class All;
+            }
+            """);
+
+        Assert.IsEmpty(privateEverywhere.CompileErrors, string.Join("\n", privateEverywhere.CompileErrors));
+        StringAssert.Contains(privateEverywhere.Source, "internal sealed class VSparkline;");
+    }
+
+    [TestMethod]
     public void ARuleRegistrationWinsOverTheSweep()
     {
         var generated = VirtualDomCompiler.Build("""

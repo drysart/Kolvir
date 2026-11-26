@@ -92,6 +92,8 @@ internal static class HeadlessCheck
         // the one it has. That is the path an extension property could quietly get wrong: setting it on
         // a first apply is a setter call, but moving it is a detach from one cell and an attach to
         // another, and only the patch does that.
+        var rowsBeforeShift = table.RowStyles[0];
+
         Click(first, "shift");
         Paint(first);
 
@@ -103,6 +105,75 @@ internal static class HeadlessCheck
         Check(Cell(table, "cell-title") == (0, 0), "an unchanged cell position should survive the patch");
         Check(Span(table, "popup") == (1, 2), "and so should an unchanged span");
         Console.WriteLine($"table: after the patch the move button is at {moved}");
+
+        // That render also rebuilt the row sequence, and it said exactly what the table already had: the
+        // same styles, by value, in the same order. A patch that replaced them anyway would be a table
+        // rebuilt on every render, so the instance is the assertion - it is the same style object.
+        Check(
+            ReferenceEquals(rowsBeforeShift, table.RowStyles[0]),
+            "a render that produced the same rows should have left the table's styles alone");
+
+        // The styles themselves are settable on the node, so the page declares a whole sequence and the
+        // control compares it by value. What the control holds is the assertion: counts, kinds, values,
+        // and one layout pass each time the sequence really changed.
+        Check(
+            table.RowCount == 2 && table.ColumnCount == 2,
+            $"the node's styles should have been applied, the table has {table.RowCount} row(s) and {table.ColumnCount} column(s)");
+        Check(
+            table.RowStyles[0].SizeType == SizeType.Absolute && table.RowStyles[0].Value == 24f,
+            $"the first row should be 24 absolute pixels, it is {table.RowStyles[0].SizeType} {table.RowStyles[0].Value}");
+        Check(
+            table.ColumnStyles[0].SizeType == SizeType.Absolute && table.ColumnStyles[0].Value == 160f,
+            $"the first column should be 160 absolute pixels, it is {table.ColumnStyles[0].SizeType} {table.ColumnStyles[0].Value}");
+        Console.WriteLine($"styles: {table.RowCount}x{table.ColumnCount}, first row 24px, first column 160px");
+
+        var shiftTop = FindControl(table.Window!, "shift").Bounds.Top;
+
+        // A changed value.
+        Click(first, "reshape");
+        Paint(first);
+
+        Check(table.RowCount == 2, $"the changed sequence should still have two rows, it has {table.RowCount}");
+        Check(
+            table.RowStyles[0].Value == 40f,
+            $"the first row should have been replaced with 40 pixels, it is {table.RowStyles[0].Value}");
+        Check(
+            FindControl(table.Window!, "shift").Bounds.Top != shiftTop,
+            "the changed row height should have been laid out, and the button above did not move");
+        Console.WriteLine("styles: the changed row height was applied and laid out");
+
+        // Reordered.
+        Click(first, "reshape");
+        Paint(first);
+
+        Check(table.RowCount == 2, $"the reordered sequence should still have two rows, it has {table.RowCount}");
+        Check(
+            table.RowStyles[0].SizeType == SizeType.Percent,
+            $"the reordered sequence should put the percent row first, it is {table.RowStyles[0].SizeType}");
+        Console.WriteLine("styles: the reordered sequence was applied in order");
+
+        // Shortened.
+        Click(first, "reshape");
+        Paint(first);
+
+        Check(table.RowCount == 1, $"the shortened sequence should have one row, it has {table.RowCount}");
+        Console.WriteLine("styles: the shortened sequence removed a row");
+
+        // Empty.
+        Click(first, "reshape");
+        Paint(first);
+
+        Check(table.RowCount == 0, $"the empty sequence should have no declared rows, it has {table.RowCount}");
+        Console.WriteLine("styles: the empty sequence removed every row");
+
+        // And back to the one the page declares, which is the sequence every render produces.
+        Click(first, "reshape");
+        Paint(first);
+
+        Check(
+            table.RowCount == 2 && table.RowStyles[0].Value == 24f,
+            "the declared rows should be back after a full cycle");
+        Console.WriteLine("styles: the cycle returned to the declared rows");
 
         // The other half: a handler pair the control does not declare, and one that lives inside an
         // extension(TextBox) block. Nothing in the page calls AddUndoStateChangedHandler - the node's
