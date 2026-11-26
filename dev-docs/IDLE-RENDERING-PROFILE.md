@@ -115,6 +115,11 @@ Three things to read off it:
 
 ### 2.2 What `SurfacePanel` is doing for 0.97 ms
 
+The figures in 2.1 under `self`, and every figure in this section, are **self** times - the control's
+own work, children excluded - so the table's sum is a cross-check on the numbers, not where they come
+from. 2.1 already states the same thing at its head; it is repeated here because this is the section
+that draws a conclusion from a single row.
+
 `SurfacePanel` (`src/demo/Kolvir.Demo.App/SurfacePanel.cs`) is the sample's card: a `Panel` whose
 `Border` is `SimpleBorder.Thin.WithCornerRadius(8f)` and whose background defaults to
 `ThemeColor.Surface`. It has no `OnPaint` at all - `paint=0.000` above is not a rounding artefact.
@@ -122,7 +127,7 @@ Its 0.965 ms of self time is:
 
 | What it is doing | ms/frame | Where |
 | --- | ---: | --- |
-| Background fill | 0.799 | `Control.OnPaintBackground` → `Painter.Fill(canvas, rect, backColor, Border.Corners)` |
+| Background fill | 0.799 | `Control.OnPaintBackground` (`Control.cs:3201`) → `Painter.Fill` (`Painter.cs:49`) |
 | Border ring | 0.128 | `SimpleBorder.Paint` → `PaintRing` |
 | Antialiased rounded clip | 0.037 | `SimpleBorder.ClipTo` → `SKPathBuilder` → `canvas.ClipPath(..., antialias: true)` |
 | Own paint | 0.000 | none |
@@ -133,9 +138,19 @@ hairline ring - over a card that covers most of the window, plus an antialiased 
 `Border.NarrowsClip` makes every rounded control pay for on every frame. Three are painted per frame;
 two are large.
 
+**The 0.799 ms is one antialiased round-rect fill, paid across the whole rectangle when only the four
+corners need antialiasing.** `Painter.Fill` builds a path with `RoundedRect.Build` and fills it with
+`canvas.DrawPath` and `IsAntialias = true` (`Painter.cs:66-72`), so every background of every rounded
+control is rasterised as an antialiased path - a card the size of a window is no exception, and a path
+is also built per fill per frame. This is **core library code, not demo code**: the same
+`Painter.Fill` draws the background of every `Control` whose `Border` has corners, so an improvement
+here applies to every rounded background in every Kolvir application, not to this page.
+
 That is the single biggest item in the tree, and it is the first thing to attack if the frame is to
-get cheaper (section 5.3). This measurement does not say whether the antialiased *clip* is what makes
-the fill expensive or the fill itself; separating those two is the obvious next experiment.
+get cheaper (section 5.3). What this measurement does **not** separate is the cost of antialiasing
+the whole rectangle from the cost of building and filling a path at all, and it does not separate
+either from the antialiased clip; that is for the follow-up to measure, not for this document to
+assume.
 
 ### 2.3 Scaling, allocation, and what is not there
 
@@ -368,11 +383,17 @@ composite; it cannot approach 15x, and on this arithmetic it does not even beat 
    partial row measures 0.207 ms against 3.05. The measured page's 3.05 ms is a *deliberate* full
    repaint: its 15 ms timer calls `UiHost.Invalidate()` with no argument, which sets `_dirtyAll`. That
    is the benchmark doing its job, and it is why this number is not the library's idle cost.
-2. **Stop re-filling what did not change - 0.8-1.0 ms of 3.3, medium risk.** `SurfacePanel` spends
-   0.80 ms per frame filling two large antialiased rounded rectangles that have not changed, and
-   `Button` backgrounds add 0.20. Caching a static card's painted content (an `SKPicture` or an
-   offscreen surface keyed on size, theme and appearance) removes most of that. Risk: invalidation
-   correctness, one extra surface per cached card, memory proportional to the visible page.
+2. **Stop filling the whole rectangle with an antialiased path - 0.8-1.0 ms of 3.3, bounded.**
+   `SurfacePanel` spends 0.80 ms per frame filling two large rounded rectangles as antialiased paths
+   (section 2.2), and `Button` backgrounds add 0.20. Only the four corners need antialiasing, and the
+   interior of a card is a solid span; a non-antialiased interior with antialiased corners is the
+   variant **the owner has chosen and it is being investigated separately** - this document records
+   the measurement that motivates it and does not predict its result. The change is in `Painter.Fill`
+   (`Painter.cs:49`), so it reaches every rounded background in every application rather than this
+   page. If it does not clear the decision rule in 5.4, the next candidate on this same cost is
+   caching a static card's painted content (an `SKPicture` or an offscreen surface keyed on size,
+   theme and appearance), whose risk is invalidation correctness, one extra surface per cached card,
+   and memory proportional to the visible page.
 3. **Stop re-laying-out text - allocation only.** 40-50 KB per frame from one wrapped label
    (`TextRenderer.Draw` → `BuildTextLines` on every paint); the six labels' paint is 0.19 ms, under
    the noise floor, so this buys garbage and gen-0 pause frequency rather than milliseconds.
@@ -385,9 +406,10 @@ composite; it cannot approach 15x, and on this arithmetic it does not even beat 
    thread paints the next frame; worthwhile only if the present is ever seen as the limit, which on
    this machine it is not.
 
-Ranked by expected gain per unit of risk: partial damage (done) ≫ static-card caching (0.8-1.0 ms,
-bounded, measurable) > text layout cache (allocation) > the page-benchmark fix (no frame cost, better
-measurement) > present decoupling > threads.
+Ranked by expected gain per unit of risk: partial damage (done) ≫ the antialiased-fill fix chosen for
+investigation (0.8-1.0 ms in library code, affects every rounded background) > static-card caching
+(0.8-1.0 ms, bounded, measurable) > text layout cache (allocation) > the page-benchmark fix (no frame
+cost, better measurement) > present decoupling > threads.
 
 ### 5.4 Recommendation, and the experiment that would settle it
 
@@ -395,20 +417,28 @@ measurement) > present decoupling > threads.
 the same machine already demonstrates a 15x by painting a twentieth of the window instead of by
 splitting the work.
 
-If the static-card idea is worth one prototype, this is the experiment that decides it, with the same
-discipline as section 3:
+The change being investigated separately is the antialiased-fill one in 5.3: a non-antialiased
+interior with antialiased corners in `Painter.Fill`. Whether it is worth landing is a measurement, and
+this is the rule it should be judged by - the same discipline as section 3:
 
-- **Change:** cache `SurfacePanel`'s background fill and ring for one card (an `SKPicture` recorded on
-  first paint and replayed while size, theme, appearance and state are unchanged, dropped otherwise).
 - **Measurement:** the page's full-damage p50 over 5 runs at 1280 x 820 @ 2.00, before and after, on
   this machine. **Decision rule:** a fall of at least 0.5 ms (≥15%) in the median, with the
   partial-damage row unchanged within its spread.
 - **Correctness gate:** `--render --page measured-rendering` byte-identical before and after, plus the
-  existing visual tests - a cached card that misses a repaint is a worse bug than 0.9 ms.
+  existing visual tests - a rounded corner that loses its antialiasing is a worse bug than 0.9 ms, so
+  the comparison is the corners' pixels, not just the total.
 
-If that prototype does not clear the decision rule, the next thing to measure is the cost of the
-antialiased `ClipPath` on rounded controls (0.037 ms here for three cards, but it forces coverage
-masks over every fill inside them), which needs a measurement rather than an estimate.
+If that does not clear the rule, the static-card idea is the next prototype on the same cost, and it
+is judged by the same two gates:
+
+- **Change:** cache `SurfacePanel`'s background fill and ring for one card (an `SKPicture` recorded on
+  first paint and replayed while size, theme, appearance and state are unchanged, dropped otherwise).
+- **Correctness note:** the byte comparison above is the load-bearing part here - a cached card that
+  misses a repaint is a worse bug than 0.9 ms.
+
+If neither clears the decision rule, the next thing to measure is the cost of the antialiased
+`ClipPath` on rounded controls (0.037 ms here for three cards, but it forces coverage masks over
+every fill inside them), which needs a measurement rather than an estimate.
 
 ## 6. What this measurement is not
 
