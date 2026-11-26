@@ -147,9 +147,24 @@ internal static class NodeEmitter
             return;
         }
 
-        foreach (var line in documentation.Split('\n'))
+        int start = 0;
+
+        while (true)
         {
-            source.AppendLine(body + "/// " + line);
+            int end = documentation.IndexOf('\n', start);
+
+            if (end < 0)
+            {
+                end = documentation.Length;
+            }
+
+            source.Append(body).Append("/// ").Append(documentation, start, end - start).Append('\n');
+            start = end + 1;
+
+            if (start > documentation.Length)
+            {
+                break;
+            }
         }
     }
 

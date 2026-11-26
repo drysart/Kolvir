@@ -45,12 +45,12 @@ internal sealed class DocumentationIndex
         if (symbol.GetDocumentationCommentId() is not { } id
             || symbol.ContainingAssembly?.Name is not { } assembly
             || !_files.TryGetValue(assembly, out var file)
-            || file.Member(id) is not { } xml)
+            || file.Documentation(id) is not { } cleaned)
         {
             return null;
         }
 
-        return DocumentationCleaner.Clean(xml);
+        return cleaned;
     }
 
     /// <summary>
@@ -58,9 +58,7 @@ internal sealed class DocumentationIndex
     /// as the body of a doc comment; null when the assembly's file has nothing for it.
     /// </summary>
     internal string? MemberOf(string assembly, string id) =>
-        _files.TryGetValue(assembly, out var file) && file.Member(id) is { } xml
-            ? DocumentationCleaner.Clean(xml)
-            : null;
+        _files.TryGetValue(assembly, out var file) ? file.Documentation(id) : null;
 
     /// <summary>Builds the index from the additional files the build handed in.</summary>
     /// <remarks>
@@ -99,6 +97,12 @@ internal sealed class DocumentationFile
     private readonly AdditionalText _text;
     private readonly Lazy<ImmutableDictionary<string, string>> _members;
 
+    // The cleaned text by member, so that a build's every compile asks for the same three thousand
+    // members and pays for none of them after the first. The instance survives across compilations
+    // for as long as the additional file does, which is what makes this worth caching at all: the
+    // cleaning is a pure function of the file.
+    private readonly Dictionary<string, string?> _documented = new(StringComparer.Ordinal);
+
     private DocumentationFile(string assembly, AdditionalText text)
     {
         Assembly = assembly;
@@ -111,6 +115,27 @@ internal sealed class DocumentationFile
 
     /// <summary>The XML inside the <c>&lt;member&gt;</c> element for <paramref name="id"/>, or null.</summary>
     internal string? Member(string id) => _members.Value.TryGetValue(id, out var xml) ? xml : null;
+
+    /// <summary>The member's documentation as a doc-comment body, or null when it has none.</summary>
+    internal string? Documentation(string id)
+    {
+        lock (_documented)
+        {
+            if (_documented.TryGetValue(id, out var cached))
+            {
+                return cached;
+            }
+        }
+
+        var cleaned = Member(id) is { } xml ? DocumentationCleaner.Clean(xml) : null;
+
+        lock (_documented)
+        {
+            _documented[id] = cleaned;
+        }
+
+        return cleaned;
+    }
 
     internal static DocumentationFile? Create(AdditionalText text) =>
         string.Equals(Path.GetExtension(text.Path), ".xml", StringComparison.OrdinalIgnoreCase)
