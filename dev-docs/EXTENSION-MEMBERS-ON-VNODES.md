@@ -298,7 +298,8 @@ member is exposed per receiver *type*, not per use. A node class the application
 every extension member that applies to its control, and `ApplyTo` names each one inside an
 `if (...)` - a reference the trimmer cannot see through, so the member is retained whether or not the
 application ever sets it. Emitting a member only when something writes it is not available to a
-source generator: it emits types, not uses.
+source generator: it emits types, not uses. The cost that follows is accepted rather than engineered
+away; the acceptance and the alternative are at the end of this section.
 
 That cost is measured on an application that **does** generate nodes - a throwaway console probe
 referencing `Kolvir` and `Kolvir.Feature.VirtualDom`, carrying a manifest, and constructing `VPanel`
@@ -327,21 +328,23 @@ accessor reaches `PopupChannel`, its `ConditionalWeakTable` and `HandlerToken` -
 machinery that an application which never shows a popup now pays for because a node has a
 `PopupClosed` property it never sets. An application that does show popups was already paying it.
 
-**That 23 KB buys a member almost no node can use.** `AddPopupClosedHandler` fires for the control
-shown *inside* a popup, and the control a node creates is in the tree, so the generated property can
-be set on every node and essentially never be raised from the one that carries it - the sample found
-this while trying to demonstrate it, and demonstrates the in-block `UndoStateChanged` pair instead.
-This is not an argument against surfacing handler pairs: the generator cannot know a given handler's
-firing conditions from its signature, the pair is a legitimate one to expose, and the same machinery
-is what makes the undo pair work. It is the honest account of where the cost lands, and the strongest
-argument for the opt-out below - the most expensive member this feature emits globally is one that
-almost no node can use, and naming specific members to leave off is the only escape that does not
-first decide that some handler pairs should never be surfaced at all.
+**Accepted: 23 KB is the price of the shape, and this is what it buys.** The evidence behind the
+acceptance is that `AddPopupClosedHandler` fires for the control shown *inside* a popup, and the
+control a node creates is in the tree, so the generated property can be set on every node and
+essentially never be raised from the one that carries it - the sample found this while trying to
+demonstrate a handler pair, and demonstrates the in-block `UndoStateChanged` pair instead. So the
+most expensive member this feature emits globally is one almost no node can use. That is not a defect
+in the rule: the generator cannot know a given handler's firing conditions from its signature, the
+pair is a legitimate one to expose, and the same machinery is what makes the undo pair work. It is
+where the cost lands.
 
-The shape is the cost here, and it is the shape the owner asked for: a member a control's node
-exposes behaves as if it were native, which is what makes it reachable from `ApplyTo`. A cheaper
-design exists - an opt-out naming specific extension members to leave off the nodes - and is not
-built, because it is a new attribute and a new decision rather than an optimisation of this one.
+The owner weighed that against the shape and accepted it. The decision is settled: a member a
+control's node exposes behaves as if it were native, which is what makes it reachable from `ApplyTo`,
+and that shape is worth 26,624 bytes to an application that has already opted into the package. The
+recorded alternative, if the 23 KB is ever worth reclaiming, is a per-member opt-out - an attribute
+naming specific extension members to leave off the nodes - which is the only escape that does not
+first decide that some handler pairs should never be surfaced at all. It is not built and it is not a
+question left open: it is the cheaper design on record.
 
 **Trimming.** The decisive question for `[VirtualDomAll]` is not "same application before and after"
 but "unused node types are removed". Two measurements, both from equal-length build roots:
@@ -395,8 +398,9 @@ keystroke is a new `Compilation` rather than a cache hit, which is why none of t
 ## 12. Out of scope
 
 Sweeping is all or nothing. There is no way to exclude one control from a `[VirtualDomAll]` (register
-it explicitly instead - that also keeps it out of the sweep), no way to opt out of one extension
-member, and no policy for silently skipping an extension member the node cannot express. The
-attributes are fixed at three: unset values, the naming override and the conflict marker. Startup and
-window creation do no work for any of it: the generator and the analyzer are compile-time, and the
-node classes are ordinary code reachable only where an application names them.
+it explicitly instead - that also keeps it out of the sweep), and no policy for silently skipping an
+extension member the node cannot express. There is no per-member opt-out either; section 11 records
+that as the accepted cost, with the opt-out as the cheaper design on record rather than a question
+left open. The attributes are fixed at three: unset values, the naming override and the conflict
+marker. Startup and window creation do no work for any of it: the generator and the analyzer are
+compile-time, and the node classes are ordinary code reachable only where an application names them.
