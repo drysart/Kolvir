@@ -58,9 +58,10 @@ same index over every available control.
 
 ## 3. What becomes a node member
 
-**Extension properties** whose receiver the control is assignable to and which have a public setter
-become settable properties. A get-only extension property is skipped, exactly as the native walk
-skips a get-only property, or `EffectiveInView` would become a node property that cannot be assigned.
+**Extension properties** whose receiver the control is assignable to, and which have a public setter
+and getter, become settable properties. A get-only extension property is skipped, exactly as the
+native walk skips a get-only property, or `EffectiveInView` would become a node property that cannot be
+assigned.
 
 **Extension handler pairs** - `AddXxxHandler(this Control, Action<T>)` with a matching
 `RemoveXxxHandler` - become event properties, exposed and applied exactly like a native event. They
@@ -70,8 +71,20 @@ symbol at all. The real in-library pair was read rather than assumed: `PopupExte
 `AddPopupClosedHandler(this Control, Action<object, PopupResult>)` returning `IDisposable` and
 `RemovePopupClosedHandler` returning `void`, so the return type is not part of the shape.
 
-The ordering is the native walk's: properties before events, and within each, the most specific
-receiver before the least, so a member on `Control` never wins over the same name on `TextBox`.
+An extension property also has to have a public getter, not just a setter: the node reads the pristine
+value back through it when a render drops the property, and a property that cannot be read cannot be
+restored.
+
+Ordering, and what happens when two members want one name, follows C# rather than a rule of its own:
+
+- a member of the control **wins silently** over an extension member of the same name, because the
+  language resolves an instance member before it looks at an extension, so the extension could never
+  be reached. That is the same silence a hidden base property gets, and it is not a conflict: an
+  extension that extends a control with a name the control already has is dead code, not a dispute;
+- a member on a more specific receiver **hides** one on a base, exactly as a derived property hides a
+  base one, so a member on `Control` never wins over the same name on `TextBox`;
+- anything left - two containers extending one receiver with one name - is a conflict, and is handled
+  by the placeholder of section 6.
 
 ## 4. Unset values
 
@@ -83,8 +96,17 @@ property uses the same instance: the receiver is `Control`, which is a base of e
 `[VNodePropertyUnsetValue]` declares the pristine value as a compile-time constant instead, on any
 property - native or extension - that the generator flattens. It exists for the property whose
 pristine value is a fact of the API (`TableColumn` is `0`) rather than something a constructor has to
-be asked, and for the case where constructing a control at type load is undesirable. With it the node
-type needs no discarded control at all.
+be asked, and for the case where reading a property at type load is undesirable in itself.
+
+As built, what it removes is the *read*, not necessarily the construction. A node type still needs its
+one shared control whenever any flattened property has no declared value, and a control inherits dozens
+of settable properties from `Control`, so in practice the instance stays and the attribute stops that
+member from being asked. The test asserts exactly that: the declared constant appears in the generated
+field and the constructed control is never read for it.
+
+It is applied to the property - including an extension property the application declares itself - and
+not to the manifest. It cannot be put on a library member the application does not own, so for
+`TableColumn` the runtime read is what happens; that is the case the shared instance is for.
 
 ## 5. Naming, and the overrides
 
@@ -106,6 +128,13 @@ could have used it and the property half could not - and one shape for both is w
 little `nameof` would buy. An override wins over the plain name. An override that lands on a name the
 node already has from a native member is an error (VD015), because the conflict is then the
 application's to fix rather than something a placeholder can stand in for.
+
+The name an override matches is the one the node would otherwise *expose*: `TableColumn` for a
+property, and `DragEnter` for the pair behind `AddDragEnterHandler`, since that is the name being
+disambiguated. It renames the node property only - the accessor the generated code calls keeps the
+declared name, which is the compiler's lowering of the declared member and has nothing to do with what
+the application decided to call it. A test overrides `Column` to `GridColumn` and asserts that the
+assignment still goes to `set_Column`.
 
 ## 6. Conflicts, and the analyzer tripwire
 
@@ -147,13 +176,21 @@ attribute to apply instead of describing it.
 Two consequences are recorded rather than fought:
 
 1. Without `[Obsolete]` there is no compiler backstop, so an application can silence the tripwire by
-   lowering VD013 or VD014 in `.editorconfig`. That is a deliberate act on a specific identifier.
-   Turning analyzers off wholesale does not lose the tripwire, it loses the generator too - no
-   analyzer means no generated node types, so the application fails to compile at the use site
-   instead, which is the same outcome by a different route.
+   lowering VD013 or VD014 in `.editorconfig`. That is a deliberate act on a specific identifier,
+   recorded in the diff, and it is not the hazard it looks like: turning analyzers off wholesale
+   (`RunAnalyzers=false`) loses the tripwire and the generator together, so no node types exist and
+   the application fails to compile at the use site instead - the same failure, by a different route.
 2. A placeholder property is `object?`, which rejects a lambda by itself. Assigning a lambda to a
    conflicting *handler* name therefore produces our diagnostic plus a conversion error, where a
    value-type assignment produces ours alone. Both are compile-time, which is the requirement.
+
+As built, the analyzer is `NodeNameConflictAnalyzer`, beside `NullAndLeafAnalyzer` in the generator
+assembly, and it registers `PropertyReference` and `ObjectCreation`. The messages name every claim and
+carry one paste-ready line per claim -
+`[assembly: VNodeExtensionPropertyName(typeof(Kolvir.TableLayoutPanelExtensions), "TableColumn",
+"<new name>")]` for a member, `[assembly: VirtualDom(typeof(Acme.Button), Name = "<new name>")]` for a
+node class - with the name left for the reader to choose. A conflict is only ever between extension
+members: a name a native member already owns is silent, per section 3.
 
 ## 7. Duplicate node class names
 
@@ -166,6 +203,11 @@ reports VD014 with both controls named and the registration line that separates 
 This replaces the old VD003 "two registrations produce the same node name" error, which reported the
 collision the moment the classes were declared rather than when the name was used. A genuine
 duplicate registration - the *same* control registered twice - is still VD004.
+
+As built, an unreferenced placeholder is a class with an empty body and no base: `internal sealed
+class VButton;`. It is deliberately **not** a `VNode`, because a placeholder that were one could be put
+in a tree and paint nothing, which is exactly the silent wrong tree the tripwire exists to prevent.
+Both that `new VButton()` reports it, and the initializer that would put it in a tree, fail to compile.
 
 ## 8. Emission goes through the lowered static accessors
 
@@ -184,9 +226,14 @@ two extension containers.
 
 This couples the generator to the compiler's lowering name - the `set_`/`get_` prefix plus the
 property's own name. That is an implementation detail of Roslyn rather than specified surface. The
-dependency is real and is pinned: a test compiles the emitted accessor call against a real extension
-block and fails if the lowering changes, so the day it moves it is a test failure rather than a
-generated node that silently sets nothing.
+dependency is real and is pinned twice: a test compiles the emitted accessor call against a real
+extension block and fails if the lowering changes, and another asserts the symbol shape the scan reads
+(`IsExtension` plus `ExtensionParameter`) against the real `TableLayoutPanelExtensions`, so a compiler
+change surfaces as a test failure rather than as nodes that quietly lost their properties.
+
+Note what "the property's own name" means after an override: the node property is renamed, the
+accessor is not, because the lowering follows the declared member. `Column` overridden to
+`GridColumn` still emits `set_Column`/`get_Column`.
 
 ## 9. No registry of node types
 
@@ -198,14 +245,43 @@ node for every available control is only acceptable if the unused ones are remov
 
 ## 10. Cost
 
-A generator change that only affects generated code can be free: the generator runs at build time and
-ships as an analyzer, so it is not in the published image, and the generated members cost only what
-their use costs. This change is verified to be that case rather than assumed to be - `Kolvir.Minimal`
-does not adopt the virtual DOM at all, so its NativeAOT image is the measurement of "no cost", at the
-512-byte resolution `FEATURE-COST-POLICY.md` section 8 gives, from build roots of equal length.
+This is rung 1 of `FEATURE-COST-POLICY.md` section 4, and the claim is that an application which does
+not use the virtual DOM cannot contain a line of it: the generator and the analyzer are analyzers,
+which the compiler loads and the published image does not contain, and the three attributes live in
+`Kolvir.Feature.VirtualDom`, which such an application does not reference.
 
-The scan's per-edit cost is reported in the pull request as the narrowed walk over this repository's
-own compilations, and the generator's total time is reported against the same build.
+Measured rather than asserted. `Kolvir.Minimal` published as NativeAOT with
+`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, from two worktrees of equal root length, one at
+`develop` (`b33a768`) and one at this branch:
+
+| | win-x64 |
+| --- | --- |
+| `Kolvir.Minimal.exe` at `develop` | 3,885,056 |
+| `Kolvir.Minimal.exe` at this branch | 3,885,056 |
+| delta | **0**, below the 512-byte resolution |
+
+The absolute is larger than the table in the policy document because the native image embeds the
+absolute path of `native\Kolvir.Minimal.pdb`, and these two roots were longer than the ones that
+produced that table. The pair is what makes the delta comparable, and the delta is zero. The same
+publish with `-p:TrimmerSingleWarn=false` reported no IL2xxx or IL3xxx warning, and nothing about
+startup or window creation changed, because no assembly the fixture contains was edited.
+
+The build-time cost is the other half, and it is paid per **keystroke** rather than per release, so it
+is the number worth knowing. Measured with the shipped generator over this repository's own
+`Kolvir.Demo.VirtualDom` compilation - six source files, 187 references, 20,622 types in the
+compilation - driven through `CSharpGeneratorDriver` with one comment added to one file per edit:
+
+| | time |
+| --- | --- |
+| first run (JIT, first metadata load) | 657 ms |
+| per edit, warm, 20 edits | min 4.6 ms, median 5.4 ms |
+
+Most of that 5 ms is the narrowed scan: 588 types across the seven assemblies the narrowing keeps
+(`Kolvir`, the demo, three backends and the feature package). The spike measured the same walk at
+0.97 ms, against 21.8 ms for a walk of all 20,622 types, which is why the narrowing is the design
+rather than an optimisation: without it the generator would cost about 27 ms per edit instead of
+about 5, and an incremental generator's model is rebuilt for every new compilation, so a cache across
+edits cannot exist.
 
 ## 11. Out of scope
 

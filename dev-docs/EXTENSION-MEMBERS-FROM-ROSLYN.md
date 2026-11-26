@@ -363,3 +363,12 @@ extensions.GetMembers().OfType<IMethodSymbol>()
 
 and the negative one, which is the reason for the whole document: `nameof` of an extension property must
 keep failing, so no attribute design may depend on it.
+
+## 9. Outcome
+
+The conclusions above are what the feature was built on. The pin moved to **5.9.0** rather than to
+any 5.x: it is what SDK 10.0.403 ships, and an analyzer that referenced a newer Roslyn than the host
+compiler would fail to load. The implementation, the rules it applies when two members want one name,
+and the measured cost are recorded in `EXTENSION-MEMBERS-ON-VNODES.md`; the shape assertions in
+section 8 of that list are now tests, so this document stays the record of what was measured rather
+than something the code has to be re-validated against by hand.
