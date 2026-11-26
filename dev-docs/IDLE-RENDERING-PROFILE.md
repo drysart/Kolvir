@@ -158,7 +158,7 @@ Nothing else is in the frame: no layout, 1.1 content measurements per frame (all
 
 The page and its `BENCH` line first exist in `8001265` (2026-11-09), and `--page` took a position
 rather than a page id until 2026-11-14, so that commit is the start of the measurable range. Between
-it and `ace0d1c` there are 91 first-parent commits, of which **44 touch the render path** by
+it and `ace0d1c` there are 92 first-parent commits, of which **44 touch the render path** by
 basename - `UiHost`, `Control`, `TextRenderer`, `Font`, `Painter`, `SimpleBorder`, `Border`, the nine
 control types this page paints, `Win32WindowBackend`, `MeasuredRenderingPage` - excluding pure
 renames. All 44 were measured: every one is a chance for the paint to change, so the sampling is
