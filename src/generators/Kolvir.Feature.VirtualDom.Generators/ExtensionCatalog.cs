@@ -53,6 +53,7 @@ internal static class Names
 /// <param name="ReceiverChain">The receiver and its base classes, so a control can be compared against it.</param>
 /// <param name="ReceiverInterfaces">The interfaces the receiver implements, for the same reason.</param>
 /// <param name="UnsetLiteral">The pristine value a <c>[VNodePropertyUnsetValue]</c> declared, as a C# literal, or null.</param>
+/// <param name="ReceiverType">The receiver as generated code writes it, which is what an actuator casts the control to.</param>
 internal sealed record ExtensionMember(
     string Container,
     string ContainerMetadataName,
@@ -63,7 +64,8 @@ internal sealed record ExtensionMember(
     string Receiver,
     ImmutableArray<string> ReceiverChain,
     ImmutableArray<string> ReceiverInterfaces,
-    string? UnsetLiteral)
+    string? UnsetLiteral,
+    string ReceiverType)
 {
     internal bool IsEvent => AddHandler is not null;
 
@@ -255,7 +257,8 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
                 receiver.ToDisplayString(Formats.Metadata),
                 Chain(receiver),
                 [.. receiver.AllInterfaces.Select(@interface => @interface.ToDisplayString(Formats.Metadata))],
-                UnsetLiteral: null));
+                UnsetLiteral: null,
+                receiver.ToDisplayString(Formats.Type)));
         }
 
         return unresolved;
@@ -279,7 +282,8 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
             receiver.ToDisplayString(Formats.Metadata),
             Chain(receiver),
             [.. receiver.AllInterfaces.Select(@interface => @interface.ToDisplayString(Formats.Metadata))],
-            unsetLiteral);
+            unsetLiteral,
+            receiver.ToDisplayString(Formats.Type));
 
     /// <summary>The receiver and the base classes it can be applied to, in the order they are searched.</summary>
     private static ImmutableArray<string> Chain(ITypeSymbol receiver)

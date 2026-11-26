@@ -4986,9 +4986,16 @@ new VLabel { TableColumn = 1, TableRow = 0, Text = "Total" }
 
 A `VTableLayoutPanel` can place its children by cell without the view naming the extension class, and
 a library that adds a property to every `Control` does not have to teach the virtual DOM about it. An
-extension member is applied, patched and restored exactly as a native one, because it is emitted
+extension property is applied, patched and restored exactly as a native one, because it is emitted
 exactly as one. Handler pairs come too: an `AddXxxHandler`/`RemoveXxxHandler` pair - a classic
 extension method pair or one declared inside a block - becomes the event property `Xxx`.
+
+A handler pair becomes live the first time a node property of that name is assigned, and stays live
+for the rest of the process: until then nothing in any generated node names the pair, so a pair nobody
+touches costs nothing in the published image, and the first assignment - which is what needs the pair -
+installs it for every node type that exposes it. Extension properties are not deferred that way; they
+are emitted directly, because they cost 5,632 bytes in total and a node property is the one path that
+must not allocate.
 
 Which member a node ends up with follows the language:
 

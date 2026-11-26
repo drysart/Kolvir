@@ -88,9 +88,59 @@ public sealed class ExtensionMemberTests
         Assert.IsEmpty(generated.Ids, string.Join("\n", generated.Ids));
         Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
 
-        StringAssert.Contains(generated.Source, "public global::System.Action<object>? Pinged");
-        StringAssert.Contains(generated.Source, "HostControlExtensions.AddPingedHandler(target, ");
-        StringAssert.Contains(generated.Source, "HostControlExtensions.RemovePingedHandler(target, ");
+        var node = NodeClass(generated, "VHostControl");
+
+        StringAssert.Contains(node, "public global::System.Action<object>? Pinged");
+
+        // The value lives in the node's extension store, and assigning it is what installs the pair.
+        StringAssert.Contains(node, "global::Kolvir.Feature.VirtualDom.VNodeExtensionActuatorSet.Get<global::System.Action<object>?>(this,");
+        StringAssert.Contains(node, "global::Kolvir.Feature.VirtualDom.VNodeExtensionActuatorSet.Set(this,");
+
+        // The point of the shape: the class names its one apply entry point, not the pair's accessors.
+        StringAssert.Contains(node, "ApplyExtensionActuators(null, target);");
+        StringAssert.Contains(node, "ApplyExtensionActuators(old, target);");
+        Assert.IsFalse(node.Contains("AddPingedHandler", StringComparison.Ordinal), node);
+        Assert.IsFalse(node.Contains("RemovePingedHandler", StringComparison.Ordinal), node);
+
+        // The accessors are named once, in the actuator the setter installs.
+        StringAssert.Contains(generated.Source, "HostControlExtensions.AddPingedHandler(");
+        StringAssert.Contains(generated.Source, "HostControlExtensions.RemovePingedHandler(");
+    }
+
+    [TestMethod]
+    public void OneHandlerPairIsInstalledOnceForEveryNodeClassItAppliesTo()
+    {
+        // A Control receiver applies to every control, so both node classes expose the pair. One token
+        // and one actuator, because the value is stored under the member's identity rather than under
+        // the class's: two would mean applying a single handler twice.
+        var generated = VirtualDomCompiler.Build("""
+            using System;
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace TestApp;
+
+            public static class ControlExtensions
+            {
+                public static IDisposable AddPingedHandler(this Kolvir.Control control, Action<object> handler) => null!;
+
+                public static void RemovePingedHandler(this Kolvir.Control control, Action<object> handler)
+                {
+                }
+            }
+
+            [VirtualDom(typeof(Label))]
+            [VirtualDom(typeof(Panel))]
+            internal partial class App;
+            """);
+
+        Assert.IsEmpty(generated.Ids, string.Join("\n", generated.Ids));
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+
+        Assert.AreEqual(2, Occurrences(generated.Source, "public global::System.Action<object>? Pinged"), generated.Source);
+        Assert.AreEqual(1, Occurrences(generated.Source, "internal static readonly object Token_TestApp_ControlExtensions_Pinged_"), generated.Source);
+        Assert.AreEqual(1, Occurrences(generated.Source, "internal static void Apply_TestApp_ControlExtensions_Pinged_"), generated.Source);
+        StringAssert.Contains(generated.Source, "internal static class App_VNodeExtensionActuators");
     }
 
     [TestMethod]
@@ -492,7 +542,7 @@ public sealed class ExtensionMemberTests
         }
 
         StringAssert.Contains(source, "public global::System.Action<object, global::Kolvir.PopupResult>? PopupClosed");
-        StringAssert.Contains(source, "global::Kolvir.PopupExtensions.AddPopupClosedHandler(target,");
+        StringAssert.Contains(source, "global::Kolvir.PopupExtensions.AddPopupClosedHandler(");
     }
 
     [TestMethod]
@@ -586,12 +636,15 @@ public sealed class ExtensionMemberTests
     private static string NodeClass(Generated generated, string name)
     {
         const string Marker = "/// <summary>A node that makes a ";
+        const string NodeClassEnd = "/// <summary>The extension handler pairs this file's node classes install on first use.</summary>";
 
         foreach (var block in generated.Source.Split(Marker).Skip(1))
         {
             if (block.Contains("class " + name + " ", StringComparison.Ordinal))
             {
-                return block;
+                // The actuator holder is file-wide rather than per class, so it is cut off here -
+                // otherwise the last node class's block would include it.
+                return block.Split(NodeClassEnd)[0];
             }
         }
 

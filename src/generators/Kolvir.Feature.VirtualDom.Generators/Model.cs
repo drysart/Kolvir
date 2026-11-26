@@ -22,6 +22,11 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// The name the compiler lowered the member to on that class: the declared member name, which an
 /// override renames for the node without renaming it here.
 /// </param>
+/// <param name="Receiver">
+/// The receiver type an extension member's accessor takes, fully qualified; null for a native member.
+/// An actuator is shared by every node class the member applies to, so it casts the control to this
+/// rather than to any one node's control type.
+/// </param>
 internal sealed record PropertyModel(
     string Name,
     string Type,
@@ -31,9 +36,16 @@ internal sealed record PropertyModel(
     string? AddHandler,
     string? RemoveHandler,
     string? Container,
-    string Accessor)
+    string Accessor,
+    string? Receiver = null)
 {
     internal bool IsEvent => AddHandler is not null;
+
+    /// <summary>
+    /// Whether this is a handler pair the node gets from an extension class, which is the half moved
+    /// behind first-use actuators: it has no generated backing field and no per-member apply line.
+    /// </summary>
+    internal bool IsExtensionEvent => IsEvent && Container is not null;
 
     /// <summary>Whether the value has to be read from a constructed control rather than being a declared constant.</summary>
     internal bool NeedsPristine => Pristine is not null && PristineLiteral is null;

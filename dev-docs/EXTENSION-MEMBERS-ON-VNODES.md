@@ -64,7 +64,8 @@ native walk skips a get-only property, or `EffectiveInView` would become a node 
 assigned.
 
 **Extension handler pairs** - `AddXxxHandler(this Control, Action<T>)` with a matching
-`RemoveXxxHandler` - become event properties, exposed and applied exactly like a native event. They
+`RemoveXxxHandler` - become event properties, exposed exactly like a native event and applied through
+the first-use actuator of section 11.1 rather than through a line of their own in each node class. They
 are found through `IMethodSymbol.IsExtensionMethod` plus `Parameters[0].Type`, which works for classic
 extension methods and for methods declared inside an `extension` block alike, and needs no block
 symbol at all. The real in-library pair was read rather than assumed: `PopupExtensions` declares
@@ -235,6 +236,12 @@ Note what "the property's own name" means after an override: the node property i
 accessor is not, because the lowering follows the declared member. `Column` overridden to
 `GridColumn` still emits `set_Column`/`get_Column`.
 
+A handler pair's accessor calls now live in the generated actuator (section 11.1) rather than in the
+node's `ApplyTo` and `PatchFrom`: they are still ordinary static calls with the receiver as the first
+argument, and the node property's setter is the only thing that names the actuator. That is what lets
+an application that never assigns the member keep the pair out of its image, and why the node class
+emits one `ApplyExtensionActuators` call instead of a line per pair.
+
 ## 9. No registry of node types
 
 Nothing in this change creates a table of node types. Node classes are reachable only by
@@ -283,33 +290,41 @@ to know before turning it on in a large application; section 11 measures it.
 
 ## 11. Cost
 
-**The rung is 3, and it cannot sit lower.** The feature is not a member an application calls into base
-`Kolvir`; it is the shape of code a generator writes, and the generator ships in a package. So it
-lives where it already lives, in `Kolvir.Feature.VirtualDom` - a rung-3 package under
-`FEATURE-COST-POLICY.md` section 4 - and an application that does not reference that package pays
-nothing for it: the generator and the analyzer are analyzers, which the compiler loads and the
-published image does not contain, and the attributes live in the package such an application does not
-reference. `Kolvir.Minimal` - no virtual DOM, no manifest, **no generated node classes at all** -
-publishes at the same size at `develop` (`b33a768`) and at this branch, 3,885,056 bytes on win-x64
-from worktrees of equal root length.
+**The rung is 3 for the package, and it cannot sit lower there.** The feature is not a member an
+application calls into base `Kolvir`; it is the shape of code a generator writes, and the generator
+ships in a package. So it lives where it already lives, in `Kolvir.Feature.VirtualDom` - a rung-3
+package under `FEATURE-COST-POLICY.md` section 4 - and an application that does not reference that
+package pays nothing for it: the generator and the analyzer are analyzers, which the compiler loads
+and the published image does not contain, and the attributes live in the package such an application
+does not reference. `Kolvir.Minimal` - no virtual DOM, no manifest, **no generated node classes at all** -
+publishes at the same size at `develop` and at this branch, 3,885,056 bytes on win-x64 from worktrees
+of equal root length (`b3177a8` and this change, both remeasured).
 
-**Within the package it does not reach rung 1, and the reason is the rule that makes it useful.** A
-member is exposed per receiver *type*, not per use. A node class the application constructs carries
-every extension member that applies to its control, and `ApplyTo` names each one inside an
-`if (...)` - a reference the trimmer cannot see through, so the member is retained whether or not the
-application ever sets it. Emitting a member only when something writes it is not available to a
-source generator: it emits types, not uses. The cost that follows is accepted rather than engineered
-away; the acceptance and the alternative are at the end of this section.
+**Within the package it does not reach rung 1 for extension properties, and the reason is the rule
+that makes them useful.** A member is exposed per receiver *type*, not per use. A node class the
+application constructs carries every extension property that applies to its control, and `ApplyTo`
+names each one inside an `if (...)` - a reference the trimmer cannot see through, so the property is
+retained whether or not the application ever sets it. Emitting a member only when something writes it
+is not available to a source generator: it emits types, not uses. The cost that follows is 5,632
+bytes in total, measured below, and it is accepted rather than engineered away, because these are the
+hottest allocation-free path a node has: routing every property set through a dictionary would trade
+a real per-render allocation for a rounding error of bytes.
 
-That cost is measured on an application that **does** generate nodes - a throwaway console probe
-referencing `Kolvir` and `Kolvir.Feature.VirtualDom`, carrying a manifest, and constructing `VPanel`
-and `VLabel` - published the same way (`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, roots
-`C:\kolvircost\p1` and `p2`, 17 characters each):
+**Extension handler pairs do reach rung 1, by being installed on first use.** Section 11.1 is the
+implemented design: until an application assigns one, nothing in any generated node names its
+accessor, so the pair's attach and detach code and everything they reach are unreachable and trim
+away. That is where the 23,040 bytes were, and they are no longer paid by an application that never
+touches the member.
+
+That first cost was measured on an application that **does** generate nodes - a throwaway console
+probe referencing `Kolvir` and `Kolvir.Feature.VirtualDom`, carrying a manifest, and constructing
+`VPanel` and `VLabel` - published the same way (`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`,
+roots `C:\kolvircost\p1` and `p2`, 17 characters each):
 
 | | win-x64 |
 | --- | --- |
 | probe at `develop` (`b33a768`) | 1,751,040 |
-| probe at this branch | 1,777,664 |
+| probe at `b33a768` with the feature | 1,777,664 |
 | delta | **+26,624**, 1.5 percent |
 
 Attributed by building the generator with one half of the feature disabled:
@@ -318,80 +333,103 @@ Attributed by building the generator with one half of the feature disabled:
 | --- | --- |
 | extension properties only | +5,632 |
 | extension handler pairs only | +23,040 |
-| both (what ships) | +26,624 |
+| both, as the feature shipped | +26,624 |
 
-Every one of those bytes is code the node classes name - the properties through `ApplyTo` and
-`PatchFrom`, the handlers through the accessors of their own pair. The properties are cheap. The
-handler pairs are not, and the reason is this repository's own pair:
-`AddPopupClosedHandler` has a `Control` receiver, so it is a member of *every* node's class, and its
+Every one of those bytes was code the node classes named - the properties through `ApplyTo` and
+`PatchFrom`, the handlers through the accessors of their own pair. The properties are cheap and stay
+where they are. The handler pairs were not, and the reason is this repository's own pair:
+`AddPopupClosedHandler` has a `Control` receiver, so it was a member of *every* node's class, and its
 accessor reaches `PopupChannel`, its `ConditionalWeakTable` and `HandlerToken` - about 23 KB of popup
-machinery that an application which never shows a popup now pays for because a node has a
-`PopupClosed` property it never sets. An application that does show popups was already paying it.
+machinery that an application which never shows a popup paid for because a node had a `PopupClosed`
+property it never set. An application that does show popups was already paying it, and still does.
 
-**Accepted: 23 KB is the price of the shape, and this is what it buys.** The evidence behind the
-acceptance is that `AddPopupClosedHandler` fires for the control shown *inside* a popup, and the
-control a node creates is in the tree, so the generated property can be set on every node and
-essentially never be raised from the one that carries it - the sample found this while trying to
-demonstrate a handler pair, and demonstrates the in-block `UndoStateChanged` pair instead. So the
-most expensive member this feature emits globally is one almost no node can use. That is not a defect
-in the rule: the generator cannot know a given handler's firing conditions from its signature, the
-pair is a legitimate one to expose, and the same machinery is what makes the undo pair work. It is
-where the cost lands.
+### 11.1 Actuators installed on first use (implemented)
 
-The owner weighed that against the shape and accepted it. The decision is settled: a member a
-control's node exposes behaves as if it were native, which is what makes it reachable from `ApplyTo`,
-and that shape is worth 26,624 bytes to an application that has already opted into the package. The
-recorded alternative, if the 23 KB is ever worth reclaiming, is a per-member opt-out - an attribute
-naming specific extension members to leave off the nodes - which is the only escape that does not
-first decide that some handler pairs should never be surfaced at all. It is not built and it is not a
-question left open: it is the cheaper design on record.
-
-### 11.1 A second recorded direction: actuators installed on first use (not built)
-
-The owner has settled the shape of a follow-up that would take the handler-pair rooting cost to zero.
-It is recorded here beside the acceptance rather than built, and it does not contradict it: the 23 KB
-ships now, and this is what to do if it is ever worth reclaiming. Unbuilt, and not a question left
-open - the section 11 acceptance stands, and this is the second recorded way out.
-
-An extension member's **actuator is installed statically, once per process, on first access** of that
-member. Until something touches the member, nothing in the generated node names its accessor, so the
-popup machinery is unreachable and trims away. Once installed, that node type permanently applies it.
-A permanent effect of first use, rather than per-node opt-in - which is what keeps it clear of the
-reachability problem `FEATURE-COST-POLICY.md` section 3 describes: the reference comes into being at
-run time, from code that only runs because the application has already asked for the member.
+The handler-pair half of that cost is gone: an extension handler pair's **actuator is installed
+statically, once per process, on first use** of that member. Until something assigns the node
+property, nothing in the generated node names its accessor, so the popup machinery is unreachable and
+trims away. Once installed, that member is applied permanently for the process. A permanent effect of
+first use, rather than per-node opt-in - which is what keeps it clear of the reachability problem
+`FEATURE-COST-POLICY.md` section 3 describes: the reference comes into being at run time, from code
+that only runs because the application has already asked for the member.
 
 - **Install path.** A lock on installation only, with copy-on-write publication of the actuator array
   and a volatile read at apply time. Nothing in this repository constructs nodes off the UI thread and
   no thread rule is documented, so this is cheap insurance rather than a requirement: installation
   happens once per member per process, the steady-state cost is nil, and the design does not rest on
   an undocumented invariant.
-- **Signature.** One delegate type, `(VNode? previous, VNode current, Control target)`, because
+- **Signature.** One delegate type, `VNodeExtensionActuator(previous, current, target)`, because
   `PatchFrom` holds both nodes: attach, detach and change become one call, and each node emits a single
-  generic loop instead of per-member apply and patch lines.
-- **State.** A `Dictionary` on `VNode`, public and marked
+  call into `VNode.ApplyExtensionActuators` instead of per-member apply and patch lines.
+- **State.** A `Dictionary<object, object?>` on `VNode`, public and marked
   `[EditorBrowsable(EditorBrowsableState.Never)]`, rather than a `ConditionalWeakTable`. Generated code
   is emitted into the *application's* assembly, so node-side storage cannot be `internal`: public
   surface is unavoidable, and `EditorBrowsable` is effective here precisely because the consumer is a
   different assembly - it does not change accessibility, so generated code can still reach it. The
-  honest cost is one nullable field per `VNode` instance, eight bytes, not allocated until used, plus a
-  new public member on a core type.
-- **Keys.** A `static readonly` identity token declared in the extension class rather than a string:
-  reference equality, no hashing, and the token is rooted only when the member is used.
+  honest cost is one nullable field per `VNode` instance, not allocated until used, plus a new public
+  member on a core type.
+- **Keys.** A `static readonly` identity token per member rather than a string: reference equality, no
+  hashing, and the token carries no reference to the accessor, so declaring it roots nothing. It is
+  declared in the generated per-manifest actuator class rather than in the extension class itself,
+  because a generator cannot add a field to a type in another assembly - the extension class is the
+  library's, and the nodes are emitted into the application's. One token and one actuator per member
+  rather than per node class, so two node classes exposing the same pair store under the same identity
+  and the pair is attached once.
+  The actuator, which does name the accessor, is named only from the node's setter.
 - **The invariant.** A value cannot exist for a member that was never installed, because setting it is
-  what installs it. Reflection or a future deserialisation path would break that silently, which is
-  why the apply path should assert rather than assume.
+  what installs it. The store is public, so reflection or a future deserialisation path could write it
+  without installing: the apply path reports that rather than skipping the value in silence.
+- **Values, not `Specified<T>`.** For a handler, "not assigned" and "set to null" have the same
+  effect - no handler attached - so the property needs no unspecified state of its own. The one shared
+  path is therefore also the only place patch semantics live: attach on a first apply, detach the old
+  handler and attach the new one on a change, detach when a render omits it. Handlers are compared with
+  `object.Equals`, so a render that produces the same delegate again does not detach and reattach it.
+  All three transitions are covered in `Kolvir.Feature.VirtualDom.Tests`, and the demo's
+  `UndoStateChanged` pair exercises the same path through `--check`.
 
-The second gain is the reason it is worth doing at all: handler pairs currently contribute apply and
-patch lines to every node class, so moving them behind one actuator path shrinks both the published
-image and the generated source - part of the 2.1 MB and of the ~0.43 ms per node class measured below.
+**What it saves, measured on this branch.** Two probe projects at `C:\kolvircost\a-probe` and
+`b-probe`, with `..\a` and `..\b` worktrees of equal-length roots (`a` is this branch, `b` is
+`develop` at `b3177a8`), published `-c Release -r win-x64 -p:EmbedSkiaSharpNative=false` with
+`-p:TrimmerSingleWarn=false` and no IL2xxx or IL3xxx warning. The probe constructs `VPanel` and
+`VLabel` **and applies and patches them**, because a node whose `ApplyTo` is never called has that
+method trimmed and would not measure the pair at all - which is also why these numbers sit above the
+1,777,664 recorded above rather than beside it:
 
-**What a future implementer has to beat:** the **+23,040 bytes** attributed to handler pairs in the
-table above, on the probe described there, and the demo's **36 node classes / 18.05 ms per edit** as
-the baseline to improve on. Neither is a target in itself; they are the measurements this design is
-an argument about.
+| probe, win-x64 | `develop` `b3177a8` | this branch |
+| --- | --- | --- |
+| nodes applied and patched, `PopupClosed` never set | 1,843,712 | 1,827,328 |
+| the same, one node sets `PopupClosed` | 1,843,712 | 1,853,440 |
+
+- **Never touching the pair: -16,384 bytes**, which clears the 512-byte resolution of these
+  measurements by a wide margin. The old shape charged the pair in both probes to the byte, which is
+  the rooting being removed.
+- **Touching it: the cost comes back, and only then.** The new probe with `PopupClosed` set is
+  26,112 bytes larger than the same probe without it; at `b3177a8` the two were identical because the
+  application always paid. It is also 9,728 bytes larger than the old shape's, because the install and
+  apply path is now retained alongside the popup machinery it enacts.
+- The 16,384 saved rather than the 23,040 attributed is the shared install/apply path - the node
+  store, the registry, the generic accessors - that every application referencing the package now
+  retains: about 6,656 bytes, arithmetically 23,040 minus 16,384.
+
+**Making it live is now observable, and permanent.** A pair nobody touches costs nothing; the first
+assignment to it installs it for the rest of the process, and from then on every node of every type
+whose class exposes it consults the actuator on apply and patch. That is the trade this design makes,
+and it is why the effect is a first-use install rather than a per-node decision.
+
+**Extension properties stay on the direct path, deliberately.** They are 5,632 bytes in total, and a
+node property is the hottest allocation-free path a node has; a dictionary behind every set would add
+a per-render allocation and a lookup to buy a rounding error of bytes. The asymmetry is a decision,
+not an omission. If the mechanism ever generalises to properties cheaply - a per-member actuator that
+assigns rather than attaches - that is a follow-up, not this change.
+
+**What is still on record as unbuilt:** a per-member opt-out, an attribute naming specific extension
+members to leave off the nodes. It was the cheaper design when the 23 KB shipped; now that handler
+pairs cost nothing until used, it remains the only way to stop a member from being *exposed*, which is
+a different question from what it costs.
 
 **Trimming.** The decisive question for `[VirtualDomAll]` is not "same application before and after"
-but "unused node types are removed". Two measurements, both from equal-length build roots:
+but "unused node types are removed". Two measurements from equal-length build roots, at the commit
+that introduced the sweep:
 
 | | win-x64 |
 | --- | --- |
@@ -426,6 +464,16 @@ count: a project sweeping the ~36 controls in `Kolvir` pays about 18 ms per edit
 more control packages pays proportionally more. It is not linear in manifests - one manifest or two
 claiming the same controls costs the same.
 
+Measured again for the first-use actuators of section 11.1, with the same harness over worktrees of
+equal-length roots (`C:\kolvircost\a` for this change, `..\b` for `develop` at `b3177a8`; six source
+files and 187 references resolved here rather than five and 180): cold 463 ms before and 457 ms after,
+and a median per edit of 19.45-22.92 ms before against 20.48-24.46 ms after, over three runs each.
+The ranges overlap, so the **19,499 bytes** the generated source lost - 0.9 percent, about 542 bytes
+per node class on 36 classes - did not clear the noise of this measurement and is not claimed as a
+speed-up. The cold compile of the demo project says the same: `-t:Rebuild --no-dependencies`, median
+of three, 4,018 ms at `b3177a8` and 3,988 ms here, a 30 ms difference inside the run-to-run spread.
+The 18.05 ms above stands as the baseline; what this change bought is the image, not the clock.
+
 The control sweep only runs when a manifest actually sweeps. Without that gate the explicit-manifest
 row would have paid for a walk whose answer nobody asked for; with it, an application that registers
 its controls by name pays what it paid before this branch plus the extension scan it already had.
@@ -444,8 +492,10 @@ keystroke is a new `Compilation` rather than a cache hit, which is why none of t
 Sweeping is all or nothing. There is no way to exclude one control from a `[VirtualDomAll]` (register
 it explicitly instead - that also keeps it out of the sweep), and no policy for silently skipping an
 extension member the node cannot express. There is no per-member opt-out either; section 11 records
-that as the accepted cost, with the opt-out and the first-use actuator design of section 11.1 as the
-two recorded ways to reclaim it rather than questions left open. The attributes are fixed at three:
-unset values, the naming override and the conflict marker. Startup and window creation do no work for
-any of it: the generator and the analyzer are compile-time, and the node classes are ordinary code
-reachable only where an application names them.
+the 5,632 bytes extension properties still cost as the accepted price of the shape, and section 11.1
+records handler pairs as installed on first use, with the measurements that came out of it. The
+attributes are fixed at three: unset values, the naming override and the conflict marker. Startup and
+window creation do no work for any of it: the generator and the analyzer are compile-time, and the
+node classes are ordinary code reachable only where an application names them. The one run-time
+effect first use adds is that assigning an extension handler member installs it for the rest of the
+process - no startup work, and nothing at all for a member nobody touches.

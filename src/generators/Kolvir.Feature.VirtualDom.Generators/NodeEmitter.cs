@@ -1,3 +1,4 @@
+using System.Globalization;
 using System.Text;
 
 namespace Kolvir.Feature.VirtualDom.Generators;
@@ -6,6 +7,9 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 internal static class NodeEmitter
 {
     private const string ConflictAttribute = "[global::Kolvir.Feature.VirtualDom.VNodeNameConflict(";
+
+    /// <summary>The runtime entry points the generated node and its actuators call.</summary>
+    private const string ActuatorSet = "global::Kolvir.Feature.VirtualDom.VNodeExtensionActuatorSet";
 
     internal static void Write(ManifestModel manifest, StringBuilder source)
     {
@@ -24,9 +28,11 @@ internal static class NodeEmitter
             indent = "    ";
         }
 
+        var holder = HolderName(manifest);
+
         foreach (var control in manifest.Controls)
         {
-            WriteNode(control, source, indent);
+            WriteNode(control, holder, source, indent);
             source.AppendLine();
         }
 
@@ -36,13 +42,15 @@ internal static class NodeEmitter
             source.AppendLine();
         }
 
+        WriteActuators(manifest, holder, source, indent);
+
         if (manifest.Namespace is not null)
         {
             source.AppendLine("}");
         }
     }
 
-    private static void WriteNode(ControlModel control, StringBuilder source, string indent)
+    private static void WriteNode(ControlModel control, string holder, StringBuilder source, string indent)
     {
         var inner = indent + "    ";
         var body = inner + "    ";
@@ -84,6 +92,12 @@ internal static class NodeEmitter
 
         foreach (var property in control.Properties)
         {
+            if (property.IsExtensionEvent)
+            {
+                WriteExtensionEvent(property, holder, source, body);
+                continue;
+            }
+
             source.AppendLine();
             source.AppendLine(body + "private global::Kolvir.Feature.VirtualDom.Specified<" + property.Type + "> " + property.Field + ";");
             source.AppendLine(body + "public " + property.Type + " " + property.Name);
@@ -134,6 +148,11 @@ internal static class NodeEmitter
 
         foreach (var property in control.Properties)
         {
+            if (property.IsExtensionEvent)
+            {
+                continue;
+            }
+
             if (property.IsEvent)
             {
                 source.AppendLine(body + "    if (" + property.Field + ".IsSpecified && " + property.Field + ".Value is { } " + property.Field + "Value)");
@@ -150,6 +169,8 @@ internal static class NodeEmitter
             }
         }
 
+        WriteActuatorApply(control, source, body, previous: null);
+
         source.AppendLine(body + "}");
     }
 
@@ -163,6 +184,11 @@ internal static class NodeEmitter
 
         foreach (var property in control.Properties)
         {
+            if (property.IsExtensionEvent)
+            {
+                continue;
+            }
+
             source.AppendLine();
             source.AppendLine(body + "    if (!" + property.Field + ".Equals(old." + property.Field + "))");
             source.AppendLine(body + "    {");
@@ -188,7 +214,160 @@ internal static class NodeEmitter
             source.AppendLine(body + "    }");
         }
 
+        WriteActuatorApply(control, source, body, previous: "old");
+
         source.AppendLine(body + "}");
+    }
+
+    /// <summary>
+    /// Writes the one call that enacts every installed extension handler pair, when the node class has
+    /// any. A class with none emits nothing, because there is nothing for it to carry.
+    /// </summary>
+    private static void WriteActuatorApply(ControlModel control, StringBuilder source, string body, string? previous)
+    {
+        if (!control.Properties.Any(property => property.IsExtensionEvent))
+        {
+            return;
+        }
+
+        source.AppendLine();
+        source.AppendLine(body + "    ApplyExtensionActuators(" + (previous ?? "null") + ", target);");
+    }
+
+    /// <summary>
+    /// Writes the property behind an extension handler pair: the value lives in the node's extension
+    /// store rather than in a field, and assigning it is what installs the pair for the process.
+    /// </summary>
+    private static void WriteExtensionEvent(PropertyModel property, string holder, StringBuilder source, string body)
+    {
+        var token = holder + "." + TokenName(property);
+        var actuator = holder + "." + ActuatorName(property);
+
+        source.AppendLine();
+        source.AppendLine(body + "public " + property.Type + " " + property.Name);
+        source.AppendLine(body + "{");
+        source.AppendLine(body + "    get => " + ActuatorSet + ".Get<" + property.Type + ">(this, " + token + ");");
+        source.AppendLine(body + "    set => " + ActuatorSet + ".Set(this, " + token + ", value, " + actuator + ");");
+        source.AppendLine(body + "}");
+    }
+
+    /// <summary>
+    /// Writes the identity token and the actuator for every distinct extension handler pair this
+    /// manifest exposes, once for the whole file.
+    /// </summary>
+    /// <remarks>
+    /// One token and one actuator per <em>member</em> rather than per node class, because the value is
+    /// stored by the node under the member's identity and every node class the member applies to has to
+    /// find it under the same one. The token is a <c>static readonly</c> object rather than a string:
+    /// the store compares by reference, and nothing about the member is rooted until one of the node
+    /// setters below has run, because the token carries no reference to the accessor. The actuator does,
+    /// and is named only from the setter - so an application that never assigns the member keeps the
+    /// pair's attach and detach code out of its image.
+    /// </remarks>
+    private static void WriteActuators(ManifestModel manifest, string holder, StringBuilder source, string indent)
+    {
+        var members = manifest.Controls
+            .SelectMany(control => control.Properties.Where(property => property.IsExtensionEvent))
+            .GroupBy(property => (property.Container, property.Accessor))
+            .Select(group => group.First())
+            .OrderBy(property => property.Container, StringComparer.Ordinal)
+            .ThenBy(property => property.Accessor, StringComparer.Ordinal)
+            .ToList();
+
+        if (members.Count == 0)
+        {
+            return;
+        }
+
+        var inner = indent + "    ";
+        var body = inner + "    ";
+
+        source.AppendLine(indent + "/// <summary>The extension handler pairs this file's node classes install on first use.</summary>");
+        source.AppendLine(indent + "internal static class " + holder);
+        source.AppendLine(indent + "{");
+
+        foreach (var property in members)
+        {
+            source.AppendLine(inner + "internal static readonly object " + TokenName(property) + " = new global::System.Object();");
+        }
+
+        foreach (var property in members)
+        {
+            source.AppendLine();
+            source.AppendLine(inner + "internal static void " + ActuatorName(property) + "(");
+            source.AppendLine(body + "global::Kolvir.Feature.VirtualDom.VNode? previous,");
+            source.AppendLine(body + "global::Kolvir.Feature.VirtualDom.VNode current,");
+            source.AppendLine(body + "global::Kolvir.Control target)");
+            source.AppendLine(inner + "{");
+            source.AppendLine(body + "var old = " + ActuatorSet + ".Get<" + property.Type + ">(previous, " + TokenName(property) + ");");
+            source.AppendLine(body + "var now = " + ActuatorSet + ".Get<" + property.Type + ">(current, " + TokenName(property) + ");");
+            source.AppendLine();
+            // Compared the way the tracked properties compare, so a render that produces the same
+            // handler again - the usual case for a lambda over the same state - does not detach and
+            // reattach it.
+            source.AppendLine(body + "if (global::System.Object.Equals(old, now))");
+            source.AppendLine(body + "{");
+            source.AppendLine(body + "    return;");
+            source.AppendLine(body + "}");
+            source.AppendLine();
+            source.AppendLine(body + "if (old is not null)");
+            source.AppendLine(body + "{");
+            source.AppendLine(body + "    " + property.Detach("(" + property.Receiver + ")target", "old") + ";");
+            source.AppendLine(body + "}");
+            source.AppendLine();
+            source.AppendLine(body + "if (now is not null)");
+            source.AppendLine(body + "{");
+            source.AppendLine(body + "    " + property.Attach("(" + property.Receiver + ")target", "now") + ";");
+            source.AppendLine(body + "}");
+            source.AppendLine(inner + "}");
+        }
+
+        source.AppendLine(indent + "}");
+    }
+
+    /// <summary>The generated holder class's name, which belongs to the manifest so two files cannot collide.</summary>
+    private static string HolderName(ManifestModel manifest) => Identifier(manifest.Name) + "_VNodeExtensionActuators";
+
+    /// <summary>The identity token a member's values are stored under.</summary>
+    private static string TokenName(PropertyModel property) => "Token_" + Member(property) + "_" + Hash(property.Container + "::" + property.Accessor);
+
+    /// <summary>The delegate that enacts a member.</summary>
+    private static string ActuatorName(PropertyModel property) => "Apply_" + Member(property) + "_" + Hash(property.Container + "::" + property.Accessor);
+
+    /// <summary>The container and the member as one identifier fragment.</summary>
+    private static string Member(PropertyModel property) =>
+        Identifier(property.Container!) + "_" + Identifier(property.Accessor);
+
+    /// <summary>A name that is a C# identifier whatever the symbol it came from says.</summary>
+    private static string Identifier(string value)
+    {
+        var text = value.StartsWith("global::", StringComparison.Ordinal) ? value.Substring("global::".Length) : value;
+        var builder = new StringBuilder(text.Length + 1);
+
+        foreach (var character in text)
+        {
+            builder.Append(char.IsLetterOrDigit(character) ? character : '_');
+        }
+
+        return builder.ToString();
+    }
+
+    /// <summary>
+    /// A stable hash of the member's identity, so that two members whose names sanitise alike still get
+    /// distinct identifiers. FNV-1a: the generator's own output has to be the same on every run, which
+    /// rules out <see cref="string.GetHashCode()"/>.
+    /// </summary>
+    private static string Hash(string value)
+    {
+        uint hash = 2166136261;
+
+        foreach (var character in value)
+        {
+            hash ^= character;
+            hash *= 16777619;
+        }
+
+        return hash.ToString("x8", CultureInfo.InvariantCulture);
     }
 
     /// <summary>The claims as a C# argument list, so nothing is parsed back out of prose.</summary>
