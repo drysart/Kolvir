@@ -4,9 +4,29 @@ namespace Kolvir;
 /// Describes how a single row or column of a <see cref="TableLayoutPanel"/> is sized.
 /// Mirrors the semantics of WinForms' <c>RowStyle</c>/<c>ColumnStyle</c>.
 /// </summary>
-public class RowOrColumnStyle
+/// <remarks>
+/// <para>
+/// A style is immutable. Its <see cref="SizeType"/> and value are <c>init</c>-only, so it is built
+/// in a constructor or an object initialiser and is fixed from then on. Changing how a row is sized
+/// means assigning a different style, which is what makes the assignment the one thing that can put
+/// the change in front of the table: the collections it hands out lay the table out when their
+/// contents change, and an in-place edit could not.
+/// </para>
+/// <para>
+/// Immutability is also what makes value equality sound here. Two styles of the same kind are equal
+/// when their <see cref="SizeType"/> and value agree, and a hash cannot disagree with an
+/// <c>Equals</c> computed before a mutation, because there is no mutation. A row style never equals
+/// a column style with the same numbers: one is a height and the other a width, and swapping them
+/// means something else.
+/// </para>
+/// <para>
+/// This equality is the one the table uses to decide that a newly assigned sequence of styles says
+/// the same thing as the current one, so a render that rebuilds its styles every time is free.
+/// </para>
+/// </remarks>
+public class RowOrColumnStyle : IEquatable<RowOrColumnStyle>
 {
-    private float _value;
+    private readonly float _value;
 
     /// <summary>
     /// Creates a style that sizes to content, the same as <see cref="AutoSize()"/>.
@@ -29,7 +49,7 @@ public class RowOrColumnStyle
     }
 
     /// <summary>How the row or column decides its size.</summary>
-    public SizeType SizeType { get; set; }
+    public SizeType SizeType { get; init; }
 
     /// <summary>
     /// Absolute height/width in pixels when <see cref="SizeType"/> is
@@ -39,7 +59,7 @@ public class RowOrColumnStyle
     public float Value
     {
         get => _value;
-        set => _value = float.IsNaN(value) ? 0f : MathF.Max(0f, value);
+        init => _value = float.IsNaN(value) ? 0f : MathF.Max(0f, value);
     }
 
     /// <summary>Creates a style of a fixed size in pixels.</summary>
@@ -55,6 +75,39 @@ public class RowOrColumnStyle
     /// <summary>Creates a style that takes the size its content asks for.</summary>
     /// <returns>The new style.</returns>
     public static RowOrColumnStyle AutoSize() => new(SizeType.AutoSize, 0f);
+
+    /// <summary>
+    /// Answers whether another style sizes its row or column exactly the same way.
+    /// </summary>
+    /// <param name="other">The style to compare with.</param>
+    /// <returns>
+    /// True when both are the same concrete kind and agree on <see cref="SizeType"/> and
+    /// <see cref="Value"/>. A row style and a column style are never equal.
+    /// </returns>
+    public bool Equals(RowOrColumnStyle? other) =>
+        other is not null
+            && other.GetType() == GetType()
+            && other.SizeType == SizeType
+            && other._value == _value;
+
+    /// <inheritdoc />
+    public override bool Equals(object? obj) => Equals(obj as RowOrColumnStyle);
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(GetType(), SizeType, _value);
+
+    /// <summary>Answers whether two styles size their row or column the same way.</summary>
+    /// <param name="left">The first.</param>
+    /// <param name="right">The second.</param>
+    /// <returns>True when they are equal, or both are null.</returns>
+    public static bool operator ==(RowOrColumnStyle? left, RowOrColumnStyle? right) =>
+        left is null ? right is null : left.Equals(right);
+
+    /// <summary>Answers whether two styles size their row or column differently.</summary>
+    /// <param name="left">The first.</param>
+    /// <param name="right">The second.</param>
+    /// <returns>True when they are not equal.</returns>
+    public static bool operator !=(RowOrColumnStyle? left, RowOrColumnStyle? right) => !(left == right);
 }
 
 /// <summary>A row definition for <see cref="TableLayoutPanel"/>.</summary>

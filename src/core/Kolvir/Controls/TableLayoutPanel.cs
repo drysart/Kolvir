@@ -1,3 +1,4 @@
+using System.Collections;
 using System.Collections.Generic;
 using SkiaSharp;
 
@@ -13,27 +14,59 @@ public class TableLayoutPanel : Panel
 {
     private readonly List<RowStyle> _rowStyles = new();
     private readonly List<ColumnStyle> _columnStyles = new();
+    private readonly IList<RowStyle> _rowStyleView;
+    private readonly IList<ColumnStyle> _columnStyleView;
 
     /// <summary>Creates a table with no rows or columns and four pixels of space around each cell.</summary>
     public TableLayoutPanel()
     {
         Padding = new Thickness(0f);
         CellPadding = new Thickness(4f);
+
+        // One view per collection for the life of the table, so a caller that kept the reference
+        // from the getter still writes to the table's current styles after the setter replaced them.
+        _rowStyleView = new StyleView<RowStyle>(this, _rowStyles);
+        _columnStyleView = new StyleView<ColumnStyle>(this, _columnStyles);
     }
 
     /// <summary>The row definitions, in the order they were added.</summary>
     /// <remarks>
-    /// This is the live list: adding to it directly adds a row but does not lay the table out
-    /// again. <see cref="AddRow(RowStyle)"/> does both.
+    /// <para>
+    /// The getter hands out the live list: <c>Add</c>, <c>Insert</c>, <c>Remove</c>, <c>Clear</c> and
+    /// assigning to an index all lay the table out again, so a row added here takes effect without a
+    /// second call. Each mutation is one layout pass, so filling a table row by row is cheaper inside
+    /// <see cref="Control.SuspendLayout"/> and <see cref="Control.ResumeLayout()"/>, which fold them
+    /// into one.
+    /// </para>
+    /// <para>
+    /// The setter replaces the whole sequence at once. It compares the new sequence with the current
+    /// one by value, in order, using <see cref="RowOrColumnStyle.Equals(RowOrColumnStyle)"/>; when the
+    /// two say the same thing it does nothing at all - the styles already on the table stay, so the
+    /// table is not rebuilt for a render that produced the same rows again. When they differ it
+    /// replaces the contents and runs exactly one layout pass.
+    /// </para>
+    /// <para>
+    /// The elements are copied, so changing the sequence after assigning it does not affect the
+    /// table. A style cannot be changed in place at all; a different size is a different style.
+    /// </para>
     /// </remarks>
-    public IList<RowStyle> RowStyles => _rowStyles;
+    public IList<RowStyle> RowStyles
+    {
+        get => _rowStyleView;
+        set => Replace(_rowStyles, _rowStyleView, value);
+    }
 
     /// <summary>The column definitions, in the order they were added.</summary>
     /// <remarks>
-    /// This is the live list: adding to it directly adds a column but does not lay the table out
-    /// again. <see cref="AddColumn(ColumnStyle)"/> does both.
+    /// The getter hands out the live list and the setter replaces the whole sequence, with the
+    /// behaviour <see cref="RowStyles"/> documents for rows: a mutation lays the table out once, and
+    /// an assignment that says the same thing as the current columns does nothing.
     /// </remarks>
-    public IList<ColumnStyle> ColumnStyles => _columnStyles;
+    public IList<ColumnStyle> ColumnStyles
+    {
+        get => _columnStyleView;
+        set => Replace(_columnStyles, _columnStyleView, value);
+    }
 
     /// <summary>How many rows the table has, which is the number of row definitions.</summary>
     public int RowCount => _rowStyles.Count;
@@ -105,21 +138,84 @@ public class TableLayoutPanel : Panel
     public void AddRow(SizeType sizeType, float value) => AddRow(new RowStyle(sizeType, value));
 
     /// <summary>Adds a column definition and lays the table out again.</summary>
-    public void AddColumn(ColumnStyle style)
+    /// <remarks>
+    /// The same thing as <see cref="ColumnStyles"/>'s <c>Add</c>, and it goes through it so the two
+    /// cannot come to differ: one call is one layout pass.
+    /// </remarks>
+    public void AddColumn(ColumnStyle style) => _columnStyleView.Add(style);
+
+    /// <summary>Adds a row definition and lays the table out again.</summary>
+    /// <remarks>
+    /// The same thing as <see cref="RowStyles"/>'s <c>Add</c>, through the same path: one call is one
+    /// layout pass.
+    /// </remarks>
+    public void AddRow(RowStyle style) => _rowStyleView.Add(style);
+
+    /// <summary>Lays the table out after its styles changed, once, however many changed.</summary>
+    private void OnStylesChanged()
     {
-        ArgumentNullException.ThrowIfNull(style);
-        _columnStyles.Add(style);
         PerformLayout();
         Invalidate();
     }
 
-    /// <summary>Adds a row definition and lays the table out again.</summary>
-    public void AddRow(RowStyle style)
+    /// <summary>
+    /// Replaces a whole sequence of styles, doing nothing at all when it says what the current one
+    /// already says.
+    /// </summary>
+    /// <remarks>
+    /// The comparison is by value and in order, which is what makes an assignment from a render that
+    /// rebuilt the same styles free: nothing is touched, so the styles on the table - and the layout
+    /// they describe - stay as they were. A sequence that differs replaces the contents and runs one
+    /// pass, not one per element.
+    /// </remarks>
+    private void Replace<T>(List<T> styles, IList<T> view, IList<T> value)
+        where T : RowOrColumnStyle
     {
-        ArgumentNullException.ThrowIfNull(style);
-        _rowStyles.Add(style);
-        PerformLayout();
-        Invalidate();
+        ArgumentNullException.ThrowIfNull(value);
+
+        // The live view is the one sequence whose contents are the current ones, so reading it while
+        // replacing would read what the replacement had already written. It is also the only way a
+        // caller can name the current sequence, and that case is always a no-op.
+        if (ReferenceEquals(value, view) || Same(styles, value))
+        {
+            return;
+        }
+
+        styles.Clear();
+
+        foreach (var style in value)
+        {
+            if (style is null)
+            {
+                throw new ArgumentException("A table's styles cannot contain null.", nameof(value));
+            }
+
+            styles.Add(style);
+        }
+
+        OnStylesChanged();
+    }
+
+    /// <summary>Whether <paramref name="other"/> holds the same styles, by value and in order.</summary>
+    private static bool Same<T>(List<T> styles, IList<T> other)
+        where T : RowOrColumnStyle
+    {
+        if (styles.Count != other.Count)
+        {
+            return false;
+        }
+
+        var comparer = EqualityComparer<T>.Default;
+
+        for (int i = 0; i < styles.Count; i++)
+        {
+            if (!comparer.Equals(styles[i], other[i]))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     /// <inheritdoc />
@@ -483,5 +579,114 @@ public class TableLayoutPanel : Panel
                 sizes[i] = remaining * styles[i].Value / totalPercent;
             }
         }
+    }
+
+    /// <summary>
+    /// The list <see cref="RowStyles"/> and <see cref="ColumnStyles"/> hand out: the table's own
+    /// list, with every mutation that changes it followed by one layout pass.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// This is why a node can assign styles the way it assigns any other property: mutating the live
+    /// list used to add the row without laying the table out again, which left a table that had rows
+    /// in its list and the old arrangement on screen, with nothing reported anywhere.
+    /// </para>
+    /// <para>
+    /// Nothing that changes nothing notifies: a <c>Remove</c> that found no match, a <c>Clear</c> of an
+    /// already empty list and an indexer assignment of an equal style all leave the table alone, which
+    /// is what keeps a patch that rewrites the same styles from costing a pass each time.
+    /// </para>
+    /// </remarks>
+    private sealed class StyleView<T> : IList<T>
+        where T : RowOrColumnStyle
+    {
+        private readonly TableLayoutPanel _table;
+        private readonly List<T> _styles;
+
+        internal StyleView(TableLayoutPanel table, List<T> styles)
+        {
+            _table = table;
+            _styles = styles;
+        }
+
+        public T this[int index]
+        {
+            get => _styles[index];
+            set
+            {
+                ArgumentNullException.ThrowIfNull(value);
+
+                // Equal styles say the same thing, so the instance already there stays and nothing is
+                // laid out again. A style's kind and its value are the whole of it, and both are fixed.
+                if (EqualityComparer<T>.Default.Equals(_styles[index], value))
+                {
+                    return;
+                }
+
+                _styles[index] = value;
+                _table.OnStylesChanged();
+            }
+        }
+
+        public int Count => _styles.Count;
+
+        public bool IsReadOnly => false;
+
+        public void Add(T item)
+        {
+            ArgumentNullException.ThrowIfNull(item);
+            _styles.Add(item);
+            _table.OnStylesChanged();
+        }
+
+        public void Clear()
+        {
+            if (_styles.Count == 0)
+            {
+                return;
+            }
+
+            _styles.Clear();
+            _table.OnStylesChanged();
+        }
+
+        public bool Contains(T item) => _styles.Contains(item);
+
+        public void CopyTo(T[] array, int arrayIndex) => _styles.CopyTo(array, arrayIndex);
+
+        public IEnumerator<T> GetEnumerator() => _styles.GetEnumerator();
+
+        public int IndexOf(T item) => _styles.IndexOf(item);
+
+        public void Insert(int index, T item)
+        {
+            ArgumentNullException.ThrowIfNull(item);
+            _styles.Insert(index, item);
+            _table.OnStylesChanged();
+        }
+
+        public bool Remove(T item)
+        {
+            // An item that is not there changes nothing, so it does not lay the table out.
+            var index = _styles.IndexOf(item);
+
+            if (index < 0)
+            {
+                return false;
+            }
+
+            _styles.RemoveAt(index);
+            _table.OnStylesChanged();
+            return true;
+        }
+
+        public void RemoveAt(int index)
+        {
+            // RemoveAt throws for an index the list does not have, before anything is notified.
+            _styles.RemoveAt(index);
+            _table.OnStylesChanged();
+        }
+
+        IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
     }
 }
