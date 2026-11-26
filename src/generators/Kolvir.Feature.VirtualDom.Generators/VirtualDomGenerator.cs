@@ -43,7 +43,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     /// property cannot share.
     /// </summary>
     private static readonly string[] ReservedNames =
-        ["Key", "Children", "NodeType", "ApplyTo", "PatchFrom", "Kind", "Pristine"];
+        ["Key", "Children", "NodeType", "ApplyTo", "PatchFrom", "Kind", "Pristine", "Extensions", "ApplyExtensionActuators"];
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -856,7 +856,8 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 AddHandler: member.AddHandler,
                 RemoveHandler: member.RemoveHandler,
                 Container: member.Container,
-                Accessor: member.Name);
+                Accessor: member.Name,
+                Receiver: member.ReceiverType);
     }
 }
 

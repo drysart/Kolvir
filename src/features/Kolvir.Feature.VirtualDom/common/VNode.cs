@@ -24,6 +24,8 @@ namespace Kolvir.Feature.VirtualDom;
 /// </remarks>
 public abstract class VNode
 {
+    private Dictionary<object, object?>? _extensions;
+
     /// <summary>
     /// Identifies this node among its siblings, so that a reorder moves it instead of replacing it.
     /// </summary>
@@ -64,4 +66,45 @@ public abstract class VNode
     /// </remarks>
     [EditorBrowsable(EditorBrowsableState.Never)]
     public abstract void PatchFrom(VNode previous, Control control);
+
+    /// <summary>
+    /// The values this node carries for the extension handler members it has been given.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// An extension handler pair has no generated field on the node class, because naming the pair's
+    /// accessor is what roots the pair in a published image. The value is kept here instead, keyed by
+    /// the member's own identity token, and the member is installed the first time one of these
+    /// properties is assigned.
+    /// </para>
+    /// <para>
+    /// Public because generated code is emitted into the <em>application's</em> assembly, where this
+    /// one's internals are not reachable; <see cref="EditorBrowsableAttribute"/> keeps it out of
+    /// IntelliSense without changing accessibility, which works here precisely because the consumer is
+    /// a different assembly. Nothing outside the generated code and
+    /// <see cref="VNodeExtensionActuatorSet"/> should read or write it, and writing it directly is what
+    /// the apply path reports as an invariant violation. The dictionary is not allocated until the
+    /// node is actually given a handler.
+    /// </para>
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public Dictionary<object, object?> Extensions => _extensions ??= [];
+
+    /// <summary>The extension values without creating the dictionary, for the apply path's fast case.</summary>
+    internal Dictionary<object, object?>? ExtensionsOrNull => _extensions;
+
+    /// <summary>
+    /// Applies every installed extension handler member to <paramref name="control"/>.
+    /// </summary>
+    /// <param name="previous">The node that produced <paramref name="control"/> on the previous render, or null on a first apply.</param>
+    /// <param name="control">The control being configured or patched.</param>
+    /// <remarks>
+    /// A generated node class makes this one call instead of a line per extension handler member, which
+    /// is also what keeps the generated source - and the reference from the node to the member's
+    /// accessor - out of the class. An apply for a node that has never been given a handler reaches no
+    /// extension code at all, because no member is installed yet.
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public void ApplyExtensionActuators(VNode? previous, Control control) =>
+        VNodeExtensionActuatorSet.Apply(previous, this, control);
 }

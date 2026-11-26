@@ -94,4 +94,41 @@ public sealed class ExtensionMemberTests
         slot.Raise();
         Assert.AreEqual(102, raised, "replacing the handler should detach the old one and attach the new one");
     }
+
+    [TestMethod]
+    public void ARenderThatRepeatsTheSameHandlerDoesNotAttachItTwice()
+    {
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+
+        var raised = 0;
+        Action<object> handler = _ => raised++;
+
+        using var mount = VirtualDomRuntime.Mount(host, new VSlot { Pinged = handler });
+        var slot = (SlotControl)mount.Root!;
+
+        // The same delegate, so nothing changed and nothing should be detached or attached again.
+        mount.Update(new VSlot { Pinged = handler });
+        slot.Raise();
+
+        Assert.AreEqual(1, raised, "a patch that leaves the handler alone should not attach it a second time");
+    }
+
+    [TestMethod]
+    public void AValueStoredWithoutInstallingItsMemberIsReportedRatherThanSkipped()
+    {
+        var host = new Panel { Dock = DockStyle.Fill };
+        using var scene = Scene.Create(host);
+
+        using var mount = VirtualDomRuntime.Mount(host, new VSlot());
+
+        // Written the way nothing in this repository writes it - a deserialiser or reflection would -
+        // so the apply path finds a value for a member that was never installed.
+        var next = new VSlot();
+        next.Extensions[new object()] = (Action<object>)(_ => { });
+
+        var exception = Assert.ThrowsException<InvalidOperationException>(() => mount.Update(next));
+
+        StringAssert.Contains(exception.Message, "never installed");
+    }
 }
