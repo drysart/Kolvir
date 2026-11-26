@@ -108,13 +108,21 @@ internal sealed record TypePlaceholderModel(string Name, string Accessibility, I
 /// <param name="Placeholders">Node class names emitted as inert placeholders in this manifest's file.</param>
 /// <param name="Overrides">The assembly's <c>[VNodeExtensionPropertyName]</c> declarations, read once per manifest.</param>
 /// <param name="Diagnostics">What reading the manifest found wrong.</param>
+/// <param name="Location">Where the manifest is, which is where a problem with a swept control is reported.</param>
+/// <param name="Sweeps">
+/// Whether the manifest declares <c>[VirtualDomAll]</c> rather than naming controls, in which case
+/// <paramref name="Controls"/> stays empty and every available control is added when the output is
+/// produced.
+/// </param>
 internal sealed record ManifestModel(
     string Name,
     string? Namespace,
     ImmutableArray<ControlModel> Controls,
     ImmutableArray<TypePlaceholderModel> Placeholders,
     ImmutableArray<OverrideModel> Overrides,
-    ImmutableArray<DiagnosticInfo> Diagnostics);
+    ImmutableArray<DiagnosticInfo> Diagnostics,
+    Location Location,
+    bool Sweeps = false);
 
 /// <summary>A diagnostic found while reading a manifest, reported when the output is produced.</summary>
 /// <param name="Descriptor">Which diagnostic.</param>

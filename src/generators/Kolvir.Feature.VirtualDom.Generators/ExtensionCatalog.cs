@@ -108,10 +108,9 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
     /// <returns>The members found, and whether the narrowing had to be given up.</returns>
     internal static ExtensionCatalog Scan(Compilation compilation, CancellationToken cancellationToken)
     {
-        var control = compilation.GetTypeByMetadataName(ControlTypeName);
         var members = ImmutableArray.CreateBuilder<ExtensionMember>();
 
-        if (!Read(Narrowed(compilation, control), members, cancellationToken))
+        if (!Read(TypeWalk.Around(compilation, ControlTypeName), members, cancellationToken))
         {
             return new ExtensionCatalog(members.ToImmutable(), false);
         }
@@ -119,42 +118,10 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
         // A receiver that resolved to nothing means the narrowed set was missing an assembly, which is
         // the one thing the construction above can be wrong about. Everything is read instead.
         members.Clear();
-        Read(Widened(compilation), members, cancellationToken);
+        Read(TypeWalk.Every(compilation), members, cancellationToken);
 
         return new ExtensionCatalog(members.ToImmutable(), true);
     }
-
-    /// <summary>The assemblies a member can be declared in, given that naming the receiver takes a reference.</summary>
-    private static ImmutableArray<IAssemblySymbol> Narrowed(Compilation compilation, INamedTypeSymbol? control)
-    {
-        var declaring = control?.ContainingAssembly;
-        var assemblies = ImmutableArray.CreateBuilder<IAssemblySymbol>();
-
-        assemblies.Add(compilation.Assembly);
-
-        if (declaring is not null)
-        {
-            assemblies.Add(declaring);
-        }
-
-        foreach (var reference in compilation.SourceModule.ReferencedAssemblySymbols)
-        {
-            if (declaring is null || References(reference, declaring))
-            {
-                assemblies.Add(reference);
-            }
-        }
-
-        return assemblies.ToImmutable();
-    }
-
-    /// <summary>Every assembly the compilation can see, which is what a failed narrowing falls back to.</summary>
-    private static ImmutableArray<IAssemblySymbol> Widened(Compilation compilation) =>
-        [compilation.Assembly, .. compilation.SourceModule.ReferencedAssemblySymbols];
-
-    private static bool References(IAssemblySymbol assembly, IAssemblySymbol referenced) =>
-        assembly.Modules.Any(module =>
-            module.ReferencedAssemblySymbols.Any(candidate => SymbolEqualityComparer.Default.Equals(candidate, referenced)));
 
     /// <summary>Reads one set of assemblies. Returns whether a receiver failed to resolve.</summary>
     private static bool Read(
@@ -166,7 +133,7 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
 
         foreach (var assembly in assemblies)
         {
-            foreach (var type in Types(assembly.GlobalNamespace, cancellationToken))
+            foreach (var type in TypeWalk.Types(assembly.GlobalNamespace, cancellationToken))
             {
                 cancellationToken.ThrowIfCancellationRequested();
 
@@ -325,30 +292,5 @@ internal sealed record ExtensionCatalog(ImmutableArray<ExtensionMember> Members,
         }
 
         return chain.ToImmutable();
-    }
-
-    private static IEnumerable<INamedTypeSymbol> Types(INamespaceOrTypeSymbol root, CancellationToken cancellationToken)
-    {
-        foreach (var member in root.GetMembers())
-        {
-            cancellationToken.ThrowIfCancellationRequested();
-
-            if (member is INamespaceSymbol space)
-            {
-                foreach (var type in Types(space, cancellationToken))
-                {
-                    yield return type;
-                }
-            }
-            else if (member is INamedTypeSymbol type)
-            {
-                yield return type;
-
-                foreach (var nested in Types(type, cancellationToken))
-                {
-                    yield return nested;
-                }
-            }
-        }
     }
 }

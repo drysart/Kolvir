@@ -33,6 +33,7 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 public sealed class VirtualDomGenerator : IIncrementalGenerator
 {
     private const string AttributeName = "Kolvir.Feature.VirtualDom.VirtualDomAttribute";
+    private const string SweepAttributeName = "Kolvir.Feature.VirtualDom.VirtualDomAllAttribute";
     private const string OverrideAttributeName = "Kolvir.Feature.VirtualDom.VNodeExtensionPropertyNameAttribute";
     private const string UnsetValueAttributeName = "Kolvir.Feature.VirtualDom.VNodePropertyUnsetValueAttribute";
     private const string ControlTypeName = "Kolvir.Control";
@@ -54,14 +55,35 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 static (syntaxContext, cancellationToken) => Read(syntaxContext, cancellationToken))
             .Collect();
 
-        // Once per compilation rather than once per manifest: the walk is the expensive half of this
-        // generator, and its answer is the same for every manifest the compilation declares.
+        var sweeps = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                SweepAttributeName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (syntaxContext, cancellationToken) => ReadSweep(syntaxContext, cancellationToken))
+            .Collect();
+
+        // Once per compilation rather than once per manifest: both walks are the expensive half of this
+        // generator, and their answers are the same for every manifest the compilation declares.
         var catalog = context.CompilationProvider
             .Select(static (compilation, cancellationToken) => ExtensionCatalog.Scan(compilation, cancellationToken));
 
+        // The sweep's half of the same discipline: what a [VirtualDomAll] manifest has to emit for.
+        // Only walked when a manifest actually sweeps - a compilation that registers its controls by
+        // name has no use for it, and the walk is half a millisecond it should not pay.
+        var controls = sweeps.Combine(context.CompilationProvider)
+            .Select(static (input, cancellationToken) =>
+                input.Left.Any(model => model is not null)
+                    ? ControlCatalog.Sweep(input.Right, cancellationToken)
+                    : ControlCatalog.Empty);
+
         context.RegisterSourceOutput(
-            manifests.Combine(catalog),
-            static (productionContext, input) => Emit(productionContext, input.Left, input.Right));
+            manifests.Combine(sweeps).Combine(catalog).Combine(controls),
+            static (productionContext, input) => Emit(
+                productionContext,
+                input.Left.Left.Left,
+                input.Left.Left.Right,
+                input.Left.Right,
+                input.Right));
     }
 
     private static ManifestModel? Read(GeneratorAttributeSyntaxContext context, CancellationToken cancellationToken)
@@ -125,17 +147,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 continue;
             }
 
-            controls.Add(new ControlModel(
-                "V" + name,
-                registered.DeclaredAccessibility == Accessibility.Public ? "public" : "internal",
-                registered.ToDisplayString(Formats.Type),
-                registered.ToDisplayString(Formats.Metadata),
-                AcceptsChildren(registered),
-                ReadProperties(registered, location, diagnostics),
-                ImmutableArray<MemberPlaceholderModel>.Empty,
-                Chain(registered),
-                Interfaces(registered),
-                location));
+            controls.Add(Model(registered, name, location, diagnostics));
         }
 
         return new ManifestModel(
@@ -144,8 +156,59 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             controls.ToImmutable(),
             ImmutableArray<TypePlaceholderModel>.Empty,
             ReadOverrides(compilation),
-            diagnostics.ToImmutable());
+            diagnostics.ToImmutable(),
+            manifest.Locations.FirstOrDefault() ?? Location.None);
     }
+
+    /// <summary>
+    /// Reads a <c>[VirtualDomAll]</c> manifest, which names nothing: what it sweeps is added when the
+    /// output is produced, because that list is the compilation's rather than the manifest's.
+    /// </summary>
+    private static ManifestModel? ReadSweep(GeneratorAttributeSyntaxContext context, CancellationToken cancellationToken)
+    {
+        if (context.TargetSymbol is not INamedTypeSymbol manifest)
+        {
+            return null;
+        }
+
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        if (!IsPartial(manifest))
+        {
+            diagnostics.Add(Info(
+                Diagnostics.ManifestIsNotPartial,
+                context.Attributes[0].ApplicationSyntaxReference?.GetSyntax(cancellationToken).GetLocation(),
+                manifest.Name));
+        }
+
+        return new ManifestModel(
+            manifest.Name,
+            manifest.ContainingNamespace.IsGlobalNamespace ? null : manifest.ContainingNamespace.ToDisplayString(),
+            ImmutableArray<ControlModel>.Empty,
+            ImmutableArray<TypePlaceholderModel>.Empty,
+            ReadOverrides(context.SemanticModel.Compilation),
+            diagnostics.ToImmutable(),
+            manifest.Locations.FirstOrDefault() ?? Location.None,
+            Sweeps: true);
+    }
+
+    /// <summary>The node model for one control. Registration and a sweep differ only in how the control was named.</summary>
+    private static ControlModel Model(
+        INamedTypeSymbol control,
+        string name,
+        Location location,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) =>
+        new(
+            "V" + name,
+            control.DeclaredAccessibility == Accessibility.Public ? "public" : "internal",
+            control.ToDisplayString(Formats.Type),
+            control.ToDisplayString(Formats.Metadata),
+            AcceptsChildren(control),
+            ReadProperties(control, location, diagnostics),
+            ImmutableArray<MemberPlaceholderModel>.Empty,
+            Chain(control),
+            Interfaces(control),
+            location);
 
     private static ImmutableArray<PropertyModel> ReadProperties(
         INamedTypeSymbol control,
@@ -537,15 +600,58 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     private static void Emit(
         SourceProductionContext context,
         ImmutableArray<ManifestModel?> models,
-        ExtensionCatalog catalog)
+        ImmutableArray<ManifestModel?> sweeps,
+        ExtensionCatalog catalog,
+        ControlCatalog controls)
     {
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        // The explicit manifests come first, then the sweeping ones, because the order of the claims
+        // below is the order of the generated file: a control the application named keeps its place at
+        // the top, and what a sweep adds follows it.
+        var manifests = new List<ManifestModel>(models.Length + sweeps.Length);
 
         foreach (var model in models)
         {
             if (model is not null)
             {
+                manifests.Add(model);
                 diagnostics.AddRange(model.Diagnostics);
+            }
+        }
+
+        foreach (var model in sweeps)
+        {
+            if (model is not null)
+            {
+                manifests.Add(model);
+                diagnostics.AddRange(model.Diagnostics);
+            }
+        }
+
+        // A class can carry both attributes: the controls it names and the ones it sweeps are one
+        // manifest, and a second file for the same class would be a duplicate hint name. So a sweeping
+        // manifest writes into the manifest of the class it was declared on.
+        var owner = new int[manifests.Count];
+
+        for (int index = 0; index < manifests.Count; index++)
+        {
+            owner[index] = index;
+
+            if (!manifests[index].Sweeps)
+            {
+                continue;
+            }
+
+            for (int candidate = 0; candidate < manifests.Count; candidate++)
+            {
+                if (!manifests[candidate].Sweeps
+                    && manifests[candidate].Name == manifests[index].Name
+                    && manifests[candidate].Namespace == manifests[index].Namespace)
+                {
+                    owner[index] = candidate;
+                    break;
+                }
             }
         }
 
@@ -555,42 +661,73 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         var claims = new Dictionary<(string Namespace, string NodeName), List<(int Manifest, ControlModel Control)>>();
         var order = new List<(string Namespace, string NodeName)>();
 
-        for (int index = 0; index < models.Length; index++)
+        for (int index = 0; index < manifests.Count; index++)
         {
-            if (models[index] is not { } model)
+            if (manifests[index].Sweeps)
             {
                 continue;
             }
 
-            foreach (var control in model.Controls)
+            foreach (var control in manifests[index].Controls)
             {
-                if (!seen.ContainsKey(control.ControlType))
-                {
-                    seen.Add(control.ControlType, index);
-                }
-                else
+                if (seen.ContainsKey(control.ControlType))
                 {
                     diagnostics.Add(Info(Diagnostics.DuplicateRegistration, control.Location, control.ControlType));
                     continue;
                 }
 
-                var key = (model.Namespace ?? string.Empty, control.NodeName);
-
-                if (!claims.TryGetValue(key, out var list))
-                {
-                    list = [];
-                    claims.Add(key, list);
-                    order.Add(key);
-                }
-
-                list.Add((index, control));
+                seen.Add(control.ControlType, index);
+                Claim(manifests[index], index, control);
             }
         }
 
-        var perManifestControls = new List<ControlModel>[models.Length];
-        var perManifestPlaceholders = new List<TypePlaceholderModel>[models.Length];
+        // A control the application named itself is left to that registration, including the error two
+        // registrations of it would give it. That is what lets [VirtualDomAll] be added to a manifest
+        // that already lists controls without turning every one of them into a duplicate.
+        var explicitTypes = new HashSet<string>(seen.Keys, StringComparer.Ordinal);
 
-        for (int index = 0; index < models.Length; index++)
+        for (int index = 0; index < manifests.Count; index++)
+        {
+            if (!manifests[index].Sweeps)
+            {
+                continue;
+            }
+
+            foreach (var swept in controls.Controls)
+            {
+                var type = swept.ToDisplayString(Formats.Type);
+
+                // Two sweeps in one compilation would otherwise claim every control twice; the first
+                // one to claim a control keeps it, silently, because a sweep names no controls and so
+                // has no names for a duplicate to collide with.
+                if (explicitTypes.Contains(type) || seen.ContainsKey(type))
+                {
+                    continue;
+                }
+
+                seen.Add(type, owner[index]);
+                Claim(manifests[index], owner[index], Model(swept, swept.Name, manifests[index].Location, diagnostics));
+            }
+        }
+
+        void Claim(ManifestModel model, int index, ControlModel control)
+        {
+            var key = (model.Namespace ?? string.Empty, control.NodeName);
+
+            if (!claims.TryGetValue(key, out var list))
+            {
+                list = [];
+                claims.Add(key, list);
+                order.Add(key);
+            }
+
+            list.Add((index, control));
+        }
+
+        var perManifestControls = new List<ControlModel>[manifests.Count];
+        var perManifestPlaceholders = new List<TypePlaceholderModel>[manifests.Count];
+
+        for (int index = 0; index < manifests.Count; index++)
         {
             perManifestControls[index] = [];
             perManifestPlaceholders[index] = [];
@@ -604,7 +741,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             {
                 var single = list[0];
                 perManifestControls[single.Manifest].Add(
-                    Resolve(single.Control, catalog, models[single.Manifest]!.Overrides, diagnostics));
+                    Resolve(single.Control, catalog, manifests[single.Manifest].Overrides, diagnostics));
 
                 continue;
             }
@@ -623,14 +760,14 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             context.ReportDiagnostic(diagnostic.ToDiagnostic());
         }
 
-        for (int index = 0; index < models.Length; index++)
+        for (int index = 0; index < manifests.Count; index++)
         {
-            if (models[index] is not { } model
-                || (perManifestControls[index].Count == 0 && perManifestPlaceholders[index].Count == 0))
+            if (perManifestControls[index].Count == 0 && perManifestPlaceholders[index].Count == 0)
             {
                 continue;
             }
 
+            var model = manifests[index];
             var source = new StringBuilder();
             NodeEmitter.Write(
                 model with
