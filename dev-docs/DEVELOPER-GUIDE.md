@@ -7261,6 +7261,16 @@ blit adds about 0.05 ms, so on this software device the partial GL total is roug
 the CPU path's 0.198 ms. A full GL frame is about 0.65 ms against 3.157 ms. Use these for the shape;
 the hardware table above is the one to quote.
 
+#### Where a full-damage idle frame's time goes
+
+The split between the clear, the menu bar, the tree walk and each control type - and why the same
+page costs 4x more at 2.00 scale than at 1.00 on the same machine - is in
+[IDLE-RENDERING-PROFILE.md](IDLE-RENDERING-PROFILE.md). Read it before treating a frame time from one
+machine, display scale or window size as comparable with another's: the frame is proportional to the
+device pixels it paints, the page's readout reports raw milliseconds, and the report proposes the
+smallest change that would stop that reading as a regression. It also records what the frame's most
+expensive control is actually doing, and why parallelising the paint is not the lever.
+
 ### On Linux (GTK4)
 
 The Linux build of `Kolvir.Demo.App` uses the
