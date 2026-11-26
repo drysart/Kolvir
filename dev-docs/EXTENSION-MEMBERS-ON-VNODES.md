@@ -346,6 +346,50 @@ naming specific extension members to leave off the nodes - which is the only esc
 first decide that some handler pairs should never be surfaced at all. It is not built and it is not a
 question left open: it is the cheaper design on record.
 
+### 11.1 A second recorded direction: actuators installed on first use (not built)
+
+The owner has settled the shape of a follow-up that would take the handler-pair rooting cost to zero.
+It is recorded here beside the acceptance rather than built, and it does not contradict it: the 23 KB
+ships now, and this is what to do if it is ever worth reclaiming. Unbuilt, and not a question left
+open - the section 11 acceptance stands, and this is the second recorded way out.
+
+An extension member's **actuator is installed statically, once per process, on first access** of that
+member. Until something touches the member, nothing in the generated node names its accessor, so the
+popup machinery is unreachable and trims away. Once installed, that node type permanently applies it.
+A permanent effect of first use, rather than per-node opt-in - which is what keeps it clear of the
+reachability problem `FEATURE-COST-POLICY.md` section 3 describes: the reference comes into being at
+run time, from code that only runs because the application has already asked for the member.
+
+- **Install path.** A lock on installation only, with copy-on-write publication of the actuator array
+  and a volatile read at apply time. Nothing in this repository constructs nodes off the UI thread and
+  no thread rule is documented, so this is cheap insurance rather than a requirement: installation
+  happens once per member per process, the steady-state cost is nil, and the design does not rest on
+  an undocumented invariant.
+- **Signature.** One delegate type, `(VNode? previous, VNode current, Control target)`, because
+  `PatchFrom` holds both nodes: attach, detach and change become one call, and each node emits a single
+  generic loop instead of per-member apply and patch lines.
+- **State.** A `Dictionary` on `VNode`, public and marked
+  `[EditorBrowsable(EditorBrowsableState.Never)]`, rather than a `ConditionalWeakTable`. Generated code
+  is emitted into the *application's* assembly, so node-side storage cannot be `internal`: public
+  surface is unavoidable, and `EditorBrowsable` is effective here precisely because the consumer is a
+  different assembly - it does not change accessibility, so generated code can still reach it. The
+  honest cost is one nullable field per `VNode` instance, eight bytes, not allocated until used, plus a
+  new public member on a core type.
+- **Keys.** A `static readonly` identity token declared in the extension class rather than a string:
+  reference equality, no hashing, and the token is rooted only when the member is used.
+- **The invariant.** A value cannot exist for a member that was never installed, because setting it is
+  what installs it. Reflection or a future deserialisation path would break that silently, which is
+  why the apply path should assert rather than assume.
+
+The second gain is the reason it is worth doing at all: handler pairs currently contribute apply and
+patch lines to every node class, so moving them behind one actuator path shrinks both the published
+image and the generated source - part of the 2.1 MB and of the ~0.43 ms per node class measured below.
+
+**What a future implementer has to beat:** the **+23,040 bytes** attributed to handler pairs in the
+table above, on the probe described there, and the demo's **36 node classes / 18.05 ms per edit** as
+the baseline to improve on. Neither is a target in itself; they are the measurements this design is
+an argument about.
+
 **Trimming.** The decisive question for `[VirtualDomAll]` is not "same application before and after"
 but "unused node types are removed". Two measurements, both from equal-length build roots:
 
@@ -400,7 +444,8 @@ keystroke is a new `Compilation` rather than a cache hit, which is why none of t
 Sweeping is all or nothing. There is no way to exclude one control from a `[VirtualDomAll]` (register
 it explicitly instead - that also keeps it out of the sweep), and no policy for silently skipping an
 extension member the node cannot express. There is no per-member opt-out either; section 11 records
-that as the accepted cost, with the opt-out as the cheaper design on record rather than a question
-left open. The attributes are fixed at three: unset values, the naming override and the conflict
-marker. Startup and window creation do no work for any of it: the generator and the analyzer are
-compile-time, and the node classes are ordinary code reachable only where an application names them.
+that as the accepted cost, with the opt-out and the first-use actuator design of section 11.1 as the
+two recorded ways to reclaim it rather than questions left open. The attributes are fixed at three:
+unset values, the naming override and the conflict marker. Startup and window creation do no work for
+any of it: the generator and the analyzer are compile-time, and the node classes are ordinary code
+reachable only where an application names them.
