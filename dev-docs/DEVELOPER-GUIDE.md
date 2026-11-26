@@ -7264,10 +7264,12 @@ the hardware table above is the one to quote.
 #### Where a full-damage idle frame's time goes
 
 The split between the clear, the menu bar, the tree walk and each control type - and why the same
-page measures 3.0 ms at 2.00 scale and 1.06 ms at 1.00 - is in
-[IDLE-RENDERING-PROFILE.md](IDLE-RENDERING-PROFILE.md). It is the reference for "the frame got
-slower" reports: the frame is proportional to device pixels, and it has been 2.9-3.2 ms on the CPU
-path at 2x at every commit in which the page's benchmark exists.
+page costs 4x more at 2.00 scale than at 1.00 on the same machine - is in
+[IDLE-RENDERING-PROFILE.md](IDLE-RENDERING-PROFILE.md). Read it before treating a frame time from one
+machine, display scale or window size as comparable with another's: the frame is proportional to the
+device pixels it paints, the page's readout reports raw milliseconds, and the report proposes the
+smallest change that would stop that reading as a regression. It also records what the frame's most
+expensive control is actually doing, and why parallelising the paint is not the lever.
 
 ### On Linux (GTK4)
 
