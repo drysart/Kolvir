@@ -123,8 +123,45 @@ analysis was on.
   at all. Measured: `DocumentationMode.None` returns nothing for a source property, `Parse` and
   `Diagnose` return the text. An application that does not generate documentation has thrown its own
   doc comments away before any generator could read them, so there is nothing left to carry.
-- A control from a reference whose package ships no XML gets nothing, and no comment is emitted. That
-  is the honest failure: the property is documented nowhere, so there is nothing to carry.
+- A control from a reference whose assembly ships no XML - hand-built, or a third-party package that
+  strips documentation - gets nothing: the node property is emitted without a comment and the build
+  says nothing about it. That is deliberate rather than a bug. There is no documentation to carry, so
+  the alternative is a warning for every property of every undocumented reference, which is a message
+  about somebody else's packaging that an application cannot act on.
+
+### Measured through a real package, not inferred
+
+The chain was proven once through project references and then again through actual packages: `Kolvir`,
+`Kolvir.Feature.Observables`, `Kolvir.Feature.VirtualDom` and `Kolvir.Backend.Headless` packed into a
+local folder feed, and a console application **outside this repository** that references them only by
+`<PackageReference>`, restores from that feed, declares `[VirtualDomAll]`, and generates no
+documentation of its own. The build succeeded with no warnings and the generated node carried the
+control's summary:
+
+```csharp
+/// <summary>Text shown by the control. Simple controls use it directly.</summary>
+public string Text
+```
+
+The target handed the compiler **114** documentation files. Four are the Kolvir packages' own
+(`Kolvir.xml`, `Kolvir.Feature.Observables.xml`, `Kolvir.Feature.VirtualDom.xml`,
+`Kolvir.Backend.Headless.xml`), and those are the only ones the generator ever reads, because only
+they declare a control or an extension member. The remaining 110 belong to references the application
+did not write: 107 from the .NET reference pack, `SkiaSharp.xml`, and two `Microsoft.Extensions.*`
+files. The rule is "the documentation file beside each resolved reference", so they are handed over;
+indexing 114 file names is the entire cost, and content is read only for an assembly whose member is
+actually asked for.
+
+Two things that run taught, worth knowing before believing a local package test:
+
+- NuGet caches by **id and version**, so packing over an id/version that is already installed leaves
+  the old package resolved and the scratch application generates nodes from a stale `Kolvir.dll`
+  without saying so. A local package test has to pack a version that has never been restored.
+- `dotnet pack` writes `exclude="Build,Analyzers"` onto a `ProjectReference`-derived dependency, so an
+  application that references a feature package gets that feature's own `buildTransitive/` assets but
+  not those of `Kolvir` itself. This target is in the feature package, which is why it runs; anything
+  that only lives in `Kolvir`'s own build assets reaches a consumer only when `Kolvir` is a direct
+  reference. That is a packaging question about the dependency attribute, not about this feature.
 
 ## 5. Rung
 
