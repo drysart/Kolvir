@@ -432,6 +432,33 @@ it renders. Placement therefore carries a running total of `Mounted.ControlCount
 mount to place its own span, which is what keeps the sibling after it from being laid out over the top
 of what the child rendered.
 
+### 6.3 Property slots
+
+A control can hold controls of its own: `SplitContainer.Panel1` and `Panel2` are made by its
+constructor, added to its own `Controls`, and read-only. A node fills such a property with a node
+rather than a value, and the reconciler keeps it in step with the same patch-and-remove rules one
+control at a time.
+
+| | **Borrowed** (get-only) | **Creating** (get-plus-set) |
+| --- | --- | --- |
+| Control | The one the property already holds. Never created, never placed. | `nodeType.Create()`, then assigned to the property. |
+| Same node class on the next render | `PatchFrom` the panel, then reconcile its children. | Patch the control the slot made; nothing is assigned. |
+| Different node class | The old contents come off and the new node is applied to the same control. | A new control is created, applied and assigned; the old one goes with its subtree. |
+| Node becomes null | Contents unmounted, and the control patched from a generated all-unassigned instance so it goes back to its owner's values. | Subtree unmounted; the property keeps the control it was given, emptied. |
+
+`Mounted` gains a `Slots` list parallel to the node's slot list (`Mounted.Slots`), holding either the
+slot's record or null, and allocated only for a node that has slots. The reconciler must never place a
+slot's control: for `SplitContainer` the panel is already one of the container's children, so placing
+it again would either throw or move it out of the position the container keeps it in. A slot node is an
+ordinary control node - a `VComponent` has no control type to create the slot's control from, and a
+`VFragment` has no control at all - so neither is accepted, by the property's type.
+
+The property's type is the covariant `IVNodeFor<TControl>`, one instantiation per node class, so a node
+for a derived control is accepted where the property's declared type is a base. For a borrowed slot the
+instance is narrower than the declaration - it is whatever the control made - so a node that would
+cast it to a subclass is refused when it is mounted, naming both types. The design, the covariance
+argument and the measurements are in [`VNODE-SLOTS.md`](VNODE-SLOTS.md).
+
 ## 7. The application-facing API
 
 The plan's surface, in the order a developer meets it:

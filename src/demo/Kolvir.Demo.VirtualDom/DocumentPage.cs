@@ -76,6 +76,47 @@ internal sealed class DocumentPage : ObservableComponent<DocumentModel>
                 Text = "Close this document",
                 Click = _ => _close(args.DataModel),
             },
+
+            // A split container is the control this sample cannot describe any other way: its two panels
+            // are made by its own constructor and belong to its own Controls, so a node has no property to
+            // assign them by. The two Panel1/Panel2 slots are what this feature adds - assigning a node to
+            // Panel1 configures that panel and fills it, rather than putting another panel inside it.
+            new VSplitContainer
+            {
+                Id = "split",
+                Dock = DockStyle.Top,
+                AutoSize = false,
+                Height = 88f,
+                Margin = new Thickness(0f, 0f, 0f, 8f),
+                Panel1 = new VPanel
+                {
+                    Padding = new Thickness(8f),
+                    Children =
+                    [
+                        new VLabel
+                        {
+                            Id = "split-left",
+                            Dock = DockStyle.Fill,
+                            AutoSize = false,
+                            Text = "Panel 1",
+                        },
+                    ],
+                },
+                Panel2 = new VPanel
+                {
+                    Padding = new Thickness(8f),
+                    Children =
+                    [
+                        new VLabel
+                        {
+                            Id = "split-right",
+                            Dock = DockStyle.Fill,
+                            AutoSize = false,
+                            Text = "Panel 2",
+                        },
+                    ],
+                },
+            },
             new VButton
             {
                 Id = "reshape",

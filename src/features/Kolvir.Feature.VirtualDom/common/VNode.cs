@@ -68,6 +68,50 @@ public abstract class VNode
     public abstract void PatchFrom(VNode previous, Control control);
 
     /// <summary>
+    /// The property slots this node fills, in declaration order, or null when it has none.
+    /// </summary>
+    /// <param name="control">The control this node describes, which a borrowed slot's control is read from.</param>
+    /// <returns>One descriptor per slot; null for every node class that declares none.</returns>
+    /// <remarks>
+    /// <para>
+    /// A slot is a property whose type derives from <see cref="Control"/> and that a node fills with a
+    /// node rather than a value - <c>SplitContainer.Panel1</c> is the one this library has. The order is
+    /// the order the slots are declared in, which is fixed by the generated method that returns them:
+    /// the reconciler pairs slot <em>n</em> of a render with slot <em>n</em> of the previous one, so two
+    /// renders of the same node class must list their slots alike. They do, because both lists come
+    /// from the same generated code.
+    /// </para>
+    /// <para>
+    /// Public because generated code is emitted into the application's assembly; nothing outside the
+    /// generated code and the reconciler should call it. A node class with no slots does not override
+    /// it, so the whole mechanism costs an ordinary node one virtual call that returns null.
+    /// </para>
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public virtual VNodeSlot[]? GetSlots(Control control) => null;
+
+    /// <summary>
+    /// A node of this class that assigns no property at all, or null when the class does not emit one.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Patching a control from this node is how a borrowed slot hands its control back: every property
+    /// the removed node assigned goes to that property's pristine value, every extension handler it
+    /// attached is detached, and a property it never mentioned is not assigned at all - the same rule
+    /// an ordinary render follows, with "this render says nothing" as the whole of the new node.
+    /// </para>
+    /// <para>
+    /// It is a static instance of the node class, shared by every removal that class takes part in, and
+    /// that is safe because it is only ever the <em>source</em> of a patch: nothing writes a node's
+    /// properties outside its setters, and no setter ever runs on this one. The generated code emits it
+    /// only for a node class whose control can appear in a slot, so a node that can never be one does
+    /// not pay for it.
+    /// </para>
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public virtual VNode? UnassignedNode => null;
+
+    /// <summary>
     /// The values this node carries for the extension handler members it has been given.
     /// </summary>
     /// <remarks>

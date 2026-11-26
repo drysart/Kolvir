@@ -110,6 +110,7 @@ public sealed class MountHandle : IDisposable
                 root.PatchFrom(mounted.Node, control);
                 Reconciler.ReconcileChildren(control, mounted.Children, root.Children);
                 mounted.Node = root;
+                Reconciler.ReconcileSlots(control, mounted, root);
                 return;
             }
         }

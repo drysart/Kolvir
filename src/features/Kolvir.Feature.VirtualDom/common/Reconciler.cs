@@ -23,6 +23,12 @@ namespace Kolvir.Feature.VirtualDom;
 /// the rest of the class reads, including <see cref="Mounted.ControlCount"/>, the one exception that
 /// lets a component own a span of its parent's children.
 /// </para>
+/// <para>
+/// A node's property slots are reconciled by the same rules one control at a time
+/// (<see cref="ReconcileSlots"/>). A slot's control is deliberately outside the child machinery: a
+/// borrowed slot's control was made and placed by the control that owns the property, so the reconciler
+/// fills it and never places it, and the panel a split container shows is not parented twice.
+/// </para>
 /// </remarks>
 internal static class Reconciler
 {
@@ -69,6 +75,10 @@ internal static class Reconciler
     /// </remarks>
     internal static void Unmount(Mounted mounted)
     {
+        // A slot's control may not be the tree's to detach - a borrowed slot's belongs to the control
+        // that made it - so each slot is released its own way before the ordinary teardown runs.
+        DetachSlots(mounted);
+
         if (mounted.ComponentMount is { } mount)
         {
             // Disposing the child's mount removes its controls and unwinds whatever it mounted in turn.
@@ -194,11 +204,207 @@ internal static class Reconciler
                 }
 
                 ReconcileChildren(control, updated[i].Children, next[i].Children);
+                ReconcileSlots(control, updated[i], next[i]);
             }
         }
         finally
         {
             owner.ResumeLayout();
+        }
+    }
+
+    /// <summary>
+    /// Reconciles the property slots of <paramref name="node"/> into the record that node owns, which
+    /// is the same patch-and-remove rule the children follow applied to one control per slot.
+    /// </summary>
+    /// <param name="owner">The control <paramref name="node"/> describes, which a borrowed slot's control comes from.</param>
+    /// <param name="mounted">The record whose slot state is updated.</param>
+    /// <param name="node">The node being applied or patched.</param>
+    /// <remarks>
+    /// <para>
+    /// Each slot is paired with the previous render's slot at the same ordinal. That is sound because
+    /// both lists come from the same generated node class - a node whose class changed is a new control,
+    /// not a patch - so a mispairing cannot be produced by a render.
+    /// </para>
+    /// <para>
+    /// A slot holds one control, so "patch" is a node type match and "replace" is anything else: a
+    /// borrowed slot is only ever replaced in place, on the control the property already holds, while a
+    /// creating slot gets a new control and assigns it.
+    /// </para>
+    /// </remarks>
+    internal static void ReconcileSlots(Control owner, Mounted mounted, VNode node)
+    {
+        var slots = node.GetSlots(owner);
+
+        if (slots is null || slots.Length == 0)
+        {
+            DetachSlots(mounted);
+            return;
+        }
+
+        var state = mounted.Slots ??= [];
+
+        for (int i = 0; i < slots.Length; i++)
+        {
+            var next = slots[i].Node;
+            var previous = i < state.Count ? state[i] : null;
+
+            if (next is null)
+            {
+                if (previous is not null)
+                {
+                    DetachSlot(previous);
+                    state[i] = null;
+                }
+
+                continue;
+            }
+
+            if (previous is not null && CanReuse(previous.Node, next))
+            {
+                next.PatchFrom(previous.Node, previous.Control!);
+                previous.Node = next;
+                ReconcileChildren(previous.Control!, previous.Children, next.Children);
+                ReconcileSlots(previous.Control!, previous, next);
+                continue;
+            }
+
+            if (previous is not null)
+            {
+                DetachSlot(previous);
+                state[i] = null;
+            }
+
+            // Padded rather than appended: a slot that was empty on an earlier render left no entry, so
+            // the list has to reach this ordinal before it can hold this slot's state. Appending instead
+            // would put slot 2's state where slot 0's belongs.
+            while (state.Count <= i)
+            {
+                state.Add(null);
+            }
+
+            state[i] = MountSlot(owner, slots[i]);
+        }
+
+        for (int i = slots.Length; i < state.Count; i++)
+        {
+            if (state[i] is { } extra)
+            {
+                DetachSlot(extra);
+            }
+        }
+
+        if (state.Count > slots.Length)
+        {
+            state.RemoveRange(slots.Length, state.Count - slots.Length);
+        }
+    }
+
+    /// <summary>Mounts one slot's node onto its control: the property's own, or one made for it.</summary>
+    /// <param name="owner">The control the node describes.</param>
+    /// <param name="slot">The slot, as the node described it.</param>
+    /// <returns>The record for the slot.</returns>
+    /// <remarks>
+    /// A borrowed slot is applied to the control the property already holds, which is never created and
+    /// never placed: for <c>SplitContainer</c> the panel is already a child of the container, so placing
+    /// it again would either throw or move it out of the position the container keeps it in. A creating
+    /// slot's control is made here and assigned after the node has been applied to it, so a setter that
+    /// reads the property back sees a configured control.
+    /// </remarks>
+    private static Mounted MountSlot(Control owner, in VNodeSlot slot)
+    {
+        var node = slot.Node!;
+        Mounted mounted;
+
+        if (slot.Control is { } target)
+        {
+            // The marker interface makes "is this node for a Panel" a compile-time question, but a
+            // borrowed slot's real requirement is narrower than its declared type can say: the instance
+            // is whatever the container made, and a node for a subclass of the declared type would cast
+            // that instance to the subclass inside ApplyTo. It is the one check the type system cannot
+            // make, so it is made here, with both types named.
+            if (!node.NodeType.ControlType.IsInstanceOfType(target))
+            {
+                throw new InvalidOperationException(
+                    $"A {target.GetType().Name} slot takes a node for that control, but this one makes a {node.NodeType.ControlType.Name}. "
+                    + $"A slot the control fills in place is the control's own instance - it is configured and filled, never replaced - so the node has to be for that instance's type. "
+                    + $"Give the slot a node for {target.GetType().Name}, or put the {node.NodeType.ControlType.Name} node inside it as a child.");
+            }
+
+            node.ApplyTo(target);
+            mounted = new Mounted(node, target) { Borrowed = true };
+        }
+        else
+        {
+            var control = node.NodeType.Create();
+            node.ApplyTo(control);
+            slot.Assign!(owner, control);
+            mounted = new Mounted(node, control);
+        }
+
+        ReconcileChildren(mounted.Control!, mounted.Children, node.Children);
+        ReconcileSlots(mounted.Control!, mounted, node);
+
+        return mounted;
+    }
+
+    /// <summary>Releases every slot a record holds, emptying the list so a later render starts fresh.</summary>
+    /// <param name="mounted">The record whose slots are released.</param>
+    private static void DetachSlots(Mounted mounted)
+    {
+        if (mounted.Slots is not { } slots)
+        {
+            return;
+        }
+
+        foreach (var slot in slots)
+        {
+            if (slot is not null)
+            {
+                DetachSlot(slot);
+            }
+        }
+
+        slots.Clear();
+    }
+
+    /// <summary>Releases one slot: its subtree comes off, and its control is dealt with by its kind.</summary>
+    /// <param name="slot">The slot's record.</param>
+    /// <remarks>
+    /// <para>
+    /// A borrowed slot's control stays where its owner put it, and goes back to the property values the
+    /// owner's constructor gave it. That restore is not bookkeeping: leaving them would break the rule
+    /// the rest of the reconciler keeps - a property a node does not assign means "the control's own
+    /// value" - for the next node to fill the slot, which would inherit whatever the removed node set.
+    /// The all-unassigned instance is what supplies the "node that says nothing" side of the patch.
+    /// </para>
+    /// <para>
+    /// A creating slot's control goes with its subtree. The property keeps holding it, emptied: an
+    /// <see cref="IVNodeFor{TControl}"/> is a description that <em>makes</em> a control, so there is
+    /// nothing the reconciler could assign that means "the value this property had before the node
+    /// arrived", and leaving the control it made is the only answer valid for a non-nullable property.
+    /// </para>
+    /// </remarks>
+    private static void DetachSlot(Mounted slot)
+    {
+        if (!slot.Borrowed)
+        {
+            Unmount(slot);
+            return;
+        }
+
+        DetachSlots(slot);
+
+        foreach (var child in slot.Children)
+        {
+            Unmount(child);
+        }
+
+        slot.Children.Clear();
+
+        if (slot.Control is { } control && slot.Node.UnassignedNode is { } restored)
+        {
+            restored.PatchFrom(slot.Node, control);
         }
     }
 
