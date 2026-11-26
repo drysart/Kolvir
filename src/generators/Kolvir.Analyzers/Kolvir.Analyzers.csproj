@@ -55,7 +55,7 @@
   <ItemGroup>
     <!-- An analyzer must not ship its own copy of the compiler: it loads into the one the SDK is
          running, so this is compile-time only. -->
-    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="4.14.0" PrivateAssets="all" />
+    <PackageReference Include="Microsoft.CodeAnalysis.CSharp" Version="5.9.0" PrivateAssets="all" />
   </ItemGroup>
 
   <ItemGroup>

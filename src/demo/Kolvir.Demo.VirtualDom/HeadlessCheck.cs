@@ -2,6 +2,7 @@ using SkiaSharp;
 using Kolvir;
 using Kolvir.Backend.Headless;
 using Kolvir.Feature.VirtualDom;
+using Kolvir.Undo;
 
 namespace Kolvir.Demo.VirtualDom;
 
@@ -70,6 +71,54 @@ internal static class HeadlessCheck
         Check(title == "Document 1 renamed 1", $"the page should show the renamed title, was '{title}'");
         Check(Readout(list).Contains("Document 1 renamed 1", StringComparison.Ordinal), "the readout should show the renamed title");
         Console.WriteLine($"after rename: {Titles(application)}");
+
+        // The table on the page is where the sample proves extension members end to end. Every position
+        // below was set by an extension property on a node - the page never names
+        // TableLayoutPanelExtensions - so the control's own record of its cell is the assertion.
+        var table = FindControl(first, "cells") as TableLayoutPanel
+            ?? throw new InvalidOperationException("The document page should have a table.");
+
+        var start = Describe(Cell(table, "shift"));
+        var popupStart = Describe(Cell(table, "popup"));
+
+        Check(Cell(table, "cell-title") == (0, 0), "the title cell should start at column 0, row 0");
+        Check(Span(table, "cell-title") == (2, 1), "the title should span both columns");
+        Check(Cell(table, "shift") == (0, 1), "the move button should start in row 1");
+        Check(Cell(table, "popup") == (1, 1), "the popup button should be at column 1, row 1");
+        Check(Span(table, "popup") == (1, 2), "the popup button should span both rows");
+        Console.WriteLine($"table: move button at {start}, popup at {popupStart}");
+
+        // The re-render changes one row, so the control arrives at the patch with a different cell than
+        // the one it has. That is the path an extension property could quietly get wrong: setting it on
+        // a first apply is a setter call, but moving it is a detach from one cell and an attach to
+        // another, and only the patch does that.
+        Click(first, "shift");
+        Paint(first);
+
+        first = Find(application, "Document 1 renamed 1 - document");
+
+        var moved = Describe(Cell(table, "shift"));
+
+        Check(Cell(table, "shift") == (0, 2), $"the patch should have moved the button to row 2, it is at {moved}");
+        Check(Cell(table, "cell-title") == (0, 0), "an unchanged cell position should survive the patch");
+        Check(Span(table, "popup") == (1, 2), "and so should an unchanged span");
+        Console.WriteLine($"table: after the patch the move button is at {moved}");
+
+        // The other half: a handler pair the control does not declare, and one that lives inside an
+        // extension(TextBox) block. Nothing in the page calls AddUndoStateChangedHandler - the node's
+        // UndoStateChanged property did - so the readout moving is the proof that a node can attach
+        // one exactly as it attaches a native event.
+        Click(first, "notes");
+        first.Host.ProcessTextInput("a");
+        Paint(first);
+
+        var activity = FindControl(first, "activity").Text;
+        var notes = (TextBox)FindControl(first, "notes");
+
+        Check(activity.StartsWith("undo: changed", StringComparison.Ordinal), $"the node's UndoStateChanged handler should have run, the readout says '{activity}'");
+        Check(notes.UndoCount > 0, "the box should have recorded the keystroke, and its history is the extension property UndoEnabled");
+        Console.WriteLine($"undo: {activity}, {notes.UndoCount} entry(ies) in the box's history");
+
         Console.WriteLine($"readout: {Readout(list)}");
 
         var homeLocation = first.Location;
@@ -141,6 +190,20 @@ internal static class HeadlessCheck
         window.TryGetControlById("readout", out var control)
             ? control.Text
             : throw new InvalidOperationException("The list window should have a readout label.");
+
+    private static Control FindControl(Window window, string id) =>
+        window.TryGetControlById(id, out var control)
+            ? control
+            : throw new InvalidOperationException($"The window does not contain a control with id '{id}'.");
+
+    /// <summary>The cell a control reports for itself - the table's view of what the node attached.</summary>
+    private static (int Column, int Row) Cell(TableLayoutPanel table, string id) =>
+        table.GetCellPosition(FindControl(table.Window!, id));
+
+    private static (int ColumnSpan, int RowSpan) Span(TableLayoutPanel table, string id) =>
+        table.GetCellSpan(FindControl(table.Window!, id));
+
+    private static string Describe((int Column, int Row) cell) => $"column {cell.Column}, row {cell.Row}";
 
     private static string Titles(Application application) =>
         string.Join(", ", application.Windows.Where(window => !window.IsClosed).Select(window => window.Title));

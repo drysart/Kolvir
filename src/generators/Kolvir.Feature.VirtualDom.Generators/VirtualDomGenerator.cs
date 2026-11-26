@@ -1,4 +1,5 @@
-using System.Collections.Immutable;
+﻿using System.Collections.Immutable;
+
 using System.Linq;
 using System.Text;
 using Microsoft.CodeAnalysis;
@@ -20,11 +21,21 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// One file per manifest, each holding one class per registered control. The classes are emitted into
 /// the manifest's namespace so that a view only needs `using` that namespace.
 /// </para>
+/// <para>
+/// A control's node also exposes the C# 14 extension members that apply to it: the properties and
+/// handler pairs an <c>extension(...)</c> block or a static class adds to a type the control is
+/// assignable to. <see cref="ExtensionCatalog"/> finds them once per compilation; this class decides,
+/// per control, which name wins and which becomes a placeholder. The design is in
+/// <c>dev-docs/EXTENSION-MEMBERS-ON-VNODES.md</c>.
+/// </para>
 /// </remarks>
 [Generator(LanguageNames.CSharp)]
 public sealed class VirtualDomGenerator : IIncrementalGenerator
 {
     private const string AttributeName = "Kolvir.Feature.VirtualDom.VirtualDomAttribute";
+    private const string SweepAttributeName = "Kolvir.Feature.VirtualDom.VirtualDomAllAttribute";
+    private const string OverrideAttributeName = "Kolvir.Feature.VirtualDom.VNodeExtensionPropertyNameAttribute";
+    private const string UnsetValueAttributeName = "Kolvir.Feature.VirtualDom.VNodePropertyUnsetValueAttribute";
     private const string ControlTypeName = "Kolvir.Control";
 
     /// <summary>
@@ -33,11 +44,6 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     /// </summary>
     private static readonly string[] ReservedNames =
         ["Key", "Children", "NodeType", "ApplyTo", "PatchFrom", "Kind", "Pristine"];
-
-    private static readonly SymbolDisplayFormat TypeFormat = SymbolDisplayFormat.FullyQualifiedFormat
-        .WithMiscellaneousOptions(
-            SymbolDisplayFormat.FullyQualifiedFormat.MiscellaneousOptions
-                | SymbolDisplayMiscellaneousOptions.IncludeNullableReferenceTypeModifier);
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -49,7 +55,35 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 static (syntaxContext, cancellationToken) => Read(syntaxContext, cancellationToken))
             .Collect();
 
-        context.RegisterSourceOutput(manifests, static (productionContext, models) => Emit(productionContext, models));
+        var sweeps = context.SyntaxProvider
+            .ForAttributeWithMetadataName(
+                SweepAttributeName,
+                static (node, _) => node is ClassDeclarationSyntax,
+                static (syntaxContext, cancellationToken) => ReadSweep(syntaxContext, cancellationToken))
+            .Collect();
+
+        // Once per compilation rather than once per manifest: both walks are the expensive half of this
+        // generator, and their answers are the same for every manifest the compilation declares.
+        var catalog = context.CompilationProvider
+            .Select(static (compilation, cancellationToken) => ExtensionCatalog.Scan(compilation, cancellationToken));
+
+        // The sweep's half of the same discipline: what a [VirtualDomAll] manifest has to emit for.
+        // Only walked when a manifest actually sweeps - a compilation that registers its controls by
+        // name has no use for it, and the walk is half a millisecond it should not pay.
+        var controls = sweeps.Combine(context.CompilationProvider)
+            .Select(static (input, cancellationToken) =>
+                input.Left.Any(model => model is not null)
+                    ? ControlCatalog.Sweep(input.Right, cancellationToken)
+                    : ControlCatalog.Empty);
+
+        context.RegisterSourceOutput(
+            manifests.Combine(sweeps).Combine(catalog).Combine(controls),
+            static (productionContext, input) => Emit(
+                productionContext,
+                input.Left.Left.Left,
+                input.Left.Left.Right,
+                input.Left.Right,
+                input.Right));
     }
 
     private static ManifestModel? Read(GeneratorAttributeSyntaxContext context, CancellationToken cancellationToken)
@@ -95,7 +129,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 }
             }
 
-            if (!IsIdentifier(name))
+            if (!Names.IsIdentifier(name))
             {
                 diagnostics.Add(Info(Diagnostics.NameIsNotAnIdentifier, location, name));
                 continue;
@@ -113,28 +147,68 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var nodeName = "V" + name;
-            if (controls.Any(c => c.NodeName == nodeName))
-            {
-                diagnostics.Add(Info(Diagnostics.DuplicateNodeName, location, nodeName));
-                continue;
-            }
-
-            controls.Add(new ControlModel(
-                nodeName,
-                registered.DeclaredAccessibility == Accessibility.Public ? "public" : "internal",
-                registered.ToDisplayString(TypeFormat),
-                AcceptsChildren(registered),
-                ReadProperties(registered, location, diagnostics),
-                location));
+            controls.Add(Model(registered, name, location, diagnostics));
         }
 
         return new ManifestModel(
             manifest.Name,
             manifest.ContainingNamespace.IsGlobalNamespace ? null : manifest.ContainingNamespace.ToDisplayString(),
             controls.ToImmutable(),
-            diagnostics.ToImmutable());
+            ImmutableArray<TypePlaceholderModel>.Empty,
+            ReadOverrides(compilation),
+            diagnostics.ToImmutable(),
+            manifest.Locations.FirstOrDefault() ?? Location.None);
     }
+
+    /// <summary>
+    /// Reads a <c>[VirtualDomAll]</c> manifest, which names nothing: what it sweeps is added when the
+    /// output is produced, because that list is the compilation's rather than the manifest's.
+    /// </summary>
+    private static ManifestModel? ReadSweep(GeneratorAttributeSyntaxContext context, CancellationToken cancellationToken)
+    {
+        if (context.TargetSymbol is not INamedTypeSymbol manifest)
+        {
+            return null;
+        }
+
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        if (!IsPartial(manifest))
+        {
+            diagnostics.Add(Info(
+                Diagnostics.ManifestIsNotPartial,
+                context.Attributes[0].ApplicationSyntaxReference?.GetSyntax(cancellationToken).GetLocation(),
+                manifest.Name));
+        }
+
+        return new ManifestModel(
+            manifest.Name,
+            manifest.ContainingNamespace.IsGlobalNamespace ? null : manifest.ContainingNamespace.ToDisplayString(),
+            ImmutableArray<ControlModel>.Empty,
+            ImmutableArray<TypePlaceholderModel>.Empty,
+            ReadOverrides(context.SemanticModel.Compilation),
+            diagnostics.ToImmutable(),
+            manifest.Locations.FirstOrDefault() ?? Location.None,
+            Sweeps: true);
+    }
+
+    /// <summary>The node model for one control. Registration and a sweep differ only in how the control was named.</summary>
+    private static ControlModel Model(
+        INamedTypeSymbol control,
+        string name,
+        Location location,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics) =>
+        new(
+            "V" + name,
+            control.DeclaredAccessibility == Accessibility.Public ? "public" : "internal",
+            control.ToDisplayString(Formats.Type),
+            control.ToDisplayString(Formats.Metadata),
+            AcceptsChildren(control),
+            ReadProperties(control, location, diagnostics),
+            ImmutableArray<MemberPlaceholderModel>.Empty,
+            Chain(control),
+            Interfaces(control),
+            location);
 
     private static ImmutableArray<PropertyModel> ReadProperties(
         INamedTypeSymbol control,
@@ -167,11 +241,14 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             taken.Add(property.Name, false);
             properties.Add(new PropertyModel(
                 property.Name,
-                property.Type.ToDisplayString(TypeFormat),
+                property.Type.ToDisplayString(Formats.Type),
                 "_" + Lower(property.Name),
                 "Pristine" + property.Name,
+                Values.Unset(property),
                 AddHandler: null,
-                RemoveHandler: null));
+                RemoveHandler: null,
+                Container: null,
+                Accessor: property.Name));
         }
 
         foreach (var (name, add, remove, handlerType) in HandlerPairs(control))
@@ -201,11 +278,195 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 handlerType,
                 "_" + Lower(name),
                 Pristine: null,
+                PristineLiteral: null,
                 AddHandler: add,
-                RemoveHandler: remove));
+                RemoveHandler: remove,
+                Container: null,
+                Accessor: name));
         }
 
         return properties.ToImmutable();
+    }
+
+    /// <summary>
+    /// Adds the extension members that apply to <paramref name="control"/>, resolving every name to one
+    /// exposable member or to an inert placeholder.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The rules are the language's own. A member of the control wins over an extension member of the
+    /// same name, because C# resolves an instance member before it looks at an extension. A member on a
+    /// more specific receiver wins over one on a base, exactly as a derived property hides a base one;
+    /// the catalogue is ordered per control by how specific each receiver is, so that is the order the
+    /// members are met in. What is left - two containers extending the same receiver with the same name
+    /// - cannot be resolved by choosing without choosing silently, so the name becomes a placeholder
+    /// and the analyzer reports its use.
+    /// </para>
+    /// <para>
+    /// An override wins over the member's own name, and one that lands on a name the control already
+    /// gives the node is reported (VD015) rather than placed in a conflict, because then the
+    /// application has to say which of the two it meant.
+    /// </para>
+    /// </remarks>
+    private static ControlModel Resolve(
+        ControlModel control,
+        ExtensionCatalog catalog,
+        ImmutableArray<OverrideModel> overrides,
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
+    {
+        if (catalog.Members.IsEmpty)
+        {
+            return control;
+        }
+
+        var claims = new List<Claim>(control.Properties.Length + catalog.Members.Length);
+        var order = new List<string>(control.Properties.Length + catalog.Members.Length);
+
+        foreach (var property in control.Properties)
+        {
+            claims.Add(Claim.ForNative(property));
+            order.Add(property.Name);
+        }
+
+        var applicable = catalog.Members
+            .Select(member => (Member: member, Rank: Rank(control, member)))
+            .Where(entry => entry.Rank < int.MaxValue)
+            .OrderBy(entry => entry.Rank)
+            .ThenBy(entry => entry.Member.ContainerMetadataName, StringComparer.Ordinal)
+            .ThenBy(entry => entry.Member.Name, StringComparer.Ordinal);
+
+        foreach (var (member, _) in applicable)
+        {
+            var overridden = FindOverride(member, overrides);
+            var name = overridden?.Name ?? member.Name;
+
+            if (!Names.IsIdentifier(name))
+            {
+                diagnostics.Add(Info(Diagnostics.NameIsNotAnIdentifier, overridden?.Location ?? control.Location, name));
+                continue;
+            }
+
+            if (ReservedNames.Contains(name))
+            {
+                diagnostics.Add(Info(Diagnostics.MemberNameCollides, control.Location, member.Contender, "the base node class"));
+                continue;
+            }
+
+            var claim = claims.FirstOrDefault(candidate => candidate.Name == name);
+
+            if (claim is null)
+            {
+                claims.Add(Claim.ForExtension(name, member));
+                order.Add(name);
+                continue;
+            }
+
+            if (claim.IsNative)
+            {
+                if (overridden is not null)
+                {
+                    diagnostics.Add(Info(
+                        Diagnostics.ExtensionNameIsTaken,
+                        overridden.Location,
+                        member.ContainerMetadataName + "." + member.Name,
+                        name,
+                        control.ControlMetadataName + "." + name));
+                }
+
+                continue;
+            }
+
+            claim.Add(member);
+        }
+
+        var properties = ImmutableArray.CreateBuilder<PropertyModel>();
+        var placeholders = ImmutableArray.CreateBuilder<MemberPlaceholderModel>();
+
+        foreach (var name in order)
+        {
+            var claim = claims.First(candidate => candidate.Name == name);
+
+            if (claim.Holds > 1)
+            {
+                placeholders.Add(new MemberPlaceholderModel(name, [.. claim.Contenders]));
+            }
+            else
+            {
+                properties.Add(claim.PropertyFor(name));
+            }
+        }
+
+        return control with { Properties = properties.ToImmutable(), Placeholders = placeholders.ToImmutable() };
+    }
+
+    private static OverrideModel? FindOverride(ExtensionMember member, ImmutableArray<OverrideModel> overrides)
+    {
+        foreach (var candidate in overrides)
+        {
+            if (candidate.Container == member.ContainerMetadataName && candidate.Member == member.Name)
+            {
+                return candidate;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
+    /// How specific a member's receiver is for this control: its distance in the control's own chain,
+    /// and after every class, the interfaces. A receiver the control is not assignable to is not
+    /// applicable at all.
+    /// </summary>
+    private static int Rank(ControlModel control, ExtensionMember member)
+    {
+        var index = control.Chain.IndexOf(member.Receiver);
+
+        if (index >= 0)
+        {
+            return index;
+        }
+
+        return control.Interfaces.Contains(member.Receiver) ? control.Chain.Length : int.MaxValue;
+    }
+
+    private static ImmutableArray<string> Chain(INamedTypeSymbol control)
+    {
+        var chain = ImmutableArray.CreateBuilder<string>();
+
+        for (var type = control; type is not null; type = type.BaseType)
+        {
+            chain.Add(type.ToDisplayString(Formats.Metadata));
+        }
+
+        return chain.ToImmutable();
+    }
+
+    private static ImmutableArray<string> Interfaces(INamedTypeSymbol control) =>
+        [.. control.AllInterfaces.Select(@interface => @interface.ToDisplayString(Formats.Metadata))];
+
+    private static ImmutableArray<OverrideModel> ReadOverrides(Compilation compilation)
+    {
+        var overrides = ImmutableArray.CreateBuilder<OverrideModel>();
+
+        foreach (var attribute in compilation.Assembly.GetAttributes())
+        {
+            if (attribute.AttributeClass?.ToDisplayString() != OverrideAttributeName
+                || attribute.ConstructorArguments.Length != 3
+                || attribute.ConstructorArguments[0].Value is not INamedTypeSymbol container
+                || attribute.ConstructorArguments[1].Value is not string member
+                || attribute.ConstructorArguments[2].Value is not string name)
+            {
+                continue;
+            }
+
+            overrides.Add(new OverrideModel(
+                container.ToDisplayString(Formats.Metadata),
+                member,
+                name,
+                attribute.ApplicationSyntaxReference?.GetSyntax().GetLocation() ?? Location.None));
+        }
+
+        return overrides.ToImmutable();
     }
 
     private static IEnumerable<IPropertySymbol> SettableProperties(INamedTypeSymbol control)
@@ -254,7 +515,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
 
             var kind = add.Name.Substring(3, add.Name.Length - 3 - 7);
 
-            if (kind.Length == 0 || !IsIdentifier(kind))
+            if (!Names.IsIdentifier(kind))
             {
                 continue;
             }
@@ -276,7 +537,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 continue;
             }
 
-            var display = handlerType.ToDisplayString(TypeFormat);
+            var display = handlerType.ToDisplayString(Formats.Type);
 
             yield return (kind, add.Name, remove.Name, display.EndsWith("?", StringComparison.Ordinal) ? display : display + "?");
         }
@@ -330,75 +591,280 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         return false;
     }
 
-    private static bool IsIdentifier(string name)
-    {
-        if (name.Length == 0 || !SyntaxFacts.IsIdentifierStartCharacter(name[0]))
-        {
-            return false;
-        }
-
-        for (int i = 1; i < name.Length; i++)
-        {
-            if (!SyntaxFacts.IsIdentifierPartCharacter(name[i]))
-            {
-                return false;
-            }
-        }
-
-        return SyntaxFacts.GetKeywordKind(name) == SyntaxKind.None;
-    }
-
     private static string Lower(string name) =>
         name.Length == 0 ? name : char.ToLowerInvariant(name[0]) + name.Substring(1);
 
     private static DiagnosticInfo Info(DiagnosticDescriptor descriptor, Location? location, params string[] arguments) =>
         new(descriptor, location ?? Location.None, arguments.ToImmutableArray());
 
-    private static void Emit(SourceProductionContext context, ImmutableArray<ManifestModel?> models)
+    private static void Emit(
+        SourceProductionContext context,
+        ImmutableArray<ManifestModel?> models,
+        ImmutableArray<ManifestModel?> sweeps,
+        ExtensionCatalog catalog,
+        ControlCatalog controls)
     {
-        var seenTypes = new Dictionary<string, Location>();
+        var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        // The explicit manifests come first, then the sweeping ones, because the order of the claims
+        // below is the order of the generated file: a control the application named keeps its place at
+        // the top, and what a sweep adds follows it.
+        var manifests = new List<ManifestModel>(models.Length + sweeps.Length);
 
         foreach (var model in models)
         {
-            if (model is null)
+            if (model is not null)
+            {
+                manifests.Add(model);
+                diagnostics.AddRange(model.Diagnostics);
+            }
+        }
+
+        foreach (var model in sweeps)
+        {
+            if (model is not null)
+            {
+                manifests.Add(model);
+                diagnostics.AddRange(model.Diagnostics);
+            }
+        }
+
+        // A class can carry both attributes: the controls it names and the ones it sweeps are one
+        // manifest, and a second file for the same class would be a duplicate hint name. So a sweeping
+        // manifest writes into the manifest of the class it was declared on.
+        var owner = new int[manifests.Count];
+
+        for (int index = 0; index < manifests.Count; index++)
+        {
+            owner[index] = index;
+
+            if (!manifests[index].Sweeps)
             {
                 continue;
             }
 
-            foreach (var diagnostic in model.Diagnostics)
+            for (int candidate = 0; candidate < manifests.Count; candidate++)
             {
-                context.ReportDiagnostic(diagnostic.ToDiagnostic());
-            }
-
-            foreach (var control in model.Controls)
-            {
-                if (seenTypes.TryGetValue(control.ControlType, out var first))
+                if (!manifests[candidate].Sweeps
+                    && manifests[candidate].Name == manifests[index].Name
+                    && manifests[candidate].Namespace == manifests[index].Namespace)
                 {
-                    context.ReportDiagnostic(Diagnostic.Create(
-                        Diagnostics.DuplicateRegistration,
-                        control.Location,
-                        new[] { first }.Cast<object>().Concat(new object[] { control.ControlType }).ToArray()));
-                }
-                else
-                {
-                    seenTypes.Add(control.ControlType, control.Location);
+                    owner[index] = candidate;
+                    break;
                 }
             }
         }
 
-        foreach (var model in models)
+        // One node class per control, whichever manifest declared it: a control registered twice would
+        // otherwise become two classes the reconciler can never patch between.
+        var seen = new Dictionary<string, int>(StringComparer.Ordinal);
+        var claims = new Dictionary<(string Namespace, string NodeName), List<(int Manifest, ControlModel Control)>>();
+        var order = new List<(string Namespace, string NodeName)>();
+
+        for (int index = 0; index < manifests.Count; index++)
         {
-            if (model is null || model.Controls.IsEmpty)
+            if (manifests[index].Sweeps)
             {
                 continue;
             }
 
+            foreach (var control in manifests[index].Controls)
+            {
+                if (seen.ContainsKey(control.ControlType))
+                {
+                    diagnostics.Add(Info(Diagnostics.DuplicateRegistration, control.Location, control.ControlType));
+                    continue;
+                }
+
+                seen.Add(control.ControlType, index);
+                Claim(manifests[index], index, control);
+            }
+        }
+
+        // A control the application named itself is left to that registration, including the error two
+        // registrations of it would give it. That is what lets [VirtualDomAll] be added to a manifest
+        // that already lists controls without turning every one of them into a duplicate.
+        var explicitTypes = new HashSet<string>(seen.Keys, StringComparer.Ordinal);
+
+        for (int index = 0; index < manifests.Count; index++)
+        {
+            if (!manifests[index].Sweeps)
+            {
+                continue;
+            }
+
+            foreach (var swept in controls.Controls)
+            {
+                var type = swept.ToDisplayString(Formats.Type);
+
+                // Two sweeps in one compilation would otherwise claim every control twice; the first
+                // one to claim a control keeps it, silently, because a sweep names no controls and so
+                // has no names for a duplicate to collide with.
+                if (explicitTypes.Contains(type) || seen.ContainsKey(type))
+                {
+                    continue;
+                }
+
+                seen.Add(type, owner[index]);
+                Claim(manifests[index], owner[index], Model(swept, swept.Name, manifests[index].Location, diagnostics));
+            }
+        }
+
+        void Claim(ManifestModel model, int index, ControlModel control)
+        {
+            var key = (model.Namespace ?? string.Empty, control.NodeName);
+
+            if (!claims.TryGetValue(key, out var list))
+            {
+                list = [];
+                claims.Add(key, list);
+                order.Add(key);
+            }
+
+            list.Add((index, control));
+        }
+
+        var perManifestControls = new List<ControlModel>[manifests.Count];
+        var perManifestPlaceholders = new List<TypePlaceholderModel>[manifests.Count];
+
+        for (int index = 0; index < manifests.Count; index++)
+        {
+            perManifestControls[index] = [];
+            perManifestPlaceholders[index] = [];
+        }
+
+        foreach (var key in order)
+        {
+            var list = claims[key];
+
+            if (list.Count == 1)
+            {
+                var single = list[0];
+                perManifestControls[single.Manifest].Add(
+                    Resolve(single.Control, catalog, manifests[single.Manifest].Overrides, diagnostics));
+
+                continue;
+            }
+
+            // Two controls, one name: neither node class is emitted, and the name becomes a placeholder
+            // that reports its own use rather than producing one of the two and quietly dropping the
+            // other.
+            perManifestPlaceholders[list[0].Manifest].Add(new TypePlaceholderModel(
+                list[0].Control.NodeName,
+                list[0].Control.Accessibility,
+                [.. list.Select(entry => entry.Control.ControlMetadataName)]));
+        }
+
+        foreach (var diagnostic in diagnostics)
+        {
+            context.ReportDiagnostic(diagnostic.ToDiagnostic());
+        }
+
+        for (int index = 0; index < manifests.Count; index++)
+        {
+            if (perManifestControls[index].Count == 0 && perManifestPlaceholders[index].Count == 0)
+            {
+                continue;
+            }
+
+            var model = manifests[index];
             var source = new StringBuilder();
-            NodeEmitter.Write(model, source);
+            NodeEmitter.Write(
+                model with
+                {
+                    Controls = [.. perManifestControls[index]],
+                    Placeholders = [.. perManifestPlaceholders[index]],
+                },
+                source);
 
             var hint = (model.Namespace is null ? "Global" : model.Namespace.Replace('.', '_'))
                 + "." + model.Name + ".VirtualDom.g.cs";
             context.AddSource(hint, source.ToString());
         }
     }
+
+    /// <summary>One name on one node class, and what claimed it.</summary>
+    private sealed class Claim
+    {
+        private Claim(string name, PropertyModel? native, ExtensionMember? member)
+        {
+            Name = name;
+            Native = native;
+            Member = member;
+            Contenders = member is null ? [] : [member.Contender];
+        }
+
+        internal string Name { get; }
+
+        internal PropertyModel? Native { get; }
+
+        internal ExtensionMember? Member { get; private set; }
+
+        internal bool IsNative => Native is not null;
+
+        /// <summary>Every claim on the name; more than one means the name is in dispute.</summary>
+        internal List<string> Contenders { get; }
+
+        /// <summary>How many claims there are, which is what decides whether the name is a placeholder.</summary>
+        internal int Holds => Contenders.Count;
+
+        internal static Claim ForNative(PropertyModel property) => new(property.Name, property, member: null);
+
+        internal static Claim ForExtension(string name, ExtensionMember member) =>
+            new(name, native: null, member);
+
+        /// <summary>
+        /// Adds a second claim on an extension name. The C# rules decide it where they can: a claim on a
+        /// more specific receiver hides the other, exactly as a derived property hides a base one, and
+        /// anything else is a dispute the analyzer reports at the use site.
+        /// </summary>
+        internal void Add(ExtensionMember member)
+        {
+            if (Contenders.Count > 1)
+            {
+                Contenders.Add(member.Contender);
+                return;
+            }
+
+            if (Member!.Receiver != member.Receiver && Member.ReceiverChain.Contains(member.Receiver))
+            {
+                return;
+            }
+
+            if (Member.Receiver != member.Receiver && member.ReceiverChain.Contains(Member.Receiver))
+            {
+                Member = member;
+                Contenders.Clear();
+                Contenders.Add(member.Contender);
+                return;
+            }
+
+            Contenders.Add(member.Contender);
+        }
+
+        /// <summary>The property to emit for this name, once the name is known to be undisputed.</summary>
+        internal PropertyModel PropertyFor(string name) =>
+            Member is null ? Native! : PropertyOf(name, Member);
+
+        private static PropertyModel PropertyOf(string name, ExtensionMember member) =>
+            new(
+                name,
+                member.Type,
+                "_" + Lower(name),
+                member.IsEvent ? null : "Pristine" + name,
+                PristineLiteral: member.UnsetLiteral,
+                AddHandler: member.AddHandler,
+                RemoveHandler: member.RemoveHandler,
+                Container: member.Container,
+                Accessor: member.Name);
+    }
 }
+
+/// <summary>One <c>[assembly: VNodeExtensionPropertyName]</c> the application declared.</summary>
+/// <param name="Container">The static class, the way a reader names it.</param>
+/// <param name="Member">The name the node would otherwise expose.</param>
+/// <param name="Name">The name to expose instead.</param>
+/// <param name="Location">Where the attribute is, to report against.</param>
+internal sealed record OverrideModel(string Container, string Member, string Name, Location Location);
+
+

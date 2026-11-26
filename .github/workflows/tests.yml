@@ -407,6 +407,15 @@ jobs:
           )
           echo KolvirDemoApp.exe is %EXE_BYTES% bytes of native code.
 
+      # The virtual DOM sample's --check is the test a test project cannot be: it mounts the real
+      # application, drives the real controls through the headless backend, and asserts what the nodes
+      # described - including the cell positions an extension property set and the handler an
+      # extension method pair attached. It throws on the first disagreement, so a regression in the
+      # reconciler's patch path fails the job instead of needing an eye on a demo window.
+      - name: Run the virtual DOM sample's check
+        if: runner.os == 'Windows'
+        run: dotnet run --project src\demo\Kolvir.Demo.VirtualDom\Kolvir.Demo.VirtualDom.csproj -c Release -- --check
+
       # MSBuild and test diagnostics are not workflow annotations, so lift the failing test names
       # into the job summary: that is readable without downloading the artifact.
       - name: Summarise failures

@@ -50,8 +50,11 @@ public sealed class GeneratorDiagnosticTests
     }
 
     [TestMethod]
-    public void TwoRegistrationsWithTheSameNodeNameAreReportedAsVD003()
+    public void TwoRegistrationsWithTheSameNodeNameProduceOnePlaceholder()
     {
+        // Two distinct controls and no Name to separate them. Neither node class is emitted, because
+        // choosing one of them would be a silent choice between two controls; the name becomes a
+        // placeholder that reports its own use (VD014) rather than a duplicate type.
         var generated = VirtualDomCompiler.Build("""
             using Kolvir;
             using Kolvir.Feature.VirtualDom;
@@ -67,7 +70,11 @@ public sealed class GeneratorDiagnosticTests
             internal partial class App;
             """);
 
-        CollectionAssert.Contains(generated.Ids, "VD003");
+        Assert.IsEmpty(generated.Ids, string.Join("\n", generated.Ids));
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+
+        StringAssert.Contains(generated.Source, "class VSame;");
+        StringAssert.Contains(generated.Source, "VNodeNameConflict(\"VSame\", \"TestApp.First\", \"TestApp.Second\")");
     }
 
     [TestMethod]
