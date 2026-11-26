@@ -127,7 +127,7 @@ public sealed class ExtensionMemberTests
         var next = new VSlot();
         next.Extensions[new object()] = (Action<object>)(_ => { });
 
-        var exception = Assert.ThrowsException<InvalidOperationException>(() => mount.Update(next));
+        var exception = Assert.ThrowsExactly<InvalidOperationException>(() => mount.Update(next));
 
         StringAssert.Contains(exception.Message, "never installed");
     }
