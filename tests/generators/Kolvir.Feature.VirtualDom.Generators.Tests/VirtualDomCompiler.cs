@@ -18,7 +18,10 @@ namespace Kolvir.Feature.VirtualDom.Generators.Tests;
 /// </remarks>
 internal static class VirtualDomCompiler
 {
-    private static readonly ImmutableArray<MetadataReference> References = GatherReferences();
+    private static readonly ImmutableArray<string> ReferencePaths = GatherPaths();
+
+    private static readonly ImmutableArray<MetadataReference> References =
+        [.. ReferencePaths.Distinct(StringComparer.OrdinalIgnoreCase).Select(path => MetadataReference.CreateFromFile(path))];
 
     private static readonly CSharpParseOptions Options = new(LanguageVersion.Preview);
 
@@ -26,18 +29,27 @@ internal static class VirtualDomCompiler
     /// <param name="sources">The test's own code, one string per file, which is where a manifest is declared.</param>
     /// <param name="nullable">Whether the nullable context is on, so that a file can pretend not to be.</param>
     /// <returns>The result, with the generated code already part of the compilation.</returns>
-    internal static Generated Build(params string[] sources) => Build(NullableContextOptions.Enable, sources);
+    internal static Generated Build(params string[] sources) => Build(NullableContextOptions.Enable, [], sources);
 
     /// <summary>Compiles <paramref name="sources"/> under a chosen nullable context.</summary>
     /// <param name="nullable">Whether the nullable context is on.</param>
     /// <param name="sources">The test's own code, one string per file.</param>
     /// <returns>The result, with the generated code already part of the compilation.</returns>
-    internal static Generated Build(NullableContextOptions nullable, params string[] sources)
+    internal static Generated Build(NullableContextOptions nullable, params string[] sources) => Build(nullable, [], sources);
+
+    /// <summary>Compiles <paramref name="sources"/> with extra references as well as the standard ones.</summary>
+    /// <param name="extra">References the test compiled itself, such as a library that declares an extension.</param>
+    /// <param name="sources">The test's own code, one string per file.</param>
+    /// <returns>The result, with the generated code already part of the compilation.</returns>
+    internal static Generated Build(IEnumerable<MetadataReference> extra, params string[] sources) =>
+        Build(NullableContextOptions.Enable, extra, sources);
+
+    private static Generated Build(NullableContextOptions nullable, IEnumerable<MetadataReference> extra, string[] sources)
     {
         var compilation = CSharpCompilation.Create(
             assemblyName: "VirtualDomUnderTest",
             syntaxTrees: [.. sources.Select(source => CSharpSyntaxTree.ParseText(source, Options))],
-            references: References,
+            references: [.. References, .. extra],
             options: new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: nullable));
@@ -52,18 +64,51 @@ internal static class VirtualDomCompiler
         return new Generated(compilation, output, driver.GetRunResult());
     }
 
-    /// <summary>Runs the analyzer over an already-generated compilation, as the compiler would.</summary>
+    /// <summary>
+    /// Compiles a small library to a reference, so a test can put an extension member in an assembly of
+    /// its own - with or without a reference to Kolvir, which is what the scan's narrowing turns on.
+    /// </summary>
+    /// <param name="name">The assembly name.</param>
+    /// <param name="source">The library's code.</param>
+    /// <param name="referencesKolvir">Whether the library references the assembly that declares Control.</param>
+    /// <returns>The reference, ready to pass to <see cref="Build(IEnumerable{MetadataReference}, string[])"/>.</returns>
+    internal static MetadataReference Library(string name, string source, bool referencesKolvir)
+    {
+        var control = typeof(Control).Assembly.Location;
+
+        var paths = ReferencePaths
+            .Where(path => referencesKolvir || !string.Equals(path, control, StringComparison.OrdinalIgnoreCase))
+            .Distinct(StringComparer.OrdinalIgnoreCase);
+
+        var compilation = CSharpCompilation.Create(
+            assemblyName: name,
+            syntaxTrees: [CSharpSyntaxTree.ParseText(source, Options)],
+            references: [.. paths.Select(path => MetadataReference.CreateFromFile(path))],
+            options: new CSharpCompilationOptions(OutputKind.DynamicallyLinkedLibrary, nullableContextOptions: NullableContextOptions.Enable));
+
+        using var image = new System.IO.MemoryStream();
+        var result = compilation.Emit(image);
+
+        Assert.IsTrue(
+            result.Success,
+            "the library did not compile: "
+                + string.Join("\n", result.Diagnostics.Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)));
+
+        return MetadataReference.CreateFromImage(image.ToArray());
+    }
+
+    /// <summary>Runs the analyzers over an already-generated compilation, as the compiler would.</summary>
     /// <param name="generated">The compilation the generator has been run over.</param>
-    /// <returns>The analyzer's diagnostics, only: everything else is the compiler's business.</returns>
+    /// <returns>The analyzers' diagnostics, only: everything else is the compiler's business.</returns>
     internal static async Task<ImmutableArray<Diagnostic>> AnalyzeAsync(Generated generated)
     {
-        var withAnalyzers = generated.Output.WithAnalyzers([new NullAndLeafAnalyzer()]);
+        var withAnalyzers = generated.Output.WithAnalyzers([new NullAndLeafAnalyzer(), new NodeNameConflictAnalyzer()]);
         var diagnostics = await withAnalyzers.GetAnalyzerDiagnosticsAsync();
 
         return diagnostics;
     }
 
-    private static ImmutableArray<MetadataReference> GatherReferences()
+    private static ImmutableArray<string> GatherPaths()
     {
         var paths = new List<string>();
 
@@ -80,12 +125,7 @@ internal static class VirtualDomCompiler
             }
         }
 
-        return
-        [
-            .. paths
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .Select(path => MetadataReference.CreateFromFile(path)),
-        ];
+        return [.. paths];
     }
 }
 
