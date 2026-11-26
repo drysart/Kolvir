@@ -499,3 +499,8 @@ window creation do no work for any of it: the generator and the analyzer are com
 node classes are ordinary code reachable only where an application names them. The one run-time
 effect first use adds is that assigning an extension handler member installs it for the rest of the
 process - no startup work, and nothing at all for a member nobody touches.
+
+What the node classes later gained - the documentation of the control property they expose, read from
+the reference's XML file because the compiler attaches no documentation provider to a reference - and
+the row and column styles a table can now assign, are in `dev-docs/VNODE-DOCUMENTATION.md`, including
+what each costs in generated source and per-edit generator time.

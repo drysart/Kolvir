@@ -258,6 +258,11 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 RemoveHandler: null,
                 Container: null,
                 Accessor: property.Name,
+
+                // A control declared in the compilation being built has its documentation here, when
+                // the project parses doc comments at all - without GenerateDocumentationFile the
+                // compiler has discarded them and this is empty. A control from a reference never has
+                // any here; its ID and assembly are what the emit step looks up instead.
                 Documentation: DocumentationCleaner.Clean(property.GetDocumentationCommentXml()),
                 DocumentationId: property.GetDocumentationCommentId(),
                 DocumentationAssembly: property.ContainingAssembly?.Name));
