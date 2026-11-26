@@ -3,6 +3,7 @@ using Kolvir.Feature.VirtualDom.Generators;
 using Microsoft.CodeAnalysis;
 using Microsoft.CodeAnalysis.CSharp;
 using Microsoft.CodeAnalysis.Diagnostics;
+using Microsoft.CodeAnalysis.Text;
 
 namespace Kolvir.Feature.VirtualDom.Generators.Tests;
 
@@ -25,6 +26,35 @@ internal static class VirtualDomCompiler
 
     private static readonly CSharpParseOptions Options = new(LanguageVersion.Preview);
 
+    /// <summary>
+    /// Compiles <paramref name="sources"/> with the documentation analysis the compiler runs for a
+    /// project that generates documentation, and with additional files the generator can read.
+    /// </summary>
+    /// <param name="documentation">Whether the parser binds doc comments, which is what makes the
+    /// compiler report anything about them at all.</param>
+    /// <param name="additional">Additional files, such as the documentation of a referenced assembly.</param>
+    /// <param name="sources">The test's own code, one string per file.</param>
+    /// <returns>The result, with the generated code already part of the compilation.</returns>
+    internal static Generated Build(
+        DocumentationMode documentation,
+        IEnumerable<AdditionalText> additional,
+        params string[] sources) =>
+        Build(NullableContextOptions.Enable, [], additional, new CSharpParseOptions(LanguageVersion.Preview, documentation), sources);
+
+    /// <summary>Compiles with documentation analysis on, additional files, and extra references.</summary>
+    /// <param name="documentation">Whether the parser binds doc comments, which is what makes the
+    /// compiler report anything about them at all.</param>
+    /// <param name="additional">Additional files, such as the documentation of a referenced assembly.</param>
+    /// <param name="extra">References the test compiled itself.</param>
+    /// <param name="sources">The test's own code, one string per file.</param>
+    /// <returns>The result, with the generated code already part of the compilation.</returns>
+    internal static Generated Build(
+        DocumentationMode documentation,
+        IEnumerable<AdditionalText> additional,
+        IEnumerable<MetadataReference> extra,
+        params string[] sources) =>
+        Build(NullableContextOptions.Enable, extra, additional, new CSharpParseOptions(LanguageVersion.Preview, documentation), sources);
+
     /// <summary>Compiles <paramref name="sources"/> and runs the generator over the result.</summary>
     /// <param name="sources">The test's own code, one string per file, which is where a manifest is declared.</param>
     /// <param name="nullable">Whether the nullable context is on, so that a file can pretend not to be.</param>
@@ -44,17 +74,28 @@ internal static class VirtualDomCompiler
     internal static Generated Build(IEnumerable<MetadataReference> extra, params string[] sources) =>
         Build(NullableContextOptions.Enable, extra, sources);
 
-    private static Generated Build(NullableContextOptions nullable, IEnumerable<MetadataReference> extra, string[] sources)
+    private static Generated Build(NullableContextOptions nullable, IEnumerable<MetadataReference> extra, string[] sources) =>
+        Build(nullable, extra, [], Options, sources);
+
+    private static Generated Build(
+        NullableContextOptions nullable,
+        IEnumerable<MetadataReference> extra,
+        IEnumerable<AdditionalText> additional,
+        CSharpParseOptions options,
+        string[] sources)
     {
         var compilation = CSharpCompilation.Create(
             assemblyName: "VirtualDomUnderTest",
-            syntaxTrees: [.. sources.Select(source => CSharpSyntaxTree.ParseText(source, Options))],
+            syntaxTrees: [.. sources.Select(source => CSharpSyntaxTree.ParseText(source, options))],
             references: [.. References, .. extra],
             options: new CSharpCompilationOptions(
                 OutputKind.DynamicallyLinkedLibrary,
                 nullableContextOptions: nullable));
 
-        var driver = CSharpGeneratorDriver.Create(new VirtualDomGenerator()).WithUpdatedParseOptions(Options);
+        var driver = CSharpGeneratorDriver.Create(
+            generators: [new VirtualDomGenerator().AsSourceGenerator()],
+            additionalTexts: [.. additional],
+            parseOptions: options);
 
         driver = (CSharpGeneratorDriver)driver.RunGeneratorsAndUpdateCompilation(
             compilation,
@@ -155,6 +196,39 @@ internal sealed record Generated(CSharpCompilation Input, Compilation Output, Ge
         .Where(diagnostic => diagnostic.Severity == DiagnosticSeverity.Error)
         .Select(diagnostic => diagnostic.ToString())
         .ToArray();
+
+    /// <summary>
+    /// Every warning or error the compiler reports <em>in the generated code</em>.
+    /// </summary>
+    /// <remarks>
+    /// The generated files are the ones a missing <c>&lt;summary&gt;</c>, an unresolvable <c>cref</c>
+    /// or a misplaced element would be reported in, and they are identifiable by hint name: a
+    /// generated tree's file path is the name the generator gave it.
+    /// </remarks>
+    internal string[] GeneratedWarnings => Output.GetDiagnostics()
+        .Where(diagnostic => diagnostic.Severity >= DiagnosticSeverity.Warning
+            && diagnostic.Location.SourceTree is { } tree
+            && tree.FilePath.EndsWith(".g.cs", StringComparison.Ordinal))
+        .Select(diagnostic => diagnostic.ToString())
+        .ToArray();
+}
+
+/// <summary>An additional file the test supplies itself, such as a referenced assembly's XML documentation.</summary>
+internal sealed class InMemoryAdditionalText : AdditionalText
+{
+    private readonly SourceText _text;
+
+    internal InMemoryAdditionalText(string path, string text)
+    {
+        Path = path;
+        _text = SourceText.From(text);
+    }
+
+    /// <inheritdoc />
+    public override string Path { get; }
+
+    /// <inheritdoc />
+    public override SourceText GetText(CancellationToken cancellationToken = default) => _text;
 }
 
 /// <summary>A source that declares a control of its own, so a test is not tied to a built-in one.</summary>

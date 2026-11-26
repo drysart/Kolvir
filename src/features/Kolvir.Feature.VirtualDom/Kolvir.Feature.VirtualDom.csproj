@@ -68,6 +68,12 @@
           Pack="true"
           PackagePath="analyzers/dotnet/cs"
           Visible="false" />
+    <!-- The generator reads the reference documentation from additional files, and asks the build for
+         them: without this the node properties carry no documentation in any real application, which
+         is measured and recorded in dev-docs/VNODE-DOCUMENTATION.md. -->
+    <None Include="buildTransitive\Kolvir.Feature.VirtualDom.targets"
+          Pack="true"
+          PackagePath="buildTransitive\" />
   </ItemGroup>
 
   <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,

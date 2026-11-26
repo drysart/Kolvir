@@ -100,6 +100,7 @@ internal static class NodeEmitter
 
             source.AppendLine();
             source.AppendLine(body + "private global::Kolvir.Feature.VirtualDom.Specified<" + property.Type + "> " + property.Field + ";");
+            WriteDocumentation(property.Documentation, source, body);
             source.AppendLine(body + "public " + property.Type + " " + property.Name);
             source.AppendLine(body + "{");
             source.AppendLine(body + "    get => " + property.Field + ".Value;");
@@ -129,6 +130,27 @@ internal static class NodeEmitter
         WritePatch(control, source, body);
 
         source.AppendLine(indent + "}");
+    }
+
+    /// <summary>
+    /// Writes a member's documentation as a doc comment at <paramref name="body"/>'s indentation.
+    /// </summary>
+    /// <remarks>
+    /// The text is already markup a property accepts - the cleaner reduced it to the elements that
+    /// belong there and turned every link into text - so this only has to place it: one <c>///</c> per
+    /// line, which is what keeps a multi-line element a comment rather than code.
+    /// </remarks>
+    private static void WriteDocumentation(string? documentation, StringBuilder source, string body)
+    {
+        if (documentation is null)
+        {
+            return;
+        }
+
+        foreach (var line in documentation.Split('\n'))
+        {
+            source.AppendLine(body + "/// " + line);
+        }
     }
 
     private static void WriteTypePlaceholder(TypePlaceholderModel placeholder, StringBuilder source, string indent)
@@ -244,6 +266,7 @@ internal static class NodeEmitter
         var actuator = holder + "." + ActuatorName(property);
 
         source.AppendLine();
+        WriteDocumentation(property.Documentation, source, body);
         source.AppendLine(body + "public " + property.Type + " " + property.Name);
         source.AppendLine(body + "{");
         source.AppendLine(body + "    get => " + ActuatorSet + ".Get<" + property.Type + ">(this, " + token + ");");

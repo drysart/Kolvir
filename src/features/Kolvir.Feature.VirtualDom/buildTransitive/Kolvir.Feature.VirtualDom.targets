@@ -1,0 +1,39 @@
+<Project>
+
+  <!-- Build assets for anything that uses the virtual DOM generator: the reference documentation the
+       generator reads so that a node property can carry the control property's `<summary>`.
+
+       The generator cannot find this for itself. Roslyn hands a generator a metadata symbol, and a
+       metadata symbol's documentation comes from a documentation *provider*, which the compiler does
+       not attach to a `/reference:`. Measured rather than assumed: in a real `dotnet build`,
+       `GetDocumentationCommentXml()` returns nothing for `Kolvir.Control.Text` even when Kolvir.xml
+       sits next to the Kolvir.dll being referenced and the consuming project generates documentation
+       itself. So the XML files are handed to the generator as additional files, and it indexes them by
+       assembly name.
+
+       Which files: the documentation file that sits beside each resolved reference -
+       `<assembly>.xml` beside `<assembly>.dll`, which is what a NuGet package puts in lib/<tfm>/ and
+       what this repository's project references copy next to their output anyway.
+       ReferenceCopyLocalPaths covers that; ReferencePath covers a build whose copy-local list is
+       empty. A project reference's compiler reference is the ref assembly in obj/<cfg>/<tfm>/ref/,
+       which has no documentation beside it, so that half is skipped there and costs nothing.
+
+       One consequence worth knowing: this adds files to the compiler's additional-file list, which
+       any generator or analyzer in the project sees. They are the documentation files of the project's
+       own references, so what another analyzer makes of them is the same thing the IDE shows it.
+
+       A NuGet consumer imports this automatically, because it is packed into buildTransitive/. This
+       repository's own projects use a ProjectReference, which imports no build assets at all, so
+       Directory.Build.targets imports the same file explicitly. -->
+
+  <Target Name="_KolvirVirtualDomReferenceDocumentation" BeforeTargets="CoreCompile">
+    <ItemGroup>
+      <_KolvirVirtualDomDocumentationCandidate Include="@(ReferenceCopyLocalPaths)"
+                                               Condition="'%(ReferenceCopyLocalPaths.Extension)' == '.xml'" />
+      <_KolvirVirtualDomDocumentationCandidate Include="@(ReferencePath->'%(RootDir)%(Directory)%(Filename).xml')"
+                                               Condition="Exists('%(ReferencePath.RootDir)%(ReferencePath.Directory)%(ReferencePath.Filename).xml')" />
+      <AdditionalFiles Include="@(_KolvirVirtualDomDocumentationCandidate->Distinct())" />
+    </ItemGroup>
+  </Target>
+
+</Project>

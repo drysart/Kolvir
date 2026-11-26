@@ -27,6 +27,17 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// An actuator is shared by every node class the member applies to, so it casts the control to this
 /// rather than to any one node's control type.
 /// </param>
+/// <param name="Documentation">
+/// The member's documentation, reduced to what is valid on a property and ready to be written between
+/// <c>///</c> markers, or null when there is none to be had.
+/// </param>
+/// <param name="DocumentationId">
+/// The member's documentation ID, which is how the reference documentation is indexed; null when the
+/// symbol has no documentation ID at all.
+/// </param>
+/// <param name="DocumentationAssembly">
+/// The assembly the member is declared in, whose documentation file the ID is looked up in.
+/// </param>
 internal sealed record PropertyModel(
     string Name,
     string Type,
@@ -37,7 +48,10 @@ internal sealed record PropertyModel(
     string? RemoveHandler,
     string? Container,
     string Accessor,
-    string? Receiver = null)
+    string? Receiver = null,
+    string? Documentation = null,
+    string? DocumentationId = null,
+    string? DocumentationAssembly = null)
 {
     internal bool IsEvent => AddHandler is not null;
 
