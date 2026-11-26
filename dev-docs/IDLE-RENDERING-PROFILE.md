@@ -219,7 +219,7 @@ warm-up, same machine, runs serial.
 ### The claim, in relative terms
 
 **Median idle frame cost on this machine stayed between 2.86 and 3.39 ms across all 44 commits that
-touch the render path, from the page's introduction to `ace0d1c` - within -7.5% / +9.7% of the
+touch the render path, from the page's introduction to `ace0d1c` - within -7.5% / +9.6% of the
 3.09 ms centre - and the second half of the range averages 3.042 ms against the first half's
 3.162 ms, so the net drift over the range is -3.8%.** No commit made this frame 30% more expensive,
 and the perf work in `perf/one-text-build`, `feature/text-measure-cache` and the two popup-adjacent
@@ -231,12 +231,14 @@ Repeat runs of one build differ by **3.1% at the median and 13.7% at worst**; th
 in two separate sweeps (different checkouts, different minutes) gave medians of 3.23 and 3.09 ms, 4.5%
 apart. Three runs per commit therefore resolve a commit's cost to roughly **5%**, which is what the
 sweep actually shows: the largest adjacent-commit change anywhere in the 44 samples is **+8.8%**
-(`b302982`), and the next commit gives back -7.1%, so even that is a bounce rather than a step.
+(`b302982`), and it comes immediately after a **-8.8%** (`c0c4762`) - a bounce between two samples,
+not a step.
 
 **Would this method have seen a 30% regression? Yes.** A 30% step is 6x the commit-level resolution
 and 3x the worst single-run spread, and it would have to land on a commit that touches the render
 path - all of which were measured, with the commits around them as controls. **Did it? No.** The
-biggest adjacent change is 8.8%, it reverses, and the range as a whole drifts *down*.
+biggest adjacent change is 8.8% and it is cancelled by its neighbour, and the range as a whole drifts
+*down*.
 
 A uniform sweep of every 8th first-parent commit (13 samples, 2 runs each, *all* commits rather than
 only render-path ones) was run first and says the same thing: 2.91-3.34 ms, no step. It is the
