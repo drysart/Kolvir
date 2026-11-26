@@ -283,18 +283,27 @@ to know before turning it on in a large application; section 11 measures it.
 
 ## 11. Cost
 
-This is rung 1 of `FEATURE-COST-POLICY.md` section 4 for an application that does not reference
-`Kolvir.Feature.VirtualDom`: the generator and the analyzer are analyzers, which the compiler loads
-and the published image does not contain, and the three attributes live in the package such an
-application does not reference. `Kolvir.Minimal` - no virtual DOM, no manifest, **no generated node
-classes at all** - still publishes at the same size at `develop` (`b33a768`) and at this branch,
-3,885,056 bytes on win-x64 from worktrees of equal root length.
+**The rung is 3, and it cannot sit lower.** The feature is not a member an application calls into base
+`Kolvir`; it is the shape of code a generator writes, and the generator ships in a package. So it
+lives where it already lives, in `Kolvir.Feature.VirtualDom` - a rung-3 package under
+`FEATURE-COST-POLICY.md` section 4 - and an application that does not reference that package pays
+nothing for it: the generator and the analyzer are analyzers, which the compiler loads and the
+published image does not contain, and the attributes live in the package such an application does not
+reference. `Kolvir.Minimal` - no virtual DOM, no manifest, **no generated node classes at all** -
+publishes at the same size at `develop` (`b33a768`) and at this branch, 3,885,056 bytes on win-x64
+from worktrees of equal root length.
 
-That measurement is true and, for this feature, vacuous: an application with no nodes cannot show
-what a node costs. So the rung claim is measured on an application that **does** generate nodes - a
-throwaway console probe referencing `Kolvir` and `Kolvir.Feature.VirtualDom`, carrying a manifest, and
-constructing `VPanel` and `VLabel` - published the same way (`-c Release -r win-x64
--p:EmbedSkiaSharpNative=false`, roots `C:\kolvircost\p1` and `p2`, 17 characters each):
+**Within the package it does not reach rung 1, and the reason is the rule that makes it useful.** A
+member is exposed per receiver *type*, not per use. A node class the application constructs carries
+every extension member that applies to its control, and `ApplyTo` names each one inside an
+`if (...)` - a reference the trimmer cannot see through, so the member is retained whether or not the
+application ever sets it. Emitting a member only when something writes it is not available to a
+source generator: it emits types, not uses.
+
+That cost is measured on an application that **does** generate nodes - a throwaway console probe
+referencing `Kolvir` and `Kolvir.Feature.VirtualDom`, carrying a manifest, and constructing `VPanel`
+and `VLabel` - published the same way (`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, roots
+`C:\kolvircost\p1` and `p2`, 17 characters each):
 
 | | win-x64 |
 | --- | --- |
@@ -310,13 +319,24 @@ Attributed by building the generator with one half of the feature disabled:
 | extension handler pairs only | +23,040 |
 | both (what ships) | +26,624 |
 
-Every one of those bytes is code the node classes name: `ApplyTo` and `PatchFrom` reference each
-member, so a member that was emitted is retained whether or not the application sets it. The
-properties are cheap. The handler pairs are not, and the reason is this repository's own pair:
+Every one of those bytes is code the node classes name - the properties through `ApplyTo` and
+`PatchFrom`, the handlers through the accessors of their own pair. The properties are cheap. The
+handler pairs are not, and the reason is this repository's own pair:
 `AddPopupClosedHandler` has a `Control` receiver, so it is a member of *every* node's class, and its
 accessor reaches `PopupChannel`, its `ConditionalWeakTable` and `HandlerToken` - about 23 KB of popup
 machinery that an application which never shows a popup now pays for because a node has a
 `PopupClosed` property it never sets. An application that does show popups was already paying it.
+
+**That 23 KB buys a member almost no node can use.** `AddPopupClosedHandler` fires for the control
+shown *inside* a popup, and the control a node creates is in the tree, so the generated property can
+be set on every node and essentially never be raised from the one that carries it - the sample found
+this while trying to demonstrate it, and demonstrates the in-block `UndoStateChanged` pair instead.
+This is not an argument against surfacing handler pairs: the generator cannot know a given handler's
+firing conditions from its signature, the pair is a legitimate one to expose, and the same machinery
+is what makes the undo pair work. It is the honest account of where the cost lands, and the strongest
+argument for the opt-out below - the most expensive member this feature emits globally is one that
+almost no node can use, and naming specific members to leave off is the only escape that does not
+first decide that some handler pairs should never be surfaced at all.
 
 The shape is the cost here, and it is the shape the owner asked for: a member a control's node
 exposes behaves as if it were native, which is what makes it reachable from `ApplyTo`. A cheaper
