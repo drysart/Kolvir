@@ -53,8 +53,8 @@ assembly that does not name Kolvir - so the scan watches for it rather than assu
 whose receiver does not resolve to a type widens the scan to every referenced assembly. That costs
 the full walk, but only in the case that would otherwise silently miss members.
 
-The scan is factored as a unit a future `[VirtualDomAll]` can reuse, because that feature needs the
-same index over every available control.
+The scan is factored as a unit `[VirtualDomAll]` reuses (section 10), because that feature needs the same
+index over every available control and the same reason for not walking everything.
 
 ## 3. What becomes a node member
 
@@ -240,51 +240,143 @@ accessor is not, because the lowering follows the declared member. `Column` over
 Nothing in this change creates a table of node types. Node classes are reachable only by
 construction, so an application that never writes `new VLabel { ... }` does not retain `VLabel`, and
 NativeAOT removes it. A `NodeType[]` registry would root every generated class and destroy exactly
-that property - which is what makes a future `[VirtualDomAll]` affordable at all, since generating a
-node for every available control is only acceptable if the unused ones are removed.
+that property - which is what makes `[VirtualDomAll]` (section 10) affordable at all, since generating a node
+for every available control is only acceptable if the unused ones are removed from the image. section 11
+measures that this is what happens rather than asserting it.
 
-## 10. Cost
+## 10. `[VirtualDomAll]`: a node for every control
 
-This is rung 1 of `FEATURE-COST-POLICY.md` section 4, and the claim is that an application which does
-not use the virtual DOM cannot contain a line of it: the generator and the analyzer are analyzers,
-which the compiler loads and the published image does not contain, and the three attributes live in
-`Kolvir.Feature.VirtualDom`, which such an application does not reference.
+`[VirtualDomAll]` on a class has the generator emit a node for every control the compilation can see,
+into that class's namespace. The attribute names nothing and takes nothing; the compilation supplies
+the list.
 
-Measured rather than asserted. `Kolvir.Minimal` published as NativeAOT with
-`-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`, from two worktrees of equal root length, one at
-`develop` (`b33a768`) and one at this branch:
+**What qualifies.** A control is swept when a node could be built from it: derived from `Control`,
+`public`, concrete, non-generic, and constructible without arguments. Everything else is skipped
+without a diagnostic, a warning or a comment. There is no remedy an application could apply - the node
+factory is `new T()`, and a control that cannot answer that is one no node could describe - so a
+message about it would be noise nobody can act on.
+
+**Where it looks.** The narrowed walk of section 2, for the reason given there and one more: the sweep is
+the part of this feature that would otherwise be tempted to walk every type in the closure. An
+assembly that cannot name `Control` cannot declare one, so it cannot contribute a control to the
+sweep either.
+
+**Explicit registration wins.** A control named by `[VirtualDom(typeof(X))]` anywhere in the
+compilation is left to that attribute and kept out of the sweep. The duplicate-registration error
+(VD004) stays for that explicit registration - it is still two names for one control - but the sweep
+refuses to manufacture the duplicate itself. This is what makes the attribute safe to add to a
+manifest that already lists controls, which is the way an application grows into it.
+
+**One name, two controls.** section 7's placeholder applies unchanged, and under a sweep it stops being a
+curiosity: two controls with one simple name now collide without anyone typing the name twice.
+Neither node is emitted, one `[VNodeNameConflict]` type takes the name, and VD014 reports its use with
+both controls named and the paste-ready override lines. An override cannot resolve a collision between
+two *controls*, so the remedy is a `Name` on an explicit registration of one of them - which also
+means the sweep leaves that one alone from then on.
+
+**One file per manifest.** A class may carry both attributes. The registered controls and the sweep
+are one manifest and become one file, with the registered ones first, so a project can keep the names
+it chose and let the rest arrive.
+
+**Cost.** A sweep of thirty-six controls writes 2.1 MB of source per compilation, which is the number
+to know before turning it on in a large application; section 11 measures it.
+
+## 11. Cost
+
+This is rung 1 of `FEATURE-COST-POLICY.md` section 4 for an application that does not reference
+`Kolvir.Feature.VirtualDom`: the generator and the analyzer are analyzers, which the compiler loads
+and the published image does not contain, and the three attributes live in the package such an
+application does not reference. `Kolvir.Minimal` - no virtual DOM, no manifest, **no generated node
+classes at all** - still publishes at the same size at `develop` (`b33a768`) and at this branch,
+3,885,056 bytes on win-x64 from worktrees of equal root length.
+
+That measurement is true and, for this feature, vacuous: an application with no nodes cannot show
+what a node costs. So the rung claim is measured on an application that **does** generate nodes - a
+throwaway console probe referencing `Kolvir` and `Kolvir.Feature.VirtualDom`, carrying a manifest, and
+constructing `VPanel` and `VLabel` - published the same way (`-c Release -r win-x64
+-p:EmbedSkiaSharpNative=false`, roots `C:\kolvircost\p1` and `p2`, 17 characters each):
 
 | | win-x64 |
 | --- | --- |
-| `Kolvir.Minimal.exe` at `develop` | 3,885,056 |
-| `Kolvir.Minimal.exe` at this branch | 3,885,056 |
-| delta | **0**, below the 512-byte resolution |
+| probe at `develop` (`b33a768`) | 1,751,040 |
+| probe at this branch | 1,777,664 |
+| delta | **+26,624**, 1.5 percent |
 
-The absolute is larger than the table in the policy document because the native image embeds the
-absolute path of `native\Kolvir.Minimal.pdb`, and these two roots were longer than the ones that
-produced that table. The pair is what makes the delta comparable, and the delta is zero. The same
-publish with `-p:TrimmerSingleWarn=false` reported no IL2xxx or IL3xxx warning, and nothing about
-startup or window creation changed, because no assembly the fixture contains was edited.
+Attributed by building the generator with one half of the feature disabled:
 
-The build-time cost is the other half, and it is paid per **keystroke** rather than per release, so it
-is the number worth knowing. Measured with the shipped generator over this repository's own
-`Kolvir.Demo.VirtualDom` compilation - six source files, 187 references, 20,622 types in the
-compilation - driven through `CSharpGeneratorDriver` with one comment added to one file per edit:
-
-| | time |
+| | delta over `develop` |
 | --- | --- |
-| first run (JIT, first metadata load) | 657 ms |
-| per edit, warm, 20 edits | min 4.6 ms, median 5.4 ms |
+| extension properties only | +5,632 |
+| extension handler pairs only | +23,040 |
+| both (what ships) | +26,624 |
 
-Most of that 5 ms is the narrowed scan: 588 types across the seven assemblies the narrowing keeps
-(`Kolvir`, the demo, three backends and the feature package). The spike measured the same walk at
-0.97 ms, against 21.8 ms for a walk of all 20,622 types, which is why the narrowing is the design
-rather than an optimisation: without it the generator would cost about 27 ms per edit instead of
-about 5, and an incremental generator's model is rebuilt for every new compilation, so a cache across
-edits cannot exist.
+Every one of those bytes is code the node classes name: `ApplyTo` and `PatchFrom` reference each
+member, so a member that was emitted is retained whether or not the application sets it. The
+properties are cheap. The handler pairs are not, and the reason is this repository's own pair:
+`AddPopupClosedHandler` has a `Control` receiver, so it is a member of *every* node's class, and its
+accessor reaches `PopupChannel`, its `ConditionalWeakTable` and `HandlerToken` - about 23 KB of popup
+machinery that an application which never shows a popup now pays for because a node has a
+`PopupClosed` property it never sets. An application that does show popups was already paying it.
 
-## 11. Out of scope
+The shape is the cost here, and it is the shape the owner asked for: a member a control's node
+exposes behaves as if it were native, which is what makes it reachable from `ApplyTo`. A cheaper
+design exists - an opt-out naming specific extension members to leave off the nodes - and is not
+built, because it is a new attribute and a new decision rather than an optimisation of this one.
 
-`[VirtualDomAll]` - a node for every control the compilation can see - is the next layer and is not
-built here. It needs this scan, which is why the scan is factored as a reusable unit, but its sweep,
-its silent-skip policy and its own placeholder types are not part of this change.
+**Trimming.** The decisive question for `[VirtualDomAll]` is not "same application before and after"
+but "unused node types are removed". Two measurements, both from equal-length build roots:
+
+| | win-x64 |
+| --- | --- |
+| probe, 3 controls registered, `VPanel` and `VLabel` constructed | 1,777,664 |
+| probe, 12 controls registered, the same two constructed | 1,777,664 |
+| demo, `[VirtualDomAll]`: 36 node classes, 5 constructed | 4,435,968 |
+| demo, 5 explicit registrations, the same 5 constructed | 4,435,968 |
+
+Identical to the byte in both pairs. Thirty-one swept node classes that the sample never constructs
+are absent from the published image rather than merely unreferenced, which is the property
+`[VirtualDomAll]` depends on: the sweep generates for every control and the application pays for the
+ones it names. For scale, one constructed node class is worth about 2,048 bytes (the probe with a
+single registration and one fewer constructed node measured 1,775,616). Both publishes used
+`-p:TrimmerSingleWarn=false` and reported no IL2xxx or IL3xxx warning.
+
+**Build time.** Paid per **keystroke** rather than per release, so it is the number worth knowing.
+Measured with the shipped generator driven through `CSharpGeneratorDriver` over this repository's
+`Kolvir.Demo.VirtualDom` compilation - five source files, 180 references, 20,622 types - with one
+comment added to one file per edit, median of 15 edits after a cold run:
+
+| | cold | per edit |
+| --- | --- | --- |
+| before this branch (explicit registrations) | 317 ms | 4.44 ms |
+| this branch, the same explicit manifest | 347 ms | 4.66 ms |
+| this branch, `[VirtualDomAll]` (36 node classes) | 354 ms | **18.05 ms** |
+
+The 18.05 ms decomposes as: 0.9-1.5 ms for the narrowed extension scan, 0.6-1.1 ms for the control
+sweep, and about 15.5 ms building 36 control models (roughly 3,400 node properties, each with a
+type-display string and an unset-value lookup) and writing 2.1 MB of generated source. It is linear
+in node classes at about **0.43 ms each**, so the number to predict for an application is its own
+count: a project sweeping the ~36 controls in `Kolvir` pays about 18 ms per edit, and one referencing
+more control packages pays proportionally more. It is not linear in manifests - one manifest or two
+claiming the same controls costs the same.
+
+The control sweep only runs when a manifest actually sweeps. Without that gate the explicit-manifest
+row would have paid for a walk whose answer nobody asked for; with it, an application that registers
+its controls by name pays what it paid before this branch plus the extension scan it already had.
+
+The other build-time number is the one a developer restarts the build to see. Rebuilding only the
+demo project (`-t:Rebuild --no-dependencies`, which still runs the child build that produces the
+generator), median of three: 3,591 ms with five explicit registrations, 4,862 ms with the sweep. So
+36 node classes cost about **1.3 s** on a cold compile of that project, and 2.1 MB of source per
+compilation is the reason.
+
+Warm, with the same `Compilation`, every row is 0.04-0.05 ms: the incremental model holds, and a
+keystroke is a new `Compilation` rather than a cache hit, which is why none of this is cached.
+
+## 12. Out of scope
+
+Sweeping is all or nothing. There is no way to exclude one control from a `[VirtualDomAll]` (register
+it explicitly instead - that also keeps it out of the sweep), no way to opt out of one extension
+member, and no policy for silently skipping an extension member the node cannot express. The
+attributes are fixed at three: unset values, the naming override and the conflict marker. Startup and
+window creation do no work for any of it: the generator and the analyzer are compile-time, and the
+node classes are ordinary code reachable only where an application names them.

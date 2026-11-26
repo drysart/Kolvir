@@ -4915,6 +4915,30 @@ VNode content = new VPanel
 
 `Children` takes a collection expression, so spread works: `[header, ..rows, footer]`.
 
+The other way to say it is one attribute: `[VirtualDomAll]` gives every control the compilation can
+see a node.
+
+```csharp
+[VirtualDomAll]
+internal partial class AppControls;
+```
+
+Prefer it when the view is meant to describe any control - a designer, a sample, an application with a
+large surface - because thirty `[VirtualDom]` lines are a list to keep up to date, and a control
+missing from it is a compile error at the use site with nothing to point at. Name controls by hand
+when the view is a small, deliberate subset: the generated file is proportional to what it registers,
+and sweeping everything in `Kolvir` writes about 2 MB of source per compilation.
+
+Three rules make a sweep predictable:
+
+| Rule | Why |
+| --- | --- |
+| A control that cannot become a node is skipped **silently** - abstract, generic, not `public`, or without an accessible parameterless constructor. | A node is built with `new T()`. There is nothing an application could do about a control that cannot answer that, so a diagnostic would be a message with no remedy. |
+| A control named by an explicit `[VirtualDom(typeof(X))]` **anywhere in the compilation** is left to that attribute. | That is what makes the attribute safe to add to a manifest that already lists controls: those keep the names they were given, and the duplicate-registration error two entries for one control still give. |
+| A node class is named after the control's simple name, so two controls called `Button` collide. | VD014 reports a use of the contested name; rename one by registering it explicitly with `Name`. Nothing is generated for either control until then. |
+
+Both attributes can sit on one class: the controls it names come first and the sweep fills in the rest.
+
 #### Omitted, set, and set to null
 
 A property a node does not assign is one it says nothing about. That is not the same as assigning
@@ -4940,6 +4964,88 @@ analyzer with the generator:
 
 `null!` is left alone: that is the caller overruling the analysis, and the control's own setter is
 the backstop.
+
+#### Members a control gets from elsewhere
+
+Everything above is about members the control declares. Since C# 14 a control can also have members
+added by an `extension(...)` block, and the node exposes those too, found rather than listed:
+
+```csharp
+// in the library: src/core/Kolvir/Controls/TableLayoutPanelExtensions.cs
+public static class TableLayoutPanelExtensions
+{
+    extension(Control control)
+    {
+        public int TableColumn { get => ...; set { ... } }
+    }
+}
+
+// in a view, against a generated node
+new VLabel { TableColumn = 1, TableRow = 0, Text = "Total" }
+```
+
+A `VTableLayoutPanel` can place its children by cell without the view naming the extension class, and
+a library that adds a property to every `Control` does not have to teach the virtual DOM about it. An
+extension member is applied, patched and restored exactly as a native one, because it is emitted
+exactly as one. Handler pairs come too: an `AddXxxHandler`/`RemoveXxxHandler` pair - a classic
+extension method pair or one declared inside a block - becomes the event property `Xxx`.
+
+Which member a node ends up with follows the language:
+
+| Rule | Why |
+| --- | --- |
+| A member of the control **wins silently** over an extension member of the same name. | That is what C# does: an instance member is found before any extension is considered, so the node's property is the control's. |
+| A more specific receiver wins over a less specific one. | `extension(TextBox)` beats `extension(Control)` for a `VTextBox`, the way a derived member hides a base one. |
+| Two containers claiming one name on the same receiver is a conflict. | Neither can be chosen without choosing silently, so the name becomes an inert placeholder and using it is an error. |
+
+Only a property with a public getter and a public setter is exposed - a node can only set what a
+caller could set, and it reads the pristine value back through the getter.
+
+Two attributes pay the two costs of that, both in the assembly that owns the view:
+
+**`[VNodePropertyUnsetValue]`** says what a dropped property restores to, as a compile-time constant,
+instead of making the node read it off a control:
+
+```csharp
+[VNodePropertyUnsetValue(0)]
+public int Column { get => ...; set { ... } }
+```
+
+Worth writing when a render will not always set the property and its pristine value is a constant the
+code can write down. It removes the *read*, not the construction: a control has dozens of settable
+properties, so the one shared `Pristine` instance a node type constructs for the rest of them stays.
+What it saves is asking a property that could have answered for itself. It goes on your own members;
+a library's extension property cannot carry it, and a constructed-control read is what happens there,
+which is always correct and merely costs one construction per node type.
+
+**`[VNodeExtensionPropertyName]`** resolves a conflict, one declaration per member:
+
+```csharp
+[assembly: VNodeExtensionPropertyName(typeof(TableLayoutPanelExtensions), "TableColumn", "GridColumn")]
+```
+
+The container is the static class, the member is the name the node would otherwise expose, and the
+replacement is the **whole** name. Resolving either side of a conflict resolves it: neither name
+becomes a placeholder and neither contender is reported. The member name is a string because
+`nameof` does not compile on an extension property (CS9286) - a limitation of the language, not of the
+attribute. An override that lands on a name the node already has from the control is an error: the
+application has to say which of the two it meant.
+
+| Id | Reported where | Says |
+| --- | --- | --- |
+| VD013 | a use of a node property name two extension members claim | names both contenders, and includes the override line that resolves it |
+| VD014 | a use of a node class name two controls claim | the same, for `[VirtualDomAll]` collisions between controls |
+| VD015 | the override itself | the new name belongs to a native member of the control |
+
+All three fire where the conflicting name is **used**, not where it is defined. A collision nobody
+mentions compiles and costs nothing, because the placeholder is only a name: it holds no property
+model, `ApplyTo` never mentions it and the reconciler never sees it. That is deliberate - the
+alternative, failing the build over a name no code mentions, would make two unrelated libraries
+unusable together for no reason.
+
+The reasoning behind all of this - why the placeholder is inert, why there is no `[Obsolete]`
+backstop, what the scan costs per edit - is in
+[`EXTENSION-MEMBERS-ON-VNODES.md`](EXTENSION-MEMBERS-ON-VNODES.md).
 
 #### Fragments, and rendering nothing
 
