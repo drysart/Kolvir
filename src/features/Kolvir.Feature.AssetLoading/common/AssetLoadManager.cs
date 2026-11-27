@@ -1,4 +1,4 @@
-namespace Kolvir.Feature.AssetLoading;
+﻿namespace Kolvir.Feature.AssetLoading;
 
 /// <summary>
 /// The queue behind <see cref="IAssetLoadManager"/>.
@@ -289,51 +289,51 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     {
         Finish(request);
 
-        bool delivered = false;
-
         if (!request.CallerDone)
         {
             // Released before the caller is answered, so a continuation that looks at this manager
             // cannot see a request the walk no longer holds (3.10).
             request.CallerDone = true;
 
-            if (error is null)
-            {
-                try
-                {
-                    delivered = request.HandOver(result);
-                }
-                catch (Exception failure)
-                {
-                    // The loader's untyped task produced something its own typed member could not take:
-                    // a mismatched type, or nothing at all for a value type. A factory bug, and one the
-                    // caller has to hear about rather than wait on forever. Catching everything is
-                    // deliberate: the block is a cast and a TrySetResult, neither of which has a
-                    // legitimate throw for the manager to preserve, and anything escaping here would
-                    // leave the caller unanswered and the walk unfinished - the slot this request holds
-                    // would never come back to the queue.
-                    request.Fail(failure);
-                }
-            }
-            else
+            if (error is not null)
             {
                 request.Fail(error);
             }
+            else
+            {
+                try
+                {
+                    request.HandOver(result);
+                }
+                catch (Exception failure) when (!request.Delivered)
+                {
+                    // The cast produced no TResult, so nothing was committed: a factory bug, and one
+                    // the caller has to hear about rather than wait on forever. That cast is the only
+                    // throw the block owns - a continuation's is the runtime's to surface, not this
+                    // manager's to answer - and the filter asks the request rather than relying on
+                    // that, because committing the value and handing it over are one call.
+                    request.Fail(failure);
+                }
+            }
         }
 
-        // Every path that arrives here with no receiver for the result - the caller was answered when
-        // it asked to stop (3.9), a caller answered from another thread at the same moment, a value
-        // its own typed member could not take - leaves the manager as the only holder, so this is
-        // where the value is let go.
-        if (!delivered)
+        try
         {
-            Discard(result);
+            // Either the caller was answered here, or it was answered when it asked to stop (3.9).
+            // Both leave the same thing to do: the request is gone, so the loaders vetoed while it
+            // held a slot get their turn. Before the release below, because that runs an arbitrary
+            // Dispose and a queue stalled behind a throwing one is the worse outcome.
+            Walk();
         }
-
-        // Either the caller was answered here, or it was answered when it asked to stop and the result
-        // it will never see has just been released. Both leave the same thing to do: the request is
-        // gone, so the loaders vetoed while it held a slot get their turn.
-        Walk();
+        finally
+        {
+            // Asked of the request rather than inferred from how this method left, so a result the
+            // caller already has is never released.
+            if (!request.Delivered)
+            {
+                Discard(result);
+            }
+        }
     }
 
     /// <summary>Releases a result that no caller is left to receive.</summary>
@@ -571,3 +571,5 @@ internal sealed class AssetLoadManager : IAssetLoadManager
         }
     }
 }
+
+

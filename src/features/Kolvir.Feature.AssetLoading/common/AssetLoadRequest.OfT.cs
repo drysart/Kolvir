@@ -32,6 +32,9 @@ internal sealed class AssetLoadRequest<TResult> : AssetLoadRequest
     public Task<TResult> Completion => _completion.Task;
 
     /// <inheritdoc/>
+    public override bool Delivered => _completion.Task.Status == TaskStatus.RanToCompletion;
+
+    /// <inheritdoc/>
     public override bool HandOver(object? result)
     {
         TResult value;

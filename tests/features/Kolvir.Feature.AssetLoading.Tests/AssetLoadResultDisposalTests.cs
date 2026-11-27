@@ -53,6 +53,31 @@ public sealed class AssetLoadResultDisposalTests : AssetLoadingTestBase
     }
 
     [TestMethod]
+    public void AResultWhoseReleaseThrowsDoesNotHoldTheQueue()
+    {
+        IAssetLoadManager manager = CreateManager();
+        using var cancellation = new CancellationTokenSource();
+        var image = new TestImage { ThrowOnDispose = true };
+        var loader = new FakeAssetLoader<ImageData>();
+        var behind = new FakeAssetLoader<string>(canLoadNow: false);
+
+        Task<ImageData> task = manager.LoadAsync(loader, null, cancellation.Token);
+        manager.LoadAsync(behind, null, CancellationToken.None);
+
+        cancellation.Cancel();
+
+        // Opened without a notification, so the dropping request's own walk is the only thing that can
+        // start it. The release below throws, and the walk has to have already happened by then.
+        behind.CanLoadNow = true;
+
+        loader.Complete(image.Data);
+
+        Assert.IsTrue(task.IsCanceled, "the caller was answered at cancellation time");
+        Assert.IsTrue(image.IsDisposed, "the dropped result was released");
+        Assert.AreEqual(1, behind.LoadCount, "and the walk ran before the release, so the slot came back");
+    }
+
+    [TestMethod]
     public void AQueuedRequestCancelledBeforeItStartsHasNoResultToDispose()
     {
         IAssetLoadManager manager = CreateManager();
