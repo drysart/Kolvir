@@ -298,10 +298,12 @@ internal sealed class HttpAssetLoaderFactory : IAssetLoaderFactory<ImageData>
 
                 if (Volatile.Read(ref decode.Abandoned) != 0)
                 {
-                    // The caller is already answered and the late result goes nowhere. Completing
-                    // off this thread keeps the loader's task from ending inside the cancellation
-                    // callback itself, which runs before the manager's own one and would otherwise
-                    // let the manager observe the end before it has answered the caller.
+                    // The caller is already answered and the late result goes nowhere. The end is
+                    // posted rather than completed here so that a cancellation callback is not doing
+                    // completion work on a caller's behalf - the callback's job is to mark the handle
+                    // and give its interest back. The manager's answer no longer depends on this
+                    // either way (section 3.9 answers a cancelled request from its own token), so the
+                    // hop is a rule about where work happens, not a fix for an ordering hazard.
                     ThreadPool.QueueUserWorkItem(
                         static queued =>
                         {

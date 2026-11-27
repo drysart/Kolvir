@@ -72,11 +72,12 @@ internal sealed class HttpAssetLoader : IAssetLoader<ImageData>
 
     /// <inheritdoc/>
     /// <remarks>
-    /// Three answers, in this order: a fetch for this URI is already in flight, so this handle would
-    /// share it and consume no new slot; or the request would fit the total and its host's limit; or
-    /// it would not. Asking changes none of those - the count moves when
-    /// <see cref="LoadAsync"/> attaches the handle, which is what keeps the manager's walk from
-    /// overshooting (section 4.2).
+    /// Three answers, in this order: a fetch for this URI is in flight and still accepting handles, so
+    /// this call would share it and consume no new slot - a fetch that has been aborted but has not
+    /// yet unwound is not that answer, and asking for its URI counts as a request of its own; or the
+    /// request would fit the total and its host's limit; or it would not. Asking changes none of
+    /// those - the count moves when <see cref="LoadAsync"/> attaches the handle, which is what keeps
+    /// the manager's walk from overshooting (section 4.2).
     /// </remarks>
     public bool CanLoadNow => _factory.CanLoadNow(_uri, Host);
 
