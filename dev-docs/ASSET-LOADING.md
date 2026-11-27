@@ -151,7 +151,7 @@ Three reasons for this shape rather than repairing the draft in place:
 
 A typed factory therefore also has to answer the non-generic member, one line comparing `resultType`
 with `typeof(TResult)` and forwarding. Whether `IAssetLoaderFactory<TResult>` supplies that line as a
-default interface implementation, or every factory writes it, is open question 9.7.
+default interface implementation, or every factory writes it, is open question 9.6.
 
 ### 2.2 Registration
 
@@ -184,7 +184,7 @@ order is free and visible.
 Not a dictionary keyed by scheme: a factory may claim by scheme, by host, by file extension, or by
 nothing at all (an embedded-resource loader claims a single prefix), and a provider that enumerated
 the possible keyings would be inventing a taxonomy that the factories already know. The exact member
-set of the provider is open question 9.6.
+set of the provider is open question 9.5.
 
 ### 2.4 The started notification, and why it is a callback
 
@@ -213,7 +213,43 @@ The rejected alternative was an `IAssetLoadRequest<TResult>` handle - a type hol
 `AddStartedHandler` pair, and a per-request `Priority` - which is the shape this should become if
 per-request priority or state is ever wanted outside the manager. It is not wanted yet: a callback is
 one parameter that callers can ignore, where a handle is a new type in every call site and a second
-way to express a priority the loader already carries. Open question 9.5 keeps that choice visible.
+way to express a priority the loader already carries. Open question 9.4 keeps that choice visible.
+
+### 2.5 The priority constants
+
+```csharp
+public static class AssetLoadPriority
+{
+    public const int Background = 0;
+    public const int Visible = 1000;
+}
+```
+
+Two anchors a thousand apart, and both halves of that are the decision.
+
+The values are far apart on purpose: future feature work and applications need room to slot intervening
+priorities between "the user is looking at it" and "nothing is looking at it", and a dense pair - 0 and
+1 - would force a renumbering the first time an application wanted a tier of its own. With this spacing
+an application can define 900 for "about to scroll into view" without touching these constants or the
+manager.
+
+That same argument is why these are `int` constants rather than an `enum`: an enum is a closed set, and
+a closed set cannot express "slightly less urgent than visible, more urgent than background", which is
+exactly the case the spacing exists to allow. An enum would also make `Priority` an enum, and the
+manager would then be generic over a set it does not own.
+
+Two constants and no more. `Normal` or `Prefetch` would be guesses at tiers nobody has asked for, and a
+constant set is API surface that has to be right; intervening values are legitimate and expected, naming
+them before something needs them is not.
+
+These are two anchors for the integration, not a default for loaders. `Priority` is a property on
+`IAssetLoader`, so what a loader starts at is that loader's business, and this feature ships no
+reference loader. If one ever chooses a default, the safe direction is `Background`: treating an
+unclassified load as visible would let it compete with work the user is looking at, which is the one
+mistake this feature exists to prevent.
+
+The queue rules that consume these stay in 3.5 and 3.6 - higher wins, priority matters only while the
+load is queued, and equal priorities keep submission order.
 
 ## 3. Decisions, and why
 
@@ -313,7 +349,7 @@ because a load finished or because a limit was raised, and both of those raise
 `CanLoadNowChanged`; a priority changes only because something set it, and that raises
 `PriorityChanged`. There is no state change the manager needs to hear about that has no event.
 
-The walk itself is O(n) in the queued loaders; section 9.8 keeps that cost as an open question rather
+The walk itself is O(n) in the queued loaders; section 9.7 keeps that cost as an open question rather
 than assuming it is fine.
 
 ### 3.8 The walk is re-entrancy safe
@@ -675,8 +711,8 @@ the loader, and the InView handler token all go. Removal and disposal are the ot
 stops, and both are now notifications the package subscribes to rather than gaps (6.2).
 
 **Priority.** `EffectiveInView` maps to `Priority` through `AddEffectiveInViewChangedHandler`, one
-subscription per URI assignment (3.15). In view is Visible, out of view is Background; the constants
-are open question 9.2.
+subscription per URI assignment (3.15). In view is `AssetLoadPriority.Visible`, out of view is
+`AssetLoadPriority.Background` (2.5).
 
 **Where the state lives.** Not on the control: a rung-3 package cannot add fields to `Image`. It goes
 in a `ConditionalWeakTable<Image, ...>` keyed on the control, exactly as `EffectiveInViewState` keeps
@@ -722,7 +758,7 @@ inferred rather than written down:
 - **`Failed` carries the exception in `SourceLoadError`**, not in the state, because a state value
   cannot carry one and an exception type is not a state.
 - **A failed load leaves `SourceUri` set**, which makes a retry a plain `SourceUri = uri` assignment
-  rather than a new API. That resolves half of what was open question 9.3 - see 6.3.
+  rather than a new API. That resolves half of what was open question 9.2 - see 6.3.
 - **`Loaded` and `Failed` are raised after `Source` is settled.** A handler that assigns
   `PlaceholderSource` in response is therefore writing the image that stays on screen, and one that
   reads `Source` reads the image the state describes. Raising the state first would let a handler see
@@ -791,7 +827,7 @@ for.
   - and so is the rule that the URI stays set. What is not decided is the retry policy: whether
   re-assigning the same URI is the documented way to retry, whether the feature retries by itself
   (and after what delay), and whether a failure that is obviously permanent (a malformed URI, a
-  factory that throws) is treated differently from a transient one. Open question 9.3.
+  factory that throws) is treated differently from a transient one. Open question 9.2.
 - **Disposal of a replaced `ImageData`.** The feature created it, so the feature owns it: `Image`
   never disposes its `Source` and assigning a new one does not dispose the old
   (`src/core/Kolvir/Controls/Image.cs`). Assigning a new URI must dispose the previous loaded
@@ -833,7 +869,7 @@ What it costs, exactly:
   makes reachable, so `EffectiveInView`'s own code goes with it if nothing else uses it.
 - **The exception to watch** is anything the package reaches from a path every consumer reaches. Today
   that is `AddAssetLoading()` alone, which registers the manager and the provider and nothing else
-  (9.9); the extension shape is what keeps it that way, and a later addition that touches InView from a
+  (9.8); the extension shape is what keeps it that way, and a later addition that touches InView from a
   constructor or a registration would quietly undo the saving. That is the one thing to check when this
   package grows.
 
@@ -878,8 +914,9 @@ decision turns on.
 | A loader as single use forever | Sharing needs a handle per caller that may be reused after it completes; "one outstanding" is the rule that gets both (3.11, 4.1). |
 | Handing one loader object to two controls | They would fight over one `Priority` and one cancellation (4.1). |
 | A new visibility notion for the control integration | `EffectiveInView` is occlusion-aware, invalidation-driven and already the reason the feature exists (3.15). |
+| An `enum` for priority | A closed set cannot express a value between two named tiers, which is the case the thousand-level spacing exists for; an int keeps `Priority` a plain number the manager can order (2.5). |
 | Two event pairs instead of one state property | A consumer wants the current answer; a synchronous failure is already terminal before a handler can subscribe; state plus a handler is what `Visible`, `Enabled` and `EffectiveInView` already use (6). |
-| `IAssetLoadRequest<TResult>` instead of an `onStarted` callback | A new type in every call site and a second way to say a priority the loader already carries; it is what this becomes if per-request state or priority is ever wanted (2.4, 9.5). |
+| `IAssetLoadRequest<TResult>` instead of an `onStarted` callback | A new type in every call site and a second way to say a priority the loader already carries; it is what this becomes if per-request state or priority is ever wanted (2.4, 9.4). |
 | One "not finished" state, with no started notification | Leaves a UI unable to distinguish a placeholder from a spinner, which is requirement 5 (1, 2.4). |
 | Letting "disposed" stand in for "removed" | Removal and disposal are separate signals now (`RemovedFromTree` and `Disposing`), and a control removed by application code never sees the second; one cannot stand in for the other (6.2). |
 | Accepting the gap and documenting it | A removed control's load would run to completion with nothing to cancel it - a wasted fetch per in-flight load, and the control held alive until it ended. The two mechanisms in 6.2 close it, so there is nothing left to accept. |
@@ -898,53 +935,49 @@ reviewer can disagree with the reading rather than with a decision presented as 
    factory exists; the shape (a counter with a per-key limit and change notification, and whether it
    refcounts fetches or only counts them) is mixed up with 4.1's handle/shared-fetch split, so it
    should be written against a real factory rather than guessed here.
-2. **Do `AssetLoadPriority` constants ship?** Two named values - `Visible` and `Background` - would
-   keep call sites from inventing their own numbers, and a `Priority` that is a bare `int` invites
-   one control to pick 5 and another 7 for the same meaning. Against: a constant set is an API surface
-   that has to be right, and the manager only needs a total order.
-3. **What is the retry policy after `Failed`?** The surface half is decided - `Failed` plus
+2. **What is the retry policy after `Failed`?** The surface half is decided - `Failed` plus
    `SourceLoadError`, with `SourceUri` left set so that a retry is a plain re-assignment (6.1, 6.3).
    What is not: whether re-assignment is the documented retry and nothing more, whether the feature
    ever retries by itself, and whether an obviously permanent failure (a malformed URI, a factory that
    throws) is distinguished from a transient one. The reading to start from is the smallest: no
    automatic retry, because a retry policy is a policy the application should own and a feature that
    retries cannot be told to stop.
-4. **What are the state's names and values?** `SourceLoadState` versus `SourceUriLoadState` for the
+3. **What are the state's names and values?** `SourceLoadState` versus `SourceUriLoadState` for the
    property, `ImageSourceLoadState` for the type, and whether a cancellation should have its own value
    instead of landing in `None` or `Failed`. A cancelled load is not a failure, and a UI that shows a
    red error for a scroll that cancelled a fetch would be wrong; the reading to start from is a
    separate `Cancelled` value, or `None` if cancellation can only happen when the control is going
    away.
-5. **Does the started notification stay a callback parameter?** The alternative shapes are a virtual
+4. **Does the started notification stay a callback parameter?** The alternative shapes are a virtual
    the manager exposes for override, or an event pair on the manager that a caller subscribes to - the
    second re-creates the per-request lookup problem a callback avoids, and the first makes one manager
    per consumer. A callback is one parameter that most callers pass `null` for; the question is
    whether it is the right long-term shape or only the smallest one that works (2.4).
-6. **What are `IAssetLoaderProvider`'s exact members?** `TryCreateAssetLoader<TResult>(string uri, out
+5. **What are `IAssetLoaderProvider`'s exact members?** `TryCreateAssetLoader<TResult>(string uri, out
    loader)` is decided (2.3); whether it also exposes "can anything handle this URI", the registered
    factories for diagnostics, or a non-generic overload is not.
-7. **Does `IAssetLoaderFactory<TResult>` forward the non-generic member as a default interface
+6. **Does `IAssetLoaderFactory<TResult>` forward the non-generic member as a default interface
    implementation, or does every factory write the three-line comparison?** A default implementation
    keeps factories short; a written one keeps every member visible in the source of the type that has
    to behave. Not decided (2.1).
-8. **Does the walk need to be cheaper than O(n) per enqueue?** A scroll enqueues many loaders at
+7. **Does the walk need to be cheaper than O(n) per enqueue?** A scroll enqueues many loaders at
    once, so the first real queue is where this is answerable; a priority index that starts from the
    waiter that woke it is the obvious candidate if it is not.
-9. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
+8. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
    `HttpClientLoaderFactory`, an `IImageDataFactory`-backed decoder, or nothing at all - the last is
    the smallest surface and the one rung 3 argues for.
-10. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
+9. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
     state) would make the demo's readout possible and make a priority bug visible; it is also a public
     surface that has to be kept truthful, and a snapshot type is a small API of its own.
-11. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
+10. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
     `PlaceholderColor` fills a control with no source at all, and the placeholder is specified as drawn
     "whenever there is no loaded image for its URI" - so the two overlap exactly where there is no URI.
     The reading to start from is that a null `SourceUri` means the control is not this feature's to
     decorate, so `PlaceholderSource` is ignored there and `PlaceholderColor` keeps its current meaning;
     the opposite reading - a placeholder is a property of the control, not of the URI - is defensible
     and would need `PlaceholderColor` to lose the no-URI case.
-12. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
+11. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
     (6.1), which is accurate but loses the fact that a load was cancelled rather than never asked for.
-    This is 9.4's question seen from a different door: if cancellation gets a `Cancelled` value for the
+    This is 9.3's question seen from a different door: if cancellation gets a `Cancelled` value for the
     URI cases, an application assignment is the one case that should probably stay `None`, because the
     control is no longer following a URI at all.
