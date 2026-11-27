@@ -4162,6 +4162,22 @@ does not dispose the first, so a long-running page that replaces its image has t
 itself. A disposed image draws nothing rather than throwing, because a paint runs on the paint thread
 where there is nobody to catch anything.
 
+`Source` is a plain property, but assigning it raises `AddSourceChangedHandler` at the end of the
+setter. That is how code that keeps state of its own for the source - an asset load that is still in
+flight, for one - can tell the application's assignment from its own: an assignment means the
+application has taken over, so the outstanding work is cancelled.
+
+```csharp
+using var subscription = image.AddSourceChangedHandler(sender => CancelOutstandingLoad((Image)sender));
+```
+
+Assigning the value already held raises nothing, because the setter returns early on an unchanged
+reference; assigning null raises like any other change. The handler runs inside the assignment, so it
+may assign `Source` itself - the setter re-enters safely - and must not assume the control is
+quiescent; an exception it throws propagates to whatever assigned the source. This is an assignment
+notification and not a frame one: an animation advancing raises `ImageData.Changed`, which the
+control consumes internally to drive its timer, and does not raise this pair.
+
 #### The data: one timeline
 
 ```csharp

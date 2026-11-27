@@ -46,6 +46,7 @@ public class Image : Control
     private ImageData? _image;
     private SizeMode _sizeMode = SizeMode.Zoom;
     private Timer? _frameTimer;
+    private Action<object>? _sourceChanged;
 
     /// <summary>Creates an image control with no source that sizes itself to the picture it is given.</summary>
     public Image()
@@ -54,13 +55,61 @@ public class Image : Control
     }
 
     /// <summary>
+    /// Adds a handler that runs when <see cref="Source"/> is assigned a different value.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the image control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
+    /// <remarks>
+    /// <para>
+    /// Raised at the end of the assignment, after the frame timer, the layout and the repaint have
+    /// been updated, so a handler that reads <see cref="Source"/> or the control's layout sees the
+    /// image the notification is about.
+    /// </para>
+    /// <para>
+    /// Assigning the value already held raises nothing, because the setter returns early when the
+    /// reference has not changed. Assigning null raises it, like any other change.
+    /// </para>
+    /// <para>
+    /// The handler runs inside the assignment and may assign <see cref="Source"/> itself, which
+    /// re-enters the setter and raises this notification again, so the control must not be assumed
+    /// quiescent. An exception it throws propagates to whatever assigned the source, exactly as every
+    /// other handler pair on <see cref="Control"/> does.
+    /// </para>
+    /// <para>
+    /// This is an assignment notification, not a frame notification: an animation advancing raises
+    /// <see cref="ImageData"/>'s own change notification, which the control consumes internally to
+    /// drive its timer. The contents of an <see cref="ImageData"/> changing does not raise this.
+    /// </para>
+    /// </remarks>
+    public IDisposable AddSourceChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _sourceChanged += handler;
+        return new HandlerToken<Action<object>>(RemoveSourceChangedHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddSourceChangedHandler"/> added.</summary>
+    public void RemoveSourceChangedHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _sourceChanged -= handler;
+    }
+
+    /// <summary>
     /// What the control shows. The control does not take ownership: it draws this and does not
     /// dispose it.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// Setting it replaces whatever was there without disposing the old data, and the timer follows
     /// the new data: an animation already playing starts ticking, and a still picture stops the timer
     /// at once. The caller disposes what the caller created - see the ownership note on this class.
+    /// </para>
+    /// <para>
+    /// An assignment that changes the value raises <see cref="AddSourceChangedHandler"/> at the end,
+    /// which is what lets an application that owns the source tell its own assignment from the
+    /// control's internal use of the same property.
+    /// </para>
     /// </remarks>
     public ImageData? Source
     {
@@ -83,6 +132,8 @@ public class Image : Control
             UpdateFrames();
             PerformLayout();
             Invalidate();
+
+            _sourceChanged?.Invoke(this);
         }
     }
 
