@@ -5,10 +5,10 @@ for `Kolvir.Feature.AssetLoading`, which ships the manager and the `Image` integ
 (section 7). The measurement that `FEATURE-COST-POLICY.md` asks every feature to state comes with the
 code, not with this note.
 
-It builds on what core now has or is getting: `Control`'s tree-lifetime notifications (`AddedToTree`,
-`RemovedFromTree`, `Disposing`), which are merged; `Image`'s `Source` change notification, which is
-decided and in progress (6); the virtual DOM's reconciler disposing the controls it removes, decided and
-in progress (6.2); and `Window` disposing its tree when it tears down, decided and in progress (6.2).
+It rests on four things core now has, all merged: `Control`'s tree-lifetime notifications (`AddedToTree`,
+`RemovedFromTree`, `Disposing`); `Image`'s `Source` change notification (#167); the virtual DOM's
+reconciler disposing the controls it removes (#166); and `Window` disposing its tree when it tears down
+(#168). Section 6.2 is where they meet.
 
 This records a design that was settled in review before it was written down. Sections 2 to 4 are the
 decided shape and the reasons for it; section 5 is what the manager does, in the order it does it;
@@ -53,7 +53,7 @@ the loader owns capacity and bytes.
 
 A third responsibility is not the manager's either, though it is the feature's: the lifetime of a
 request belongs to the control that made it. A control now hears that it left its tree, that it joined
-one, and that it is being disposed (`Control`, merged), so the control integration - not the manager -
+one, and that it is being disposed (`Control`), so the control integration - not the manager -
 is where a load is cancelled and restarted (6.2). The manager never learns what a control tree is.
 
 ## 2. The interfaces, as decided
@@ -785,13 +785,13 @@ application's bug rather than a case the feature resolves. What it does is whate
 in the render produces, and that is deliberately not a contract - detecting it would mean a general
 validation pass over generated nodes, which is a system this feature does not justify (section 8).
 
-That last rule is the one that needs a core change, and it is the same argument 6.2 had to win for
-`Control`, on one control instead of on the base class: `Image.Source` is a plain property with a
-reference-equality guard and no notification to anything (`src/core/Kolvir/Controls/Image.cs:65-87`), so
-a package in another assembly cannot tell an application assignment from the one it just made itself.
-`Image` therefore gains `AddSourceChangedHandler`/`RemoveSourceChangedHandler`, raised at the end of the
-`Source` setter. That is decided and in progress, and without it the exclusivity rule is not
-implementable from a rung-3 package at all.
+That last rule is the one that needed a core change, and it is the same argument 6.2 had to win for
+`Control`, on one control instead of on the base class: `Image.Source` was a plain property with a
+reference-equality guard and no notification to anything, so a package in another assembly could not
+tell an application assignment from the one it had just made itself. `Image` now raises
+`AddSourceChangedHandler`/`RemoveSourceChangedHandler` at the end of the `Source` setter, on an
+assignment that changes the value (#167), and without it the exclusivity rule is not implementable from
+a rung-3 package at all.
 
 **`PlaceholderSource` is what an application shows when there is nothing loaded.** It pairs with the
 control's existing `PlaceholderColor`, which fills the surface when there is no source at all:
@@ -926,60 +926,68 @@ inferred rather than written down:
   took the control over, so the URI is cleared, the error stays null, and the state says what is
   actually true.
 
-### 6.2 Removal and disposal are separate, and both are now observable
+### 6.2 Removal and disposal are separate, and both are observable
 
 Requirement 4 opens with "the image control is removed from the UI", and removal is not disposal. Two
-facts made that the hardest case in this note, and both of them are answered now - one in core, one by
-a change to the reconciler:
+facts made that the hardest case in this note, and core answers both now:
 
-- **Removal does not dispose.** `Reconciler.Unmount` takes the control out of its parent -
+- **Removal does not, by itself, dispose.** `Reconciler.Unmount` takes the control out of its parent -
   `control.Parent?.Controls.Remove(control)` at
-  `src/features/Kolvir.Feature.VirtualDom/common/Reconciler.cs:99` - and nothing in that call ends the
-  control. So the virtual DOM, the main producer of these controls, detached them and left them alive.
-- **Disposal raised nothing.** `Dispose(bool)` is `protected virtual` and the disposal guard is
+  `src/features/Kolvir.Feature.VirtualDom/common/Reconciler.cs:113` - and that call alone ends nothing.
+- **Disposal used to raise nothing.** `Dispose(bool)` is `protected virtual` and the disposal guard is
   private, so nothing outside a control could hear that it had ended.
 
 The consequence was worse than a leaked `ImageData`: the completion continuation closes over the
 control and the manager holds the handle, so an in-flight load kept a removed control reachable and ran
 to completion with nothing to cancel it.
 
-**Decided: the notification, plus owners disposing what they own.** They were built for different reasons
-and now overlap on purpose.
+**The design rests on the notification, plus owners disposing what they own.** They were built for
+different reasons and now overlap on purpose.
 
-- **`Control` tells a subtree about all three moments** (merged): `AddRemovedFromTreeHandler` fires when
+- **`Control` tells a subtree about all three moments** (#165): `AddRemovedFromTreeHandler` fires when
   `Parent` goes from a control to null, `AddAddedToTreeHandler` when it goes back, and
   `AddDisposingHandler` from `Dispose()` while the control is still usable and before `Own<T>`
   resources are released. Each returns an `IDisposable` token through `HandlerToken<Action<object>>`,
   the same shape as every other pair on the control. This is the notification a *package* subscribes
   to, and it is what makes the feature implementable from a rung-3 assembly at all.
-- **The reconciler disposes what it removes.** The mount created the control, so the mount disposes it;
-  a control the reconciler unmounted is not reused by anything, because the next render that wants one
-  creates a new one. That change is decided and in progress in its own PR. This is the *owner* doing
-  the obvious thing, and it is not a substitute for the notification - it is what makes sure the end
-  actually happens for reconciler-owned controls.
-- **A closing window disposes its tree.** `Window` is the logical root of the control tree, and
-  `Control.Dispose` already disposes children recursively, so tearing a window down disposes
-  `Window.Content` - after the backend, before the window's own service scope ends. That change is
-  decided and in progress, in the same shape as the reconciler one, and its consequence for this note is
-  the one that matters: a closed window's in-flight loads cancel through `Disposing` like any other, so
-  the feature needs no window hook and `AddAssetLoading()` stays infrastructure-only (2.2).
+- **The reconciler disposes what it removes** (#166): `Unmount` detaches and then disposes, in that
+  order, so the removed control sees `RemovedFromTree` and then `Disposing` - the order `Control`'s own
+  documentation promises. A control the reconciler unmounted is not reused by anything, because the next
+  render that wants one creates a new one. A borrowed slot's control is an exception the reconciler
+  already had: it belongs to the control that made the slot, so it is detached and not disposed.
+- **A closing window disposes its tree** (#168). `Window` is the logical root, and `Control.Dispose`
+  already disposes children recursively, so `TearDown` disposes `Content` and takes the subtree with it.
+  The ordering is pinned rather than incidental: the backend goes first, then `Closed` handlers run, so
+  they still see the controls they were shown; then the tree is disposed; then `Host.Root` is cleared;
+  and only then is the window's service scope disposed - so a control's `Disposing` handler can still
+  resolve a window-scoped service. `Content` reads null afterwards rather than handing back a disposed
+  control, and `Show` throws `ObjectDisposedException`, so the ownership question is closed in both
+  directions: a closed window cannot be shown again, and it gives back nothing to show.
+  For this note the consequence is that a closed window's in-flight loads cancel through `Disposing` like
+  any other, so the feature needs no window hook and `AddAssetLoading()` stays infrastructure-only (2.2).
+
+That last change is a behaviour change for applications, and the suite found the shape of it on the first
+run: two SVG size-mode tests reused one `Image` across two windows and drew nothing in the second, and now
+build one image per scene. An application that keeps a control tree and moves it between windows has to
+move it out before the first window closes - which is the documented rule, and cheaper to learn from a
+test than from a blank window.
 
 **Why disposing on unmount is safe.** The caveat sounds like there is a remove-and-add-elsewhere path a
 disposal would break, and there is not:
 
-- `Place` (`Reconciler.cs:919-931`) positions a control with `IndexOf` and then `Insert` or `Move`, both
+- `Place` (`Reconciler.cs:943-955`) positions a control with `IndexOf` and then `Insert` or `Move`, both
   within one owner's `Controls`. A reorder therefore never unmounts anything - it is a move.
 - When a slot matches but cannot be patched, `ReconcileChildren` unmounts the old subtree and creates a
-  fresh control (`Reconciler.cs:180-189`). The new control is a different object; the old one is never
+  fresh control (`Reconciler.cs:197-203`). The new control is a different object; the old one is never
   reused under a different parent.
 - Nothing else re-parents. A control under a different parent is a different slot in a different
   owner's list, which is a create, not a move.
 
-So every `Unmount` is a permanent removal, disposing on it cannot take a control away from an
-application that was about to use it again, and the earlier objection to this option - "wrong for an
-application that reattaches the control" - does not describe anything the reconciler does.
+So every `Unmount` is a permanent removal, disposing on it cannot take a control away from an application
+that was about to use it again, and the objection this option once drew - "wrong for an application that
+reattaches the control" - describes nothing the reconciler does.
 
-**The Image integration needs both, and for different reasons.** `Disposing` is where the loaded
+**The Image integration needs both signals, for different reasons.** `Disposing` is where the loaded
 `ImageData` is released and the load cancelled, because it is the last moment the control is usable. But
 `RemovedFromTree` is the earlier signal that the control has left the tree and has not ended - and for a
 control removed by application code rather than by a reconciler there is no `Disposing` at all, so
