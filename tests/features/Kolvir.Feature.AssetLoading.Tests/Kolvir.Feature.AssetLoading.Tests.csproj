@@ -1,0 +1,56 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The asset loading feature's own suite, in an assembly of its own because the feature is a
+       package of its own: a rung-3 feature is not part of the core library, so its tests are not part
+       of the core suite either.
+
+       The feature has no platform code - a queue, two loader interfaces and a registration - so the
+       project takes one portable target framework and the reference resolves the net10.0 inner build
+       on every machine.
+
+       Everything in this suite is driven by hand: the fake loader's availability is a field the test
+       sets, its task is one the test completes, and its handler pair is an ordinary list. There is no
+       timer, no sleep and no `Task.Delay` anywhere, so every assertion is about the walk rather than
+       about the clock (dev-docs/ASSET-LOADING.md section 7.1). -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Feature.AssetLoading.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <!-- One test builds an application, because the manager's UI-thread check has to be seen refusing a
+       call from another thread and `Application.CheckAccess` is where the answer lives. The headless
+       backend is what the rest of the suite uses for that, and it needs SkiaSharp's native library on
+       the two platforms whose main package does not carry one. -->
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('Linux'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.Linux" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup Condition="$([MSBuild]::IsOSPlatform('osx'))">
+    <PackageReference Include="SkiaSharp.NativeAssets.macOS" Version="4.154.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
+    <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.AssetLoading\Kolvir.Feature.AssetLoading.csproj" />
+    <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
+  </ItemGroup>
+
+</Project>
