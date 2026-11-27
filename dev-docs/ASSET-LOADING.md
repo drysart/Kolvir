@@ -538,7 +538,12 @@ section 4.1 is why reuse and non-reuse both exist.
 
 The one thing this must not be read as: "the manager marshals". The manager does not need a post of
 its own for the walk it starts from `LoadAsync`, because it is already on the UI thread; it needs the
-ambient context for the continuations, which is what the installed context gives it.
+ambient context for the continuations, which is what the installed context gives it. Not needing a
+post of its own and never being walked from a pool thread are different claims, and the second is not
+a hedge on the first: what the manager does do is refuse to let a foreign thread mutate the queue, so
+the notifications it receives are moved onto the UI thread before they touch anything, by an
+`OnUiThread` helper that runs them inline when it is already on it and posts them through
+`Application.BeginInvoke` when it is not.
 
 **Calling `LoadAsync` from another thread throws.** The queue is UI-thread state, so a call from a pool
 thread is a bug rather than something to marshal: it throws `InvalidOperationException`, checked with
@@ -548,8 +553,14 @@ between the caller and the walk rather than remove it, and the caller would then
 something it had not.
 
 What that does not cover is the loader's own internals, which may of course run anywhere: a fetch is
-somebody else's thread, which is why the token and the completion continuation are the only things
-crossing the boundary.
+somebody else's thread. The boundary is crossed in both directions, and by different things. The token
+and the completion continuation go out, from the manager to the loader. The four notifications come
+back in - `PriorityChanged`, `CanLoadNowChanged`, the `CancellationToken.Register` callback and the
+completion of the task that continuation is watching - and the manager moves each onto the UI thread
+before it touches the queue, so a loader may load anywhere and raise its notifications anywhere. The
+asymmetry is deliberate: a call *to* the manager from a foreign thread is refused because there is a
+caller to report the mistake to, while a notification *from* the loader is moved because the loader
+cannot know which thread it is on and has nobody to report a refusal to.
 
 ### 3.13 Handler pairs, not events, and disposable tokens
 
@@ -648,7 +659,8 @@ Two things make that contract workable rather than fragile:
   domain should notify that domain's handles and no others; otherwise every scroll re-walks the whole
   queue for a slot that was never theirs. Each handle raises its own `CanLoadNowChanged` when its own
   domain has room, so the manager hears "one of your queued loaders may start now", which is the only
-  thing it can act on.
+  thing it can act on. It raises it from whatever thread freed the slot - the fetch's - and 3.12 is
+  why that is legal rather than a bug.
 
 A reusable gate helper - a counter, a change notification, and the per-key refcounting - is probably
 worth shipping so that every https-style factory does not reimplement it. It is open question 9.1, not
