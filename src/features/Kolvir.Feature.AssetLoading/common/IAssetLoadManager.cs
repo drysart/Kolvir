@@ -67,8 +67,11 @@ public interface IAssetLoadManager
     /// afterwards is never delivered to it; a request cancelled while still queued never starts; and
     /// the load keeps counting against the loader's own capacity until its underlying task actually
     /// ends, so cancelling a running request cannot quietly let the application exceed whatever
-    /// limit the loader enforces (section 3.9). Cancel on the UI thread: the queue is UI-thread
-    /// state, and the manager does not marshal a cancellation that arrives from somewhere else.
+    /// limit the loader enforces (section 3.9). The token may be cancelled from any thread: a
+    /// cancellation on the UI thread - what a control's removal produces - is answered inside the
+    /// <c>Cancel()</c> call, and one from another thread is answered on the loop's next turn,
+    /// because the manager moves that work onto the UI thread rather than mutating its queue where
+    /// the cancellation landed.
     /// </para>
     /// <para>
     /// <b>One request per handle.</b> A loader instance with a request outstanding cannot be

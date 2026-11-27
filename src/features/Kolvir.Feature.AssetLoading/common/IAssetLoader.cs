@@ -64,6 +64,12 @@ public interface IAssetLoader
     /// raise it on a real change and forget about the queue.
     /// </para>
     /// <para>
+    /// <b>It may be raised from any thread.</b> A loader's own work runs wherever it runs, so a
+    /// priority that a background step changes is raised from that background thread; the manager
+    /// moves the notification onto the UI thread before it touches its queue, so raising it there is
+    /// safe. Raising it on the UI thread when you can simply skips that post.
+    /// </para>
+    /// <para>
     /// A handler pair rather than an <c>event</c>, so a host that already funnels
     /// <see cref="Action{Object}"/> callbacks through one dispatch path can do the same for this,
     /// and so the virtual DOM generator recognises it as an event property (section 3.13).
@@ -113,6 +119,13 @@ public interface IAssetLoader
     /// theirs (section 4.2).
     /// </para>
     /// <para>
+    /// <b>It is expected to be raised from the thread that finished a fetch.</b> An <c>https</c>
+    /// loader completes on a pool thread, decrements its per-domain count and says so from there, and
+    /// that is the contract working as designed: the manager moves the notification onto the UI
+    /// thread itself, so a factory may raise it from wherever the count moved. Raising it on the UI
+    /// thread when you can simply skips that post.
+    /// </para>
+    /// <para>
     /// The manager subscribes one of these per request and removes it on every exit path, with one
     /// deliberate exception it keeps for itself: a request cancelled while running keeps this
     /// subscription until the underlying task actually ends, because the slot is still occupied
@@ -153,6 +166,9 @@ public interface IAssetLoader
     /// Called on the UI thread, from inside the caller's <c>LoadAsync</c> call. The task may be
     /// already completed when it is returned - a cache hit, an embedded resource already in memory -
     /// and the manager handles that: it is the reason the walk is re-entrancy safe (section 3.8).
+    /// It may also be completed from any thread, which is what a fetch does; the manager moves the
+    /// outcome onto the UI thread before it touches its queue, so finishing on a pool thread is
+    /// expected rather than a violation.
     /// </para>
     /// </remarks>
     Task<object?> LoadAsync(CancellationToken cancellationToken);

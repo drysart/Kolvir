@@ -24,6 +24,13 @@ namespace Kolvir.Feature.AssetLoading;
 /// on a completion that frees a slot, and those are the only state changes there are
 /// (section 3.7).
 /// </para>
+/// <para>
+/// The queue belongs to the UI thread, and both directions respect that. A caller that is not on it
+/// is refused (<see cref="EnsureUiThread"/>); a notification that arrives from somewhere else - a
+/// priority change, an availability change, a cancellation, a completion - is moved onto it before it
+/// touches anything (<see cref="OnUiThread"/>). A loader may therefore load anywhere and notify from
+/// anywhere; only the manager's own caller-facing members require the UI thread.
+/// </para>
 /// </remarks>
 internal sealed class AssetLoadManager : IAssetLoadManager
 {
@@ -219,15 +226,23 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     }
 
     /// <summary>
-    /// Waits for the loader's task and reports its outcome on the thread that finished it.
+    /// Waits for the loader's task and reports its outcome.
     /// </summary>
     /// <param name="request">The request the task belongs to.</param>
     /// <param name="underlying">The loader's task.</param>
     /// <remarks>
     /// <para>
-    /// The await resumes on the ambient context rather than a pool thread, which is what
-    /// <see cref="UiSynchronizationContext"/> supplies for the duration of <see cref="Application.Run()"/>:
-    /// the manager does not post, it needs the context a UI application already has (section 3.12).
+    /// The await resumes on the ambient context when there is one, which is what
+    /// <see cref="UiSynchronizationContext"/> supplies for the duration of <see cref="Application.Run()"/>,
+    /// so in an application the continuation is already on the UI thread (section 3.12).
+    /// </para>
+    /// <para>
+    /// There may be no context to resume on - a host that never installed one, a load started before
+    /// <see cref="Application.Run()"/>, a test - and then this continuation runs on whichever thread
+    /// completed the loader's task. The result is still applied through
+    /// <see cref="OnUiThread(Action)"/>, because applying it touches the queue. That is the manager
+    /// refusing to let a foreign thread walk its queue, not the manager marshalling its own work: the
+    /// normal path is already on the UI thread and runs inline.
     /// </para>
     /// <para>
     /// The returned task is not awaited by anyone - every outcome is handled inside, so it never
@@ -255,6 +270,13 @@ internal sealed class AssetLoadManager : IAssetLoadManager
         OnUnderlyingCompleted(request, result, error);
     }
 
+    /// <summary>Moves a load's outcome onto the UI thread and applies it there.</summary>
+    /// <param name="request">The request whose task ended.</param>
+    /// <param name="result">What it produced, when it produced anything.</param>
+    /// <param name="error">What it threw, when it threw.</param>
+    private void OnUnderlyingCompleted(AssetLoadRequest request, object? result, Exception? error) =>
+        OnUiThread(() => ApplyCompletion(request, result, error));
+
     /// <summary>
     /// Ends one request: releases what it held, answers whoever is still waiting, and walks again
     /// because a slot the loader was counting has just come free.
@@ -262,7 +284,7 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     /// <param name="request">The request whose task ended.</param>
     /// <param name="result">What it produced, when it produced anything.</param>
     /// <param name="error">What it threw, when it threw.</param>
-    private void OnUnderlyingCompleted(AssetLoadRequest request, object? result, Exception? error)
+    private void ApplyCompletion(AssetLoadRequest request, object? result, Exception? error)
     {
         Finish(request);
 
@@ -321,10 +343,23 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     }
 
     /// <summary>
+    /// Moves a caller's cancellation onto the UI thread and applies it there.
+    /// </summary>
+    /// <param name="request">The request whose caller cancelled.</param>
+    /// <remarks>
+    /// This is a <c>CancellationToken.Register</c> callback, so it runs on whichever thread
+    /// called <see cref="CancellationTokenSource.Cancel()"/> - not necessarily the UI thread, because
+    /// a timeout or a factory's own countdown may cancel from a pool thread. A cancellation on the UI
+    /// thread, which is what a control's removal produces, still runs inline and is answered inside
+    /// the <c>Cancel()</c> call; one from another thread is answered on the loop's next turn.
+    /// </remarks>
+    private void OnCallerCancelled(AssetLoadRequest request) => OnUiThread(() => ApplyCancellation(request));
+
+    /// <summary>
     /// Answers a caller that has cancelled, and takes the two paths apart because they are different.
     /// </summary>
     /// <param name="request">The request whose caller cancelled.</param>
-    private void OnCallerCancelled(AssetLoadRequest request)
+    private void ApplyCancellation(AssetLoadRequest request)
     {
         if (request.IsFinished || request.CallerDone)
         {
@@ -356,11 +391,19 @@ internal sealed class AssetLoadManager : IAssetLoadManager
         request.Cancel();
     }
 
-    /// <summary>Moves a queued request to wherever its new priority puts it, and walks.</summary>
+    /// <summary>Moves a priority change onto the UI thread, where it is applied.</summary>
     /// <param name="sender">The loader that raised the notification.</param>
-    private void OnPriorityChanged(object sender)
+    /// <remarks>
+    /// A loader may raise this from any thread; the manager moves it before touching the queue,
+    /// because the queue and the walk belong to the UI thread. See <see cref="OnUiThread(Action)"/>.
+    /// </remarks>
+    private void OnPriorityChanged(object sender) => OnUiThread(() => ApplyPriorityChange((IAssetLoader)sender));
+
+    /// <summary>Moves an already-queued request to wherever its new priority puts it, and walks.</summary>
+    /// <param name="loader">The loader whose priority changed.</param>
+    private void ApplyPriorityChange(IAssetLoader loader)
     {
-        if (!_live.TryGetValue((IAssetLoader)sender, out AssetLoadRequest? request))
+        if (!_live.TryGetValue(loader, out AssetLoadRequest? request))
         {
             return;
         }
@@ -380,7 +423,12 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     /// <param name="sender">The loader that raised the notification. Its identity is not needed: a
     /// walk asks every queued request's loader anyway, which is what makes a notification for one
     /// gate safe for the rest of the queue.</param>
-    private void OnCanLoadNowChanged(object sender) => Walk();
+    /// <remarks>
+    /// This is the notification a real gate raises from the thread that finished a fetch, so it is
+    /// the one that most often arrives off the UI thread; the walk is therefore queued rather than
+    /// run where the notification landed.
+    /// </remarks>
+    private void OnCanLoadNowChanged(object sender) => OnUiThread(Walk);
 
     /// <summary>Finds where a request belongs in the ordered queue.</summary>
     /// <param name="request">The request to place.</param>
@@ -417,6 +465,46 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     }
 
     /// <summary>
+    /// Runs <paramref name="action"/> on the UI thread: inline when this is already that thread, and
+    /// through <see cref="Application.BeginInvoke"/> otherwise.
+    /// </summary>
+    /// <param name="action">The work that touches the queue.</param>
+    /// <remarks>
+    /// <para>
+    /// Every callback the manager subscribes can arrive anywhere. A priority change comes from
+    /// whatever moved it, a cancellation from whatever called <c>Cancel</c>, a completion from
+    /// whatever finished the load, and an availability change from the thread that just finished a
+    /// fetch and decremented its factory's count - which is what section 4.2 asks a gate to do. The
+    /// queue, the index and the walk's flags are unsynchronised UI-thread state, so a callback that
+    /// walked from a pool thread would race the walk in progress and could drop a load entirely.
+    /// This is where that is refused.
+    /// </para>
+    /// <para>
+    /// It is not the manager marshalling its own work (section 3.12's point, which stands): the walk
+    /// the manager starts from <c>LoadAsync</c> is already on the UI thread and runs inline, and in an
+    /// application a completion resumes through <see cref="UiSynchronizationContext"/> and does the
+    /// same. What this covers is the direction the callbacks come from - an outside thread notifying
+    /// the manager - where the alternatives are a race or a queue mutation on a thread that does not
+    /// own it.
+    /// </para>
+    /// <para>
+    /// With no application in the process there is no UI thread to move to, and the action runs where
+    /// it is, which is what keeps a test host and a headless render working: they have one thread, so
+    /// there is no queue to race.
+    /// </para>
+    /// </remarks>
+    private void OnUiThread(Action action)
+    {
+        if (Application.Current is not { } application || application.CheckAccess())
+        {
+            action();
+            return;
+        }
+
+        application.BeginInvoke(action);
+    }
+
+    /// <summary>
     /// Rejects a call from a thread that is not the UI thread.
     /// </summary>
     /// <remarks>
@@ -424,6 +512,9 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     /// marshal: a silent marshal would hide the race between the caller and the walk rather than
     /// remove it, and the caller would believe it had ordered something it had not - the same stance
     /// <see cref="UiSynchronizationContext.Send"/> takes, and for the same reason (section 3.12).
+    /// The callbacks that run the other way - a loader notifying the manager - are moved onto this
+    /// thread rather than refused, because the loader cannot know which thread it is on and has no
+    /// caller to report a refusal to; see <see cref="OnUiThread(Action)"/>.
     /// With no application in the process there is no UI thread to be off, so the check passes: a
     /// test host and a headless render are both in that state, and neither has a queue to race.
     /// </remarks>
