@@ -618,6 +618,144 @@ public sealed class ImageSourceLoadingTests
     }
 
     [TestMethod]
+    public void ALoadStartedBeforeTheAnswerExistsTakesThePriorityTheNextPassGivesIt()
+    {
+        // The configuration an application is in rather than the demo's: the URI is assigned while the
+        // tree is unhosted, so the load starts on the first completed layout pass - and that pass, like
+        // the one after it, arrives before the window has a client area.
+        var factory = new ImageLoaderFactory();
+        using var scene = new ImageSourceScene(services => services.AddAssetLoaderFactory(factory));
+        var panel = new Panel();
+        var image = new Image
+        {
+            AutoSize = false,
+            Bounds = new SKRect(0f, 0f, 10f, 10f),
+            SourceUri = Uri,
+        };
+
+        panel.Controls.Add(image);
+
+        // Passes that cannot answer come first: the load starts on the first of them, which is where
+        // the priority reads worst.
+        Window window = scene.Open(panel, 0f, 0f);
+
+        Assert.AreEqual(1, factory.Loaders.Count, "the first completed pass is where the load starts");
+        Assert.AreEqual(ImageSourceLoadState.Loading, image.SourceLoadState);
+        Assert.IsFalse(image.EffectiveInView, "a host with no client area has nothing to say");
+        Assert.AreEqual(
+            AssetLoadPriority.Background,
+            factory.Last!.Priority,
+            "the priority it was submitted with, read at the one moment the answer is missing");
+
+        // The pass that can answer. It establishes the baseline and deliberately raises no change, so
+        // the confirmation is the only thing that can correct the load.
+        window.ClientSize = new SKSize(200f, 200f);
+        ImageSourceScene.Layout(window);
+
+        Assert.IsTrue(image.EffectiveInView);
+        Assert.AreEqual(
+            AssetLoadPriority.Visible,
+            factory.Last!.Priority,
+            "the confirming pass is what says the control is on screen, and it raises nothing");
+    }
+
+    [TestMethod]
+    public void AConfirmationSurvivesAnotherPassThatCannotAnswer()
+    {
+        var factory = new ImageLoaderFactory();
+        using var scene = new ImageSourceScene(services => services.AddAssetLoaderFactory(factory));
+        var panel = new Panel();
+        var image = new Image
+        {
+            AutoSize = false,
+            Bounds = new SKRect(0f, 0f, 10f, 10f),
+            SourceUri = Uri,
+        };
+
+        panel.Controls.Add(image);
+
+        Window window = scene.Open(panel, 0f, 0f);
+        Assert.AreEqual(AssetLoadPriority.Background, factory.Last!.Priority);
+
+        // A pass that still cannot answer must not consume the confirmation: the answer it would give
+        // is the same wrong one, and the pass after it establishes the baseline without raising.
+        ImageSourceScene.Layout(window);
+
+        Assert.AreEqual(
+            AssetLoadPriority.Background,
+            factory.Last!.Priority,
+            "nothing moves while the host still has no client area");
+
+        window.ClientSize = new SKSize(200f, 200f);
+        ImageSourceScene.Layout(window);
+
+        Assert.IsTrue(image.EffectiveInView);
+        Assert.AreEqual(
+            AssetLoadPriority.Visible,
+            factory.Last!.Priority,
+            "the confirmation waited for a pass that could answer rather than being spent on one that could not");
+    }
+
+    [TestMethod]
+    public void AConfirmationLeavesAControlOffScreenAtBackground()
+    {
+        var factory = new ImageLoaderFactory();
+        using var scene = new ImageSourceScene(services => services.AddAssetLoaderFactory(factory));
+        var panel = new Panel();
+        var image = new Image
+        {
+            AutoSize = false,
+            Bounds = new SKRect(0f, 600f, 10f, 610f),
+            SourceUri = Uri,
+        };
+
+        panel.Controls.Add(image);
+
+        Window window = scene.Open(panel, 0f, 0f);
+        Assert.AreEqual(1, factory.Loaders.Count);
+        Assert.AreEqual(AssetLoadPriority.Background, factory.Last!.Priority);
+
+        window.ClientSize = new SKSize(200f, 200f);
+        ImageSourceScene.Layout(window);
+
+        Assert.IsFalse(image.EffectiveInView, "the control sits below the window");
+        Assert.AreEqual(
+            AssetLoadPriority.Background,
+            factory.Last!.Priority,
+            "the confirmation reads the answer rather than assuming one: off screen stays background");
+    }
+
+    [TestMethod]
+    public void ALoadStartedWhereTheAnswerIsAlreadyAvailableIsNotDisturbedByTheConfirmation()
+    {
+        var factory = new ImageLoaderFactory();
+        using var scene = new ImageSourceScene(services => services.AddAssetLoaderFactory(factory));
+        var panel = new Panel();
+        Window window = scene.Open(panel, 200f, 200f);
+
+        var image = new Image
+        {
+            AutoSize = false,
+            Bounds = new SKRect(0f, 0f, 10f, 10f),
+        };
+
+        panel.Controls.Add(image);
+        image.SourceUri = Uri;
+
+        Assert.AreEqual(
+            AssetLoadPriority.Visible,
+            factory.Last!.Priority,
+            "the answer is available at submission, so it is the one the load is submitted with");
+
+        // The pass that follows agrees with the submission, so the confirmation is a no-op rather than
+        // a second change: the loader's setter guards on equality.
+        ImageSourceScene.Layout(window);
+
+        Assert.IsTrue(image.EffectiveInView);
+        Assert.AreEqual(AssetLoadPriority.Visible, factory.Last!.Priority);
+    }
+
+    [TestMethod]
     public void AUriNothingClaimsFailsRatherThanStayingPending()
     {
         var factory = new RefusingImageLoaderFactory();
