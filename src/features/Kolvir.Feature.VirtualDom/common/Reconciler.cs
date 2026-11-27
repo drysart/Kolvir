@@ -64,14 +64,23 @@ internal static class Reconciler
         return new Mounted(node, control);
     }
 
-    /// <summary>Detaches a mounted control from wherever it sits, and drops its subtree.</summary>
+    /// <summary>Detaches a mounted control from wherever it sits, disposes it, and drops its subtree.</summary>
     /// <param name="mounted">The record to unmount.</param>
     /// <remarks>
+    /// <para>
     /// The walk is recursive, because a component can be nested below ordinary nodes: a render that
     /// puts a <see cref="VComponent"/> inside a panel leaves the panel's record holding the child's
     /// mount, and dropping that record without disposing the mount would leave the child rendering into
     /// a control that is no longer in any tree - and refusing to be mounted again, because it is still
     /// mounted as far as it knows.
+    /// </para>
+    /// <para>
+    /// Every call is a removal the tree intends to keep. A reorder never reaches here, because
+    /// <see cref="Place(Control, Mounted, int)"/> moves a control inside one owner's list, and a child
+    /// that appears under a different parent is unmounted and created fresh rather than re-parented.
+    /// The control is therefore disposed, which is what gives work started for it - an in-flight asset
+    /// load, for one - something to cancel when its node goes away.
+    /// </para>
     /// </remarks>
     internal static void Unmount(Mounted mounted)
     {
@@ -96,7 +105,13 @@ internal static class Reconciler
 
         if (mounted.Control is { } control)
         {
+            // Detach first and dispose second: RemovedFromTree and then Disposing is the order Control's
+            // own documentation promises a child, and the parent pointer is what makes the first one
+            // fire. Every control that reaches here is being removed for good - a borrowed slot's
+            // control never does, because DetachSlot only calls Unmount for a slot that is not
+            // borrowed - so the disposal is unconditional rather than predicated on a case.
             control.Parent?.Controls.Remove(control);
+            control.Dispose();
         }
     }
 
@@ -769,6 +784,15 @@ internal static class Reconciler
             }
 
             var current = slot.IsBorrowed ? slot.Control : slot.Current(element);
+
+            // A creating slot's control went with the previous node, which disposed it: taking that
+            // instance over again would patch a disposed control. A different control the application
+            // put on the element in the meantime is still good to take over.
+            if (!slot.IsBorrowed && previous is not null && ReferenceEquals(current, previous.Control))
+            {
+                current = null;
+            }
+
             var relink = previous is not null;
             Mounted mountedSlot;
 
