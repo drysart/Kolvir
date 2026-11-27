@@ -99,7 +99,7 @@ public abstract class VNode
     /// <remarks>
     /// <para>
     /// A collection property is a get-only <see cref="IList{T}"/> of an element type the compilation
-    /// marked with <c>[VirtualDomElement]</c> - <see cref="RichLabel.Spans"/> is the one this library
+    /// marked with <c>[VirtualizableElement]</c> - <see cref="RichLabel.Spans"/> is the one this library
     /// has. The node carries a sequence of element descriptions and the reconciler reconciles them
     /// against the live elements in flow order, through the collection's own public mutators so that
     /// whatever the control does on add and remove still happens.

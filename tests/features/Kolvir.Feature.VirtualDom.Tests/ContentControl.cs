@@ -7,7 +7,7 @@ namespace Kolvir.Feature.VirtualDom.Tests;
 /// A non-control element with a value, a handler pair and a control member, so the generated
 /// description class and the collection reconciler can be watched against real state.
 /// </summary>
-[VirtualDomElement]
+[VirtualizableElement]
 public sealed class TestElement
 {
     private string _text = string.Empty;

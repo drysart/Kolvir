@@ -5560,7 +5560,7 @@ What to know:
   exactly once, leaving the old control out of `Controls`.
 - **Omitted and empty are different.** Leaving `Spans` out (or assigning `null`) says nothing about
   the collection and leaves its elements alone. Assigning `[]` empties it.
-- **The rule is general within the feature.** Mark an element type with `[VirtualDomElement]`, and any
+- **The rule is general within the feature.** Mark an element type with `[VirtualizableElement]`, and any
   get-only `IList<T>` of it on a control becomes a sequence property on that control's node. A
   collection type with a public `Move(int, int)` keeps a reorder free of control churn; one without
   falls back to remove and insert. `[VirtualDomAll]` picks up `RichLabel.Spans` by the same rule, with

@@ -36,7 +36,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     private const string SweepAttributeName = "Kolvir.Feature.VirtualDom.VirtualDomAllAttribute";
     private const string OverrideAttributeName = "Kolvir.Feature.VirtualDom.VNodeExtensionPropertyNameAttribute";
     private const string UnsetValueAttributeName = "Kolvir.Feature.VirtualDom.VNodePropertyUnsetValueAttribute";
-    private const string ElementAttributeName = "Kolvir.VirtualDomElementAttribute";
+    private const string ElementAttributeName = "Kolvir.VirtualizableElementAttribute";
     private const string ControlTypeName = "Kolvir.Control";
 
     /// <summary>
@@ -679,7 +679,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
 
     /// <summary>
     /// The get-only collection properties a node describes: an <see cref="IList{T}"/> whose element
-    /// type is marked <c>[VirtualDomElement]</c>.
+    /// type is marked <c>[VirtualizableElement]</c>.
     /// </summary>
     /// <remarks>
     /// A property with a public setter is not one of these; the ordinary property path already

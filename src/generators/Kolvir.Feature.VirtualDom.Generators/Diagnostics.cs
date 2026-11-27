@@ -1,4 +1,4 @@
-﻿using Microsoft.CodeAnalysis;
+using Microsoft.CodeAnalysis;
 
 namespace Kolvir.Feature.VirtualDom.Generators;
 
@@ -110,11 +110,11 @@ internal static class Diagnostics
         isEnabledByDefault: true,
         helpLinkUri: OverrideHelp);
 
-    /// <summary>Reported on a <c>[VirtualDomElement]</c> type a description class cannot be made for.</summary>
+    /// <summary>Reported on a <c>[VirtualizableElement]</c> type a description class cannot be made for.</summary>
     internal static readonly DiagnosticDescriptor ElementIsNotUsable = new(
         "VD016",
         "Marked element type cannot be described",
-        "'{0}' is marked [VirtualDomElement] but cannot be made into a description class: an element type must be a concrete, accessible, non-generic class with an accessible parameterless constructor, and must not be a Control",
+        "'{0}' is marked [VirtualizableElement] but cannot be made into a description class: an element type must be a concrete, accessible, non-generic class with an accessible parameterless constructor, and must not be a Control",
         Category,
         DiagnosticSeverity.Error,
         isEnabledByDefault: true);

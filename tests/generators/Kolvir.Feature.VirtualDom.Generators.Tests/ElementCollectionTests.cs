@@ -23,7 +23,7 @@ public sealed class ElementCollectionTests
 
             namespace TestApp;
 
-            [VirtualDomElement]
+            [VirtualizableElement]
             public sealed class Item
             {
                 public string Text { get; set; } = "";
@@ -75,7 +75,7 @@ public sealed class ElementCollectionTests
 
             namespace TestApp;
 
-            [VirtualDomElement]
+            [VirtualizableElement]
             public sealed class Item
             {
                 public string Text { get; set; } = "";
@@ -158,7 +158,7 @@ public sealed class ElementCollectionTests
 
             namespace Elements;
 
-            [VirtualDomElement]
+            [VirtualizableElement]
             public sealed class Item
             {
                 public string Text { get; set; } = "";
@@ -194,7 +194,7 @@ public sealed class ElementCollectionTests
 
             namespace TestApp;
 
-            [VirtualDomElement]
+            [VirtualizableElement]
             public sealed class Item
             {
                 public string Text { get; set; } = "";

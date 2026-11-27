@@ -133,10 +133,11 @@ gates:
 
 ### 4.1 The element rule
 
-A class is an element type when it is marked:
+A class is an element type when it is marked with `[VirtualizableElement]`
+(`Kolvir.VirtualizableElementAttribute`):
 
 ```csharp
-[VirtualDomElement]
+[VirtualizableElement]
 public sealed class TextSpan { .. }
 ```
 
@@ -147,7 +148,9 @@ is an explicit declaration and silently ignoring it would leave a collection mys
 
 The attribute lives in `Kolvir` rather than in the feature because the element type it marks lives
 there too: a core type cannot name a type from a package that references core. It carries no
-behaviour and no state.
+behaviour and no state. Its name describes what the type is - an element a render can virtualise -
+rather than the feature that currently reads it, because core's public vocabulary outlives any one
+consumer and the collection rule is meant to generalise beyond this one.
 
 ### 4.2 The collection rule
 

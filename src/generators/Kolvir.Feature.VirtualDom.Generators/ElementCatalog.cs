@@ -4,7 +4,7 @@ using Microsoft.CodeAnalysis;
 namespace Kolvir.Feature.VirtualDom.Generators;
 
 /// <summary>
-/// Every non-control element type marked <c>[VirtualDomElement]</c> that the compilation can see,
+/// Every non-control element type marked <c>[VirtualizableElement]</c> that the compilation can see,
 /// found once per compilation.
 /// </summary>
 /// <remarks>
@@ -23,7 +23,7 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// </remarks>
 internal sealed record ElementCatalog(ImmutableArray<ElementModel> Elements, ImmutableArray<DiagnosticInfo> Reported)
 {
-    private const string AttributeName = "Kolvir.VirtualDomElementAttribute";
+    private const string AttributeName = "Kolvir.VirtualizableElementAttribute";
     private const string ControlTypeName = "Kolvir.Control";
 
     /// <summary>Nothing found, which is what a compilation with no marked elements gets.</summary>
