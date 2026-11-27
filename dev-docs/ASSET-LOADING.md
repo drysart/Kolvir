@@ -85,6 +85,8 @@ public interface IAssetLoadManager
         IAssetLoader<TResult> loader,
         Action? onStarted,
         CancellationToken cancellationToken);
+
+    IReadOnlyList<AssetLoadSnapshot> Snapshot();   // 2.6
 }
 ```
 
@@ -293,6 +295,46 @@ mistake this feature exists to prevent.
 
 The queue rules that consume these stay in 3.5 and 3.6 - higher wins, priority matters only while the
 load is queued, and equal priorities keep submission order.
+
+### 2.6 The diagnostics snapshot
+
+```csharp
+public readonly record struct AssetLoadSnapshot(
+    IAssetLoader Loader,
+    int Priority,
+    long Sequence,
+    AssetLoadPhase Phase,
+    bool CanLoadNow);
+
+public enum AssetLoadPhase { Queued, Running }
+
+IReadOnlyList<AssetLoadSnapshot> Snapshot();
+```
+
+One method, for debugging, and deliberately minimal: the smallest thing that answers "why is this one not
+starting".
+
+- **Ordered the way the walk orders it** - priority descending, sequence ascending. The snapshot is a
+  readable mirror of the decision rather than a bag of entries, so the answer is read down from the top.
+- **`CanLoadNow` is read when the snapshot is taken**, not cached, which is what lets it explain a stall:
+  an entry at the top of the list with `CanLoadNow = false` is the whole story, and it is the same answer
+  the next walk would get.
+- **Queued and running only.** A finished load is not in the manager any more, so the method reports the
+  present rather than a log.
+- **Its own phase enum, not the control's `SourceLoadState`.** The manager knows nothing about controls
+  or images, and the two phases it acts on are exactly `Queued` and `Running` - `Loaded` and `Failed` are
+  not missing from it, they are outside its subject.
+- **It allocates only when it is called.** Nothing is maintained for it: the queue already exists and the
+  snapshot is a copy of it, which is what keeps a debugging aid from becoming a cost.
+- **UI thread only**, like the rest of the manager's state.
+
+What is deliberately left out, because "do not over-engineer" is an instruction rather than a mood: no
+history of finished loads, no durations or timings, no byte counters, no change notification when the
+queue changes, and no `ToString` formatting contract. Each of those is something a diagnostics surface
+grows when nobody says where it stops, and each would then have to be kept truthful and measured. A
+caller that wants more can take the snapshot twice and diff it.
+
+The demo's load readout, when one exists, is the intended consumer.
 
 ## 3. Decisions, and why
 
@@ -1038,17 +1080,14 @@ reviewer can disagree with the reading rather than with a decision presented as 
 5. **What are `IAssetLoaderProvider`'s exact members?** `TryCreateAssetLoader<TResult>(string uri, out
    loader)` is decided (2.3); whether it also exposes "can anything handle this URI", the registered
    factories for diagnostics, or a non-generic overload is not.
-6. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
-    state) would make the demo's readout possible and make a priority bug visible; it is also a public
-    surface that has to be kept truthful, and a snapshot type is a small API of its own.
-7. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
+6. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
     `PlaceholderColor` fills a control with no source at all, and the placeholder is specified as drawn
     "whenever there is no loaded image for its URI" - so the two overlap exactly where there is no URI.
     The reading to start from is that a null `SourceUri` means the control is not this feature's to
     decorate, so `PlaceholderSource` is ignored there and `PlaceholderColor` keeps its current meaning;
     the opposite reading - a placeholder is a property of the control, not of the URI - is defensible
     and would need `PlaceholderColor` to lose the no-URI case.
-8. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
+7. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
     (6.1), which is accurate but loses the fact that a load was cancelled rather than never asked for.
     This is 9.3's question seen from a different door: if cancellation gets a `Cancelled` value for the
     URI cases, an application assignment is the one case that should probably stay `None`, because the
