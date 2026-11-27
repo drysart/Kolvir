@@ -1,9 +1,9 @@
 # Asset loading - design note
 
 Status: **design note only.** No code, no project, nothing under `src/` from this change. Rung: **3**
-for `Kolvir.Feature.AssetLoading`, and **3** again for the follow-up package that gives an `Image` a
-URI. The measurement that `FEATURE-COST-POLICY.md` asks every feature to state comes with the code,
-not with this note (section 7).
+for `Kolvir.Feature.AssetLoading`, which ships the manager and the `Image` integration together
+(section 7). The measurement that `FEATURE-COST-POLICY.md` asks every feature to state comes with the
+code, not with this note.
 
 It builds on three things core now has or is getting: `Control`'s tree-lifetime notifications
 (`AddedToTree`, `RemovedFromTree`, `Disposing`), which are merged; `Image`'s `Source` change
@@ -12,7 +12,7 @@ controls it removes, which is decided and in progress (6.2).
 
 This records a design that was settled in review before it was written down. Sections 2 to 4 are the
 decided shape and the reasons for it; section 5 is what the manager does, in the order it does it;
-section 6 is the control integration, described and not built; section 7 is the packages; section 8
+section 6 is the control integration, described and not built; section 7 is the package; section 8
 is the alternatives that lost, in one place, so a reviewer can see what was considered; section 9 is
 what is genuinely still open.
 
@@ -808,36 +808,55 @@ for.
   control is still usable. Nothing else is owed here, because the notification is now the control's own
   contract rather than a seam a package has to ask for.
 
-## 7. Packages, rung, and sequencing
+## 7. Package, rung, and sequencing
 
-Two packages, in this order:
+One package: **`Kolvir.Feature.AssetLoading`**. It ships the manager, the two loader interfaces, the
+two factory interfaces, the provider, `AddAssetLoading()`/`AddAssetLoaderFactory()`, and the `Image`
+integration described in section 6 - `SourceUri`, `PlaceholderSource`, `SourceLoadState`,
+`SourceLoadError` and the state handler pair. One package to install and one thing to learn, and the
+`Image` members are extension members, so they trim per member rather than costing every consumer of
+the package.
 
-- **`Kolvir.Feature.AssetLoading`** - the manager, the two loader interfaces, the two factory
-  interfaces, the provider, and `AddAssetLoading()`/`AddAssetLoaderFactory()`. No control, no
-  visibility, no image format. It is the reusable core, and it is useful on its own: an application
-  with a virtual list of its own can priority-order its own loads with it.
-- **A follow-up package for the `Image` loading surface** (section 6: the URI, the placeholder, the
-  load state, the error, and the priority mapping), which references AssetLoading *and* EffectiveInView.
-  This split is why the reusable core does not hard-depend on a UI visibility feature: the dependency
-  points from the control integration to both, not between the two. With the tree notifications in
-  core, the `Source` notification in progress, and the reconciler disposing what it removes (6.2), the
-  follow-up has no missing seam left of its own - the two can ship in either order, and only
-  AssetLoading is useful on its own.
+**It references `Kolvir.Feature.EffectiveInView`, and that is the price of one package.** The priority
+mapping is `EffectiveInView` -> `Priority` (3.15), so the dependency is not incidental: without it the
+integration cannot ask the question the feature exists to ask. Keeping the control surface in its own
+package was the earlier plan, and it existed to keep that edge off an application that only wants the
+manager. Bundling trades that for one reference, and the trade is worth stating rather than glossing.
 
-**Rung: 3 for each**, per `FEATURE-COST-POLICY.md` section 4. A feature package is rung 3 by
-definition, and here rung 3 is also correct on the merits rather than merely available: an
-application that does not load assets should have no manager, no queue, and no loader interfaces in its
-deliverable, and an application that loads its images up front with `ImageDataFactory` should not have
-any of it either. Rung 2 buys nothing here: rung 2 is for a feature that has to live in core and
-gates the work it does at startup, and this one has no reason to be in core - so the package
-reference is the opt-in, which is rung 3's own mechanism. Rung 1 is impossible: a package in another
-assembly cannot add members to `Control` or `Image`, which is the standing rung-3 consequence
-`FEATURE-COST-POLICY.md` section 4 records for every feature package.
+What it costs, exactly:
+
+- **A package dependency in the build graph, not bytes in the deliverable.** An application that
+  resolves only the manager still restores `EffectiveInView` and still builds it.
+- **The `Image` code still trims.** The integration is extension members, which trim one member at a
+  time (`FEATURE-COST-POLICY.md` section 5.1). An application that never names `SourceUri` keeps
+  neither the integration code behind it nor the `AddEffectiveInViewChangedHandler` call that code
+  makes reachable, so `EffectiveInView`'s own code goes with it if nothing else uses it.
+- **The exception to watch** is anything the package reaches from a path every consumer reaches. Today
+  that is `AddAssetLoading()` alone, which registers the manager and the provider and nothing else
+  (9.9); the extension shape is what keeps it that way, and a later addition that touches InView from a
+  constructor or a registration would quietly undo the saving. That is the one thing to check when this
+  package grows.
+
+**Two PRs, one package.** The manager, interfaces, provider and DI land first; the `Image` integration
+lands second, in the same project. That is about review size - the queue and its tests are a different
+argument from the control surface and its tests - not about packaging.
+
+**Rung: 3**, per `FEATURE-COST-POLICY.md` section 4. A feature package is rung 3 by definition, and here
+rung 3 is also correct on the merits rather than merely available: an application that does not load
+assets should have no manager, no queue, and no loader interfaces in its deliverable, and an
+application that loads its images up front with `ImageDataFactory` should not have any of it either.
+Rung 2 buys nothing here: rung 2 is for a feature that has to live in core and gates the work it does
+at startup, and this one has no reason to be in core - so the package reference is the opt-in, which is
+rung 3's own mechanism. Rung 1 is impossible: a package in another assembly cannot add members to
+`Control` or `Image`, which is the standing rung-3 consequence `FEATURE-COST-POLICY.md` section 4
+records for every feature package.
 
 The measurement `FEATURE-COST-POLICY.md` requires - the published AOT size delta between
 `Kolvir.Minimal` with and without the package, and the trim warnings - **comes with the code, not with
-this note.** Nothing here can be measured, and a number invented now would be the kind of assertion
-the policy exists to replace.
+this note.** Nothing here can be measured, and a number invented now would be the kind of assertion the
+policy exists to replace. One number is not enough to settle the dependency above, so the measurement
+should also say whether `EffectiveInView`'s code is in that binary at all: that is the row the bundling
+decision turns on.
 
 ## 8. The rejected alternatives, in one place
 
@@ -917,18 +936,14 @@ reviewer can disagree with the reading rather than with a decision presented as 
 10. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
     state) would make the demo's readout possible and make a priority bug visible; it is also a public
     surface that has to be kept truthful, and a snapshot type is a small API of its own.
-11. **What is the follow-up package called?** Nothing in this note names it, and section 6's class name
-    is a placeholder too. The other packages are named after the feature (`Kolvir.Feature.Svg`,
-    `Kolvir.Feature.EffectiveInView`), which argues for `Kolvir.Feature.ImageLoading` and a static
-    class that matches.
-12. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
+11. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
     `PlaceholderColor` fills a control with no source at all, and the placeholder is specified as drawn
     "whenever there is no loaded image for its URI" - so the two overlap exactly where there is no URI.
     The reading to start from is that a null `SourceUri` means the control is not this feature's to
     decorate, so `PlaceholderSource` is ignored there and `PlaceholderColor` keeps its current meaning;
     the opposite reading - a placeholder is a property of the control, not of the URI - is defensible
     and would need `PlaceholderColor` to lose the no-URI case.
-13. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
+12. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
     (6.1), which is accurate but loses the fact that a load was cancelled rather than never asked for.
     This is 9.4's question seen from a different door: if cancellation gets a `Cancelled` value for the
     URI cases, an application assignment is the one case that should probably stay `None`, because the
