@@ -540,6 +540,17 @@ The one thing this must not be read as: "the manager marshals". The manager does
 its own for the walk it starts from `LoadAsync`, because it is already on the UI thread; it needs the
 ambient context for the continuations, which is what the installed context gives it.
 
+**Calling `LoadAsync` from another thread throws.** The queue is UI-thread state, so a call from a pool
+thread is a bug rather than something to marshal: it throws `InvalidOperationException`, checked with
+`Application.CheckAccess` (`src/core/Kolvir/Application/Application.cs`), which is the same stance
+`UiSynchronizationContext.Send` takes and for the same reason - a silent marshal would hide the race
+between the caller and the walk rather than remove it, and the caller would then believe it had ordered
+something it had not.
+
+What that does not cover is the loader's own internals, which may of course run anywhere: a fetch is
+somebody else's thread, which is why the token and the completion continuation are the only things
+crossing the boundary.
+
 ### 3.13 Handler pairs, not events, and disposable tokens
 
 `Add...ChangedHandler`/`Remove...ChangedHandler` returning `IDisposable`, with `Action<object>`
@@ -1030,9 +1041,20 @@ What it costs, exactly:
   constructor or a registration would quietly undo the saving. That is the one thing to check when this
   package grows.
 
-**Two PRs, one package.** The manager, interfaces, provider and DI land first; the `Image` integration
-lands second, in the same project. That is about review size - the queue and its tests are a different
-argument from the control surface and its tests - not about packaging.
+**Three PRs, one package.** They are separate for review size, not for packaging:
+
+1. **The infrastructure** - the manager, its interfaces, the provider, the factory shape, the priority
+   constants, the snapshot, and `AddAssetLoading()`/`AddAssetLoaderFactory()`. The queue and its tests are
+   one argument.
+2. **The `Image` integration** - the surface in section 6, in the same project. The control surface and
+   its tests are a different argument.
+3. **A demo page**, and it is a deliverable rather than a nicety: it is the only end-to-end proof of the
+   two things no unit test can show. It needs a list of images long enough to scroll, so `EffectiveInView`
+   drives the priority and the visible ones arrive first; the per-image `SourceLoadState` visible, so the
+   pending/loading/loaded transition is watchable; and a `Snapshot()` readout beside the list. That is the
+   only place where "InView actually feeds the manager" and "the snapshot explains what the queue is doing"
+   are demonstrated rather than asserted - a fake loader proves the queue obeys a priority it is handed,
+   and nothing in the suite proves the priority was correct.
 
 **Rung: 3**, per `FEATURE-COST-POLICY.md` section 4. A feature package is rung 3 by definition, and here
 rung 3 is also correct on the merits rather than merely available: an application that does not load
@@ -1050,6 +1072,33 @@ this note.** Nothing here can be measured, and a number invented now would be th
 policy exists to replace. One number is not enough to settle the dependency above, so the measurement
 should also say whether `EffectiveInView`'s code is in that binary at all: that is the row the bundling
 decision turns on.
+
+### 7.1 How the manager is tested
+
+The queue's contract is timing, ordering and cancellation, so the tests supply all three by hand rather
+than waiting for them. One fake loader type does the work: `CanLoadNow` is a field the test sets, `LoadAsync`
+returns a task the test completes when it chooses (or completes synchronously, when the test needs that
+case), and the handler pair is an ordinary list. No timer, no sleep, no `Task.Delay` - a test that waits is
+a test that asserts about the clock instead of the walk.
+
+What has to be pinned, because between them they *are* the contract:
+
+- Priority order, and FIFO within a priority with the sequence tie-break (3.5, 3.6).
+- A gate opening wakes exactly the entries whose gate opened, and not the rest of the queue.
+- A synchronous completion does not corrupt the walk - the re-entrancy case in 3.8 - including the case
+  where the completion enqueues another load.
+- A queued entry that is cancelled never starts, and its `onStarted` never fires.
+- A running entry that is cancelled completes its caller at once, and the slot stays counted until the
+  underlying task ends (3.9).
+- A late result is never delivered to a cancelled caller.
+- Every handler pair is released on every exit path (3.10).
+- `Snapshot()` agrees with what the walk would do next - which is also the cheapest way to assert ordering
+  without reaching into the manager's internals, and the reason the snapshot is worth having before there
+  is a UI to look at it.
+
+The control integration's tests are a smaller set and belong to the second PR: a URI accepted before the
+control is in a tree stays `Pending`, `AddedToTree` starts it, `RemovedFromTree` returns it to `Pending`,
+`Disposing` releases the `ImageData`, and assigning `Source` clears the URI and leaves the image alone.
 
 ## 8. The rejected alternatives, in one place
 
