@@ -32,7 +32,7 @@ internal sealed class ObservableSetDependencies<T>
     /// <summary>Creates the dependencies for one set.</summary>
     /// <param name="comparer">What decides that two items are the same address.</param>
     internal ObservableSetDependencies(IEqualityComparer<T>? comparer) =>
-        _items = new ObservableKeyedDependencies<T>(comparer, item => $"item {item} of an observable set");
+        _items = new ObservableKeyedDependencies<T>(comparer, ObservableKeyedDependencyKind.Item);
 
     /// <summary>Publishes a read of the size.</summary>
     internal void PublishCount() => _shape.PublishCount();

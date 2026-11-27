@@ -30,7 +30,7 @@ internal sealed class ObservableDictionaryDependencies<TKey, TValue>
     /// <summary>Creates the dependencies for one dictionary.</summary>
     /// <param name="comparer">What decides that two keys are the same address.</param>
     internal ObservableDictionaryDependencies(IEqualityComparer<TKey>? comparer) =>
-        _keys = new ObservableKeyedDependencies<TKey>(comparer, key => $"key {key} of an observable dictionary");
+        _keys = new ObservableKeyedDependencies<TKey>(comparer, ObservableKeyedDependencyKind.Key);
 
     /// <summary>Publishes a read of the structure: the size, or the keys.</summary>
     internal void PublishCount() => _shape.PublishCount();

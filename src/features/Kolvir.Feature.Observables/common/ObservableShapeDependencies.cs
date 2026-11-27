@@ -29,6 +29,8 @@ internal sealed class ObservableShapeDependencies
     /// <c>"an observable list"</c>.</param>
     internal ObservableShapeDependencies(string collection)
     {
+        // Two of these per collection and made once with it, so keeping the text is the cheap choice
+        // here - there is one name per source rather than one per watched address.
         _count = new ObservableDependency($"the count of {collection}");
         _contents = new ObservableDependency($"the contents of {collection}");
     }

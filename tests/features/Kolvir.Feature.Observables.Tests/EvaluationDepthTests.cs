@@ -42,6 +42,41 @@ public sealed class EvaluationDepthTests
     }
 
     [TestMethod]
+    public void ARefusedChainNamesTheAddressItWasRaising()
+    {
+        // The only consumer of a dependency's name is this message, which is why an address entry keeps its
+        // key and builds the name here rather than keeping the text: the message must name the address it
+        // always named. A handler that changes a *different* collection nests, so the second collection's
+        // index is the step that is refused.
+        using var first = Observable.CreateList(1);
+        using var second = Observable.CreateList(1);
+
+        using var firstWatcher = Observable.CollectDependencies(
+            () => { _ = first[0]; },
+            _ => second[0] = 2);
+        using var secondWatcher = Observable.CollectDependencies(() => { _ = second[0]; }, _ => { });
+
+        try
+        {
+            Observable.MaxEventStackSize = 1;
+
+            var thrown = Assert.ThrowsExactly<InvalidOperationException>(
+                () => first[0] = 2,
+                "the raise past the limit is refused");
+
+            StringAssert.Contains(thrown.Message, "MaxEventStackSize", "and the limit is named");
+            StringAssert.Contains(
+                thrown.Message,
+                "index 0 of an observable list",
+                "with the address that was being raised");
+        }
+        finally
+        {
+            Observable.MaxEventStackSize = 50;
+        }
+    }
+
+    [TestMethod]
     public void RaisingTheLimitLetsTheSameChainGoDeeper()
     {
         // The limit is a setting because a legitimate chain can be deeper than one number is comfortable
