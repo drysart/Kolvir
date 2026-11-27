@@ -46,7 +46,7 @@ internal class ObservableDependency : IObservableEventSource
     /// where an owner that dropped the entry puts it back. It must not raise.</param>
     /// <param name="onReleased">What to call when the last handler is removed. It must not raise.</param>
     internal ObservableDependency(
-        string? description = null,
+        string? description,
         Action? onWatched = null,
         Action? onReleased = null)
     {
@@ -186,7 +186,10 @@ internal class ObservableDependency : IObservableEventSource
     private void RaiseToHandlers() => Observable.RaiseToHandlers(this, _handlers);
 
     /// <summary>What was read, for a diagnostic.</summary>
-    /// <remarks>The only caller is the refusal message, so a source with no text of its own still names
-    /// something rather than returning null.</remarks>
-    public override string ToString() => _description ?? string.Empty;
+    /// <remarks>
+    /// The only caller is the refusal message, so a source with no text of its own names its type rather
+    /// than saying nothing: an unnamed step in that message is worse than a vague one. The suppression is
+    /// only because <see cref="object.ToString"/> is annotated nullable and does not return null.
+    /// </remarks>
+    public override string ToString() => _description ?? base.ToString()!;
 }
