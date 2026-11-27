@@ -48,11 +48,13 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// </param>
 /// <param name="SlotControlType">
 /// The control type the slot's property declares, as generated code writes it; null when this is not
-/// a slot.
+/// a slot. It is also the identity the node class for that control is looked up by, and the key the
+/// emit step rewrites a borrowed slot's <see cref="Type"/> through.
 /// </param>
 /// <param name="SlotControlMetadataName">
 /// The same type the way a reader names it, which is what a node class's control chain is compared
-/// against; null when this is not a slot.
+/// against and what the compilation is asked for when a borrowed slot's node has to be emitted; null
+/// when this is not a slot.
 /// </param>
 internal sealed record PropertyModel(
     string Name,
@@ -74,6 +76,9 @@ internal sealed record PropertyModel(
     string? SlotControlMetadataName = null)
 {
     internal bool IsEvent => AddHandler is not null;
+
+    /// <summary>Whether a node fills a control the property already holds, rather than creating one.</summary>
+    internal bool SlotBorrows => Slot && !SlotCreates;
 
 
     /// <summary>

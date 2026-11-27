@@ -19,7 +19,7 @@ namespace Kolvir.Feature.VirtualDom;
 /// applies and patches the node onto that instance and never creates or places anything. A
 /// <see cref="Creating"/> slot is a get-plus-set property: when the node's control type differs from
 /// the one already mounted, the reconciler makes the control, applies the node to it and assigns the
-/// node to the property.
+/// control to the property.
 /// </para>
 /// </remarks>
 [EditorBrowsable(EditorBrowsableState.Never)]

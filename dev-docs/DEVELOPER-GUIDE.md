@@ -5088,29 +5088,32 @@ new VSplitContainer
 
 What to know:
 
-- **It takes a node whose control is the property's type or derives from it.** The property is typed
-  `IVNodeFor<Panel>?` - a node that describes a `Panel`, possibly a more specific one - so
-  `VPanel`, `VGroupBox`, `VStackPanel`, `VTableLayoutPanel` and `VTabPage` all belong there, and a
-  `VLabel` does not compile. Leaving the property out, or assigning `null`, leaves the slot empty.
+- **A get-only slot takes the node class for the control it holds.** `Panel1` is declared `VPanel?`
+  in the generated node, because the panel it describes is the split container's own `Panel` - so
+  `Panel1 = new VPanel { .. }` is the value, and `Panel1 = new VTableLayoutPanel()` does not compile.
+  That is deliberate: variance would let it through, and a grid node cannot configure a plain panel.
+  Put the grid one node down instead: `Panel1 = new VPanel { Children = [new VTableLayoutPanel { .. }] }`.
+  Leaving the property out, or assigning `null`, leaves the slot empty.
+- **A settable control-typed property is the other kind, and it does take any derived node.** The
+  reconciler creates whatever the node's class makes and assigns it, so the property is typed
+  `IVNodeFor<Panel>?` - a node that describes a `Panel`, possibly a more specific one - and `VPanel`,
+  `VGroupBox`, `VStackPanel`, `VTableLayoutPanel` and `VTabPage` all belong there. A `VLabel` does
+  not compile. A new control is created only when the node's class changes, which is the same "patch
+  when the class is the same" rule every other child follows.
 - **A get-only slot is configured in place, never replaced.** `Panel1 = new VPanel { Padding = 8 }`
   sets the split container's *own* panel: the node describes that panel, and its `Children` go inside
-  it. The panel is not a child of the node's control and is never added to it a second time. Because
-  the instance is the control's, a node for a *derived* control - `new VTableLayoutPanel()` on a
-  `Panel` slot - is refused when it is mounted, naming both types: there is no `TableLayoutPanel` to
-  configure, only the `Panel` the container made. Put the grid one node down instead:
-  `Panel1 = new VPanel { Children = [new VTableLayoutPanel { .. }] }`.
-- **A settable control-typed property is the other kind.** Your own control can hand the node the job
-  of making the control: the reconciler creates whatever the node's class makes, assigns it, and
-  creates a new one only when the node's class changes - the same "patch when the class is the same"
-  rule every other child follows.
+  it. The panel is not a child of the node's control and is never added to it a second time.
 - **A slot that goes away empties.** Setting it to `null` (or not mentioning it) takes the node's
   contents off. A get-only slot's control also goes back to the values its owner's constructor gave
   it, so the next node to fill it does not inherit the last one's `Dock` or `Padding`. A settable
-  slot's property keeps the control the node made, emptied - an `IVNodeFor<T>` is a description that
-  *makes* a control, so there is nothing to hand back that means "what this property held before".
+  slot's property keeps the control the node made, emptied - a node is a description that *makes* a
+  control, so there is nothing to hand back that means "what this property held before".
 - **A component goes one node down.** `Panel1 = new VComponent(page)` does not compile, because a
   component is not a node for a control. The spelling is `Panel1 = new VPanel { Children = [new
   VComponent(page)] }`, and the component's own subtree is then inside the panel as usual.
+- **A property whose control has no node of its own is not a slot.** If the property's declared type
+  cannot have a node - it is abstract, generic, or has no parameterless constructor - the node gets no
+  property for it at all, rather than one typed by a name that does not exist.
 - **Some slots hold a control with a content model of its own.** `ComboBox.DropDownList` is the
   combo box's popup list, and what is *in* it comes from `Items`. A node there is for the things the
   combo box does not forward - item height, item drawing, the list's scroll bars - rather than for its

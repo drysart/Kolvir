@@ -11,9 +11,9 @@ public Panel Panel2 { get; }
 
 Both panels are created by the `SplitContainer`'s own constructor, and neither can be assigned, so no
 node could say what is *in* them - which is most of the reason to use the control at all. This
-document is the mechanism that lets a node express the contents of a property like that, and the one
-decision in it that is not obvious: how a slot accepts a node for a control that merely derives from
-the property's type.
+document is the mechanism that lets a node express the contents of a property like that, and the two
+decisions in it that are not obvious: how a slot names the node it accepts, and what happens to the
+control when the node goes away.
 
 ## 1. Which properties this is about, and which it is not
 
@@ -76,7 +76,7 @@ removal and nested subtree work exactly like a one-element `Children`:
 | --- | --- |
 | **Borrowed** (get-only: `Panel1`) - first render | `node.ApplyTo(target.Panel1)`, then reconcile that node's `Children` into `target.Panel1.Controls`. The reconciler never creates the panel and never places it. |
 | **Borrowed** - later render, same node class | `node.PatchFrom(previous, target.Panel1)`, then reconcile the panel's children. The panel instance survives, so the container keeps whatever it holds for it. |
-| **Borrowed** - different node class | The old node's subtree comes off, the new node is applied to the *same* panel. A borrow is in place by construction: the container made the control. |
+| **Borrowed** - different node class | Cannot happen: the property is typed with the one node class for the control the container made, so there is no other node class to give it. |
 | **Creating** (get-plus-set) - first render | `nodeType.Create()`, `node.ApplyTo(control)`, then assign **the control** to the property and reconcile its children. |
 | **Creating** - same node class | Patch the control the slot already made. **Nothing is assigned**, which is the create-slot half of "an unchanged value is not re-applied". |
 | **Creating** - different node class | Create a new control, apply, assign it, and drop the old one with its subtree. |
@@ -99,7 +99,8 @@ in the tests.
 A slot node is an ordinary control node: not a `VComponent` (a component has no `NodeType` to create
 the property's control with, and a borrowed slot would have to be a second mount point) and not a
 `VFragment` (a fragment has no control of its own, and a slot holds one). Both are refused where the
-property is assigned, by the property's type - `IVNodeFor<Panel>?` is a type neither implements.
+property is assigned, by the property's type: neither a `VComponent` nor a `VFragment` is a
+`IVNodeFor<Panel>` for a creating slot, nor a `VPanel` for a borrowed one.
 
 **One node instance fills two slots as two trees.** A node is a description read during apply and patch
 and never written, so `Panel1 = shared; Panel2 = shared` mounts two independent subtrees from one
@@ -120,14 +121,14 @@ Two different answers, because the two kinds of slot own different things.
   the next node to fill that slot, which would inherit `Dock`, `Padding` and anything else the
   removed node happened to set.
 - **Creating.** The control the slot made is dropped with its subtree. **The property keeps holding
-  it, emptied**, rather than being handed back to whatever it held before the node arrived: an
-  `IVNodeFor<T>` is a description that *makes* a control, so there is nothing the reconciler could
-  assign that means "the value this property had before", and leaving the created control in place is
-  the only answer that is valid for a non-nullable property either. A control that can tell null from
-  an empty panel will see the difference; that is stated here rather than papered over.
+  it, emptied**, rather than being handed back to whatever it held before the node arrived: a node is a
+  description that *makes* a control, so there is nothing the reconciler could assign that means "the
+  value this property had before", and leaving the created control in place is the only answer that is
+  valid for a non-nullable property either. A control that can tell null from an empty panel will see
+  the difference; that is stated here rather than papered over.
 
 The borrowed half needs to know what the removed node had assigned, and only the node's own class
-knows that. So a node class whose control can appear in a slot carries **`UnassignedNode`** - a
+knows that. So a node class whose control a borrowed slot holds carries **`UnassignedNode`** - a
 static instance of itself with nothing assigned - and removal is
 `UnassignedNode.PatchFrom(removed, panel)`: every property the removed node assigned goes back to its
 pristine value, every extension handler it attached is detached, and a property it never mentioned is
@@ -136,12 +137,20 @@ it costs a static field and a two-line override instead of a line per property.
 
 ## 4. Covariance, and what holds the slot value
 
-A property declared `Panel` must accept a node for **any** control that derives from `Panel`. In this
-library that is not hypothetical: `GroupBox`, `StackPanel`, `TableLayoutPanel` and `TabPage` all
-derive from `Panel`, so `VGroupBox`, `VStackPanel`, `VTableLayoutPanel` and `VTabPage` are all legal
-contents for `SplitContainer.Panel1`.
+There are two kinds of slot and they hold their values differently, because the two questions are
+different: whether a node may describe a control the node *makes*, and whether it may describe a
+control the *parent* made.
 
-The slot property is typed with a **covariant marker interface**:
+### 4.1 A creating slot: the covariant marker
+
+A settable property declared `Panel` must accept a node for **any** control that derives from `Panel`.
+In this library that is not hypothetical: `GroupBox`, `StackPanel`, `TableLayoutPanel` and `TabPage`
+all derive from `Panel`, so `VGroupBox`, `VStackPanel`, `VTableLayoutPanel` and `VTabPage` are all
+legal contents for a settable `Panel` property. The reconciler makes the control the node describes,
+so a `VTableLayoutPanel` in a `Panel` slot makes a `TableLayoutPanel` in it - exactly what a property
+of that type is for.
+
+The creating slot property is typed with a **covariant marker interface**:
 
 ```csharp
 public interface IVNodeFor<out TControl> where TControl : Control
@@ -153,13 +162,13 @@ public interface IVNodeFor<out TControl> where TControl : Control
 `TControl` appears in no member position, so the variance annotation is legal, and one instantiation
 covers the whole chain: a node declaring only `IVNodeFor<TableLayoutPanel>` converts implicitly to
 `IVNodeFor<Panel>`, `IVNodeFor<Control>` and everything in between. **One marker per node class**, its
-own control type, plus an explicit implementation returning `this`. The generated slot property is
-then `IVNodeFor<Panel>?` - identity for `VPanel`, variance for `VTableLayoutPanel`, and a compile
-error at the assignment site for a node whose control is not a `Panel`. There is no runtime check, no
-`is` test and nothing to throw: the type system does the work, and it does it where the mistake is
-made.
+own control type, plus an explicit implementation returning `this`. The generated property is then
+`IVNodeFor<Panel>?` - identity for `VPanel`, variance for `VTableLayoutPanel`, and a compile error at
+the assignment site for a node whose control is not a `Panel`. There is no runtime check, no `is` test
+and nothing to throw: the type system does the work, and it does it where the mistake is made. The
+reconciler reads `slot.Node` and never cares which instantiation it came from.
 
-Four claims are load-bearing enough to have been compiled rather than assumed, in a throwaway project
+Three claims are load-bearing enough to have been compiled rather than assumed, in a throwaway project
 with the same shape:
 
 1. The variance annotation with a `Control` constraint and a member compiles. It does.
@@ -167,52 +176,56 @@ with the same shape:
    identity, and up the chain. It does, both at a variable and at the slot property.
 3. Assigning a `VLabel` - control `Label`, not a `Panel` - to `IVNodeFor<Panel>?` fails to compile:
    `CS0029`, at the assignment, naming both types. It does.
-4. The explicit cast back from the `VNode` the reconciler reads to `IVNodeFor<T>` that the creating
-   path needs - `(IVNodeFor<Panel>)node` - is a valid runtime conversion for an object that
-   implements `IVNodeFor<TableLayoutPanel>`, because CLR variance conversions are real casts. It is.
 
-The reconciler reads `slot.Node` and never cares which instantiation it came from.
-
-### 4.1 What a borrowed slot's instance actually is
-
-The marker interface settles the *declared* type, which is not the whole of a borrowed slot's
-requirement, and the difference decides what a `VSplitContainer` accepts:
+### 4.2 A borrowed slot: the node class itself
 
 `SplitContainer.Panel1` is declared `Panel` and holds a `Panel` its constructor made. The node in that
-slot is applied **to that instance**, and `ApplyTo` casts the control to the node's own control type -
-so a `VTableLayoutPanel` node, for all that it is an `IVNodeFor<Panel>`, would cast the panel to
-`TableLayoutPanel` and throw. Covariance is sound exactly where the reconciler *creates* the control
-(a creating slot hands a `TableLayoutPanel` to a `Panel`-typed property, which is what a property of
-that type is for); it is not sound where the control already exists with a type of its own.
+slot is applied **to that instance**, and `ApplyTo` casts the control to the node's own control type.
+Covariance is unsound here, and not in a way a null check could catch: a `VTableLayoutPanel` node is a
+legal `IVNodeFor<Panel>`, but the instance it would be applied to is a plain `Panel`, so the cast
+inside `ApplyTo` would fail at mount with no better message than the cast's.
 
-So a borrowed slot takes a node for the control it holds - `Panel1 = new VPanel { .. }` - and the node
-for a derived control is refused at the mount, naming both:
+So a borrowed slot is typed with **the node class for the control the property holds** - not a marker,
+not the base node class:
 
-> A Panel slot takes a node for that control, but this one makes a TableLayoutPanel. …
+```csharp
+public VPanel? Panel1 { get; set; }
+```
 
-This is the one runtime check in the mechanism, and it is not the one the marker interface replaced:
-the type system answers "is this node for a `Panel`", and only the runtime can say what a get-only
-property actually handed back. The alternative was a second, invariant marker (`IVNodeForExactly<T>`)
-so that `Panel1 = new VTableLayoutPanel` would not compile at all; it costs a second interface
-instantiation and a second explicit member on **every** node class, and it would reject a container
-that hands out a derived instance - the case where the check above is exactly right. It was not worth
-the per-node cost.
+- `Panel1 = new VPanel { .. }` compiles by identity.
+- `Panel1 = new VTableLayoutPanel()` is `CS0029` at the assignment, naming both node class names.
+  There is no runtime check for it because there is nothing left for one to catch: the only value the
+  property can hold is the node class for the type the container actually made.
+- The reconciler reads a borrowed slot's value directly as a `VNode` - no interface, no `.Node` hop -
+  so the borrowed path is the simpler of the two.
+- Removal patches from the all-unassigned instance of **that same node class** (§3), which the
+  property type already guarantees is the right one.
 
-One consequence for nesting follows from the same fact: a slot inside a slot goes through a
-**creating** slot, because a borrowed slot can only be filled by a node for the panel itself.
-`HostControl.Split = new VSplitContainer { Panel1 = .. }` is the shape the tests use;
-`VSplitContainer.Panel1 = new VSplitContainer` is not expressible, and correctly so - the outer panel
-is a `Panel`, not a `SplitContainer`.
+A borrowed slot is therefore narrower than the control hierarchy: a property declared `Panel` does not
+accept a node for a `GroupBox`, even though `GroupBox` is a `Panel`. That is the deliberate
+consequence of the choice - the panel is a `Panel`, so nothing else can describe it.
 
-### Why not mirror the node hierarchy
+### Why not a second marker, and why not mirror the node hierarchy
 
-`VTableLayoutPanel : VPanel` would give the same covariance statically, and it was rejected on cost,
-not on taste. Nodes are emitted one flat class per control, all deriving from `VNode`, and mirroring
-the control hierarchy would change that:
+Both alternatives were costed, and both were rejected.
+
+**A second, invariant marker** (`IVNodeForExactly<T>`) would give the borrowed slot the same
+compile-time rejection with one interface instead of a concrete type. It costs a second interface
+instantiation and a second explicit member on **every** node class - the whole point of keeping the
+marker count down - and it types the property with an interface, so the removal path has to cast the
+property's value back to the node class it needs and the reconciler needs a cast to read it. The
+concrete node class does both jobs with the one type the generator already had to emit, which is why
+`IVNodeFor<out TControl>` survives for creating slots alone.
+
+**Mirroring the node hierarchy** (`VTableLayoutPanel : VPanel`) would give both covariance and static
+typing, and it was rejected on cost rather than taste. Nodes are emitted one flat class per control,
+all deriving from `VNode`, and mirroring the control hierarchy would change that:
 
 - **A node for an ancestor would have to exist.** Registering or sweeping `TableLayoutPanel` would
   transitively generate `VPanel`, `VControlNode` and so on, whether or not the application registered
-  them - so "a node the application never names is trimmed" would stop being true.
+  them - so "a node the application never names is trimmed" would stop being true. (The bounded,
+  borrowed-slot-only expansion in §4.3 is the same objection at one thousandth of the size: it emits
+  exactly the declared type of a borrowed slot and never an ancestor.)
 - **`sealed` would have to come off** every generated node class that has a subclass, which is a
   public-API change to code that shipped as `sealed`.
 - **`ApplyTo`/`PatchFrom` would become overrides needing base chaining**, because the properties of
@@ -226,15 +239,41 @@ the control hierarchy would change that:
   library derive from that library's `VNode` subclasses, not this compilation's, so a `VPanel`-typed
   slot would still reject a perfectly good `TableLayoutPanel` node from another generator run.
 
-The marker interface is two lines per node class, exists once per control type in metadata, and
-composes across assemblies because the interface is the contract rather than the class.
+### 4.3 The node class a borrowed slot names has to exist
+
+Typing `Panel1` as `VPanel?` makes the generator depend on a node class for `Panel` even when nothing
+registered or swept `Panel`. So it emits one on demand: for every borrowed slot in the output, the node
+class for the slot's declared control type, and **nothing else**. The rules keep it from becoming a
+general "generate whatever a property mentions" rule:
+
+- **Only a borrowed slot's declared control type**, never the type's ancestors and never the type of a
+  creating slot. A creating slot is typed by the marker, which needs no node class of the property's
+  type to exist.
+- **It recurses only through the borrowed slots of what it emits.** A node emitted this way is itself
+  a node with a slot list, so its own borrowed slots pull in their types the same way - that is how a
+  `SplitContainer` node found this way still brings its panels' node class. The worklist is
+  `Queue`-based and terminates because each control type is taken once.
+- **De-duplication is the registration identity the generator already keeps** - the control type as it
+  writes it - so a control both swept and needed by a slot is claimed once and reports no diagnostic.
+  (`[VirtualDomAll]` therefore changes nothing for a swept application except that the slot is now
+  exactly typed.)
+- **A declared type that cannot have a node class has no slot.** Abstract, static, generic, or without
+  an accessible parameterless constructor: there is nothing to construct, so the property is skipped
+  rather than typed by a name that would not compile.
+- **A declared type whose node name went to a placeholder has no slot either.** Two controls in one
+  namespace with the same node name produce an unbuildable placeholder type, and a slot typed by a
+  placeholder would be a worse failure than an absent slot.
+
+Skipping is visible in the node: the property is simply not there, and the node still carries every
+other property. The alternative - a property typed `VNode?` with a runtime check - is what this design
+spent two revisions removing.
 
 ## 5. What the generator emits, and what it costs
 
 Per control whose node has a slot property (today: `VSplitContainer`):
 
-- the slot property, tracked like any other (`Specified<IVNodeFor<Panel>?>`), carrying the control
-  property's documentation;
+- the slot property, tracked like any other, carrying the control property's documentation - typed
+  `VPanel?` for a borrowed slot and `IVNodeFor<Panel>?` for a creating one;
 - a `GetSlots` override returning the slot list, built from the tracked values and the owner control
   (the array is allocated per call, and only for a node that has slots).
 
@@ -242,9 +281,15 @@ Per node class, unconditionally: the `IVNodeFor<TControl>` implementation - the 
 class declaration and one explicit member. That is the owner's accepted cost, and section 7 measures
 it rather than asserting it is free.
 
-Per node class whose control can appear in a slot: the `UnassignedNode` static and its override. That
-set is computed from the same property models - a node gets one when one of the slot types declared
-in this output is on its control's chain - so a `VButton` never pays for it.
+Per node class whose control a borrowed slot holds: the `UnassignedNode` static and its override. The
+set is the exact control types of the output's borrowed slots - not their base classes, because a
+borrowed slot is typed with one node class and a derived control's node can never be in it - so a
+`VButton` never pays for it, and neither does a `VTableLayoutPanel` for a `Panel` slot.
+
+Per borrowed slot: the node class for the slot's declared control type, if nothing else in the
+output provided it (§4.3). That expansion is bounded to borrowed slots and de-duplicated through the
+registration identity, so it adds at most one node class per borrowed-slot type and never doubles what
+a sweep already produced.
 
 Nothing else changes. The slot properties come from the property model the sweep already walks, so
 `[VirtualDomAll]` picks them up with no rule of its own; extension members, the documentation
@@ -253,23 +298,27 @@ carry-over and the styles work are untouched.
 ## 6. Tests
 
 `Kolvir.Feature.VirtualDom.Tests` covers the mechanism, and `Kolvir.Feature.VirtualDom.Generators.Tests`
-covers what is now a compile-time question:
+covers what is a compile-time or emit-step question:
 
 | Test | What it holds |
 | --- | --- |
 | `VSplitContainer` with a node in each panel | Both panels get their contents on the first apply, `Panel1.Parent` is the split container, the container's `Controls` holds exactly the two panels it made, and each child's `Parent` is the panel it is in. |
 | A slot's node describes its control | A property the slot node assigns (`Padding`) lands on the borrowed panel itself, and a property it does not assign keeps the container's own value. |
 | Patch inside a slot | Changing a child's text inside a panel patches it - the child control is the same instance - rather than recreating the panel or the child. |
-| Replace the slot's node | A different node class in a borrowed slot reconciles into the same panel; in a creating slot it creates and assigns a new control. |
+| A borrowed slot is never replaced | The panel the container made survives a render that gives the slot a new node, with the node's values applied to it. |
+| Replace the slot's node | In a creating slot, a node of a different class creates and assigns a new control, while an unchanged class patches in place. |
 | Removal | A slot that becomes null leaves the borrowed panel empty, and back at its constructor's property values rather than the removed node's; a creating slot's property keeps the control it made, emptied. |
-| Ordering | Two slots with different node classes land in the right panels, including across a render where the first slot is empty and the second is not - the ordinal-alignment case. |
+| Ordering | Two slots that both take `VPanel` are told apart by `Name`, including across a render where the first slot is empty and the second is not - the ordinal-alignment case, which fails if the state list is not padded to the slot ordinal. |
 | Two removals, twice, in two containers | The shared all-unassigned instance carries nothing from one removal to the next: each panel takes its own node's value in both rounds. |
 | Nested slots | A creating slot holding a `VSplitContainer` fills, patches and unwinds both levels. |
 | One instance in two slots | Two independent subtrees are mounted and patched apart; a shared node carrying a component fails by the component's own message. |
 | Covariant slot value | A `VTableLayoutPanel` in a creating `Panel` slot creates a `TableLayoutPanel` in the property. |
-| The wrong node for a borrowed slot | Refused at the mount, naming the node's control and the panel's. |
-| Wrong node type, statically | A generator test compiles a `VLabel` into a `Panel` slot and asserts the compile fails with `CS0029` naming both types. |
-| What is not a slot | Generator tests assert that `Control.Parent` and `Panel`'s scroll bars have no node property, and that only controls a slot can hold carry the all-unassigned instance. |
+| A node for a non-`Panel` control, creating slot | A generator test compiles a `VLabel` into a `Panel` slot and asserts the compile fails with `CS0029` naming both types. |
+| A node for a `Panel` subclass, borrowed slot | A generator test assigns a `VTableLayoutPanel` to `SplitContainer.Panel1` and asserts `CS0029` naming `VTableLayoutPanel` and `VPanel` - the runtime check the previous revision had, now a type error. |
+| A borrowed slot registered alone | Registering only `SplitContainer` still produces the `VPanel` class its slot is typed with, and no diagnostic. |
+| A borrowed slot also swept | The same class is emitted once, with no duplicate-registration diagnostic. |
+| A borrowed slot that cannot be typed | A property whose declared type is abstract is absent from the node rather than typed by a name that does not exist, and no node class is emitted for it. |
+| What is not a slot | Generator tests assert that `Control.Parent`, `Panel`'s scroll bars and a same-kind reference have no node property, and that only the controls a borrowed slot holds carry the all-unassigned instance. |
 | The demo's `--check` | The document page's `VSplitContainer` is asserted by parentage and contents - two panels, in the container, each holding its own node's label - and re-asserted after a later render, which is the slot patch path in the real application. |
 
 ## 7. Rung, and the measurements

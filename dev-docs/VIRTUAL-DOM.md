@@ -443,21 +443,26 @@ control at a time.
 | --- | --- | --- |
 | Control | The one the property already holds. Never created, never placed. | `nodeType.Create()`, then assigned to the property. |
 | Same node class on the next render | `PatchFrom` the panel, then reconcile its children. | Patch the control the slot made; nothing is assigned. |
-| Different node class | The old contents come off and the new node is applied to the same control. | A new control is created, applied and assigned; the old one goes with its subtree. |
+| Different node class | Not expressible: the property is typed with the one node class for the control the parent made. | A new control is created, applied and assigned; the old one goes with its subtree. |
 | Node becomes null | Contents unmounted, and the control patched from a generated all-unassigned instance so it goes back to its owner's values. | Subtree unmounted; the property keeps the control it was given, emptied. |
 
 `Mounted` gains a `Slots` list parallel to the node's slot list (`Mounted.Slots`), holding either the
-slot's record or null, and allocated only for a node that has slots. The reconciler must never place a
+slot's record or null, and allocated only for a node that has slots. The state list is indexed by slot
+ordinal and padded to it, so an empty slot still holds its place. The reconciler must never place a
 slot's control: for `SplitContainer` the panel is already one of the container's children, so placing
-it again would either throw or move it out of the position the container keeps it in. A slot node is an
-ordinary control node - a `VComponent` has no control type to create the slot's control from, and a
+it again would either throw or move it out of the position the container keeps it in. A slot node is
+an ordinary control node - a `VComponent` has no control type to create the slot's control from, and a
 `VFragment` has no control at all - so neither is accepted, by the property's type.
 
-The property's type is the covariant `IVNodeFor<TControl>`, one instantiation per node class, so a node
-for a derived control is accepted where the property's declared type is a base. For a borrowed slot the
-instance is narrower than the declaration - it is whatever the control made - so a node that would
-cast it to a subclass is refused when it is mounted, naming both types. The design, the covariance
-argument and the measurements are in [`VNODE-SLOTS.md`](VNODE-SLOTS.md).
+The two kinds are typed differently, because the two questions are different. A creating slot property
+is typed with the covariant `IVNodeFor<TControl>`, one instantiation per node class, so a node for a
+derived control is accepted where the property's declared type is a base - sound because the reconciler
+makes the control the node describes. A borrowed slot property is typed with the concrete node class
+for the control the property holds (`VPanel?`), so a node for a derived control is a compile error
+rather than a cast that fails at mount: the instance is whatever the parent made, with a type of its
+own. That makes the generator emit the node class for a borrowed slot's declared type when nothing else
+provided it. The design, the covariance argument and the measurements are in
+[`VNODE-SLOTS.md`](VNODE-SLOTS.md).
 
 ## 7. The application-facing API
 

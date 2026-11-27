@@ -27,6 +27,8 @@ public sealed class SlotTests
 
     private static readonly Thickness PristinePanelPadding = new Panel().Padding;
 
+    private static readonly string PristinePanelName = new Panel().Name;
+
     [TestMethod]
     public void BothPanelsGetTheirContentsAndTheContainerStillHoldsOnlyItsOwnPanels()
     {
@@ -89,25 +91,22 @@ public sealed class SlotTests
     }
 
     [TestMethod]
-    public void ADifferentNodeClassInABorrowedSlotIsReconciledIntoTheSamePanel()
+    public void ABorrowedSlotIsNeverReplacedByThePanelItSitsIn()
     {
-        var before = new Thickness(3f);
-        var after = new Thickness(9f);
-
         using var split = new SplitSession(new VSplitContainer
         {
-            Panel1 = new VPanel { Padding = before },
+            Panel1 = new VPanel { Padding = new Thickness(3f) },
         });
 
         var panel = split.Panel1;
 
         split.Update(new VSplitContainer
         {
-            Panel1 = new ManualPanel { Padding = after },
+            Panel1 = new VPanel { Padding = new Thickness(9f) },
         });
 
         Assert.AreSame(panel, split.Panel1, "a borrowed slot is never replaced, because the container owns it");
-        Assert.AreEqual(after, split.Panel1.Padding, "the new node was applied to the same panel");
+        Assert.AreEqual(new Thickness(9f), split.Panel1.Padding, "the new node was applied to the same panel");
     }
 
     [TestMethod]
@@ -245,23 +244,6 @@ public sealed class SlotTests
     }
 
     [TestMethod]
-    public void ANodeForTheWrongControlTypeIsRejectedWithBothTypesNamed()
-    {
-        var host = new Panel { Dock = DockStyle.Fill };
-
-        var exception = Assert.ThrowsExactly<InvalidOperationException>(() =>
-            VirtualDomRuntime.Mount(host, new VSplitContainer
-            {
-                // IVNodeFor<TableLayoutPanel> is an IVNodeFor<Panel>, but the panel this slot holds is a
-                // Panel - so the node cannot be applied to it.
-                Panel1 = new VTableLayoutPanel(),
-            }));
-
-        StringAssert.Contains(exception.Message, "TableLayoutPanel", "the message names the node's control");
-        StringAssert.Contains(exception.Message, "Panel", "and the control the slot actually holds");
-    }
-
-    [TestMethod]
     public void TheSameNodeInstanceInTwoSlotsMountsTwoIndependentSubtrees()
     {
         var shared = new VPanel { Children = [new VLabel { Text = "shared" }] };
@@ -346,42 +328,40 @@ public sealed class SlotTests
     [TestMethod]
     public void SlotsArePairedByDeclarationOrderNotByDiscovery()
     {
-        // Panel1 and Panel2 are both Panel slots, so a mispairing would be invisible if both nodes were
-        // VPanels. Different classes per slot make it visible: whatever ends up in a panel is what that
-        // panel's own slot was given.
-        var left = new Thickness(2f);
-        var right = new Thickness(8f);
-
+        // Both slots take the same node class, because a borrowed slot is typed with the one node class
+        // for the control it holds - so a mispairing is only visible through something that lands on the
+        // control itself. Name does: whichever panel ends up called "right" is the one slot 2 was paired
+        // with, and a run that paired slot 1 with the wrong panel would put it on the left one.
         using var split = new SplitSession(new VSplitContainer
         {
-            Panel1 = new VPanel { Padding = left },
-            Panel2 = new ManualPanel { Padding = right },
+            Panel1 = new VPanel { Name = "left" },
+            Panel2 = new VPanel { Name = "right" },
         });
 
-        Assert.AreEqual(left, split.Panel1.Padding, "the first slot's node went to the first panel");
-        Assert.AreEqual(right, split.Panel2.Padding, "the second slot's node went to the second panel");
+        Assert.AreEqual("left", split.Panel1.Name, "the first slot's node went to the first panel");
+        Assert.AreEqual("right", split.Panel2.Name, "the second slot's node went to the second panel");
 
         var panel2 = split.Panel2;
 
-        // The first slot is empty now and the second is not, which is where a list that indexes by
-        // slot rather than by "the slots that happened to be filled" would pair them wrongly.
+        // The first slot is empty now and the second is not, which is where a list that indexed by "the
+        // slots that happened to be filled" rather than by slot would pair them wrongly.
         split.Update(new VSplitContainer
         {
-            Panel2 = new ManualPanel { Padding = right },
+            Panel2 = new VPanel { Name = "right-again" },
         });
 
-        Assert.AreEqual(PristinePanelPadding, split.Panel1.Padding, "the first slot emptied its own panel");
+        Assert.AreEqual(PristinePanelName, split.Panel1.Name, "the first slot emptied its own panel");
         Assert.AreSame(panel2, split.Panel2, "and the second slot kept the panel it was paired with");
-        Assert.AreEqual(right, split.Panel2.Padding);
+        Assert.AreEqual("right-again", split.Panel2.Name);
 
         split.Update(new VSplitContainer
         {
-            Panel1 = new VPanel { Padding = left },
-            Panel2 = new ManualPanel { Padding = right },
+            Panel1 = new VPanel { Name = "left" },
+            Panel2 = new VPanel { Name = "right" },
         });
 
-        Assert.AreEqual(left, split.Panel1.Padding, "and a slot that refills goes back to its own panel");
-        Assert.AreEqual(right, split.Panel2.Padding);
+        Assert.AreEqual("left", split.Panel1.Name, "and a slot that refills goes back to its own panel");
+        Assert.AreEqual("right", split.Panel2.Name);
     }
 
     private sealed class SplitSession : IDisposable
@@ -443,41 +423,3 @@ public sealed class SlotTests
     }
 }
 
-/// <summary>
-/// A hand-written node for <see cref="Panel"/>, so a test can hand a borrowed slot a second node class
-/// for the same control type - which the generator never produces, because it emits one node class per
-/// control.
-/// </summary>
-/// <remarks>
-/// It also stands as the proof that <see cref="IVNodeFor{TControl}"/> is implementable outside generated
-/// code: one interface, one explicit member, and the reconciler treats it like any other node.
-/// </remarks>
-internal sealed class ManualPanel : VNode, IVNodeFor<Panel>
-{
-    private static readonly NodeType Kind = new(typeof(Panel), static () => new Panel());
-    private static readonly Thickness PristinePadding = new Panel().Padding;
-
-    internal Thickness? Padding { get; init; }
-
-    VNode IVNodeFor<Panel>.Node => this;
-
-    public override NodeType NodeType => Kind;
-
-    public override void ApplyTo(Control control)
-    {
-        if (Padding is { } padding)
-        {
-            control.Padding = padding;
-        }
-    }
-
-    public override void PatchFrom(VNode previous, Control control)
-    {
-        var old = (ManualPanel)previous;
-
-        if (!Nullable.Equals(old.Padding, Padding))
-        {
-            control.Padding = Padding ?? PristinePadding;
-        }
-    }
-}

@@ -318,19 +318,6 @@ internal static class Reconciler
 
         if (slot.Control is { } target)
         {
-            // The marker interface makes "is this node for a Panel" a compile-time question, but a
-            // borrowed slot's real requirement is narrower than its declared type can say: the instance
-            // is whatever the container made, and a node for a subclass of the declared type would cast
-            // that instance to the subclass inside ApplyTo. It is the one check the type system cannot
-            // make, so it is made here, with both types named.
-            if (!node.NodeType.ControlType.IsInstanceOfType(target))
-            {
-                throw new InvalidOperationException(
-                    $"A {target.GetType().Name} slot takes a node for that control, but this one makes a {node.NodeType.ControlType.Name}. "
-                    + $"A slot the control fills in place is the control's own instance - it is configured and filled, never replaced - so the node has to be for that instance's type. "
-                    + $"Give the slot a node for {target.GetType().Name}, or put the {node.NodeType.ControlType.Name} node inside it as a child.");
-            }
-
             node.ApplyTo(target);
             mounted = new Mounted(node, target) { Borrowed = true };
         }

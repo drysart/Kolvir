@@ -55,11 +55,14 @@ internal static class NodeEmitter
         var inner = indent + "    ";
         var body = inner + "    ";
 
-        // A node whose control can be given to a slot carries the all-unassigned instance removal
-        // needs, and no other node does: it is a static instance and an override, so charging every
-        // node class for a mechanism most of them can never take part in would be the per-node cost
-        // this design exists to avoid.
-        bool slotTarget = slotControls.Count > 0 && control.Chain.Any(slotControls.Contains);
+        // A node whose control a borrowed slot holds carries the all-unassigned instance removal needs,
+        // and no other node does: it is a static instance and an override, so charging every node class
+        // for a mechanism most of them can never take part in would be the per-node cost this design
+        // exists to avoid. The comparison is the control itself, not its bases: a borrowed slot is typed
+        // with one node class exactly, so a derived control's node can never be in it.
+        bool slotTarget = slotControls.Count > 0
+            && control.Chain.Length > 0
+            && slotControls.Contains(control.Chain[0]);
 
         source.AppendLine(indent + "/// <summary>A node that makes a " + control.ControlType + ".</summary>");
         if (!control.AcceptsChildren)
@@ -173,9 +176,9 @@ internal static class NodeEmitter
     private static string SlotDocumentation(PropertyModel property)
     {
         const string Note =
-            "<remarks><para>On a node this is a property slot: assign a node to describe what the control "
-            + "this property holds contains, or null for nothing. A node whose control does not derive from "
-            + "the property's type does not compile.</para></remarks>";
+            "<remarks><para>On a node this is a property slot: assign a node for this control's own type to "
+            + "describe what it contains, or null for nothing. Any other node class is a compile error, because "
+            + "the control is the one the parent made and a node for a different control cannot describe it.</para></remarks>";
 
         var documentation = property.Documentation;
 
@@ -335,7 +338,7 @@ internal static class NodeEmitter
             return;
         }
 
-        bool borrows = slots.Any(property => !property.SlotCreates);
+        bool borrows = slots.Any(property => property.SlotBorrows);
 
         source.AppendLine();
         source.AppendLine(body + "public override global::Kolvir.Feature.VirtualDom.VNodeSlot[]? GetSlots(global::Kolvir.Control control)");
@@ -351,15 +354,15 @@ internal static class NodeEmitter
 
         foreach (var property in slots)
         {
-            var node = property.Field + ".Value?.Node";
-
             source.AppendLine(
-                property.SlotCreates
-                    ? body + "        global::Kolvir.Feature.VirtualDom.VNodeSlot.Creating(" + node
-                        + ", static (owner, control) => ((" + control.ControlType + ")owner)." + property.Accessor
-                        + " = (" + property.SlotControlType + ")control),"
-                    : body + "        global::Kolvir.Feature.VirtualDom.VNodeSlot.Borrowed(target."
-                        + property.Accessor + ", " + node + "),");
+                property.SlotBorrows
+                    // A borrowed slot's value is the node itself: the property is typed with the node
+                    // class, so there is no marker interface to read through.
+                    ? body + "        global::Kolvir.Feature.VirtualDom.VNodeSlot.Borrowed(target."
+                        + property.Accessor + ", " + property.Field + ".Value),"
+                    : body + "        global::Kolvir.Feature.VirtualDom.VNodeSlot.Creating("
+                        + property.Field + ".Value?.Node, static (owner, control) => ((" + control.ControlType + ")owner)."
+                        + property.Accessor + " = (" + property.SlotControlType + ")control),");
         }
 
         source.AppendLine(body + "    ];");
