@@ -373,8 +373,17 @@ because a load finished or because a limit was raised, and both of those raise
 `CanLoadNowChanged`; a priority changes only because something set it, and that raises
 `PriorityChanged`. There is no state change the manager needs to hear about that has no event.
 
-The walk itself is O(n) in the queued loaders; section 9.6 keeps that cost as an open question rather
-than assuming it is fine.
+The walk is O(n) in the queued loaders, and that is decided rather than tolerated. The queue is what is
+on screen plus a little prefetch - tens of entries, not thousands - and a linear scan of that, with the
+insertion that keeps it ordered, is nothing next to a fetch. The number worth remembering is that the
+cost is per *call* rather than per enqueue: a scroll that submits two hundred loaders in one pass is
+O(n) walks of O(n) each. That is the shape that would break first if the assumption ever stops holding,
+and it is cheaper to name it here than to rediscover it.
+
+Two levers are recorded for that day, not as work: a priority index that starts the scan from the waiter
+that woke it, and coalescing a batch of enqueues into one walk. The second is nearly free already - the
+"walking / walk again" flag (3.8) is exactly the mechanism, and `CanLoadNowChanged` arrives through the
+same path, so the same trick would cover both.
 
 ### 3.8 The walk is re-entrancy safe
 
@@ -922,7 +931,7 @@ What it costs, exactly:
   makes reachable, so `EffectiveInView`'s own code goes with it if nothing else uses it.
 - **The exception to watch** is anything the package reaches from a path every consumer reaches. Today
   that is `AddAssetLoading()` alone, which registers the manager and the provider and nothing else
-  (9.7); the extension shape is what keeps it that way, and a later addition that touches InView from a
+  (9.6); the extension shape is what keeps it that way, and a later addition that touches InView from a
   constructor or a registration would quietly undo the saving. That is the one thing to check when this
   package grows.
 
@@ -1010,23 +1019,20 @@ reviewer can disagree with the reading rather than with a decision presented as 
 5. **What are `IAssetLoaderProvider`'s exact members?** `TryCreateAssetLoader<TResult>(string uri, out
    loader)` is decided (2.3); whether it also exposes "can anything handle this URI", the registered
    factories for diagnostics, or a non-generic overload is not.
-6. **Does the walk need to be cheaper than O(n) per enqueue?** A scroll enqueues many loaders at
-   once, so the first real queue is where this is answerable; a priority index that starts from the
-   waiter that woke it is the obvious candidate if it is not.
-7. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
+6. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
    `HttpClientLoaderFactory`, an `IImageDataFactory`-backed decoder, or nothing at all - the last is
    the smallest surface and the one rung 3 argues for.
-8. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
+7. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
     state) would make the demo's readout possible and make a priority bug visible; it is also a public
     surface that has to be kept truthful, and a snapshot type is a small API of its own.
-9. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
+8. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
     `PlaceholderColor` fills a control with no source at all, and the placeholder is specified as drawn
     "whenever there is no loaded image for its URI" - so the two overlap exactly where there is no URI.
     The reading to start from is that a null `SourceUri` means the control is not this feature's to
     decorate, so `PlaceholderSource` is ignored there and `PlaceholderColor` keeps its current meaning;
     the opposite reading - a placeholder is a property of the control, not of the URI - is defensible
     and would need `PlaceholderColor` to lose the no-URI case.
-10. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
+9. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
     (6.1), which is accurate but loses the fact that a load was cancelled rather than never asked for.
     This is 9.3's question seen from a different door: if cancellation gets a `Cancelled` value for the
     URI cases, an application assignment is the one case that should probably stay `None`, because the
