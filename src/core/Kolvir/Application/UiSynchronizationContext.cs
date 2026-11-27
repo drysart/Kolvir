@@ -17,10 +17,17 @@ namespace Kolvir;
 /// <para>
 /// Every dispatch is one the model already owns: <see cref="Post"/> queues through
 /// <see cref="Application.BeginInvoke"/> and <see cref="Send"/> goes through
-/// <see cref="Application.Invoke"/>. So a continuation is subject to exactly the rules any other
-/// marshalled work is - it is never run inline, so it cannot overtake work already queued, and an
-/// exception it throws reaches <see cref="Application.AddUnhandledExceptionHandler"/> instead of
-/// unwinding into the platform's message pump.
+/// <see cref="Application.Invoke"/>. What that covers is a continuation that is <em>dispatched</em>
+/// through this context: it is queued rather than run inline, so it cannot overtake work already
+/// queued, and an exception it throws reaches
+/// <see cref="Application.AddUnhandledExceptionHandler"/> instead of unwinding into the platform's
+/// message pump. It does not cover every <c>await</c> in application code. An awaiter runs its
+/// continuation inline when the awaited task completes on a thread where this same instance is
+/// current - inside a turn the loop is already running, for one - and then nothing reaches
+/// <see cref="Post"/>: the continuation runs ahead of whatever is queued, and an exception it throws
+/// unwinds into the completing code rather than the handler. Which of the two a given <c>await</c>
+/// gets is the awaiter's decision rather than this type's; the asset loading note works the case that
+/// depends on it through, in section 3.12.
 /// </para>
 /// <para>
 /// There is one instance for the process, which is what <see cref="CreateCopy"/> answers: there is
