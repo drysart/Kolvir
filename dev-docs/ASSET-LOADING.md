@@ -5,9 +5,10 @@ for `Kolvir.Feature.AssetLoading`, and **3** again for the follow-up package tha
 URI. The measurement that `FEATURE-COST-POLICY.md` asks every feature to state comes with the code,
 not with this note (section 7).
 
-It builds on two things core now has or is getting: `Control`'s tree-lifetime notifications
-(`AddedToTree`, `RemovedFromTree`, `Disposing`), which are merged, and the virtual DOM's reconciler
-disposing the controls it removes, which is decided and in progress (6.2).
+It builds on three things core now has or is getting: `Control`'s tree-lifetime notifications
+(`AddedToTree`, `RemovedFromTree`, `Disposing`), which are merged; `Image`'s `Source` change
+notification, which is decided and in progress (6); and the virtual DOM's reconciler disposing the
+controls it removes, which is decided and in progress (6.2).
 
 This records a design that was settled in review before it was written down. Sections 2 to 4 are the
 decided shape and the reasons for it; section 5 is what the manager does, in the order it does it;
@@ -556,9 +557,9 @@ cancelling it, which is the only thing the manager has ever done to one.
 
 ## 6. The control integration (described, not built)
 
-A URI to ask for, and a property, an error value and a change handler pair to say where the request
-has got to, as C# 14 extension members in a feature package in the shape
-`ControlEffectiveInViewExtensions` already uses:
+A URI to ask for, a placeholder to show until there is one, and a property, an error value and a
+change handler pair to say where the request has got to, as C# 14 extension members in a feature
+package in the shape `ControlEffectiveInViewExtensions` already uses:
 
 ```csharp
 public static class ImageSourceLoadingExtensions
@@ -566,6 +567,7 @@ public static class ImageSourceLoadingExtensions
     extension(Image image)
     {
         public string? SourceUri { get; set; }
+        public ImageData? PlaceholderSource { get; set; }
         public ImageSourceLoadState SourceLoadState { get; }
         public Exception? SourceLoadError { get; }
         public IDisposable AddSourceLoadStateChangedHandler(Action<object> handler);
@@ -609,6 +611,61 @@ directly, and a state property only says *that* it finished. That advantage does
 because this feature assigns `Image.Source` itself - the consumer never needs the bytes, only to know
 whether to draw a spinner. A consumer that does want the bytes is better served by the manager
 directly (2), which is the general path.
+
+**`Source` and `SourceUri` are exclusive, and assigning either takes ownership.**
+
+- **Assigning `SourceUri` puts the control into URI mode.** For as long as that relationship lasts the
+  feature owns what `Source` holds: it writes the loaded image, it writes the placeholder, and it
+  disposes the loaded image it replaces.
+- **Assigning `Source` means the application has taken the control over.** The feature cancels the
+  outstanding load, clears `SourceUri`, and leaves the state at `None`. The image the application
+  assigned is left exactly where it is, and a load that was already in flight cannot replace it,
+  because there is no longer a load to deliver.
+- **The feature's own writes do not count.** It recognises an application assignment by suppressing the
+  notification around its own writes, which is why this rule needs the notification below rather than a
+  property read.
+
+That last rule is the one that needs a core change, and it is the same argument 6.2 had to win for
+`Control`, on one control instead of on the base class: `Image.Source` is a plain property with a
+reference-equality guard and no notification to anything (`src/core/Kolvir/Controls/Image.cs:65-87`), so
+a package in another assembly cannot tell an application assignment from the one it just made itself.
+`Image` therefore gains `AddSourceChangedHandler`/`RemoveSourceChangedHandler`, raised at the end of the
+`Source` setter. That is decided and in progress, and without it the exclusivity rule is not
+implementable from a rung-3 package at all.
+
+**`PlaceholderSource` is what an application shows when there is nothing loaded.** It pairs with the
+control's existing `PlaceholderColor`, which fills the surface when there is no source at all:
+
+```csharp
+public ImageData? PlaceholderSource { get; set; }
+```
+
+It is drawn whenever the control has no loaded image for its URI - a shine while the load is pending, an
+error image after `Failed`, or, when it is null, nothing at all and `PlaceholderColor` does the work as
+it does today. There is no second drawing path: the feature writes the placeholder into `Source`, so
+what an `Image` draws is always its `Source`, and `Image` itself needs no change to show one. One
+property rather than one per state, for two reasons: an application that wants different visuals per
+state sets a different image from the state change handler, and the obvious alternative - assigning
+`Source` directly - would end the URI relationship, so an error image assigned that way would be an
+error image that prevents the retry.
+
+Four things about it are decided:
+
+- **The feature writes it through the same guarded path as a loaded image**, so it never trips the
+  ownership rule above.
+- **`Loaded` wins automatically.** Assigning the loaded image replaces the placeholder, so the feature
+  never has to clear it on the way out.
+- **It is borrowed, not owned.** The application created it and the application disposes it; the feature
+  never does. The loaded `ImageData` is the other way round - the feature created it, so the feature
+  disposes it (6.3). They are the same property from two directions, and that difference is the whole
+  point.
+- **It is an `ImageData`, not a URI.** A placeholder that came from a URI would pend and fail on its
+  own, and would recurse.
+
+**Ordering, for a handler that assigns it.** On `Loaded` and on `Failed`, `Source` has already been
+updated when the state change is raised, so a handler that assigns `PlaceholderSource` in response is
+writing the image that stays on screen - the loaded image in the first case, the placeholder in the
+second. 6.1 lists this with the ordering rules.
 
 **Set.** Resolve `IAssetLoaderProvider` through `Control.Services` (which is `Host?.Services`,
 `src/core/Kolvir/Core/Control.cs`) - not through a window, not through a static. Ask it for an
@@ -666,6 +723,13 @@ inferred rather than written down:
   cannot carry one and an exception type is not a state.
 - **A failed load leaves `SourceUri` set**, which makes a retry a plain `SourceUri = uri` assignment
   rather than a new API. That resolves half of what was open question 9.3 - see 6.3.
+- **`Loaded` and `Failed` are raised after `Source` is settled.** A handler that assigns
+  `PlaceholderSource` in response is therefore writing the image that stays on screen, and one that
+  reads `Source` reads the image the state describes. Raising the state first would let a handler see
+  the previous image beside the new state.
+- **Assigning `Source` from application code is `None`, not `Failed`.** Nothing failed: the application
+  took the control over, so the URI is cleared, the error stays null, and the state says what is
+  actually true.
 
 ### 6.2 Removal and disposal are separate, and both are now observable
 
@@ -733,6 +797,12 @@ for.
   (`src/core/Kolvir/Controls/Image.cs`). Assigning a new URI must dispose the previous loaded
   `ImageData`, and that is a real rule, not a nicety - it is the same rule an application already
   follows when it assigns `Source` itself.
+- **Owned and borrowed are two different things on one property.** A loaded `ImageData` is owned: the
+  feature created it, so the feature disposes it when it is replaced, when the URI changes, and on
+  `Disposing`. A `PlaceholderSource` is borrowed: the application created it, and the application
+  disposes it - the feature writes it into `Source` and never disposes it, not even when the load
+  succeeds and the placeholder stops being shown. The rule is the one `Image`'s own documentation
+  states for `Source`, applied per writer rather than per property: whoever made the image disposes it.
 - **Disposal when the control is disposed - closed.** `AddDisposingHandler` is the notification this
   needed (6.2): the feature disposes the `ImageData` it created and cancels the load there, while the
   control is still usable. Nothing else is owed here, because the notification is now the control's own
@@ -746,12 +816,13 @@ Two packages, in this order:
   interfaces, the provider, and `AddAssetLoading()`/`AddAssetLoaderFactory()`. No control, no
   visibility, no image format. It is the reusable core, and it is useful on its own: an application
   with a virtual list of its own can priority-order its own loads with it.
-- **A follow-up package for the `Image` loading surface** (section 6: the URI, the load state, the
-  error, and the priority mapping), which references AssetLoading *and* EffectiveInView. This split is
-  why the reusable core does not hard-depend on a UI visibility feature: the dependency points from the
-  control integration to both, not between the two. With the tree notifications in core and the
-  reconciler disposing what it removes (6.2), the follow-up has no missing seam left of its own - the
-  two can ship in either order, and only AssetLoading is useful on its own.
+- **A follow-up package for the `Image` loading surface** (section 6: the URI, the placeholder, the
+  load state, the error, and the priority mapping), which references AssetLoading *and* EffectiveInView.
+  This split is why the reusable core does not hard-depend on a UI visibility feature: the dependency
+  points from the control integration to both, not between the two. With the tree notifications in
+  core, the `Source` notification in progress, and the reconciler disposing what it removes (6.2), the
+  follow-up has no missing seam left of its own - the two can ship in either order, and only
+  AssetLoading is useful on its own.
 
 **Rung: 3 for each**, per `FEATURE-COST-POLICY.md` section 4. A feature package is rung 3 by
 definition, and here rung 3 is also correct on the merits rather than merely available: an
@@ -794,6 +865,9 @@ the policy exists to replace.
 | Letting "disposed" stand in for "removed" | Removal and disposal are separate signals now (`RemovedFromTree` and `Disposing`), and a control removed by application code never sees the second; one cannot stand in for the other (6.2). |
 | Accepting the gap and documenting it | A removed control's load would run to completion with nothing to cancel it - a wasted fetch per in-flight load, and the control held alive until it ended. The two mechanisms in 6.2 close it, so there is nothing left to accept. |
 | A set-only `SourceUri` extension property | The generator skips it: it reads the pristine value back through a public getter (6). |
+| Leaving `Source` and `SourceUri` independent | A completion would silently overwrite an image the application assigned, and the application could not tell whether the control was still following the URI (6). |
+| A placeholder loaded from a URI | It would pend and fail on its own, including after it replaced itself, which recurses; a placeholder is an `ImageData`, not a request (6). |
+| Separate `PendingSource` and `FailedSource` properties | One property plus the state change handler covers both, and a third state would want a third property; the state is the axis, so the handler picks the image per state (6). |
 | `SourceUri` on `Image` in core | A rung-3 package cannot add members to a core type; the surface has to be extension members (7). |
 
 ## 9. Open questions
@@ -847,3 +921,15 @@ reviewer can disagree with the reading rather than with a decision presented as 
     is a placeholder too. The other packages are named after the feature (`Kolvir.Feature.Svg`,
     `Kolvir.Feature.EffectiveInView`), which argues for `Kolvir.Feature.ImageLoading` and a static
     class that matches.
+12. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
+    `PlaceholderColor` fills a control with no source at all, and the placeholder is specified as drawn
+    "whenever there is no loaded image for its URI" - so the two overlap exactly where there is no URI.
+    The reading to start from is that a null `SourceUri` means the control is not this feature's to
+    decorate, so `PlaceholderSource` is ignored there and `PlaceholderColor` keeps its current meaning;
+    the opposite reading - a placeholder is a property of the control, not of the URI - is defensible
+    and would need `PlaceholderColor` to lose the no-URI case.
+13. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
+    (6.1), which is accurate but loses the fact that a load was cancelled rather than never asked for.
+    This is 9.4's question seen from a different door: if cancellation gets a `Cancelled` value for the
+    URI cases, an application assignment is the one case that should probably stay `None`, because the
+    control is no longer following a URI at all.
