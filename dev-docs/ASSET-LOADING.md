@@ -517,9 +517,9 @@ public static class ImageSourceUriExtensions
 **Set.** Resolve `IAssetLoaderProvider` through `Control.Services` (which is `Host?.Services`,
 `src/core/Kolvir/Core/Control.cs`) - not through a window, not through a static. Ask it for an
 `ImageData` loader for the URI, submit it to `IAssetLoadManager`, and on completion assign
-`Image.Source`. Disposal or a new URI cancels the outstanding load: the token source, the loader, and
-the InView handler token all go. Removal is the third way a load should stop, and it is the one
-nothing observes (6.1).
+`Image.Source`. A new URI cancels the outstanding load: the token source, the loader, and the InView
+handler token all go. Disposal and removal are the other two ways a load should stop, and neither is
+observable (6.1).
 
 **Priority.** `EffectiveInView` maps to `Priority` through `AddEffectiveInViewChangedHandler`, one
 subscription per URI assignment (3.15). In view is Visible, out of view is Background; the constants
@@ -561,12 +561,17 @@ had left shut.
 
 Three options, named and not decided:
 
-- **A removal and disposal notification on `Control`.** The honest fix, and it cannot be an extension
-  member: the notification has to be *raised by the tree*, so it is a member on a retained type - the
-  pattern `FEATURE-COST-POLICY.md` section 3's first table row is about, and the reason section 5
-  exists. Section 5.5 lists the three exceptions that justify a core member, and none of them is
-  obviously satisfied for asset loading. That is a decision a feature cannot take on its own, and it
-  is open question 9.4.
+- **A removal and disposal notification the tree raises.** The honest fix, and it cannot be an
+  extension member: the notification has to be *raised by the tree*, so it lives on a retained type -
+  the pattern `FEATURE-COST-POLICY.md` section 3's first table row is about, and the reason section 5
+  exists. `FEATURE-COST-POLICY.md` section 5.5 lists the three exceptions that justify a core member.
+  Its second exception is also the shape this option should take: an **interface** the control
+  implements that the tree raises through, never a virtual or an event on `Control`, because an
+  interface is retained only by the types that implement it. The wrinkle for this feature is that
+  `Control` itself would implement it - every control is removable - so the retained-vtable argument
+  lands differently here than it does for a feature only some subclasses implement, and the cost has to
+  be measured rather than assumed to be small. A decision a feature cannot take on its own; open
+  question 9.4.
 - **The reconciler disposing what it detaches.** Cheap to write and wrong as a rule: an application
   that detaches a control to reattach it elsewhere would get a disposed control back, and `Unmount`
   is also the path a window's teardown takes. If it is considered at all, it is considered as a
@@ -666,15 +671,19 @@ reviewer can disagree with the reading rather than with a decision presented as 
 3. **What is the image error surface, and does a failed load clear the URI?** An event on the control
    is the likely answer (6); leaving the URI set is what makes a retry possible, clearing it is what
    makes "not loaded" visible. Not decided.
-4. **Does `Control` gain a removal and disposal notification?** This is the seam 6.1 needs, and the
-   largest question in the note, because the notification cannot be an extension member: it has to be
-   raised by the tree, so it is a member on a retained type, paid for by every application
+4. **Does the tree gain a way to say a control was removed or disposed?** This is the seam 6.1 needs,
+   and the largest question in the note. The notification cannot be an extension member - the tree has
+   to raise it - so it is a member on a retained type, paid for by every application
    (`FEATURE-COST-POLICY.md` sections 3 and 5), and section 5.5's three exceptions would have to be
-   argued one way or the other. An `Add`/`Remove` pair over a table holding only the controls that
-   asked - the way `EffectiveInView` keeps a separate `Watched` table and computes nothing for a
-   control nobody watches - keeps the *runtime* cost off unwatched controls, but not the reachability
-   cost: the type keeps the member. So the question is whether that cost is acceptable, and the answer
-   is a measurement rather than a guess.
+   argued one way or the other. The reading to start from is section 5.5's second exception: an
+   interface the control implements and the tree raises through, not a virtual or an event on
+   `Control`, because an interface is retained only by the types that implement it - with the caveat
+   that `Control` always implements this one, so the win is smaller here than for a feature only some
+   subclasses implement. An `Add`/`Remove` pair over a table holding only the controls that asked -
+   the way `EffectiveInView` keeps a separate `Watched` table and computes nothing for a control
+   nobody watches - keeps the *runtime* cost off unwatched controls, but not the reachability cost.
+   So the question is whether that cost is acceptable, and the answer is a measurement rather than a
+   guess.
 5. **Does `Reconciler.Unmount` dispose what it detaches?** A core behaviour change, not a seam: it
    would fix 6.1 without touching `Control`, and it would break any application that detaches a
    control to reattach it, which is a legitimate thing to do today. Decided separately or not at all.
