@@ -22,15 +22,13 @@ public sealed class SvgSizeModeTests : SvgTestBase
     [TestMethod]
     public void StretchImageFillsTheBoxAndNormalDoesNot()
     {
-        var image = Load(sizeMode: SizeMode.StretchImage);
-
-        using (var scene = SvgScene.Create(image, HostSize, HostSize))
+        using (var scene = SvgScene.Create(Load(SizeMode.StretchImage), HostSize, HostSize))
         {
             Assert.AreEqual(SvgFixtures.Blue, scene.PixelAt(2, 2), "a stretched document reaches the corner");
         }
 
-        image.SizeMode = SizeMode.Normal;
-        using var normal = SvgScene.Create(image, HostSize, HostSize);
+        // Closing a window disposes the tree it showed, so the second scene is a second image.
+        using var normal = SvgScene.Create(Load(SizeMode.Normal), HostSize, HostSize);
         Assert.AreNotEqual(SvgFixtures.Blue, normal.PixelAt(2, 2), "an eight-by-four document drawn at natural size cannot");
         Assert.AreEqual(SvgFixtures.Blue, normal.PixelAt(50, 50), "but it is painted in the middle of the box");
     }
@@ -60,14 +58,12 @@ public sealed class SvgSizeModeTests : SvgTestBase
     [TestMethod]
     public void EveryModePlacesTheDocumentWhereTheBitmapsTestAlreadySaysItDoes()
     {
-        var image = Load(sizeMode: SizeMode.Normal);
-
         // The same expectations as the core suite's bitmap test, driven through a vector document:
         // the alignment is the control's, and a picture that was never a bitmap uses it unchanged.
+        // Each scene gets its own image because closing a window disposes the tree it showed.
         foreach (var mode in Enum.GetValues<SizeMode>())
         {
-            image.SizeMode = mode;
-            using var scene = SvgScene.Create(image, HostSize, HostSize);
+            using var scene = SvgScene.Create(Load(mode), HostSize, HostSize);
 
             var painted = scene.PixelAt(52, 50);
             var corner = scene.PixelAt(2, 2);

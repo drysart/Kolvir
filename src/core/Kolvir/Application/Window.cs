@@ -111,7 +111,16 @@ public sealed partial class Window : IDisposable
         RaisePhase(WindowPhase.Created);
     }
 
-    /// <summary>The control tree's root. Assigning it is the same as assigning <see cref="UiHost.Root"/>.</summary>
+    /// <summary>
+    /// The control tree's root. Assigning it is the same as assigning <see cref="UiHost.Root"/>.
+    /// </summary>
+    /// <remarks>
+    /// The window owns the tree: closing it disposes the root, and the root disposes its children in
+    /// turn. Once the window has closed this is null - the window hands back no disposed control -
+    /// and so is <see cref="UiHost.Root"/>. An application that wants to keep a window's content has
+    /// to move it out first, by assigning it to <see cref="Content"/> of another window or by
+    /// clearing this one before the close.
+    /// </remarks>
     public Control? Content
     {
         get => _content;
@@ -776,9 +785,9 @@ public sealed partial class Window : IDisposable
 
     /// <summary>
     /// Closes the window. A handler added by <see cref="AddClosingHandler"/> may cancel it;
-    /// otherwise the native window is destroyed, the service scope is disposed and the handlers
-    /// added by
-    /// <see cref="AddClosedHandler"/> run.
+    /// otherwise the native window is destroyed, the handlers added by
+    /// <see cref="AddClosedHandler"/> run, and then the control tree and the service scope are
+    /// disposed.
     /// </summary>
     /// <remarks>
     /// The window becomes closed at once, but a close asked for from a frame-starting handler
@@ -787,7 +796,9 @@ public sealed partial class Window : IDisposable
     /// </remarks>
     public void Close() => RequestClose();
 
-    /// <summary>Closes the window and releases its service scope. Idempotent.</summary>
+    /// <summary>
+    /// Closes the window and releases the control tree and the service scope. Idempotent.
+    /// </summary>
     /// <remarks>
     /// A close asked for while a host is painting cannot finish there: the backend's paint path is
     /// still holding the surface it handed to <see cref="UiHost.Paint"/>, and disposing the backend
@@ -857,8 +868,23 @@ public sealed partial class Window : IDisposable
         _closed?.Invoke(this);
         _application.UnregisterWindow(this);
 
+        // The window is the root of its control tree, so closing it disposes the tree the way any
+        // control disposes its children. Closed handlers have already run, so they still see the
+        // controls they were shown; nothing after this point can. Disposing here rather than later
+        // keeps the host's reach into the tree - a control's Disposing handler resolving a scoped
+        // service still works, which is why the scope below outlives it.
+        if (_content is { } content)
+        {
+            _content = null;
+            content.Dispose();
+        }
+
+        // Nothing hands back a disposed control, and the host is not left pointing at one either.
+        Host.Root = null;
+
         // The scope, and the hook instances in it, are still alive here; that is what makes this
-        // the last point at which a hook can reach other scoped services.
+        // the last point at which a hook can reach other scoped services. The tree was disposed
+        // just above, so its handlers had that same reach.
         RaisePhase(WindowPhase.Disposed);
         _scope.Dispose();
     }
