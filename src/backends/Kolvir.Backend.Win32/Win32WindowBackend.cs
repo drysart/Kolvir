@@ -1097,6 +1097,13 @@ public sealed class Win32WindowBackend : IWindowBackend
     {
         _pressActive = false;
 
+        // The move loop consumes the button-up this window would have ended the press with, so the UI
+        // is told the gesture is over while it still can be: a capture left standing would route
+        // every later wheel turn to the control the drag started on, wherever the pointer really is.
+        // This is the same state a release leaves, and it is not left to the WM_CAPTURECHANGED that
+        // ReleaseCapture produces a moment later: the handoff is the one case we know is coming.
+        _host.ProcessCaptureLost();
+
         NativeMethods.ReleaseCapture();
 
         // WM_LBUTTONDOWN reported the press in client coordinates; the non-client move loop takes a
@@ -1785,6 +1792,16 @@ public sealed class Win32WindowBackend : IWindowBackend
                 }
 
                 break;
+
+            case NativeMethods.WmCaptureChanged:
+                // Windows took the pointer away - another window captured it, or it was given up
+                // without a release on our side. The press that captured it is over with it, and the
+                // UI has to hit-test again rather than keep sending everything to the control the
+                // press started on. The move loop in BeginSystemDrag is the case that needs this: it
+                // eats the button-up, so nothing else would ever end the press.
+                _pressActive = false;
+                _host.ProcessCaptureLost();
+                return IntPtr.Zero;
 
             case NativeMethods.WmSetFocus:
                 // The caret is per thread and exists only while a window of this thread has the focus,

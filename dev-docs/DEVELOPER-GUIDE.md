@@ -717,6 +717,17 @@ precise deltas (a touchpad) passes them straight through. A panel scrolls vertic
 is held and horizontal scrolling is possible, and falls back to the other axis when the preferred one
 cannot move. A standalone `ScrollBar` moves three `SmallChange` steps per detent.
 
+A capture lasts exactly as long as its press. Every press captures the control it lands on, and a
+release ends it - but some gestures never deliver a release, and a capture that outlived its press
+would send every later wheel turn to the control the press began on, wherever the pointer really
+was. On Win32 that is what moving a window by its own drag region does: `TryBeginDrag` hands the
+press to the system's move loop, which consumes the button-up. So an adapter that learns the pointer
+is no longer the UI's calls `UiHost.ProcessCaptureLost()`, which ends the capture without raising a
+release (the platform owns the gesture from there, and a control told its drag ended would act on an
+ending the user never performed). Win32 calls it twice over: at the drag handoff, before the move
+loop starts, and on `WM_CAPTURECHANGED`, which covers every other way a capture can go. A captured
+control drags as it always did; only the gesture the platform took is ended.
+
 ```csharp
 list.AddMouseWheelHandler((sender, e) =>
 {

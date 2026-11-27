@@ -1264,6 +1264,33 @@ public sealed class UiHost
     });
 
     /// <summary>
+    /// Drops the pointer capture because the platform took the pointer away, without raising a
+    /// release on the control that held it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Adapters call this when the platform says the gesture is no longer the UI's: on Windows, the
+    /// system's own move loop taking the press (<c>WM_NCLBUTTONDOWN</c>), and <c>WM_CAPTURECHANGED</c>
+    /// for every other way a capture can go. The move loop consumes the button-up the host would
+    /// otherwise have cleared the capture with, and a capture that outlives its press is not a
+    /// cosmetic leak: every later wheel turn and button release is routed to the captured control
+    /// rather than to whatever is under the pointer, so a window dragged by its own drag region stops
+    /// scrolling until something else presses and releases inside the UI.
+    /// </para>
+    /// <para>
+    /// The release is deliberately not raised. The platform owns the gesture from here, and a control
+    /// told its drag ended would act on an ending the user never performed; ending the selection drag
+    /// is the only state the host itself has to undo.
+    /// </para>
+    /// </remarks>
+    public void ProcessCaptureLost() => Guard(() =>
+    {
+        _captured = null;
+        _selecting = false;
+        _draggingSelection = false;
+    });
+
+    /// <summary>
     /// Makes <paramref name="hit"/> the hovered control, raising the enter and leave events on every
     /// control whose hover changed.
     /// </summary>
