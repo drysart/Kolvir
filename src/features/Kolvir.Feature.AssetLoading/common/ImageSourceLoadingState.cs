@@ -19,8 +19,10 @@ namespace Kolvir.Feature.AssetLoading;
 /// <para>
 /// <b>The four moments a load starts or stops.</b> The <c>SourceUri</c>
 /// setter, <see cref="Control.AddAddedToTreeHandler"/>, <see cref="Control.AddRemovedFromTreeHandler"/>
-/// and <see cref="Control.AddDisposingHandler"/>, which is the pair the tree's own documentation
-/// describes (section 6.2). The control is told about its own <see cref="Image.Source"/> assignments
+/// and <see cref="Control.AddDisposingHandler"/>, which are the notifications the tree's own
+/// documentation describes (section 6.2). A load that is waiting for a service provider is also
+/// attempted on a completed layout pass, because a tree reaching a host raises none of them - see
+/// <see cref="TryStart"/>. The control is told about its own <see cref="Image.Source"/> assignments
 /// through <see cref="Image.AddSourceChangedHandler"/>, which is what lets the application take the
 /// control back without the feature mistaking its own writes for the application's (section 6).
 /// </para>
@@ -262,8 +264,8 @@ internal sealed class ImageSourceLoadingState
     /// from three places rather than one: the setter (the control was already in a hosted tree),
     /// <see cref="Control.AddAddedToTreeHandler"/> (it just joined one) and a completed layout pass
     /// (the tree it was already in was attached to a host, which raises neither of the other two -
-    /// <c>AttachHost</c> touches only the root). Each attempt either starts the load
-    /// or leaves the control in <see cref="Waiting"/> for the next one.
+    /// <c>AttachHost</c> touches only the root). Each attempt either starts the load or leaves the
+    /// control in <c>Waiting</c> for the next one.
     /// </para>
     /// <para>
     /// <see cref="ImageSourceLoadState.Pending"/> is already set when this runs, never after the
@@ -374,9 +376,9 @@ internal sealed class ImageSourceLoadingState
     /// <remarks>
     /// The task is already on the UI thread when it completes - the manager moves completions there
     /// and the ambient context resumes the await there - so this needs no dispatch of its own
-    /// (section 3.12). The returned task is not awaited by anyone and never faults: a handler that
-    /// throws from a state change faults it, exactly as an exception from a control handler reaches
-    /// whatever raised it.
+    /// (section 3.12). The returned task is not awaited by anyone, so an exception a state handler
+    /// throws from inside it becomes an unobserved task exception rather than reaching the caller that
+    /// assigned the URI; the alternative would be swallowing it here, which would hide a real bug.
     /// </remarks>
     private static async Task CompleteAsync(
         Image image,

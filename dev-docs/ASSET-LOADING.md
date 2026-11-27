@@ -1,9 +1,10 @@
 # Asset loading - design note
 
-Status: **design note only.** No code, no project, nothing under `src/` from this change. Rung: **3**
-for `Kolvir.Feature.AssetLoading`, which ships the manager and the `Image` integration together
-(section 7). The measurement that `FEATURE-COST-POLICY.md` asks every feature to state comes with the
-code, not with this note.
+Status: **design note, with the manager and the `Image` integration in the tree.** Rung: **3**
+for `Kolvir.Feature.AssetLoading`: the manager and its interfaces (sections 2 and 5) and the `Image`
+integration (section 6) are `src/features/Kolvir.Feature.AssetLoading/`. The demo page of section 7
+is not built, and the measurement `FEATURE-COST-POLICY.md` asks for is in the pull request that added
+the integration rather than in this note.
 
 It rests on four things core now has, all merged: `Control`'s tree-lifetime notifications (`AddedToTree`,
 `RemovedFromTree`, `Disposing`); `Image`'s `Source` change notification (#167); the virtual DOM's
@@ -12,7 +13,7 @@ reconciler disposing the controls it removes (#166); and `Window` disposing its 
 
 This records a design that was settled in review before it was written down. Sections 2 to 4 are the
 decided shape and the reasons for it; section 5 is what the manager does, in the order it does it;
-section 6 is the control integration, described and not built; section 7 is the package; section 8
+section 6 is the control integration, as built; section 7 is the package; section 8
 is the alternatives that lost, in one place, so a reviewer can see what was considered; section 9 is
 what is genuinely still open.
 
@@ -709,7 +710,7 @@ running load still holds; they are the only two states an entry has, and each ha
 The manager never disposes a handle: the loader interface has no `Dispose`, and a handle is released by
 cancelling it, which is the only thing the manager has ever done to one.
 
-## 6. The control integration (described, not built)
+## 6. The control integration
 
 A URI to ask for, a placeholder to show until there is one, and a property, an error value and a change
 handler pair to say where the request has got to, as C# 14 extension members in a feature package in
@@ -725,7 +726,7 @@ public static class ImageSourceLoadingExtensions
         public ImageSourceLoadState SourceLoadState { get; }
         public Exception? SourceLoadError { get; }
         public IDisposable AddSourceLoadStateChangedHandler(Action<object> handler);
-        void RemoveSourceLoadStateChangedHandler(Action<object> handler);
+        public void RemoveSourceLoadStateChangedHandler(Action<object> handler);
     }
 }
 ```
@@ -829,14 +830,13 @@ second. 6.1 lists this with the ordering rules.
 
 **Set.** The setter accepts the URI and goes no further than `Pending`. Before the control is in a tree
 there is nothing to resolve a factory or a manager from - `Control.Services` is null - so the URI is
-recorded and the load is not started. It starts when the control joins a tree (`AddedToTree`, the same
-event 6.2 leans on), or immediately if it is already in one, and from there: resolve
-`IAssetLoaderProvider` through `Control.Services` (which is `Host?.Services`,
-`src/core/Kolvir/Core/Control.cs`) - not through a window, not through a static - ask it for an
-`ImageData` loader for the URI, submit it to `IAssetLoadManager`, and on completion assign `Image.Source`
-and raise the state change. A new URI cancels the outstanding load: the token source, the loader, and the
-InView handler token all go. Removal and disposal are the other two ways a load stops, and both are now
-notifications the package subscribes to rather than gaps (6.2).
+recorded and the load is not started. It starts when the control can reach its services, or immediately
+if it already can, and from there: resolve `IAssetLoaderProvider` through `Control.Services` (which is
+`Host?.Services`, `src/core/Kolvir/Core/Control.cs`) - not through a window, not through a static - ask
+it for an `ImageData` loader for the URI, submit it to `IAssetLoadManager`, and on completion assign
+`Image.Source` and raise the state change. A new URI cancels the outstanding load: the token source, the
+loader, and the InView handler token all go. Removal and disposal are the other two ways a load stops, and
+both are now notifications the package subscribes to rather than gaps (6.2).
 
 **Retry is two assignments, and that is the whole API for it.** `SourceUri = null` ends the relationship:
 the outstanding load is cancelled, the loaded image is disposed, and the control has no image of the
@@ -864,11 +864,13 @@ makes the state readable after the load has finished and the tables emptied of e
 
 **Declarable in a render, with no extra work - almost.** The VirtualDom generator already maps
 extension properties onto node members (`EXTENSION-MEMBERS-ON-VNODES.md`), so `new VImage { SourceUri =
-"..." }` needs no generator change, and `SourceLoadState` is readable in a render for free. One
-condition from that document's section 3 applies to the URI: the property must have a *public getter*
-as well as a setter, because the generator reads the pristine value back through it when a render drops
-the property. A set-only `SourceUri` would be silently skipped - so the property stores what it was
-set to and returns it.
+"..." }` needs no generator change. `SourceLoadState` and `SourceLoadError` are get-only and so are not
+node properties - the generator skips a property it cannot assign - but a render reads them from the
+control it already has, which is the case they exist for. One condition from that document's section 3
+applies to the URI and to the placeholder: the property must have a *public getter* as well as a
+setter, because the generator reads the pristine value back through it when a render drops the
+property. A set-only `SourceUri` would be silently skipped - so the property stores what it was set to
+and returns it.
 
 ### 6.1 The ordering rules the control has to follow
 
@@ -878,16 +880,27 @@ inferred rather than written down:
 - **`Pending` is set before `manager.LoadAsync` is called, not after it returns.** A synchronous start
   calls back from inside that call (2.4), so the control must already be waiting when it does.
 - **A URI assigned before the control is in a tree waits at `Pending`.** `Control.Services` is null until
-  the control is attached, so the setter records the URI, sets `Pending` and starts nothing; `AddedToTree`
-  is where it starts. This is the same rule as the re-attached control below rather than a special case:
-  pending until the control can reach its services, then start or restart.
+  the control is attached, so the setter records the URI, sets `Pending` and starts nothing. It starts
+  when the control can reach its services, and there are two moments that can be the first one:
+  `AddedToTree` (the same event 6.2 leans on) for a control added to a tree that is already hosted, and a
+  completed layout pass for a control added to a tree that is not. The second is not a refinement: a
+  subtree's `Host` is set by `AttachHost`, which raises neither tree notification, so the ordinary
+  imperative order - build a panel, add an image to it, put the panel in a window - reaches `AddedToTree`
+  with no services and never hears about the window. The first completed pass is when that tree has
+  reached a host, and it is when the load starts. This is the same rule as the re-attached control below
+  rather than a special case: pending until the control can reach its services, then start or restart.
 - **A new URI cancels the old load before starting the new one**, so the state goes `Loading ->
   Pending` directly and never passes through `None`: the control still has a URI, it is only a
   different one.
 - **A stale completion never writes `Loaded`.** The cancelled load's completion arrives after the new
   load's state was set, and it is ignored - the same rule as 3.9's "a late result is never delivered",
   reached here from the control's side. The cheapest way to obey it is to compare the completing
-  request against the current one rather than to trust the cancellation.
+  request against the current one rather than to trust the cancellation. That comparison is defensive
+  rather than load-bearing in practice: the manager answers a cancelled caller at cancellation time and
+  never hands it a result afterwards (3.9), so the completion the control receives for a superseded
+  request is the cancellation, not an image. What the control cannot do is dispose an image the manager
+  drops - a load cancelled while running still produces one, and it goes nowhere - so that image is the
+  manager's to account for, and the feature owns only what it is handed.
 - **A control the reconciler removes is disposed, so its state stops mattering.** The mount created the
   control and disposes it on unmount (6.2), and the load is cancelled with it. There is no spinner left
   to correct and nothing left to keep, so this case needs no state rule of its own.
@@ -899,14 +912,25 @@ inferred rather than written down:
   documentation says it is for: "an asset load, for one - starts here" (`Control.AddAddedToTreeHandler`).
   This runs inside the removal assignment, which `Control` documents as re-entrant, and cancelling
   completes the caller's task at once (3.9), so the continuation can run before the handler returns -
-  which is one more reason the stale-completion rule below is a rule rather than a precaution.
+  which is one more reason the stale-completion rule below is a rule rather than a precaution. An image
+  the load had already produced stays on screen: the control still has an image for its URI and nothing
+  has failed, so `Source` is left alone and the restart replaces it when it arrives (6.3).
 - **`Disposing` cancels and releases.** It is the last moment the control is usable - `Own<T>` resources
-  go immediately afterwards - so the loaded `ImageData` is disposed there and nowhere later (6.3).
+  go immediately afterwards - so the loaded `ImageData` is disposed there and nowhere later (6.3). It
+  does not write `Source`: the control disposes its own source a few lines later, and assigning during
+  teardown would lay a disposing control out again.
 - **`Failed` carries the exception in `SourceLoadError`**, not in the state, because a state value
   cannot carry one and an exception type is not a state.
 - **A failed load leaves `SourceUri` exactly as it was.** A failure touches none of the three: the URI
   stays, `SourceLoadState` becomes `Failed`, and `SourceLoadError` carries the reason. Clearing the URI
   would lose the only record of what failed and make a retry impossible.
+- **A URI nothing claims is `Failed`, not `Pending`.** The provider answers false when no registered
+  factory produces an `ImageData` for the pair, and a control left `Pending` for ever would be a
+  spinner that never ends. `SourceLoadError` carries a `NotSupportedException` naming the URI, and the
+  same is true of an application that assigned a URI without calling `AddAssetLoading()` - there is no
+  provider to ask, and the failure is an `InvalidOperationException` that says so. Both leave
+  `SourceUri` alone, so registering what was missing and assigning null and then the URI is the whole
+  retry.
 - **Assigning the value `SourceUri` already holds does nothing** - no restart, no state change, no
   `Source` write. The setter guards on equality like every other settable property in the library
   (`Control.Parent`, `Image.Source`, `SizeMode`), which is what makes a re-rendering tree safe: a render
@@ -922,6 +946,12 @@ inferred rather than written down:
   `PlaceholderSource` in response is therefore writing the image that stays on screen, and one that
   reads `Source` reads the image the state describes. Raising the state first would let a handler see
   the previous image beside the new state.
+- **A handler that takes the control over from inside that write wins.** The feature's own `Source`
+  assignment raises `SourceChanged`, and a handler may assign `Source` from there. That assignment is
+  the application's, so the takeover rule applies at once - URI cleared, state `None` - and the
+  `Loaded` or `Failed` change that load was about to raise is dropped rather than overwriting it. The
+  feature recognises its own write by the value it is writing rather than by a flag, which is what
+  makes a nested assignment distinguishable from it.
 - **Assigning `Source` from application code is `None`, not `Failed`.** Nothing failed: the application
   took the control over, so the URI is cleared, the error stays null, and the state says what is
   actually true.
@@ -1008,7 +1038,9 @@ for.
   never disposes its `Source` and assigning a new one does not dispose the old
   (`src/core/Kolvir/Controls/Image.cs`). Assigning a new URI must dispose the previous loaded
   `ImageData`, and that is a real rule, not a nicety - it is the same rule an application already
-  follows when it assigns `Source` itself.
+  follows when it assigns `Source` itself. The one image the feature does not release is the one the
+  manager never hands it: a load cancelled while running is answered as cancelled and its result goes
+  nowhere (3.9, 6.1), so there is nothing on this side to dispose.
 - **Owned and borrowed are two different things on one property.** A loaded `ImageData` is owned: the
   feature created it, so the feature disposes it when it is replaced, when the URI changes, and on
   `Disposing`. A `PlaceholderSource` is borrowed: the application created it, and the application
@@ -1043,6 +1075,15 @@ What it costs, exactly:
   time (`FEATURE-COST-POLICY.md` section 5.1). An application that never names `SourceUri` keeps
   neither the integration code behind it nor the `AddEffectiveInViewChangedHandler` call that code
   makes reachable, so `EffectiveInView`'s own code goes with it if nothing else uses it.
+- **What that costs a Virtual DOM consumer, measured.** The generator scans the consumer's whole
+  reference closure (`EXTENSION-MEMBERS-ON-VNODES.md` section 2), so this package's reference to
+  `EffectiveInView` puts `EffectiveInViewChanged` on 36 generated node classes - the same 36 that
+  already carry `Control`'s own handler pairs, since only a `Control` node can reach a `Control`
+  extension - and `SourceUri`/`PlaceholderSource` on every `VImage` node whether or not the render
+  names them. In a `[VirtualDomAll]` consumer that renders one `VImage`, the generated node source grew
+  by 31,976 bytes: 3,591 for the three `Image` members, 26,097 for `EffectiveInViewChanged`, and the
+  rest actuator scaffolding. A hand-written application that names no member pays nothing; a Virtual
+  DOM one pays for the surface, because the node's apply path names the members.
 - **The exception to watch** is anything the package reaches from a path every consumer reaches. Today
   that is `AddAssetLoading()` alone, which registers the manager and the provider and nothing else
   (2.2); the extension shape is what keeps it that way, and a later addition that touches InView from a
@@ -1074,12 +1115,13 @@ rung 3's own mechanism. Rung 1 is impossible: a package in another assembly cann
 `Control` or `Image`, which is the standing rung-3 consequence `FEATURE-COST-POLICY.md` section 4
 records for every feature package.
 
-The measurement `FEATURE-COST-POLICY.md` requires - the published AOT size delta between
-`Kolvir.Minimal` with and without the package, and the trim warnings - **comes with the code, not with
-this note.** Nothing here can be measured, and a number invented now would be the kind of assertion the
-policy exists to replace. One number is not enough to settle the dependency above, so the measurement
-should also say whether `EffectiveInView`'s code is in that binary at all: that is the row the bundling
-decision turns on.
+The measurement `FEATURE-COST-POLICY.md` requires - the published AOT size delta and the trim warnings -
+**is in the pull request that added the integration, not in this note.** The row the bundling decision
+turned on was whether `EffectiveInView`'s code is in that binary at all: for a Virtual DOM consumer it
+is, and the generated-node half of the number is in the cost list above. A `[VirtualDomAll]` fixture
+that renders one `VImage` publishes at 4,068,864 bytes on win-x64, Skia loose, before this package's
+surface exists and 4,143,104 with it, and naming `SourceUri`, `PlaceholderSource` and the handler pair
+adds 7,168 more: the surface is what costs, not the use.
 
 ### 7.1 How the manager is tested
 
@@ -1104,9 +1146,21 @@ What has to be pinned, because between them they *are* the contract:
   without reaching into the manager's internals, and the reason the snapshot is worth having before there
   is a UI to look at it.
 
-The control integration's tests are a smaller set and belong to the second PR: a URI accepted before the
-control is in a tree stays `Pending`, `AddedToTree` starts it, `RemovedFromTree` returns it to `Pending`,
-`Disposing` releases the `ImageData`, and assigning `Source` clears the URI and leaves the image alone.
+The control integration's set is in the same assembly and is driven the same way: a real application, a
+real window and a real control tree on the headless backend, with a factory that hands out the fake
+loader and an `ImageData` whose source records that it was disposed. It pins a URI accepted before the
+control is in a tree staying `Pending` and starting on `AddedToTree` - and on the layout pass that
+attaches an unhosted tree to a window - the equal assignment doing nothing, a new URI releasing the old
+image and never passing through `None`, a detached control cancelling and resetting to `Pending`, a
+re-attached one starting again, `Disposing` releasing the loaded `ImageData`, the placeholder being
+shown while pending and replaced or restored on load and on failure, the stale completion, a failure
+carrying its exception with `SourceUri` intact, `Loaded` and `Failed` being raised after `Source` is
+settled, and the priority following `EffectiveInView`.
+
+One of those rules is defensive rather than observable: the stale-completion comparison cannot be shown
+to change an outcome, because the manager never delivers a cancelled caller's result, so removing it
+leaves the test passing. It stays because it is the rule 6.1 states and because the manager's guarantee
+is the manager's, not this package's.
 
 ## 8. The rejected alternatives, in one place
 
