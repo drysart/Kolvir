@@ -16,4 +16,9 @@ namespace Kolvir.Demo;
 [VirtualDom(typeof(Button))]
 [VirtualDom(typeof(Panel))]
 [VirtualDom(typeof(TextBox))]
+
+// The same attribute covers the label's element collection: a RichLabel node exposes Spans as a
+// sequence of generated VTextSpan descriptions, because TextSpan is marked as a virtualizable element
+// in core. The markup page is the one that uses it.
+[VirtualDom(typeof(RichLabel))]
 internal partial class DemoControls;

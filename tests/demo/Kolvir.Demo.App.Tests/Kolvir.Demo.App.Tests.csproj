@@ -1,0 +1,41 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- The sample's own unit: the markup parser the rich-label page runs on every keystroke.
+
+       The page itself is judged by rendering it - it needs a window, a host and a frame, which is what
+       the render switch is for - but the parser is a pure function from a string to runs, and no input
+       may make it throw, so it is tested here.
+
+       The source is linked rather than referenced. Kolvir.Demo.App is a platform application with a
+       conditioned target framework and a long list of backends and features, and a project reference
+       would drag all of that into this suite to test one file that names none of it. Linking the file
+       keeps the test on the very source the application compiles, so the two cannot drift. -->
+
+  <PropertyGroup>
+    <TargetFramework>net10.0</TargetFramework>
+
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <RootNamespace>Kolvir.Demo.Tests</RootNamespace>
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+    <IsAotCompatible>false</IsAotCompatible>
+    <EnableMSTestRunner>false</EnableMSTestRunner>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.14.1" />
+    <PackageReference Include="MSTest.TestAdapter" Version="3.11.1" />
+    <PackageReference Include="MSTest.TestFramework" Version="3.11.1" />
+    <PackageReference Include="coverlet.collector" Version="6.0.4">
+      <PrivateAssets>all</PrivateAssets>
+      <IncludeAssets>runtime; build; native; contentfiles; analyzers; buildtransitive</IncludeAssets>
+    </PackageReference>
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\..\..\src\demo\Kolvir.Demo.App\RichLabelMarkupParser.cs"
+             Link="RichLabelMarkupParser.cs" />
+  </ItemGroup>
+
+</Project>

@@ -243,6 +243,15 @@ dotnet test tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFon
 
 All seven portable suites are what the `Tests` workflow dispatches, on all three platforms.
 
+The sample has one suite of its own, for the one part of it that is a pure function: the markup parser
+the rich-label page runs on every keystroke. The project links that source file rather than referencing
+`Kolvir.Demo.App`, which is a platform application, so the suite restores the test framework and
+nothing else and runs on all three platforms:
+
+```
+dotnet test tests/demo/Kolvir.Demo.App.Tests/Kolvir.Demo.App.Tests.csproj
+```
+
 The Win32 backend has a Windows-only suite of its own, because its fallback decision is internal
 and its target framework is `net10.0-windows`:
 

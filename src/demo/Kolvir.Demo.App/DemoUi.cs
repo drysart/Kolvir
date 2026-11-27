@@ -586,6 +586,7 @@ public sealed class DemoUi
         // after it for the same reason: a page appended here renumbers nothing above it.
         ("graphics-acceleration", "Graphics acceleration", demo => new GraphicsAccelerationPage(demo)),
         ("popups", "Popups", demo => new PopupPage(demo)),
+        ("rich-label-markup", "Rich label markup", demo => new RichLabelMarkupPage(demo)),
     };
 
     /// <summary>

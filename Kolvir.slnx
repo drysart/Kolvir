@@ -54,6 +54,9 @@
   <Folder Name="/tests/core/">
     <Project Path="tests/core/Kolvir.Tests/Kolvir.Tests.csproj" />
   </Folder>
+  <Folder Name="/tests/demo/">
+    <Project Path="tests/demo/Kolvir.Demo.App.Tests/Kolvir.Demo.App.Tests.csproj" />
+  </Folder>
   <Folder Name="/tests/features/">
     <Project Path="tests/features/Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj" />
     <Project Path="tests/features/Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj" />
