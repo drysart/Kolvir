@@ -1,10 +1,12 @@
 # Asset loading - design note
 
-Status: **design note, with the manager and the `Image` integration in the tree.** Rung: **3**
-for `Kolvir.Feature.AssetLoading`: the manager and its interfaces (sections 2 and 5) and the `Image`
-integration (section 6) are `src/features/Kolvir.Feature.AssetLoading/`. The demo page of section 7
-is not built, and the measurement `FEATURE-COST-POLICY.md` asks for is in the pull request that added
-the integration rather than in this note.
+Status: **shipped feature; the manager, the `Image` integration and the demo page are all in the
+tree.** Rung: **3** for `Kolvir.Feature.AssetLoading`: the manager and its interfaces (sections 2 and
+5) and the `Image` integration (section 6) are `src/features/Kolvir.Feature.AssetLoading/`, and the
+demo page of section 7 is the `asset-loading` page of `src/demo/Kolvir.Demo.App/`. So this is the
+record of a shipped feature rather than a design with pieces outstanding; only section 9 is still
+open. The measurement `FEATURE-COST-POLICY.md` asks for is in the pull request that added the
+integration rather than in this note.
 
 It rests on four things core now has, all merged: `Control`'s tree-lifetime notifications (`AddedToTree`,
 `RemovedFromTree`, `Disposing`); `Image`'s `Source` change notification (#167); the virtual DOM's
@@ -348,7 +350,8 @@ queue changes, and no `ToString` formatting contract. Each of those is something
 grows when nobody says where it stops, and each would then have to be kept truthful and measured. A
 caller that wants more can take the snapshot twice and diff it.
 
-The demo's load readout, when one exists, is the intended consumer.
+The `asset-loading` page of `src/demo/Kolvir.Demo.App/` is that consumer: it reads `Snapshot()`
+beside its list, which is what the method was added for.
 
 ## 3. Decisions, and why
 
@@ -1157,13 +1160,36 @@ What it costs, exactly:
    one argument.
 2. **The `Image` integration** - the surface in section 6, in the same project. The control surface and
    its tests are a different argument.
-3. **A demo page**, and it is a deliverable rather than a nicety: it is the only end-to-end proof of the
-   two things no unit test can show. It needs a list of images long enough to scroll, so `EffectiveInView`
-   drives the priority and the visible ones arrive first; the per-image `SourceLoadState` visible, so the
-   pending/loading/loaded transition is watchable; and a `Snapshot()` readout beside the list. That is the
-   only place where "InView actually feeds the manager" and "the snapshot explains what the queue is doing"
-   are demonstrated rather than asserted - a fake loader proves the queue obeys a priority it is handed,
-   and nothing in the suite proves the priority was correct.
+3. **The demo page**, and it is a deliverable rather than a nicety: it is the only end-to-end proof of
+   the two things no unit test can show. It is the `asset-loading` page of
+   `src/demo/Kolvir.Demo.App/` - forty `Image` controls in a stack longer than the viewport, each
+   following its own `SourceUri`, so scrolling, and only scrolling, moves `EffectiveInView` and with it
+   the row's `Priority` between `Visible` and `Background`; each row's `SourceLoadState` and in-view
+   answer beside it, updated from the handler pairs rather than a timer, so the pending/loading/loaded
+   transition is watchable and a `Failed` row shows the `NotSupportedException` a developer will
+   actually hit; and the manager's `Snapshot()` beside the list, the top of the queue in the manager's
+   own order with each entry's priority, phase and live `CanLoadNow`. A top entry that says gated is why
+   nothing below it started, which is the case 2.6 says the snapshot was designed for.
+
+   The demo's factory is real rather than faked, and that is what makes the page prove something rather
+   than illustrate it. It serves tiles the sample draws itself, so there is no network, behind **three
+   concurrent fetches per host** with a 220 ms wait standing in for the transport: it counts its own
+   fetches per host, answers `CanLoadNow` from that count while reserving nothing (4.2), and raises
+   `CanLoadNowChanged` from the thread that finished the fetch, which is what re-walks the queued
+   handles. The gate stays **demo-local** and is not proposed for the package: the reusable helper is
+   open question 9.1, and its shape is worth writing against a real factory rather than guessing, so
+   this is that factory and the demo is where it belongs until 9.1 settles. The page assigns its URIs
+   while the tree is unhosted, the ordinary ordering 6.1 describes, so its first batch starts before any
+   visibility answer exists and the confirming pass of 6.1 is what moves the rest.
+
+   **What it measured.** Allowed to settle, the page started its rows in document order,
+   `01 02 03 04 05 07 08 ... 40`, because the on-screen rows are the ones `EffectiveInView` names.
+   Scrolled to row 29 while the first three fetches held the gate, the start order was
+   `01 02 03 24 25 26 27 28 29 04 05 07 08 ... 23 30 ... 40`: the rows that came on screen mid-run
+   were fetched ahead of the queued `Background` rows 4-5 and 7-23, and the three running loads were
+   not preempted. That is "InView actually feeds the manager" observed rather than asserted - a fake
+   loader proves the queue obeys a priority it is handed, and nothing else proves the priority was
+   correct.
 
 **Rung: 3**, per `FEATURE-COST-POLICY.md` section 4. A feature package is rung 3 by definition, and here
 rung 3 is also correct on the merits rather than merely available: an application that does not load
