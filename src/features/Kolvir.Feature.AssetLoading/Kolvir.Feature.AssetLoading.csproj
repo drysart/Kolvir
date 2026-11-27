@@ -24,6 +24,11 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+    <!-- The priority mapping is EffectiveInView -> Priority, so the dependency is not incidental:
+         without it the integration cannot ask the question the feature exists to ask
+         (dev-docs/ASSET-LOADING.md section 3.15). The cost is a package dependency in the build
+         graph, not bytes in a deliverable that never names the extension members (section 7). -->
+    <ProjectReference Include="..\Kolvir.Feature.EffectiveInView\Kolvir.Feature.EffectiveInView.csproj" />
   </ItemGroup>
 
   <!-- The interfaces, the priority constants and the snapshot are public because they are the API an
