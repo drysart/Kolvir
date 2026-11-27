@@ -421,6 +421,57 @@ public sealed class ImageSourceLoadingTests
     }
 
     [TestMethod]
+    public void ADeliveredResultWhoseTurnHasNotComeYetDoesNotWriteOverANewUri()
+    {
+        // The manager answers a caller on the UI thread and 3.12 has the continuation posted rather than
+        // run where the load finished, so "the result is delivered" and "the control writes it" are two
+        // turns. A new URI assigned between them is what the stale comparison is for, and this test is
+        // the only one that can see it: the scene's default has every await resume inline.
+        var factory = new ImageLoaderFactory();
+        using var scene = new ImageSourceScene(services => services.AddAssetLoaderFactory(factory));
+        var panel = new Panel();
+        scene.Open(panel);
+
+        using var context = new QueuedSynchronizationContext();
+
+        var image = new Image();
+        panel.Controls.Add(image);
+        image.SourceUri = Uri;
+
+        FakeAssetLoader<ImageData> delivered = factory.Last!;
+        var stale = new TestImage();
+
+        // The completion arrives without the context the load started under, which is the shape of a
+        // loader finishing on its own thread: each hop back to that context is a queued turn.
+        SynchronizationContext.SetSynchronizationContext(null);
+
+        delivered.Complete(stale.Data);
+
+        Assert.AreEqual(1, context.Pending, "the manager's own continuation is queued");
+
+        context.RunNext();
+
+        Assert.AreEqual(
+            1,
+            context.Pending,
+            "the manager has settled the request and this control's turn is queued behind it");
+        Assert.AreEqual(ImageSourceLoadState.Loading, image.SourceLoadState);
+        Assert.IsFalse(ReferenceEquals(stale.Data, image.Source), "nothing was written before its turn");
+
+        image.SourceUri = OtherUri;
+
+        context.RunNext();
+
+        Assert.IsFalse(
+            ReferenceEquals(stale.Data, image.Source),
+            "the delivered result is not written over a control that follows another URI");
+        Assert.AreEqual(ImageSourceLoadState.Loading, image.SourceLoadState);
+        Assert.AreEqual(OtherUri, image.SourceUri);
+        Assert.IsTrue(stale.IsDisposed, "and the image it carried is released rather than leaked");
+        Assert.AreEqual(0, context.Pending);
+    }
+
+    [TestMethod]
     public void AStaleCompletionNeverWritesLoaded()
     {
         var factory = new ImageLoaderFactory();

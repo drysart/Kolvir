@@ -892,15 +892,17 @@ inferred rather than written down:
 - **A new URI cancels the old load before starting the new one**, so the state goes `Loading ->
   Pending` directly and never passes through `None`: the control still has a URI, it is only a
   different one.
-- **A stale completion never writes `Loaded`.** The cancelled load's completion arrives after the new
-  load's state was set, and it is ignored - the same rule as 3.9's "a late result is never delivered",
-  reached here from the control's side. The cheapest way to obey it is to compare the completing
-  request against the current one rather than to trust the cancellation. That comparison is defensive
-  rather than load-bearing in practice: the manager answers a cancelled caller at cancellation time and
-  never hands it a result afterwards (3.9), so the completion the control receives for a superseded
-  request is the cancellation, not an image. What the control cannot do is dispose an image the manager
-  drops - a load cancelled while running still produces one, and it goes nowhere - so that image is the
-  manager's to account for, and the feature owns only what it is handed.
+- **A stale completion never writes `Loaded`.** The completing request is compared against the current
+  one, and a result the control has moved past is disposed rather than written - the same rule as 3.9's
+  "a late result is never delivered", reached here from the control's side. The comparison is not
+  redundant with that rule, because 3.9 is about a *cancelled* caller and this is the successful one:
+  the manager answers its caller on the UI thread, 3.12 has the continuation that applies the answer
+  posted rather than run where the load finished, and the UI thread can assign a new `SourceUri` in
+  between - a render, a scroll handler, a handler the walk itself ran. Without the comparison that
+  result lands on a control following a different URI and the image it carried is never disposed. What
+  the control cannot do is dispose an image the manager drops - a load cancelled while running still
+  produces one, and it goes nowhere - so that image is the manager's to account for, and the feature
+  owns only what it is handed.
 - **A control the reconciler removes is disposed, so its state stops mattering.** The mount created the
   control and disposes it on unmount (6.2), and the load is cancelled with it. There is no spinner left
   to correct and nothing left to keep, so this case needs no state rule of its own.
@@ -917,8 +919,11 @@ inferred rather than written down:
   has failed, so `Source` is left alone and the restart replaces it when it arrives (6.3).
 - **`Disposing` cancels and releases.** It is the last moment the control is usable - `Own<T>` resources
   go immediately afterwards - so the loaded `ImageData` is disposed there and nowhere later (6.3). It
-  does not write `Source`: the control disposes its own source a few lines later, and assigning during
-  teardown would lay a disposing control out again.
+  does not write `Source`, and the reason is not that the control is about to clear it: `Image.Dispose`
+  has already stopped listening to its source and cleared its own reference *before* it raises this
+  notification (`ReleaseImage` runs before `base.Dispose`, and it never disposes the data - 6.3), so
+  `Source` is already null, and assigning to a disposing control would lay it out again and raise
+  `SourceChanged` during teardown. Disposing the `ImageData` here leaves nothing pointing at it.
 - **`Failed` carries the exception in `SourceLoadError`**, not in the state, because a state value
   cannot carry one and an exception type is not a state.
 - **A failed load leaves `SourceUri` exactly as it was.** A failure touches none of the three: the URI
@@ -1153,14 +1158,18 @@ control is in a tree staying `Pending` and starting on `AddedToTree` - and on th
 attaches an unhosted tree to a window - the equal assignment doing nothing, a new URI releasing the old
 image and never passing through `None`, a detached control cancelling and resetting to `Pending`, a
 re-attached one starting again, `Disposing` releasing the loaded `ImageData`, the placeholder being
-shown while pending and replaced or restored on load and on failure, the stale completion, a failure
-carrying its exception with `SourceUri` intact, `Loaded` and `Failed` being raised after `Source` is
-settled, and the priority following `EffectiveInView`.
+shown while pending and replaced or restored on load and on failure, both stale-completion shapes (a
+superseded request and a delivered result whose turn has not come), a failure carrying its exception
+with `SourceUri` intact, `Loaded` and `Failed` being raised after `Source` is settled, and the priority
+following `EffectiveInView`.
 
-One of those rules is defensive rather than observable: the stale-completion comparison cannot be shown
-to change an outcome, because the manager never delivers a cancelled caller's result, so removing it
-leaves the test passing. It stays because it is the rule 6.1 states and because the manager's guarantee
-is the manager's, not this package's.
+One of those rules needs a turn held to be seen. When every await resumes inline, a superseded
+completion reaches the control as the cancellation the manager answered it with, so removing the
+stale-completion comparison changes nothing - which is why the scene resumes awaits inline by default.
+It is not redundant, though: the delivered result whose continuation has not run yet is the case 3.9
+does not cover, and the suite pins it with a synchronization context it drains by hand - complete a
+load, run the manager's turn, assign a new URI before the control's turn, then let it run and assert
+the old image was disposed rather than written. Removing the comparison makes exactly that test fail.
 
 ## 8. The rejected alternatives, in one place
 

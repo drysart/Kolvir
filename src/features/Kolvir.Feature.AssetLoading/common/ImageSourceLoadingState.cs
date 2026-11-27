@@ -574,9 +574,12 @@ internal sealed class ImageSourceLoadingState
         ReleaseInView();
         Waiting.Remove(image);
 
-        // The control is already past its last paint and disposes its source of its own accord a few
-        // lines after this returns, so the image is released without touching Source: assigning it
-        // here would lay a disposing control out again.
+        // Image.Dispose stops listening to its source and clears its own reference before this
+        // notification is raised - ReleaseImage runs before base.Dispose - and it never disposes the
+        // data, because that belongs to whoever assigned it. So Source is already null, and the
+        // ImageData the feature owns is released here, which leaves nothing pointing at it. Source is
+        // deliberately not written: assigning to a disposing control would lay it out again and raise
+        // SourceChanged during teardown.
         DisposeLoaded();
 
         _addedToTreeSubscription.Dispose();
@@ -727,6 +730,12 @@ internal sealed class ImageSourceLoadingState
     /// <summary>Records the control as waiting for a service provider, and makes sure a completed
     /// layout pass will try it again.</summary>
     /// <param name="image">The control.</param>
+    /// <remarks>
+    /// The wait is a weak entry keyed on the control and the pass has one subscription for the whole
+    /// process rather than one per image, so a control that dies takes its entry with it and the walk
+    /// on each pass is over controls that are alive and still waiting. That is what makes a pass worth
+    /// asking at all.
+    /// </remarks>
     private void Wait(Image image)
     {
         if (!Waiting.TryGetValue(image, out _))
