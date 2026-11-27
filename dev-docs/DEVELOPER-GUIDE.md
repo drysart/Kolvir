@@ -2023,6 +2023,11 @@ are laid out by the label, so they receive input normally. A control taller than
 its line and pushes the whole line down, so `Top`-aligned controls never paint outside the
 label.
 
+Used from a virtual DOM, the same label is described by a `VRichLabel` node whose `Spans` property
+takes `VTextSpan` descriptions; the imperative surface above is unchanged, and a label used directly
+with no node anywhere behaves exactly as it always has. See
+[Element collections, and the rich label's spans](#element-collections-and-the-rich-labels-spans).
+
 ### Text box
 
 `TextBox` is a single-line editor: caret, selection, clipboard, password masking,
@@ -5504,6 +5509,65 @@ That is what keeps a typed-in text box's caret, a list's selection and a panel's
 across a sort. Keyed and unkeyed children never mix within one list - a keyed node with no matching
 key is new, and a keyed child nobody asks for is removed - because claiming a keyed control by
 position would silently rename it.
+
+#### Element collections, and the rich label's spans
+
+Some controls expose a get-only collection of things that are not controls. `RichLabel.Spans` is the
+one this library has: an ordered list of `TextSpan` objects, each of which can carry styling, handlers
+and an inline `Control`. A node describes that collection with a **description class** rather than a
+node class, because a `TextSpan` makes no control of its own:
+
+```csharp
+new VRichLabel
+{
+    Spans =
+    [
+        new VTextSpan { Text = "hello " },
+        new VTextSpan
+        {
+            Text = "click ",
+            Bold = true,
+            HoverBackColor = ThemeColor.Accent,
+            Click = (_, _) => Open(),
+            Control = new VButton { Text = "go" },
+        },
+    ],
+}
+```
+
+What to know:
+
+- **A `VTextSpan` is a description, not a node.** It has no `NodeType`, no `ApplyTo(Control)`, no
+  place in the parent's control tree and no `Children`. Its `Control` member is a creating slot, so a
+  control node is constructed inline and the control itself is the span's inline control. The
+  description class is source-generated with direct typed members, exactly as a control node is; there
+  is no reflection or name lookup at run time.
+- **Spans are reconciled, not replaced.** A `TextSpan` carries handler lists and live state, and
+  `RichLabel` parents a span's control when the span is added. Replacing the collection each render
+  would re-register every handler and destroy and re-parent every inline control. So the reconciler
+  matches descriptions to the live `TextSpan` instances, patches the members that changed, appends the
+  surplus and removes the shortfall through `Spans.Add`/`Insert`/`RemoveAt`. A span that did not
+  change is not re-added, and its control keeps its instance.
+- **Keys win over positions.** A description with a `Key` matches the previous element that had the
+  same key, wherever it has moved to, and the element is moved rather than rebuilt. An unkeyed
+  description matches the previous element at its ordinal if a keyed description has not claimed it.
+  A keyed description with no matching key is new - it does not take over a positional element whose
+  key is different. Duplicate keys in one render are an error, because a key that identifies two
+  elements identifies neither.
+- **A move is a move.** A keyed reorder uses `TextSpanCollection.Move`, which keeps the span's
+  `Owner` and moves its control inside the label's `Controls` without unparenting it. A patch that
+  replaces a span's `Control` is the only case that removes and re-adds the span, and it does so
+  exactly once, leaving the old control out of `Controls`.
+- **Omitted and empty are different.** Leaving `Spans` out (or assigning `null`) says nothing about
+  the collection and leaves its elements alone. Assigning `[]` empties it.
+- **The rule is general within the feature.** Mark an element type with `[VirtualDomElement]`, and any
+  get-only `IList<T>` of it on a control becomes a sequence property on that control's node. A
+  collection type with a public `Move(int, int)` keeps a reorder free of control churn; one without
+  falls back to remove and insert. `[VirtualDomAll]` picks up `RichLabel.Spans` by the same rule, with
+  no case of its own.
+
+The design, the alternatives considered and the measurements are in
+[`ELEMENT-COLLECTIONS.md`](ELEMENT-COLLECTIONS.md).
 
 #### Using it without components
 

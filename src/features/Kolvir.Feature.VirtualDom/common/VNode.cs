@@ -91,6 +91,29 @@ public abstract class VNode
     public virtual VNodeSlot[]? GetSlots(Control control) => null;
 
     /// <summary>
+    /// The get-only element collections this node describes, in declaration order, or null when it
+    /// describes none.
+    /// </summary>
+    /// <param name="control">The control whose collections the descriptors wrap.</param>
+    /// <returns>One descriptor per collection; null for every node class that declares none.</returns>
+    /// <remarks>
+    /// <para>
+    /// A collection property is a get-only <see cref="IList{T}"/> of an element type the compilation
+    /// marked with <c>[VirtualDomElement]</c> - <see cref="RichLabel.Spans"/> is the one this library
+    /// has. The node carries a sequence of element descriptions and the reconciler reconciles them
+    /// against the live elements in flow order, through the collection's own public mutators so that
+    /// whatever the control does on add and remove still happens.
+    /// </para>
+    /// <para>
+    /// Public because generated code is emitted into the application's assembly; nothing outside the
+    /// generated code and the reconciler should call it. A node class with no collection does not
+    /// override it, so the mechanism costs an ordinary node one virtual call that returns null.
+    /// </para>
+    /// </remarks>
+    [EditorBrowsable(EditorBrowsableState.Never)]
+    public virtual VNodeCollection[]? GetCollections(Control control) => null;
+
+    /// <summary>
     /// A node of this class that assigns no property at all, or null when the class does not emit one.
     /// </summary>
     /// <remarks>

@@ -91,6 +91,45 @@ public sealed class TextSpanCollection : IList<TextSpan>
     }
 
     /// <summary>
+    /// Moves the span at <paramref name="fromIndex"/> to <paramref name="toIndex"/> without
+    /// unlinking it from the label or disturbing the inline control it contributed.
+    /// </summary>
+    /// <param name="fromIndex">The span's position now.</param>
+    /// <param name="toIndex">The position it should occupy afterwards.</param>
+    /// <remarks>
+    /// <para>
+    /// This is the span equivalent of <see cref="ControlCollection.Move"/>: the span keeps its
+    /// <see cref="TextSpan.Owner"/>, its inline control stays parented to the label, and the control
+    /// is moved inside <see cref="Control.Controls"/> so the two orders agree. A reorder is therefore
+    /// a reorder and not a remove followed by an insert, which would unparent and re-parent every
+    /// control in the moved region.
+    /// </para>
+    /// <para>
+    /// Both indices address the collection as it is now, so moving the first of three spans to the
+    /// end is <c>Move(0, 2)</c>. A move to the index the span already occupies does nothing at all.
+    /// </para>
+    /// </remarks>
+    /// <exception cref="ArgumentOutOfRangeException">Either index is outside the collection.</exception>
+    public void Move(int fromIndex, int toIndex)
+    {
+        ArgumentOutOfRangeException.ThrowIfNegative(fromIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(fromIndex, _items.Count);
+        ArgumentOutOfRangeException.ThrowIfNegative(toIndex);
+        ArgumentOutOfRangeException.ThrowIfGreaterThanOrEqual(toIndex, _items.Count);
+
+        if (fromIndex == toIndex)
+        {
+            return;
+        }
+
+        var item = _items[fromIndex];
+        _items.RemoveAt(fromIndex);
+        _items.Insert(toIndex, item);
+        MoveControl(item, toIndex);
+        _owner.OnSpanMoved();
+    }
+
+    /// <summary>
     /// Removes <paramref name="item"/> and unlinks it from the label, dropping the inline control it
     /// contributed, if any.
     /// </summary>
@@ -138,6 +177,74 @@ public sealed class TextSpanCollection : IList<TextSpan>
         {
             item.Owner = null;
             _owner.OnSpanRemoved(item);
+        }
+    }
+
+    /// <summary>
+    /// Moves the inline control of <paramref name="item"/> inside the label's child collection so it
+    /// keeps the same order relative to the other span controls.
+    /// </summary>
+    /// <param name="item">The span that moved.</param>
+    /// <param name="toIndex">Its new position among the spans.</param>
+    /// <remarks>
+    /// The label lays spans out from its own list, but <see cref="Control.Controls"/> also has an
+    /// order that decides painting and hit testing. Moving the control - rather than removing and
+    /// adding it - is what keeps its parent, its state and anything a container keeps per child. A
+    /// label may hold controls that are not spans at all, so the control is placed relative to the
+    /// nearest span control before or after it and everything else is left where it is.
+    /// </remarks>
+    private void MoveControl(TextSpan item, int toIndex)
+    {
+        if (item.Control is not { } control || !ReferenceEquals(control.Parent, _owner))
+        {
+            return;
+        }
+
+        var current = _owner.Controls.IndexOf(control);
+
+        if (current < 0)
+        {
+            return;
+        }
+
+        int? target = null;
+
+        for (int i = toIndex - 1; i >= 0; i--)
+        {
+            if (_items[i].Control is { } previous && ReferenceEquals(previous.Parent, _owner))
+            {
+                target = _owner.Controls.IndexOf(previous) + 1;
+                break;
+            }
+        }
+
+        if (target is null)
+        {
+            for (int i = toIndex + 1; i < _items.Count; i++)
+            {
+                if (_items[i].Control is { } next && ReferenceEquals(next.Parent, _owner))
+                {
+                    target = _owner.Controls.IndexOf(next);
+                    break;
+                }
+            }
+        }
+
+        if (target is { } index)
+        {
+            // ControlCollection.Move addresses the collection as it stands after the move, so a
+            // control moving forward passes one index fewer than "after the control before it".
+            if (current < index)
+            {
+                index--;
+            }
+
+            index = Math.Clamp(index, 0, _owner.Controls.Count - 1);
+
+            if (index != current)
+            {
+                _owner.Controls.Move(current, index);
+            }
         }
     }
 

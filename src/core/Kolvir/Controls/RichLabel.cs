@@ -427,6 +427,9 @@ public class RichLabel : Control
         InvalidateLayout();
     }
 
+    /// <summary>Called when a span moved in the collection but did not change its content.</summary>
+    internal void OnSpanMoved() => InvalidateLayout();
+
     internal void OnSpanAdded(TextSpan span)
     {
         if (span.Control is { } control && !ReferenceEquals(control.Parent, this))

@@ -56,6 +56,20 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// against and what the compilation is asked for when a borrowed slot's node has to be emitted; null
 /// when this is not a slot.
 /// </param>
+/// <param name="Collection">Whether this is a get-only element collection the node describes.</param>
+/// <param name="CollectionElementType">The collection's element type, fully qualified; null when this is not a collection.</param>
+/// <param name="CollectionElementMetadataName">
+/// The same element type the way a reader names it, which is the identity the element description
+/// class is looked up by; null when this is not a collection.
+/// </param>
+/// <param name="CollectionNodeType">
+/// Where the element description class was emitted, fully qualified; null until the emit step
+/// resolves it, and null afterwards when no class could be emitted.
+/// </param>
+/// <param name="CollectionMoves">
+/// Whether the collection type offers a public <c>Move(int, int)</c>, so a reorder can keep the
+/// element's inline control parented instead of removing and re-inserting it.
+/// </param>
 internal sealed record PropertyModel(
     string Name,
     string Type,
@@ -73,9 +87,17 @@ internal sealed record PropertyModel(
     bool Slot = false,
     bool SlotCreates = false,
     string? SlotControlType = null,
-    string? SlotControlMetadataName = null)
+    string? SlotControlMetadataName = null,
+    bool Collection = false,
+    string? CollectionElementType = null,
+    string? CollectionElementMetadataName = null,
+    string? CollectionNodeType = null,
+    bool CollectionMoves = false)
 {
     internal bool IsEvent => AddHandler is not null;
+
+    /// <summary>Whether this is a get-only element collection the node describes.</summary>
+    internal bool IsCollection => Collection;
 
     /// <summary>Whether a node fills a control the property already holds, rather than creating one.</summary>
     internal bool SlotBorrows => Slot && !SlotCreates;
@@ -155,6 +177,21 @@ internal sealed record ControlModel(
 /// </param>
 /// <param name="Contenders">One claim per contender: the control type's identity.</param>
 internal sealed record TypePlaceholderModel(string Name, string Accessibility, ImmutableArray<string> Contenders);
+
+/// <summary>One non-control element type, and the description class it becomes.</summary>
+/// <param name="NodeName">The generated description class's name.</param>
+/// <param name="Accessibility">The accessibility the generated class gets, matching the element's.</param>
+/// <param name="ElementType">The element type, fully qualified.</param>
+/// <param name="ElementMetadataName">The same type the way a reader names it, for diagnostics and lookups.</param>
+/// <param name="Properties">The members the description exposes.</param>
+/// <param name="Location">Where the element type is declared, to report diagnostics against.</param>
+internal sealed record ElementModel(
+    string NodeName,
+    string Accessibility,
+    string ElementType,
+    string ElementMetadataName,
+    ImmutableArray<PropertyModel> Properties,
+    Location Location);
 
 /// <summary>One manifest class, and the controls registered on it.</summary>
 /// <param name="Name">The manifest's own name, which makes its generated file name unique.</param>

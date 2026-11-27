@@ -36,6 +36,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     private const string SweepAttributeName = "Kolvir.Feature.VirtualDom.VirtualDomAllAttribute";
     private const string OverrideAttributeName = "Kolvir.Feature.VirtualDom.VNodeExtensionPropertyNameAttribute";
     private const string UnsetValueAttributeName = "Kolvir.Feature.VirtualDom.VNodePropertyUnsetValueAttribute";
+    private const string ElementAttributeName = "Kolvir.VirtualDomElementAttribute";
     private const string ControlTypeName = "Kolvir.Control";
 
     /// <summary>
@@ -44,7 +45,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     /// </summary>
     private static readonly string[] ReservedNames =
         ["Key", "Children", "NodeType", "ApplyTo", "PatchFrom", "Kind", "Pristine", "Extensions", "ApplyExtensionActuators",
-         "GetSlots", "UnassignedNode", "Unassigned"];
+         "GetSlots", "GetCollections", "UnassignedNode", "Unassigned"];
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -85,11 +86,20 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                     ? ControlCatalog.Sweep(input.Right, cancellationToken)
                     : ControlCatalog.Empty);
 
+        // Element types are only needed when a manifest exists at all: without one there is no
+        // generated node to put a collection property on.
+        var elements = manifests.Combine(sweeps).Combine(context.CompilationProvider)
+            .Select(static (input, cancellationToken) =>
+                input.Left.Left.Any(model => model is not null) || input.Left.Right.Any(model => model is not null)
+                    ? ElementCatalog.Sweep(input.Right, cancellationToken)
+                    : ElementCatalog.Empty);
+
         context.RegisterSourceOutput(
-            manifests.Combine(sweeps).Combine(catalog).Combine(controls).Combine(documentation).Combine(context.CompilationProvider),
+            manifests.Combine(sweeps).Combine(catalog).Combine(controls).Combine(documentation).Combine(context.CompilationProvider).Combine(elements),
             static (productionContext, input) => Emit(
                 productionContext,
-                input.Left.Left.Left.Left.Left,
+                input.Left.Left.Left.Left.Left.Left,
+                input.Left.Left.Left.Left.Left.Right,
                 input.Left.Left.Left.Left.Right,
                 input.Left.Left.Left.Right,
                 input.Left.Left.Right,
@@ -221,10 +231,11 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             Interfaces(control),
             location);
 
-    private static ImmutableArray<PropertyModel> ReadProperties(
+    internal static ImmutableArray<PropertyModel> ReadProperties(
         INamedTypeSymbol control,
         Location location,
-        ImmutableArray<DiagnosticInfo>.Builder diagnostics)
+        ImmutableArray<DiagnosticInfo>.Builder diagnostics,
+        bool collections = true)
     {
         var properties = ImmutableArray.CreateBuilder<PropertyModel>();
 
@@ -284,6 +295,44 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 Documentation: DocumentationCleaner.Clean(property.GetDocumentationCommentXml()),
                 DocumentationId: property.GetDocumentationCommentId(),
                 DocumentationAssembly: property.ContainingAssembly?.Name));
+        }
+
+        if (collections)
+        {
+            foreach (var (property, element) in CollectionProperties(control))
+            {
+                if (ReservedNames.Contains(property.Name))
+                {
+                    diagnostics.Add(Info(Diagnostics.MemberNameCollides, location, control.Name + "." + property.Name, "the base node class"));
+                    continue;
+                }
+
+                // A derived property hides a base one, and the walk reached the derived declaration
+                // first, exactly as it does for ordinary properties.
+                if (taken.ContainsKey(property.Name))
+                {
+                    continue;
+                }
+
+                taken.Add(property.Name, false);
+                properties.Add(new PropertyModel(
+                    property.Name,
+                    "<collection>",
+                    "_" + Lower(property.Name),
+                    Pristine: null,
+                    PristineLiteral: null,
+                    AddHandler: null,
+                    RemoveHandler: null,
+                    Container: null,
+                    Accessor: property.Name,
+                    Documentation: DocumentationCleaner.Clean(property.GetDocumentationCommentXml()),
+                    DocumentationId: property.GetDocumentationCommentId(),
+                    DocumentationAssembly: property.ContainingAssembly?.Name,
+                    Collection: true,
+                    CollectionElementType: element.ToDisplayString(Formats.Type),
+                    CollectionElementMetadataName: element.ToDisplayString(Formats.Metadata),
+                    CollectionMoves: HasMove(property.Type)));
+            }
         }
 
         foreach (var (name, add, remove, handlerType, documentation, documentationId, documentationAssembly) in HandlerPairs(control))
@@ -629,6 +678,102 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         || (property.Type.IsValueType && property.Type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T);
 
     /// <summary>
+    /// The get-only collection properties a node describes: an <see cref="IList{T}"/> whose element
+    /// type is marked <c>[VirtualDomElement]</c>.
+    /// </summary>
+    /// <remarks>
+    /// A property with a public setter is not one of these; the ordinary property path already
+    /// assigns it and the control compares the sequence it was given. What is left is a collection the
+    /// control owns and hands out, which a node can only describe by mutating it in place.
+    /// </remarks>
+    private static IEnumerable<(IPropertySymbol Property, INamedTypeSymbol Element)> CollectionProperties(INamedTypeSymbol control)
+    {
+        for (var type = control; type is not null; type = type.BaseType)
+        {
+            foreach (var property in type.GetMembers().OfType<IPropertySymbol>())
+            {
+                if (property.IsStatic
+                    || property.IsIndexer
+                    || property.IsAbstract
+                    || property.GetMethod is not { DeclaredAccessibility: Accessibility.Public }
+                    || property.SetMethod is { DeclaredAccessibility: Accessibility.Public }
+                    || IsControl(property.Type))
+                {
+                    continue;
+                }
+
+                if (CollectionElement(property.Type) is { } element)
+                {
+                    yield return (property, element);
+                }
+            }
+        }
+    }
+
+    /// <summary>The element type a collection property exposes, or null when it exposes none.</summary>
+    private static INamedTypeSymbol? CollectionElement(ITypeSymbol type)
+    {
+        if (type is INamedTypeSymbol named && ElementOf(named) is { } own)
+        {
+            return own;
+        }
+
+        foreach (var candidate in type.AllInterfaces)
+        {
+            if (ElementOf(candidate) is { } element)
+            {
+                return element;
+            }
+        }
+
+        return null;
+    }
+
+    private static INamedTypeSymbol? ElementOf(INamedTypeSymbol type)
+    {
+        if (type.OriginalDefinition.MetadataName != "IList`1"
+            || !type.OriginalDefinition.ContainingNamespace.ToDisplayString().Equals("System.Collections.Generic", StringComparison.Ordinal)
+            || type.TypeArguments[0] is not INamedTypeSymbol element
+            || IsControl(element)
+            || !HasElementAttribute(element)
+            || !CanHaveANode(element))
+        {
+            return null;
+        }
+
+        return element;
+    }
+
+    private static bool HasElementAttribute(INamedTypeSymbol type) =>
+        type.GetAttributes().Any(attribute =>
+            attribute.AttributeClass?.ToDisplayString(Formats.Metadata) == ElementAttributeName);
+
+    /// <summary>
+    /// Whether a collection type offers a public <c>Move(int, int)</c>, which lets a reorder keep
+    /// ownership and the inline control's place instead of removing and re-inserting.
+    /// </summary>
+    private static bool HasMove(ITypeSymbol type)
+    {
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            foreach (var method in current.GetMembers("Move").OfType<IMethodSymbol>())
+            {
+                if (!method.IsStatic
+                    && method.DeclaredAccessibility == Accessibility.Public
+                    && method.ReturnsVoid
+                    && method.Parameters.Length == 2
+                    && method.Parameters[0].Type.SpecialType == SpecialType.System_Int32
+                    && method.Parameters[1].Type.SpecialType == SpecialType.System_Int32)
+                {
+                    return true;
+                }
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
     /// The node model for a slot.
     /// </summary>
     /// <remarks>
@@ -686,7 +831,9 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     {
         for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
         {
-            if (current.ToDisplayString(Formats.Metadata) == ControlTypeName)
+            var name = current.ToDisplayString(Formats.Metadata);
+
+            if (name == ControlTypeName || name == ControlTypeName + "?")
             {
                 return true;
             }
@@ -817,9 +964,12 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         ExtensionCatalog catalog,
         ControlCatalog controls,
         DocumentationIndex documentation,
-        Compilation compilation)
+        Compilation compilation,
+        ElementCatalog elements)
     {
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
+
+        diagnostics.AddRange(elements.Reported);
 
         // The explicit manifests come first, then the sweeping ones, because the order of the claims
         // below is the order of the generated file: a control the application named keeps its place at
@@ -994,11 +1144,13 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
 
         var perManifestControls = new List<ControlModel>[manifests.Count];
         var perManifestPlaceholders = new List<TypePlaceholderModel>[manifests.Count];
+        var perManifestElements = new List<ElementModel>[manifests.Count];
 
         for (int index = 0; index < manifests.Count; index++)
         {
             perManifestControls[index] = [];
             perManifestPlaceholders[index] = [];
+            perManifestElements[index] = [];
         }
 
         // Where each control's node class actually lives, fully qualified. A borrowed slot is typed with
@@ -1075,6 +1227,110 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             }
         }
 
+        // An element description class is emitted once, in a manifest whose control needs it and
+        // whose namespace has no control node class with the same name. Another manifest that needs
+        // the same element type references the class where it was emitted, fully qualified.
+        var elementModels = elements.Elements.ToDictionary(
+            element => element.ElementMetadataName,
+            StringComparer.Ordinal);
+        var elementNodeClass = new Dictionary<string, string>(StringComparer.Ordinal);
+        var emittedElements = new HashSet<(string Namespace, string Name)>();
+
+        foreach (var metadataName in perManifestControls
+            .SelectMany(list => list)
+            .SelectMany(control => control.Properties)
+            .Where(property => property.IsCollection && property.CollectionElementMetadataName is not null)
+            .Select(property => property.CollectionElementMetadataName!)
+            .Distinct(StringComparer.Ordinal)
+            .OrderBy(name => name, StringComparer.Ordinal))
+        {
+            if (!elementModels.TryGetValue(metadataName, out var element))
+            {
+                continue;
+            }
+
+            var host = -1;
+
+            for (int index = 0; index < manifests.Count; index++)
+            {
+                bool needed = perManifestControls[index].Any(control => control.Properties.Any(
+                    property => property.IsCollection && property.CollectionElementMetadataName == metadataName));
+
+                if (!needed)
+                {
+                    continue;
+                }
+
+                var space = manifests[index].Namespace ?? string.Empty;
+
+                if (claims.ContainsKey((space, element.NodeName)) || emittedElements.Contains((space, element.NodeName)))
+                {
+                    continue;
+                }
+
+                host = index;
+                break;
+            }
+
+            if (host < 0)
+            {
+                diagnostics.Add(Info(
+                    Diagnostics.ElementNameConflict,
+                    element.Location,
+                    element.NodeName,
+                    element.ElementType,
+                    element.NodeName));
+                continue;
+            }
+
+            var hostSpace = manifests[host].Namespace ?? string.Empty;
+            emittedElements.Add((hostSpace, element.NodeName));
+            perManifestElements[host].Add(element);
+            elementNodeClass[metadataName] = hostSpace.Length == 0
+                ? "global::" + element.NodeName
+                : "global::" + hostSpace + "." + element.NodeName;
+        }
+
+        // The collection property is typed by the element description class. An element type whose
+        // class never materialised is left off the node for the same reason an unresolved borrowed
+        // slot is: a property typed by something that does not exist would be worse than an absent
+        // property.
+        for (int index = 0; index < perManifestControls.Length; index++)
+        {
+            var list = perManifestControls[index];
+
+            for (int entry = 0; entry < list.Count; entry++)
+            {
+                var control = list[entry];
+
+                if (!control.Properties.Any(property => property.IsCollection))
+                {
+                    continue;
+                }
+
+                var properties = ImmutableArray.CreateBuilder<PropertyModel>(control.Properties.Length);
+
+                foreach (var property in control.Properties)
+                {
+                    if (!property.IsCollection)
+                    {
+                        properties.Add(property);
+                    }
+                    else if (property.CollectionElementMetadataName is { } metadata
+                        && elementNodeClass.TryGetValue(metadata, out var elementType))
+                    {
+                        properties.Add(property with
+                        {
+                            Type = "global::System.Collections.Generic.IReadOnlyList<" + elementType + ">?",
+                            CollectionNodeType = elementType,
+                        });
+                    }
+                }
+
+                list[entry] = control with { Properties = properties.ToImmutable() };
+            }
+        }
+
         foreach (var diagnostic in diagnostics)
         {
             context.ReportDiagnostic(diagnostic.ToDiagnostic());
@@ -1101,7 +1357,9 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
 
         for (int index = 0; index < manifests.Count; index++)
         {
-            if (perManifestControls[index].Count == 0 && perManifestPlaceholders[index].Count == 0)
+            if (perManifestControls[index].Count == 0
+                && perManifestPlaceholders[index].Count == 0
+                && perManifestElements[index].Count == 0)
             {
                 continue;
             }
@@ -1114,6 +1372,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                     Controls = [.. perManifestControls[index]],
                     Placeholders = [.. perManifestPlaceholders[index]],
                 },
+                perManifestElements[index],
                 slotControls,
                 source);
 

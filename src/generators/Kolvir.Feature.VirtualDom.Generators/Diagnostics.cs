@@ -109,5 +109,23 @@ internal static class Diagnostics
         DiagnosticSeverity.Error,
         isEnabledByDefault: true,
         helpLinkUri: OverrideHelp);
+
+    /// <summary>Reported on a <c>[VirtualDomElement]</c> type a description class cannot be made for.</summary>
+    internal static readonly DiagnosticDescriptor ElementIsNotUsable = new(
+        "VD016",
+        "Marked element type cannot be described",
+        "'{0}' is marked [VirtualDomElement] but cannot be made into a description class: an element type must be a concrete, accessible, non-generic class with an accessible parameterless constructor, and must not be a Control",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
+
+    /// <summary>Reported when an element description class's name is already a control node's in a namespace.</summary>
+    internal static readonly DiagnosticDescriptor ElementNameConflict = new(
+        "VD017",
+        "Element description would reuse a node class name",
+        "'{0}' would be the description class for '{1}', but '{2}' already uses that name in the same namespace; no description class was generated, so the collection property it would type is left off the node",
+        Category,
+        DiagnosticSeverity.Error,
+        isEnabledByDefault: true);
 }
 

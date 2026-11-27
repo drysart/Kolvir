@@ -53,6 +53,7 @@ public class SpanEventArgs : MouseEventArgs
 /// <see cref="Cursor"/> and handle <see cref="AddClickHandler"/>. Spans are not controls; they are
 /// lightweight value holders owned by the rich label they are added to.
 /// </remarks>
+[VirtualDomElement]
 public sealed class TextSpan
 {
     private Action<object, SpanEventArgs>? _click;
