@@ -330,39 +330,54 @@ only for a node that has slots, `GetSlots` returns null for every other node, an
 slot pass is two null checks on a path it already walks.
 
 Measured per section 8 of `FEATURE-COST-POLICY.md` - `win-x64`, `-c Release -r win-x64`, published
-from build roots of equal length (`C:\kolvircost\a` for this branch, `..\b` for `develop` at
-`7072be1`), so the numbers are the change rather than where it was built. The build roots hold
-worktrees of the two commits; the probe projects are `C:\kolvircost\a-probe` and `b-probe`, identical
-source, referencing their own worktree.
+from build roots of equal length (`C:\kolvircost\a` for this branch at `a4351ca`, `..\b` for
+`develop` at `7072be1`), so the numbers are the change rather than where it was built. The build
+roots hold worktrees of the two commits, so the `..\b` is the same length as the `a`; the probe
+projects are `probe/` inside each root, identical source, referencing their own worktree.
 
 | Publication | `develop` | this branch | delta |
 | --- | --- | --- | --- |
 | `Kolvir.Minimal`, Skia loose, AOT (an application that never references the feature) | 3,885,056 | 3,885,056 | **0** |
-| probe: 12 controls registered, `VPanel` and `VLabel` constructed, applied and patched, **no slot filled** | 1,856,512 | 1,857,024 | **+512** |
-| use probe: the same feature with a `VSplitContainer`'s panels filled, patched and emptied | - | 1,890,304 | (use check, no pair) |
+| probe: 2 controls registered, `VPanel` and `VLabel` constructed, applied and patched, **no slot filled** | 7,135,232 | 7,135,232 | **0** at 512-byte resolution |
+| probe: 12 controls registered, the same work, **no slot filled** | 7,135,232 | 7,135,232 | **0** at 512-byte resolution |
 
-Both pairs were published twice from clean output and came out to the byte the second time, so the
-512 is the image and not the `FileAlignment` boundary moving. It is one step of this method's
-resolution: the marker interface - an implementation and its instantiation on each node class the
-application actually constructs - costs **less than 512 bytes** in the published image for two
-constructed node classes and the whole slot reconciler. The managed `Probe.dll` shows the change is
-really there (+3,584 bytes over 202,752), which is why the flat native size is reported as a
-sub-resolution cost rather than as nothing. No IL2xxx or IL3xxx warning in either publish, and the
-use probe prints the correct panel contents, patch and restore.
+The managed assembly is where the change is visible, because the published image is dominated by
+Skia and steps in 512-byte units:
+
+| Managed `probe.dll` | `develop` | this branch | delta |
+| --- | --- | --- | --- |
+| 2 node classes | 5,498,880 | 5,499,392 | **+512** |
+| 12 node classes | 5,652,992 | 5,655,552 | **+2,560** |
+
+The two rows together are the per-node figure: ten more node classes cost 2,048 bytes, so a node
+class pays about **205 bytes** for its marker interface, its instantiation and the explicit member
+that returns `this` - metadata, not code, which is why ten of them fit inside four image steps. The
+remainder of the 512 is the slot reconciler, `VNodeSlot` and the `Mounted.Slots` field, reached only
+from a node that has slots. No IL2xxx or IL3xxx warning in any publish, and the probe run prints the
+patched values rather than throwing.
+
+The use check is a real application with the feature in use rather than a probe:
+`Kolvir.Demo.VirtualDom`, whose document page fills a `VSplitContainer`, publishes AOT at 4,496,896
+bytes with 0 warnings and 0 errors, and its `--check` still ends in `check: OK` including the panel
+parentage and contents assertions.
 
 The generator's output grows by what it emits, and nothing else:
 
 | | |
 | --- | --- |
-| Generated source, the demo's 36-node sweep | 3,116,355 -> 3,128,991 bytes, **+12,636 (0.41%)** |
+| Generated source, the demo's 36-node sweep | 3,116,355 -> 3,127,622 bytes, **+11,267 (0.36%)** |
 | of which: the marker on 36 node class declarations | ~1,850 bytes (~52 per class) |
 | of which: 36 explicit `IVNodeFor<T>.Node => this` members | 4,869 bytes (~135 per class) |
-| of which: the all-unassigned instance on the 9 controls a slot can hold | 1,567 bytes (static + override) |
+| of which: the all-unassigned instance on the 2 controls a borrowed slot holds | ~350 bytes (static + override) |
 | of which: 3 slot properties, their carried documentation and 2 `GetSlots` methods | ~4,200 bytes |
 
 The per-node half is the cost the owner accepted for the marker interface; the per-slot half is
-proportional to the number of slots, and the all-unassigned instance is emitted only for the nine
-controls a slot can hold - a `VLabel` pays nothing for a mechanism it can never take part in.
+proportional to the number of slots. Typing the borrowed slots with their node class made the output
+*smaller* than the previous revision's 3,128,991 bytes - `VPanel?` is a shorter type than
+`IVNodeFor<global::Kolvir.Panel>?` and the borrowed path lost its `.Node` hop - and the
+all-unassigned instance now covers 2 controls instead of the 9 the previous chain-based rule picked
+up. A `VLabel` pays nothing for a mechanism it can never take part in, and neither does a
+`VTableLayoutPanel`, which is not the node class a `Panel` slot takes.
 
 ## 8. Out of scope
 
@@ -371,6 +386,9 @@ controls a slot can hold - a `VLabel` pays nothing for a mechanism it can never 
   single slot, and it is not this one.
 - **Components in slots.** `Panel1 = new VComponent(page)` would need a second mount point per slot;
   the supported spelling is one node down, `Panel1 = new VPanel { Children = [new VComponent(page)] }`.
+- **A borrowed slot typed with a base node class.** `VPanel?` is the only value a `Panel` slot takes,
+  even though a `GroupBox` is a `Panel`. Giving the property a base type would need either a runtime
+  cast or the mirrored hierarchy (§4.2).
 - **A slot on a node from a different generator run.** The slot itself works - the reconciler is
   runtime code - but the `UnassignedNode` that hands a borrowed control back is emitted by the
   compilation that can see the slot's type, so a node class from another compilation has none and a
