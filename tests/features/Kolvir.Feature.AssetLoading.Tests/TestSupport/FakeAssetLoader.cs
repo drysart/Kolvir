@@ -45,6 +45,24 @@ internal sealed class FakeAssetLoader<TResult> : IAssetLoader<TResult>
     /// <summary>An exception <see cref="LoadAsync"/> throws instead of returning a task.</summary>
     public Exception? StartError { get; set; }
 
+    /// <summary>
+    /// True when the load finishes from a callback on the caller's token, which is what a loader does
+    /// when it treats the token as "stop, and hand back whatever you have".
+    /// </summary>
+    /// <remarks>
+    /// The callback is registered when the load starts, which is after the manager registered its own
+    /// - and <c>CancellationToken.Register</c> invokes callbacks last-registered-first, so this one
+    /// runs <em>before</em> the manager's and the task is completed from inside it. That is the
+    /// ordering the manager's answer must not depend on (dev-docs/ASSET-LOADING.md section 3.9).
+    /// </remarks>
+    public bool CompletesWhenCancelled { get; set; }
+
+    /// <summary>What <see cref="CompletesWhenCancelled"/> completes with.</summary>
+    public TResult? OnCancelResult { get; set; }
+
+    /// <summary>What <see cref="CompletesWhenCancelled"/> fails with, when it fails instead.</summary>
+    public Exception? OnCancelError { get; set; }
+
     /// <summary>How many times the manager has asked this loader to load.</summary>
     public int LoadCount { get; private set; }
 
@@ -129,12 +147,29 @@ internal sealed class FakeAssetLoader<TResult> : IAssetLoader<TResult>
         LoadCount++;
         Token = cancellationToken;
 
+        if (CompletesWhenCancelled)
+        {
+            cancellationToken.Register(CompleteWhenCancelled);
+        }
+
         if (CompletesOnStart)
         {
             _completion.SetResult(OnStartResult);
         }
 
         return _completion.Task;
+    }
+
+    /// <summary>Finishes the load from inside the caller's token callback.</summary>
+    private void CompleteWhenCancelled()
+    {
+        if (OnCancelError is not null)
+        {
+            _completion.SetException(OnCancelError);
+            return;
+        }
+
+        _completion.SetResult(OnCancelResult);
     }
 
     /// <summary>Raises a notification over a copy, so a handler may subscribe or remove while it

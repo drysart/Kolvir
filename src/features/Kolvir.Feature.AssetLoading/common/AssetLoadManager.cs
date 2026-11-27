@@ -285,6 +285,16 @@ internal sealed class AssetLoadManager : IAssetLoadManager
     /// <param name="request">The request whose task ended.</param>
     /// <param name="result">What it produced, when it produced anything.</param>
     /// <param name="error">What it threw, when it threw.</param>
+    /// <remarks>
+    /// The outcome is only delivered to a caller that is still asking for it. A caller whose token has
+    /// fired is answered cancelled here instead, because the cancellation is a fact about the request
+    /// and this completion may well be what revealed it: <c>CancellationToken.Register</c> runs its
+    /// callbacks last-registered-first, and the manager's registration is made when the request is
+    /// created, so a loader that registers on the token and finishes its task inside that callback
+    /// runs before <see cref="OnCallerCancelled"/>. Reading the request's own token is what makes the
+    /// answer independent of that order (section 3.9) - and it costs one field read on a token the
+    /// request already holds, so the hot path pays nothing for it.
+    /// </remarks>
     private void ApplyCompletion(AssetLoadRequest request, object? result, Exception? error)
     {
         Finish(request);
@@ -295,7 +305,14 @@ internal sealed class AssetLoadManager : IAssetLoadManager
             // cannot see a request the walk no longer holds (3.10).
             request.CallerDone = true;
 
-            if (error is not null)
+            if (request.CancellationToken.IsCancellationRequested)
+            {
+                // The caller asked to stop and the completion is what revealed it, so it gets the
+                // cancellation it asked for rather than the loader's result or failure (3.9). The
+                // result, if there is one, is released below like any other nobody is left to receive.
+                request.Cancel();
+            }
+            else if (error is not null)
             {
                 request.Fail(error);
             }
@@ -319,10 +336,11 @@ internal sealed class AssetLoadManager : IAssetLoadManager
 
         try
         {
-            // Either the caller was answered here, or it was answered when it asked to stop (3.9).
-            // Both leave the same thing to do: the request is gone, so the loaders vetoed while it
-            // held a slot get their turn. Before the release below, because that runs an arbitrary
-            // Dispose and a queue stalled behind a throwing one is the worse outcome.
+            // Either the caller was answered here (with the result, the failure, or the cancellation
+            // the completion revealed), or it was answered when it asked to stop (3.9). Both leave the
+            // same thing to do: the request is gone, so the loaders vetoed while it held a slot get
+            // their turn. Before the release below, because that runs an arbitrary Dispose and a queue
+            // stalled behind a throwing one is the worse outcome.
             Walk();
         }
         finally

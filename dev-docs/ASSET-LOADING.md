@@ -485,7 +485,14 @@ they are all the manager's:
 
 - **A cancelled caller's task is completed cancelled, at cancellation time.** Not when the underlying
   load happens to finish, and not with the result if the load finished in the meantime. The caller
-  asked to stop; the answer arrives when it asks.
+  asked to stop; the answer arrives when it asks. What decides that is the request's own token, not
+  the order two registrations ran in: `CancellationToken.Register` invokes callbacks
+  last-registered-first, and the manager registers when the request is created, so a loader that
+  registers on the same token when it starts runs *before* the manager's callback does. A loader that
+  completes its task inside that callback therefore hands the manager a completion while the
+  cancellation is still on its way, and that completion is answered with the cancellation - and its
+  result released - exactly as one that arrives after the manager has already been told. The answer
+  belongs to the request, which is why it cannot rest on a callback order a loader can change.
 - **A late result is never delivered, and if it is disposable the manager releases it.** If the
   underlying task completes after the caller's task was cancelled, the result goes nowhere. This is the
   case that matters: the token fired, the loader kept going, the bytes arrived, and the control that
@@ -658,9 +665,10 @@ cancelled:
   by itself - the count under a removed image never reaches zero on its own - so the removal
   notification is what turns "nobody can see it" into "nobody wants it" (6.2).
 
-This is what lets loader-owned caching coexist with per-consumer priority, and it is why the manager's
-rule is "one outstanding request per instance" (3.11) rather than "an instance is used once". An
-instance is a handle; a handle is used once *at a time*, which is all the manager needs to promise.
+This is what lets loader-owned caching coexist with per-consumer priority, and it is why the rule is
+"one outstanding request per instance" (3.11) rather than "an instance is used once" - a rule about the
+handle, which the manager enforces by rejecting a second submission of a live one. An instance is a
+handle; a handle is used once *at a time*, which is all the manager needs to promise.
 
 One thing the diagram does not show: a handle's result belongs to that handle's caller alone - the
 factory shares the fetch, never the decoded instance - which is what lets the manager dispose a result
