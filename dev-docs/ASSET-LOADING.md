@@ -593,9 +593,9 @@ cancelling it, which is the only thing the manager has ever done to one.
 
 ## 6. The control integration (described, not built)
 
-A URI to ask for, a placeholder to show until there is one, and a property, an error value and a
-change handler pair to say where the request has got to, as C# 14 extension members in a feature
-package in the shape `ControlEffectiveInViewExtensions` already uses:
+A URI to ask for, a placeholder to show until there is one, and a property, an error value and a change
+handler pair to say where the request has got to, as C# 14 extension members in a feature package in
+the shape `ControlEffectiveInViewExtensions` already uses:
 
 ```csharp
 public static class ImageSourceLoadingExtensions
@@ -710,6 +710,21 @@ second. 6.1 lists this with the ordering rules.
 the loader, and the InView handler token all go. Removal and disposal are the other two ways a load
 stops, and both are now notifications the package subscribes to rather than gaps (6.2).
 
+**Retry is two assignments, and that is the whole API for it.** `SourceUri = null` ends the relationship:
+the outstanding load is cancelled, the loaded image is disposed, and the control has no image of the
+feature's - so the state is `None`. Setting the URI again starts a fresh load from `Pending`.
+
+That form is the one that survives a re-rendering tree, which is why it is the form rather than a
+method. The null is a real state change, so nothing that re-asserts a value it already holds can trigger
+either half: the first assignment only takes effect because the value differs from what is held, and the
+second only because it differs from null. A render that re-applies its properties, or an imperative
+caller that sets the same URI every frame, therefore cannot restart a load or a failure by accident. A
+`RetrySourceLoad()` method would be a second way to say "load this" on a surface that already has one,
+and it is section 8's rejected option for exactly that reason.
+
+The brief `None` between the two assignments is accurate rather than awkward: the control really is not
+following a URI in that instant, and it is the same state it is in before any URI is set.
+
 **Priority.** `EffectiveInView` maps to `Priority` through `AddEffectiveInViewChangedHandler`, one
 subscription per URI assignment (3.15). In view is `AssetLoadPriority.Visible`, out of view is
 `AssetLoadPriority.Background` (2.5).
@@ -757,8 +772,20 @@ inferred rather than written down:
   go immediately afterwards - so the loaded `ImageData` is disposed there and nowhere later (6.3).
 - **`Failed` carries the exception in `SourceLoadError`**, not in the state, because a state value
   cannot carry one and an exception type is not a state.
-- **A failed load leaves `SourceUri` set**, which makes a retry a plain `SourceUri = uri` assignment
-  rather than a new API. That resolves half of what was open question 9.2 - see 6.3.
+- **A failed load leaves `SourceUri` exactly as it was.** A failure touches none of the three: the URI
+  stays, `SourceLoadState` becomes `Failed`, and `SourceLoadError` carries the reason. Clearing the URI
+  would lose the only record of what failed and make a retry impossible.
+- **Assigning the value `SourceUri` already holds does nothing** - no restart, no state change, no
+  `Source` write. The setter guards on equality like every other settable property in the library
+  (`Control.Parent`, `Image.Source`, `SizeMode`), which is what makes a re-rendering tree safe: a render
+  re-applies the properties that changed, and an imperative caller may well set the same value every
+  frame. Without the guard, a permanent failure would become a retry storm the moment anything
+  re-asserted the URI.
+- **Retry is `SourceUri = null` and then the URI, in that order.** The first assignment ends the load the
+  control has and takes it to `None`; the second starts a new one from `Pending`. Because the setter
+  guards on equality, neither half fires unless the value actually changes, so nothing that re-asserts a
+  URI it already holds can restart a load - a retry is a deliberate act, not something a render can do by
+  accident.
 - **`Loaded` and `Failed` are raised after `Source` is settled.** A handler that assigns
   `PlaceholderSource` in response is therefore writing the image that stays on screen, and one that
   reads `Source` reads the image the state describes. Raising the state first would let a handler see
@@ -823,11 +850,13 @@ for.
 
 ### 6.3 What is left to name, and what closed
 
-- **What happens after `Failed`.** The error *surface* is now decided - the state and `SourceLoadError`
-  - and so is the rule that the URI stays set. What is not decided is the retry policy: whether
-  re-assigning the same URI is the documented way to retry, whether the feature retries by itself
-  (and after what delay), and whether a failure that is obviously permanent (a malformed URI, a
-  factory that throws) is treated differently from a transient one. Open question 9.2.
+- **What happens after `Failed`.** The surface and the mechanism are decided - `Failed`,
+  `SourceLoadError`, `SourceUri` left exactly as it was, and a manual retry expressed as `SourceUri =
+  null` followed by the URI (6, 6.1). What is still open is the *automatic* half: whether the feature
+  ever retries by itself, after what delay, and whether a failure that is obviously permanent (a
+  malformed URI, a factory that throws) is treated differently from a transient one. Open question 9.2.
+  The reading to start from is no automatic retry at all, because a retry policy is a policy the
+  application should own.
 - **Disposal of a replaced `ImageData`.** The feature created it, so the feature owns it: `Image`
   never disposes its `Source` and assigning a new one does not dispose the old
   (`src/core/Kolvir/Controls/Image.cs`). Assigning a new URI must dispose the previous loaded
@@ -922,6 +951,8 @@ decision turns on.
 | Accepting the gap and documenting it | A removed control's load would run to completion with nothing to cancel it - a wasted fetch per in-flight load, and the control held alive until it ended. The two mechanisms in 6.2 close it, so there is nothing left to accept. |
 | A set-only `SourceUri` extension property | The generator skips it: it reads the pristine value back through a public getter (6). |
 | Leaving `Source` and `SourceUri` independent | A completion would silently overwrite an image the application assigned, and the application could not tell whether the control was still following the URI (6). |
+| Restarting the load on every `SourceUri` assignment | A render re-applies changed properties and an imperative caller may set the same value every frame, so the setter has to be idempotent or a permanent failure becomes a retry storm; the guard is also what makes the two-assignment retry deliberate (6.1, 6). |
+| `RetrySourceLoad()`, a method for retry | Two assignments already express it, and the null is a real state change so nothing can trigger either half by accident; a method would be a second way to say "load this" on a surface that already has one (6, 6.1). |
 | A placeholder loaded from a URI | It would pend and fail on its own, including after it replaced itself, which recurses; a placeholder is an `ImageData`, not a request (6). |
 | Separate `PendingSource` and `FailedSource` properties | One property plus the state change handler covers both, and a third state would want a third property; the state is the axis, so the handler picks the image per state (6). |
 | `SourceUri` on `Image` in core | A rung-3 package cannot add members to a core type; the surface has to be extension members (7). |
@@ -935,13 +966,12 @@ reviewer can disagree with the reading rather than with a decision presented as 
    factory exists; the shape (a counter with a per-key limit and change notification, and whether it
    refcounts fetches or only counts them) is mixed up with 4.1's handle/shared-fetch split, so it
    should be written against a real factory rather than guessed here.
-2. **What is the retry policy after `Failed`?** The surface half is decided - `Failed` plus
-   `SourceLoadError`, with `SourceUri` left set so that a retry is a plain re-assignment (6.1, 6.3).
-   What is not: whether re-assignment is the documented retry and nothing more, whether the feature
-   ever retries by itself, and whether an obviously permanent failure (a malformed URI, a factory that
-   throws) is distinguished from a transient one. The reading to start from is the smallest: no
-   automatic retry, because a retry policy is a policy the application should own and a feature that
-   retries cannot be told to stop.
+2. **Does the feature ever retry a failed load by itself?** The manual case is decided: `SourceUri` is
+   left exactly as it was, `Failed` and `SourceLoadError` say what happened, and a retry is `SourceUri =
+   null` followed by the URI (6, 6.1). What is open is whether there is any automatic retry, after what
+   delay, and whether an obviously permanent failure (a malformed URI, a factory that throws) is
+   distinguished from a transient one. The reading to start from is none: a retry policy is a policy the
+   application should own, and a feature that retries cannot be told to stop.
 3. **What are the state's names and values?** `SourceLoadState` versus `SourceUriLoadState` for the
    property, `ImageSourceLoadState` for the type, and whether a cancellation should have its own value
    instead of landing in `None` or `Failed`. A cancelled load is not a failure, and a UI that shows a
