@@ -21,7 +21,7 @@ namespace Kolvir.Feature.Observables;
 /// <para>
 /// A disposed dictionary delivers one last event with no changes at all, which is how a registrant that
 /// only wants to detach learns it is gone: <see cref="Dictionary"/> answers
-/// <see cref="IReadOnlyObservableDictionary{TKey, TValue}.IsDisposed"/> by then, and every other event
+/// <see cref="IReadOnlyObservableSet{T}.IsDisposed"/> by then, and every other event
 /// arrives with it false. There is no other empty event.
 /// </para>
 /// </remarks>

@@ -1082,11 +1082,13 @@ ObservableDictionaryChangedEventArgs<TKey, TValue> : EventArgs
   IReadOnlyList<ObservableDictionaryChange<TKey, TValue>> Changes { get; }
   IReadOnlyObservableDictionary<TKey, TValue> Dictionary { get; }
 
-IReadOnlyObservableDictionary<TKey, TValue> : IReadOnlyDictionary<TKey, TValue>, IDisposable
-  bool IsDisposed { get; }
-  IEqualityComparer<TKey> Comparer { get; }
+IReadOnlyObservableDictionary<TKey, TValue>
+    : IReadOnlyDictionary<TKey, TValue>, IReadOnlyObservableSet<KeyValuePair<TKey, TValue>>
+  new IEqualityComparer<TKey> Comparer { get; }    // hides the set base's pair comparer; explicit there
   IDisposable AddObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler)
   void RemoveObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler)
+  // IsDisposed, IDisposable and the set surface - Count, Contains, the six algebra questions,
+  // Comparer and the two set handlers - are the set base's (section 7.7)
 
 IObservableDictionary<TKey, TValue> : IReadOnlyObservableDictionary<TKey, TValue>, IDictionary<TKey, TValue>
   int ChangeBatchDepth { get; }
@@ -1118,7 +1120,9 @@ key was there.
 
 `Comparer` is on the read surface for 6.2.1's reason one collection over: two keys the comparer calls
 equal are the same key, and a consumer mirroring the dictionary has to agree. The per-key dependency
-entries are keyed with it, in a table the dictionary owns.
+entries are keyed with it, in a table the dictionary owns. That is the *dictionary's* identity and the
+member a caller of the interface sees; the set view's identity is the pair and is a second comparer,
+reachable as the set base's `Comparer` (section 7.7).
 
 #### 7.2.2 `ItemChanged` only when the value differs
 
@@ -1172,12 +1176,14 @@ public sealed class ObservableDictionaryChangedEventArgs<TKey, TValue> : EventAr
     public IReadOnlyObservableDictionary<TKey, TValue> Dictionary { get; }
 }
 
-public interface IReadOnlyObservableDictionary<TKey, TValue> : IReadOnlyDictionary<TKey, TValue>, IDisposable
+public interface IReadOnlyObservableDictionary<TKey, TValue>
+    : IReadOnlyDictionary<TKey, TValue>, IReadOnlyObservableSet<KeyValuePair<TKey, TValue>>
 {
-    bool IsDisposed { get; }
-    IEqualityComparer<TKey> Comparer { get; }
+    new IEqualityComparer<TKey> Comparer { get; }   // the set base's pair comparer is explicit (7.7)
     IDisposable AddObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler);
     void RemoveObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TValue>> handler);
+    // Inherited from the set base: IsDisposed, the pair Comparer, Count, Contains,
+    // the six algebra questions, and Add/RemoveObservableSetChangedHandler.
 }
 
 public interface IObservableDictionary<TKey, TValue>
@@ -1244,6 +1250,9 @@ Which record marks what:
 | `DictionaryCleared` | yes | yes | every watched key |
 | `UntrackedChanges` | yes | yes | every watched key |
 
+The set view hears the same events as set changes - an add, a removal, and a replacement as two records
+in one event - and section 7.7 gives that mapping.
+
 ### 7.5 The mapped view
 
 `ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>` is a read-only view over another
@@ -1262,7 +1271,9 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
         Func<TInner, TOuter> selector);
 
     public bool IsDisposed { get; }
-    public IEqualityComparer<TKey> Comparer { get; }
+    public IEqualityComparer<TKey> Comparer { get; }             // the key comparer, as on any dictionary
+    IEqualityComparer<KeyValuePair<TKey, TOuter>>                   // explicit: the set base's pair comparer
+        IReadOnlyObservableSet<KeyValuePair<TKey, TOuter>>.Comparer { get; }
     public int Count { get; }
     public IEnumerable<TKey> Keys { get; }
     public IEnumerable<TOuter> Values { get; }
@@ -1272,8 +1283,16 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
     public bool Contains(KeyValuePair<TKey, TOuter> item);
     public void CopyTo(KeyValuePair<TKey, TOuter>[] array, int arrayIndex);
     public IEnumerator<KeyValuePair<TKey, TOuter>> GetEnumerator();
+    public bool SetEquals(IEnumerable<KeyValuePair<TKey, TOuter>> other);
+    public bool IsSubsetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other);
+    public bool IsSupersetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other);
+    public bool IsProperSubsetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other);
+    public bool IsProperSupersetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other);
+    public bool Overlaps(IEnumerable<KeyValuePair<TKey, TOuter>> other);
     public IDisposable AddObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TOuter>> handler);
     public void RemoveObservableDictionaryChangedHandler(Action<ObservableDictionaryChangedEventArgs<TKey, TOuter>> handler);
+    public IDisposable AddObservableSetChangedHandler(Action<ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>> handler);
+    public void RemoveObservableSetChangedHandler(Action<ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>> handler);
     public void Dispose();
 }
 ```
@@ -1281,9 +1300,12 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
 `Contains` and `CopyTo` are not on `IReadOnlyDictionary<TKey, TValue>` - nor is the set view's
 `CopyTo` on `IReadOnlySet<T>` - but they are kept for the reason 5.4 gives about the list view's
 scans: a consumer handed any of the three views should find the same scans in each. Both publish the
-contents dependency, and both delegate to the storage, so the BCL's equality and argument rules are
-the ones that answer. The write surface, `ChangeBatchDepth`, `MaxCollectionBatchSize`, a factory and
-`Refresh`/`Remap` are absent for the reasons 5.4 gives.
+contents dependency. `CopyTo` delegates to the storage, so the BCL's argument rules are the ones that
+answer; `Contains` is the set view's `Contains`, so it asks the source's key comparer which entry an
+item names and compares the mapped value with `EqualityComparer<TOuter>.Default` (section 7.7) -
+the BCL's default key equality would disagree with a source built on another comparer. The write
+surface, `ChangeBatchDepth`, `MaxCollectionBatchSize`, a factory and `Refresh`/`Remap` are absent for
+the reasons 5.4 gives.
 
 **Record for record, exactly as the list's view is.** A key is unique, so every entry's value has
 exactly one mapped counterpart: nothing collapses, nothing merges, and no entry can arrive already
@@ -1385,6 +1407,43 @@ translation, as 6.5 says of a set. There is no `Observable.MapDictionary` factor
 - A value comparer per dictionary (open question 8.10).
 - The `Dictionary<,>`-only conveniences (`Remove(k, out v)`, `GetValueOrDefault`). None of them is a
   change, and all of them are one line over the interface.
+
+### 7.7 The dictionary as a set of its pairs
+
+`IReadOnlyObservableDictionary<TKey, TValue>` is an `IReadOnlyObservableSet<KeyValuePair<TKey, TValue>>`,
+and only the read-only half is: `IObservableDictionary<TKey, TValue>` does not extend `IObservableSet`,
+because a writable set surface spelled in pairs would be a second way to change the same dictionary, while
+the owner already has `Add(k, v)`, `TryAdd(k, v)` and the indexer.
+
+**The element is the pair.** Identity includes the value, so `{"a" to 1}` and `{"a" to 2}` are two
+elements, `Contains(pair)` is true only when the key is present *and* its value equals the pair's, and a
+pair whose key has since moved on is not in the set. Two dictionaries with the same keys and different
+values are not `SetEquals`. Identity by key would have made the set view a set of keys with a payload,
+which says nothing the dictionary does not already say; the owner chose pair identity for that reason.
+The event's `Set` is the dictionary itself, which is the set view.
+
+**Two comparers, reachable from different places.** `Comparer` on the dictionary interface stays the key
+comparer (`IEqualityComparer<TKey>`) and is what a caller of that interface sees; the set base's
+`Comparer` is the pair comparer (`IEqualityComparer<KeyValuePair<TKey, TValue>>`), hidden by a `new`
+declaration on the dictionary interface and reachable only by casting to `IReadOnlyObservableSet<...>`.
+The pair comparer compares the key with the dictionary's own comparer and the value with
+`EqualityComparer<TValue>.Default`, and its `GetHashCode` combines both: a comparer that hashed only the
+key would call two pairs equal and still file them in different buckets, and every set operation would be
+silently wrong. Both implementations take the comparer and all six algebra answers from
+`ObservableDictionaryPairSet<TKey, TValue>`, so there is one definition of an element rather than two.
+
+**A replacement is two changes in one event.** A dictionary record carries the key, the old value and the
+new value, so `ItemAdded`, `ItemRemoved`, `DictionaryCleared` and `UntrackedChanges` translate one for one
+(`Add(pair(k, NewValue))`, `Remove(pair(k, OldValue))`, `Clear()`, `Untracked()`), and `ItemChanged`
+becomes `Remove(pair(k, OldValue))` followed by `Add(pair(k, NewValue))`. Those two records are delivered
+in one `ObservableSetChangedEventArgs`, in that order, because the replacement is atomic to an observer:
+one that saw the removal without the add would hold a set the dictionary never held, and no intermediate
+pair is observable because the dictionary's own mutation completed before the records were made.
+The set stream is derived from the *delivered* dictionary event rather than recorded beside the mutation,
+so it cannot describe a change the dictionary event did not, and a dictionary event that went untracked
+becomes an untracked set event instead of being advertised anyway.
+`ObservableMappedReadOnlyDictionaryView` translates its own mapped records through the same helper, so it
+raises the same set changes as the dictionary it maps.
 
 ## 8. Open questions - confirm before code
 
