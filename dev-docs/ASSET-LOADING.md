@@ -17,7 +17,7 @@ something is not decided, section 9 says so rather than a section here quietly d
 
 ## 1. What the feature is for
 
-A UI loads many assets, images above all. Four requirements, and the third and fourth are what
+A UI loads many assets, images above all. Five requirements, and the third and fourth are what
 decide the shape:
 
 1. What is on screen loads first.
@@ -26,12 +26,19 @@ decide the shape:
    to be changeable *after* the load is enqueued.
 4. When the need goes away - the image control is removed, disposed, or its source replaced - a
    queued load must never start, and a running one must be cancelled.
+5. The control that asked has to be able to say where its load has got to, because that is what a
+   placeholder, a spinner and an error message are drawn from - and the distinction a UI most needs is
+   "submitted, waiting" against "actually in flight".
 
 1 and 2 make this a priority queue. 4 makes it a queue whose entries can be withdrawn, which is not
 the same as a queue with a cancellation token at the far end: a withdrawn entry has to leave, and a
 withdrawn running load has to stop consuming whatever the loader was spending on it. Removal and
 disposal are two different ways of withdrawing, and neither is currently observable from a feature
-package (6.1) - so the note keeps them apart instead of letting "disposed" stand in for both.
+package (6.2) - so the note keeps them apart instead of letting "disposed" stand in for both.
+
+5 is the requirement that reaches back into the manager. A caller cannot tell a queued load from a
+running one from the outside - both are "I have a task and it has not finished" - so the manager has
+to say when a queued load starts, which is the one thing added to its signature for this (2.4).
 
 Two things are deliberately *not* here. There is no cache and no in-flight sharing in the manager,
 and there is no concurrency limit in the manager. Both are real and both belong to the loader
@@ -63,7 +70,10 @@ public interface IAssetLoader<TResult> : IAssetLoader
 
 public interface IAssetLoadManager
 {
-    Task<TResult> LoadAsync<TResult>(IAssetLoader<TResult> loader, CancellationToken cancellationToken);
+    Task<TResult> LoadAsync<TResult>(
+        IAssetLoader<TResult> loader,
+        Action? onStarted,
+        CancellationToken cancellationToken);
 }
 ```
 
@@ -130,7 +140,7 @@ Three reasons for this shape rather than repairing the draft in place:
 
 A typed factory therefore also has to answer the non-generic member, one line comparing `resultType`
 with `typeof(TResult)` and forwarding. Whether `IAssetLoaderFactory<TResult>` supplies that line as a
-default interface implementation, or every factory writes it, is open question 9.7.
+default interface implementation, or every factory writes it, is open question 9.9.
 
 ### 2.2 Registration
 
@@ -163,7 +173,36 @@ order is free and visible.
 Not a dictionary keyed by scheme: a factory may claim by scheme, by host, by file extension, or by
 nothing at all (an embedded-resource loader claims a single prefix), and a provider that enumerated
 the possible keyings would be inventing a taxonomy that the factories already know. The exact member
-set of the provider is open question 9.6.
+set of the provider is open question 9.8.
+
+### 2.4 The started notification, and why it is a callback
+
+`onStarted` is the smallest thing that answers requirement 5. A queued load and a running load look
+identical from the caller's side, so the manager says when one stops waiting and starts. Three things
+about it are decided, and each is a trap if it is assumed rather than written:
+
+- **It is raised by the walk, on the UI thread, at the moment the manager has called the loader's
+  `LoadAsync` and is about to observe its completion.** Not when the caller asked for the load - that
+  can be many walks, and many loads, earlier.
+- **It is raised synchronously, from inside the manager's `LoadAsync`, when the loader starts at once**
+  - a cache hit, an embedded resource already in memory. So a caller must set its own waiting state
+  *before* it calls the manager, not after the call returns. This is 3.8's re-entrancy seen from the
+  caller's side: the manager's walk can re-enter itself through a synchronous completion, and the
+  caller's own bookkeeping is inside that loop.
+- **A load cancelled while queued never raises it; one cancelled while running already has.** That is
+  the whole reason the notification exists - it is what makes "pending" and "loading" separable at all
+  (5 keeps the two cancellation paths apart for the same reason).
+
+One ordering detail follows, and it is not cosmetic: the notification goes out after the loader's
+`LoadAsync` has returned its task but *before* that task's completion can be delivered to the caller.
+For a loader that completes synchronously, the continuation is attached after the notification, so a
+caller never hears "loaded" before it hears "started".
+
+The rejected alternative was an `IAssetLoadRequest<TResult>` handle - a type holding the task, an
+`AddStartedHandler` pair, and a per-request `Priority` - which is the shape this should become if
+per-request priority or state is ever wanted outside the manager. It is not wanted yet: a callback is
+one parameter that callers can ignore, where a handle is a new type in every call site and a second
+way to express a priority the loader already carries. Open question 9.5 keeps that choice visible.
 
 ## 3. Decisions, and why
 
@@ -263,7 +302,7 @@ because a load finished or because a limit was raised, and both of those raise
 `CanLoadNowChanged`; a priority changes only because something set it, and that raises
 `PriorityChanged`. There is no state change the manager needs to hear about that has no event.
 
-The walk itself is O(n) in the queued loaders; section 9.8 keeps that cost as an open question rather
+The walk itself is O(n) in the queued loaders; section 9.10 keeps that cost as an open question rather
 than assuming it is fine.
 
 ### 3.8 The walk is re-entrancy safe
@@ -302,7 +341,7 @@ they are all the manager's:
 The guarantee is about what the manager does once it is *told*. It does not supply the telling: the
 token is cancelled by whoever owns the consumer, and for the case requirement 4 opens with - the image
 control removed from the UI - nothing in the tree does, because removal is not observable from a
-package (section 6.1). Section 5 keeps the two cases apart, because only one of them has a load to
+package (section 6.2). Section 5 keeps the two cases apart, because only one of them has a load to
 stop.
 
 ### 3.10 Every handler subscription is released on every exit path
@@ -415,7 +454,7 @@ cancelled:
 - Two handles over one fetch complete together; a late result after the last cancellation is dropped
   with the fetch.
 - All of this assumes each handle is actually cancelled. A control removed from the UI cancels
-  nothing today (6.1), so the count under a removed image never reaches zero on its own.
+  nothing today (6.2), so the count under a removed image never reaches zero on its own.
 
 This is what lets loader-owned caching coexist with per-consumer priority, and it is why the manager's
 rule is "one outstanding request per instance" (3.11) rather than "an instance is used once". An
@@ -454,11 +493,11 @@ a decision, because its shape is not settled and everything above stands without
 Stated as an order of operations, because the interaction between the walk and the callbacks is where
 a queue like this goes wrong.
 
-**On `LoadAsync(loader, token)`:**
+**On `LoadAsync(loader, onStarted, token)`:**
 
 1. Reject a loader with a request outstanding (3.11).
 2. Subscribe both handlers (3.10).
-3. Insert the entry with the next sequence number (3.6).
+3. Insert the entry with the next sequence number (3.6), remembering `onStarted` with it.
 4. Walk.
 
 **On a walk:**
@@ -469,8 +508,11 @@ a queue like this goes wrong.
 3. Ask its `CanLoadNow` (3.2). If false, set it aside and continue to the *next* entry - a closed gate
    for one loader says nothing about another's, and with per-domain limits the next entry is often the
    one that can start.
-4. If true, remove it from the queue, call its `LoadAsync` with the caller's token, and attach the
-   completion continuation.
+4. If true, remove it from the queue, call its `LoadAsync` with the caller's token, raise its
+   `onStarted` on the UI thread, and attach the completion continuation. The raise comes before the
+   continuation is attached so that a loader completing synchronously cannot deliver a result first
+   (2.4) - which also means `onStarted` throwing leaves no continuation to detach, and the entry
+   fails like any other throw from a loader.
 5. Repeat until no queued entry can start.
 6. Clear the flag; if "walk again" was set, walk once more.
 
@@ -481,13 +523,15 @@ ambient context, not because the manager posted anything (3.12).
 **On a cancellation, and the two cases are different:**
 
 - **The entry is still queued.** It leaves the queue and is never started - that is requirement 4's
-  first half. No load exists to stop, so there is nothing to watch: both handlers come off immediately,
-  the caller's task is completed cancelled, and the walk continues with the entries below it.
-- **The load is already running.** The caller's task is completed cancelled at once (3.9), the priority
-  handler comes off - the queue order no longer concerns this entry - and the availability handler
-  stays until the underlying task actually ends, because the slot is still occupied until then (3.9).
-  When the underlying task ends, that handler comes off and the manager walks, for the loaders that
-  were vetoed while this one held a slot.
+  first half, and it is also why `onStarted` is never raised for it (2.4). No load exists to stop, so
+  there is nothing to watch: both handlers come off immediately, the caller's task is completed
+  cancelled, and the walk continues with the entries below it.
+- **The load is already running.** Its `onStarted` was raised when it started, so the caller has
+  already been told. The caller's task is completed cancelled at once (3.9), the priority handler comes
+  off - the queue order no longer concerns this entry - and the availability handler stays until the
+  underlying task actually ends, because the slot is still occupied until then (3.9). When the
+  underlying task ends, that handler comes off and the manager walks, for the loaders that were vetoed
+  while this one held a slot.
 
 Collapsing the two would either leave a cancelled queued entry being started later, or free a slot a
 running load still holds; they are the only two states an entry has, and each has its own exit.
@@ -501,25 +545,66 @@ cancelling it, which is the only thing the manager has ever done to one.
 
 ## 6. The control integration (described, not built)
 
-`Image.SourceUri` as a C# 14 extension member in a feature package, in the shape
+A URI to ask for, and a property, an error value and a change handler pair to say where the request
+has got to, as C# 14 extension members in a feature package in the shape
 `ControlEffectiveInViewExtensions` already uses:
 
 ```csharp
-public static class ImageSourceUriExtensions
+public static class ImageSourceLoadingExtensions
 {
     extension(Image image)
     {
-        public string? SourceUri { get => ..; set { .. } }
+        public string? SourceUri { get; set; }
+        public ImageSourceLoadState SourceLoadState { get; }
+        public Exception? SourceLoadError { get; }
+        public IDisposable AddSourceLoadStateChangedHandler(Action<object> handler);
+        void RemoveSourceLoadStateChangedHandler(Action<object> handler);
     }
 }
 ```
 
+with five states:
+
+| State | Meaning |
+| --- | --- |
+| `None` | No URI. Nothing has been asked for. |
+| `Pending` | A URI was accepted and the load is queued, not started. |
+| `Loading` | The manager said the load started (2.4). |
+| `Loaded` | `Image.Source` has been assigned from the load. |
+| `Failed` | The load failed; `SourceLoadError` says why. |
+
+`Pending` and `Loading` are separate only because of 2.4, and that is the whole point of the
+notification: without it there is one "not finished" state, and a UI cannot tell a placeholder from a
+spinner.
+
+**A state property, not two event pairs.** The obvious alternative is `AddSourceLoadCompletedHandler`
+and `AddSourceLoadFailedHandler`, and it was rejected:
+
+- **A consumer wants the current answer, not the transitions.** A control that renders a placeholder,
+  a spinner or an error message is asking "what should I draw now", and that is a property read. Two
+  event pairs answer "what happened at some point", which a template has to turn back into a state -
+  and it has to get the initial case right on its own, before either event has fired.
+- **A state cannot be missed; an event can.** A load that fails synchronously - a malformed URI, a
+  factory that throws - is already `Failed` by the time the caller's next line runs, and a handler
+  subscribed afterwards hears nothing. A state property plus a change handler has no such window: the
+  read gives the answer, and the handler exists to learn that the answer changed.
+- **It is the shape the rest of the library uses.** `Visible`, `Enabled` and `EffectiveInView` are
+  state plus a change pair, so a VirtualDom render binds a property (`EXTENSION-MEMBERS-ON-VNODES.md`
+  section 3 - and the handler pair is what the generator recognises as an event property), and an
+  application has one idiom to learn rather than a second one for images.
+
+The counter-argument, recorded because it is real: a completed handler could hand over the `ImageData`
+directly, and a state property only says *that* it finished. That advantage does not apply here,
+because this feature assigns `Image.Source` itself - the consumer never needs the bytes, only to know
+whether to draw a spinner. A consumer that does want the bytes is better served by the manager
+directly (2), which is the general path.
+
 **Set.** Resolve `IAssetLoaderProvider` through `Control.Services` (which is `Host?.Services`,
 `src/core/Kolvir/Core/Control.cs`) - not through a window, not through a static. Ask it for an
 `ImageData` loader for the URI, submit it to `IAssetLoadManager`, and on completion assign
-`Image.Source`. A new URI cancels the outstanding load: the token source, the loader, and the InView
-handler token all go. Disposal and removal are the other two ways a load should stop, and neither is
-observable (6.1).
+`Image.Source` and raise the state change. A new URI cancels the outstanding load: the token source,
+the loader, and the InView handler token all go. Disposal and removal are the other two ways a load
+should stop, and neither is observable (6.2).
 
 **Priority.** `EffectiveInView` maps to `Priority` through `AddEffectiveInViewChangedHandler`, one
 subscription per URI assignment (3.15). In view is Visible, out of view is Background; the constants
@@ -527,16 +612,42 @@ are open question 9.2.
 
 **Where the state lives.** Not on the control: a rung-3 package cannot add fields to `Image`. It goes
 in a `ConditionalWeakTable<Image, ...>` keyed on the control, exactly as `EffectiveInViewState` keeps
-`States`, `Watched` and `Hosts` off every `Control` (`EffectiveInViewState.cs`).
+`States`, `Watched` and `Hosts` off every `Control` (`EffectiveInViewState.cs`). That is also what
+makes the state readable after the load has finished and the tables emptied of everything else.
 
 **Declarable in a render, with no extra work - almost.** The VirtualDom generator already maps
 extension properties onto node members (`EXTENSION-MEMBERS-ON-VNODES.md`), so `new VImage { SourceUri =
-"..." }` needs no generator change. One condition from that document's section 3 applies: the
-property must have a *public getter* as well as a setter, because the generator reads the pristine
-value back through it when a render drops the property. A set-only `SourceUri` would be silently
-skipped - so the property stores what it was set to and returns it.
+"..." }` needs no generator change, and `SourceLoadState` is readable in a render for free. One
+condition from that document's section 3 applies to the URI: the property must have a *public getter*
+as well as a setter, because the generator reads the pristine value back through it when a render drops
+the property. A set-only `SourceUri` would be silently skipped - so the property stores what it was
+set to and returns it.
 
-### 6.1 Removal and disposal are separate, and neither is observable
+### 6.1 The ordering rules the control has to follow
+
+Each of these is a consequence of something the note already decided, and each is a bug if it is
+inferred rather than written down:
+
+- **`Pending` is set before `manager.LoadAsync` is called, not after it returns.** A synchronous start
+  calls back from inside that call (2.4), so the control must already be waiting when it does.
+- **A new URI cancels the old load before starting the new one**, so the state goes `Loading ->
+  Pending` directly and never passes through `None`: the control still has a URI, it is only a
+  different one.
+- **A stale completion never writes `Loaded`.** The cancelled load's completion arrives after the new
+  load's state was set, and it is ignored - the same rule as 3.9's "a late result is never delivered",
+  reached here from the control's side. The cheapest way to obey it is to compare the completing
+  request against the current one rather than to trust the cancellation.
+- **Removal and disposal leave the state where it is today, and should reset it to `Pending` once the
+  seam exists (6.2).** `Pending` is the right answer for a reparent - the same control goes back into
+  a tree with the same URI and wants the same bytes, and leaving it `Loading` would leave a spinner
+  turning over a load that is never coming back. Until the seam exists, nothing happens on removal and
+  the state stays `Loading`, which is exactly 6.2's gap seen from the UI.
+- **`Failed` carries the exception in `SourceLoadError`**, not in the state, because a state value
+  cannot carry one and an exception type is not a state.
+- **A failed load leaves `SourceUri` set**, which makes a retry a plain `SourceUri = uri` assignment
+  rather than a new API. That resolves half of what was open question 9.3 - see 6.3.
+
+### 6.2 Removal and disposal are separate, and neither is observable
 
 Requirement 4 opens with "the image control is removed from the UI", and removal is not disposal. The
 two are different events, and neither one reaches a rung-3 package:
@@ -571,35 +682,35 @@ Three options, named and not decided:
   `Control` itself would implement it - every control is removable - so the retained-vtable argument
   lands differently here than it does for a feature only some subclasses implement, and the cost has to
   be measured rather than assumed to be small. A decision a feature cannot take on its own; open
-  question 9.4.
+  question 9.6.
 - **The reconciler disposing what it detaches.** Cheap to write and wrong as a rule: an application
   that detaches a control to reattach it elsewhere would get a disposed control back, and `Unmount`
   is also the path a window's teardown takes. If it is considered at all, it is considered as a
-  separate change with its own reason, and it is open question 9.5.
+  separate change with its own reason, and it is open question 9.7.
 - **Accepted and documented.** The feature package cancels on a new URI, and on a removed control it
   lets the load finish and assigns a `Source` nobody sees. Written down with its cost - one wasted
   fetch per in-flight load per removed control, and the control held alive until that fetch ends - it
   is a defensible answer for a first cut. What is not defensible is shipping it silently, which is why
   it is here.
 
-### 6.2 Gaps to name rather than paper over
+### 6.3 Gaps to name rather than paper over
 
-- **The error path.** A 404 has to go somewhere. `Image`'s own documentation says a failure today is
-  "an ordinary exception where the developer called the factory rather than an event raised from a
-  control" - which a URI-based load cannot honour, because the caller is a `set` in a render, not the
-  developer. So an event (`SourceLoadFailed` or similar) on the control, and whether a failed load
-  leaves `SourceUri` set or clears it, are open questions 9.3, not decisions.
+- **What happens after `Failed`.** The error *surface* is now decided - the state and `SourceLoadError`
+  - and so is the rule that the URI stays set. What is not decided is the retry policy: whether
+  re-assigning the same URI is the documented way to retry, whether the feature retries by itself
+  (and after what delay), and whether a failure that is obviously permanent (a malformed URI, a
+  factory that throws) is treated differently from a transient one. Open question 9.3.
 - **Disposal of a replaced `ImageData`.** The feature created it, so the feature owns it: `Image`
   never disposes its `Source` and assigning a new one does not dispose the old
   (`src/core/Kolvir/Controls/Image.cs`). Assigning a new URI must dispose the previous loaded
   `ImageData`, and that is a real rule, not a nicety - it is the same rule an application already
   follows when it assigns `Source` itself.
-- **Disposal when the control is disposed.** The same missing seam as 6.1, seen from the ownership
+- **Disposal when the control is disposed.** The same missing seam as 6.2, seen from the ownership
   side: `Control.Own<T>` is exactly the core's answer to "dispose this with the control"
   (`Control.cs:2725`), but it is `protected internal`, `Dispose(bool)` is `protected virtual`
   (`Control.cs:3572`) and there is no disposal notification to subscribe to. So the `ImageData` this
   feature created cannot be disposed at the right moment either - it outlives the control that holds
-  it. Same three options as 6.1, and this is the gap that may not be solvable inside the feature
+  it. Same three options as 6.2, and this is the gap that may not be solvable inside the feature
   package at all.
 
 ## 7. Packages, rung, and sequencing
@@ -610,11 +721,12 @@ Two packages, in this order:
   interfaces, the provider, and `AddAssetLoading()`/`AddAssetLoaderFactory()`. No control, no
   visibility, no image format. It is the reusable core, and it is useful on its own: an application
   with a virtual list of its own can priority-order its own loads with it.
-- **A follow-up package for `Image.SourceUri`** (section 6), which references AssetLoading *and*
-  EffectiveInView. This split is why the reusable core does not hard-depend on a UI visibility
-  feature: the dependency points from the control integration to both, not between the two. It also
-  means 6.1's missing seam blocks the follow-up without blocking AssetLoading, which is a real reason
-  to sequence the two packages rather than ship them together.
+- **A follow-up package for the `Image` loading surface** (section 6: the URI, the load state, the
+  error, and the priority mapping), which references AssetLoading *and* EffectiveInView. This split is
+  why the reusable core does not hard-depend on a UI visibility feature: the dependency points from the
+  control integration to both, not between the two. It also means 6.2's missing seam blocks the
+  follow-up without blocking AssetLoading, which is a real reason to sequence the two packages rather
+  than ship them together.
 
 **Rung: 3 for each**, per `FEATURE-COST-POLICY.md` section 4. A feature package is rung 3 by
 definition, and here rung 3 is also correct on the merits rather than merely available: an
@@ -651,7 +763,10 @@ the policy exists to replace.
 | A loader as single use forever | Sharing needs a handle per caller that may be reused after it completes; "one outstanding" is the rule that gets both (3.11, 4.1). |
 | Handing one loader object to two controls | They would fight over one `Priority` and one cancellation (4.1). |
 | A new visibility notion for the control integration | `EffectiveInView` is occlusion-aware, invalidation-driven and already the reason the feature exists (3.15). |
-| Letting "disposed" stand in for "removed" | `Reconciler.Unmount` detaches without disposing (`Reconciler.cs:99`), so a removed control stays alive and its load runs on; requirement 4's first case would be unmet (6.1). |
+| Two event pairs instead of one state property | A consumer wants the current answer; a synchronous failure is already terminal before a handler can subscribe; state plus a handler is what `Visible`, `Enabled` and `EffectiveInView` already use (6). |
+| `IAssetLoadRequest<TResult>` instead of an `onStarted` callback | A new type in every call site and a second way to say a priority the loader already carries; it is what this becomes if per-request state or priority is ever wanted (2.4, 9.5). |
+| One "not finished" state, with no started notification | Leaves a UI unable to distinguish a placeholder from a spinner, which is requirement 5 (1, 2.4). |
+| Letting "disposed" stand in for "removed" | `Reconciler.Unmount` detaches without disposing (`Reconciler.cs:99`), so a removed control stays alive and its load runs on; requirement 4's first case would be unmet (6.2). |
 | A set-only `SourceUri` extension property | The generator skips it: it reads the pristine value back through a public getter (6). |
 | `SourceUri` on `Image` in core | A rung-3 package cannot add members to a core type; the surface has to be extension members (7). |
 
@@ -668,10 +783,25 @@ reviewer can disagree with the reading rather than with a decision presented as 
    keep call sites from inventing their own numbers, and a `Priority` that is a bare `int` invites
    one control to pick 5 and another 7 for the same meaning. Against: a constant set is an API surface
    that has to be right, and the manager only needs a total order.
-3. **What is the image error surface, and does a failed load clear the URI?** An event on the control
-   is the likely answer (6); leaving the URI set is what makes a retry possible, clearing it is what
-   makes "not loaded" visible. Not decided.
-4. **Does the tree gain a way to say a control was removed or disposed?** This is the seam 6.1 needs,
+3. **What is the retry policy after `Failed`?** The surface half is decided - `Failed` plus
+   `SourceLoadError`, with `SourceUri` left set so that a retry is a plain re-assignment (6.1, 6.3).
+   What is not: whether re-assignment is the documented retry and nothing more, whether the feature
+   ever retries by itself, and whether an obviously permanent failure (a malformed URI, a factory that
+   throws) is distinguished from a transient one. The reading to start from is the smallest: no
+   automatic retry, because a retry policy is a policy the application should own and a feature that
+   retries cannot be told to stop.
+4. **What are the state's names and values?** `SourceLoadState` versus `SourceUriLoadState` for the
+   property, `ImageSourceLoadState` for the type, and whether a cancellation should have its own value
+   instead of landing in `None` or `Failed`. A cancelled load is not a failure, and a UI that shows a
+   red error for a scroll that cancelled a fetch would be wrong; the reading to start from is a
+   separate `Cancelled` value, or `None` if cancellation can only happen when the control is going
+   away.
+5. **Does the started notification stay a callback parameter?** The alternative shapes are a virtual
+   the manager exposes for override, or an event pair on the manager that a caller subscribes to - the
+   second re-creates the per-request lookup problem a callback avoids, and the first makes one manager
+   per consumer. A callback is one parameter that most callers pass `null` for; the question is
+   whether it is the right long-term shape or only the smallest one that works (2.4).
+6. **Does the tree gain a way to say a control was removed or disposed?** This is the seam 6.2 needs,
    and the largest question in the note. The notification cannot be an extension member - the tree has
    to raise it - so it is a member on a retained type, paid for by every application
    (`FEATURE-COST-POLICY.md` sections 3 and 5), and section 5.5's three exceptions would have to be
@@ -684,26 +814,26 @@ reviewer can disagree with the reading rather than with a decision presented as 
    nobody watches - keeps the *runtime* cost off unwatched controls, but not the reachability cost.
    So the question is whether that cost is acceptable, and the answer is a measurement rather than a
    guess.
-5. **Does `Reconciler.Unmount` dispose what it detaches?** A core behaviour change, not a seam: it
-   would fix 6.1 without touching `Control`, and it would break any application that detaches a
+7. **Does `Reconciler.Unmount` dispose what it detaches?** A core behaviour change, not a seam: it
+   would fix 6.2 without touching `Control`, and it would break any application that detaches a
    control to reattach it, which is a legitimate thing to do today. Decided separately or not at all.
-6. **What are `IAssetLoaderProvider`'s exact members?** `TryCreateAssetLoader<TResult>(string uri, out
+8. **What are `IAssetLoaderProvider`'s exact members?** `TryCreateAssetLoader<TResult>(string uri, out
    loader)` is decided (2.3); whether it also exposes "can anything handle this URI", the registered
    factories for diagnostics, or a non-generic overload is not.
-7. **Does `IAssetLoaderFactory<TResult>` forward the non-generic member as a default interface
+9. **Does `IAssetLoaderFactory<TResult>` forward the non-generic member as a default interface
    implementation, or does every factory write the three-line comparison?** A default implementation
    keeps factories short; a written one keeps every member visible in the source of the type that has
    to behave. Not decided (2.1).
-8. **Does the walk need to be cheaper than O(n) per enqueue?** A scroll enqueues many loaders at
-   once, so the first real queue is where this is answerable; a priority index that starts from the
-   waiter that woke it is the obvious candidate if it is not.
-9. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
-   `HttpClientLoaderFactory`, an `IImageDataFactory`-backed decoder, or nothing at all - the last is
-   the smallest surface and the one rung 3 argues for.
-10. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
+10. **Does the walk need to be cheaper than O(n) per enqueue?** A scroll enqueues many loaders at
+    once, so the first real queue is where this is answerable; a priority index that starts from the
+    waiter that woke it is the obvious candidate if it is not.
+11. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
+    `HttpClientLoaderFactory`, an `IImageDataFactory`-backed decoder, or nothing at all - the last is
+    the smallest surface and the one rung 3 argues for.
+12. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
     state) would make the demo's readout possible and make a priority bug visible; it is also a public
     surface that has to be kept truthful, and a snapshot type is a small API of its own.
-11. **What is the follow-up package called?** `Kolvir.Feature.ImageSourceUri` is the placeholder used
-    in section 6; the other packages are named after the feature (`Kolvir.Feature.Svg`,
-    `Kolvir.Feature.EffectiveInView`), which argues for something more like
-    `Kolvir.Feature.ImageLoading`.
+13. **What is the follow-up package called?** Nothing in this note names it, and section 6's class name
+    is a placeholder too. The other packages are named after the feature (`Kolvir.Feature.Svg`,
+    `Kolvir.Feature.EffectiveInView`), which argues for `Kolvir.Feature.ImageLoading` and a static
+    class that matches.
