@@ -334,6 +334,41 @@ public sealed class ObservableDictionarySetViewTests
     }
 
     [TestMethod]
+    public void TheWritableInterfaceResolvesContainsAndAnswersWithPairIdentity()
+    {
+        // The shape that was ambiguous while the set base arrived un-redeclared: the two inherited
+        // Contains(KeyValuePair) declarations collided for a caller of this interface, and the `new`
+        // declaration on IObservableDictionary is what resolves them to the one implementation.
+        using var dictionary = Observable.CreateDictionary(new Dictionary<string, int> { ["a"] = 1 });
+
+        Assert.IsTrue(dictionary.Contains(new KeyValuePair<string, int>("a", 1)), "the key is there with that value");
+        Assert.IsFalse(dictionary.Contains(new KeyValuePair<string, int>("a", 2)), "a stale pair is not");
+        Assert.IsFalse(dictionary.Contains(new KeyValuePair<string, int>("b", 1)), "nor an absent key");
+    }
+
+    [TestMethod]
+    public void TheReadOnlyInterfaceResolvesContainsAndAnswersWithPairIdentity()
+    {
+        using var dictionary = Observable.CreateDictionary(new Dictionary<string, int> { ["a"] = 1 });
+
+        IReadOnlyObservableDictionary<string, int> readOnly = dictionary;
+
+        Assert.IsTrue(readOnly.Contains(new KeyValuePair<string, int>("a", 1)));
+        Assert.IsFalse(readOnly.Contains(new KeyValuePair<string, int>("a", 2)), "a stale pair is not in the set");
+    }
+
+    [TestMethod]
+    public void TheCollectionInterfaceStillResolvesContains()
+    {
+        using var dictionary = Observable.CreateDictionary(new Dictionary<string, int> { ["a"] = 1 });
+
+        ICollection<KeyValuePair<string, int>> collection = dictionary;
+
+        Assert.IsTrue(collection.Contains(new KeyValuePair<string, int>("a", 1)));
+        Assert.IsFalse(collection.Contains(new KeyValuePair<string, int>("a", 2)), "one member, one answer");
+    }
+
+    [TestMethod]
     public void TheWritableInterfaceIsDeliberatelyNotAnObservableSet()
     {
         using var dictionary = Observable.CreateDictionary<string, int>();

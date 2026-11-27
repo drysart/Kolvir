@@ -1195,6 +1195,7 @@ public interface IObservableDictionary<TKey, TValue>
     new ICollection<TValue> Values { get; }
     new bool ContainsKey(TKey key);
     new bool TryGetValue(TKey key, out TValue value);
+    new bool Contains(KeyValuePair<TKey, TValue> item);   // the set base brought a second Contains
     int ChangeBatchDepth { get; }
     int MaxCollectionBatchSize { get; set; }
     void BeginChangeBatch();
@@ -1215,11 +1216,15 @@ public static partial class Observable
 comes first in the four-argument overload, as it does in `CreateList` and `CreateHashSet` - corrected
 after review, where this section had it second.
 
-**Six redeclarations**, for the reason the list needed two and the set eight: a dictionary's two shapes
+**Seven redeclarations**, for the reason the list needed two and the set eight: a dictionary's two shapes
 overlap the most. `Count`, `ContainsKey` and `TryGetValue` are the same member declared twice; the indexer
 is get-only in one and settable in the other; and `Keys`/`Values` are `IEnumerable<T>` in the read-only
-interface and `ICollection<T>` in the writable one. The implementation answers the narrower spelling
-explicitly, because an interface implementation has to match the member's type exactly.
+interface and `ICollection<T>` in the writable one. `Contains(KeyValuePair)` is the seventh and the one the
+set base added: `ICollection<KeyValuePair<K, V>>` has always brought it, and
+`IReadOnlyObservableSet<KeyValuePair<K, V>>` now brings it a second way through the read-only interface, so
+the writable interface names it too - without gaining an `IObservableSet` base, a set handler or any set
+behaviour. The implementation answers the narrower spelling explicitly, because an interface
+implementation has to match the member's type exactly.
 
 ### 7.4 What each mutation raises
 
