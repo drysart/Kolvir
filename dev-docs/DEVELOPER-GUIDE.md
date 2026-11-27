@@ -5111,6 +5111,10 @@ What to know:
 - **A component goes one node down.** `Panel1 = new VComponent(page)` does not compile, because a
   component is not a node for a control. The spelling is `Panel1 = new VPanel { Children = [new
   VComponent(page)] }`, and the component's own subtree is then inside the panel as usual.
+- **Some slots hold a control with a content model of its own.** `ComboBox.DropDownList` is the
+  combo box's popup list, and what is *in* it comes from `Items`. A node there is for the things the
+  combo box does not forward - item height, item drawing, the list's scroll bars - rather than for its
+  children, and the same judgement applies to any property a control hands out for configuration.
 
 The mechanism, the covariance argument and what is measured are in [`VNODE-SLOTS.md`](VNODE-SLOTS.md).
 

@@ -26,6 +26,8 @@ a time rather than assumed:
 | `SplitContainer.Panel1`, `Panel2` | `Panel` instances the container's constructor makes and adds to its own `Controls` | **Yes.** The whole point of the split container. |
 | `Control.Parent` | `Control?`, set by the parent's `Controls` collection | **No.** The reconciler maintains it; a node that named it would describe the tree, not the control. |
 | `Panel.HorizontalScrollBar`, `VerticalScrollBar` (and the same on `VirtualList`, `TextBoxMultiline`) | `ScrollBar?`, made and dropped by the scrolling feature | **No.** A slot has to have a control to fill at mount time; one that may be null is the control's own, created when the control needs it. |
+| `MenuView.RootMenu`, `DeepestMenu` | `MenuView`, the outermost or innermost view of the menu chain - this view itself when there is no parent | **No.** A reference to a control of the same *kind*, which already has a node describing it; applying a second node to it would describe nothing new and disturb what the first one set. |
+| `ComboBox.DropDownList` | `ListBox`, the popup list the combo box made and says is reachable "for the things the combo box does not forward - item drawing, item height, scrollbars" | **Yes.** A subtree of its own, which a node configures. Its *items* come from `Items`, so a node should set its properties rather than its children. |
 | `Panel.Control`, `WrapPanel.Control` | A field of a private nested struct (`DockedChild`, `FlowItem`) | No - not a property of the control at all. |
 | `ListView.Column`, `ListBox.Canvas`, … | Properties of event-argument classes | No - they are what a handler is told, not what a control holds. |
 | `ListView.Columns`, `TabControl` pages | Control-typed **collections** | Not in this change (section 8). |
@@ -33,19 +35,26 @@ a time rather than assumed:
 | `SplitButton.Menu`, `Control.ContextMenu` | `ContextMenu`, which is not a `Control` | No. |
 | `TextSpan.Owner` | `RichLabel?`, on a class that is not a `Control` | No - the declaration is not on the control's chain. |
 
-That leaves `Panel1` and `Panel2`. The generalisation is real - an application's own container with
-its own handed-out panel is the same shape, and a settable control-typed property is the other half -
-but in this library the borrowed kind has exactly two users today, and the design is written so that
-finding nothing to do costs nothing.
+That leaves three: `SplitContainer.Panel1`, `SplitContainer.Panel2` and `ComboBox.DropDownList`. The
+generalisation is real - an application's own container with its own handed-out panel is the same
+shape, and a settable control-typed property is the other half - but the borrowed kind has exactly
+three users today, and the design is written so that finding nothing to do costs nothing.
 
 **What makes a property a slot, rather than a name on a list.** A control-typed property is a slot
-when it **has no setter at all** and always holds a control (the control made the instance and hands it
-out to be filled), or when it has a **public setter** (the control the node makes is what the property
-should hold). A control-typed property whose setter the control keeps to itself is the control's own
-state - `Parent` is written by the parent's `Controls` collection - and is not a slot. The rule is
-structural, so it needs no attribute, no name list, and holds for a control this repository has never
-seen. `Parent` is the only property the setter half of it excludes today; `Panel`'s scroll bars are
-the only ones the may-be-null half excludes, and both are excluded for the right reason.
+when all three of these hold:
+
+1. **It is a control of another kind** - its declared type is not the declaring control's type or a
+   base of it. A property of the same kind is a reference to a control like this one: `Parent` is
+   `Control` on `Control`, `MenuView.RootMenu` is `MenuView` on `MenuView`, and both already have a
+   node describing the control they return.
+2. **It can always hold one** - a get-only property that may be null is the control's own, made and
+   dropped as the control needs it, and there is nothing to fill at mount time.
+3. **Its setter, if it has one, is public** - a setter the control keeps to itself is the control's
+   own state, written by its own machinery.
+
+The three clauses are structural, so they need no attribute, no name list, and hold for a control this
+repository has never seen. `Parent` is excluded by the second and third together, the scroll bars by
+the second alone, and the menu chain by the first - each for the reason a reader would give.
 
 ## 2. The mechanism
 
@@ -271,8 +280,40 @@ byte of it is reached only from a node class the application names. `Mounted.Slo
 only for a node that has slots, `GetSlots` returns null for every other node, and the reconciler's
 slot pass is two null checks on a path it already walks.
 
-Measured per section 8 of `FEATURE-COST-POLICY.md` (publication from build roots of equal length,
-512-byte resolution) - filled in by the change itself, and stated in the pull request.
+Measured per section 8 of `FEATURE-COST-POLICY.md` - `win-x64`, `-c Release -r win-x64`, published
+from build roots of equal length (`C:\kolvircost\a` for this branch, `..\b` for `develop` at
+`7072be1`), so the numbers are the change rather than where it was built. The build roots hold
+worktrees of the two commits; the probe projects are `C:\kolvircost\a-probe` and `b-probe`, identical
+source, referencing their own worktree.
+
+| Publication | `develop` | this branch | delta |
+| --- | --- | --- | --- |
+| `Kolvir.Minimal`, Skia loose, AOT (an application that never references the feature) | 3,885,056 | 3,885,056 | **0** |
+| probe: 12 controls registered, `VPanel` and `VLabel` constructed, applied and patched, **no slot filled** | 1,856,512 | 1,857,024 | **+512** |
+| use probe: the same feature with a `VSplitContainer`'s panels filled, patched and emptied | - | 1,890,304 | (use check, no pair) |
+
+Both pairs were published twice from clean output and came out to the byte the second time, so the
+512 is the image and not the `FileAlignment` boundary moving. It is one step of this method's
+resolution: the marker interface - an implementation and its instantiation on each node class the
+application actually constructs - costs **less than 512 bytes** in the published image for two
+constructed node classes and the whole slot reconciler. The managed `Probe.dll` shows the change is
+really there (+3,584 bytes over 202,752), which is why the flat native size is reported as a
+sub-resolution cost rather than as nothing. No IL2xxx or IL3xxx warning in either publish, and the
+use probe prints the correct panel contents, patch and restore.
+
+The generator's output grows by what it emits, and nothing else:
+
+| | |
+| --- | --- |
+| Generated source, the demo's 36-node sweep | 3,116,355 -> 3,128,991 bytes, **+12,636 (0.41%)** |
+| of which: the marker on 36 node class declarations | ~1,850 bytes (~52 per class) |
+| of which: 36 explicit `IVNodeFor<T>.Node => this` members | 4,869 bytes (~135 per class) |
+| of which: the all-unassigned instance on the 9 controls a slot can hold | 1,567 bytes (static + override) |
+| of which: 3 slot properties, their carried documentation and 2 `GetSlots` methods | ~4,200 bytes |
+
+The per-node half is the cost the owner accepted for the marker interface; the per-slot half is
+proportional to the number of slots, and the all-unassigned instance is emitted only for the nine
+controls a slot can hold - a `VLabel` pays nothing for a mechanism it can never take part in.
 
 ## 8. Out of scope
 

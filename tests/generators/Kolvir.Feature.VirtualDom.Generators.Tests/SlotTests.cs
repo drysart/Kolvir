@@ -177,6 +177,38 @@ public sealed class SlotTests
     }
 
     [TestMethod]
+    public void AControlReturnedByItsOwnKindIsNotASlot()
+    {
+        // MenuView.RootMenu returns the outermost view of its chain - this view when there is no parent.
+        // A node there would be a second node on a control that already has one, so a property of the
+        // declaring control's own kind is a reference rather than a place for contents.
+        var generated = VirtualDomCompiler.Build("""
+            using Kolvir;
+            using Kolvir.Feature.VirtualDom;
+
+            namespace TestApp;
+
+            public class Chain : Kolvir.Control
+            {
+                public Chain Root => this;
+
+                public Panel Body { get; } = new();
+            }
+
+            [VirtualDom(typeof(Chain))]
+            internal partial class App;
+            """);
+
+        Assert.IsEmpty(generated.CompileErrors, string.Join("\n", generated.CompileErrors));
+
+        var node = generated.Output.GetTypeByMetadataName("TestApp.VChain");
+
+        Assert.IsNotNull(node);
+        Assert.IsEmpty(node.GetMembers("Root"), "a reference to a control of the same kind is not a slot");
+        Assert.IsNotEmpty(node.GetMembers("Body"), "a control of another kind still is");
+    }
+
+    [TestMethod]
     public void ALazilyCreatedControlIsNotASlot()
     {
         // Panel.HorizontalScrollBar is a ScrollBar? the scrolling feature creates and drops; there is

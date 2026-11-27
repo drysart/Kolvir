@@ -547,6 +547,14 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     /// control's own state, not a place for a node, and the rule says so structurally instead of naming
     /// it.
     /// </para>
+    /// <para>
+    /// Nor is a property of the declaring control's <em>own kind</em> - one whose type is that control's
+    /// type or a base of it. <c>MenuView.RootMenu</c> is the case: it returns the outermost view of the
+    /// chain, which is this view itself when there is no parent. It is a reference to a control that
+    /// already exists and already has a node describing it, so filling it would apply a second node to
+    /// the same control rather than describe anything new. A control of <em>another</em> kind -
+    /// <c>SplitContainer.Panel1</c>, <c>ComboBox.DropDownList</c> - is a subtree of its own and is a slot.
+    /// </para>
     /// </remarks>
     private static IEnumerable<(IPropertySymbol Property, bool Slot, bool Creates)> NodeProperties(INamedTypeSymbol control)
     {
@@ -562,7 +570,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                     continue;
                 }
 
-                bool controlTyped = IsControl(property.Type);
+                bool controlTyped = IsControl(property.Type) && !IsOfTheSameKind(property, type);
 
                 if (property.SetMethod is { DeclaredAccessibility: Accessibility.Public })
                 {
@@ -576,6 +584,23 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 }
             }
         }
+    }
+
+    /// <summary>
+    /// Whether a property's type is the declaring control's type or a base of it, which makes the value
+    /// a reference to a control of the same kind rather than a subtree of its own.
+    /// </summary>
+    private static bool IsOfTheSameKind(IPropertySymbol property, INamedTypeSymbol declaring)
+    {
+        for (var current = property.Type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(current, declaring))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
