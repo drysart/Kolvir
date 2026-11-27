@@ -4,6 +4,7 @@ using Microsoft.Extensions.DependencyInjection;
 using SkiaSharp;
 using Kolvir;
 using Kolvir.Feature.Animations;
+using Kolvir.Feature.AssetLoading;
 using Kolvir.Feature.Audio;
 using Kolvir.AutoComplete;
 using Kolvir.Backend.Headless;
@@ -264,10 +265,14 @@ public sealed class DemoUi
 
         // The same features the sample's own window declares, because a page is entitled to them and a
         // render that lacked one would show a page the application never shows. The fonts page is the
-        // one that depends on it: it loads its web font through the loader.
+        // one that depends on it: it loads its web font through the loader. The asset-loading page is
+        // the same shape: without these two lines every SourceUri would be Failed.
         using var application = new Application(backend, new ApplicationOptions
         {
-            ConfigureServices = services => services.AddWoffFonts(),
+            ConfigureServices = services => services
+                .AddWoffFonts()
+                .AddAssetLoading()
+                .AddAssetLoaderFactory(new DemoAssetLoaderFactory()),
         });
 
         var window = new Window("Kolvir sample", demo.Root)
@@ -587,6 +592,7 @@ public sealed class DemoUi
         ("graphics-acceleration", "Graphics acceleration", demo => new GraphicsAccelerationPage(demo)),
         ("popups", "Popups", demo => new PopupPage(demo)),
         ("rich-label-markup", "Rich label markup", demo => new RichLabelMarkupPage(demo)),
+        ("asset-loading", "Asset loading", demo => new AssetLoadingPage(demo)),
     };
 
     /// <summary>
