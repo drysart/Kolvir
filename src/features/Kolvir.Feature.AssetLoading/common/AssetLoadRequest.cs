@@ -66,7 +66,20 @@ internal abstract class AssetLoadRequest
 
     /// <summary>Hands the loaded value to the caller.</summary>
     /// <param name="result">What the loader produced.</param>
-    public abstract void HandOver(object? result);
+    /// <returns>
+    /// True when the caller received it. False when the caller had already been answered - a
+    /// cancellation arriving from another thread at the same moment is the case - which leaves the
+    /// value with nobody holding it but the manager, and is why the manager disposes it (section 3.9).
+    /// </returns>
+    /// <exception cref="InvalidCastException">
+    /// <paramref name="result"/> is not a <c>TResult</c>. A factory bug; the manager fails the caller
+    /// with it rather than leaving it waiting.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="result"/> is null for a value type, so it cannot be unboxed. Also a factory bug,
+    /// and phrased around the loader because the runtime's own exception names neither type.
+    /// </exception>
+    public abstract bool HandOver(object? result);
 
     /// <summary>Answers the caller with the failure.</summary>
     /// <param name="error">What the load threw.</param>

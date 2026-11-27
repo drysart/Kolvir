@@ -151,7 +151,9 @@ public interface IAssetLoader
     /// A task that completes when the load has produced its result, with that result, or faults with
     /// the reason it failed. The manager observes it and hands the outcome to the caller; the task
     /// is also what tells the manager the load has ended, so a task that never completes is a
-    /// request that never leaves the running state.
+    /// request that never leaves the running state. The value belongs to that one caller - a factory
+    /// shares the fetch, never one decoded value between two handles (section 4.1) - which is what
+    /// lets the manager dispose it when there is no caller left to receive it (section 3.9).
     /// </returns>
     /// <remarks>
     /// <para>

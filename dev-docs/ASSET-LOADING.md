@@ -483,9 +483,14 @@ they are all the manager's:
 - **A cancelled caller's task is completed cancelled, at cancellation time.** Not when the underlying
   load happens to finish, and not with the result if the load finished in the meantime. The caller
   asked to stop; the answer arrives when it asks.
-- **A late result is never delivered.** If the underlying task completes after the caller's task was
-  cancelled, the result goes nowhere. This is the case that matters: the token fired, the loader kept
-  going, the bytes arrived, and the control that wanted them is gone.
+- **A late result is never delivered, and if it is disposable the manager releases it.** If the
+  underlying task completes after the caller's task was cancelled, the result goes nowhere. This is the
+  case that matters: the token fired, the loader kept going, the bytes arrived, and the control that
+  wanted them is gone. Nobody else can be holding that value - the caller's task was answered at
+  cancellation time, and a factory hands each result to one caller rather than sharing it (4.1) - so
+  the manager is the only holder, and it disposes the value there. Finalization is not a release
+  policy: `ImageData` disposes the `IImageDataSource` it owns but has no finalizer of its own, so the
+  native side would come back only whenever the source's own finalization happened to run.
 - **The load keeps counting against availability until the underlying task actually ends.** The
   manager does not release anything when it stops waiting. If it told the gate the slot was free on
   cancellation, a cancelled-but-still-running load would let the app silently exceed whatever limit
@@ -637,6 +642,10 @@ cancelled:
 This is what lets loader-owned caching coexist with per-consumer priority, and it is why the manager's
 rule is "one outstanding request per instance" (3.11) rather than "an instance is used once". An
 instance is a handle; a handle is used once *at a time*, which is all the manager needs to promise.
+
+One thing the diagram does not show: a handle's result belongs to that handle's caller alone - the
+factory shares the fetch, never the decoded instance - which is what lets the manager dispose a result
+nobody is left to receive (3.9).
 
 ### 4.2 Availability gates are advisory, not slot-reserving
 
@@ -912,9 +921,9 @@ inferred rather than written down:
   posted rather than run where the load finished, and the UI thread can assign a new `SourceUri` in
   between - a render, a scroll handler, a handler the walk itself ran. Without the comparison that
   result lands on a control following a different URI and the image it carried is never disposed. What
-  the control cannot do is dispose an image the manager drops - a load cancelled while running still
-  produces one, and it goes nowhere - so that image is the manager's to account for, and the feature
-  owns only what it is handed.
+  the control cannot dispose is the image the manager drops: a load cancelled while running still
+  produces one, and it goes nowhere - so the manager disposes it there (3.9), and the feature owns
+  only what it is handed.
 - **A control the reconciler removes is disposed, so its state stops mattering.** The mount created the
   control and disposes it on unmount (6.2), and the load is cancelled with it. There is no spinner left
   to correct and nothing left to keep, so this case needs no state rule of its own.
@@ -1056,8 +1065,9 @@ for.
   (`src/core/Kolvir/Controls/Image.cs`). Assigning a new URI must dispose the previous loaded
   `ImageData`, and that is a real rule, not a nicety - it is the same rule an application already
   follows when it assigns `Source` itself. The one image the feature does not release is the one the
-  manager never hands it: a load cancelled while running is answered as cancelled and its result goes
-  nowhere (3.9, 6.1), so there is nothing on this side to dispose.
+  manager never hands it: a load cancelled while running is answered as cancelled, its result goes
+  nowhere, and the manager disposes it (3.9, 6.1) - so there is nothing on this side to dispose, and
+  the feature owns only what it is handed.
 - **Owned and borrowed are two different things on one property.** A loaded `ImageData` is owned: the
   feature created it, so the feature disposes it when it is replaced, when the URI changes, and on
   `Disposing`. A `PlaceholderSource` is borrowed: the application created it, and the application
@@ -1158,6 +1168,8 @@ What has to be pinned, because between them they *are* the contract:
 - A running entry that is cancelled completes its caller at once, and the slot stays counted until the
   underlying task ends (3.9).
 - A late result is never delivered to a cancelled caller.
+- A result nobody is left to receive is disposed when it is disposable, and a delivered one is not -
+  the caller owns it from that moment, which is the half a fix could break (3.9).
 - Every handler pair is released on every exit path (3.10).
 - `Snapshot()` agrees with what the walk would do next - which is also the cheapest way to assert ordering
   without reaching into the manager's internals, and the reason the snapshot is worth having before there

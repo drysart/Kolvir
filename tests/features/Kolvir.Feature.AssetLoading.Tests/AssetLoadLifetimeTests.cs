@@ -144,6 +144,38 @@ public sealed class AssetLoadLifetimeTests : AssetLoadingTestBase
     }
 
     [TestMethod]
+    public void AValueTypeLoaderThatProducesNothingFailsItsCallerAndTheWalkContinues()
+    {
+        IAssetLoadManager manager = CreateManager();
+        var loader = new FakeAssetLoader<int>();
+        var behind = new FakeAssetLoader<string>(canLoadNow: false);
+
+        Task<int> task = manager.LoadAsync(loader, null, CancellationToken.None);
+        manager.LoadAsync(behind, null, CancellationToken.None);
+
+        Assert.AreEqual(0, behind.LoadCount, "the failing load holds the only slot");
+
+        // Opened without raising the notification, so the walk the failure has to leave behind is the
+        // only thing that can start it. A fix that catches without reaching its Walk() leaves both the
+        // caller unanswered and this entry queued, which is what the two assertions below are for.
+        behind.CanLoadNow = true;
+
+        loader.CompleteWithTheWrongType(null);
+
+        Assert.IsTrue(task.IsFaulted, "null for a value type answers the caller rather than leaving it waiting");
+        Assert.IsInstanceOfType<InvalidOperationException>(task.Exception!.InnerException);
+        StringAssert.Contains(
+            task.Exception.InnerException!.Message,
+            "Int32",
+            "and the failure names the type the loader owed");
+        IReadOnlyList<AssetLoadSnapshot> live = manager.Snapshot();
+
+        Assert.AreEqual(1, live.Count, "the failed request left the manager; only the one behind it is still live");
+        Assert.AreSame(behind, live[0].Loader);
+        Assert.AreEqual(1, behind.LoadCount, "the failing request's walk still runs, so the slot it held comes back");
+    }
+
+    [TestMethod]
     public void ACallFromAnotherThreadThrows()
     {
         // The check is Application.CheckAccess, so the test is what an application looks like: an

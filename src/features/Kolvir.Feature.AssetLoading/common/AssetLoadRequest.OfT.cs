@@ -32,7 +32,28 @@ internal sealed class AssetLoadRequest<TResult> : AssetLoadRequest
     public Task<TResult> Completion => _completion.Task;
 
     /// <inheritdoc/>
-    public override void HandOver(object? result) => _completion.TrySetResult((TResult)result!);
+    public override bool HandOver(object? result)
+    {
+        TResult value;
+
+        try
+        {
+            value = (TResult)result!;
+        }
+        catch (NullReferenceException nullResult)
+        {
+            // Unboxing null: a typed loader over a value type that produced nothing. The runtime's
+            // message names neither the loader nor the type it was expected to produce, and both are
+            // what an author has to look at.
+            throw new InvalidOperationException(
+                $"The loader {Loader.GetType()} produced no result for a {typeof(TResult)} request. A " +
+                "typed loader over a value type has to produce one, so an untyped member that completes " +
+                "with null is a factory bug rather than a load that produced nothing.",
+                nullResult);
+        }
+
+        return _completion.TrySetResult(value);
+    }
 
     /// <inheritdoc/>
     public override void Fail(Exception error) => _completion.TrySetException(error);
