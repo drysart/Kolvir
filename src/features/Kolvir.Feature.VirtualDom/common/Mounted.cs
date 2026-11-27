@@ -49,6 +49,30 @@ internal sealed class Mounted
     internal List<Mounted> Children { get; } = [];
 
     /// <summary>
+    /// The mounted state of each property slot, by the slot's ordinal, or null when the node has none.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A slot entry is an ordinary <see cref="Mounted"/>, so a slot's patch, removal and nested subtree
+    /// are the child machinery applied to one control: an empty slot is a null entry, and a filled one
+    /// holds the node and the control it filled.
+    /// </para>
+    /// <para>
+    /// The list is parallel to the node's slot list, which is why it can be indexed by ordinal: the
+    /// slots a node lists come from its generated class, so two renders of the same class list them in
+    /// the same order. It is allocated the first time a node with slots is mounted, and a node with no
+    /// slots never allocates it.
+    /// </para>
+    /// </remarks>
+    internal List<Mounted?>? Slots { get; set; }
+
+    /// <summary>
+    /// True for a slot whose control the node fills in place, so removal leaves the control where its
+    /// owner put it instead of detaching it.
+    /// </summary>
+    internal bool Borrowed { get; init; }
+
+    /// <summary>
     /// The child component's mount, for a node that is a <see cref="VComponent"/>, and null otherwise.
     /// </summary>
     /// <remarks>

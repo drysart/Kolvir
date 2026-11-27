@@ -5006,8 +5006,10 @@ Which member a node ends up with follows the language:
 | A more specific receiver wins over a less specific one. | `extension(TextBox)` beats `extension(Control)` for a `VTextBox`, the way a derived member hides a base one. |
 | Two containers claiming one name on the same receiver is a conflict. | Neither can be chosen without choosing silently, so the name becomes an inert placeholder and using it is an error. |
 
-Only a property with a public getter and a public setter is exposed - a node can only set what a
-caller could set, and it reads the pristine value back through the getter.
+Only a property with a public getter and a public setter is exposed by value - a node can only set
+what a caller could set, and it reads the pristine value back through the getter. A **control-typed**
+property is the one exception, and it is not a value at all: a node fills it with a node. That is
+[next section](#a-property-the-control-itself-holds).
 
 Two attributes pay the two costs of that, both in the assembly that owns the view:
 
@@ -5054,6 +5056,70 @@ unusable together for no reason.
 The reasoning behind all of this - why the placeholder is inert, why there is no `[Obsolete]`
 backstop, what the scan costs per edit - is in
 [`EXTENSION-MEMBERS-ON-VNODES.md`](EXTENSION-MEMBERS-ON-VNODES.md).
+
+#### A property the control itself holds
+
+Some controls hold controls of their own. `SplitContainer` is the one you will meet: its two panels are
+made by its constructor, added to its own `Controls`, and handed out read-only.
+
+```csharp
+public Panel Panel1 { get; }   // made by the SplitContainer, not by you
+public Panel Panel2 { get; }
+```
+
+A property like that is a **slot**: a node fills it with a node rather than with a value. Both halves
+of the split, in one node, with no `Controls.Add` anywhere:
+
+```csharp
+new VSplitContainer
+{
+    Orientation = Orientation.Vertical,
+    Panel1 = new VPanel
+    {
+        Padding = new Thickness(8f),
+        Children = [new VLabel { Text = "files" }],
+    },
+    Panel2 = new VPanel
+    {
+        Children = [new VTreeView { .. }],
+    },
+}
+```
+
+What to know:
+
+- **A get-only slot takes the node class for the control it holds.** `Panel1` is declared `VPanel?`
+  in the generated node, because the panel it describes is the split container's own `Panel` - so
+  `Panel1 = new VPanel { .. }` is the value, and `Panel1 = new VTableLayoutPanel()` does not compile.
+  That is deliberate: variance would let it through, and a grid node cannot configure a plain panel.
+  Put the grid one node down instead: `Panel1 = new VPanel { Children = [new VTableLayoutPanel { .. }] }`.
+  Leaving the property out, or assigning `null`, leaves the slot empty.
+- **A settable control-typed property is the other kind, and it does take any derived node.** The
+  reconciler creates whatever the node's class makes and assigns it, so the property is typed
+  `IVNodeFor<Panel>?` - a node that describes a `Panel`, possibly a more specific one - and `VPanel`,
+  `VGroupBox`, `VStackPanel`, `VTableLayoutPanel` and `VTabPage` all belong there. A `VLabel` does
+  not compile. A new control is created only when the node's class changes, which is the same "patch
+  when the class is the same" rule every other child follows.
+- **A get-only slot is configured in place, never replaced.** `Panel1 = new VPanel { Padding = 8 }`
+  sets the split container's *own* panel: the node describes that panel, and its `Children` go inside
+  it. The panel is not a child of the node's control and is never added to it a second time.
+- **A slot that goes away empties.** Setting it to `null` (or not mentioning it) takes the node's
+  contents off. A get-only slot's control also goes back to the values its owner's constructor gave
+  it, so the next node to fill it does not inherit the last one's `Dock` or `Padding`. A settable
+  slot's property keeps the control the node made, emptied - a node is a description that *makes* a
+  control, so there is nothing to hand back that means "what this property held before".
+- **A component goes one node down.** `Panel1 = new VComponent(page)` does not compile, because a
+  component is not a node for a control. The spelling is `Panel1 = new VPanel { Children = [new
+  VComponent(page)] }`, and the component's own subtree is then inside the panel as usual.
+- **A property whose control has no node of its own is not a slot.** If the property's declared type
+  cannot have a node - it is abstract, generic, or has no parameterless constructor - the node gets no
+  property for it at all, rather than one typed by a name that does not exist.
+- **Some slots hold a control with a content model of its own.** `ComboBox.DropDownList` is the
+  combo box's popup list, and what is *in* it comes from `Items`. A node there is for the things the
+  combo box does not forward - item height, item drawing, the list's scroll bars - rather than for its
+  children, and the same judgement applies to any property a control hands out for configuration.
+
+The mechanism, the covariance argument and what is measured are in [`VNODE-SLOTS.md`](VNODE-SLOTS.md).
 
 #### Fragments, and rendering nothing
 

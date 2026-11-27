@@ -161,7 +161,7 @@ internal sealed class DocumentApplication : ApplicationComponent
             _nextId,
             $"Document {_nextId}",
             new SKPoint(160f + offset, 60f + offset),
-            new SKSize(480f, 300f));
+            new SKSize(480f, 420f));
         _nextId++;
 
         // The page is kept with the document so a render of the list reuses the same component

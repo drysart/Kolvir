@@ -43,7 +43,8 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
     /// property cannot share.
     /// </summary>
     private static readonly string[] ReservedNames =
-        ["Key", "Children", "NodeType", "ApplyTo", "PatchFrom", "Kind", "Pristine", "Extensions", "ApplyExtensionActuators"];
+        ["Key", "Children", "NodeType", "ApplyTo", "PatchFrom", "Kind", "Pristine", "Extensions", "ApplyExtensionActuators",
+         "GetSlots", "UnassignedNode", "Unassigned"];
 
     /// <inheritdoc />
     public void Initialize(IncrementalGeneratorInitializationContext context)
@@ -85,10 +86,11 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                     : ControlCatalog.Empty);
 
         context.RegisterSourceOutput(
-            manifests.Combine(sweeps).Combine(catalog).Combine(controls).Combine(documentation),
+            manifests.Combine(sweeps).Combine(catalog).Combine(controls).Combine(documentation).Combine(context.CompilationProvider),
             static (productionContext, input) => Emit(
                 productionContext,
-                input.Left.Left.Left.Left,
+                input.Left.Left.Left.Left.Left,
+                input.Left.Left.Left.Left.Right,
                 input.Left.Left.Left.Right,
                 input.Left.Left.Right,
                 input.Left.Right,
@@ -231,7 +233,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         // reached twice, while a property and an event with one name is a collision.
         var taken = new Dictionary<string, bool>(StringComparer.Ordinal);
 
-        foreach (var property in SettableProperties(control))
+        foreach (var (property, slot, creates) in NodeProperties(control))
         {
             if (ReservedNames.Contains(property.Name))
             {
@@ -248,6 +250,22 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             }
 
             taken.Add(property.Name, false);
+
+            if (slot)
+            {
+                // A borrowed slot is typed with the node class for the control it already holds, so a
+                // declared type that cannot have a node class cannot have a slot either. The property is
+                // left off the node rather than typed by something that does not exist; the design note
+                // says why that is the honest outcome. A creating slot needs no node class for its type,
+                // because the node the caller gives it is the one that makes the control.
+                if (creates || (property.Type is INamedTypeSymbol declared && CanHaveANode(declared)))
+                {
+                    properties.Add(SlotModel(property, creates));
+                }
+
+                continue;
+            }
+
             properties.Add(new PropertyModel(
                 property.Name,
                 property.Type.ToDisplayString(Formats.Type),
@@ -521,7 +539,34 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         return overrides.ToImmutable();
     }
 
-    private static IEnumerable<IPropertySymbol> SettableProperties(INamedTypeSymbol control)
+    /// <summary>
+    /// The control's properties a node describes, and whether each is a property slot - and, when it
+    /// is, whether the reconciler makes the control for it.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A settable property that is not control-typed is an ordinary node property. A control-typed one
+    /// is a slot either way: a public setter means the node's node is what the property should hold, so
+    /// the reconciler makes the control and assigns it, while <em>no setter at all</em> means the
+    /// control made the instance, keeps it where it wants it, and hands it out for someone else to
+    /// fill - which is exactly what a node describing contents is for.
+    /// </para>
+    /// <para>
+    /// A control-typed property whose setter the control keeps to itself is not a slot. That is
+    /// <c>Control.Parent</c>, which the parent's <c>Controls</c> collection writes: it is the
+    /// control's own state, not a place for a node, and the rule says so structurally instead of naming
+    /// it.
+    /// </para>
+    /// <para>
+    /// Nor is a property of the declaring control's <em>own kind</em> - one whose type is that control's
+    /// type or a base of it. <c>MenuView.RootMenu</c> is the case: it returns the outermost view of the
+    /// chain, which is this view itself when there is no parent. It is a reference to a control that
+    /// already exists and already has a node describing it, so filling it would apply a second node to
+    /// the same control rather than describe anything new. A control of <em>another</em> kind -
+    /// <c>SplitContainer.Panel1</c>, <c>ComboBox.DropDownList</c> - is a subtree of its own and is a slot.
+    /// </para>
+    /// </remarks>
+    private static IEnumerable<(IPropertySymbol Property, bool Slot, bool Creates)> NodeProperties(INamedTypeSymbol control)
     {
         for (var type = control; type is not null; type = type.BaseType)
         {
@@ -530,15 +575,124 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 if (property.IsStatic
                     || property.IsIndexer
                     || property.IsAbstract
-                    || property.GetMethod is not { DeclaredAccessibility: Accessibility.Public }
-                    || property.SetMethod is not { DeclaredAccessibility: Accessibility.Public })
+                    || property.GetMethod is not { DeclaredAccessibility: Accessibility.Public })
                 {
                     continue;
                 }
 
-                yield return property;
+                bool controlTyped = IsControl(property.Type) && !IsOfTheSameKind(property, type);
+
+                if (property.SetMethod is { DeclaredAccessibility: Accessibility.Public })
+                {
+                    yield return (property, controlTyped, controlTyped);
+                    continue;
+                }
+
+                if (property.SetMethod is null && controlTyped && !MayBeNull(property))
+                {
+                    yield return (property, Slot: true, Creates: false);
+                }
             }
         }
+    }
+
+    /// <summary>
+    /// Whether a property's type is the declaring control's type or a base of it, which makes the value
+    /// a reference to a control of the same kind rather than a subtree of its own.
+    /// </summary>
+    private static bool IsOfTheSameKind(IPropertySymbol property, INamedTypeSymbol declaring)
+    {
+        for (var current = property.Type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (SymbolEqualityComparer.Default.Equals(current, declaring))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Whether a property can hold no control at all.
+    /// </summary>
+    /// <remarks>
+    /// A get-only control-typed property that may be null is not a slot: there is nothing at mount time
+    /// to fill, and the control is the one that decides when to make it and when to drop it. That is
+    /// <c>Panel.HorizontalScrollBar</c> and its siblings on every scrolling control - lazily created by
+    /// the scrolling feature and null until it is - as opposed to <c>SplitContainer.Panel1</c>, which
+    /// the container's constructor makes and keeps. A settable property is unaffected: null is a value
+    /// the node can carry, and the reconciler makes the control itself.
+    /// </remarks>
+    private static bool MayBeNull(IPropertySymbol property) =>
+        property.Type.NullableAnnotation == NullableAnnotation.Annotated
+        || (property.Type.IsValueType && property.Type.OriginalDefinition.SpecialType == SpecialType.System_Nullable_T);
+
+    /// <summary>
+    /// The node model for a slot.
+    /// </summary>
+    /// <remarks>
+    /// A <em>creating</em> slot takes the covariant marker, because the reconciler makes the control the
+    /// node describes and a node for a derived control belongs in a property typed as the base. A
+    /// <em>borrowed</em> slot takes the node class for the control the property already holds, and only
+    /// that class: the instance the node is applied to is the control's own, with a type of its own, so
+    /// a node for a derived control is a compile error rather than a cast that fails later. The node
+    /// class name is a default here - the emit step knows which name and namespace it was claimed under.
+    /// </remarks>
+    private static PropertyModel SlotModel(IPropertySymbol property, bool creates)
+    {
+        // A control is a class, so the nullable annotation on the property belongs outside the type
+        // argument - IVNodeFor<Panel>? rather than IVNodeFor<Panel?> - and the interface's constraint
+        // would reject the latter.
+        var controlType = property.Type.ToDisplayString(Formats.Type).TrimEnd('?');
+        var metadataName = property.Type.ToDisplayString(Formats.Metadata).TrimEnd('?');
+
+        return new PropertyModel(
+            property.Name,
+            creates
+                ? "global::Kolvir.Feature.VirtualDom.IVNodeFor<" + controlType + ">?"
+                // A default only: the emit step has no type yet and replaces this with the node class
+                // the control was actually claimed under, in the namespace it was emitted into.
+                : "V" + property.Type.Name + "?",
+            "_" + Lower(property.Name),
+            Pristine: null,
+            PristineLiteral: null,
+            AddHandler: null,
+            RemoveHandler: null,
+            Container: null,
+            Accessor: property.Name,
+            Documentation: DocumentationCleaner.Clean(property.GetDocumentationCommentXml()),
+            DocumentationId: property.GetDocumentationCommentId(),
+            DocumentationAssembly: property.ContainingAssembly?.Name,
+            Slot: true,
+            SlotCreates: creates,
+            SlotControlType: controlType,
+            SlotControlMetadataName: metadataName);
+    }
+
+    /// <summary>
+    /// Whether a control type can have a node class at all, which is what a borrowed slot is typed with:
+    /// a node needs a type it can construct, and the generator emits one node class per control.
+    /// </summary>
+    private static bool CanHaveANode(INamedTypeSymbol type) =>
+        type.TypeKind == TypeKind.Class
+        && !type.IsAbstract
+        && !type.IsStatic
+        && type.Arity == 0
+        && HasParameterlessConstructor(type);
+
+    /// <summary>Whether a type is <c>Kolvir.Control</c> or derives from it.</summary>
+    private static bool IsControl(ITypeSymbol type)
+    {
+        for (var current = type as INamedTypeSymbol; current is not null; current = current.BaseType)
+        {
+            if (current.ToDisplayString(Formats.Metadata) == ControlTypeName)
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -662,7 +816,8 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
         ImmutableArray<ManifestModel?> sweeps,
         ExtensionCatalog catalog,
         ControlCatalog controls,
-        DocumentationIndex documentation)
+        DocumentationIndex documentation,
+        Compilation compilation)
     {
         var diagnostics = ImmutableArray.CreateBuilder<DiagnosticInfo>();
 
@@ -770,6 +925,59 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             }
         }
 
+        // A borrowed slot is typed with the node class for the control it already holds, so that node
+        // class has to exist even when nothing registered or swept the control - otherwise the property
+        // could not be declared at all. The expansion is bounded on purpose: it adds the declared type of
+        // a borrowed slot and nothing else, never the type's ancestors, and the `seen` map is what keeps
+        // it to one class per control and stops it doubling what a sweep already produced.
+        var pending = new Queue<(int Manifest, ControlModel Control)>();
+
+        foreach (var key in order)
+        {
+            foreach (var (manifestIndex, control) in claims[key])
+            {
+                pending.Enqueue((manifestIndex, control));
+            }
+        }
+
+        while (pending.Count > 0)
+        {
+            var (manifestIndex, control) = pending.Dequeue();
+
+            foreach (var property in control.Properties)
+            {
+                if (!property.SlotBorrows || property.SlotControlType is not { } needed)
+                {
+                    continue;
+                }
+
+                // `seen` and the claim map are keyed the way every other registration is - the control
+                // type as the generator writes it - so a control the sweep already took is recognised
+                // here and is not claimed a second time under the same node name, which would read as a
+                // duplicate-name conflict and replace the class with a placeholder.
+                if (seen.ContainsKey(needed))
+                {
+                    continue;
+                }
+
+                // A declared type the compilation cannot name, or one that cannot have a node class, has
+                // no slot: the property is left off the node by the pass below rather than typed by
+                // something that does not exist.
+                if (property.SlotControlMetadataName is not { } metadataName
+                    || compilation.GetTypeByMetadataName(metadataName) is not { } declared
+                    || !CanHaveANode(declared))
+                {
+                    continue;
+                }
+
+                seen.Add(needed, manifestIndex);
+
+                var node = Model(declared, declared.Name, manifests[manifestIndex].Location, diagnostics);
+                Claim(manifests[manifestIndex], manifestIndex, node);
+                pending.Enqueue((manifestIndex, node));
+            }
+        }
+
         void Claim(ManifestModel model, int index, ControlModel control)
         {
             var key = (model.Namespace ?? string.Empty, control.NodeName);
@@ -793,6 +1001,11 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
             perManifestPlaceholders[index] = [];
         }
 
+        // Where each control's node class actually lives, fully qualified. A borrowed slot is typed with
+        // this, because the control may be registered under a name of its own and its node may be emitted
+        // into another manifest's namespace.
+        var nodeClass = new Dictionary<string, string>(StringComparer.Ordinal);
+
         foreach (var key in order)
         {
             var list = claims[key];
@@ -803,6 +1016,10 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 perManifestControls[single.Manifest].Add(Documentate(
                     Resolve(single.Control, catalog, manifests[single.Manifest].Overrides, diagnostics),
                     documentation));
+
+                nodeClass[single.Control.ControlType] = key.Namespace.Length == 0
+                    ? "global::" + key.NodeName
+                    : "global::" + key.Namespace + "." + key.NodeName;
 
                 continue;
             }
@@ -821,9 +1038,65 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                 [.. list.Select(entry => entry.Control.ControlMetadataName)]));
         }
 
+        // A borrowed slot takes the node class for the control it holds, resolved to where that class was
+        // emitted - the control may be registered under a name of its own, and its node may be in another
+        // manifest's namespace. A slot whose node class never materialised, because the name went to a
+        // placeholder or the type could not be named, is left off the node: a property typed by something
+        // that does not exist would be worse than an absent property.
+        for (int index = 0; index < perManifestControls.Length; index++)
+        {
+            var list = perManifestControls[index];
+
+            for (int entry = 0; entry < list.Count; entry++)
+            {
+                var control = list[entry];
+
+                if (!control.Properties.Any(property => property.SlotBorrows))
+                {
+                    continue;
+                }
+
+                var properties = ImmutableArray.CreateBuilder<PropertyModel>(control.Properties.Length);
+
+                foreach (var property in control.Properties)
+                {
+                    if (!property.SlotBorrows)
+                    {
+                        properties.Add(property);
+                    }
+                    else if (property.SlotControlType is { } needed
+                        && nodeClass.TryGetValue(needed, out var nodeTypeName))
+                    {
+                        properties.Add(property with { Type = nodeTypeName + "?" });
+                    }
+                }
+
+                list[entry] = control with { Properties = properties.ToImmutable() };
+            }
+        }
+
         foreach (var diagnostic in diagnostics)
         {
             context.ReportDiagnostic(diagnostic.ToDiagnostic());
+        }
+
+        // Every control type a borrowed slot holds, across the whole output. A node class whose control is
+        // one of these is the one that carries the all-unassigned instance a removal restores from; no
+        // other node class pays for it, and a creating slot needs none because nothing is restored.
+        var slotControls = new HashSet<string>(StringComparer.Ordinal);
+
+        foreach (var manifestControls in perManifestControls)
+        {
+            foreach (var control in manifestControls)
+            {
+                foreach (var property in control.Properties)
+                {
+                    if (property.SlotBorrows && property.SlotControlMetadataName is { } slotControl)
+                    {
+                        slotControls.Add(slotControl);
+                    }
+                }
+            }
         }
 
         for (int index = 0; index < manifests.Count; index++)
@@ -841,6 +1114,7 @@ public sealed class VirtualDomGenerator : IIncrementalGenerator
                     Controls = [.. perManifestControls[index]],
                     Placeholders = [.. perManifestPlaceholders[index]],
                 },
+                slotControls,
                 source);
 
             var hint = (model.Namespace is null ? "Global" : model.Namespace.Replace('.', '_'))

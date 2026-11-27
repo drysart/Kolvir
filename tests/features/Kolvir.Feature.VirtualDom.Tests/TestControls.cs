@@ -15,6 +15,8 @@ namespace Kolvir.Feature.VirtualDom.Tests;
 [VirtualDom(typeof(Panel))]
 [VirtualDom(typeof(TextBox))]
 [VirtualDom(typeof(TableLayoutPanel))]
+[VirtualDom(typeof(SplitContainer))]
 [VirtualDom(typeof(NoteControl), Name = "Note")]
 [VirtualDom(typeof(SlotControl), Name = "Slot")]
+[VirtualDom(typeof(HostControl), Name = "Host")]
 internal partial class TestControls;

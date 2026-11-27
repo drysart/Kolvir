@@ -38,6 +38,24 @@ namespace Kolvir.Feature.VirtualDom.Generators;
 /// <param name="DocumentationAssembly">
 /// The assembly the member is declared in, whose documentation file the ID is looked up in.
 /// </param>
+/// <param name="Slot">
+/// Whether this is a property slot rather than a value: a control-typed property the node fills with
+/// a node instead of a value.
+/// </param>
+/// <param name="SlotCreates">
+/// True for a slot the reconciler makes the control for and assigns to the property (the property has
+/// a public setter), false for one the property already holds (it has no setter at all).
+/// </param>
+/// <param name="SlotControlType">
+/// The control type the slot's property declares, as generated code writes it; null when this is not
+/// a slot. It is also the identity the node class for that control is looked up by, and the key the
+/// emit step rewrites a borrowed slot's <see cref="Type"/> through.
+/// </param>
+/// <param name="SlotControlMetadataName">
+/// The same type the way a reader names it, which is what a node class's control chain is compared
+/// against and what the compilation is asked for when a borrowed slot's node has to be emitted; null
+/// when this is not a slot.
+/// </param>
 internal sealed record PropertyModel(
     string Name,
     string Type,
@@ -51,9 +69,17 @@ internal sealed record PropertyModel(
     string? Receiver = null,
     string? Documentation = null,
     string? DocumentationId = null,
-    string? DocumentationAssembly = null)
+    string? DocumentationAssembly = null,
+    bool Slot = false,
+    bool SlotCreates = false,
+    string? SlotControlType = null,
+    string? SlotControlMetadataName = null)
 {
     internal bool IsEvent => AddHandler is not null;
+
+    /// <summary>Whether a node fills a control the property already holds, rather than creating one.</summary>
+    internal bool SlotBorrows => Slot && !SlotCreates;
+
 
     /// <summary>
     /// Whether this is a handler pair the node gets from an extension class, which is the half moved

@@ -72,6 +72,37 @@ internal static class HeadlessCheck
         Check(Readout(list).Contains("Document 1 renamed 1", StringComparison.Ordinal), "the readout should show the renamed title");
         Console.WriteLine($"after rename: {Titles(application)}");
 
+        // The split container is where the sample proves a node can fill a property the control creates
+        // for itself. The two panels are the split container's own - its constructor made them, added
+        // them to its Controls and hands them out read-only - so the assertion that matters is parentage:
+        // Panel1 is still the container's own child, and the node's label is inside that panel rather
+        // than in the container beside it. A slot control mounted as a child would show up as a third
+        // entry here.
+        var split = FindControl(first, "split") as SplitContainer
+            ?? throw new InvalidOperationException("The document page should have a split container.");
+
+        var leftPanel = split.Panel1;
+        var rightPanel = split.Panel2;
+
+        Check(
+            split.Controls.Count == 2
+                && ReferenceEquals(split.Controls[0], leftPanel)
+                && ReferenceEquals(split.Controls[1], rightPanel),
+            $"the split container should hold exactly the two panels it made, it holds {split.Controls.Count} control(s)");
+
+        Check(ReferenceEquals(leftPanel.Parent, split), "Panel1 should still be parented by the split container");
+        Check(ReferenceEquals(rightPanel.Parent, split), "and so should Panel2");
+
+        var left = FindControl(first, "split-left");
+        var right = FindControl(first, "split-right");
+
+        Check(ReferenceEquals(left.Parent, leftPanel), $"the left label should be inside Panel1, it is in {left.Parent?.GetType().Name ?? "nothing"}");
+        Check(ReferenceEquals(right.Parent, rightPanel), "the right label should be inside Panel2");
+        Check(left.Text == "Panel 1" && right.Text == "Panel 2", "and each panel should show its own node's label");
+        Check(leftPanel.Controls.Count == 1 && rightPanel.Controls.Count == 1, "with nothing else in either panel");
+        Check(leftPanel.Padding.Left == 8f, $"the node's padding should have been applied to the panel itself, it is {leftPanel.Padding}");
+        Console.WriteLine($"split: Panel1 holds '{left.Text}', Panel2 holds '{right.Text}', both parented by the container");
+
         // The table on the page is where the sample proves extension members end to end. Every position
         // below was set by an extension property on a node - the page never names
         // TableLayoutPanelExtensions - so the control's own record of its cell is the assertion.
@@ -105,6 +136,13 @@ internal static class HeadlessCheck
         Check(Cell(table, "cell-title") == (0, 0), "an unchanged cell position should survive the patch");
         Check(Span(table, "popup") == (1, 2), "and so should an unchanged span");
         Console.WriteLine($"table: after the patch the move button is at {moved}");
+
+        // The split container's panels are on the same node tree, so that render patched its slots too.
+        // A slot that rebuilt instead of patching would have handed the panels back and made new ones -
+        // which the container cannot do, and which would show up as different panel instances.
+        Check(ReferenceEquals(split.Panel1, leftPanel), "the render should have patched the panels it was given, not remade them");
+        Check(ReferenceEquals(FindControl(first, "split-left"), left), "and patched their contents in place");
+        Check(split.Controls.Count == 2, "leaving the container with its two panels and no more");
 
         // That render also rebuilt the row sequence, and it said exactly what the table already had: the
         // same styles, by value, in the same order. A patch that replaced them anyway would be a table
@@ -240,7 +278,7 @@ internal static class HeadlessCheck
         Check(first.Location == homeLocation, "Tidy should put the document back where the model assigned it");
         Check(first.ClientSize == homeSize, "Tidy should put the document back at the size the model assigned");
         Check(first.Backend.State == WindowState.Normal, "Tidy should restore the model's window state");
-        Check(Readout(list).Contains("160,60 480x300 Normal", StringComparison.Ordinal), "the readout should follow the tidy");
+        Check(Readout(list).Contains("160,60 480x420 Normal", StringComparison.Ordinal), "the readout should follow the tidy");
         Console.WriteLine("after tidy: the moved document returned to its assigned position and size");
 
         Click(list, "quit");
