@@ -477,6 +477,45 @@ public sealed class RichLabelTests : HeadlessTestBase
         Assert.AreEqual(0x1A, tinted.Alpha, "a role is tinted so the text stays legible");
     }
 
+    [TestMethod]
+    public void MovingASpanKeepsOwnershipAndItsInlineControlParented()
+    {
+        using var label = new RichLabel();
+        var control = new Button();
+        var text = new TextSpan("text");
+        var inline = TextSpan.ForControl(control);
+
+        label.Spans.Add(text);
+        label.Spans.Add(inline);
+
+        label.Spans.Move(1, 0);
+
+        Assert.AreSame(inline, label.Spans[0], "the span moved");
+        Assert.AreSame(text, label.Spans[1]);
+        Assert.AreSame(label, inline.Owner, "a move does not unlink the span");
+        Assert.AreSame(label, control.Parent, "and does not unparent its control");
+        Assert.AreEqual(0, label.Controls.IndexOf(control), "the control follows the span's order");
+    }
+
+    [TestMethod]
+    public void MovingASpanForwardKeepsItsInlineControlParented()
+    {
+        using var label = new RichLabel();
+        var first = TextSpan.ForControl(new Button());
+        var second = TextSpan.ForControl(new Button());
+        var third = TextSpan.ForControl(new Button());
+
+        label.Spans.AddRange(first, second, third);
+
+        label.Spans.Move(0, 2);
+
+        Assert.AreSame(second, label.Spans[0]);
+        Assert.AreSame(third, label.Spans[1]);
+        Assert.AreSame(first, label.Spans[2]);
+        Assert.AreSame(label, first.Control!.Parent, "the moved control is still parented");
+        Assert.AreEqual(2, label.Controls.IndexOf(first.Control!), "and moved to the end of Controls");
+    }
+
     /// <summary>
     /// The first point inside the label whose glyphs belong to <paramref name="span"/>. Searching
     /// for it keeps the assertion about hit-testing rather than about where a font put a glyph.

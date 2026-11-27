@@ -78,6 +78,7 @@ internal static class Reconciler
         // A slot's control may not be the tree's to detach - a borrowed slot's belongs to the control
         // that made it - so each slot is released its own way before the ordinary teardown runs.
         DetachSlots(mounted);
+        DetachCollections(mounted);
 
         if (mounted.ComponentMount is { } mount)
         {
@@ -205,6 +206,7 @@ internal static class Reconciler
 
                 ReconcileChildren(control, updated[i].Children, next[i].Children);
                 ReconcileSlots(control, updated[i], next[i]);
+                ReconcileCollections(control, updated[i], next[i]);
             }
         }
         finally
@@ -266,6 +268,7 @@ internal static class Reconciler
                 previous.Node = next;
                 ReconcileChildren(previous.Control!, previous.Children, next.Children);
                 ReconcileSlots(previous.Control!, previous, next);
+                ReconcileCollections(previous.Control!, previous, next);
                 continue;
             }
 
@@ -331,6 +334,7 @@ internal static class Reconciler
 
         ReconcileChildren(mounted.Control!, mounted.Children, node.Children);
         ReconcileSlots(mounted.Control!, mounted, node);
+        ReconcileCollections(mounted.Control!, mounted, node);
 
         return mounted;
     }
@@ -381,6 +385,7 @@ internal static class Reconciler
         }
 
         DetachSlots(slot);
+        DetachCollections(slot);
 
         foreach (var child in slot.Children)
         {
@@ -411,6 +416,504 @@ internal static class Reconciler
 
         Place(owner, child.Control!, index);
     }
+
+    /// <summary>
+    /// Reconciles the get-only element collections of <paramref name="node"/> into the record that
+    /// node owns.
+    /// </summary>
+    /// <param name="owner">The control <paramref name="node"/> describes.</param>
+    /// <param name="mounted">The record whose collection state is updated.</param>
+    /// <param name="node">The node being applied or patched.</param>
+    /// <remarks>
+    /// The same patch-and-remove rule the children and slots follow, applied to a collection whose
+    /// elements are not controls: the live elements are matched by key and then by position, a match
+    /// is patched in place, the surplus is appended and the shortfall is removed. Every structural
+    /// change goes through the collection itself, so the control's own add and remove notifications
+    /// still run - which is what parents an element's inline control and unparents it again.
+    /// </remarks>
+    internal static void ReconcileCollections(Control owner, Mounted mounted, VNode node)
+    {
+        var collections = node.GetCollections(owner);
+
+        if (collections is null || collections.Length == 0)
+        {
+            DetachCollections(mounted);
+            return;
+        }
+
+        var state = mounted.Collections ??= [];
+
+        while (state.Count < collections.Length)
+        {
+            state.Add(new MountedCollection());
+        }
+
+        for (int i = collections.Length; i < state.Count; i++)
+        {
+            DetachCollection(state[i]);
+        }
+
+        if (state.Count > collections.Length)
+        {
+            state.RemoveRange(collections.Length, state.Count - collections.Length);
+        }
+
+        for (int i = 0; i < collections.Length; i++)
+        {
+            // A descriptor whose Nodes is null is a render that said nothing about the collection.
+            // That is not "make it empty": the elements already there are left exactly as they are.
+            if (collections[i].Nodes is null)
+            {
+                continue;
+            }
+
+            ReconcileCollection(collections[i], state[i]);
+        }
+    }
+
+    /// <summary>Reconciles one collection against the elements that are in it.</summary>
+    /// <param name="collection">The live collection and the descriptions this render gave it.</param>
+    /// <param name="state">The elements the previous render tracked.</param>
+    private static void ReconcileCollection(VNodeCollection collection, MountedCollection state)
+    {
+        // An imperative user can add or remove an element between renders. Put the tracked records
+        // back in step with the live collection before matching anything: an element nobody described
+        // is adopted with no previous description, and a described element that left is forgotten.
+        var known = new Dictionary<object, MountedElement>(ReferenceEqualityComparer.Instance);
+
+        foreach (var tracked in state.Elements)
+        {
+            known[tracked.Element] = tracked;
+        }
+
+        var synced = new List<MountedElement>(collection.Count);
+
+        for (int i = 0; i < collection.Count; i++)
+        {
+            var element = collection.At(i);
+
+            if (known.Remove(element, out var existing))
+            {
+                synced.Add(existing);
+            }
+            else
+            {
+                synced.Add(new MountedElement(element));
+            }
+        }
+
+        foreach (var gone in known.Values)
+        {
+            DetachElementSlots(gone);
+            gone.Node?.Detach(gone.Element);
+        }
+
+        state.Elements.Clear();
+        state.Elements.AddRange(synced);
+
+        var nodes = collection.Nodes!;
+        var count = nodes.Count;
+        var matches = new MountedElement?[count];
+        var matchIndex = new int[count];
+        var used = new bool[state.Elements.Count];
+        var keys = new HashSet<object>();
+        var previousByKey = new Dictionary<object, int>();
+
+        for (int i = 0; i < state.Elements.Count; i++)
+        {
+            if (state.Elements[i].Node?.Key is { } key && !previousByKey.ContainsKey(key))
+            {
+                previousByKey.Add(key, i);
+            }
+        }
+
+        // Keys win over positions: a keyed description finds the element that carried the same key
+        // last render, wherever it now sits, and that element is moved to the description's position.
+        for (int j = 0; j < count; j++)
+        {
+            matchIndex[j] = -1;
+
+            if (nodes[j].Key is not { } key)
+            {
+                continue;
+            }
+
+            if (!keys.Add(key))
+            {
+                throw new InvalidOperationException(
+                    $"Two elements in one render share the key '{key}'. A key identifies an element, so a duplicate is ambiguous; give the elements distinct keys or leave them unkeyed.");
+            }
+
+            if (previousByKey.TryGetValue(key, out var index) && !used[index])
+            {
+                matches[j] = state.Elements[index];
+                matchIndex[j] = index;
+                used[index] = true;
+            }
+        }
+
+        // Everything else is matched by position: an unkeyed description takes the previous element
+        // at its ordinal, provided no keyed description has already claimed that element.
+        for (int j = 0; j < count; j++)
+        {
+            if (matches[j] is not null || nodes[j].Key is not null)
+            {
+                continue;
+            }
+
+            if (j < state.Elements.Count && !used[j])
+            {
+                matches[j] = state.Elements[j];
+                matchIndex[j] = j;
+                used[j] = true;
+            }
+        }
+
+        var remove = new bool[state.Elements.Count];
+
+        for (int i = 0; i < remove.Length; i++)
+        {
+            remove[i] = !used[i];
+        }
+
+        var targets = new MountedElement?[count];
+        var relink = new bool[count];
+
+        for (int j = 0; j < count; j++)
+        {
+            var match = matches[j];
+
+            if (match is null)
+            {
+                continue;
+            }
+
+            if (match.Node is not null && !Reusable(match.Node, nodes[j]))
+            {
+                // A different description class cannot patch this element, so the element is
+                // replaced. The old one goes through the same removal path as a shortfall.
+                remove[matchIndex[j]] = true;
+                continue;
+            }
+
+            targets[j] = match;
+        }
+
+        for (int i = state.Elements.Count - 1; i >= 0; i--)
+        {
+            if (!remove[i])
+            {
+                continue;
+            }
+
+            var old = state.Elements[i];
+            DetachElementSlots(old);
+            old.Node?.Detach(old.Element);
+
+            var index = ReferenceIndexOf(collection, old.Element);
+
+            if (index >= 0)
+            {
+                collection.RemoveAt(index);
+            }
+        }
+
+        for (int j = 0; j < count; j++)
+        {
+            var target = targets[j];
+
+            if (target is null)
+            {
+                continue;
+            }
+
+            var node = nodes[j];
+
+            if (target.Node is null)
+            {
+                node.ApplyTo(target.Element);
+            }
+            else
+            {
+                node.PatchFrom(target.Node, target.Element);
+            }
+
+            target.Node = node;
+            relink[j] = ReconcileElementSlots(target.Element, target, node);
+        }
+
+        for (int j = 0; j < count; j++)
+        {
+            if (targets[j] is not null)
+            {
+                continue;
+            }
+
+            var node = nodes[j];
+            var element = collection.ElementType.Create();
+            var target = new MountedElement(element);
+
+            node.ApplyTo(element);
+            target.Node = node;
+            ReconcileElementSlots(element, target, node);
+            targets[j] = target;
+        }
+
+        // Put the live collection into flow order. A reorder is a move through the collection's own
+        // primitive where it has one, so an inline control is not unparented; an element that did not
+        // move is left alone. A retained element whose inline control changed is relinked even when
+        // its position did not change, because that is what parents the new control.
+        for (int i = 0; i < count; i++)
+        {
+            var target = targets[i]!;
+            var element = target.Element;
+            var current = ReferenceIndexOf(collection, element);
+
+            if (current == i && !relink[i])
+            {
+                continue;
+            }
+
+            if (!relink[i] && current >= 0)
+            {
+                // An order-only change is a move, exactly as it is for children: the element keeps
+                // its identity and its control stays parented where it is.
+                collection.Move(current, i);
+                continue;
+            }
+
+            if (current >= 0)
+            {
+                collection.RemoveAt(current);
+            }
+
+            collection.Insert(i, element);
+        }
+
+        state.Elements.Clear();
+
+        for (int i = 0; i < count; i++)
+        {
+            state.Elements.Add(targets[i]!);
+        }
+    }
+
+    /// <summary>Whether a description can patch the element another description produced.</summary>
+    private static bool Reusable(VElementDescription previous, VElementDescription next) =>
+        ReferenceEquals(previous.ElementType, next.ElementType);
+
+    /// <summary>Reconciles the control-typed members of one element.</summary>
+    /// <returns>True when a member the collection parents was replaced or cleared.</returns>
+    private static bool ReconcileElementSlots(object element, MountedElement mounted, VElementDescription node)
+    {
+        var slots = node.GetSlots(element);
+
+        if (slots is null || slots.Length == 0)
+        {
+            DetachElementSlots(mounted);
+            mounted.Slots = null;
+            return false;
+        }
+
+        var state = mounted.Slots ??= [];
+        var changed = false;
+
+        for (int i = 0; i < slots.Length; i++)
+        {
+            while (state.Count <= i)
+            {
+                state.Add(null);
+            }
+
+            var slot = slots[i];
+            var next = slot.Node;
+            var previous = i < state.Count ? state[i] : null;
+
+            if (next is null)
+            {
+                if (previous is not null)
+                {
+                    DetachElementSlot(previous);
+                    state[i] = null;
+
+                    if (!previous.Borrowed)
+                    {
+                        slot.Assign(element, null);
+                        changed = true;
+                    }
+                }
+
+                continue;
+            }
+
+            if (previous is not null && previous.Control is not null && CanReuse(previous.Node, next))
+            {
+                next.PatchFrom(previous.Node, previous.Control);
+                previous.Node = next;
+                ReconcileChildren(previous.Control, previous.Children, next.Children);
+                ReconcileSlots(previous.Control, previous, next);
+                ReconcileCollections(previous.Control, previous, next);
+                continue;
+            }
+
+            if (next is VComponent or VFragment)
+            {
+                throw new InvalidOperationException(
+                    "An element's control member takes a control node, not a component or a fragment: there is no control to create for it, so the element has nowhere to put it. Return a control from the component's render instead.");
+            }
+
+            if (previous is not null)
+            {
+                DetachElementSlot(previous);
+                state[i] = null;
+            }
+
+            var current = slot.IsBorrowed ? slot.Control : slot.Current(element);
+            var relink = previous is not null;
+            Mounted mountedSlot;
+
+            if (current is not null && next.NodeType.ControlType.IsInstanceOfType(current))
+            {
+                next.ApplyTo(current);
+                mountedSlot = new Mounted(next, current) { Borrowed = slot.IsBorrowed };
+            }
+            else
+            {
+                if (current is not null)
+                {
+                    current.Parent?.Controls.Remove(current);
+                }
+
+                var control = next.NodeType.Create();
+                next.ApplyTo(control);
+
+                if (!slot.IsBorrowed)
+                {
+                    slot.Assign(element, control);
+                }
+
+                mountedSlot = new Mounted(next, control);
+                relink = true;
+            }
+
+            ReconcileChildren(mountedSlot.Control!, mountedSlot.Children, next.Children);
+            ReconcileSlots(mountedSlot.Control!, mountedSlot, next);
+            ReconcileCollections(mountedSlot.Control!, mountedSlot, next);
+            state[i] = mountedSlot;
+
+            if (!slot.IsBorrowed && relink)
+            {
+                changed = true;
+            }
+        }
+
+        for (int i = slots.Length; i < state.Count; i++)
+        {
+            if (state[i] is { } extra)
+            {
+                DetachElementSlot(extra);
+            }
+        }
+
+        if (state.Count > slots.Length)
+        {
+            state.RemoveRange(slots.Length, state.Count - slots.Length);
+        }
+
+        return changed;
+    }
+
+    /// <summary>Releases everything the elements of one collection attached.</summary>
+    private static void DetachCollection(MountedCollection state)
+    {
+        foreach (var element in state.Elements)
+        {
+            DetachElementSlots(element);
+            element.Node?.Detach(element.Element);
+        }
+
+        state.Elements.Clear();
+    }
+
+    /// <summary>Releases every collection a record tracks.</summary>
+    private static void DetachCollections(Mounted mounted)
+    {
+        if (mounted.Collections is not { } collections)
+        {
+            return;
+        }
+
+        foreach (var collection in collections)
+        {
+            DetachCollection(collection);
+        }
+
+        collections.Clear();
+    }
+
+    /// <summary>Releases every control-typed member of one element.</summary>
+    private static void DetachElementSlots(MountedElement element)
+    {
+        if (element.Slots is not { } slots)
+        {
+            return;
+        }
+
+        foreach (var slot in slots)
+        {
+            if (slot is not null)
+            {
+                DetachElementSlot(slot);
+            }
+        }
+
+        slots.Clear();
+    }
+
+    /// <summary>Releases one control-typed member of an element.</summary>
+    /// <remarks>
+    /// A creating member's control is a control the node made, so it comes off with its subtree. A
+    /// borrowed member's control belongs to the element's owner, so it is restored in place and never
+    /// detached.
+    /// </remarks>
+    private static void DetachElementSlot(Mounted slot)
+    {
+        if (!slot.Borrowed)
+        {
+            Unmount(slot);
+            return;
+        }
+
+        DetachSlots(slot);
+        DetachCollections(slot);
+
+        foreach (var child in slot.Children)
+        {
+            Unmount(child);
+        }
+
+        slot.Children.Clear();
+
+        if (slot.Control is { } control && slot.Node.UnassignedNode is { } restored)
+        {
+            restored.PatchFrom(slot.Node, control);
+        }
+    }
+
+    /// <summary>The position of <paramref name="element"/> in <paramref name="collection"/>, or -1.</summary>
+    private static int ReferenceIndexOf(VNodeCollection collection, object element)
+    {
+        for (int i = 0; i < collection.Count; i++)
+        {
+            if (ReferenceEquals(collection.At(i), element))
+            {
+                return i;
+            }
+        }
+
+        return -1;
+    }
+
 
     /// <summary>Puts <paramref name="child"/> at <paramref name="index"/> in <paramref name="owner"/>.</summary>
     internal static void Place(Control owner, Control child, int index)
@@ -505,7 +1008,7 @@ internal static class Reconciler
     /// state and the controls showing it - while a different child in the same slot is a different
     /// component and inherits nothing from the one it replaces. The two kinds never match each other.
     /// </remarks>
-    private static bool CanReuse(VNode previous, VNode next)
+    internal static bool CanReuse(VNode previous, VNode next)
     {
         if (previous is VComponent mounted)
         {

@@ -111,6 +111,7 @@ public sealed class MountHandle : IDisposable
                 Reconciler.ReconcileChildren(control, mounted.Children, root.Children);
                 mounted.Node = root;
                 Reconciler.ReconcileSlots(control, mounted, root);
+                Reconciler.ReconcileCollections(control, mounted, root);
                 return;
             }
         }

@@ -20,3 +20,5 @@ VD012 | VirtualDom | Error | A control property has the same name as a member of
 VD013 | VirtualDom | Error | Two extension members want the same node property
 VD014 | VirtualDom | Error | Two controls want the same node class name
 VD015 | VirtualDom | Error | An overridden extension member name is already taken
+VD016 | VirtualDom | Error | A [VirtualizableElement] type cannot be made into a description class
+VD017 | VirtualDom | Error | An element description class name is already a control node name

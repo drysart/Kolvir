@@ -67,6 +67,17 @@ internal sealed class Mounted
     internal List<Mounted?>? Slots { get; set; }
 
     /// <summary>
+    /// The mounted state of each get-only element collection, by the collection's ordinal, or null
+    /// when the node has none.
+    /// </summary>
+    /// <remarks>
+    /// The list is parallel to the node's collection list for the same reason <see cref="Slots"/> is
+    /// parallel to its slot list: both lists come from the same generated class, so two renders of
+    /// one node class describe the collections in the same order.
+    /// </remarks>
+    internal List<MountedCollection>? Collections { get; set; }
+
+    /// <summary>
     /// True for a slot whose control the node fills in place, so removal leaves the control where its
     /// owner put it instead of detaching it.
     /// </summary>
