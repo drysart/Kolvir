@@ -149,9 +149,29 @@ Three reasons for this shape rather than repairing the draft in place:
   `OBSERVABLE-COLLECTIONS.md` section 2 had to redeclare a member because two base interfaces each
   contributed one; here the two members ask different things and coexist.
 
-A typed factory therefore also has to answer the non-generic member, one line comparing `resultType`
-with `typeof(TResult)` and forwarding. Whether `IAssetLoaderFactory<TResult>` supplies that line as a
-default interface implementation, or every factory writes it, is open question 9.6.
+A typed factory therefore also has to answer the non-generic member. `IAssetLoaderFactory<TResult>`
+supplies that as a default interface implementation - it answers `resultType == typeof(TResult)` and
+forwards to the typed method - so a factory that only cares about URIs writes one method and is done.
+A factory that spans result types, or whose rule is a type predicate rather than a URI match,
+implements `IAssetLoaderFactory` directly and uses both `resultType` and `uri`; that is the case
+`resultType` exists for, and nothing about the default stops it.
+
+**What `resultType` is for, because it is not bookkeeping for the provider.** It is the second half of
+the question a factory answers. A factory predicates on the *kind of data* a URI yields, not only on the
+URI - configuration fetched over `https` might be refused while the same configuration from a local path
+is fine - and it can only make that judgement if it is told what the caller asked for alongside where it
+asked for it.
+
+Two rules about the forwarding, because they are where this goes wrong later:
+
+- **The default's test is exact type equality, not assignability.** An assignability test would let a
+  factory producing `object` claim every request in the application, and evaluating one needs reflection
+  over the type, which `FEATURE-COST-POLICY.md` section 3 lists among the patterns that keep code alive.
+  `==` on `Type` is the cheap, trim-friendly answer, and it is a decision rather than an accident of the
+  operator.
+- **An override must not disagree with the typed member.** A factory that implements the non-generic
+  member itself does so deliberately, and the two members must answer the same question, because the
+  provider only ever asks the non-generic one (2.3).
 
 ### 2.2 Registration
 
@@ -180,6 +200,10 @@ First match wins rather than "the most specific factory wins", because there is 
 provider could compute that the application cannot express better by registering its factories in the
 order it wants - and `IEnumerable<IAssetLoaderFactory>` already preserves registration order, so the
 order is free and visible.
+
+The question a factory is asked is the pair `(resultType, uri)`, not the URI alone: a factory may refuse
+a URI for one kind of data and accept it for another, so the provider passes both and applies no rule of
+its own beyond the ordering (2.1).
 
 Not a dictionary keyed by scheme: a factory may claim by scheme, by host, by file extension, or by
 nothing at all (an embedded-resource loader claims a single prefix), and a provider that enumerated
@@ -349,7 +373,7 @@ because a load finished or because a limit was raised, and both of those raise
 `CanLoadNowChanged`; a priority changes only because something set it, and that raises
 `PriorityChanged`. There is no state change the manager needs to hear about that has no event.
 
-The walk itself is O(n) in the queued loaders; section 9.7 keeps that cost as an open question rather
+The walk itself is O(n) in the queued loaders; section 9.6 keeps that cost as an open question rather
 than assuming it is fine.
 
 ### 3.8 The walk is re-entrancy safe
@@ -898,7 +922,7 @@ What it costs, exactly:
   makes reachable, so `EffectiveInView`'s own code goes with it if nothing else uses it.
 - **The exception to watch** is anything the package reaches from a path every consumer reaches. Today
   that is `AddAssetLoading()` alone, which registers the manager and the provider and nothing else
-  (9.8); the extension shape is what keeps it that way, and a later addition that touches InView from a
+  (9.7); the extension shape is what keeps it that way, and a later addition that touches InView from a
   constructor or a registration would quietly undo the saving. That is the one thing to check when this
   package grows.
 
@@ -986,27 +1010,23 @@ reviewer can disagree with the reading rather than with a decision presented as 
 5. **What are `IAssetLoaderProvider`'s exact members?** `TryCreateAssetLoader<TResult>(string uri, out
    loader)` is decided (2.3); whether it also exposes "can anything handle this URI", the registered
    factories for diagnostics, or a non-generic overload is not.
-6. **Does `IAssetLoaderFactory<TResult>` forward the non-generic member as a default interface
-   implementation, or does every factory write the three-line comparison?** A default implementation
-   keeps factories short; a written one keeps every member visible in the source of the type that has
-   to behave. Not decided (2.1).
-7. **Does the walk need to be cheaper than O(n) per enqueue?** A scroll enqueues many loaders at
+6. **Does the walk need to be cheaper than O(n) per enqueue?** A scroll enqueues many loaders at
    once, so the first real queue is where this is answerable; a priority index that starts from the
    waiter that woke it is the obvious candidate if it is not.
-8. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
+7. **Does `AddAssetLoading()` register anything beyond the manager and the provider?** A default
    `HttpClientLoaderFactory`, an `IImageDataFactory`-backed decoder, or nothing at all - the last is
    the smallest surface and the one rung 3 argues for.
-9. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
+8. **Does the manager expose its queue for diagnostics?** A read-only snapshot (entry, priority,
     state) would make the demo's readout possible and make a priority bug visible; it is also a public
     surface that has to be kept truthful, and a snapshot type is a small API of its own.
-10. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
+9. **Do `PlaceholderSource` and `PlaceholderColor` interact when `SourceUri` is null?** Today
     `PlaceholderColor` fills a control with no source at all, and the placeholder is specified as drawn
     "whenever there is no loaded image for its URI" - so the two overlap exactly where there is no URI.
     The reading to start from is that a null `SourceUri` means the control is not this feature's to
     decorate, so `PlaceholderSource` is ignored there and `PlaceholderColor` keeps its current meaning;
     the opposite reading - a placeholder is a property of the control, not of the URI - is defensible
     and would need `PlaceholderColor` to lose the no-URI case.
-11. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
+10. **Does a `Source` assignment need its own state value?** It cancels the load and ends at `None`
     (6.1), which is accurate but loses the fact that a load was cancelled rather than never asked for.
     This is 9.3's question seen from a different door: if cancellation gets a `Cancelled` value for the
     URI cases, an application assignment is the one case that should probably stay `None`, because the
