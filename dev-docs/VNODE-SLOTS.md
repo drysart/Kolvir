@@ -79,7 +79,7 @@ removal and nested subtree work exactly like a one-element `Children`:
 | **Borrowed** - different node class | Cannot happen: the property is typed with the one node class for the control the container made, so there is no other node class to give it. |
 | **Creating** (get-plus-set) - first render | `nodeType.Create()`, `node.ApplyTo(control)`, then assign **the control** to the property and reconcile its children. |
 | **Creating** - same node class | Patch the control the slot already made. **Nothing is assigned**, which is the create-slot half of "an unchanged value is not re-applied". |
-| **Creating** - different node class | Create a new control, apply, assign it, and drop the old one with its subtree. |
+| **Creating** - different node class | Create a new control, apply, assign it, and dispose the old one with its subtree. |
 | **Removal** (the node becomes `null`) | Section 3. |
 
 The state list is parallel to the node's slot list *by ordinal*, which has one consequence worth
@@ -114,18 +114,21 @@ be a stricter rule than the tree itself keeps, for no state that could actually 
 
 Two different answers, because the two kinds of slot own different things.
 
-- **Borrowed.** The panel is the container's, so it stays: what comes off is everything the node put
-  *inside* it, and the panel's own properties are handed back to what the container's constructor
-  gave them. That second half is not optional bookkeeping. Leaving them would break the rule the rest
-  of the reconciler keeps - a property a node does not assign means "the control's own value" - for
-  the next node to fill that slot, which would inherit `Dock`, `Padding` and anything else the
-  removed node happened to set.
-- **Creating.** The control the slot made is dropped with its subtree. **The property keeps holding
-  it, emptied**, rather than being handed back to whatever it held before the node arrived: a node is a
-  description that *makes* a control, so there is nothing the reconciler could assign that means "the
-  value this property had before", and leaving the created control in place is the only answer that is
-  valid for a non-nullable property either. A control that can tell null from an empty panel will see
-  the difference; that is stated here rather than papered over.
+- **Borrowed.** The panel is the container's, so it stays - and is **not disposed**: what comes off is
+  everything the node put *inside* it, and the panel's own properties are handed back to what the
+  container's constructor gave them. That second half is not optional bookkeeping. Leaving them would
+  break the rule the rest of the reconciler keeps - a property a node does not assign means "the
+  control's own value" - for the next node to fill that slot, which would inherit `Dock`, `Padding`
+  and anything else the removed node happened to set. `DetachSlot` therefore unmounts only a slot that
+  is not borrowed, which is why the reconciler's disposal rule needs no predicate for this case.
+- **Creating.** The control the slot made is disposed and dropped with its subtree. **The property
+  keeps holding it, emptied**, rather than being handed back to whatever it held before the node
+  arrived: a node is a description that *makes* a control, so there is nothing the reconciler could
+  assign that means "the value this property had before", and leaving the created control in place is
+  the only answer that is valid for a non-nullable property either. A control that can tell null from
+  an empty panel will see the difference; it can also tell a disposed one from an empty one, which is
+  the same breaking change the reconciler makes for every control it created, and is stated here
+  rather than papered over.
 
 The borrowed half needs to know what the removed node had assigned, and only the node's own class
 knows that. So a node class whose control a borrowed slot holds carries **`UnassignedNode`** - a
@@ -307,7 +310,7 @@ covers what is a compile-time or emit-step question:
 | Patch inside a slot | Changing a child's text inside a panel patches it - the child control is the same instance - rather than recreating the panel or the child. |
 | A borrowed slot is never replaced | The panel the container made survives a render that gives the slot a new node, with the node's values applied to it. |
 | Replace the slot's node | In a creating slot, a node of a different class creates and assigns a new control, while an unchanged class patches in place. |
-| Removal | A slot that becomes null leaves the borrowed panel empty, and back at its constructor's property values rather than the removed node's; a creating slot's property keeps the control it made, emptied. |
+| Removal | A slot that becomes null leaves the borrowed panel empty and still parented, with its constructor's property values rather than the removed node's; a creating slot's property keeps the control it made, emptied and disposed. `DisposalTests` pins the borrowed panel as not disposed and a created control as disposed. |
 | Ordering | Two slots that both take `VPanel` are told apart by `Name`, including across a render where the first slot is empty and the second is not - the ordinal-alignment case, which fails if the state list is not padded to the slot ordinal. |
 | Two removals, twice, in two containers | The shared all-unassigned instance carries nothing from one removal to the next: each panel takes its own node's value in both rounds. |
 | Nested slots | A creating slot holding a `VSplitContainer` fills, patches and unwinds both levels. |
