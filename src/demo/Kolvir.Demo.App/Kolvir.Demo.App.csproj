@@ -66,6 +66,9 @@
     <ProjectReference Include="..\..\features\Kolvir.Feature.Observables\Kolvir.Feature.Observables.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.WoffFonts\Kolvir.Feature.WoffFonts.csproj" />
     <ProjectReference Include="..\..\features\Kolvir.Feature.EffectiveInView\Kolvir.Feature.EffectiveInView.csproj" />
+    <!-- The asset-loading page is the end-to-end demonstration of the manager and the Image
+         integration, so the sample names the package and registers its own factory. -->
+    <ProjectReference Include="..\..\features\Kolvir.Feature.AssetLoading\Kolvir.Feature.AssetLoading.csproj" />
   </ItemGroup>
 
   <!-- Built before the compiler runs, because the manifest in this assembly is what turns into node

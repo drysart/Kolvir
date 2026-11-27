@@ -3,6 +3,7 @@ using Kolvir;
 using Kolvir.Feature.AnimatedGif;
 using Kolvir.Feature.AnimatedWebp;
 using Kolvir.Feature.Animations;
+using Kolvir.Feature.AssetLoading;
 using Kolvir.Feature.Audio;
 using Kolvir.Feature.Badges;
 using Kolvir.Demo;
@@ -133,17 +134,16 @@ internal static class Program
             // three platforms.
             SingleInstance = true,
 
-            // The sample opts into seven features, each for a page that uses it: drag and drop for
-            // its drops, animations for the easing pages, SVG for the icon pages, the animated
-            // GIF and WebP providers for their picture pages, app badging for the badge page,
-            // and audio for its audio page.
+            // The sample opts into one feature per page that uses it: drag and drop for its drops,
+            // animations for the easing pages, SVG for the icon pages, the animated GIF and WebP
+            // providers for their picture pages, app badging for the badge page, audio for its audio
+            // page, web fonts for the fonts-from-a-file page, and asset loading for its queue page.
             // Each Add call is the whole opt-in; leaving one out keeps that feature's code out of
             // an application that does not want it.
             //
-            // The virtual DOM is the eighth and needs no line here: it runs no code of its own -
-            // no timer, no hook, no process-wide state - so the opt-in is the Mount call on its
-            // page, and an application that references the package without mounting anything
-            // keeps none of it.
+            // The virtual DOM needs no line here: it runs no code of its own - no timer, no hook, no
+            // process-wide state - so the opt-in is the Mount call on its page, and an application
+            // that references the package without mounting anything keeps none of it.
             ConfigureServices = services => services
                 .AddDragDrop()
                 .AddAnimations()
@@ -152,7 +152,9 @@ internal static class Program
                 .AddAnimatedWebpImages()
                 .AddAppBadges()
                 .AddAudio()
-                .AddWoffFonts(),
+                .AddWoffFonts()
+                .AddAssetLoading()
+                .AddAssetLoaderFactory(new DemoAssetLoaderFactory()),
 #if WINDOWS
             // A WinExe has no console of its own; borrow the parent's so diagnostics are visible.
             AttachConsole = true,
