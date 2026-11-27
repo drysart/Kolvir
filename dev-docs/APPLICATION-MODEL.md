@@ -243,7 +243,7 @@ public sealed class Window : IDisposable
 	public Window(Control content);
 	public Window(string title, Control content);
 
-	public Control? Content { get; set; }     // becomes Host.Root
+	public Control? Content { get; set; }     // becomes Host.Root; owned, and disposed on close
 	public UiHost Host { get; }
 	public Application? Application { get; }
 	public IServiceProvider Services { get; }   // this window's scope; see section 5.4
@@ -288,6 +288,14 @@ the loop starts. This keeps `MainWindow = new Window(...)` inside the object ini
 **Sizing.** If `ClientSize` is never set, the window sizes to `Content.DesiredSize` clamped to the
 screen working area - the same "design size x scale, then clamp" logic that lives in the Win32
 harness today. That logic moves into the model so all three platforms agree.
+
+**Content ownership.** The window is the root of its control tree, so it owns it: a control already
+disposes its children recursively, and closing a window disposes `Content` and with it the whole
+tree. That leaves `Content` - and `Host.Root` - null, and it happens after `Closed` handlers have
+run, so a closed handler still reads the controls it was shown, and before the service scope is
+disposed, so a control's `Disposing` handler can still resolve a window-scoped service. A closed
+window cannot be shown again, so the tree a window is closed over is gone for good: an application
+that wants to reuse it has to assign it to another window, or clear `Content`, before the close.
 
 **`ScaleFactor` and `ScaleChanged`.** A window dragged between monitors changes DPI; `ClientSize`
 stays logical, the framebuffer changes size. The backend reports it, the model re-runs layout and
@@ -1027,7 +1035,7 @@ Main()
 	   |- Exit event                         cancellable
 	   `- teardown, in this order:
 			1. dismiss open context menus / popups
-			2. close and dispose every window, then dispose that window's service scope
+			2. close and dispose every window - its control tree, then its service scope
 			3. dispose the root provider (disposes application-scoped services), then clear the static slots
 			4. backend.Shutdown()
   `- return ExitCode

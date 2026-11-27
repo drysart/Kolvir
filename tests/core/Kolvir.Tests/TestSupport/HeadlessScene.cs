@@ -92,16 +92,22 @@ internal sealed class HeadlessScene : IDisposable
     /// <param name="width">Client width in logical pixels.</param>
     /// <param name="height">Client height in logical pixels.</param>
     /// <param name="title">The window title.</param>
+    /// <param name="options">
+    /// The application's options, for a test that has to register a service; null for the defaults.
+    /// </param>
     public static HeadlessScene Create(
         IApplicationBackend backend,
         Control? root = null,
         float width = 480f,
         float height = 320f,
-        string title = "Kolvir test")
+        string title = "Kolvir test",
+        ApplicationOptions? options = null)
     {
         ArgumentNullException.ThrowIfNull(backend);
 
-        var application = new Application(backend);
+        var application = options is null
+            ? new Application(backend)
+            : new Application(backend, options);
         var window = new Window(title, root) { ClientSize = new SKSize(width, height) };
 
         if (window.Backend is not HeadlessWindowBackend windowBackend)

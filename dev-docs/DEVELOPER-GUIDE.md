@@ -3554,6 +3554,30 @@ Wayland only the toolkit's own D-Bus registration can raise another process's wi
 backend has to own the mechanism. `TryClaimSingleInstance` runs after `Initialize` and returns false
 when this process is the second one; the headless backend always returns true.
 
+### Window content and closing
+
+A window owns the control tree it shows. `Content` is the root of that tree, so closing the window
+disposes it - and, since a control disposes its children, everything below it:
+
+```csharp
+var root = new Panel { Controls = { status, grid } };
+var window = new Window("Orders", root);
+
+window.Close();
+// root, status and grid are disposed now, and window.Content is null.
+```
+
+The order is what an application can rely on. `Closing` handlers can still cancel, `Closed` handlers
+still see the controls they were shown, and the tree goes immediately afterwards - while the window's
+service scope is still alive, so a control's `AddDisposingHandler` handler can resolve a window-scoped
+service. The scope is disposed once the tree is gone. Because of that, a control that has work in
+flight - an image whose asset load is still running - stops it as the window closes rather than
+running on for a window nobody can see.
+
+A closed window cannot be shown again, so nothing is left pointing at a disposed tree:
+`Content` and `Host.Root` are both null. An application that wants to keep the content has to move it
+out first - assign it to another window, or `window.Content = null`, before the close.
+
 ### Owned windows, topmost and activation
 
 `Owner` makes one window belong to another, `TopMost` floats a window above everything, and
