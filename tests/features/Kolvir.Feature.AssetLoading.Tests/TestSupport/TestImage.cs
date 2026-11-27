@@ -18,6 +18,9 @@ internal sealed class TestImageDataSource : IImageDataSource
     /// <summary>True once <see cref="Dispose"/> has run.</summary>
     public bool IsDisposed { get; private set; }
 
+    /// <summary>True to make <see cref="Dispose"/> throw after recording the release.</summary>
+    public bool ThrowOnDispose { get; set; }
+
     /// <inheritdoc/>
     public TimeSpan Duration => TimeSpan.Zero;
 
@@ -34,7 +37,15 @@ internal sealed class TestImageDataSource : IImageDataSource
     public TimeSpan? TimeUntilNextFrame(TimeSpan position) => null;
 
     /// <inheritdoc/>
-    public void Dispose() => IsDisposed = true;
+    public void Dispose()
+    {
+        IsDisposed = true;
+
+        if (ThrowOnDispose)
+        {
+            throw new InvalidOperationException("the source's native handle could not be released");
+        }
+    }
 }
 
 /// <summary>One image the feature may show, and the source behind it, so a test can watch both.</summary>
@@ -50,4 +61,11 @@ internal sealed class TestImage
 
     /// <summary>True once the data behind <see cref="Data"/> has been disposed.</summary>
     public bool IsDisposed => _source.IsDisposed;
+
+    /// <summary>True to make releasing the data throw, as releasing a native handle can.</summary>
+    public bool ThrowOnDispose
+    {
+        get => _source.ThrowOnDispose;
+        set => _source.ThrowOnDispose = value;
+    }
 }

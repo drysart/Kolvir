@@ -40,7 +40,11 @@ public interface IAssetLoadManager
     /// <param name="cancellationToken">Stops this request. See the remarks.</param>
     /// <returns>
     /// Completes with the loader's result, on the UI thread, so a caller can assign what it loaded
-    /// on the next line without a dispatch of its own.
+    /// on the next line without a dispatch of its own. That result belongs to this caller alone -
+    /// one instance per request, which a factory owes by sharing the fetch and not the decoded value
+    /// (section 4.1) - and the caller owns it from that moment: it disposes it when it replaces it
+    /// or when its control ends. If no caller is left to receive it by the time the load produces
+    /// one, the manager disposes it instead of delivering it (section 3.9).
     /// </returns>
     /// <remarks>
     /// <para>

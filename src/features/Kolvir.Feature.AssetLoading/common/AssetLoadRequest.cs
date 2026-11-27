@@ -64,9 +64,38 @@ internal abstract class AssetLoadRequest
     /// <summary>The caller's cancellation registration, released on every exit path.</summary>
     public CancellationTokenRegistration CancellationRegistration { get; set; }
 
+    /// <summary>
+    /// True once the caller's task has been completed with a value, which is the manager's answer to
+    /// "did anyone receive this result".
+    /// </summary>
+    /// <remarks>
+    /// Read from the task's status rather than from <see cref="HandOver"/>'s return: committing the
+    /// value and handing it over are one call, and only the task's status survives everything that
+    /// call may do. (A caller's continuation throwing does not come back out of it - the runtime
+    /// captures that and rethrows it asynchronously - but the manager's answer should not rest on
+    /// which exceptions a completion chooses to swallow.)
+    /// <see cref="TaskStatus.RanToCompletion"/> rather than <see cref="Task.IsCompleted"/>, because
+    /// <see cref="Cancel"/> and <see cref="Fail"/> complete the task too and neither accepted a value.
+    /// </remarks>
+    public abstract bool Delivered { get; }
+
     /// <summary>Hands the loaded value to the caller.</summary>
     /// <param name="result">What the loader produced.</param>
-    public abstract void HandOver(object? result);
+    /// <returns>
+    /// True when the caller received it. False when the caller had already been answered - a
+    /// cancellation arriving from another thread at the same moment is the case - which leaves the
+    /// value with nobody holding it. The manager releases on the same condition but asks
+    /// <see cref="Delivered"/> for it, so that nothing a completion does can lose the answer.
+    /// </returns>
+    /// <exception cref="InvalidCastException">
+    /// <paramref name="result"/> is not a <c>TResult</c>. A factory bug; the manager fails the caller
+    /// with it rather than leaving it waiting.
+    /// </exception>
+    /// <exception cref="InvalidOperationException">
+    /// <paramref name="result"/> is null for a value type, so it cannot be unboxed. Also a factory bug,
+    /// and phrased around the loader because the runtime's own exception names neither type.
+    /// </exception>
+    public abstract bool HandOver(object? result);
 
     /// <summary>Answers the caller with the failure.</summary>
     /// <param name="error">What the load threw.</param>

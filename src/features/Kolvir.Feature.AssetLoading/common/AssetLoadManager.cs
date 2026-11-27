@@ -1,4 +1,4 @@
-namespace Kolvir.Feature.AssetLoading;
+﻿namespace Kolvir.Feature.AssetLoading;
 
 /// <summary>
 /// The queue behind <see cref="IAssetLoadManager"/>.
@@ -278,8 +278,9 @@ internal sealed class AssetLoadManager : IAssetLoadManager
         OnUiThread(() => ApplyCompletion(request, result, error));
 
     /// <summary>
-    /// Ends one request: releases what it held, answers whoever is still waiting, and walks again
-    /// because a slot the loader was counting has just come free.
+    /// Ends one request: releases what it held, answers whoever is still waiting, releases a result
+    /// nobody is left to receive, and walks again because a slot the loader was counting has just
+    /// come free.
     /// </summary>
     /// <param name="request">The request whose task ended.</param>
     /// <param name="result">What it produced, when it produced anything.</param>
@@ -294,29 +295,69 @@ internal sealed class AssetLoadManager : IAssetLoadManager
             // cannot see a request the walk no longer holds (3.10).
             request.CallerDone = true;
 
-            if (error is null)
+            if (error is not null)
+            {
+                request.Fail(error);
+            }
+            else
             {
                 try
                 {
                     request.HandOver(result);
                 }
-                catch (InvalidCastException mismatch)
+                catch (Exception failure) when (!request.Delivered)
                 {
-                    // The loader's untyped task produced something its own typed member could not: a
-                    // factory bug, and one the caller has to hear about rather than wait on forever.
-                    request.Fail(mismatch);
+                    // The cast produced no TResult, so nothing was committed: a factory bug, and one
+                    // the caller has to hear about rather than wait on forever. That cast is the only
+                    // throw the block owns - a continuation's is the runtime's to surface, not this
+                    // manager's to answer - and the filter asks the request rather than relying on
+                    // that, because committing the value and handing it over are one call.
+                    request.Fail(failure);
                 }
-            }
-            else
-            {
-                request.Fail(error);
             }
         }
 
-        // Either the caller was answered here, or it was answered when it asked to stop and this
-        // result goes nowhere (3.9). Both leave the same thing to do: the request is gone, so the
-        // loaders vetoed while it held a slot get their turn.
-        Walk();
+        try
+        {
+            // Either the caller was answered here, or it was answered when it asked to stop (3.9).
+            // Both leave the same thing to do: the request is gone, so the loaders vetoed while it
+            // held a slot get their turn. Before the release below, because that runs an arbitrary
+            // Dispose and a queue stalled behind a throwing one is the worse outcome.
+            Walk();
+        }
+        finally
+        {
+            // Asked of the request rather than inferred from how this method left, so a result the
+            // caller already has is never released.
+            if (!request.Delivered)
+            {
+                Discard(result);
+            }
+        }
+    }
+
+    /// <summary>Releases a result that no caller is left to receive.</summary>
+    /// <param name="result">What the load produced, when it produced anything.</param>
+    /// <remarks>
+    /// <para>
+    /// The manager is the only party holding it at this point: the caller's task is already answered,
+    /// and a factory hands each result to one caller rather than sharing it between two
+    /// (section 4.1). Leaving it to finalization is not a release policy - <c>ImageData</c> disposes
+    /// the <c>IImageDataSource</c> it owns but has no finalizer of its own, so the native side would
+    /// come back only when the source's finalization happened to run.
+    /// </para>
+    /// <para>
+    /// A type test, not a tracked flag: <c>result is IDisposable</c> is a runtime lookup that allocates
+    /// nothing, where an ownership field on the request would be paid for by every load to cover the
+    /// few whose caller went away.
+    /// </para>
+    /// </remarks>
+    private static void Discard(object? result)
+    {
+        if (result is IDisposable disposable)
+        {
+            disposable.Dispose();
+        }
     }
 
     /// <summary>Answers a request that never produced a task, and keeps walking.</summary>
@@ -530,3 +571,5 @@ internal sealed class AssetLoadManager : IAssetLoadManager
         }
     }
 }
+
+

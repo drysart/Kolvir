@@ -483,9 +483,14 @@ they are all the manager's:
 - **A cancelled caller's task is completed cancelled, at cancellation time.** Not when the underlying
   load happens to finish, and not with the result if the load finished in the meantime. The caller
   asked to stop; the answer arrives when it asks.
-- **A late result is never delivered.** If the underlying task completes after the caller's task was
-  cancelled, the result goes nowhere. This is the case that matters: the token fired, the loader kept
-  going, the bytes arrived, and the control that wanted them is gone.
+- **A late result is never delivered, and if it is disposable the manager releases it.** If the
+  underlying task completes after the caller's task was cancelled, the result goes nowhere. This is the
+  case that matters: the token fired, the loader kept going, the bytes arrived, and the control that
+  wanted them is gone. Nobody else can be holding that value - the caller's task was answered at
+  cancellation time, and a factory hands each result to one caller rather than sharing it (4.1) - so
+  the manager is the only holder, and it disposes the value there. Finalization is not a release
+  policy: `ImageData` disposes the `IImageDataSource` it owns but has no finalizer of its own, so the
+  native side would come back only whenever the source's own finalization happened to run.
 - **The load keeps counting against availability until the underlying task actually ends.** The
   manager does not release anything when it stops waiting. If it told the gate the slot was free on
   cancellation, a cancelled-but-still-running load would let the app silently exceed whatever limit
@@ -534,8 +539,18 @@ section 4.1 is why reuse and non-reuse both exist.
   loop, so an `await` in UI code resumes on the thread that owns the controls it is about to touch.
 - So the task handed to a caller completes with the UI context intact. A caller awaits
   `manager.LoadAsync(loader, token)` and assigns `image.Source` on the next line without a dispatch of
-  its own. `UiSynchronizationContext.Post` queues even when the caller is already on the UI thread, so
-  a completion never overtakes work the loop has already queued.
+  its own. There are two hops and only the first is a queue. A load finishing on its own thread posts
+  the manager's continuation, because the context it captured is not current there; when that
+  continuation runs, the loop's context *is* current - it is installed for the loop's whole duration
+  and nothing removes it inside a turn - so the caller's continuation runs inline, inside
+  `ApplyCompletion` and therefore inside the walk. There is no second turn between "the result is
+  delivered" and "the caller applies it", and nothing the loop already queued runs in between. That is
+  what the manager's re-entrancy rules and the test for a completion that enqueues from inside a walk
+  exist for: the caller's own code runs while the walk is in progress, and a request it makes from
+  there is served by that same walk. Only a caller whose captured context is not the one current when
+  the value is handed over - a caller awaiting under a context of its own, or a harness that takes the
+  manager's turn with the context deliberately cleared (7.1) - gets the posted shape, and then its
+  continuation waits behind whatever the loop has queued.
 
 The one thing this must not be read as: "the manager marshals". The manager does not need a post of
 its own for the walk it starts from `LoadAsync`, because it is already on the UI thread; it needs the
@@ -637,6 +652,10 @@ cancelled:
 This is what lets loader-owned caching coexist with per-consumer priority, and it is why the manager's
 rule is "one outstanding request per instance" (3.11) rather than "an instance is used once". An
 instance is a handle; a handle is used once *at a time*, which is all the manager needs to promise.
+
+One thing the diagram does not show: a handle's result belongs to that handle's caller alone - the
+factory shares the fetch, never the decoded instance - which is what lets the manager dispose a result
+nobody is left to receive (3.9).
 
 ### 4.2 Availability gates are advisory, not slot-reserving
 
@@ -907,14 +926,17 @@ inferred rather than written down:
 - **A stale completion never writes `Loaded`.** The completing request is compared against the current
   one, and a result the control has moved past is disposed rather than written - the same rule as 3.9's
   "a late result is never delivered", reached here from the control's side. The comparison is not
-  redundant with that rule, because 3.9 is about a *cancelled* caller and this is the successful one:
-  the manager answers its caller on the UI thread, 3.12 has the continuation that applies the answer
-  posted rather than run where the load finished, and the UI thread can assign a new `SourceUri` in
-  between - a render, a scroll handler, a handler the walk itself ran. Without the comparison that
-  result lands on a control following a different URI and the image it carried is never disposed. What
-  the control cannot do is dispose an image the manager drops - a load cancelled while running still
-  produces one, and it goes nowhere - so that image is the manager's to account for, and the feature
-  owns only what it is handed.
+  redundant with that rule, because 3.9 is about a *cancelled* caller and this is the successful one.
+  On the delivered path as the design runs it, 3.12 has the caller's continuation inline inside the
+  manager's walk, so the comparison is a no-op there: nothing can assign a new `SourceUri` between
+  delivery and the write. What it covers is the shape where delivery is not inline - a caller awaiting
+  under a context of its own - and the suite constructs that shape deliberately rather than relying on
+  it (7.1): a result delivered, the turn that applies it still queued, a new URI assigned in between,
+  and the stale image disposed rather than written. Without the comparison that result lands on a
+  control following a different URI and the image it carried is never disposed. What the control
+  cannot dispose is the image the manager drops: a load cancelled while running still produces one,
+  and it goes nowhere - so the manager disposes it there (3.9), and the feature owns only what it is
+  handed.
 - **A control the reconciler removes is disposed, so its state stops mattering.** The mount created the
   control and disposes it on unmount (6.2), and the load is cancelled with it. There is no spinner left
   to correct and nothing left to keep, so this case needs no state rule of its own.
@@ -1056,8 +1078,9 @@ for.
   (`src/core/Kolvir/Controls/Image.cs`). Assigning a new URI must dispose the previous loaded
   `ImageData`, and that is a real rule, not a nicety - it is the same rule an application already
   follows when it assigns `Source` itself. The one image the feature does not release is the one the
-  manager never hands it: a load cancelled while running is answered as cancelled and its result goes
-  nowhere (3.9, 6.1), so there is nothing on this side to dispose.
+  manager never hands it: a load cancelled while running is answered as cancelled, its result goes
+  nowhere, and the manager disposes it (3.9, 6.1) - so there is nothing on this side to dispose, and
+  the feature owns only what it is handed.
 - **Owned and borrowed are two different things on one property.** A loaded `ImageData` is owned: the
   feature created it, so the feature disposes it when it is replaced, when the URI changes, and on
   `Disposing`. A `PlaceholderSource` is borrowed: the application created it, and the application
@@ -1158,6 +1181,8 @@ What has to be pinned, because between them they *are* the contract:
 - A running entry that is cancelled completes its caller at once, and the slot stays counted until the
   underlying task ends (3.9).
 - A late result is never delivered to a cancelled caller.
+- A result nobody is left to receive is disposed when it is disposable, and a delivered one is not -
+  the caller owns it from that moment, which is the half a fix could break (3.9).
 - Every handler pair is released on every exit path (3.10).
 - `Snapshot()` agrees with what the walk would do next - which is also the cheapest way to assert ordering
   without reaching into the manager's internals, and the reason the snapshot is worth having before there
@@ -1175,13 +1200,16 @@ superseded request and a delivered result whose turn has not come), a failure ca
 with `SourceUri` intact, `Loaded` and `Failed` being raised after `Source` is settled, and the priority
 following `EffectiveInView`.
 
-One of those rules needs a turn held to be seen. When every await resumes inline, a superseded
-completion reaches the control as the cancellation the manager answered it with, so removing the
-stale-completion comparison changes nothing - which is why the scene resumes awaits inline by default.
-It is not redundant, though: the delivered result whose continuation has not run yet is the case 3.9
-does not cover, and the suite pins it with a synchronization context it drains by hand - complete a
-load, run the manager's turn, assign a new URI before the control's turn, then let it run and assert
-the old image was disposed rather than written. Removing the comparison makes exactly that test fail.
+One of those rules needs a turn held to be seen. On the delivered path the caller's continuation runs
+inline inside the manager's turn (3.12), so a superseded completion reaches the control as the
+cancellation the manager answered it with, and removing the stale-completion comparison changes
+nothing - which is why the scene resumes awaits inline by default. It is not redundant, though: the
+delivered result whose continuation has not run yet is the case 3.9 does not cover, and the suite
+constructs that window rather than relying on it - a synchronization context it drains by hand, with the
+manager's turn taken while that context is deliberately not current, so the control's turn is posted
+behind it. Complete a load, run the manager's turn, assign a new URI before the control's turn, then let
+it run and assert the old image was disposed rather than written. Removing the comparison makes exactly
+that test fail.
 
 ## 8. The rejected alternatives, in one place
 
