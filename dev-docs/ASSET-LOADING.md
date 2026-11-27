@@ -670,7 +670,8 @@ inferred rather than written down:
 ### 6.2 Removal and disposal are separate, and both are now observable
 
 Requirement 4 opens with "the image control is removed from the UI", and removal is not disposal. Two
-facts made that the hardest case in this note, and both of them are now answered in core:
+facts made that the hardest case in this note, and both of them are answered now - one in core, one by
+a change to the reconciler:
 
 - **Removal does not dispose.** `Reconciler.Unmount` takes the control out of its parent -
   `control.Parent?.Controls.Remove(control)` at
