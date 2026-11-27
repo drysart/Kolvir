@@ -48,6 +48,10 @@ src/
     Kolvir.Feature.Animations/ timeline animations, as a separate package: same layout, all portable
       common/                 the set, the value animations, the easings and the app-wide frame clock
       windows/ macos/ linux/  empty: an animation is arithmetic, a clock and an invalidation
+    Kolvir.Feature.AssetLoading/ priority-ordered asset loading, as a separate package: all portable
+      common/                 the manager and its queue, the loader and factory interfaces, the
+                              provider, the priority anchors, the diagnostics snapshot, the opt-in
+      windows/ macos/ linux/  empty: a queue, two interfaces and a registration are delegates
     Kolvir.Feature.Svg/       SVG images, as a separate package: same layout, all portable
       common/                 the format provider, the parse cache, the currentColor load helpers
       windows/ macos/ linux/  empty: Svg.Skia renders to an SKPicture on every platform
@@ -234,6 +238,7 @@ A rung-3 feature is a package of its own, so its tests are an assembly of their 
 ```
 dotnet test tests/features/Kolvir.Feature.DragDrop.Tests/Kolvir.Feature.DragDrop.Tests.csproj
 dotnet test tests/features/Kolvir.Feature.Animations.Tests/Kolvir.Feature.Animations.Tests.csproj
+dotnet test tests/features/Kolvir.Feature.AssetLoading.Tests/Kolvir.Feature.AssetLoading.Tests.csproj
 dotnet test tests/features/Kolvir.Feature.Svg.Tests/Kolvir.Feature.Svg.Tests.csproj
 dotnet test tests/features/Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj
 dotnet test tests/features/Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj
@@ -241,7 +246,7 @@ dotnet test tests/features/Kolvir.Feature.Audio.Tests/Kolvir.Feature.Audio.Tests
 dotnet test tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj
 ```
 
-All seven portable suites are what the `Tests` workflow dispatches, on all three platforms.
+All eight portable suites are what the `Tests` workflow dispatches, on all three platforms.
 
 The sample has one suite of its own, for the one part of it that is a pure function: the markup parser
 the rich-label page runs on every keystroke. The project links that source file rather than referencing
@@ -293,6 +298,18 @@ the same code production runs: a
 `AnimationScheduler`, so the timeline's arithmetic and the clock's start and stop edges are
 exercised exactly rather than approximately, and nothing sleeps. The one thing the suite cannot show
 is a real timer waking a real window, which is what the demo's **Animations** page is for.
+
+`Kolvir.Feature.AssetLoading.Tests` is wired the same way - `Feature` and `AssetLoading` categories,
+the same filter, plain `net10.0` on every platform. The queue's contract is order, availability and
+cancellation, so the tests supply all three by hand rather than waiting for them: `FakeAssetLoader`
+has a `CanLoadNow` the test sets, a task the test completes (or one it completes inside `LoadAsync`,
+which is the synchronous-completion case the walk has to survive), and handler pairs that are
+ordinary lists the test can count. There is no timer, no sleep and no `Task.Delay` anywhere, so an
+assertion is about the walk and never about the clock. `Snapshot()` is used where it makes an
+assertion clearer than reaching into the manager, which is also the reason the snapshot is worth
+having before there is a UI to look at it. The one thing this suite cannot show is a real factory
+whose gate depends on a real fetch, and a real scroll moving a real priority, which are the demo
+page's job in the third PR of the feature.
 
 `Kolvir.Feature.DragDrop.Tests` uses the same categories, plus `Feature` and `DragDrop`, and the
 same filter. It targets plain `net10.0` on every platform even though the feature itself is split by

@@ -1,0 +1,59 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application calls AddAssetLoading(). -->
+  <PropertyGroup>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
+    <RootNamespace>Kolvir.Feature.AssetLoading</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- AOT compatible for the same reason the library is: an application that opts in publishes the
+         same way whether it did or not. Nothing here reflects over a type - the factory's result type
+         is compared with `==`, which is one of the reasons the default implementation is written that
+         way (dev-docs/ASSET-LOADING.md section 2.1) - and the container is handed factory delegates
+         rather than types to construct. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>Priority-ordered asset loading for Kolvir: one manager that decides when a load starts, loader handles the application's factories make, and an availability gate the loader owns.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+  </ItemGroup>
+
+  <!-- The interfaces, the priority constants and the snapshot are public because they are the API an
+       application and its factories name. The manager, the provider and the per-request entry are
+       internal: nothing outside this assembly should construct a queue, and nothing outside it should
+       depend on how one is kept. The tests drive the queue through IAssetLoadManager - which is what
+       an application does - so this assembly grants no InternalsVisibleTo, and no member was made
+       public for a test. -->
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- The three platform folders are empty, and that is the finding rather than an oversight: a queue,
+       two loader interfaces and a registration are arithmetic and delegates, so nothing here is native
+       and there is nothing to select by platform. The folders stay because the layout is the package's
+       shape - the `lib/` folders and dependency groups come from these same inner builds either way. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>
