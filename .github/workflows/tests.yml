@@ -99,6 +99,7 @@ jobs:
           dotnet restore tests/features/Kolvir.Feature.EffectiveInView.Tests/Kolvir.Feature.EffectiveInView.Tests.csproj --nologo
           dotnet restore tests/generators/Kolvir.Feature.VirtualDom.Generators.Tests/Kolvir.Feature.VirtualDom.Generators.Tests.csproj --nologo
           dotnet restore tests/generators/Kolvir.Analyzers.Tests/Kolvir.Analyzers.Tests.csproj --nologo
+          dotnet restore tests/demo/Kolvir.Demo.App.Tests/Kolvir.Demo.App.Tests.csproj --nologo
 
       # The filter is the category contract: a test that can only run on one platform carries
       # Platform.Win32, Platform.AppKit or Platform.Gtk4 and the portable job skips it. Everything
@@ -279,6 +280,20 @@ jobs:
           dotnet test tests/features/Kolvir.Feature.EffectiveInView.Tests/Kolvir.Feature.EffectiveInView.Tests.csproj --no-restore --nologo \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=effectiveinview.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The sample's one testable unit. The rich-label markup page is judged by rendering it, but the
+      # parser behind it runs on every keystroke and is a pure function, so it is a test rather than a
+      # screenshot. The project links the source file instead of referencing the application: the
+      # sample is a platform application with a conditioned target framework, and no package or
+      # library is involved in this file at all, so this leg restores nothing but the test framework.
+      - name: Test the sample's markup parser
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test tests/demo/Kolvir.Demo.App.Tests/Kolvir.Demo.App.Tests.csproj --no-restore --nologo \
+            --logger "trx;LogFileName=demo-markup.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 
