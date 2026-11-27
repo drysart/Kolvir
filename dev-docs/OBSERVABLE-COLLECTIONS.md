@@ -1046,10 +1046,11 @@ or the counts stop describing the view - must not throw and must not change eith
 Single-threaded, and not an `IObservableEventSource` for the reason 3.8 and `IReadOnlyObservableSet<T>`
 give.
 
-**What is not here.** A filtered or sorted view of a set is not designed: membership is the whole of a
-set's record, so a filter is a different membership rule rather than a translation, and an ordered variant
-is 8.11. This section has no counterpart to 5.3's "Still undesigned" list; this paragraph is where its
-boundary is recorded.
+**What is not here.** A filtered view of a set is not designed: membership is the whole of a set's
+record, so a filter is a different membership rule rather than a translation. The sorted view is 6.7 -
+it is an ordering, which a list can carry - and a sorted *collection* with its own mutation surface is
+still open (8.11). This section has no counterpart to 5.3's "Still undesigned" list; this paragraph is
+where its boundary is recorded.
 
 ### 6.6 Where it differs from the list on purpose
 
@@ -1058,6 +1059,125 @@ boundary is recorded.
   rendered marks twelve entries at most.
 - **A bulk operation is N records and one event**, where a list would need a batch from the caller. The
   set has no `AddRange`-shaped alternative to offer, so the batching is not optional.
+
+### 6.7 The sorted view
+
+`ObservableSortedReadOnlySetView<T>` is a read-only view over an observable set that orders its items
+with an `IComparer<T>` and exposes the result as an `IReadOnlyObservableList<T>` - the ordered view 5.3
+left open, and the one that is a list rather than a set:
+
+```csharp
+namespace Kolvir.Feature.Observables;
+
+public sealed class ObservableSortedReadOnlySetView<T>
+    : IReadOnlyObservableList<T>, IObservableChangeTarget<ObservableListChange<T>, ...>
+    where T : notnull
+{
+    public ObservableSortedReadOnlySetView(
+        IReadOnlyObservableSet<T> inner,
+        IComparer<T>? comparer = null);
+
+    public bool IsDisposed { get; }
+    public int Count { get; }
+    public T this[int index] { get; }
+    public IEnumerator<T> GetEnumerator();
+    public IDisposable AddObservableListChangedHandler(Action<ObservableListChangedEventArgs<T>> handler);
+    public void RemoveObservableListChangedHandler(Action<ObservableListChangedEventArgs<T>> handler);
+    public void Dispose();
+}
+```
+
+The surface is `IReadOnlyObservableList<T>` and nothing beyond it. It is not a set and does not become
+one: there is no set algebra, because a sorted projection of a set has no set operations of its own to
+answer, and no `Contains`, `IndexOf` or `CopyTo`, which the mapped views add as conveniences rather
+than contract. There is no factory either, for the reason 5.4 gives: every `Create*` factory returns
+something the caller does not dispose, and this is the one object in the family its holder must
+dispose. `T` is `notnull` because the identity map below is a `Dictionary<T, long>`, the same constraint
+the mapped set view's outer type carries for the same reason.
+
+**An order-statistic AVL tree, so insert, remove and the indexer are all `O(log n)`.** Each node stores
+the size of its subtree, which makes the tree a rank index: `this[i]` walks down comparing `i` with the
+left subtree's size, `O(log n)`; an insertion accumulates its rank from the left subtrees it passes on
+the way down, so the index the record carries is the one the tree already computed rather than a second
+search; and enumeration is the in-order walk, `O(n)` with an `O(log n)` path on an explicit stack. That
+is the structure a view that presents a set as an indexed list needs. `SortedSet<T>` is not it - it
+exposes neither an indexer nor a rank, so `IReadOnlyList` access over it would be linear - and neither
+is a sorted list with binary search, whose insert still shifts every later element. A skip list with
+per-level widths was the other candidate and would have been easier to get right, but its bounds are
+expected rather than worst-case; the AVL tree gives the worst case and lets the height bound be
+asserted directly. The initial build is off the mutation path: it orders the source once, `O(n log n)`,
+and assembles a perfectly balanced tree from the sorted array in `O(n)`.
+
+**The key is (comparer, arrival number), which is what makes it unique.** Two distinct items can
+compare equal under the ordering - a case-insensitive ordering over a case-sensitive set is the usual
+way - and the view holds both, so its count is always the source's count. A monotonic counter gives
+every item a sequence number when it arrives, the tree's key is the user's comparison first and that
+number last, and no two keys are equal. Equal-comparing items are therefore neighbours ordered by
+arrival, and the ordering's tie order is arrival order: for the items the source already held when the
+view was built, that is the source's enumeration order. A rebuild keeps the number of every item it
+still holds and numbers the unseen ones in the source's enumeration order, so a tie that survives an
+untracked change keeps the order it arrived in rather than being reordered by the recovery.
+
+**Removal goes through an identity map, not the ordering.** A removal arrives as an element, and the
+ordering cannot tell two tied elements apart, so a `Dictionary<T, long>` keyed by the source set's own
+`Comparer` (falling back to `EqualityComparer<T>.Default` only for a hand-written source that exposes
+none) holds each element's sequence number. The removal record names the element, the map gives back
+the number, and the tree is searched by the composite key - which is total, so it lands on exactly the
+element the source removed. The number is forgotten on removal: an element removed and added again is
+the newest among its ties, which is a deliberate rule rather than whichever one the search happens to
+find, and it is also what keeps the map's size equal to the view's rather than growing for the life of
+the process. A removal whose element has no number, or whose key is not in the tree, means the source
+and the view have diverged; the view rebuilds from the source and delivers `UntrackedChanges` rather
+than throwing or silently doing nothing, so every reader is told to re-read and the view heals instead
+of drifting. That recovery is also what a nonsensical ordering reaches: the search needs the ordering
+to agree with the source's identity, so that two elements the set calls the same item compare equal,
+and an ordering that disagrees makes a removal miss its node and the view admit it rather than remove
+the wrong one.
+
+| Source record | The tree | The record the view delivers |
+| --- | --- | --- |
+| `ItemAdded` with `x` | numbered, then inserted at its rank | `ItemAdded` at that rank, with `x` |
+| `ItemRemoved` with `x` | its node taken out by (comparer, number) | `ItemRemoved` at its old rank, with the item the view held; a missing number or key resyncs and ends with `UntrackedChanges` |
+| `SetCleared` | emptied, and the map with it | `ListCleared`, carrying nothing |
+| `UntrackedChanges` | rebuilt from the source, in order | `UntrackedChanges` |
+
+**One source delivery is one view delivery, translated sequentially.** The records of one source event
+are applied to the tree one at a time, in the source's order, and each rank is computed against the
+tree the previous record left; a translate-then-apply-in-a-batch would compute every rank against the
+contents the event began with and get a multi-change event wrong. The translated records leave together
+as one event, in the order they happened. The batch is the view's own at the package default cap, so a
+source left at the default cannot describe more records in one event than the view will, and a source
+whose owner raised its cap can: that event collapses here to one `UntrackedChanges` record while the
+tree is already complete, exactly as 5.4 and 6.5 describe.
+
+**Reads publish the same three questions** (5.1) from the view's own dependency table: `Count` is the
+count, `this[i]` is index `i`, and enumeration is the contents. An insert at `i` wakes the readers of
+`i` and the indexes at or past it; a reader of an index that is still past the end is not woken by a
+change that does not make it answerable. `IsDisposed` publishes nothing. The enumerator is
+version-checked, so mutating the view under a `foreach` throws `InvalidOperationException` rather than
+yielding a torn order.
+
+**The tree is tested as the risk it is.** A hand-written balanced tree is the part of this view that a
+handful of examples cannot prove, so the suite carries three checks that ordinary example tests do not:
+three seeded randomised differential tests of 2,500 add/remove/clear operations each, against a
+reference model that sorts the arrival list on every step, comparing the contents and every indexed
+read; an invariant
+check after every one of those operations - subtree sizes against actual counts, the in-order sequence
+non-decreasing under (comparer, number), the identity map agreeing with the tree, and the height inside
+the AVL bound; and a deterministic complexity check that wraps the user comparer and counts its calls,
+asserting an insert and a removal near the middle of a thousand-item tree each stay within a small
+multiple of `log2(n)` comparisons. The last one pins the search at a logarithmic cost and would fail a
+structure that scans the items, though on its own it cannot tell this tree from another `O(log n)`
+index; the differential and invariant checks are what catch a structure that is fast but wrong. None of
+them is a timing test.
+
+**The source is not owned**, and everything else follows 5.4 and 3.9: `Dispose` unsubscribes, drops
+what had not been delivered, delivers one last empty event and lets its handlers go, and never disposes
+the source - the same set may be read directly and by other views. A source disposed first leaves the
+view readable with its last contents, because its final empty event says only that it can never change
+again. A disposed source handed to the constructor is refused with `ObjectDisposedException`, and a
+null one with `ArgumentNullException`. Single-threaded, and not an `IObservableEventSource` for the
+reason 3.8 and `IReadOnlyObservableList<T>` give.
 
 ## 7. The observable dictionary
 
@@ -1562,6 +1682,7 @@ treatment:
 | **A mapped view's records are the source's records translated** | Applying a view's records to a mirror of the mapped type ends equal to the view, after inserts, appends, removals, replacements, moves and a clear, and `args.List` is the view itself; a move leaves the selector's call count alone while a replacement adds exactly one, and a removal adds none; a batch on the source arrives as one delivery with the records in order, a batch at exactly the view's cap arrives with every record, and a source whose cap was raised above the default collapses to one untracked record with the mapped list still complete; an untracked source event rebuilds the view from the source and is delivered as one `UntrackedChanges` record; an index reader is not woken by a change to another index; disposing the view unsubscribes from the source and leaves it usable, while a disposed source leaves the view readable with its last contents |
 | **A mapped set view's records are the source's records translated, with duplicates collapsed** | A mirror built only from the view's records ends equal to the view after an add that introduces a mapped item, adds that collapse, partial removals, a last removal, a union, a symmetric difference and a clear - and `args.Set` is the view itself; a collapsing add and a removal that leaves another inner item on the same mapped item each raise nothing, while the last removal names the instance the view already held and a removal whose mapping finds nothing the view holds resyncs and ends the event with `UntrackedChanges`; a batch on the source arrives as one delivery in order, a source event at exactly the view's cap arrives with every record, a source left at the default that goes past its own cap collapses there and is passed on as one untracked record with the view rebuilt, and a source tuned above the default collapses here to one untracked record with the view complete; an untracked event wakes the count, the contents and every watched item; `Count` is not woken by a change that leaves the size alone, and a `Contains` read through `IReadOnlyObservableSet<TOuter>` is woken by exactly its own item; disposing the view unsubscribes from the source and leaves it usable, while a disposed source leaves the view readable with its last contents |
 | **A mapped dictionary view's records are the source's records translated** | A mirror built only from the view's records ends equal to the view after adds, changes, removals and a clear, and `args.Dictionary` is the view itself; an add and a change map exactly once while a removal and a clear map none, and a removal names the value the view already held; a throwing selector leaves the view behind the source, and the shape of that depends on whether the view had taken the key in: a key it never took in leaves no entry, so the next record naming that key rebuilds the view and ends the event with `UntrackedChanges`, while a key it had taken in keeps its stale mapped value, and the next change delivers one `ItemChanged` naming that stale value as the old one with no untracked record; a batch on the source arrives as one delivery in order, a source event at exactly the view's cap arrives with every record, a source left at the default that goes past its own cap collapses there and is passed on as one untracked record with the view rebuilt, and a source tuned above the default collapses here with the contents intact; `Count` and `Keys` are the structure and are not woken by a value change, a `TryGetValue` read is woken by exactly its own key, and `Values`, enumeration, `Contains(pair)` and `CopyTo` are the contents; the indexer of an absent key throws and publishes nothing while `TryGetValue` of one is woken when the key appears; disposing the view unsubscribes from the source and leaves it usable, while a disposed source leaves the view readable with its last contents |
+| **A sorted set view's records are the source's records translated into an ordered list, and its tree holds** | A mirror built only from the view's records ends equal to the view after an insert at the start, the middle and the end, a multiple-change batch, a clear and an untracked rebuild, and `args.List` is the view itself; the ranks the records carry are the ones sequential translation produces - each computed against the tree the previous record left - which is the test a translate-then-apply batch fails; two items the ordering calls equal are both held in arrival order and a removal takes the one the source's identity names, with an element removed and re-added becoming the newest among its ties; a few thousand randomised operations against a reference model leave the contents, every indexed read and the tree's invariants - subtree sizes, heights, the in-order (comparer, number) sequence and the identity map - in agreement after every step; an insert and a removal near the middle of a thousand-item tree each cost a small multiple of `log2(n)` comparer calls; enumerating a view that mutates throws; an untracked source event rebuilds the contents in order; a reader of one index is woken by an insert that can move it and not by one after it, including the read that threw past the end; disposing the view unsubscribes from the source and leaves it usable with its own handlers, while a disposed source leaves the view readable with its last contents and a disposed source is refused by the constructor |
 | **Enumeration is a snapshot of the version, not of the contents** | Mutating during `foreach` throws `InvalidOperationException`; reading after it throws is fine; a `CopyTo` during a mutation is the same failure rather than a torn array |
 
 The demo pages are the other half: each applies records to a mirror and asserts equality against the
@@ -1587,3 +1708,4 @@ by the producer.
 | 15 | Done | `ObservableMappedReadOnlyListView<TInner, TOuter>` (5.4), the first derived view: a `public sealed` class over `IReadOnlyObservableList<TOuter>` and `IObservableChangeTarget`, on the shared core unchanged - `ObservableChangeBatch` wired to itself for the queue, the cap and the disposal, `ObservableListDependencies` for the same three questions, and the existing `ObservableListChange` factories for the record - with a parallel cached `List<TOuter>` that maps an add and a replacement once each and never maps a move or a removal. One source delivery is one view delivery, an untracked source event rebuilds the cache, the source is never disposed, and a source disposed first leaves the view readable with its last contents. 22 tests in `ObservableMappedReadOnlyListViewTests`: the cache against every record kind, the call count across move, change and removal, one delivery per source batch and the cap's three cases (a source event at exactly the default arrives with every record, one above the default is the source collapsing and being passed on, and a source tuned above the default is the view collapsing with the contents intact), the three dependencies, unsubscribe on disposal, the full disposed contract, and the null arguments. Suites: 220 in the observables suite - the 198 from step 13-14 unchanged and 22 new - with the core and every other feature suite untouched |
 | 16 | Done | `ObservableMappedReadOnlySetView<TInner, TOuter>` (6.5), the set's projection and the first view whose translation is not record for record: a set projection is not injective, so the view counts - a `HashSet<TOuter>` of distinct mapped items beside a `Dictionary<TOuter, int>` of multiplicities, both on the view's comparer and both touched only through one private pair of helpers - and emits `ItemAdded` only on the first inner item for a mapped item, `ItemRemoved` with the stored instance only on the last, `SetCleared` only for a view that was not empty, and `UntrackedChanges` after a rebuild. A source change that leaves the view unchanged raises no event at all. On the shared core unchanged: `ObservableChangeBatch` wired to itself, `ObservableSetDependencies<TOuter>` for the count, the item and the contents, the existing `ObservableSetChange` factories for the records, and the six scans delegated to the storage. 25 tests in `ObservableMappedReadOnlySetViewTests`: the counted cache against every record kind, the collapsing add and partial removal that raise nothing, the stored instance in the last removal, an impure selector whose removal resyncs with the admission that ends the event, one delivery per source batch and the cap's three cases (a source event at exactly the default arrives with every record, a source left at the default that goes past it collapses at the source and is passed on as one untracked record, and a source tuned above the default collapses here with the contents intact), a replay into a mirror, the three dependencies, the comparer's default, unsubscribe on disposal, the full disposed contract, and the null arguments. Suites: 245 in the observables suite - the 220 from step 15 unchanged and 25 new - with the core and every other feature suite untouched |
 | 17 | Done | `ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>` (7.5), the dictionary's projection and the second record-for-record view: one cached `Dictionary<TKey, TOuter>` keyed with the source's own comparer, an add and a change each mapping exactly once, a removal and a clear mapping nothing because the record names the key and the view is keyed by it, and `UntrackedChanges` after a rebuild. No outer comparer and an unconstrained `TOuter`, because the key is the identity and the value is not, so equal and null values may sit under different keys. A record that does not fit the cache - a change or removal for a key not held, or an add for one held - rebuilds and admits it, which is the documented recovery a throwing selector reaches. `Contains` and `CopyTo` are kept for parity with the other two views and publish the contents. On the shared core unchanged: `ObservableChangeBatch` wired to itself, `ObservableDictionaryDependencies<TKey, TOuter>` for the structure, the key and the contents, and the existing `ObservableDictionaryChange` factories for the records. 31 tests in `ObservableMappedReadOnlyDictionaryViewTests`: the cached translation against every record kind with its call counts, both shapes of the throwing-selector failure - a key never taken in, which resyncs and admits it, and a held key whose stale value the next change reports, one delivery per source batch and the cap's three cases (a source event at exactly the default arrives with every record, one above the default is the source collapsing and being passed on, and a source tuned above the default collapses here with the contents intact), a replay into a mirror, the three dependencies, equal and null values under different keys, the source's key comparer, `Contains` and `CopyTo`, unsubscribe on disposal, the full disposed contract, and the null arguments. Suites: 276 in the observables suite - the 245 from step 16 unchanged and 31 new - with the core and every other feature suite untouched |
+| 18 | Done | `ObservableSortedReadOnlySetView<T>` (6.7), the ordered view: an order-statistic AVL tree whose subtree sizes serve the indexer, the insertion rank and the removal rank at `O(log n)`, while enumeration is `O(n)` with an `O(log n)` path, over a `Dictionary<T, long>` identity map keyed by the source set's own comparer. The tree's key is (user comparison, arrival number), which keeps two tied items both present with arrival order as the tie order; the map is what lets a removal pick its own node out of a tie group, and the number is forgotten on removal so a re-added item is the newest among its ties. Construction numbers the source in enumeration order, sorts once and assembles a perfectly balanced tree in `O(n)`; a missing number or key means the view and the source diverged, so it rebuilds and delivers `UntrackedChanges`. On the shared core unchanged: `ObservableChangeBatch` wired to itself for the queue, the cap and the disposal, `ObservableListDependencies<T>` for the count, the index and the contents, and the existing `ObservableListChange` factories for the records. 21 tests in `ObservableSortedReadOnlySetViewTests`: initial order with the default and a custom comparer, inserts at the start, the middle and the end with their reported ranks, ties held in arrival order, a removal that takes the named one of two tied items, the re-added item becoming the newest among its ties, a clear, an untracked rebuild, a multi-change event translated sequentially, a replay into a mirror, the three dependencies, the version-checked enumerator, disposal and the disposed-source cases, the null argument, three seeded 2,500-operation randomised differential tests against a reference sort with the tree's invariants checked after every step, and a comparer-count proof that an insert and a removal near the middle of a thousand-item tree stay within a small multiple of `log2(n)`. Suites: 297 in the observables suite - the 276 from step 17 unchanged and 21 new - with the core and every other feature suite untouched |

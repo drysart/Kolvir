@@ -36,6 +36,13 @@
     <Compile Remove="windows\**;linux\**;macos\**" />
   </ItemGroup>
 
+  <!-- The sorted view's tree is hand-written, and its invariants are checked by the suite rather than
+       by a reviewer: the randomised test calls the view's internal ValidateTree after every operation.
+       Nothing else in this package needs it, and it is the shape the other feature packages use. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kolvir.Feature.Observables.Tests" />
+  </ItemGroup>
+
   <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
     <Compile Include="windows\**\*.cs" />
   </ItemGroup>
