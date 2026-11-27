@@ -52,6 +52,13 @@ internal sealed class ImageSourceLoadingState
     /// </summary>
     private static readonly ConditionalWeakTable<Image, ImageSourceLoadingState> Waiting = new();
 
+    /// <summary>
+    /// The controls whose load started since the last completed pass, and whose priority that pass
+    /// confirms. A load takes its priority when it is submitted, and one of the moments a load is
+    /// submitted is a pass on a host that cannot answer yet (section 6.1).
+    /// </summary>
+    private static readonly ConditionalWeakTable<Image, ImageSourceLoadingState> Confirming = new();
+
     private static IDisposable? _layoutSubscription;
 
     private readonly IDisposable _addedToTreeSubscription;
@@ -206,6 +213,7 @@ internal sealed class ImageSourceLoadingState
         if (value is null)
         {
             Waiting.Remove(image);
+            Confirming.Remove(image);
             WriteSource(image, null);
 
             if (generation == _generation)
@@ -272,6 +280,12 @@ internal sealed class ImageSourceLoadingState
     /// manager is called: a loader that starts at once calls back synchronously from inside
     /// <c>LoadAsync</c>, and the control must already be waiting when it does (section 6.1).
     /// </para>
+    /// <para>
+    /// The priority is taken here, at submission, and that is the one moment where the answer is
+    /// least available: a load that starts on a pass in a host with no client area yet reads
+    /// "not in view". <see cref="ArmConfirmation"/> is what corrects it on the next pass that can
+    /// answer (section 6.1).
+    /// </para>
     /// </remarks>
     private void TryStart(Image image)
     {
@@ -323,7 +337,12 @@ internal sealed class ImageSourceLoadingState
         _cancellation = cancellation;
         _request = request;
         _loader = loader;
+
+        // The best answer there is at this moment. One of the three moments above is a pass on a host
+        // that has no client area yet, where the InView feature has no answer to give - so the next
+        // pass that can answer confirms this one (section 6.1).
         loader.Priority = PriorityFor(image);
+        ArmConfirmation(image);
 
         Task<ImageData> task;
 
@@ -559,6 +578,9 @@ internal sealed class ImageSourceLoadingState
         }
 
         CancelLoad();
+
+        // No load is in flight, so there is nothing for a pass to confirm; the restart arms it again.
+        Confirming.Remove(image);
         Wait(image);
         SetState(image, ImageSourceLoadState.Pending);
     }
@@ -573,6 +595,7 @@ internal sealed class ImageSourceLoadingState
         CancelLoad();
         ReleaseInView();
         Waiting.Remove(image);
+        Confirming.Remove(image);
 
         // Image.Dispose stops listening to its source and clears its own reference before this
         // notification is raised - ReleaseImage runs before base.Dispose - and it never disposes the
@@ -610,6 +633,7 @@ internal sealed class ImageSourceLoadingState
         CancelLoad();
         ReleaseInView();
         Waiting.Remove(image);
+        Confirming.Remove(image);
         ReleaseLoaded(image);
 
         _sourceUri = null;
@@ -671,18 +695,22 @@ internal sealed class ImageSourceLoadingState
         }
     }
 
-    /// <summary>The layout notification: a control that was waiting for its tree to be hosted can
-    /// start now.</summary>
+    /// <summary>The layout notification: a waiting control can start, and a load that started since
+    /// the last pass can have its priority confirmed.</summary>
     /// <remarks>
     /// <see cref="UiHost.Root"/> attaching a tree to a host sets <see cref="Control.Host"/> for the
     /// whole subtree and raises neither tree notification, so this is the moment at which an image
     /// that was added to a tree before that tree reached a window can finally resolve its services.
-    /// The walk is over the waiting controls only, which is empty in an application whose trees are
-    /// built inside a hosted window.
+    /// A tree built inside a hosted window never waits, so that walk is empty there; the confirmation
+    /// walk is not, because every start arms it.
     /// </remarks>
-    private static void OnLayoutCompleted()
+    private static void OnLayoutCompleted(UiHost host)
     {
-        if (!AnyWaiting())
+        // Before the waiting walk, so a load this pass starts is confirmed by a later one: the answer
+        // this pass gives has not been computed for a control it is about to submit.
+        ConfirmStarted(host);
+
+        if (!AnyEntry(Waiting))
         {
             return;
         }
@@ -700,9 +728,70 @@ internal sealed class ImageSourceLoadingState
         }
     }
 
-    private static bool AnyWaiting()
+    /// <summary>
+    /// Confirms the priority of every load that started since the last completed pass, on the first
+    /// pass that can answer.
+    /// </summary>
+    /// <param name="host">The host whose tree the pass just settled.</param>
+    /// <remarks>
+    /// <para>
+    /// A load takes its priority when it is submitted, and one of the moments a load is submitted is
+    /// a completed pass - so a control whose tree only reached a host then reads "not in view"
+    /// because the host has no client area yet, and its load is submitted at
+    /// <see cref="AssetLoadPriority.Background"/>. The pass that finally can answer does not raise
+    /// the control's in-view change handler for it: registering establishes the baseline, and only a
+    /// later change is an event. Without this walk the priority would stay wrong until something
+    /// moved the control (section 6.1).
+    /// </para>
+    /// <para>
+    /// It confirms on the <i>next</i> pass rather than reading straight after <see cref="TryStart"/>,
+    /// because <c>EffectiveInViewState</c> caches its answer per pass and refreshes the controls it
+    /// watches from its own layout handler. Its subscription is made when the control's change
+    /// handler is added, which is before any load is submitted or waited on, so it runs before this
+    /// one: the read here is the value that handler settled for this pass. A read taken while
+    /// <see cref="TryStart"/> is still running - the pass the load starts on - would be the answer
+    /// from before that pass, or from a pass that could not answer at all.
+    /// </para>
+    /// <para>
+    /// A pass on a host with no client area says nothing, exactly as it does to the baseline, so it
+    /// does not consume the latch: the entry stays and the next pass that can answer confirms. The
+    /// entry is weak, so a control that dies first takes it with it, and it is removed when the load
+    /// ends another way, so nothing is left to confirm.
+    /// </para>
+    /// </remarks>
+    private static void ConfirmStarted(UiHost host)
     {
-        foreach (var _ in Waiting)
+        if (host.ClientSize.Width <= 0f || host.ClientSize.Height <= 0f || !AnyEntry(Confirming))
+        {
+            return;
+        }
+
+        var confirming = new List<(Image Image, ImageSourceLoadingState State)>();
+
+        foreach (KeyValuePair<Image, ImageSourceLoadingState> pair in Confirming)
+        {
+            // Only a control this pass laid out: another host's answer was not recomputed by it, and
+            // that host's own pass confirms instead.
+            if (ReferenceEquals(pair.Key.Host, host))
+            {
+                confirming.Add((pair.Key, pair.Value));
+            }
+        }
+
+        foreach (var (image, state) in confirming)
+        {
+            Confirming.Remove(image);
+            state.ApplyPriority(image);
+        }
+    }
+
+    /// <summary>True when a table has at least one live entry, without building a list for the
+    /// empty case that is the common one.</summary>
+    /// <param name="entries">The table to look in.</param>
+    /// <returns>True when there is something to walk.</returns>
+    private static bool AnyEntry(ConditionalWeakTable<Image, ImageSourceLoadingState> entries)
+    {
+        foreach (var _ in entries)
         {
             return true;
         }
@@ -712,6 +801,11 @@ internal sealed class ImageSourceLoadingState
 
     /// <summary>Moves a load's priority to whatever the control's visibility now says.</summary>
     /// <param name="image">The control.</param>
+    /// <remarks>
+    /// Called from the change handler and from the one-shot confirmation, which is why it is a method
+    /// rather than two assignments: a loader's setter guards on equality, so a confirmation that
+    /// agrees with what the load was submitted with raises nothing and re-orders nothing.
+    /// </remarks>
     private void ApplyPriority(Image image)
     {
         if (_loader is { } loader)
@@ -743,8 +837,34 @@ internal sealed class ImageSourceLoadingState
             Waiting.Add(image, this);
         }
 
-        _layoutSubscription ??= UiHost.AddLayoutCompletedHandler(static _ => OnLayoutCompleted());
+        EnsureLayoutSubscription();
     }
+
+    /// <summary>
+    /// Records the control as one whose started load is confirmed by the next completed pass that can
+    /// answer, and makes sure that pass will look.
+    /// </summary>
+    /// <param name="image">The control whose load just started.</param>
+    /// <remarks>
+    /// It is the same subscription <see cref="Wait"/> uses and not a second one. A load that starts
+    /// from inside that walk arms its entry during a pass, so the following pass is the first that can
+    /// confirm it; one that starts from the setter or from <see cref="Control.AddAddedToTreeHandler"/>
+    /// subscribes here, before any pass. The entry is a weak key, like every other table here, so a
+    /// control that is dropped before a pass can answer leaves nothing behind.
+    /// </remarks>
+    private void ArmConfirmation(Image image)
+    {
+        if (!Confirming.TryGetValue(image, out _))
+        {
+            Confirming.Add(image, this);
+        }
+
+        EnsureLayoutSubscription();
+    }
+
+    /// <summary>Subscribes the one layout notification both walks run from.</summary>
+    private static void EnsureLayoutSubscription() =>
+        _layoutSubscription ??= UiHost.AddLayoutCompletedHandler(static host => OnLayoutCompleted(host));
 
     /// <summary>Subscribes the priority mapping for the URI that is being followed.</summary>
     /// <param name="image">The control.</param>

@@ -615,6 +615,12 @@ be a second answer to a question that already has one, and a worse one: a hand-r
 "is my control in the viewport" would ignore occlusion, ignore ancestor clips, and need its own
 invalidation hook.
 
+The mapping is read at the start and then confirmed once on the next completed pass, rather than only
+from the change handler. It is still the one mapping read twice: a load can start on a pass that has
+no answer to give - the pass that attaches an unhosted tree, before the window has a client area - and
+the pass that finally can answer raises nothing, because it is the pass that establishes the baseline
+(6.1). Without the confirmation that load would keep the priority it was submitted with.
+
 ## 4. The two consequences of loader-owned sharing
 
 Sharing and per-consumer priority pull in opposite directions: one copy of the bytes, two controls that
@@ -920,6 +926,20 @@ inferred rather than written down:
   with no services and never hears about the window. The first completed pass is when that tree has
   reached a host, and it is when the load starts. This is the same rule as the re-attached control below
   rather than a special case: pending until the control can reach its services, then start or restart.
+- **A load started before the visibility answer exists takes the priority the confirming pass gives
+  it, not the one it was submitted with.** `Priority` is set at submission from `EffectiveInView`
+  (2.5), and submission can *be* that first layout pass - which, arriving before the window has a
+  client area, has nothing to say: every rectangle in it is empty, so the control reads out of view and
+  the load is submitted at `Background`. The pass that finally can answer cannot correct it either: the
+  first measurable pass establishes the baseline and deliberately raises no change ("registering
+  establishes the baseline; only a later change is an event"), so the change handler never runs for it.
+  The mapping is therefore confirmed once, on the next completed pass that can answer, and from then on
+  the change handler is the only thing that moves the load. A pass that still has no client area
+  consumes nothing - the confirmation waits for one that does, because applying the same unanswerable
+  read would spend the only correction there is - and a control that is genuinely off screen at the
+  confirming pass is confirmed at `Background`, because the confirmation is a read rather than a rule
+  that everything a pass touches is visible. After that one read the load is on
+  `AddEffectiveInViewChangedHandler` like every other.
 - **A new URI cancels the old load before starting the new one**, so the state goes `Loading ->
   Pending` directly and never passes through `None`: the control still has a URI, it is only a
   different one.
@@ -1198,7 +1218,11 @@ re-attached one starting again, `Disposing` releasing the loaded `ImageData`, th
 shown while pending and replaced or restored on load and on failure, both stale-completion shapes (a
 superseded request and a delivered result whose turn has not come), a failure carrying its exception
 with `SourceUri` intact, `Loaded` and `Failed` being raised after `Source` is settled, and the priority
-following `EffectiveInView`.
+following `EffectiveInView` - including the case a change-only mapping cannot reach: a load started on a
+pass that cannot answer taking the priority the next pass that can gives it, a further pass that cannot
+answer leaving that confirmation waiting rather than spending it, a control still off screen at the
+confirming pass staying `Background`, and a load that starts where the answer already exists being left
+where it is.
 
 One of those rules needs a turn held to be seen. On the delivered path the caller's continuation runs
 inline inside the manager's turn (3.12), so a superseded completion reaches the control as the
