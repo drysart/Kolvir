@@ -93,6 +93,7 @@ jobs:
           dotnet restore tests/features/Kolvir.Feature.AnimatedGif.Tests/Kolvir.Feature.AnimatedGif.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.AnimatedWebp.Tests/Kolvir.Feature.AnimatedWebp.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.AssetLoading.Tests/Kolvir.Feature.AssetLoading.Tests.csproj --nologo
+          dotnet restore tests/features/Kolvir.Feature.AssetLoading.Http.Tests/Kolvir.Feature.AssetLoading.Http.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.Badges.Tests/Kolvir.Feature.Badges.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.WoffFonts.Tests/Kolvir.Feature.WoffFonts.Tests.csproj --nologo
           dotnet restore tests/features/Kolvir.Feature.VirtualDom.Tests/Kolvir.Feature.VirtualDom.Tests.csproj --nologo
@@ -160,6 +161,23 @@ jobs:
           dotnet test tests/features/Kolvir.Feature.AssetLoading.Tests/Kolvir.Feature.AssetLoading.Tests.csproj --no-restore --nologo \
             --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
             --logger "trx;LogFileName=assetloading.trx" \
+            --results-directory "$RUNNER_TEMP/test-results" \
+            --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
+
+      # The HTTP loader's suite, in its own assembly for the same reason the loader is its own
+      # package. There is no network and no socket: a fake HttpMessageHandler is the transport, which
+      # is why an application-supplied handler is part of the public options rather than a test hook.
+      # Nothing sleeps - a request that must start is observed through the transport's own signal, and
+      # a response is completed by hand - so what it pins is the two limits, the runtime changes that
+      # admit queued work, the shared fetch, and the cancellation that aborts it only when the last
+      # handle leaves.
+      - name: Test the HTTP asset loading feature
+        shell: bash
+        run: |
+          set -o pipefail
+          dotnet test tests/features/Kolvir.Feature.AssetLoading.Http.Tests/Kolvir.Feature.AssetLoading.Http.Tests.csproj --no-restore --nologo \
+            --filter "TestCategory!=Platform.Win32&TestCategory!=Platform.AppKit&TestCategory!=Platform.Gtk4" \
+            --logger "trx;LogFileName=assetloading.http.trx" \
             --results-directory "$RUNNER_TEMP/test-results" \
             --blame-hang-timeout 5m 2>&1 | tee -a "$RUNNER_TEMP/test.log"
 

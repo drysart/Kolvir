@@ -1,0 +1,71 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- A feature package, in the four-folder layout of FEATURE-COST-POLICY.md section 4: `common/`
+       compiles into every target framework and each platform folder into the one framework that can
+       use it, so a single `dotnet pack` writes one `lib/` folder and one dependency group per
+       platform. Nothing in this assembly runs unless an application calls AddHttpAssetLoading(). -->
+  <PropertyGroup>
+    <!-- The frameworks a package ships for: every platform, which is what `dotnet pack` needs and what
+         the pack job asks for by name. Everything else gets the platform it is running on plus the
+         portable framework, from KolvirTargetFrameworks in Directory.Build.props, so a build only
+         needs the workload of the platform it is on. -->
+    <TargetFrameworks>$(KolvirTargetFrameworks)</TargetFrameworks>
+    <RootNamespace>Kolvir.Feature.AssetLoading.Http</RootNamespace>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <!-- AOT compatible for the same reason the library is: an application that opts in publishes the
+         same way whether it did or not. There is no reflection here - a URI is parsed with Uri, a
+         factory is asked through the interface that declares it, and System.Net.Http's request path
+         is hand-written metadata rather than a serializer reflection would have to discover - so
+         there is nothing for the trimmer to give up on and nothing that needs an interpreter. -->
+    <IsAotCompatible>true</IsAotCompatible>
+    <Description>HTTP asset loading for Kolvir: an asset loader factory that fetches http and https URIs and produces the decoded image the library's Image control draws.</Description>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\core\Kolvir\Kolvir.csproj" />
+    <!-- The interfaces, the factory contract and the manager are the whole point of the package; it
+         cannot be written without them. The reference is a package dependency in the build graph,
+         not bytes in a deliverable that never names the loader. -->
+    <ProjectReference Include="..\Kolvir.Feature.AssetLoading\Kolvir.Feature.AssetLoading.csproj" />
+  </ItemGroup>
+
+  <!-- The fetch, the handle and the capacity gate are internal: an application names
+       AddHttpAssetLoading() and the options, never the fetch, and nothing outside this assembly
+       should depend on how the in-flight map is kept. The tests drive the loader through the same
+       manager an application uses, and need the in-flight count to prove a completed fetch leaves no
+       cache behind, so this assembly grants exactly that to its own suite. -->
+  <ItemGroup>
+    <InternalsVisibleTo Include="Kolvir.Feature.AssetLoading.Http.Tests" />
+  </ItemGroup>
+
+  <!-- The four-folder layout: `common/` is compiled into every target framework by the default glob,
+       and each platform folder only into the one framework that can use it. A file added to
+       `common/` needs no build change, which is the point of doing it by folder. -->
+  <ItemGroup>
+    <Compile Remove="windows\**;linux\**;macos\**" />
+  </ItemGroup>
+
+  <!-- The three platform folders are empty, and that is the finding rather than an oversight: an HTTP
+       request is sockets, TLS and a message parser, all of which the runtime supplies on every
+       platform, and System.Net.Http is part of the shared framework so no package reference selects
+       one platform's transport. The folders stay because the layout is the package's shape - the
+       `lib/` folders and dependency groups come from these same inner builds either way - and
+       because a platform that grew a transport of its own would belong here.
+
+       This is also the first project in the repository to use System.Net.Http, and it costs nothing
+       at build time to say so: the reference is part of the shared framework, not a package, so the
+       only place its size shows up is the AOT measurement of FEATURE-COST-POLICY.md section 8. -->
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-windows'">
+    <Compile Include="windows\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0-macos'">
+    <Compile Include="macos\**\*.cs" />
+  </ItemGroup>
+
+  <ItemGroup Condition="'$(TargetFramework)' == 'net10.0'">
+    <Compile Include="linux\**\*.cs" />
+  </ItemGroup>
+
+</Project>
