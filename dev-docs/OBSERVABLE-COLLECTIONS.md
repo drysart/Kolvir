@@ -564,6 +564,9 @@ ObservableChangeBatch<TChange>       one collection's pending records, its batch
 ObservableKeyedDependencies<TKey>    the watched addresses: an entry per key holding that entry's
                                      handlers, created by a read inside a run, dropped when its last
                                      handler goes, and the thing a change walks to mark what moved
+ObservableKeyedDependency<TKey>      one watched address: the key it was read by and a byte saying
+                                     which collection, so the name a diagnostic prints is built when
+                                     it is asked for rather than kept for every address on screen
 ObservableShapeDependencies          the two sources every collection has: its shape, and its contents
 ```
 

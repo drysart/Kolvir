@@ -30,7 +30,7 @@ internal sealed class ObservableListDependencies<T>
 
     private readonly ObservableKeyedDependencies<int> _indexes = new(
         null,
-        index => $"index {index} of an observable list");
+        ObservableKeyedDependencyKind.Index);
 
     /// <summary>Publishes a read of the size.</summary>
     internal void PublishCount() => _shape.PublishCount();

@@ -29,16 +29,18 @@ internal sealed class ObservableKeyedDependencies<TKey>
     where TKey : notnull
 {
     private readonly Dictionary<TKey, ObservableDependency> _entries;
-    private readonly Func<TKey, string> _describe;
+    private readonly ObservableKeyedDependencyKind _kind;
     private readonly List<ObservableDependency> _marked = [];
 
     /// <summary>Creates an empty table for one collection.</summary>
     /// <param name="comparer">What decides that two keys are the same address.</param>
-    /// <param name="describe">How one key is named in a diagnostic.</param>
-    internal ObservableKeyedDependencies(IEqualityComparer<TKey>? comparer, Func<TKey, string> describe)
+    /// <param name="kind">Which collection this is, which is how an entry names itself in a diagnostic.
+    /// An entry keeps its key rather than a name built from it, because the name is only ever needed to
+    /// describe a refusal.</param>
+    internal ObservableKeyedDependencies(IEqualityComparer<TKey>? comparer, ObservableKeyedDependencyKind kind)
     {
         _entries = new Dictionary<TKey, ObservableDependency>(comparer ?? EqualityComparer<TKey>.Default);
-        _describe = describe;
+        _kind = kind;
     }
 
     /// <summary>The entries that anything is watching, which is what a mark walks.</summary>
@@ -142,8 +144,9 @@ internal sealed class ObservableKeyedDependencies<TKey>
         // this table dropped it.
         ObservableDependency? created = null;
 
-        created = new ObservableDependency(
-            _describe(key),
+        created = new ObservableKeyedDependency<TKey>(
+            key,
+            _kind,
             onWatched: () => Acquire(key, created!),
             onReleased: () => ReleaseEntry(key, created!));
 

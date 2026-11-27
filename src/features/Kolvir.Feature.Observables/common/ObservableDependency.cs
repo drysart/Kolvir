@@ -29,20 +29,26 @@ namespace Kolvir.Feature.Observables;
 /// <see cref="Adopt"/> for the case where something else took the row meanwhile.
 /// </para>
 /// </remarks>
-internal sealed class ObservableDependency : IObservableEventSource
+internal class ObservableDependency : IObservableEventSource
 {
-    private readonly string _description;
+    private readonly string? _description;
     private readonly Action? _onWatched;
     private readonly Action? _onReleased;
     private ImmutableArray<Action<IObservableEventSource>> _handlers = [];
     private ObservableDependency? _successor;
 
     /// <summary>Creates a dependency, telling its owner when it starts and stops being watched.</summary>
-    /// <param name="description">How it is named in a diagnostic.</param>
+    /// <param name="description">How it is named in a diagnostic, or null for a source that names itself
+    /// some other way - an entry per address keeps its key and builds the text on demand, because there
+    /// is one of those for every address a run watched and the text is only needed to describe a
+    /// refusal.</param>
     /// <param name="onWatched">What to call when a handler is added to an entry that had none, which is
     /// where an owner that dropped the entry puts it back. It must not raise.</param>
     /// <param name="onReleased">What to call when the last handler is removed. It must not raise.</param>
-    internal ObservableDependency(string description, Action? onWatched = null, Action? onReleased = null)
+    internal ObservableDependency(
+        string? description,
+        Action? onWatched = null,
+        Action? onReleased = null)
     {
         _description = description;
         _onWatched = onWatched;
@@ -180,5 +186,10 @@ internal sealed class ObservableDependency : IObservableEventSource
     private void RaiseToHandlers() => Observable.RaiseToHandlers(this, _handlers);
 
     /// <summary>What was read, for a diagnostic.</summary>
-    public override string ToString() => _description;
+    /// <remarks>
+    /// The only caller is the refusal message, so a source with no text of its own names its type rather
+    /// than saying nothing: an unnamed step in that message is worse than a vague one. The suppression is
+    /// only because <see cref="object.ToString"/> is annotated nullable and does not return null.
+    /// </remarks>
+    public override string ToString() => _description ?? base.ToString()!;
 }
