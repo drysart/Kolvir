@@ -31,6 +31,9 @@ public class Control : IDisposable
     private Action<object>? _textChanged;
     private Action<object>? _visibleChanged;
     private Action<object>? _enabledChanged;
+    private Action<object>? _addedToTree;
+    private Action<object>? _removedFromTree;
+    private Action<object>? _disposing;
     private Action<ContextMenuEventArgs>? _contextMenuOpening;
     private SKRect _bounds;
     private SKSize _desiredSize;
@@ -392,6 +395,128 @@ public class Control : IDisposable
         _enabledChanged -= handler;
     }
 
+    /// <summary>
+    /// Adds a handler that runs when the control joins a tree, which is the moment
+    /// <see cref="Parent"/> goes from null to a control. Work that was started for a control and
+    /// outlives the render that created it - an asset load, for one - starts here.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
+    /// <remarks>
+    /// <para>
+    /// A move from one parent to another is a removal and then an addition, and this pair raises
+    /// both: <see cref="ControlCollection"/> clears the old parent before it sets the new one, so a
+    /// reparent is two notifications rather than one. A consumer is expected to cancel its work on
+    /// <see cref="AddRemovedFromTreeHandler"/> and start again here, rather than treat the two as
+    /// a single "parent changed" notification.
+    /// </para>
+    /// <para>
+    /// Assigning the same parent again raises nothing, because the setter returns without doing
+    /// anything when the reference has not changed.
+    /// </para>
+    /// <para>
+    /// The handler runs inside the assignment that caused it and may re-enter the tree - adding or
+    /// removing controls, including this one - so it must not assume a quiescent tree. An
+    /// exception it throws propagates to whatever changed the tree, exactly as every other handler
+    /// pair on this class does.
+    /// </para>
+    /// <para>
+    /// This says the control joined a tree, not that it reached a window: attaching a tree to a
+    /// <see cref="UiHost"/> changes <see cref="Host"/> for the whole subtree without raising this
+    /// notification or <see cref="AddRemovedFromTreeHandler"/>.
+    /// </para>
+    /// </remarks>
+    public IDisposable AddAddedToTreeHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _addedToTree += handler;
+        return new HandlerToken<Action<object>>(RemoveAddedToTreeHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddAddedToTreeHandler"/> added.</summary>
+    public void RemoveAddedToTreeHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _addedToTree -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs when the control leaves its tree, which is the moment
+    /// <see cref="Parent"/> goes from a control to null. It is the signal to cancel work that was
+    /// started for a control the user can no longer see.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
+    /// <remarks>
+    /// <para>
+    /// Removal is not disposal: the virtual DOM's reconciler detaches what it unmounts and leaves
+    /// the control alive and reusable, so for a control that is out of the UI but not finished this
+    /// is the only notification there is.
+    /// </para>
+    /// <para>
+    /// A reparent raises this and then <see cref="AddAddedToTreeHandler"/>, in that order, because
+    /// <see cref="ControlCollection"/> clears the old parent before setting the new one. Assigning
+    /// the same parent again raises nothing. The handler runs inside the assignment and may
+    /// re-enter the tree, so it must not assume a quiescent tree; an exception it throws propagates
+    /// to whatever changed the tree.
+    /// </para>
+    /// <para>
+    /// Disposing a parent removes each child before it disposes it, so a child sees this
+    /// notification before <see cref="AddDisposingHandler"/>'s.
+    /// </para>
+    /// <para>
+    /// This is not "out of the UI" in the window sense. <see cref="Host"/> is resolved through the
+    /// parent chain, and <see cref="UiHost"/> attachment touches only the root, so a subtree's
+    /// <see cref="Host"/> starts and stops answering without either tree notification. A control
+    /// that has to know about window attachment watches <see cref="Host"/> itself.
+    /// </para>
+    /// </remarks>
+    public IDisposable AddRemovedFromTreeHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _removedFromTree += handler;
+        return new HandlerToken<Action<object>>(RemoveRemovedFromTreeHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddRemovedFromTreeHandler"/> added.</summary>
+    public void RemoveRemovedFromTreeHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _removedFromTree -= handler;
+    }
+
+    /// <summary>
+    /// Adds a handler that runs once when the control is disposed, before the resources it owns
+    /// are released, so that it can still cancel outstanding work and read the control.
+    /// </summary>
+    /// <param name="handler">The handler, which receives the control.</param>
+    /// <returns>A subscription that removes the handler when it is disposed.</returns>
+    /// <remarks>
+    /// <para>
+    /// Raised from <see cref="Dispose()"/>. A control disposed twice raises it once, because the
+    /// disposal guard is what stops the second call. A parent's disposal detaches and then disposes
+    /// each child, so a child sees <see cref="AddRemovedFromTreeHandler"/> before this.
+    /// </para>
+    /// <para>
+    /// The control is still usable while the handler runs, but only until it returns: the resources
+    /// registered with <see cref="Own{T}"/> are released immediately afterwards. An exception it
+    /// throws propagates to the caller of <see cref="Dispose()"/>.
+    /// </para>
+    /// </remarks>
+    public IDisposable AddDisposingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _disposing += handler;
+        return new HandlerToken<Action<object>>(RemoveDisposingHandler, handler);
+    }
+
+    /// <summary>Removes a handler that <see cref="AddDisposingHandler"/> added.</summary>
+    public void RemoveDisposingHandler(Action<object> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+        _disposing -= handler;
+    }
+
     /// <summary>Diagnostic name; defaults to the type name.</summary>
     public string Name { get; set; }
 
@@ -657,6 +782,12 @@ public class Control : IDisposable
     /// container, or removing it, is what sets it, and the change re-reads the inherited enabled,
     /// displayed and appearance state for the whole subtree.
     /// </summary>
+    /// <remarks>
+    /// Every change from null to a control raises <see cref="AddAddedToTreeHandler"/>, and every
+    /// change from a control to null raises <see cref="AddRemovedFromTreeHandler"/>, after the
+    /// inherited state has been re-read. Assigning the reference that is already there raises
+    /// neither.
+    /// </remarks>
     public Control? Parent
     {
         get => _parent;
@@ -666,6 +797,8 @@ public class Control : IDisposable
             {
                 return;
             }
+
+            var wasAttached = _parent is not null;
 
             _parent = value;
 
@@ -679,6 +812,18 @@ public class Control : IDisposable
             // control now sits, so what the old chain contributed is no longer the answer. The
             // layout follows from the add or remove that moved it.
             InvalidateAppearanceTree();
+
+            // Announced last, so a handler that asks Parent, Host or Services sees the tree it is
+            // being told about rather than the one it is leaving. The guard above is what makes a
+            // reassignment of the same parent raise nothing.
+            if (value is null)
+            {
+                _removedFromTree?.Invoke(this);
+            }
+            else if (!wasAttached)
+            {
+                _addedToTree?.Invoke(this);
+            }
         }
     }
 
@@ -3580,6 +3725,11 @@ public class Control : IDisposable
 
         if (disposing)
         {
+            // Before the resources go, so a handler can still cancel its work and read the
+            // control. The guard above is what limits this to one call for a control disposed
+            // twice.
+            _disposing?.Invoke(this);
+
             if (_resources is not null)
             {
                 // Reverse order, so whatever was built on top of something else goes first.
