@@ -5,10 +5,10 @@ for `Kolvir.Feature.AssetLoading`, which ships the manager and the `Image` integ
 (section 7). The measurement that `FEATURE-COST-POLICY.md` asks every feature to state comes with the
 code, not with this note.
 
-It builds on three things core now has or is getting: `Control`'s tree-lifetime notifications
-(`AddedToTree`, `RemovedFromTree`, `Disposing`), which are merged; `Image`'s `Source` change
-notification, which is decided and in progress (6); and the virtual DOM's reconciler disposing the
-controls it removes, which is decided and in progress (6.2).
+It builds on what core now has or is getting: `Control`'s tree-lifetime notifications (`AddedToTree`,
+`RemovedFromTree`, `Disposing`), which are merged; `Image`'s `Source` change notification, which is
+decided and in progress (6); the virtual DOM's reconciler disposing the controls it removes, decided and
+in progress (6.2); and `Window` disposing its tree when it tears down, decided and in progress (6.2).
 
 This records a design that was settled in review before it was written down. Sections 2 to 4 are the
 decided shape and the reasons for it; section 5 is what the manager does, in the order it does it;
@@ -205,6 +205,19 @@ Two consequences are worth stating rather than leaving to be discovered:
   `services.AddHttpAssetLoaders()` would stand on its own. That is a rule to confirm with the first
   loader rather than something decided here; what must not happen today is a reader concluding that the
   infrastructure call is mandatory and ordering-sensitive.
+
+**The manager and the factories are singletons.** The manager holds the queue across windows, and a
+factory holds the counting state its loaders coordinate through, so both are process-wide by definition
+rather than per window or per application session. `AddAssetLoaderFactory(instance)` is therefore the
+natural registration, because a factory already is one. A scoped registration would be a captive
+dependency - the container catches that with `ValidateScopes` only in `Debug`
+(`src/core/Kolvir/Application/Application.cs:39-44`), so it is a development tripwire rather than a
+guarantee.
+
+Nothing here needs a window hook either: a window that closes disposes its tree, so a load started for a
+closed window is cancelled by the same `Disposing` notification every other end uses (6.2). That is what
+keeps `AddAssetLoading()` infrastructure-only rather than infrastructure plus a window lifecycle
+register.
 
 ### 2.3 The provider
 
@@ -755,6 +768,12 @@ directly (2), which is the general path.
   notification around its own writes, which is why this rule needs the notification below rather than a
   property read.
 
+**Assigning `Source` and `SourceUri` in the same render is undefined.** Each is legitimate alone; a render
+that assigns both is asking the feature two questions it cannot answer together, and that is the
+application's bug rather than a case the feature resolves. What it does is whatever the assignment order
+in the render produces, and that is deliberately not a contract - detecting it would mean a general
+validation pass over generated nodes, which is a system this feature does not justify (section 8).
+
 That last rule is the one that needs a core change, and it is the same argument 6.2 had to win for
 `Control`, on one control instead of on the base class: `Image.Source` is a plain property with a
 reference-equality guard and no notification to anything (`src/core/Kolvir/Controls/Image.cs:65-87`), so
@@ -797,12 +816,16 @@ updated when the state change is raised, so a handler that assigns `PlaceholderS
 writing the image that stays on screen - the loaded image in the first case, the placeholder in the
 second. 6.1 lists this with the ordering rules.
 
-**Set.** Resolve `IAssetLoaderProvider` through `Control.Services` (which is `Host?.Services`,
-`src/core/Kolvir/Core/Control.cs`) - not through a window, not through a static. Ask it for an
-`ImageData` loader for the URI, submit it to `IAssetLoadManager`, and on completion assign
-`Image.Source` and raise the state change. A new URI cancels the outstanding load: the token source,
-the loader, and the InView handler token all go. Removal and disposal are the other two ways a load
-stops, and both are now notifications the package subscribes to rather than gaps (6.2).
+**Set.** The setter accepts the URI and goes no further than `Pending`. Before the control is in a tree
+there is nothing to resolve a factory or a manager from - `Control.Services` is null - so the URI is
+recorded and the load is not started. It starts when the control joins a tree (`AddedToTree`, the same
+event 6.2 leans on), or immediately if it is already in one, and from there: resolve
+`IAssetLoaderProvider` through `Control.Services` (which is `Host?.Services`,
+`src/core/Kolvir/Core/Control.cs`) - not through a window, not through a static - ask it for an
+`ImageData` loader for the URI, submit it to `IAssetLoadManager`, and on completion assign `Image.Source`
+and raise the state change. A new URI cancels the outstanding load: the token source, the loader, and the
+InView handler token all go. Removal and disposal are the other two ways a load stops, and both are now
+notifications the package subscribes to rather than gaps (6.2).
 
 **Retry is two assignments, and that is the whole API for it.** `SourceUri = null` ends the relationship:
 the outstanding load is cancelled, the loaded image is disposed, and the control has no image of the
@@ -843,6 +866,10 @@ inferred rather than written down:
 
 - **`Pending` is set before `manager.LoadAsync` is called, not after it returns.** A synchronous start
   calls back from inside that call (2.4), so the control must already be waiting when it does.
+- **A URI assigned before the control is in a tree waits at `Pending`.** `Control.Services` is null until
+  the control is attached, so the setter records the URI, sets `Pending` and starts nothing; `AddedToTree`
+  is where it starts. This is the same rule as the re-attached control below rather than a special case:
+  pending until the control can reach its services, then start or restart.
 - **A new URI cancels the old load before starting the new one**, so the state goes `Loading ->
   Pending` directly and never passes through `None`: the control still has a URI, it is only a
   different one.
@@ -905,7 +932,8 @@ The consequence was worse than a leaked `ImageData`: the completion continuation
 control and the manager holds the handle, so an in-flight load kept a removed control reachable and ran
 to completion with nothing to cancel it.
 
-**Decided: two mechanisms, built for different reasons, overlapping on purpose.**
+**Decided: the notification, plus owners disposing what they own.** They were built for different reasons
+and now overlap on purpose.
 
 - **`Control` tells a subtree about all three moments** (merged): `AddRemovedFromTreeHandler` fires when
   `Parent` goes from a control to null, `AddAddedToTreeHandler` when it goes back, and
@@ -918,6 +946,12 @@ to completion with nothing to cancel it.
   creates a new one. That change is decided and in progress in its own PR. This is the *owner* doing
   the obvious thing, and it is not a substitute for the notification - it is what makes sure the end
   actually happens for reconciler-owned controls.
+- **A closing window disposes its tree.** `Window` is the logical root of the control tree, and
+  `Control.Dispose` already disposes children recursively, so tearing a window down disposes
+  `Window.Content` - after the backend, before the window's own service scope ends. That change is
+  decided and in progress, in the same shape as the reconciler one, and its consequence for this note is
+  the one that matters: a closed window's in-flight loads cancel through `Disposing` like any other, so
+  the feature needs no window hook and `AddAssetLoading()` stays infrastructure-only (2.2).
 
 **Why disposing on unmount is safe.** The caveat sounds like there is a remove-and-add-elsewhere path a
 disposal would break, and there is not:
@@ -1044,6 +1078,8 @@ decision turns on.
 | Letting "disposed" stand in for "removed" | Removal and disposal are separate signals now (`RemovedFromTree` and `Disposing`), and a control removed by application code never sees the second; one cannot stand in for the other (6.2). |
 | Accepting the gap and documenting it | A removed control's load would run to completion with nothing to cancel it - a wasted fetch per in-flight load, and the control held alive until it ended. The two mechanisms in 6.2 close it, so there is nothing left to accept. |
 | A set-only `SourceUri` extension property | The generator skips it: it reads the pristine value back through a public getter (6). |
+| A generator diagnostic for `Source` and `SourceUri` in one render | Detecting it means a general validation pass over generated nodes; the case is an application bug, and it is recorded as undefined rather than contracted (6). |
+| A window hook to cancel loads when a window closes | A closing window disposes its tree, so `Disposing` already covers it and the package needs no lifecycle registration (6.2). |
 | Leaving `Source` and `SourceUri` independent | A completion would silently overwrite an image the application assigned, and the application could not tell whether the control was still following the URI (6). |
 | Restarting the load on every `SourceUri` assignment | A render re-applies changed properties and an imperative caller may set the same value every frame, so the setter has to be idempotent or a permanent failure becomes a retry storm; the guard is also what makes the two-assignment retry deliberate (6.1, 6). |
 | `RetrySourceLoad()`, a method for retry | Two assignments already express it, and the null is a real state change so nothing can trigger either half by accident; a method would be a second way to say "load this" on a surface that already has one (6, 6.1). |
