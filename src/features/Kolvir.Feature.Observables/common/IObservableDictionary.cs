@@ -47,9 +47,11 @@ public interface IObservableDictionary<TKey, TValue>
     /// Redeclared rather than merely inherited, and that is a language requirement rather than a style
     /// choice: <see cref="IDictionary{TKey, TValue}"/> and
     /// <see cref="IReadOnlyObservableDictionary{TKey, TValue}"/> both bring a <c>Count</c>, so a caller of
-    /// <c>dictionary.Count</c> through this interface would be told the call is ambiguous. Six members get
-    /// this treatment - <c>Count</c>, the indexer, <c>Keys</c>, <c>Values</c>, <c>ContainsKey</c> and
-    /// <c>TryGetValue</c> - because a dictionary is the collection whose two shapes overlap the most.
+    /// <c>dictionary.Count</c> through this interface would be told the call is ambiguous. Seven members
+    /// get this treatment - <c>Count</c>, the indexer, <c>Keys</c>, <c>Values</c>, <c>ContainsKey</c>,
+    /// <c>TryGetValue</c> and <c>Contains(KeyValuePair)</c> - because a dictionary is the collection whose
+    /// two shapes overlap the most, and the last of them arrives with the set base the read-only interface
+    /// gained (section 7.7).
     /// </para>
     /// <para>
     /// Reading publishes the structure dependency, so an expression over the size is re-run when a key is
@@ -118,6 +120,33 @@ public interface IObservableDictionary<TKey, TValue>
     /// <remarks>Redeclared for the reason <see cref="Count"/> gives. Publishes the key's dependency before
     /// answering, whether or not the key is there.</remarks>
     new bool TryGetValue(TKey key, out TValue value);
+
+    /// <summary>Whether <paramref name="item"/> is in the dictionary - that key, with that value.</summary>
+    /// <param name="item">The key, and the value it must have.</param>
+    /// <returns>True when the key is present under the dictionary's comparer and its value equals the
+    /// pair's.</returns>
+    /// <exception cref="ObjectDisposedException">The dictionary is disposed.</exception>
+    /// <remarks>
+    /// <para>
+    /// Redeclared for the reason <see cref="Count"/> gives, and it is the one the set base added:
+    /// <see cref="ICollection{T}"/> has brought this member all along, and
+    /// <see cref="IReadOnlyObservableSet{T}"/> now brings it a second way, through
+    /// <see cref="IReadOnlyObservableDictionary{TKey, TValue}"/>. Identical signatures down two unrelated
+    /// paths make <c>dictionary.Contains(pair)</c> ambiguous for a caller of this interface, so this
+    /// declaration is the one that wins - and it is the same member for all three.
+    /// </para>
+    /// <para>
+    /// It adds no capability and does not make the writable dictionary a set: there is no
+    /// <see cref="IObservableSet{T}"/> base here, no set handler and no set algebra. It is only a name for
+    /// the member <see cref="ICollection{T}"/> already required, and the set view's reading of the pair is
+    /// what both answer with (section 7.7).
+    /// </para>
+    /// <para>
+    /// Reading publishes the contents dependency before answering, because it asks about a value as well
+    /// as a key, and the key half is asked under the dictionary's own comparer.
+    /// </para>
+    /// </remarks>
+    new bool Contains(KeyValuePair<TKey, TValue> item);
 
     /// <summary>How many batches are open. Zero outside any batch.</summary>
     /// <remarks>

@@ -20,12 +20,24 @@ namespace Kolvir.Feature.Observables;
 /// (dev-docs/OBSERVABLE-COLLECTIONS.md section 7.5).
 /// </para>
 /// <para>
-/// <b>There is no <typeparamref name="TOuter"/> comparer.</b> The key is the identity and the value is
-/// not, so a dictionary may hold the same value under two keys and that is a normal dictionary. The
-/// view is therefore built with <c>_inner.Comparer</c> and <see cref="Comparer"/> answers that same key
-/// comparer - what decides which entries are the same entry, exactly as
-/// <see cref="IReadOnlyObservableDictionary{TKey, TValue}"/> requires. <typeparamref name="TOuter"/> is
-/// unconstrained for the same reason: a value may be null.
+/// <b>The key is the dictionary's identity; the pair is the set view's.</b> A dictionary may hold the
+/// same value under two keys and that is a normal dictionary, so there is no <typeparamref name="TOuter"/>
+/// comparer for which entries are the same entry: the view is built with <c>_inner.Comparer</c> and
+/// <see cref="Comparer"/> answers that same key comparer - what decides which entries are the same entry,
+/// exactly as <see cref="IReadOnlyObservableDictionary{TKey, TValue}"/> requires.
+/// <typeparamref name="TOuter"/> is unconstrained for the same reason: a value may be null. The set view
+/// is a different question, answered by the pair comparer: the key under the source's comparer and the
+/// mapped value under equality, so <c>{"a" to "X"}</c> and <c>{"a" to "Y"}</c> are two elements
+/// (dev-docs/OBSERVABLE-COLLECTIONS.md section 7.7).
+/// </para>
+/// <para>
+/// <b>The set view is a second stream over the mapped records.</b> The view is also an
+/// <see cref="IReadOnlyObservableSet{T}"/> of its pairs, so it carries a set batch beside the dictionary
+/// batch and an internal handler on that batch: every delivered mapped dictionary event is translated into
+/// the set records a set observer hears, through <see cref="ObservableDictionaryPairSet{TKey, TValue}"/>.
+/// The set event therefore cannot describe a change the dictionary event did not, and an untracked mapped
+/// event - which is what a resync records - becomes an untracked set event rather than being described
+/// anyway.
 /// </para>
 /// <para>
 /// <b>The mapping is eager and cached.</b> A <see cref="Dictionary{TKey, TValue}"/> keyed by the source
@@ -97,15 +109,21 @@ namespace Kolvir.Feature.Observables;
 /// </remarks>
 public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
     : IReadOnlyObservableDictionary<TKey, TOuter>,
-      IObservableChangeTarget<ObservableDictionaryChange<TKey, TOuter>, ObservableDictionaryChangedEventArgs<TKey, TOuter>>
+      IObservableChangeTarget<ObservableDictionaryChange<TKey, TOuter>, ObservableDictionaryChangedEventArgs<TKey, TOuter>>,
+      IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>
     where TKey : notnull
 {
     private readonly IReadOnlyObservableDictionary<TKey, TInner> _inner;
     private readonly Func<TInner, TOuter> _selector;
     private readonly Action<ObservableDictionaryChangedEventArgs<TKey, TInner>> _onInnerChanged;
     private readonly Dictionary<TKey, TOuter> _items;
+
+    /// <summary>What decides that two mapped entries are the same element of the set view.</summary>
+    private readonly IEqualityComparer<KeyValuePair<TKey, TOuter>> _pairComparer;
+
     private readonly ObservableDictionaryDependencies<TKey, TOuter> _dependencies;
     private readonly ObservableChangeBatch<ObservableDictionaryChange<TKey, TOuter>, ObservableDictionaryChangedEventArgs<TKey, TOuter>> _batch;
+    private readonly ObservableChangeBatch<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>> _setBatch;
 
     /// <summary>Creates a view over <paramref name="inner"/>, projecting each value with
     /// <paramref name="selector"/>.</summary>
@@ -138,7 +156,17 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
 
         // The cache's own comparer, which is the source's - the dependencies have to key by the same rule.
         _dependencies = new ObservableDictionaryDependencies<TKey, TOuter>(_items.Comparer);
+
+        // The set view's identity: the key under that same comparer, the mapped value under equality.
+        _pairComparer = ObservableDictionaryPairSet<TKey, TOuter>.CreateComparer(_items.Comparer);
+
         _batch = new(this);
+        _setBatch = new(this);
+
+        // Before the source is subscribed and before any external handler, so the set stream is recorded
+        // from the same mapped record the dictionary handlers are about to hear. The batch owns the
+        // registration and drops it on disposal; there is nothing to unregister separately.
+        _batch.AddHandler(OnMappedChanged);
 
         foreach (var item in inner)
         {
@@ -155,13 +183,21 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
     /// </remarks>
     public bool IsDisposed => _batch.IsDisposed;
 
-    /// <inheritdoc/>
+    /// <summary>What decides that two keys are the same key.</summary>
     /// <remarks>
     /// A constant of the view and not a read of anything, so it publishes no dependency and stays
-    /// readable once the view is dead. It is the source's key comparer, because the key is the identity
-    /// here and the value is not - there is no outer comparer, and two keys may hold equal values.
+    /// readable once the view is dead. It is the source's key comparer, because the key is the dictionary's
+    /// identity here and the value is not - two keys may hold equal values.
     /// </remarks>
     public IEqualityComparer<TKey> Comparer => _inner.Comparer;
+
+    /// <summary>What decides that two mapped pairs are the same element of the set view.</summary>
+    /// <remarks>
+    /// Explicit because this one is not the member a dictionary caller sees: the public
+    /// <see cref="Comparer"/> above is the key comparer, and this is the set base's, hidden by it.
+    /// </remarks>
+    IEqualityComparer<KeyValuePair<TKey, TOuter>> IReadOnlyObservableSet<KeyValuePair<TKey, TOuter>>.Comparer =>
+        _pairComparer;
 
     /// <inheritdoc/>
     /// <remarks>Publishes the structure dependency: raised by a key arriving, a key leaving, or a clear,
@@ -267,15 +303,16 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
     /// <remarks>
     /// Not on <see cref="IReadOnlyDictionary{TKey, TValue}"/>, kept as the counterpart of the other two
     /// views' scans and of the dictionary's own <c>Contains(KeyValuePair)</c>.
-    /// Publishes the contents dependency, because it asks about a value as well as a key, and delegates
-    /// to the storage so the BCL's equality rules are the ones that answer.
+    /// Publishes the contents dependency, because it asks about a value as well as a key, and answers with
+    /// the set view's rule: the key must be present under the source's comparer and its value must equal
+    /// the pair's (dev-docs/OBSERVABLE-COLLECTIONS.md section 7.7).
     /// </remarks>
     public bool Contains(KeyValuePair<TKey, TOuter> item)
     {
         ThrowIfDisposed();
 
         _dependencies.PublishContents();
-        return ((ICollection<KeyValuePair<TKey, TOuter>>)_items).Contains(item);
+        return ObservableDictionaryPairSet<TKey, TOuter>.Contains(_items, item);
     }
 
     /// <summary>Copies every entry into <paramref name="array"/>, starting at
@@ -314,6 +351,68 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
     IEnumerator IEnumerable.GetEnumerator() => GetEnumerator();
 
     /// <inheritdoc/>
+    /// <remarks>Publishes the contents dependency, because it answers from every pair on at least one
+    /// side. The pair comparer is the set view's, so the same keys with a different mapped value on either
+    /// side make the answer false (section 7.7).</remarks>
+    public bool SetEquals(IEnumerable<KeyValuePair<TKey, TOuter>> other)
+    {
+        ThrowIfDisposed();
+
+        _dependencies.PublishContents();
+        return ObservableDictionaryPairSet<TKey, TOuter>.SetEquals(_items, _pairComparer, other);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Publishes the contents dependency, for the reason <see cref="SetEquals"/> gives.</remarks>
+    public bool IsSubsetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other)
+    {
+        ThrowIfDisposed();
+
+        _dependencies.PublishContents();
+        return ObservableDictionaryPairSet<TKey, TOuter>.IsSubsetOf(_items, _pairComparer, other);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Publishes the contents dependency, for the reason <see cref="SetEquals"/> gives.</remarks>
+    public bool IsSupersetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other)
+    {
+        ThrowIfDisposed();
+
+        _dependencies.PublishContents();
+        return ObservableDictionaryPairSet<TKey, TOuter>.IsSupersetOf(_items, other);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Publishes the contents dependency, for the reason <see cref="SetEquals"/> gives.</remarks>
+    public bool IsProperSubsetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other)
+    {
+        ThrowIfDisposed();
+
+        _dependencies.PublishContents();
+        return ObservableDictionaryPairSet<TKey, TOuter>.IsProperSubsetOf(_items, _pairComparer, other);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Publishes the contents dependency, for the reason <see cref="SetEquals"/> gives.</remarks>
+    public bool IsProperSupersetOf(IEnumerable<KeyValuePair<TKey, TOuter>> other)
+    {
+        ThrowIfDisposed();
+
+        _dependencies.PublishContents();
+        return ObservableDictionaryPairSet<TKey, TOuter>.IsProperSupersetOf(_items, _pairComparer, other);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Publishes the contents dependency, for the reason <see cref="SetEquals"/> gives.</remarks>
+    public bool Overlaps(IEnumerable<KeyValuePair<TKey, TOuter>> other)
+    {
+        ThrowIfDisposed();
+
+        _dependencies.PublishContents();
+        return ObservableDictionaryPairSet<TKey, TOuter>.Overlaps(_items, other);
+    }
+
+    /// <inheritdoc/>
     public IDisposable AddObservableDictionaryChangedHandler(
         Action<ObservableDictionaryChangedEventArgs<TKey, TOuter>> handler)
     {
@@ -329,6 +428,29 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
         ArgumentNullException.ThrowIfNull(handler);
 
         _batch.RemoveHandler(handler);
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>
+    /// The set view's handlers are registered on a batch of their own, exactly as the dictionary's are, so
+    /// the token, the tolerance of a repeated removal and the refusal once the view is disposed are the
+    /// same and come from the same place.
+    /// </remarks>
+    public IDisposable AddObservableSetChangedHandler(
+        Action<ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        return _setBatch.AddHandler(handler);
+    }
+
+    /// <inheritdoc/>
+    public void RemoveObservableSetChangedHandler(
+        Action<ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>> handler)
+    {
+        ArgumentNullException.ThrowIfNull(handler);
+
+        _setBatch.RemoveHandler(handler);
     }
 
     /// <summary>
@@ -360,7 +482,14 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
         }
         finally
         {
-            _batch.Dispose();
+            try
+            {
+                _batch.Dispose();
+            }
+            finally
+            {
+                _setBatch.Dispose();
+            }
         }
     }
 
@@ -401,6 +530,65 @@ public sealed class ObservableMappedReadOnlyDictionaryView<TKey, TInner, TOuter>
     /// <inheritdoc/>
     void IObservableChangeTarget<ObservableDictionaryChange<TKey, TOuter>, ObservableDictionaryChangedEventArgs<TKey, TOuter>>.ReleaseDependencies() =>
         _dependencies.Release();
+
+    /// <inheritdoc/>
+    int IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>.Size =>
+        _items.Count;
+
+    /// <inheritdoc/>
+    ObservableSetChange<KeyValuePair<TKey, TOuter>>
+        IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>.Untracked =>
+        ObservableSetChange<KeyValuePair<TKey, TOuter>>.Untracked();
+
+    /// <inheritdoc/>
+    bool IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>.IsUntracked(
+        in ObservableSetChange<KeyValuePair<TKey, TOuter>> change) =>
+        change.ChangeType == ObservableSetChangeType.UntrackedChanges;
+
+    /// <summary>The argument for one set delivery, naming this view as the set that changed.</summary>
+    /// <remarks>
+    /// <see cref="ObservableSetChangedEventArgs{T}.Set"/> is therefore the view itself, which is the same
+    /// object the caller was handed and not a second stand-in for it.
+    /// </remarks>
+    ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>
+        IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>.CreateArgs(
+            IReadOnlyList<ObservableSetChange<KeyValuePair<TKey, TOuter>>> changes) =>
+        new(this, changes);
+
+    /// <summary>Marks nothing, because the set view publishes the dictionary view's dependencies.</summary>
+    /// <remarks>
+    /// There is no second dependency set here on purpose. Every set question is answered from the mapped
+    /// cache - <c>Contains(pair)</c> and the six algebra questions publish the contents dependency this view
+    /// already has - and every set record exists because a mapped dictionary record did, so the dictionary
+    /// batch's own delivery marks exactly what a set reader is watching.
+    /// </remarks>
+    void IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>.Mark(
+        IReadOnlyList<ObservableSetChange<KeyValuePair<TKey, TOuter>>> changes,
+        int size)
+    {
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Nothing to raise, for the reason <c>Mark</c> gives.</remarks>
+    void IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>.RaiseDependencies()
+    {
+    }
+
+    /// <inheritdoc/>
+    /// <remarks>Nothing to release, for the reason <c>Mark</c> gives: the dependencies belong to the
+    /// dictionary view, and its own batch releases them.</remarks>
+    void IObservableChangeTarget<ObservableSetChange<KeyValuePair<TKey, TOuter>>, ObservableSetChangedEventArgs<KeyValuePair<TKey, TOuter>>>.ReleaseDependencies()
+    {
+    }
+
+    /// <summary>Records the set records one delivered mapped dictionary event describes.</summary>
+    /// <param name="args">The event the dictionary handlers are being called with.</param>
+    /// <remarks>
+    /// The one empty event - the one a disposal delivers - carries nothing and is ignored here; the set
+    /// batch delivers its own final event when the view's disposal reaches it.
+    /// </remarks>
+    private void OnMappedChanged(ObservableDictionaryChangedEventArgs<TKey, TOuter> args) =>
+        ObservableDictionaryPairSet<TKey, TOuter>.RecordChanges(_setBatch, args.Changes);
 
     /// <summary>Translates what the source delivered into the mapped record stream, and delivers it once.</summary>
     /// <remarks>
