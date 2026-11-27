@@ -692,12 +692,19 @@ Two things make that contract workable rather than fragile:
 - **The count moves at submission, not at first byte.** A load is counted when its `LoadAsync` returns
   its task, synchronously, so the gate read immediately after the manager starts a load reflects it.
   A walk therefore cannot overshoot by starting everything in one pass while the gates still say yes.
-- **"Ask again" is scoped to the affected waiters.** With per-domain limits, a slot freeing on one
-  domain should notify that domain's handles and no others; otherwise every scroll re-walks the whole
-  queue for a slot that was never theirs. Each handle raises its own `CanLoadNowChanged` when its own
-  domain has room, so the manager hears "one of your queued loaders may start now", which is the only
-  thing it can act on. It raises it from whatever thread freed the slot - the fetch's - and 3.12 is
-  why that is legal rather than a bug.
+- **"Ask again" is scoped to the cap that was binding.** Notifying every queued handle on every
+  completion would re-walk the whole queue for a slot that was never theirs, so a freed slot wakes the
+  waiters it can actually admit - but with two limits the set is not the same for both. A **per-domain**
+  slot only admits work on that domain: a freed per-domain slot wakes that domain's handles and no
+  others. A **total** slot admits work on any domain: a freed total slot wakes every handle, because
+  the one it can admit may well be on a host whose own limit was never the problem. Notifying only the
+  freed host's waiters when the total was the binding cap leaves the rest of the queue stalled behind a
+  slot any of them could have taken, which is the failure mode a second limit exists to avoid - the
+  gate would say yes to them and nothing would ask again. So the scope follows the cap that was
+  binding, not the fetch that ended, and a fetch that was binding both wakes everyone. Each handle
+  raises its own `CanLoadNowChanged`, so the manager hears "one of your queued loaders may start now",
+  which is the only thing it can act on. It raises it from whatever thread freed the slot - the
+  fetch's - and 3.12 is why that is legal rather than a bug.
 
 A reusable gate helper - a counter, a change notification, and the per-key refcounting - is probably
 worth shipping so that every https-style factory does not reimplement it. It is open question 9.1, not

@@ -54,4 +54,26 @@ public sealed class HttpAssetLoadFailureTests : HttpAssetLoadingTestBase
 
         await Assert.ThrowsExactlyAsync<HttpRequestException>(async () => await task);
     }
+
+    [TestMethod]
+    public async Task ARequestThatOutlivesItsTimeoutFailsTheCallerWithATimeout()
+    {
+        // One tick rather than a wait: the transport never answers, the deadline fires as soon as the
+        // runtime runs its timer, and the test only awaits the task that already has to end. Nothing
+        // here sleeps or measures an interval.
+        var options = new HttpAssetLoaderOptions { Timeout = TimeSpan.FromTicks(1) };
+        var handler = new FakeHttpMessageHandler { RespondAutomatically = false };
+        using ServiceProvider provider = CreateProvider(options, handler);
+
+        Task<ImageData> task = Load(provider, "https://slow.test/logo.png");
+
+        await Assert.ThrowsExactlyAsync<TimeoutException>(async () => await task);
+        Assert.IsTrue(
+            handler.Requests[0].Token.IsCancellationRequested,
+            "the deadline cancels the request itself rather than only the caller's wait");
+        Assert.AreEqual(
+            0,
+            Factory(provider).InFlightRequestCount,
+            "a request that timed out leaves the map like any other ending");
+    }
 }

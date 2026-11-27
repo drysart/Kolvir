@@ -98,4 +98,68 @@ public sealed class HttpAssetLoadSharingTests : HttpAssetLoadingTestBase
 
         Assert.AreEqual(0, factory.InFlightRequestCount, "and the aborted request has left the map");
     }
+
+    [TestMethod]
+    public async Task AHandleThatArrivesWhileTheLastHandleIsAbortingStartsItsOwnRequest()
+    {
+        // Room for the replacement, so what this test proves is the abort window rather than capacity.
+        var options = new HttpAssetLoaderOptions { MaxConcurrentRequests = 2, MaxConcurrentRequestsPerHost = 2 };
+        var handler = new FakeHttpMessageHandler
+        {
+            RespondAutomatically = false,
+
+            // The transport does not react to the abort, which is what keeps the doomed fetch in the
+            // map: this is the window between the last handle leaving and the request unwinding.
+            ObserveCancellation = false,
+        };
+        using ServiceProvider provider = CreateProvider(options, handler);
+        using var firstCancellation = new CancellationTokenSource();
+        using var secondCancellation = new CancellationTokenSource();
+        HttpAssetLoaderFactory factory = Factory(provider);
+
+        Task<ImageData> first = Load(provider, "https://example.test/logo.png", firstCancellation.Token);
+        Task<ImageData> second = Load(provider, "https://example.test/logo.png", secondCancellation.Token);
+        HttpAssetFetch? doomed = factory.PeekFetch("https://example.test/logo.png");
+
+        Assert.IsNotNull(doomed);
+        Assert.AreEqual(1, handler.Count);
+
+        firstCancellation.Cancel();
+        secondCancellation.Cancel();
+
+        Assert.IsTrue(handler.Requests[0].Token.IsCancellationRequested, "the last handle aborted the request");
+        Assert.IsFalse(doomed.AcceptsHandles, "a fetch that has been aborted takes no more handles");
+        Assert.AreEqual(
+            1,
+            factory.InFlightSlotCount,
+            "the aborting fetch still holds its slot until it unwinds, so a replacement can be refused for capacity");
+
+        Task<ImageData> third = Load(provider, "https://example.test/logo.png");
+
+        Assert.AreEqual(2, handler.Count, "the new handle starts a request of its own instead of joining a doomed one");
+        Assert.IsFalse(third.IsCompleted);
+        Assert.AreEqual(
+            2,
+            factory.InFlightSlotCount,
+            "two requests really are in flight until the first unwinds");
+        Assert.AreNotSame(doomed, factory.PeekFetch("https://example.test/logo.png"), "the replacement took the entry");
+
+        // The abandoned request finally answers, which is where its End runs: it must release its own
+        // slot without removing the replacement that now owns the URI.
+        handler.Respond(0);
+
+        Assert.AreNotSame(
+            doomed,
+            factory.PeekFetch("https://example.test/logo.png"),
+            "the unwinding fetch does not remove its replacement's entry");
+        Assert.AreEqual(1, factory.InFlightSlotCount, "the abandoned request gave its slot back");
+
+        handler.Respond(1);
+
+        ImageData image = await third;
+
+        Assert.AreEqual(2f, image.NaturalSize.Width, "the new caller gets a real image rather than the aborting fetch's timeout");
+        Assert.AreEqual(0, factory.InFlightSlotCount, "and the request that answered released its own");
+        Assert.IsNull(factory.PeekFetch("https://example.test/logo.png"), "with nothing left in the map");
+    }
 }

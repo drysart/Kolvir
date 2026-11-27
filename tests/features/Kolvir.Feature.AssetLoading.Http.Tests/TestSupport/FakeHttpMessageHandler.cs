@@ -11,7 +11,9 @@ namespace Kolvir.Feature.AssetLoading.Http.Tests;
 /// It registers with the request's cancellation token, so aborting a fetch gives this a cancelled
 /// <see cref="Task"/> exactly as a real socket would: the response never arrives and the await it was
 /// holding throws. That is what lets "the last cancellation aborts the request" be asserted without
-/// a real connection.
+/// a real connection. A test can turn that off
+/// (<see cref="FakeHttpMessageHandler.ObserveCancellation"/>) to hold a fetch in the window between
+/// its last handle leaving and the transport unwinding.
 /// </remarks>
 internal sealed class FakeRequest
 {
@@ -20,7 +22,11 @@ internal sealed class FakeRequest
     /// <summary>Captures the request before the loader disposes it.</summary>
     /// <param name="request">What the loader sent.</param>
     /// <param name="token">The token the request was sent with.</param>
-    public FakeRequest(HttpRequestMessage request, CancellationToken token)
+    /// <param name="observeCancellation">
+    /// True to stop when the token is cancelled, the way a real transport does; false to leave the
+    /// request pending so a test can hold a fetch in the aborting state.
+    /// </param>
+    public FakeRequest(HttpRequestMessage request, CancellationToken token, bool observeCancellation)
     {
         Uri = request.RequestUri;
         Method = request.Method;
@@ -28,6 +34,11 @@ internal sealed class FakeRequest
             ? string.Join(", ", values)
             : null;
         Token = token;
+
+        if (!observeCancellation)
+        {
+            return;
+        }
 
         if (token.IsCancellationRequested)
         {
@@ -85,6 +96,12 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
 
     /// <summary>When set, the request fails with this instead of producing a response.</summary>
     public Exception? SendError { get; set; }
+
+    /// <summary>
+    /// True to stop a request when its token is cancelled; false to leave it pending, so a test can
+    /// hold a fetch in the state between its last handle leaving and the transport unwinding.
+    /// </summary>
+    public bool ObserveCancellation { get; set; } = true;
 
     /// <summary>The requests, in the order the loader made them.</summary>
     public IReadOnlyList<FakeRequest> Requests
@@ -148,7 +165,7 @@ internal sealed class FakeHttpMessageHandler : HttpMessageHandler
         HttpRequestMessage request,
         CancellationToken cancellationToken)
     {
-        var pending = new FakeRequest(request, cancellationToken);
+        var pending = new FakeRequest(request, cancellationToken, ObserveCancellation);
 
         lock (_sync)
         {

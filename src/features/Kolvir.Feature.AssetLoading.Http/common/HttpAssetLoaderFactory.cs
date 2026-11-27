@@ -104,6 +104,26 @@ internal sealed class HttpAssetLoaderFactory : IAssetLoaderFactory<ImageData>
         }
     }
 
+    /// <summary>
+    /// How many capacity slots are held, for the suite that proves an aborting fetch keeps its slot
+    /// until it unwinds.
+    /// </summary>
+    /// <remarks>
+    /// Not the map's size: a fetch that has been aborted can be replaced under the same URI while it
+    /// is still unwinding, and the replacement is a second request holding a second slot until the
+    /// first one ends.
+    /// </remarks>
+    internal int InFlightSlotCount
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _totalInFlight;
+            }
+        }
+    }
+
     /// <inheritdoc/>
     /// <remarks>
     /// It claims an absolute <c>http</c> or <c>https</c> URI and nothing else, and a URI it does not
@@ -143,7 +163,10 @@ internal sealed class HttpAssetLoaderFactory : IAssetLoaderFactory<ImageData>
     {
         lock (_sync)
         {
-            if (_fetches.ContainsKey(uri))
+            // An entry that is aborting or finished cannot take another handle. Treating it as
+            // absent is what stops the gate saying yes to a request that is already on its way out;
+            // the replacement a load then starts is counted as a fresh request.
+            if (_fetches.TryGetValue(uri, out HttpAssetFetch? running) && running.AcceptsHandles)
             {
                 return true;
             }
@@ -180,16 +203,28 @@ internal sealed class HttpAssetLoaderFactory : IAssetLoaderFactory<ImageData>
         {
             RemoveWaiter(handle);
 
-            if (_fetches.TryGetValue(uri, out HttpAssetFetch? existing))
+            if (_fetches.TryGetValue(uri, out HttpAssetFetch? existing) && existing.TryAddHandle())
             {
                 fetch = existing;
                 startsFetch = false;
             }
             else
             {
-                // The count moves here, synchronously, before the task exists: a walk that starts one
-                // request and immediately reads every gate sees this slot taken, which is what stops
-                // it overshooting (section 4.2).
+                if (existing is not null)
+                {
+                    // The entry is aborting or finished and will not take another handle. Removing
+                    // it here is what lets this call count a fresh request; the dying fetch's End
+                    // must not remove the replacement (it checks identity before removing).
+                    _fetches.Remove(uri);
+                }
+
+                // A replacement takes a new slot, so it can be refused for capacity while the dying
+                // fetch still holds its own - which is correct: two requests really are in flight
+                // until the first one unwinds.
+                //
+                // The count moves here, synchronously, before the task exists: a walk that starts
+                // one request and immediately reads every gate sees this slot taken, which is what
+                // stops it overshooting (section 4.2).
                 if (_totalInFlight >= _options.MaxConcurrentRequests
                     || HostCount(host) >= _options.MaxConcurrentRequestsPerHost)
                 {
@@ -203,10 +238,9 @@ internal sealed class HttpAssetLoaderFactory : IAssetLoaderFactory<ImageData>
                 _fetches.Add(uri, fetch);
                 _totalInFlight++;
                 _perHost[host] = HostCount(host) + 1;
+                fetch.TryAddHandle();
                 startsFetch = true;
             }
-
-            fetch.AddHandle();
         }
 
         if (startsFetch)
@@ -427,10 +461,11 @@ internal sealed class HttpAssetLoaderFactory : IAssetLoaderFactory<ImageData>
 
             return await response.Content.ReadAsByteArrayAsync(fetch.AbortToken).ConfigureAwait(false);
         }
-        catch (OperationCanceledException) when (fetch.TimedOut && fetch.HasWaiters)
+        catch (OperationCanceledException) when (fetch.TimeoutArmed && fetch.HasWaiters)
         {
-            // A caller's cancellation never gets here - each handle stops its own wait - so a
-            // cancelled request with a handle still waiting is the fetch's own deadline.
+            // A caller's cancellation never gets here - each handle stops its own wait - and the
+            // only other thing that cancels this token is ReleaseHandle at zero handles. So a
+            // cancelled request with a handle still waiting is the deadline this fetch armed.
             throw new TimeoutException(
                 $"The request for '{fetch.Uri}' did not complete within {timeout}.");
         }
@@ -534,6 +569,9 @@ internal sealed class HttpAssetLoaderFactory : IAssetLoaderFactory<ImageData>
 
             if (_fetches.TryGetValue(fetch.Uri, out HttpAssetFetch? current) && ReferenceEquals(current, fetch))
             {
+                // Load-bearing, not defensive: an aborting fetch can be replaced under the same URI
+                // before it unwinds, and this is what keeps the dying fetch from removing its
+                // replacement's entry.
                 _fetches.Remove(fetch.Uri);
             }
 

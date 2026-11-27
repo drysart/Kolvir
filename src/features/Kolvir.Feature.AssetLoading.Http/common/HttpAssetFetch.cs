@@ -18,6 +18,14 @@ namespace Kolvir.Feature.AssetLoading.Http;
 /// bytes to and is dropped with this object.
 /// </para>
 /// <para>
+/// <b>An aborted fetch takes no more handles.</b> The abort does not end the request immediately -
+/// unwinding takes as long as the transport takes - and the factory's map still has this entry until
+/// <c>End</c> runs. <see cref="TryAddHandle"/> is the atomic answer a new handle needs: attaching to a
+/// fetch whose abort token is already cancelled would hand the caller a request that was never given
+/// a chance to succeed. <see cref="AcceptsHandles"/> is the same question without attaching, for a
+/// gate that must not say yes to it.
+/// </para>
+/// <para>
 /// <b>The completion is deliberately synchronous.</b> It is a plain
 /// <see cref="TaskCompletionSource{TResult}"/> without
 /// <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>, so a handle that is already
@@ -30,13 +38,15 @@ namespace Kolvir.Feature.AssetLoading.Http;
 /// </remarks>
 internal sealed class HttpAssetFetch
 {
+    private readonly object _sync = new();
     private readonly CancellationTokenSource _abort = new();
     private readonly TaskCompletionSource<HttpFetchResult> _completion = new();
 
-    private volatile HttpFetchResult? _result;
+    private HttpFetchResult? _result;
     private int _handles;
-    private int _finished;
-    private int _timedOut;
+    private bool _finished;
+    private bool _aborted;
+    private bool _timeoutArmed;
 
     /// <summary>One fetch, for one canonical URI and its host.</summary>
     /// <param name="uri">The canonical absolute URI this fetch asks for.</param>
@@ -59,23 +69,95 @@ internal sealed class HttpAssetFetch
     /// <summary>The token the HTTP request is sent with: this fetch's own, not any caller's.</summary>
     public CancellationToken AbortToken => _abort.Token;
 
-    /// <summary>True when the fetch was aborted by its own timeout rather than by the last handle.</summary>
-    public bool TimedOut => Volatile.Read(ref _timedOut) != 0;
+    /// <summary>
+    /// True when this fetch armed a deadline of its own, whether or not that deadline has fired.
+    /// </summary>
+    /// <remarks>
+    /// It records that <see cref="StartTimeout"/> ran, not that the timer was the thing that
+    /// cancelled the request. The throw site in the factory is where the two are told apart: the only
+    /// other thing that cancels a fetch is the last handle leaving, and that happens at zero handles -
+    /// so a cancellation with a handle still waiting is the deadline.
+    /// </remarks>
+    public bool TimeoutArmed
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _timeoutArmed;
+            }
+        }
+    }
 
     /// <summary>True while a handle is still waiting on this fetch's outcome.</summary>
-    public bool HasWaiters => Volatile.Read(ref _handles) > 0;
+    public bool HasWaiters
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return _handles > 0;
+            }
+        }
+    }
 
-    /// <summary>Registers one handle's interest in the bytes.</summary>
-    public void AddHandle() => Interlocked.Increment(ref _handles);
+    /// <summary>True when this fetch can still take a handle.</summary>
+    /// <remarks>
+    /// False once it finished or once its last handle left and cancelled the request. The gate reads
+    /// this together with the counts, so a request already on its way out is not offered to a new
+    /// caller as something to share.
+    /// </remarks>
+    public bool AcceptsHandles
+    {
+        get
+        {
+            lock (_sync)
+            {
+                return !_finished && !_aborted;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Registers one handle's interest, unless the fetch is finished or already aborting.
+    /// </summary>
+    /// <returns>True when the handle was attached; false when it has to start a fetch of its own.</returns>
+    /// <remarks>
+    /// The test and the increment are one operation under one lock, which is what closes the race
+    /// between a new handle arriving and the last one leaving: a handle cannot attach to a fetch that
+    /// has just decided to abort, and an abort cannot decide while a handle is attaching.
+    /// </remarks>
+    public bool TryAddHandle()
+    {
+        lock (_sync)
+        {
+            if (_finished || _aborted)
+            {
+                return false;
+            }
+
+            _handles++;
+
+            return true;
+        }
+    }
 
     /// <summary>
     /// Starts the fetch's own timeout. Called once, before the request is sent, because a fetch has
     /// one deadline rather than one per handle.
     /// </summary>
     /// <param name="timeout">How long the request may take.</param>
+    /// <remarks>
+    /// The interval is armed as a cancellation of this fetch's token, so the transport's own
+    /// cancellation path ends the request; the flag only records that the deadline exists.
+    /// </remarks>
     public void StartTimeout(TimeSpan timeout)
     {
-        Volatile.Write(ref _timedOut, 1);
+        lock (_sync)
+        {
+            _timeoutArmed = true;
+        }
+
         _abort.CancelAfter(timeout);
     }
 
@@ -86,16 +168,24 @@ internal sealed class HttpAssetFetch
     /// <param name="result">What the request produced.</param>
     public void Complete(HttpFetchResult result)
     {
-        _result = result;
-        Volatile.Write(ref _finished, 1);
+        bool releaseNow;
+
+        lock (_sync)
+        {
+            _result = result;
+            _finished = true;
+            releaseNow = _handles == 0;
+        }
 
         // Stops the timeout's timer without disposing the source: a handle that is still unwinding
         // may read AbortToken, and CancelAfter(Infinite) is the cancellable way to release the timer.
         _abort.CancelAfter(System.Threading.Timeout.InfiniteTimeSpan);
 
+        // Outside the lock: a continuation runs the decode and the manager's bookkeeping, and may
+        // re-enter the factory. Holding this fetch's lock here would invert the factory's lock order.
         _completion.TrySetResult(result);
 
-        if (Volatile.Read(ref _handles) == 0)
+        if (releaseNow)
         {
             result.Release();
         }
@@ -108,18 +198,26 @@ internal sealed class HttpAssetFetch
     /// The release runs after the handle has decoded, so the last release is the point at which the
     /// encoded bytes stop being useful; from there the array is dropped even if this object is still
     /// referenced. Cancelling the request is the last handle's job only: an earlier handle leaving
-    /// must not disturb a fetch somebody else is still waiting on.
+    /// must not disturb a fetch somebody else is still waiting on. The abort is raised outside the
+    /// lock because its callbacks belong to the transport and may re-enter the factory.
     /// </remarks>
     public void ReleaseHandle()
     {
-        if (Interlocked.Decrement(ref _handles) > 0)
+        bool abort;
+
+        lock (_sync)
         {
-            return;
+            if (--_handles > 0)
+            {
+                return;
+            }
+
+            _result?.Release();
+            _aborted = !_finished;
+            abort = _aborted;
         }
 
-        _result?.Release();
-
-        if (Volatile.Read(ref _finished) == 0)
+        if (abort)
         {
             _abort.Cancel();
         }
