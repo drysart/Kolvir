@@ -423,10 +423,12 @@ public sealed class ImageSourceLoadingTests
     [TestMethod]
     public void ADeliveredResultWhoseTurnHasNotComeYetDoesNotWriteOverANewUri()
     {
-        // The manager answers a caller on the UI thread and 3.12 has the continuation posted rather than
-        // run where the load finished, so "the result is delivered" and "the control writes it" are two
-        // turns. A new URI assigned between them is what the stale comparison is for, and this test is
-        // the only one that can see it: the scene's default has every await resume inline.
+        // On the delivered path the caller's continuation runs inline inside the manager's turn (3.12),
+        // so "the result is delivered" and "the control writes it" are one turn and there is no window
+        // for a new URI to land in. This test constructs the window the stale comparison covers
+        // instead: the manager's turn is taken with the context deliberately not current, so the
+        // control's turn is posted behind it, and a URI assigned in between is what the comparison is
+        // for. The scene's default has every await resume inline, which is the other shape.
         var factory = new ImageLoaderFactory();
         using var scene = new ImageSourceScene(services => services.AddAssetLoaderFactory(factory));
         var panel = new Panel();
@@ -441,8 +443,9 @@ public sealed class ImageSourceLoadingTests
         FakeAssetLoader<ImageData> delivered = factory.Last!;
         var stale = new TestImage();
 
-        // The completion arrives without the context the load started under, which is the shape of a
-        // loader finishing on its own thread: each hop back to that context is a queued turn.
+        // The completion arrives without the context the load started under, and the turn taken below
+        // restores none either - which is what queues the manager's continuation, and the control's
+        // behind it, rather than letting either run inline.
         SynchronizationContext.SetSynchronizationContext(null);
 
         delivered.Complete(stale.Data);

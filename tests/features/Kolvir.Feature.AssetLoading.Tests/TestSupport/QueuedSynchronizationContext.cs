@@ -3,14 +3,17 @@ using System.Collections.Generic;
 namespace Kolvir.Feature.AssetLoading.Tests;
 
 /// <summary>
-/// A synchronization context whose <see cref="Post"/> queues the callback instead of running it, the
-/// way <see cref="UiSynchronizationContext"/> does on the UI thread, with the turn taken by hand.
+/// A synchronization context whose <see cref="Post"/> queues the callback instead of running it, and
+/// whose turns are taken by hand without the context being current - which is what makes a
+/// continuation awaiting through it post again rather than run inline.
 /// </summary>
 /// <remarks>
-/// This is what lets a test see the step an application really takes: the manager completes the
-/// caller's task on the UI thread, and the continuation that applies the result is posted rather than
-/// run inline. Without it the scene resumes every await inline, so the window between "the load
-/// finished" and "the control writes it" does not exist and a rule about that window cannot be tested.
+/// This is not the step an application takes. There the manager's continuation is posted from the
+/// loader's thread but the caller's runs inline inside it, because the loop's context is current for
+/// every turn (dev-docs/ASSET-LOADING.md section 3.12). It is how the suite constructs the window the
+/// control's stale-completion comparison covers - a result delivered with the turn that applies it
+/// still queued - so removing that comparison breaks a test instead of changing a behaviour no test
+/// can reach.
 /// </remarks>
 internal sealed class QueuedSynchronizationContext : SynchronizationContext, IDisposable
 {

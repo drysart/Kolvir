@@ -539,8 +539,18 @@ section 4.1 is why reuse and non-reuse both exist.
   loop, so an `await` in UI code resumes on the thread that owns the controls it is about to touch.
 - So the task handed to a caller completes with the UI context intact. A caller awaits
   `manager.LoadAsync(loader, token)` and assigns `image.Source` on the next line without a dispatch of
-  its own. `UiSynchronizationContext.Post` queues even when the caller is already on the UI thread, so
-  a completion never overtakes work the loop has already queued.
+  its own. There are two hops and only the first is a queue. A load finishing on its own thread posts
+  the manager's continuation, because the context it captured is not current there; when that
+  continuation runs, the loop's context *is* current - it is installed for the loop's whole duration
+  and nothing removes it inside a turn - so the caller's continuation runs inline, inside
+  `ApplyCompletion` and therefore inside the walk. There is no second turn between "the result is
+  delivered" and "the caller applies it", and nothing the loop already queued runs in between. That is
+  what the manager's re-entrancy rules and the test for a completion that enqueues from inside a walk
+  exist for: the caller's own code runs while the walk is in progress, and a request it makes from
+  there is served by that same walk. Only a caller whose captured context is not the one current when
+  the value is handed over - a caller awaiting under a context of its own, or a harness that takes the
+  manager's turn with the context deliberately cleared (7.1) - gets the posted shape, and then its
+  continuation waits behind whatever the loop has queued.
 
 The one thing this must not be read as: "the manager marshals". The manager does not need a post of
 its own for the walk it starts from `LoadAsync`, because it is already on the UI thread; it needs the
@@ -916,14 +926,17 @@ inferred rather than written down:
 - **A stale completion never writes `Loaded`.** The completing request is compared against the current
   one, and a result the control has moved past is disposed rather than written - the same rule as 3.9's
   "a late result is never delivered", reached here from the control's side. The comparison is not
-  redundant with that rule, because 3.9 is about a *cancelled* caller and this is the successful one:
-  the manager answers its caller on the UI thread, 3.12 has the continuation that applies the answer
-  posted rather than run where the load finished, and the UI thread can assign a new `SourceUri` in
-  between - a render, a scroll handler, a handler the walk itself ran. Without the comparison that
-  result lands on a control following a different URI and the image it carried is never disposed. What
-  the control cannot dispose is the image the manager drops: a load cancelled while running still
-  produces one, and it goes nowhere - so the manager disposes it there (3.9), and the feature owns
-  only what it is handed.
+  redundant with that rule, because 3.9 is about a *cancelled* caller and this is the successful one.
+  On the delivered path as the design runs it, 3.12 has the caller's continuation inline inside the
+  manager's walk, so the comparison is a no-op there: nothing can assign a new `SourceUri` between
+  delivery and the write. What it covers is the shape where delivery is not inline - a caller awaiting
+  under a context of its own - and the suite constructs that shape deliberately rather than relying on
+  it (7.1): a result delivered, the turn that applies it still queued, a new URI assigned in between,
+  and the stale image disposed rather than written. Without the comparison that result lands on a
+  control following a different URI and the image it carried is never disposed. What the control
+  cannot dispose is the image the manager drops: a load cancelled while running still produces one,
+  and it goes nowhere - so the manager disposes it there (3.9), and the feature owns only what it is
+  handed.
 - **A control the reconciler removes is disposed, so its state stops mattering.** The mount created the
   control and disposes it on unmount (6.2), and the load is cancelled with it. There is no spinner left
   to correct and nothing left to keep, so this case needs no state rule of its own.
@@ -1187,13 +1200,16 @@ superseded request and a delivered result whose turn has not come), a failure ca
 with `SourceUri` intact, `Loaded` and `Failed` being raised after `Source` is settled, and the priority
 following `EffectiveInView`.
 
-One of those rules needs a turn held to be seen. When every await resumes inline, a superseded
-completion reaches the control as the cancellation the manager answered it with, so removing the
-stale-completion comparison changes nothing - which is why the scene resumes awaits inline by default.
-It is not redundant, though: the delivered result whose continuation has not run yet is the case 3.9
-does not cover, and the suite pins it with a synchronization context it drains by hand - complete a
-load, run the manager's turn, assign a new URI before the control's turn, then let it run and assert
-the old image was disposed rather than written. Removing the comparison makes exactly that test fail.
+One of those rules needs a turn held to be seen. On the delivered path the caller's continuation runs
+inline inside the manager's turn (3.12), so a superseded completion reaches the control as the
+cancellation the manager answered it with, and removing the stale-completion comparison changes
+nothing - which is why the scene resumes awaits inline by default. It is not redundant, though: the
+delivered result whose continuation has not run yet is the case 3.9 does not cover, and the suite
+constructs that window rather than relying on it - a synchronization context it drains by hand, with the
+manager's turn taken while that context is deliberately not current, so the control's turn is posted
+behind it. Complete a load, run the manager's turn, assign a new URI before the control's turn, then let
+it run and assert the old image was disposed rather than written. Removing the comparison makes exactly
+that test fail.
 
 ## 8. The rejected alternatives, in one place
 

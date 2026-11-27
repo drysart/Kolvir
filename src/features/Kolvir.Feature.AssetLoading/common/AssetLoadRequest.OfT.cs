@@ -11,8 +11,8 @@ namespace Kolvir.Feature.AssetLoading;
 /// <see cref="TaskCreationOptions.RunContinuationsAsynchronously"/>: a caller that has attached a
 /// continuation is answered inside the manager's own step, which is the re-entrancy the walk has to
 /// survive rather than something to push onto the thread pool (dev-docs/ASSET-LOADING.md
-/// section 3.8). In an application the ambient <c>UiSynchronizationContext</c> then puts that
-/// continuation back on the UI thread, which is where a caller assigns what it loaded (section 3.12).
+/// section 3.8). In an application that step is already on the UI thread with the UI context current,
+/// so the caller's continuation runs inline there rather than being posted back to it (section 3.12).
 /// </para>
 /// <para>
 /// A cancellation is reported with the caller's token, so <c>TaskCanceledException.CancellationToken</c>
