@@ -525,6 +525,40 @@ public class TextBox : Control
     }
 
     /// <summary>
+    /// Reports where the field's single line of text would sit at <paramref name="size"/>: the text,
+    /// the caret and the placeholder all share it, so a field with no text still has one.
+    /// </summary>
+    /// <param name="size">The size the field is about to be arranged at.</param>
+    /// <param name="baseline">The text baseline, measured from the field's top edge.</param>
+    /// <returns>
+    /// True for a one-line field; false for a multi-line one, whose text is laid out by the
+    /// multiline feature and whose first line the box does not answer for.
+    /// </returns>
+    /// <remarks>
+    /// The centred top is clamped at the top of the content area, exactly as <see cref="OnPaint"/>
+    /// clamps it, so a field shorter than one line answers with the baseline it actually draws at
+    /// rather than a negative one.
+    /// </remarks>
+    internal override bool TryGetBaseline(SKSize size, out float baseline)
+    {
+        baseline = 0f;
+        if (MultilineFeature is not null || size.Height <= 0f)
+        {
+            return false;
+        }
+
+        var content = Geometry.Deflate(new SKRect(0f, 0f, size.Width, size.Height), ContentPadding);
+        if (content.Width <= 0f || content.Height <= 0f)
+        {
+            return false;
+        }
+
+        float top = content.Top + MathF.Max(0f, (content.Height - EffectiveFont.LineHeight) / 2f);
+        baseline = top + EffectiveFont.BaselineOffset;
+        return true;
+    }
+
+    /// <summary>
     /// Maps a point to the nearest character boundary rather than a proportion of the width, so
     /// a selection dragged into the box lands between two characters.
     /// </summary>

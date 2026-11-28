@@ -245,6 +245,42 @@ public class RichLabel : Control
         return new SKSize(MathF.Ceiling(layout.Width), MathF.Ceiling(layout.Height));
     }
 
+    /// <summary>
+    /// Reports where the first laid-out line's baseline would sit at <paramref name="size"/>, using
+    /// the same layout and block placement <see cref="OnPaint"/> draws with.
+    /// </summary>
+    /// <param name="size">The size the label is about to be arranged at.</param>
+    /// <param name="baseline">The first line's baseline, measured from the label's top edge.</param>
+    /// <returns>True when the label has a line of text to align; false when it has none.</returns>
+    /// <remarks>
+    /// A mixed line reports an ascent taken across every run font on it, which is the ascent the
+    /// line is drawn at, so the answer stays right when the first line mixes sizes.
+    /// </remarks>
+    internal override bool TryGetBaseline(SKSize size, out float baseline)
+    {
+        baseline = 0f;
+        if (size.Height <= 0f)
+        {
+            return false;
+        }
+
+        var content = Geometry.Deflate(new SKRect(0f, 0f, size.Width, size.Height), Padding);
+        if (content.Width <= 0f || content.Height <= 0f)
+        {
+            return false;
+        }
+
+        var layout = EnsureLayout(content.Width);
+        if (layout is null || layout.Lines.Count == 0)
+        {
+            return false;
+        }
+
+        var first = layout.Lines[0];
+        baseline = GetBlockTop(layout, content) + first.Top + first.Ascent;
+        return true;
+    }
+
     /// <inheritdoc />
     protected override void OnLayout()
     {
@@ -950,10 +986,17 @@ public class RichLabel : Control
         }
     }
 
-    /// <summary>Assigns absolute (label-local) bounds to every fragment.</summary>
-    private void Place(Layout layout, SKRect content)
-    {
-        float blockTop = content.Top + (TextAlign switch
+    /// <summary>
+    /// The top of the laid-out block inside <paramref name="content"/> for the label's
+    /// <see cref="RichLabel.TextAlign"/>.
+    /// </summary>
+    /// <remarks>
+    /// This is not <see cref="TextRenderer.GetBlockTop"/>: the block's height is the sum of the
+    /// lines' own heights plus the line spacing, which a span's size and any inline control both
+    /// change, so it is not the line count times a single font's line height.
+    /// </remarks>
+    private float GetBlockTop(Layout layout, SKRect content) =>
+        content.Top + (TextAlign switch
         {
             ContentAlignment.MiddleLeft or ContentAlignment.MiddleCenter or ContentAlignment.MiddleRight
                 => (content.Height - layout.Height) / 2f,
@@ -961,6 +1004,11 @@ public class RichLabel : Control
                 => content.Height - layout.Height,
             _ => 0f,
         });
+
+    /// <summary>Assigns absolute (label-local) bounds to every fragment.</summary>
+    private void Place(Layout layout, SKRect content)
+    {
+        float blockTop = GetBlockTop(layout, content);
 
         foreach (var line in layout.Lines)
         {
