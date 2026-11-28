@@ -829,36 +829,58 @@ public constructor: an override is written, not built. `InheritedFont` is a stat
 factories and the neutral value, because the name has to resolve at an assignment with only
 `using Kolvir;` in scope and only a type can do that; it is the one public name this note did not
 propose. The instance `With*` members chain (`InheritedFont.WithSize(14f).WithItalic(true)`), and a
-null argument leaves that member inherited, which is how a chain is narrowed back to the neutral
-override. `string.Empty` is the platform's default family and `0f` is a real size - the same values
-they are on `Font`, and the reason a null member cannot be spelled on the complete type.
+null argument clears that member back to inherited, which is how a chain is narrowed back to the
+neutral override. `string.Empty` is the platform's default family and `0f` is a real size - the same
+values they are on `Font`, and the reason a null member cannot be spelled on the complete type.
 
 **The fluent surface, on both types.** `Font` and `FontOverride` carry the same four single-member
 modifiers - `WithFamily`, `WithSize`, `WithWeight`, `WithItalic` - and the same one-call `With(...)`,
-whose parameters are `family` (`string?`), `size` (`float?`), `weight` (`int?`) and `italic` (`bool?`),
-each null by default, so `font.With(family: "Courier New", weight: 700)` compiles as written. On both
-types null means "leave this member as the receiver has it", and every argument null returns the
-receiver itself - `InheritedFont.With()` returns `AsIs` - so a no-op neither allocates nor changes
-object identity. The third answer follows from what the receiver already has:
+but the parameter types differ, because a complete description and a partial one can say different
+things:
 
-| receiver | `With(size: 14f)` leaves family/weight/italic as |
-| --- | --- |
-| `Font` | this font's own values |
-| `FontOverride` | whatever the override says - unset (inherited) or previously set |
-| `InheritedFont` (and `AsIs`) | unset, because it starts from the neutral override |
+- **`Font.With`** takes `Optional<string?> family`, `Optional<float> size`, `Optional<int> weight`
+  and `Optional<bool> italic`. `Optional<T>` is a new core wrapper: omitted is `default` and changes
+  nothing, a value converts implicitly and sets that member, and an explicit null is a supplied value
+  - so `font.With(family: null)` names the platform's default family, while `font.With(size: null)`
+  does not compile because a complete description has no nullable size.
+- **`FontOverride.With` and `InheritedFont.With`** take `Union<string?, InheritedValue> family`,
+  `Union<float?, InheritedValue> size`, `Union<int?, InheritedValue> weight` and
+  `Union<bool?, InheritedValue> italic`. The union's four states are the ones an override needs:
+  omitted (`IsUnspecified`) changes nothing, a value sets the member, an explicit null names a null
+  member, and `PropertyValue.Inherited` clears it back to the inherited member.
 
-Two consequences follow from that rule rather than from an accident:
+The rule is the distinction the two types already draw - **`Union<T?, InheritedValue>` where
+inheritance is meaningful, `Optional<T>` where the value is total and an argument is only supplied or
+not** - and each rejection is the other one's advantage. A union on `Font` would compile
+`font.With(family: PropertyValue.Inherited)` and leave a state a complete font cannot honour: a
+runtime failure where a compile-time one is available. An `Optional<T>` on the override would lose
+the readable way to say "go back to inherited", which is the whole point of a partial description.
 
-- **`With()` cannot clear a member on an override.** `With(size: null)` is a no-op because null means
-  "keep", so clearing is `WithSize(null)` - or the other three single-member methods - and the
-  asymmetry is deliberate. A caller who expects `With(size: null)` to clear is reading the one-call
-  method as a setter when it is a filter.
-- **`WithFamily(null)` means opposite things on the two types.** On `Font` it names the platform's
-  default family, exactly as the constructor's null does, because a complete description has to name
-  something; on `FontOverride` it keeps the family inherited. Same name, same signature, opposite
-  meaning, and the one place the pair is not interchangeable. `With(family: null)` is not that case:
-  it follows the uniform rule on both types and leaves the receiver's family alone, so a `Font` keeps
-  its own name there and never falls to the platform default.
+| a caller writes | `Font.With` | `FontOverride.With` |
+| --- | --- | --- |
+| omits the argument | member unchanged | member unchanged |
+| a value - `size: 14f`, `family: "Inter"` | member set | member set |
+| `PropertyValue.Inherited` | does not compile | member cleared, so it is inherited again |
+| `null` | family: the platform's default; size/weight/italic: does not compile | member set to null, which composes as inherited |
+
+So `font.With(family: "Courier New", weight: 700)` compiles as written and keeps the size and the
+slant, `override.With(size: PropertyValue.Inherited)` clears the size, and every argument omitted
+returns the receiver itself - `InheritedFont.With()` returns `AsIs` - so the result allocates nothing.
+
+**The null trap is now a compile-time one, and the compiler closes it.** The earlier draft gave all
+four parameters a nullable type on both types, so forwarding one nullable variable to `Font.With` and
+`FontOverride.With` produced different fonts from the same value. Now the three style members cannot
+be forwarded at all - a `float?` does not convert to `Optional<float>`, and `Font` has no
+`InheritedValue` case to forward `PropertyValue.Inherited` into. The family is the one argument both
+methods accept, and a null there means the family the receiver's type gives null: the platform's
+default on a complete font, inherited on a partial one. Both are coherent, and the two `With` methods
+differ only where the types do. `WithFamily(null)` keeps that same complete-versus-partial
+difference.
+
+**Two wrappers, one word for the flag.** `Optional<T>` is not the virtual DOM's `Specified<T>`, and
+neither replaces the other: section 6.1 of the Virtual DOM note records why both exist, the four
+measured argument states, why `Optional<T>` cannot be a nullable parameter (CS1770 and the lost
+state), and why the union's case type has to be `T?` rather than `T`.
 
 **`InheritedFont.AsIs`** is the neutral override, public and documented rather than a private field.
 It is the identity - `AsIs.WithSize(14f)` is `InheritedFont.WithSize(14f)`, and composing `AsIs` onto
@@ -915,8 +937,9 @@ an override naming only that member changes that field and leaves the other thre
 sets all four through one chain, and a sixth re-sets a member (`WithSize(20f).WithSize(14f)`) so the
 last value wins. A member added to `Font` later and not to the composition fails one of them. The
 fluent surface is pinned the same way: each of `Font`'s four `With*` methods changes exactly its field,
-`With` with every argument null returns the receiver itself on both types, `InheritedFont.With()` is
-`AsIs`, and the null-family pair is tested on both sides of the trap.
+`With` with every argument omitted returns the receiver itself on both types, `InheritedFont.With()` is
+`AsIs`, and every member of `FontOverride.With` is tested in its four states - omitted, a value, an
+explicit null, and `PropertyValue.Inherited`.
 
 **`ToolStripItem.Font` widened too.** A menu item is a control that inherits, "a bit bigger here" is
 the same wish, and leaving the two properties different by accident would be worse than the union
@@ -1296,16 +1319,15 @@ should look like**: a page that moved without an override in it would be a findi
 **4. The fluent surface, as measured.** The same fixture and command against `57276fd`, published from
 two worktrees whose roots are both 67 characters: **3,916,288 bytes before and 3,916,288 after**, so
 the delta is **0** - below the 512-byte resolution of the method, which is the expected answer for
-description arithmetic that adds no reachable type. A publish with `-p:TrimmerSingleWarn=false`
-reported no IL2xxx or IL3xxx warning.
+argument arithmetic that adds no reachable type. Both sides reproduce at the same size, and a publish
+with `-p:TrimmerSingleWarn=false` reported no IL2xxx or IL3xxx warning.
 
 All 73 pages, 1280x820, light appearance, were rendered twice in each tree by the method in 8.2.
-**The 70 pages that render deterministically in both trees are byte-identical to `57276fd`.** The three
-excluded pages all animate a GIF: `animated-gif` and `animated-webp` differ from themselves run to run
-as before, and `gif-out-of-view` did so once - one of the baseline's two passes caught a frame in which
-the moving square at (274,249)-(300,268) is green rather than red, 540 pixels - and twenty further
-renders in each tree, plus the other pass in each, produced one identical image on both sides. It is
-the same clock dependence, rarer, rather than a movement this change caused; no page moved for any
+**The 71 pages that can be compared are byte-identical to `57276fd`.** The two excluded pages are the
+clock-dependent `animated-gif` and `animated-webp`, which differ from themselves in both trees. (One
+earlier pass of the same gate caught a different animation frame on `gif-out-of-view` - also an
+animated GIF - in one baseline render; a run of further renders in both trees produced one identical
+image on both sides, which is why it is a clock page rather than a movement.) No page moved for any
 other reason, and the demo was not changed.
 
 ## 9. Migration

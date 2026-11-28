@@ -2976,9 +2976,10 @@ section.Controls.Add(footer);
 ```
 
 The members chain - `InheritedFont.WithSize(14f).WithItalic(true)` - and overrides compose down the
-tree, so each level keeps what it inherited and changes only what it names. A null argument leaves
-that member inherited and is how a chain is narrowed again; `string.Empty` is the platform's default
-family and `0f` is a real size, exactly as they are on a `Font`. `EffectiveFont` is where the
+tree, so each level keeps what it inherited and changes only what it names. A null on a single-member
+modifier clears that member back to inherited, which is how a chain is narrowed again; `string.Empty`
+is the platform's default family and `0f` is a real size, exactly as they are on a `Font`.
+`EffectiveFont` is where the
 composition happens and what it returns is a complete `Font`, so
 `control.EffectiveFont.WithSize(...)` remains the way to derive from a font that is in hand.
 Assigning compares by value, so a render that rebuilds the same override invalidates nothing.
@@ -2992,15 +2993,24 @@ FontOverride heading = bold
     ? InheritedFont.With(family: "Inter", size: 18f, weight: 700)
     : InheritedFont.AsIs;
 
+FontOverride backTo18 = InheritedFont.WithSize(18f).With(size: PropertyValue.Inherited);   // inherited again
+
 Font smaller = title.With(size: 14f);       // a complete font: keeps family, weight and slant
 Font strong = smaller.With(weight: 800, italic: true);
 ```
 
-On every type, null in `With(...)` means "keep the receiver's member", so `With(size: null)` is a
-no-op rather than a clear: `WithSize(null)` is how a member is removed from an override. The one trap
-is `WithFamily(null)`, which names the platform's default family on a `Font` (exactly as the
-constructor's null does) and keeps the inherited family on a `FontOverride`. `With(family: null)`
-does not have that trap: it leaves the receiver's family alone on both types.
+`With(...)` tells an omitted argument from an explicit one. An omitted argument leaves the member
+alone. On a `FontOverride`, `PropertyValue.Inherited` clears a member back to inherited - the reason
+the one-call form takes a union there - while an explicit `null` names a null member. On a `Font`,
+`font.With(size: null)` does not compile because a complete font has no nullable size, and
+`PropertyValue.Inherited` does not compile either because a complete font never inherits;
+`font.With(family: null)` names the platform's default family, exactly as the constructor's null does.
+
+A `string?` forwarded to both `font.With(family: value)` and `override.With(family: value)` therefore
+means the platform's default family on the font and the inherited family on the override - each
+type's own rule for a null family. The style members cannot be forwarded at all: a `float?` does not
+convert to `Optional<float>`, and a `Font` has no inherited state to offer. `WithFamily(null)` keeps
+that same complete-versus-partial difference.
 
 Assigning `PropertyValue.Inherited` is how a control goes back to inheriting; there are no
 `ClearFont`, `ClearForeground` or `ClearBackground` methods:

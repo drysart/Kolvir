@@ -237,14 +237,17 @@ Five things to notice:
   developer writes, and its `Reset` member is gone, because absence already means "not assigned".
   This is what removed the public wrapper, the implicit operator, the nullable-conversion trap and
   the CS0411 generic-inference note from the design (section 10).
-- **The setter constructs a `Specified<T>` rather than relying on an implicit conversion, and there is
-  no implicit conversion to rely on.** An assignment operator taking `T` is only applicable where the
-  source converts to its parameter by a *standard* conversion, and for a nullable reference type
-  argument - `Specified<string?>` from a `string?`, the very case whose point is that null is a value -
-  it does not. Measured on the shipping compiler: `_text = value;` is CS0029 for `Specified<string?>`
-  and compiles for `Specified<string>`, so the operator would have worked for most properties and
-  failed for the interesting ones. The constructor call has no such rule to satisfy, so the operator
-  was deleted rather than documented.
+- **The setter constructs a `Specified<T>` rather than relying on an implicit conversion.** The
+  earlier design took an operator from `T`, and the claim that prompted the setter needs correcting,
+  because it was measured more narrowly than it was written. The operator **does** apply for a
+  nullable reference type argument: measured on the shipping compiler, `Specified<string?>` from a
+  `string?` compiles - both a variable holding null and a bare `null` literal - as do `float?`, `int?`
+  and `bool?`, and a `string?` assigned to `Specified<string>` compiles with CS8604. What actually
+  failed was the *nullable parameter* the old factories used: with `Specified<T>?`, a bare `null`
+  binds to the nullable struct, because the compiler prefers the nullable conversion over the
+  operator, so it means "absent" and setting a nullable member to null needed a `(Font?)null` cast.
+  That is overload resolution, not the conversion operator. The operator has no role in a
+  tracked-property setter anyway, so the setter constructs the value explicitly.
 - **One control is constructed per node type, not per property.** `Pristine` is what "restore the
   value the constructor left" reads from, and reading it off a fresh `new Label()` per property would
   construct a control for every property a control has - dozens - the first time the node type is
@@ -255,6 +258,37 @@ Five things to notice:
 - **`NodeType` is the identity the reconciler uses** - one static instance per node class, compared by
   reference, which is what answers "can I reuse this control?" in one step and what stops one node
   class patching a control another node class made (its `PatchFrom` could not cast the previous node).
+
+**The two argument wrappers: `Optional<T>` and `Union<T?, InheritedValue>`.** They answer different
+questions, and the split follows the types they serve. `Union<T?, InheritedValue>` is for the partial
+descriptions - `FontOverride.With` and `InheritedFont.With` - because inheritance is meaningful there
+and the second case spells "go back to the inherited member" where a null could only imply it.
+`Kolvir.Optional<T>` is for `Font.With`, whose receiver is a complete description: a value is total,
+so the only question is whether the caller supplied it.
+
+The union gives four states, each measured through the compiler: omitted is
+`default(Union<string?, InheritedValue>)` with `IsUnspecified` true; `"foo"` is the first case; a
+`string?` variable holding null is the first case holding null; and `PropertyValue.Inherited` is the
+second case. The case type has to be `T?` rather than `T`: with `Union<string, InheritedValue>` a null
+literal goes through the first case's conversion operator and is reported as a possible null
+(**CS8604**, a warning rather than an error), so the nullable case type is what makes the fourth
+state clean.
+
+`Optional<T>` cannot carry that fourth state and is not spelled as a nullable parameter, for measured
+reasons. On `Optional<T>?`, `= default(Optional<T>)` does not compile - **CS1770**, "cannot be used as
+default parameter for nullable parameter ... because `Optional<T>` is not a simple type" - and the
+spellings that do compile lose a state: `= default` and `= null` are the same value for
+`Optional<T>?`, so an omitted argument and an explicit `null` both arrive as the outer null and cannot
+be told apart (measured: both print "absent"). With the non-nullable `Optional<T>` and a nullable
+type argument nothing is lost: omitted is `default(Optional<T>)`, null is a populated
+`Optional<string?>` whose value is null, and a value arrives populated.
+
+The choice runs the other way too. A union on `Font.With` would compile
+`font.With(family: PropertyValue.Inherited)` and leave a state a complete font cannot honour - a
+runtime failure where a compile-time one is available - so the complete type takes `Optional<T>` and
+the partial types take the union. `Specified<T>` is a third, unrelated type: the virtual DOM's
+tracked-property field, constructed explicitly by generated code and never converted to. The three
+share `IsSpecified` where the idea is shared and are otherwise not interchangeable.
 
 The `VNode` base itself is hand-written in `Kolvir.Feature.VirtualDom`: `Key`, `Children`, the abstract
 `ApplyTo`/`PatchFrom`/`NodeType` members, and the reconciler's entry points. The generated code is

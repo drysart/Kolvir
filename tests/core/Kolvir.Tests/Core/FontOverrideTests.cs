@@ -353,27 +353,123 @@ public sealed class FontOverrideTests : HeadlessTestBase
         FontOverride fromSet = InheritedFont.WithFamily(TestFont.Family).WithSize(20f).With(weight: 700);
 
         Assert.AreEqual(TestFont.Family, fromSet.FamilyName, "a member the receiver named keeps its value");
-        Assert.AreEqual(20f, fromSet.Size!.Value, 0.01f, "a null size keeps the one the override already names");
+        Assert.AreEqual(20f, fromSet.Size!.Value, 0.01f, "an omitted size keeps the one the override already names");
         Assert.AreEqual(700, fromSet.Weight!.Value, "and the named weight is added");
         Assert.IsNull(fromSet.Italic, "while the slant stays inherited");
     }
 
     [TestMethod]
-    public void OverrideWithCannotClearAMember()
+    public void OverrideWithClearsAMemberSuppliedAsNull()
     {
-        FontOverride sized = InheritedFont.WithSize(20f);
+        FontOverride named = InheritedFont.WithSize(20f).WithWeight(700);
 
-        Assert.AreEqual(
-            20f,
-            sized.With(size: null).Size!.Value,
-            0.01f,
-            "With's null leaves the set member set, so it cannot clear");
+        FontOverride cleared = named.With(size: null);
 
-        Assert.IsNull(sized.WithSize(null).Size, "clearing is the single-member method's null");
+        Assert.IsNull(cleared.Size, "a supplied null clears the size back to inherited");
+        Assert.AreEqual(700, cleared.Weight!.Value, "while an omitted member keeps its value");
+        Assert.IsNull(named.With(size: PropertyValue.Inherited).Size, "and PropertyValue.Inherited says the same thing more clearly");
+        Assert.IsNull(named.WithWeight(null).Weight, "the single-member method clears the same way");
     }
 
     [TestMethod]
-    public void OverrideWithEveryArgumentNullReturnsThisOverride()
+    public void WithFamilyHasAllFourStates()
+    {
+        FontOverride named = InheritedFont.WithFamily("Segoe UI");
+
+        Assert.AreEqual("Segoe UI", named.With(size: 14f).FamilyName, "an omitted argument leaves it");
+        Assert.AreEqual(TestFont.Family, named.With(family: TestFont.Family).FamilyName, "a value sets it");
+        Assert.IsNull(named.With(family: PropertyValue.Inherited).FamilyName, "Inherited clears it");
+        Assert.IsNull(named.With(family: (string?)null).FamilyName, "an explicit null names a null family");
+    }
+
+    [TestMethod]
+    public void WithSizeHasAllFourStates()
+    {
+        FontOverride sized = InheritedFont.WithSize(20f);
+
+        Assert.AreEqual(20f, sized.With(weight: 700).Size!.Value, 0.01f, "an omitted argument leaves it");
+        Assert.AreEqual(14f, sized.With(size: 14f).Size!.Value, 0.01f, "a value sets it");
+        Assert.IsNull(sized.With(size: PropertyValue.Inherited).Size, "Inherited clears it");
+        Assert.IsNull(sized.With(size: (float?)null).Size, "an explicit null clears it too");
+    }
+
+    [TestMethod]
+    public void WithWeightHasAllFourStates()
+    {
+        FontOverride weighted = InheritedFont.WithWeight(500);
+
+        Assert.AreEqual(500, weighted.With(size: 14f).Weight!.Value, "an omitted argument leaves it");
+        Assert.AreEqual(700, weighted.With(weight: 700).Weight!.Value, "a value sets it");
+        Assert.IsNull(weighted.With(weight: PropertyValue.Inherited).Weight, "Inherited clears it");
+        Assert.IsNull(weighted.With(weight: (int?)null).Weight, "an explicit null clears it too");
+    }
+
+    [TestMethod]
+    public void WithItalicHasAllFourStates()
+    {
+        FontOverride upright = InheritedFont.WithItalic(false);
+
+        Assert.IsFalse(upright.With(size: 14f).Italic!.Value, "an omitted argument leaves it");
+        Assert.IsTrue(upright.With(italic: true).Italic!.Value, "a value sets it");
+        Assert.IsNull(upright.With(italic: PropertyValue.Inherited).Italic, "Inherited clears it");
+        Assert.IsNull(upright.With(italic: (bool?)null).Italic, "an explicit null clears it too");
+    }
+
+    [TestMethod]
+    public void InheritedValueOnEveryMemberIsAsIs()
+    {
+        FontOverride cleared = InheritedFont.With(
+            family: PropertyValue.Inherited,
+            size: PropertyValue.Inherited,
+            weight: PropertyValue.Inherited,
+            italic: PropertyValue.Inherited);
+
+        Assert.AreEqual(InheritedFont.AsIs, cleared, "every member is the inherited state, which is AsIs");
+        Assert.AreEqual(InheritedFont.AsIs, InheritedFont.With(family: PropertyValue.Inherited));
+    }
+
+    [TestMethod]
+    public void ClearingAFamilyThroughWithComposesBackToTheInheritedFamily()
+    {
+        var inherited = new Font(TestFont.Family, 11f, 500);
+        FontOverride named = InheritedFont.WithFamily("Segoe UI").WithSize(20f);
+
+        Font composed = Compose(inherited, named.With(family: PropertyValue.Inherited));
+
+        Assert.AreEqual(TestFont.Family, composed.FamilyName, "the inherited family answers again");
+        Assert.AreEqual(20f, composed.Size, 0.01f, "and the size the override asked for stays");
+        Assert.AreEqual(500, composed.Weight);
+    }
+
+    [TestMethod]
+    public void AForwardedNullableStringMeansTheDefaultOnFontAndInheritedOnOverride()
+    {
+        var font = new Font(TestFont.Family, 11f);
+        var inherited = new Font(TestFont.Family, 11f);
+        string platformDefault = new Font(11f).FamilyName;
+
+        string? forwardedNull = null;
+
+        Assert.AreEqual(
+            platformDefault,
+            font.With(family: forwardedNull).FamilyName,
+            "on a complete font a null family is the platform's default family");
+
+        Font composed = Compose(inherited, InheritedFont.WithFamily("Segoe UI").With(family: forwardedNull));
+
+        Assert.AreEqual(
+            TestFont.Family,
+            composed.FamilyName,
+            "on an override the same null clears the family, so the inherited one answers");
+
+        string? forwardedName = "Segoe UI";
+
+        Assert.AreEqual("Segoe UI", font.With(family: forwardedName).FamilyName);
+        Assert.AreEqual("Segoe UI", InheritedFont.With(family: forwardedName).FamilyName);
+    }
+
+    [TestMethod]
+    public void OverrideWithEveryArgumentOmittedReturnsThisOverride()
     {
         FontOverride sized = InheritedFont.WithSize(14f);
 
@@ -381,7 +477,7 @@ public sealed class FontOverrideTests : HeadlessTestBase
     }
 
     [TestMethod]
-    public void InheritedFontWithEveryArgumentNullIsAsIs()
+    public void InheritedFontWithEveryArgumentOmittedIsAsIs()
     {
         Assert.AreSame(InheritedFont.AsIs, InheritedFont.With(), "the neutral override is the starting point");
 
@@ -389,6 +485,11 @@ public sealed class FontOverrideTests : HeadlessTestBase
         Assert.IsNull(InheritedFont.AsIs.Size);
         Assert.IsNull(InheritedFont.AsIs.Weight);
         Assert.IsNull(InheritedFont.AsIs.Italic);
+
+        Assert.AreEqual(
+            InheritedFont.AsIs,
+            InheritedFont.With(family: null),
+            "a supplied null names nothing either, so it is equal to AsIs even though it is a new override");
     }
 
     [TestMethod]

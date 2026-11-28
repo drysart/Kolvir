@@ -29,7 +29,7 @@ public sealed class FontTests
     }
 
     [TestMethod]
-    public void WithWithEveryArgumentNullReturnsThisFont()
+    public void WithWithEveryArgumentOmittedReturnsThisFont()
     {
         Assert.AreSame(Original, Original.With(), "a no-op allocates nothing and keeps identity");
     }
@@ -79,7 +79,7 @@ public sealed class FontTests
     }
 
     [TestMethod]
-    public void NullFamilyMeansTheDefaultOnWithFamilyAndTheReceiversFamilyOnWith()
+    public void NullFamilyMeansThePlatformDefaultOnBothMethodsAndOmissionKeepsIt()
     {
         var font = new Font(TestFont.Family, 11f);
         string platformDefault = new Font(11f).FamilyName;
@@ -90,8 +90,13 @@ public sealed class FontTests
             "WithFamily(null) is the constructor's null: a complete description names a family, so it names the platform's default one");
 
         Assert.AreEqual(
-            TestFont.Family,
+            platformDefault,
             font.With(family: null).FamilyName,
-            "With(family: null) leaves the receiver's family alone, which is the rule every other null argument follows");
+            "With(family: null) agrees, because a supplied null is a value on this type");
+
+        Assert.AreEqual(
+            TestFont.Family,
+            font.With(size: 14f).FamilyName,
+            "keeping the family is spelled by omitting the argument, not by passing null");
     }
 }
