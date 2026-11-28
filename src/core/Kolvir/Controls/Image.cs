@@ -64,6 +64,15 @@ public class Image : Control
     private Action<object>? _sourceChanged;
 
     /// <summary>
+    /// Creates an image control with no source and no size. Give it bounds - <see cref="Control.Bounds"/>,
+    /// <see cref="Control.Width"/> and <see cref="Control.Height"/>, or a dock - or set
+    /// <see cref="Control.AutoSize"/> to have it take the size of the picture it is given.
+    /// </summary>
+    public Image()
+    {
+    }
+
+    /// <summary>
     /// Adds a handler that runs when <see cref="Source"/> is assigned a different value.
     /// </summary>
     /// <param name="handler">The handler, which receives the image control.</param>
