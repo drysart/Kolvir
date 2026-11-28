@@ -112,7 +112,12 @@ jobs:
       actions: write
     environment:
       name: github-pages
-      url: ${{ steps.deploy.outputs.page_url }}
+      # Whichever attempt actually deployed. Every attempt that did not run, or that failed, leaves
+      # its `page_url` output empty, and `||` takes the first operand that is not, so this resolves
+      # to the one attempt that succeeded. When all attempts fail this resolves to the empty string
+      # and the environment is recorded without a URL, which is what a single failed deploy did
+      # before the retries existed; the job is red in that case anyway.
+      url: ${{ steps.deploy.outputs.page_url || steps.deploy_retry.outputs.page_url || steps.deploy_retry_2.outputs.page_url }}
     # Publications queue instead of cancelling each other: a deployment that is interrupted leaves the
     # site on whichever version happened to finish.
     concurrency:
@@ -164,20 +169,25 @@ jobs:
         with:
           path: site
 
-      # `deploy-pages` lists the run's artifacts and then fetches that one artifact's own metadata
-      # URL, and it is that second call that can lose the race with the artifacts API. Attempt 1 of
-      # run 45447073038 was exactly this: the upload reported "Artifact github-pages successfully
-      # finalized" (8,647,023 bytes) and the step below had already seen it listed, yet the action
-      # died with "Fetching artifact metadata failed ... No artifacts named github-pages were found
-      # for this workflow run". Listing the artifact does not prove that its metadata URL answers, so
-      # this resolves the artifact's id from the listing and then polls the metadata URL itself.
+      # This step waits for an artifact named github-pages to appear in this run's listing, requires
+      # that there is exactly one, and confirms that the artifact's own metadata URL answers. What
+      # that buys is an early, legible message for the two bad states this job can create for
+      # itself: no artifact at all (the packaging step failed, so there is nothing to deploy) and a
+      # duplicate (a leftover that the cleanup step above should have deleted, which deploy-pages
+      # would otherwise refuse deep inside itself as "Multiple artifacts named github-pages were
+      # unexpectedly found"). It also fails rather than warning and deploying anyway, so a run can
+      # never publish something other than what this attempt built.
       #
-      # It also requires the listing to show exactly one artifact, which is what `deploy-pages`
-      # demands: a leftover duplicate is then reported here, clearly, instead of inside the action as
-      # "Multiple artifacts named github-pages were unexpectedly found". And if this attempt never
-      # produced an artifact at all - the upload failed, or the wait ran out - this fails rather than
-      # warning and deploying anyway, which is how the previous version of this step could have
-      # published something other than what this run built.
+      # What it does not buy is protection against the artifacts API itself being inconsistent. It
+      # was written after run 45447073038, and the comment here used to claim that it polls the
+      # same call deploy-pages fails on and so prevents that failure. Run 46180065852 disproved
+      # that. In that job this step listed the run's artifacts at 19:14:53.81, found artifact
+      # 15276369627, fetched its metadata URL and exited 0 at 19:14:54.394. At 19:14:54.736
+      # deploy-pages listed the same endpoint and printed "Found 1 artifact(s)", and at 19:14:54.929
+      # its metadata call failed with "No artifacts named github-pages were found". The artifact
+      # was finalized (8,651,390 bytes) and was still there afterwards. So a successful listing says
+      # nothing about the next listing of the same endpoint 0.9 seconds later. The deploy retries
+      # below, not this step, are what covers that.
       - name: Wait for the packaged site to be readable through the artifacts API
         shell: bash
         env:
@@ -201,9 +211,58 @@ jobs:
             fi
             sleep 2
           done
-          echo "::error::the github-pages artifact never became readable through the artifacts API, which is the call deploy-pages would have failed on; failing here rather than deploying whatever else the API happened to return"
+          echo "::error::the github-pages artifact never became readable through the artifacts API; failing here rather than deploying whatever else the API happened to return. Note this proves nothing about whether the next listing will contain it - that is what the deployment retries below are for"
           exit 1
 
+      # deploy-pages does not retry anything itself, so a single transient artifacts API blip turns
+      # a green run red permanently. Run 46180065852 is exactly that: 0.9 seconds after the wait step
+      # above read the artifact successfully, the very same action could not see it, and the run was
+      # red for a publication that was complete and correct. So the deployment is attempted three
+      # times.
+      #
+      # Only the deployment is repeated. The packaging happens once, above, and every attempt
+      # deploys that same artifact, so the attempts cannot manufacture the duplicate artifact that
+      # deploy-pages refuses; the cleanup and wait steps stay single, for the same reason.
+      #
+      # On deployment state: an attempt that fails *before* creating a Pages deployment - which
+      # includes the artifacts API failure being retried here, since the artifact lookup comes first
+      # - leaves nothing behind. An attempt that fails *after* `POST /pages/deployments` can leave a
+      # deployment record, but deploy-pages cancels its own deployment on the timeout and
+      # error-count paths that can end that way, and a cancel is a further API call that need not
+      # have landed by the time the next attempt starts. So a retry refused with "deployment already
+      # in progress" is possible in principle, though not from the failure above. The increasing
+      # gap before each attempt is the handling: the refused attempt fails, and the next one, later,
+      # succeeds once the cancel drains. That is deliberately not an explicit cancel-the-deployment
+      # step - adding one would mean guessing at state the action already cleans up.
       - name: Deploy to Pages
         id: deploy
         uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before retrying the deployment
+        if: steps.deploy.outcome == 'failure'
+        run: sleep 10
+
+      - name: Deploy to Pages (attempt 2)
+        id: deploy_retry
+        if: steps.deploy.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      - name: Wait before the last deployment attempt
+        if: steps.deploy_retry.outcome == 'failure'
+        run: sleep 20
+
+      - name: Deploy to Pages (attempt 3)
+        id: deploy_retry_2
+        if: steps.deploy_retry.outcome == 'failure'
+        uses: actions/deploy-pages@v4
+        continue-on-error: true
+
+      # Every attempt is `continue-on-error`, so without this a run where all three failed would go
+      # green with nothing published. It runs only when all three outcomes are failures.
+      - name: Fail when every deployment attempt failed
+        if: steps.deploy.outcome == 'failure' && steps.deploy_retry.outcome == 'failure' && steps.deploy_retry_2.outcome == 'failure'
+        run: |
+          echo "::error::all 3 deploy-pages attempts failed for run ${{ github.run_id }}; each attempt deploys the same packaged artifact, so this is not one transient artifacts API blip. Check githubstatus.com and the attempts above before rerunning this job"
+          exit 1
