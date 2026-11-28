@@ -10,12 +10,15 @@ namespace Kolvir;
 /// the backends convert; macOS points and the library's logical pixels are the same unit.
 /// </para>
 /// <para>
-/// The dialog lists the families the operating system has installed. A face loaded from a file with
-/// <see cref="Font.FromFile"/>, <see cref="Font.FromStream"/> or
-/// <see cref="Font.FromBytes"/> is not a system font unless the application registered it with
-/// the OS, so it does not appear here. That is deliberate rather than partial support: the backend
-/// cannot tell an arbitrary loaded face from an installed one, and inventing a way to add it would
-/// promise a system-wide answer the platform does not give.
+/// The dialog lists the families the operating system has installed. A face an application supplied
+/// through <see cref="IFontRegistry"/> resolves for a <see cref="Font"/>, but the dialog does not list
+/// it and cannot: it is the platform's own picker, showing what the platform's font manager knows, and
+/// a registered family is not a system font. That is deliberate rather than partial support - the
+/// backend cannot tell an application's face from an installed one, and inventing a way to add it
+/// would promise a system-wide answer the platform does not give. An application that wants to offer
+/// its own families builds its own picker over <see cref="IFontRegistry.Families"/> and constructs a
+/// <see cref="Font"/> from the choice; <see cref="IDialogService.PickFont"/>'s own result is a
+/// <see cref="FontSelection"/> for the same reason, so the caller builds the font.
 /// </para>
 /// </remarks>
 public sealed class FontDialogOptions
@@ -76,8 +79,8 @@ public sealed class FontDialogOptions
 /// What the user chose in a font dialog: a family, a size, a weight and whether the face is
 /// italic. It is a value, not a font, because <see cref="Font"/> is
 /// <see cref="IDisposable"/> and owns a typeface; handing one back from a dialog would leave the
-/// caller guessing who is responsible for it. Build the font with <see cref="CreateFont"/>, which
-/// returns one the caller owns, or pass the values to an <see cref="Font"/> constructor.
+/// caller guessing who is responsible for it. Build the font with <see cref="CreateFont"/>, or
+/// pass the values to an <see cref="Font"/> constructor.
 /// </summary>
 /// <remarks>
 /// The selection carries only what the four dialog backends can agree on. A face's width,
@@ -115,10 +118,13 @@ public sealed class FontSelection
     public bool Italic { get; }
 
     /// <summary>
-    /// A new font for this selection, owned by the caller. The face is resolved by family name at
-    /// the current size, so this is the same answer asking for the family anywhere else gives.
+    /// A new font description for this selection. The face is resolved by family name at the current
+    /// size, so this is the same answer asking for the family anywhere else gives.
     /// </summary>
-    /// <returns>A font the caller has to dispose.</returns>
+    /// <returns>
+    /// A font; nothing is owned and there is nothing to dispose, because the heavyweight face behind
+    /// it is shared with every description that resolves to the same one.
+    /// </returns>
     public Font CreateFont() => new(FamilyName, Size, Weight, Italic);
 }
 

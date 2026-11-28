@@ -1,5 +1,4 @@
 using Microsoft.Extensions.DependencyInjection;
-using System.Globalization;
 using Kolvir.Multiline;
 using Kolvir.Feature.WoffFonts;
 using XDock = Kolvir.DockStyle;
@@ -34,9 +33,10 @@ internal sealed class FontsFromFilePage : DemoPage
     {
         const string sample = "Kolvir";
 
-        // The page owns these fonts for the life of the window: a control never disposes a font it was
-        // handed, and the theme fonts are held the same way.
-        var loaded = Font.FromBytes(DemoFont.Data);
+        // The face travels with the application, so it is registered under a family name and then
+        // named like any other family: nothing here owns a font, so nothing here disposes one.
+        var family = DemoFont.Register();
+        var loaded = new Font(family, 13f);
         var system = new Font(loaded.Size);
 
         var card = Card();
@@ -157,15 +157,16 @@ internal sealed class FontsFromFilePage : DemoPage
 
         try
         {
-            var web = fonts.LoadFromBytes(DemoFont.WoffData, 15f);
-            label.Font = web;
+            // The loader unwraps the container and hands back a face; the registry is what gives that
+            // face a name, and the font is a description at the size this label wants.
+            string family = FontRegistry.Current.Register("IBM Plex Sans Web", fonts.LoadFromBytes(DemoFont.WoffData));
+            label.Font = new Font(family, 15f);
 
             if (_fontPageWebReadout is { } readout)
             {
                 var formats = fonts is FontLoader loader ? loader.Providers.Count : 0;
                 readout.Text =
-                    $"Loaded through IFontLoader: \"{web.FamilyName}\" at " +
-                    $"{web.Size.ToString("0.##", CultureInfo.InvariantCulture)} pt, " +
+                    $"Loaded through IFontLoader and registered as \"{family}\": " +
                     $"{formats} format provider(s) registered by this application. The label above asked " +
                     "for a font and got one; AddWoffFonts() is what made the bytes readable.";
             }

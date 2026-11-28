@@ -1,21 +1,57 @@
 # Fonts - design note
 
-Status: **design, not built.** Nothing under `src/` changes in the pull request that lands this note;
-it is the record of a design settled in discussion, written down before the work starts so the work
-can be reviewed against it. It stands on `develop` at `b8c39b2`.
+Status: **sections 1-4 and 6-9 are built.** Section 5 - inherited overrides - is not, and is layer 2 of
+a two-layer stack: this layer leaves `Control.Font` as `Union<Font, InheritedValue>` and
+`EffectiveFont` returning `Font` precisely so that change only adds a case. The note was written before
+the work started, on `develop` at `b8c39b2`; where a section says what the code does today it now
+describes the implementation, and every place the implementation disagreed with the design is recorded
+in section 9 with the reason.
 
 `Font` is used by every text-bearing control in the library, so this is a core change and the note is
 written as one. Where a section says what the code does today it names the file and the member, and
 that statement is meant to be checkable rather than remembered. Where a section is an argument rather
 than a decision it says so. Section 10 is the rejected alternatives in one place; section 11 is what
-is genuinely still open.
+is genuinely still open, with the reading each question was resolved with.
 
-Every type and member name in this note is a proposed one - `RealizedFont`, `FontKey`, `FontManager`,
-`FontRegistry`, `FontFace`, `FontOverride` - and none of them exists yet. Where a name is used it is
-used consistently, so the implementation can rename one thing rather than reason about a paragraph.
+**File and line references describe the tree the design was settled on (`d05540b)** unless they name a
+type this layer added. The members they point at are now in `RealizedFont` (`src/core/Kolvir/Core/`) or
+`FontManager`, so a reference to `Font.cs:192` is a reference to
+`RealizedFont.ResolveFace` today.
 
-The register is the one `ASSET-LOADING.md` uses: present tense, each decision recorded with the reason
-it was made, and no open question quietly decided inside a body section.
+The names the note proposed are the names that shipped: `RealizedFont`, `FontKey`, `FontManager`,
+`FontRegistry`, `IFontRegistry`, `FontFace`, `RegisteredFontFamily`, `NotifyFontsChanged`,
+`InvalidateFamily`. `FontOverride` is the one that does not exist yet, by design.
+
+## What this layer landed, and what it cost
+
+| | before | after |
+| --- | --- | --- |
+| `new Font("Verdana", 13f)` | 987.60 bytes | 48.00 bytes |
+| The five theme fonts, first touch | 5,592 bytes, 1.912 ms | 488 bytes, 1.092 ms |
+| First geometry read of `Theme.DefaultFont` | 0 bytes (already realized) | 1,904 bytes, 0.922 ms |
+| `new BareControl()` (a `Control` subclass) | 608.0 bytes | 608.0 bytes |
+| A cached `MeasureWidth`, 200,000 calls | 13.078-14.309 ms | 13.646-14.218 ms |
+| A wrapped layout, 350 characters at 420 px | 25.617-28.617 ms | 25.615-27.565 ms |
+| `Kolvir.Minimal`, win-x64, Skia loose | 3,886,080 bytes | 3,910,144 bytes |
+
+The last row is the one cost every application pays: **24,064 bytes**, measured from build roots of
+equal length with `-p:EmbedSkiaSharpNative=false`, and reproducible (the baseline publishes at
+3,886,080 twice). It is not the manager's data structure - see open question 3, which the measurement
+settled: an `ImmutableDictionary` would have cost 34,304 bytes more.
+
+The two timing rows have no result to report: every sample of both trees overlaps, so the epoch
+compare this layer adds in front of every `MeasureWidth` is below this method's resolution. Section 8
+says why that is the expected answer and why it was measured anyway.
+
+The per-instance allocation is the change's headline: a description that is created and thrown away
+costs 48 bytes instead of 988, which is what a Virtual DOM pass that builds a font per text node per
+render does.
+
+A face that travels with the application is now named once and referred to like any other family.
+`Font.FromFile`, `Font.FromStream`, `Font.FromBytes`, `Font.Dispose` and `Theme.UseFont` are gone;
+`Font` is four fields, `IEquatable<Font>`, a lazy `Realize()` and forwarders, and `RealizedFont` holds
+everything that used to be heavyweight.
+
 
 ## 1. The problem
 
@@ -74,9 +110,22 @@ That is a change from today. `FamilyName` is `_font.Typeface?.FamilyName ?? stri
 constructor" - is wrong under the new rule and changes with it. Section 9 lists the behaviour change
 and its two observable consequences.
 
-`WithSize` and the internal `Derive` stay on `Font` and become pure description arithmetic. Today
-`Derive` has a branch that reuses the `SKFont`'s typeface so a derived font keeps a loaded face; with
-no face in the description there is nothing to keep, and the branch disappears.
+`WithSize` and the internal `Derive` stay on `Font` and become description arithmetic, with one
+exception the implementation forced and section 9 records. Today `Derive` has a branch that reuses the
+`SKFont`'s typeface so a derived font keeps a loaded face; with no face in the description there is
+nothing to keep, and the branch disappears.
+
+**The exception: a style asked of an unnamed description.** `Derive` is what a rich label's bold or
+italic span calls. A description with no family cannot express "the default family, in bold", because
+SkiaSharp answers the default *face* whatever weight is asked of a null family name - so a pure
+arithmetic derive would silently stop drawing bold spans in bold. It therefore names the platform's
+default family (`RealizedFont.DefaultFamilyName()`) when, and only when, the derived style differs
+from this font's; a derive that only changes the size stays exactly as unnamed as it was. The
+alternative - making resolution treat an unnamed family as "the default family, then the style" - is
+what the documentation implies and would have been cleaner, but it also makes every theme font that
+asks for weight 600 or 700 draw a bold face where it draws a regular one today, which changes every
+page of the sample and every application's look. That is a separate decision, and section 9 states it
+as one.
 
 ### 2.2 `RealizedFont` becomes the heavyweight object
 
@@ -110,10 +159,16 @@ and `Label`, `TextBox`, `RichLabel`, `MenuRenderer`, `ListView` and the rest do 
 is no gain in making them say `.Realize().MeasureWidth(...)`; the gain was the pooling, and it does
 not depend on the spelling.
 
-The internal members move rather than forward because they are the realization: `RichLabel.cs:1084`
-and `TextBoxSpanFeature.cs:234` read `font.SkFont.Metrics`, and both are in the same assembly, so they
-say `font.Realize().SkFont.Metrics`. Tests that assert on runs (`FontFallbackTests` uses the internal
+The internal members move rather than forward because they are the realization: `RichLabel.cs` and
+`TextBoxSpanFeature.cs` read the `SKFont`'s metrics, and both are in the same assembly, so they say
+`font.Realize().SkFont.Metrics`. Tests that assert on runs (`FontFallbackTests` uses the internal
 `TextRunCount`) call the same accessor.
+
+**As built, one correction to the paragraph above.** `internal DrawText` is not reached by two places
+but by nine: `TextRenderer`, `TextBox` twice, `MenuBarView`, `MenuRenderer` twice, `RichLabel` and
+`TextBoxMultiline` twice. All nine now say `font.Realize().DrawText(...)`. The alternative - an
+internal forwarder on `Font` - would have been a forwarding member for the realization, which is the
+one thing this table's rule excludes.
 
 `RealizedFont` is internal. An application draws and measures through `Font`, which is the surface it
 already has; exposing the realization would make the registration epoch of section 4.4 part of the
@@ -122,9 +177,11 @@ question 2.
 
 ### 2.3 The key, and why it cannot be a `Font`
 
-`FontManager` resolves a description to a realization, once per description, through an
-`ImmutableDictionary<FontKey, WeakReference<RealizedFont>>` read lock-free on the happy path, with
-`ImmutableInterlocked` as the slow path when something has to be created.
+`FontManager` resolves a description to a realization, once per description, through a table read
+lock-free on the happy path, and creates it under one lock on a miss. Section 8's measurement chose the
+table's shape: it is a plain `Dictionary<FontKey, WeakReference<RealizedFont>>` published by a single
+volatile write and never mutated after publication, rather than the `ImmutableDictionary` this section
+first proposed (open question 3).
 
 `FontKey` is the description as a `readonly struct`: the family name, the size, the weight and the
 italic flag, with value equality over exactly those four fields. Family names compare `Ordinal`, which
@@ -166,11 +223,16 @@ enough and no native call is made on our finalizer.
 
 ### 2.5 What `FontManager` is, and what it is not
 
-`FontManager` is a static class holding one dictionary and one epoch counter (section 4.4). It owns
+`FontManager` is a static class holding one table and one epoch counter (section 4.4). It owns
 resolution and nothing else: it does not own faces, does not decide what a family means (the registry
 of section 4 does), does not size anything and does not know what a control is. A single
 `RealizedFont` per description is created on the first `Font` that needs it, and thereafter a
 dictionary read.
+
+**As built, `FontManager` and `FontKey` are internal**, not public. Section 2.2's argument for keeping
+`RealizedFont` internal applies to both: the epoch and the invalidation rule are what a caller would
+need documented as public API if it could see them, and nothing outside the library needs either type.
+"Internal" rather than merely undocumented, so the compiler enforces the claim.
 
 Controls keep caching layout against the realization, which is the point of pooling: `RealizedFont`
 holds the width, run and coverage caches, so a control that measures the same word against an equal
@@ -270,13 +332,20 @@ container is the same one `FontRegistry.Current` returns.
 ```csharp
 public interface IFontRegistry
 {
-    string Register(string family, ReadOnlySpan<byte> data, int? weight = null, bool? italic = null);
+    string Register(string family, ReadOnlySpan<byte> data);
     string Register(string family, FontFace face);
     string RegisterFromFile(string path, string? family = null);      // 4.7
     bool Unregister(string? family);                                  // 4.4
     IReadOnlyList<RegisteredFontFamily> Families { get; }             // 4.8
 }
 ```
+
+**As built, the overload set is exactly this**, and the optional weight and italic parameters this
+section first sketched are gone. Nothing in the tree needed them: a file's style is read from the
+file, and an application that wants a second style of a family registers a second face - which is what
+section 4.5 already describes as the reason the registry holds a set per family. Adding `int? weight`
+would have been surface whose only purpose was to let a caller lie about the file it is registering.
+Open question 5 records the decision.
 
 **Why a static rather than a service resolved from `Control.Services`.** Realization happens with no
 control in sight. `Theme`'s five font fields (`src/core/Kolvir/Core/Theme.cs`) are static and are
@@ -321,6 +390,14 @@ the realization path (section 4.3) and nothing else.
 tolerated accident, and it is the reason resolution is ours rather than Skia's: an application that
 wants its own "Inter", or its own "Segoe UI", registers that name and gets its face everywhere,
 including in `Theme`'s fields, without changing a single `Font` in its code.
+
+**As built, a resolution also decides the layout settings, and that is load-bearing.** `RealizedFont`
+keeps the flag the old `Font` called `_fixedFace`, and it now means "this face came from the
+registry". A face from the registry gets `LinearMetrics = true`, `Hinting = None` and
+`BaselineSnap = false` - exactly what a face loaded from data got before this change, and the reason a
+face registered from a file measures the same on all three platforms. The note listed `_fixedFace` as
+moving without saying what sets it; nothing else does, and getting it wrong would move every
+measurement the demo and the suite pin.
 
 Shadowing is worth more than it first looks for one reason: the family an application puts in
 `ApplicationOptions.FontFamily` is usually the platform's own UI family - the demo application passes
@@ -535,12 +612,19 @@ var family = registry.RegisterFromFile("Fonts/Inter.woff2");           // unwrap
 Theme.FontFamily = family;
 ```
 
-`RegisterFromFile` resolves `IFontLoader` from the container, calls `LoadFromBytes`, and registers the
-result; when `family` is null it uses the face's internal family name. Whether that resolution should
-be a registry dependency in the container or an explicit loader argument is implementation detail; the
-point is that a face decompressed from a WOFF file is stored exactly like a face read from a `.ttf`,
-because by the time it reaches the registry it *is* one. Nothing in the registry knows what a
-container format is.
+`RegisterFromFile` reads the bytes through an `IFontLoader`, and **as built that loader is pushed into
+the registry rather than resolved from it.** The note left this as "implementation detail", but the
+detail has to be decided somewhere and the registry is a process-wide static with no container of its
+own, so `Application.InstallProcessServices` calls an internal `FontRegistry.UseLoader(...)` with the
+container's `IFontLoader` - the one composed from the features the application declared. The registry
+falls back to a bare `FontLoader()` when no application installed one, which is what lets a test
+register a plain `.ttf` with no `Application` at all. That is what makes the example above work: the
+WOFF provider is in the container, so it is in the loader, so it is what `RegisterFromFile` unwraps
+with.
+
+When `family` is null the registered name is the face's internal family name. A face decompressed from
+a WOFF file is stored exactly like a face read from a `.ttf`, because by the time it reaches the
+registry it *is* one. Nothing in the registry knows what a container format is.
 
 ### 4.8 Enumeration, and the font dialog
 
@@ -557,6 +641,10 @@ change adds is that the *answer* is now enumerable, so an application that wants
 families builds its own picker over `FontRegistry.Families` and constructs
 `new Font(chosen.FamilyName, size, weight, italic)` from the choice.
 `FontDialogOptions`'s remarks need that sentence added when this lands; this note does not edit it.
+
+**As built**, `FontDialogOptions`'s remarks carry it: the paragraph about an arbitrary loaded face
+became one about a registered family, and it names `IFontRegistry.Families` and the choice to build a
+picker, next to the existing note that `PickFont` answers with a `FontSelection` for the same reason.
 
 Note that `PickFont`'s result is already a `FontSelection` - a value of family, size, weight and
 italic - and not a `Font`, for the same reason the registry exists: the caller builds the font.
@@ -644,6 +732,15 @@ The rules for the manager:
   than assume the manager is alive. It also touches no Skia object, so a half-torn-down native
   library cannot fault it (section 2.4).
 
+**As built, one addition.** The finalizer takes no lock, because a finalizer that blocks is a
+finalization queue that stops. Its compare-and-swap therefore competes with the UI thread's
+publications, and a removal that loses that race would leave an entry behind. Every publication - the
+creator's and the invalidator's - is a compare-and-swap that rebuilds from whatever it finds and
+retries, so no publication can drop a concurrent removal; the residual case is the reverse, a removal
+that loses to a publication, and what it leaves is a weak reference to a collected object: harmless,
+and replaced the next time that description is realized. That is cheaper than the alternative of
+locking on the finalizer thread for a table whose entries are also cleaned up by use.
+
 ## 7. Diagnostics
 
 `Font.ToString` reports the description and never realizes: the family, the size, the weight and the
@@ -728,6 +825,127 @@ wrapped paragraph rather than a sentence.
 No number is invented here. The pull request that implements the change carries the measurements, as
 the policy's status line asks of every change.
 
+### 8.1 The numbers, as measured
+
+Both trees were published and run from build roots of equal length
+(`...\copilot-worktrees\Kolvir\baseline0000` and `...\copilot-worktrees\Kolvir\verbose-lamp`, both 12
+characters), SDK 10.0.403.
+
+**1. Publish size.** `Kolvir.Minimal`, `-c Release -r win-x64 -p:EmbedSkiaSharpNative=false`:
+
+| | baseline | this layer | delta |
+| --- | --- | --- | --- |
+| win-x64 | 3,886,080 | 3,910,144 | 24,064 |
+
+The baseline reproduces at 3,886,080 on a second publish, and 24,064 is 47 alignment steps, so the
+delta is the code rather than the 512-byte boundary. Only win-x64 could be weighed here: the fixture
+pins its own `TargetFramework` to the host OS, and the publish for another RID stops at
+`error : Cross-OS native compilation is not supported.` A linux-x64 and an osx-arm64 row need a
+machine of that OS, which is what the policy already says about the publishing machine.
+
+The dependency question is settled by running both shapes. With
+`ImmutableDictionary<FontKey, WeakReference<RealizedFont>>` the image publishes at **3,944,448**;
+with the copy-on-write `Dictionary` it publishes at **3,910,144**. So `System.Collections.Immutable`
+would have cost 34,304 bytes - 67 alignment steps - and open question 3's fallback is what shipped.
+
+`-p:TrimmerSingleWarn=false` reported no IL2xxx or IL3xxx warning in either tree.
+
+**2. Per-instance allocation.** 100,000 `new Font("Verdana", 13f)` with the native work done outside
+the measured region, `GC.GetAllocatedBytesForCurrentThread`:
+
+| | baseline | this layer |
+| --- | --- | --- |
+| 100,000 fonts | 98,759,864 bytes (987.60 each) | 4,800,000 bytes (48.00 each) |
+
+That is the claim this note asked for: a font that is described and thrown away allocates one small
+object - 48 bytes, five sixths of it the `Font` object and its string, against 988 for the same
+description with its typeface, `SKFont` and five collections.
+
+**3. `Control` size.** `Unsafe.SizeOf` answers 8 bytes for both `Font` and a trivial `Control`
+subclass in both trees, because both are reference types and the method reports the size of the
+reference - **so the measurement this note specified does not measure an instance size at all.** The
+number that can be compared is the allocation of constructing one, and it is unchanged:
+
+| | baseline | this layer |
+| --- | --- | --- |
+| `new BareControl()` (`Control` subclass, no children) | 608.0 bytes | 608.0 bytes |
+
+As expected and for the stated reason: `_font` and `_inheritedFont` hold the same `Union` of the same
+reference, and no field was added to `Control`.
+
+**4. Startup work.** The five theme fonts at the first touch of `Theme`, then the first read of
+geometry:
+
+| | baseline | this layer |
+| --- | --- | --- |
+| five theme fonts, first touch | 5,592 bytes, 1.912 ms | 488 bytes, 1.092 ms |
+| first `Theme.DefaultFont.LineHeight` | 0 bytes, 0.017 ms (already realized) | 1,904 bytes, 0.922 ms |
+
+The win is real but smaller than the paragraph above expected: the baseline's 5,592 bytes are five
+descriptions with their typefaces and `SKFont`s, and this layer's 488 are five four-field objects.
+The cost moves to the first geometry read, which now realizes one description (1,904 bytes, 0.922 ms)
+where the baseline had already paid for all five eagerly. What this numbers is "no Skia call until
+text is measured": reading `Size` or `FamilyName` on any theme font allocates nothing and touches
+nothing native.
+
+**5. The epoch compare on the measure path.** Nine runs of each tree, the median reported:
+
+| | baseline | this layer |
+| --- | --- | --- |
+| 200,000 cached `MeasureWidth` | 69.8 ns each (13.078-14.309 ms) | 70.4 ns each (13.646-14.218 ms) |
+| 2,000 wrapped layouts, 350 characters at 420 px | 26.869 ms (25.617-28.617) | 26.610 ms (25.615-27.565) |
+
+**There is no result here.** The two distributions overlap completely - the baseline's own nine
+samples span 65.4 to 71.5 ns per cached measurement - so the epoch compare is below this method's
+resolution, and the honest reading is "not measurable" rather than "+0.6 ns". The wrapped-layout row
+came out marginally *faster* after the change, which is the same statement: noise. What the change
+adds is one volatile read, one null check and one integer compare ahead of a dictionary probe that
+costs about seventy nanoseconds, and that is why.
+
+The whole measurement harness is outside the repository - it compiles against either tree through a
+`<ProjectReference>` on `$(KolvirRoot)` so the same source produces both columns - and it is not
+committed, because a harness that ships is a harness that rots.
+
+### 8.2 Renders
+
+Text layout is what this change touches, so every page of the sample was rendered before and after and
+the decoded bitmaps compared.
+
+**Method.** All 73 pages in `DemoUi.Demos`, at 1280x820, light appearance, through
+`KolvirDemoApp --render <png> 1280 820 --page <id>`. Each build was rendered twice, into separate
+directories, and compared with itself first: two pages - `animated-gif` and `animated-webp` - differ
+from run to run in *both* builds, in the same 33x46 box, because they paint an animation frame and the
+frame depends on the clock. Those two are excluded from the cross-build claim rather than reported as
+regressions. Equal PNG bytes are equal pixels because both builds encode with the same SkiaSharp; a
+differing file is decoded and compared pixel by pixel, and the number and bounding box below come from
+that comparison.
+
+**Result: 71 of 73 pages are pixel-identical.** The two that are not:
+
+- **`fonts-from-a-file`**, 5,751 pixels in one 38-pixel band at (398,570)-(1243,608). That band is the
+  web-font readout, whose text changed: it used to print the face's internal family name at the size
+  the loader was asked for, and now prints the name it was *registered* under - "IBM Plex Sans Web" -
+  because that is the name a font is built from. The rest of the page - the label, the text box, the
+  rich label, the measured comparison - is unchanged, which is the interesting half: the registered
+  face measures exactly as the loaded face did, because a registered face keeps the pinned layout
+  settings a loaded one had.
+- **`font-dialog`**, 5,804 pixels at (304,266)-(1223,611). One caption changed because the API it names
+  changed: "A face loaded with `Font.FromFile` is not a system font" became "A family an application
+  registered is not a system font". The paragraph re-wraps, so the content below it moves; nothing
+  about any font's measurement changed.
+
+**Two pages the note expected to move and one it did not.** It predicted `FontsFromFilePage` and
+`InheritedAppearancePage`. The first moved, for the reason above. `inherited-appearance` did **not**,
+and that is correct rather than lucky: the page registers the bundled face under the family name
+recorded inside the file, so `FamilyName` echoes exactly what it reported before, and a family with one
+regular face serves the page's semibold request with that face - so every pixel is the same, and what
+changed is only the value `Weight` reports, which is a number and not a glyph.
+
+**Two pages that moved and then stopped moving**, which is where the note was wrong: `rich-text` and
+`rich-label-markup` differed by a text band each, because a bold span in a font with no family stopped
+being bold. That is the `Derive` finding of section 2.1, and it is why a style-changing derive names the
+default family. With that rule in place both pages are identical to the baseline again.
+
 ## 9. Migration
 
 `Font`'s public surface today: four constructors, three static factories, `IDisposable`, and
@@ -735,15 +953,41 @@ the policy's status line asks of every change.
 the change the constructors and the four data properties and `MeasureWidth`/`WithSize` stay, and the
 factories and `Dispose` go.
 
-**Call sites in the tree today**, so the size of the change is not a guess:
+**Call sites in the tree before the change**, so the size of the change is not a guess:
 
 | What | Where | Count |
 | --- | --- | --- |
 | `new Font(...)` outside `Font.cs` itself | `Theme.cs` (five statics plus `ThemeFont`), `RichLabel.cs`, `AppKitSkiaView.cs`, demo `FontsFromFilePage.cs` | 9 |
 | `Font.FromFile`/`FromStream`/`FromBytes` in non-documentation code | `FontLoader.cs` (2), demo `Program.cs` (2), `FontsFromFilePage.cs`, `InheritedAppearancePage.cs` (3) | 8 |
-| Font construction in tests (`Font.From*` or `TestFont.Create`) | 7 test files, 48 sites | 48 |
-| `using`/`using var` on a font | 33 sites across `AppearanceUnionTests` (9), `FontFallbackTests` (7), `FontLoadingTests` (6), `FontLoaderTests` (5), `InheritedAppearanceTests` (5), `AppKitSkiaView` (1) | 33 |
-| `Theme.UseFont` | demo `Program.cs` (2), demo `InheritedAppearancePage.cs` (2), tests `FontLoadingTests` (2) | 6 |
+| Font construction in tests (`Font.From*` or `TestFont.Create`) | 8 files: 23 `TestFont.Create` plus 27 `Font.From*` (`FontLoadingTests` 15, `InheritedAppearanceTests` 6, `WoffFontLoadingTests` 3, `TestFont` 2, `FontLoaderTests` 1) | 50 |
+| `using`/`using var` on a font | `AppearanceUnionTests`, `FontFallbackTests`, `FontLoadingTests`, `FontLoaderTests`, `InheritedAppearanceTests`, `FontDialogTests`, `WoffFontLoadingTests`, `AppKitSkiaView` | 49 |
+| `Theme.UseFont` | demo `Program.cs` (2), demo `InheritedAppearancePage.cs` (2), tests `FontLoadingTests` (2), `TestFont.Pin` (1) | 7 |
+| `font.DrawText(...)`, which becomes `font.Realize().DrawText(...)` | `TextRenderer`, `TextBox` (2), `MenuBarView`, `MenuRenderer` (2), `RichLabel`, `TextBoxMultiline` (2) | 9 |
+| `font.SkFont...`, which becomes `font.Realize().SkFont...` | `RichLabel`, `TextBoxSpanFeature` | 2 |
+
+**Corrections to the original table, after doing the work.** Three of its counts were low and one was
+high. There are 50 test construction sites across 8 files, not 48 across 7. There are 49 `using` sites
+rather than 33 - the original count missed `FontDialogTests` and the WOFF suite, and both
+`FontLoadingTests` and `FontLoaderTests` have more than the table said. `Theme.UseFont` has a seventh
+caller, `TestFont.Pin`, which the table does not list. And Table 2.2's "two places read `SkFont`" is
+right about `SkFont` but incomplete about the realization: `DrawText` moved too, so nine more call
+sites gained a `.Realize()`.
+
+**Three things in this section were wrong in a way that changed the work:**
+
+- **`TestFont.Pin` does not go away.** The table above says `TestFont.cs` "loses `Create` and `Pin`",
+  on the assumption that `Theme.FontFamily = TestFont.Family` can be written inline wherever `Pin` was
+  used. It cannot: `Pin` is a `using`-scoped assignment with a restore, used by 16 tests, and inlining
+  it would put a try/finally into each of them. `Pin` stays, with a body that assigns the registered
+  family and restores `null`; only `Create` goes.
+- **`FontLoadingTests` could not be migrated line by line.** Eight of its fourteen tests existed to pin
+  `Font.FromFile`/`FromStream`/`FromBytes` failures, three more pinned disposal, and two pinned
+  `Theme.UseFont`. They were rewritten rather than ported: the loader-failure tests belong to
+  `FontLoaderTests` and `FontFace`, the registry's own rules got `FontRegistryTests`, and what is left
+  in `FontLoadingTests` is the description, its equality, the pool and the theme.
+- **`AFontKeepsNoTieToTheFileItCameFrom` changed meaning.** It now belongs to the registry: register
+  from a path, delete the file, measure. The registry owns bytes, so the property survives, but it is
+  a claim about `FontRegistry` and it moved there.
 
 **What breaks for an application, and what it does instead:**
 
@@ -754,8 +998,8 @@ factories and `Dispose` go.
   `tests/core/Kolvir.Tests/Ported/FontLoadingTests.cs` - go away, and so does
   `RichLabel.ClearDerivedFonts`'s disposal loop (`_derivedFonts` stays as a lookup cache but holds
   descriptions, which re-realize themselves). `tests/core/Kolvir.Tests/TestSupport/TestFont.cs` loses
-  `Create` and `Pin`: it registers the embedded face once and hands back its family name, and the 48
-  test construction sites become `new Font(TestFont.Family, size)`.
+  `Create`: it registers the embedded face once and hands back its family name, and the test
+  construction sites become `new Font(TestFont.Family, size)`.
 - **`Font.FromFile`/`FromStream`/`FromBytes` disappear.** Three lines replace them:
   ```csharp
   var family = registry.RegisterFromFile("Fonts/Inter-Regular.ttf");  // or Register(name, bytes)
@@ -785,7 +1029,12 @@ factories and `Dispose` go.
   `new Font(FamilyName, size, weight, italic)`, so a font made with no family currently has its
   `WithSize` result silently *named* with the resolved default family; after the change it stays
   unnamed, so the derived font keeps the same description apart from its size instead of minting a
-  second name for the same face.
+  second name for the same face. **That last claim was wrong and the code disagrees with it:** the
+  name is not cosmetic on Windows, because `SKTypeface.FromFamilyName(null, weight)` ignores the weight
+  while `FromFamilyName("Segoe UI", weight)` honours it. Dropping the name therefore stopped bold and
+  italic spans on an unnamed font from being bold or italic - two sample pages moved and said so - so
+  a derive that changes the style still names the default family, and only a size-only derive stays
+  unnamed. Section 2.1 states the rule.
 - **`FontDialogOptions`'s remarks need one sentence** (4.8): registered families resolve but are not
   listed by the platform dialog.
 
@@ -839,6 +1088,10 @@ reviewer can disagree with the reading rather than with a decision presented as 
    second theme role. The reading to start from is to wait for that consumer and ship only the
    registry and the description/realization split, because every application pays for the union arity
    (a wider value, a case to test for on read) whether or not it uses an override.
+   **Resolved elsewhere: layer 2 builds it.** A consumer arrived - `label.Font =
+   InheritedFont.WithSize(14f)` - so the override type is being built on a branch stacked on this one.
+   Nothing here blocks it: this layer adds no case to `Control.Font` and leaves `EffectiveFont`
+   returning `Font`, which is exactly the shape section 5 needs.
 2. **Should an application be able to reach the realization?** `RealizedFont` is proposed internal,
    with `Font` as the whole surface. What an application cannot do today either - draw with a
    `Font` directly, or read `SKFont.Metrics.Descent` for its own layout - it still cannot do. The
@@ -846,6 +1099,8 @@ reviewer can disagree with the reading rather than with a decision presented as 
    realization makes the epoch and the invalidation rule public, and a caller that reaches an
    object which can be replaced under it needs the whole section 4.4 contract documented as public
    API.
+   **Resolved as read: `RealizedFont`, `FontKey` and `FontManager` are all internal.** The same
+   argument covers all three; see section 2.5.
 3. **`ImmutableDictionary`, or a swapped `Dictionary`?** The agreed shape is
    `ImmutableDictionary<FontKey, WeakReference<RealizedFont>>` read lock-free. It is the first use of
    `System.Collections.Immutable` in the core assembly, and since `Font` is always retained the
@@ -853,12 +1108,23 @@ reviewer can disagree with the reading rather than with a decision presented as 
    step 1 attributes the delta - and to fall back to a plain `Dictionary` swapped by `Volatile` under
    a lock if the delta is more than one alignment step, because the read pattern the immutable table
    buys is exactly the copy-on-write pattern a swapped dictionary gives.
+   **Resolved: the swapped `Dictionary`.** It cost 34,304 bytes more on win-x64 (section 8.1), 67
+   alignment steps, so the fallback was forced rather than chosen. One amendment to the shape above:
+   the table is published by a compare-and-swap and mutated under a lock only for creation, never
+   `Volatile.Write`n while another writer may be mid-publication, because the finalizer removes an
+   entry without a lock and a plain write could drop that removal.
 4. **Does re-registering a face need to be cheap?** Registration parses the file once to read its
    internal family name and style, and the bytes are kept. An application that registers the same
    file from two code paths pays that parse twice. The reading to start from is to leave it: parsing
    happens at startup, and a content hash at registration is the natural way to de-duplicate it, which
    is the same decision as content-hash identity and should be taken once rather than twice.
+   **Resolved as read: left alone.** No content hash was added, and the measured parse cost is the one
+   section 4.4 already accepts.
 5. **What is the exact `Register` overload set?** `(family, data)`, `(family, FontFace)`,
    `RegisterFromFile(path, family?)` and the optional weight and italic overrides are what this note
    assumes. Whether the overrides belong at registration at all - rather than always being read from
    the file - is surface that has no caller yet, so it is listed rather than fixed.
+   **Resolved: the overrides are gone.** Nothing in the tree needed them; a face's style is read from
+   its file, and a second style of a family is a second face. The interface is the three `Register`
+   forms and nothing else (section 4.2).
+

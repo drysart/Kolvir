@@ -87,7 +87,7 @@ public static class TextRenderer
             var line = lines[i];
             float x = GetLineLeft(bounds, font, line.Text, alignment);
             float baseline = top + (i * lineHeight) + font.BaselineOffset;
-            font.DrawText(canvas, line.Text, x, baseline, paint);
+            font.Realize().DrawText(canvas, line.Text, x, baseline, paint);
         }
     }
 

@@ -169,7 +169,7 @@ internal static class Program
         // published application whether or not it loads a font.
         if (Array.IndexOf(args, "--embedded-font") >= 0)
         {
-            Theme.UseFont(Font.FromBytes(DemoFont.Data));
+            Theme.FontFamily = DemoFont.Register();
         }
 
         var demo = new DemoUi();
@@ -485,7 +485,7 @@ internal static class Program
         // before the sample builds its controls, so every page renders in the bundled face.
         if (Array.IndexOf(args, "--embedded-font") >= 0)
         {
-            Theme.UseFont(Font.FromBytes(DemoFont.Data));
+            Theme.FontFamily = DemoFont.Register();
         }
 
         ApplyAppearanceOverride(args);

@@ -37,7 +37,7 @@ public sealed class RichLabelTests : HeadlessTestBase
         var label = new RichLabel { Dock = DockStyle.Fill };
         using (TestFont.Pin())
         {
-            label.Font = TestFont.Create(13f);
+            label.Font = new Font(TestFont.Family, 13f);
             var lead = label.AddText("ab");
             var link = label.AddLink("cd", _ => { });
 
@@ -57,7 +57,7 @@ public sealed class RichLabelTests : HeadlessTestBase
         var label = new RichLabel { Dock = DockStyle.Fill };
         using (TestFont.Pin())
         {
-            label.Font = TestFont.Create(13f);
+            label.Font = new Font(TestFont.Family, 13f);
             var link = label.AddLink("open", _ => clicked++);
 
             using var scene = HeadlessScene.Create(label, 200f, 40f);
@@ -79,7 +79,7 @@ public sealed class RichLabelTests : HeadlessTestBase
     public void AnInlineControlIsPartOfTheRun()
     {
         var button = new Button("Inline") { Width = 60f, Height = 24f };
-        using var label = new RichLabel { Dock = DockStyle.Fill, Font = TestFont.Create(13f) };
+        using var label = new RichLabel { Dock = DockStyle.Fill, Font = new Font(TestFont.Family, 13f) };
         label.AddText("before ");
         label.AddInlineControl(button);
         label.AddText(" after");
@@ -96,7 +96,7 @@ public sealed class RichLabelTests : HeadlessTestBase
     public void LosingAnInlineControlsSpanRemovesItFromTheRun()
     {
         var button = new Button("Inline");
-        using var label = new RichLabel { Font = TestFont.Create(13f) };
+        using var label = new RichLabel { Font = new Font(TestFont.Family, 13f) };
         label.AddText("a ");
         label.AddInlineControl(button);
 
@@ -113,7 +113,7 @@ public sealed class RichLabelTests : HeadlessTestBase
     {
         using (TestFont.Pin())
         {
-            var label = new RichLabel { WrapText = true, Font = TestFont.Create(13f) };
+            var label = new RichLabel { WrapText = true, Font = new Font(TestFont.Family, 13f) };
             label.AddText("a sentence long enough to need more than one line at this width");
 
             float wide = label.Measure(new SKSize(600f, float.PositiveInfinity)).Height;
@@ -273,14 +273,14 @@ public sealed class RichLabelTests : HeadlessTestBase
             {
                 Text = LongText,
                 WrapText = true,
-                Font = TestFont.Create(13f),
+                Font = new Font(TestFont.Family, 13f),
             };
 
             using var scene = HeadlessScene.Create(InStack(label), 300f, 600f);
 
             float before = label.Bounds.Height;
 
-            label.Font = TestFont.Create(40f);
+            label.Font = new Font(TestFont.Family, 40f);
             scene.Host.PerformLayout();
 
             Assert.IsTrue(

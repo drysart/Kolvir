@@ -22,7 +22,7 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     [TestMethod]
     public void TheFontPropertyReportsTheAssignedCase()
     {
-        using var font = TestFont.Create(14f);
+        var font = new Font(TestFont.Family, 14f);
         var label = new Label("x");
 
         Assert.IsTrue(label.Font.TryGetValue<InheritedValue>(out _), "an unassigned font reads back as inherit");
@@ -53,8 +53,8 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     [TestMethod]
     public void InheritingAgainRestoresTheParentFontAndLaysOutAgain()
     {
-        using var parentFont = TestFont.Create(20f);
-        using var ownFont = TestFont.Create(9f);
+        var parentFont = new Font(TestFont.Family, 20f);
+        var ownFont = new Font(TestFont.Family, 9f);
 
         var panel = new Panel { Font = parentFont };
         var label = new Label("inherited") { AutoSize = true };
@@ -81,8 +81,8 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     [TestMethod]
     public void AFontAssignedAboveAChildThatAlreadyResolvedIsPickedUp()
     {
-        using var outerFont = TestFont.Create(18f);
-        using var innerFont = TestFont.Create(11f);
+        var outerFont = new Font(TestFont.Family, 18f);
+        var innerFont = new Font(TestFont.Family, 11f);
 
         var outer = new Panel();
         var middle = new Panel();
@@ -105,8 +105,8 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     [TestMethod]
     public void ReparentingResolvesAgainstTheNewParent()
     {
-        using var firstFont = TestFont.Create(15f);
-        using var secondFont = TestFont.Create(25f);
+        var firstFont = new Font(TestFont.Family, 15f);
+        var secondFont = new Font(TestFont.Family, 25f);
 
         var first = new Panel { Font = firstFont };
         var second = new Panel { Font = secondFont };
@@ -353,8 +353,8 @@ public sealed class AppearanceUnionTests : HeadlessTestBase
     [TestMethod]
     public void ToolStripItemsInheritFromTheirStrip()
     {
-        using var stripFont = TestFont.Create(16f);
-        using var itemFont = TestFont.Create(10f);
+        var stripFont = new Font(TestFont.Family, 16f);
+        var itemFont = new Font(TestFont.Family, 10f);
 
         var strip = new ToolStrip { Font = stripFont, ForeColor = ThemeColor.Accent };
         var label = new ToolStripLabel("Ready");

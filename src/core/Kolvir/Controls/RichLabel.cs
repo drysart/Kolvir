@@ -44,6 +44,8 @@ public class RichLabel : Control
     private const float HighlightRadius = 2f;
 
     private readonly TextSpanCollection _spans;
+
+    /// <summary>Fonts derived from a span's style, by the description they were derived at.</summary>
     private readonly Dictionary<string, Font> _derivedFonts = new(StringComparer.Ordinal);
     private Layout? _layout;
     private List<Fragment>? _fragments;
@@ -308,7 +310,7 @@ public class RichLabel : Control
 
                 float baseline = fragment.Bounds.Top + line.Ascent;
                 textPaint.Color = ResolveSpanColor(fragment.Span);
-                fragment.Font.DrawText(canvas, fragment.Text, fragment.Bounds.Left, baseline, textPaint);
+                fragment.Font.Realize().DrawText(canvas, fragment.Text, fragment.Bounds.Left, baseline, textPaint);
             }
 
             DrawSpanDecorations(canvas, line, fill);
@@ -1081,7 +1083,7 @@ public class RichLabel : Control
             return;
         }
 
-        var metrics = font.SkFont.Metrics;
+        var metrics = font.Realize().SkFont.Metrics;
         float size = font.Size;
         float capHeight = metrics.CapHeight > 0f ? metrics.CapHeight : -metrics.Ascent * 0.7f;
         float xHeight = metrics.XHeight > 0f ? metrics.XHeight : capHeight * 0.7f;
@@ -1502,11 +1504,8 @@ public class RichLabel : Control
 
     private void ClearDerivedFonts()
     {
-        foreach (var font in _derivedFonts.Values)
-        {
-            font.Dispose();
-        }
-
+        // Nothing is owned and nothing is disposable: a derived font is a description that
+        // re-realizes itself, so dropping the lookup cache is the whole of the cleanup.
         _derivedFonts.Clear();
     }
 

@@ -6,10 +6,9 @@ namespace Kolvir;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It derives from <see cref="ArgumentException"/> because that is what
-/// <see cref="Font.FromBytes"/> has always thrown for bytes it cannot read, and a caller that
-/// catches the old type keeps working. What it adds is the provider's name, which is the one part of
-/// the failure a caller cannot work out for themselves.
+/// It derives from <see cref="ArgumentException"/> because that is what a font load has always thrown
+/// for bytes it cannot read, and a caller that catches the old type keeps working. What it adds is the
+/// provider's name, which is the one part of the failure a caller cannot work out for themselves.
 /// </para>
 /// <para>
 /// It is thrown from a load, not from a paint: the caller asked for the font, so the caller catches

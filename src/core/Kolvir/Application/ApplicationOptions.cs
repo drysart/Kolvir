@@ -229,9 +229,11 @@ public sealed class ApplicationOptions
     /// A family name resolves to a different physical face on each platform, and this option cannot
     /// carry a font of your own: an option is read by <see cref="Application"/> at start-up,
     /// which is a type every application runs, so a font read there would keep the loaders in every
-    /// published application. Call <see cref="Theme.UseFont"/> from application code before the
-    /// windows are created instead - <c>Theme.UseFont(Font.FromFile(path))</c> - when the
-    /// same metrics everywhere matter.
+    /// published application. Register the face with <see cref="FontRegistry"/> instead, before the
+    /// windows are created, and name the family it was registered under -
+    /// <c>Theme.FontFamily = registry.RegisterFromFile(path)</c> - when the same metrics everywhere
+    /// matter. A registered name wins even over a system family of the same name, so registering the
+    /// name assigned here is enough.
     /// </remarks>
     public string? FontFamily { get; set; }
 

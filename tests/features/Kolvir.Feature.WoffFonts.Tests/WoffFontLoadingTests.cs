@@ -104,15 +104,33 @@ public sealed class WoffFontLoadingTests
     [TestMethod]
     public void TheMetricsSurviveTheRoundTrip()
     {
-        var original = Font.FromBytes(TrueType.Value, 17f);
-        var woff = Font.FromBytes(WoffFontFormatProvider.Shared.Decode(Woff.Value).Span, 17f);
-        var woff2 = Font.FromBytes(WoffFontFormatProvider.Shared.Decode(Woff2.Value).Span, 17f);
+        // Three names for one face: what a caller does with a decoded container is register it, and
+        // the numbers below are what the registered face measures.
+        var registry = FontRegistry.Current;
+        string plain = registry.Register("Woff check plain", TrueType.Value);
+        string woff = registry.Register("Woff check woff", WoffFontFormatProvider.Shared.Decode(Woff.Value).Span);
+        string woff2 = registry.Register("Woff check woff2", WoffFontFormatProvider.Shared.Decode(Woff2.Value).Span);
 
-        Assert.AreEqual("IBM Plex Sans", woff2.FamilyName);
-        Assert.AreEqual(400, woff2.Weight);
-        Assert.AreEqual(original.LineHeight, woff.LineHeight, 0.001f);
-        Assert.AreEqual(original.LineHeight, woff2.LineHeight, 0.001f);
-        Assert.AreEqual(original.MeasureWidth(GlyphSample), woff2.MeasureWidth(GlyphSample), 0.001f);
+        try
+        {
+            var face = new FontFace(WoffFontFormatProvider.Shared.Decode(Woff2.Value));
+            Assert.AreEqual("IBM Plex Sans", face.FamilyName);
+            Assert.AreEqual(400, face.Weight);
+
+            var original = new Font(plain, 17f);
+            var fromWoff = new Font(woff, 17f);
+            var fromWoff2 = new Font(woff2, 17f);
+
+            Assert.AreEqual(original.LineHeight, fromWoff.LineHeight, 0.001f);
+            Assert.AreEqual(original.LineHeight, fromWoff2.LineHeight, 0.001f);
+            Assert.AreEqual(original.MeasureWidth(GlyphSample), fromWoff2.MeasureWidth(GlyphSample), 0.001f);
+        }
+        finally
+        {
+            registry.Unregister(woff2);
+            registry.Unregister(woff);
+            registry.Unregister(plain);
+        }
     }
 
     [TestMethod]
@@ -120,14 +138,15 @@ public sealed class WoffFontLoadingTests
     {
         var loader = new FontLoader([WoffFontFormatProvider.Shared]);
 
-        var fromTtf = loader.LoadFromBytes(TrueType.Value, 20f);
-        var fromWoff = loader.LoadFromBytes(Woff.Value, 20f);
-        var fromWoff2 = loader.LoadFromBytes(Woff2.Value, 20f);
+        var fromTtf = loader.LoadFromBytes(TrueType.Value);
+        var fromWoff = loader.LoadFromBytes(Woff.Value);
+        var fromWoff2 = loader.LoadFromBytes(Woff2.Value);
 
         Assert.AreEqual("IBM Plex Sans", fromTtf.FamilyName, "the built-in path still reads a plain file");
         Assert.AreEqual(fromTtf.FamilyName, fromWoff.FamilyName);
         Assert.AreEqual(fromTtf.FamilyName, fromWoff2.FamilyName);
-        Assert.AreEqual(fromTtf.MeasureWidth(GlyphSample), fromWoff2.MeasureWidth(GlyphSample), 0.001f);
+        Assert.AreEqual(fromTtf.Weight, fromWoff2.Weight);
+        Assert.IsFalse(fromWoff2.Data.IsEmpty, "a decoded container is OpenType bytes a face can be read from");
     }
 
     [TestMethod]
@@ -149,9 +168,9 @@ public sealed class WoffFontLoadingTests
         {
             try
             {
-                using var font = plain.LoadFromBytes(data);
+                var face = plain.LoadFromBytes(data);
 
-                Assert.AreEqual("IBM Plex Sans", font.FamilyName, "read by Skia itself, as the same font");
+                Assert.AreEqual("IBM Plex Sans", face.FamilyName, "read by Skia itself, as the same font");
             }
             catch (FontFormatException exception)
             {
@@ -187,7 +206,7 @@ public sealed class WoffFontLoadingTests
             {
                 try
                 {
-                    using var font = loader.LoadFromBytes(whole.AsSpan(0, length));
+                    _ = loader.LoadFromBytes(whole.AsSpan(0, length));
                 }
                 catch (FontFormatException)
                 {

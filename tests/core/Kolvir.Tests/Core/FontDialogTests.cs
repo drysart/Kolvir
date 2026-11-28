@@ -80,11 +80,11 @@ public sealed class FontDialogTests : HeadlessTestBase
 
     [TestMethod]
     [TestCategory("Core")]
-    public void ASelectionCreatesAFontTheCallerOwns()
+    public void ASelectionCreatesAnEqualFont()
     {
         var selection = new FontSelection("IBM Plex Sans", 19f, 600, italic: true);
 
-        using var font = selection.CreateFont();
+        var font = selection.CreateFont();
 
         Assert.AreEqual(19f, font.Size);
         Assert.AreEqual(600, font.Weight);

@@ -754,7 +754,7 @@ public class TextBox : Control
         if (text.Length > 0)
         {
             paint.Color = color;
-            EffectiveFont.DrawText(canvas, text, originX, baseline, paint);
+            EffectiveFont.Realize().DrawText(canvas, text, originX, baseline, paint);
         }
 
         canvas.Restore();
@@ -846,7 +846,7 @@ public class TextBox : Control
         canvas.ClipRect(area);
 
         using var paint = new SKPaint { IsAntialias = true, Style = SKPaintStyle.Fill, Color = color };
-        EffectiveFont.DrawText(canvas, text, left, baseline, paint);
+        EffectiveFont.Realize().DrawText(canvas, text, left, baseline, paint);
 
         // One underline for the whole run: v1 has no clause model, so a single underline is all the
         // preedit has to say.
