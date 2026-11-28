@@ -102,7 +102,7 @@ the application adds, which is the opt-in in its packaging form: a feature that 
 cannot be used and cannot be in the deliverable.
 
 The rung is also taken by features that could have been trimmed and are simply rare. `Kolvir.Feature.WoffFonts`
-is the example: WOFF and WOFF 2 are containers that unwrap into the OpenType bytes `Font.FromBytes`
+is the example: WOFF and WOFF 2 are containers that unwrap into the OpenType bytes `IFontLoader`
 already reads, so a provider could have been registered inside `Kolvir` and cost an application only
 the one line that never runs. It ships as a package because almost no desktop application loads a web
 font, and keeping it out of the base deliverable was worth more than the trimming it would have

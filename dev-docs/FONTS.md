@@ -120,12 +120,21 @@ italic span calls. A description with no family cannot express "the default fami
 SkiaSharp answers the default *face* whatever weight is asked of a null family name - so a pure
 arithmetic derive would silently stop drawing bold spans in bold. It therefore names the platform's
 default family (`RealizedFont.DefaultFamilyName()`) when, and only when, the derived style differs
-from this font's; a derive that only changes the size stays exactly as unnamed as it was. The
-alternative - making resolution treat an unnamed family as "the default family, then the style" - is
-what the documentation implies and would have been cleaner, but it also makes every theme font that
-asks for weight 600 or 700 draw a bold face where it draws a regular one today, which changes every
-page of the sample and every application's look. That is a separate decision, and section 9 states it
-as one.
+from this font's; a derive that only changes the size stays exactly as unnamed as it was.
+
+The alternative - making resolution treat an unnamed family as "the default family, then the style" -
+is **decided against**, and not as a follow-up. It would change the face every theme font that asks
+for weight 600 or 700 draws with, on every page, for applications that never assign a family - and
+those are the only applications it could help, while such an application cannot express that intent
+anyway: a bold default is written by naming a family, which is what an application that wants bold does
+through `ApplicationOptions.FontFamily` or `Theme.FontFamily`. So `new Font(13f, bold: true)` keeps
+ignoring the style, as it does today.
+
+The two rules read asymmetrically on purpose: a constructor with no family ignores its weight, and a
+derive to a different style does not. The first is pre-existing behaviour being kept. The second is
+pre-existing behaviour that pure arithmetic would have broken - `Derive` names the default family today
+too, through the typeface it carried, and the only reason the name is now written explicitly is that
+there is no face left to carry it.
 
 ### 2.2 `RealizedFont` becomes the heavyweight object
 
@@ -616,11 +625,34 @@ Theme.FontFamily = family;
 the registry rather than resolved from it.** The note left this as "implementation detail", but the
 detail has to be decided somewhere and the registry is a process-wide static with no container of its
 own, so `Application.InstallProcessServices` calls an internal `FontRegistry.UseLoader(...)` with the
-container's `IFontLoader` - the one composed from the features the application declared. The registry
-falls back to a bare `FontLoader()` when no application installed one, which is what lets a test
-register a plain `.ttf` with no `Application` at all. That is what makes the example above work: the
-WOFF provider is in the container, so it is in the loader, so it is what `RegisterFromFile` unwraps
-with.
+container's `IFontLoader` - the one composed from the features the application declared. That is what
+makes the example above work: the WOFF provider is in the container, so it is in the loader, so it is
+what `RegisterFromFile` unwraps with.
+
+**What a registration with no loader does, which the note did not specify.** With no applications
+constructed - a test, or a start-up that registers a web font before it builds the `Application` - the
+registry reads through one static, provider-less `FontLoader`, and the built-in path alone is left: it
+reads TrueType and OpenType, so a `.ttf` registers with no `Application` at all. A container that
+reaches that path is refused by `FontFace`'s constructor, and the note's first draft would have
+reported it as "the data is not a font this build can read" - true and useless, because the cause is
+the registration order rather than the bytes. So a WOFF or WOFF 2 signature that nothing claimed is
+re-thrown with an explanation naming both the cause and both fixes: no `Application` was constructed,
+so no provider from `AddWoffFonts()` was installed, only TrueType and OpenType can be read, construct
+the `Application` before registering a container, or hand over the OpenType the container unwraps to.
+Two conditions keep that honest: the explanation is added only when no loader was installed, and only
+for the two WOFF signatures - so a genuinely damaged OpenType file still reports exactly what it is,
+and an application that exists but never declared `AddWoffFonts()` gets the loader's own answer rather
+than advice about constructing something it already constructed.
+
+`Application.TearDown` clears the pushed loader, so a registration after the application is gone is
+told the same thing a registration before it existed is.
+
+`UseLoader` had no test and one caller before this pass; it now has both directions covered -
+`ARegisteredContainerIsReadByTheApplicationsOwnLoader` registers a `.woff2` after constructing an
+`Application` whose `ConfigureServices` called `AddWoffFonts()`, and compares the measured width and
+line height against the same face registered from bytes the test decoded itself; and
+`AContainerRegisteredBeforeAnyApplicationSaysWhatToDoAboutIt` asserts the four claims in that message
+for both `RegisterFromFile` and `Register`.
 
 When `family` is null the registered name is the face's internal family name. A face decompressed from
 a WOFF file is stored exactly like a face read from a `.ttf`, because by the time it reaches the
@@ -740,6 +772,26 @@ retries, so no publication can drop a concurrent removal; the residual case is t
 that loses to a publication, and what it leaves is a weak reference to a collected object: harmless,
 and replaced the next time that description is realized. That is cheaper than the alternative of
 locking on the finalizer thread for a table whose entries are also cleaned up by use.
+
+**As built, a second addition the note got wrong: a build can be overtaken by an invalidation.** A
+realization is *resolved* before it is *published*, so an `InvalidateFamily` can run to completion in
+between: the scan finds nothing for a key that is not in the table yet, does not publish anything
+because it has nothing to remove, and the build then publishes a realization made under the previous
+resolution. Every later read finds it, and because the font that took it records the current epoch
+against it, the epoch compare never fires again - a stale face for the rest of the process. The note's
+"the lock covers creation and nothing else" is what leaves the hole. The fix is two-part. The creator
+captures the epoch under the lock before it builds and checks it again before it publishes, and a build
+whose epoch moved is thrown away and resolved again rather than published. And the invalidator's scan
+takes the same lock, which covers the other half of the window: an invalidation that starts after the
+check either waits for the publish and then drops that entry, or is refused by the check before it
+publishes. The epoch bump itself stays outside the lock, because the check is only meaningful if an
+invalidation can land between the two reads.
+
+That makes the lock ordering one-way and worth writing down: a realization holds the manager's lock
+across a registry lookup, and the registry calls `InvalidateFamily` only after releasing its own lock,
+so the order is always manager-then-registry and the reverse never happens. `InvalidateFamily` costs a
+wait for an in-flight resolution, which is one typeface resolve and happens once per registered family
+rather than per frame.
 
 ## 7. Diagnostics
 
@@ -906,6 +958,18 @@ The whole measurement harness is outside the repository - it compiles against ei
 `<ProjectReference>` on `$(KolvirRoot)` so the same source produces both columns - and it is not
 committed, because a harness that ships is a harness that rots.
 
+**6. The follow-up pass, re-measured.** The review that followed the first push required three things
+this note did not: an explanation on the failure a container registered before any `Application` gets
+(section 4.7), a test that drives `RegisterFromFile` through the application's own loader, and a fix
+for a build that an invalidation overtakes (section 6). None of them is on a measure or paint path, so
+the only number that could move is the publish size, and re-publishing the same fixture the same way
+gives **3,910,144 bytes** - identical to the number in the table above, so the delta against the
+baseline is still 24,064 and the follow-up's own cost is below one 512-byte step. The render check was
+re-run for the five pages of the sample whose content is about fonts (`fonts-from-a-file`,
+`inherited-appearance`, `font-dialog`, `rich-text`, `rich-label-markup`), against the first push's
+renders: all five are pixel-identical. That is what "the review pass changed no drawing" means as a
+measurement rather than as a claim.
+
 ### 8.2 Renders
 
 Text layout is what this change touches, so every page of the sample was rendered before and after and
@@ -1037,6 +1101,14 @@ sites gained a `.Realize()`.
   unnamed. Section 2.1 states the rule.
 - **`FontDialogOptions`'s remarks need one sentence** (4.8): registered families resolve but are not
   listed by the platform dialog.
+- **The prose that taught the removed API had to change, which the migration table did not count.**
+  `dev-docs/DEVELOPER-GUIDE.md`'s font chapter, its feature table, the WOFF chapter's example and the
+  font-dialog paragraph, `dev-docs/WOFF.md`'s two examples and `FEATURE-COST-POLICY.md`'s mention all
+  showed `Font.FromFile`/`FromBytes`, `Theme.UseFont` or `fonts.LoadFromPath(path, size)`. The table
+  above counts call sites in code, and a design that removes an API has as many documentation sites as
+  code sites - the guide is the thing an application author reads first. Each was rewritten to the
+  registry-then-name shape, including the order rule the follow-up pass added (register after the
+  `Application` exists, not before).
 
 **Compatibility.** No version is pinned in `Directory.Build.props` or `Directory.Build.targets`, and
 no compatibility promise is written down anywhere in `dev-docs/`, so this is a clean break rather

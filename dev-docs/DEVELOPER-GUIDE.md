@@ -164,8 +164,8 @@ has to read `--classic-menus` before it can build a backend.
 | `MenuPresentation` | - | Chooses the library's menus or the platform's, per application |
 | `Image` | `PictureBox` | Draws an `ImageData` - a still picture or an animation, which are the same thing with different durations: `Source`, `SizeMode` (Normal/StretchImage/CenterImage/Zoom), `ImageAlign`, `PlaceholderColor` (a colour, a palette role, or `InheritedValue` for none). It decodes nothing and owns nothing: `IImageDataFactory` loads, the caller disposes |
 | `Theme` / `Palette` | `SystemColors` / `Application.SetColorMode` | Every default colour is a palette role, so the whole UI can switch light/dark at runtime |
-| `Font` | `Font` | A size plus a face: resolved by family name, or loaded from a file, stream or byte span, so a pinned `.ttf` measures identically on every platform |
-| `Theme.UseFont` | `Font` / `PrivateFontCollection` | One line makes a loaded face the application's font: the theme fonts are rebuilt from it at their own sizes |
+| `Font` | `Font` | A description of a face - family, size, weight, italic - that costs four fields and resolves to a pooled face only when something measures or draws with it |
+| `FontRegistry` | `PrivateFontCollection` | Registers font data under a family name, which a `Font` then refers to like any installed family; unregistering drops it |
 | `IDialogService.PickFont` | `FontDialog` | The platform's own font chooser: returns an `FontSelection` (family, size, weight, italic) or null when cancelled; the caller creates and owns the `Font` |
 | `ColorDialog` | `ColorDialog` (the dialog half) | A modal window around `ColorPicker` with OK and Cancel: library-drawn on every platform, returns the chosen `SKColor` or null, preserves the caller's alpha without offering an alpha control |
 | `SystemTheme` | `Application.ColorMode` | The seam a backend implements to report the OS appearance |
@@ -3026,9 +3026,9 @@ a palette swap is still a repaint rather than a rebuild, exactly as before. A fo
 the text, so any of these changes re-runs layout - `UiHost` lays the whole tree out again on the
 frame that follows a theme font change, and assigning a font re-measures from the root at once.
 
-Fonts are not owned by the control that draws with them. Never dispose one that was inherited or
-came from `Theme`; keep an assigned font alive for as long as it is in use, and let the theme
-own the face given to `Theme.UseFont`.
+Fonts are not owned by the control that draws with them, and there is nothing to dispose: a `Font` is
+a description of a face, and the face behind it is pooled (see [Fonts](#fonts)). Assigning one
+re-measures the control and everything under it.
 
 The cost is the one [FEATURE-COST-POLICY.md](FEATURE-COST-POLICY.md) section 3 names for members on a type
 every application touches, and this feature is deliberately that: the three properties *are* the
@@ -3048,34 +3048,60 @@ rule, through the headless backend.
 
 ### Fonts
 
-`Font` is a size plus a face, and the face can come from the machine or from font data:
+`Font` is a *description* of a face - family, size, weight, italic - and carries nothing heavier:
 
 ```csharp
-using var body = new Font("Segoe UI", 13f);           // a family the desktop has
-using var pinned = Font.FromFile("Fonts/Inter-Regular.ttf");
-using var embedded = Font.FromStream(resourceStream);  // or FromBytes(bytes)
-using var title = pinned.WithSize(24f);                      // the same face, larger
+var body = new Font("Segoe UI", 13f);                  // a family the desktop has
+var title = body.WithSize(24f);                        // the same description, larger
+var bold = new Font("Segoe UI", 13f, 700);             // a weight asked for
+var brand = new Font("Inter", 13f);                    // a family the application registered
 ```
 
-A loaded font is the same physical face on every platform, so `MeasureWidth`, `LineHeight`,
-`BaselineOffset`, wrapping and caret geometry measure the same on Windows, macOS and Linux - to a
-thousandth of a pixel. A loaded face's advances and the font's own vertical metrics are taken
-unhinted and linear (`LinearMetrics`, `Hinting = None`, `BaselineSnap = false`), which is what stops
-FreeType on Linux rounding advances to whole pixels when CoreText and DirectWrite do not; what is
-left is each backend's own fixed-point rounding, under 0.001 px on the demo face at 13 pt. Those
-three settings apply only to a loaded face, so a font resolved by family name keeps exactly the
-numbers it had. That is what a test pins a `.ttf` for, and what a trimmed single-file application
-needs when it carries its brand in the executable. A family name gets none of that: the same name
-resolves to whatever face each desktop calls by that name, so a layout measured on one platform does
-not have to match another.
+Creating one is four fields and no native call: 100,000 of them allocate 4.8 MB, against 98.8 MB for
+the same loop when a `Font` was an underlying `SKFont`. What is expensive - the typeface, the
+`SKFont`, the metrics and the per-font measurement caches - is a *realization*, built the first time
+this font measures or draws and then pooled by description: two fonts with the same family, size,
+weight and italic share one. The pooling is what lets a control keep caching layout against the
+face's identity while a Virtual DOM pass rebuilds the same `Font` objects every frame.
 
-`FromFile` reads the whole file, `FromStream` reads the whole stream and `FromBytes` copies the span,
-so nothing is tied to the source afterwards. A path that does not exist throws
-`FileNotFoundException`; a stream or span that is not a font throws `FontFormatException`, and so does
-empty data. `FontFormatException` derives from `ArgumentException`, so a handler written against the
-old type still catches it. Disposing a font twice does nothing, and a font obtained with `WithSize`
-keeps working after the one it came from is disposed: each derived font holds its own reference to the
-face.
+`FamilyName`, `Weight` and `Italic` report what the description asks for, not what the platform
+resolved: a font with no family answers the empty string, and a family with only a regular face
+answers `Weight` 700 while drawing with that face. Nothing is synthesized.
+
+A face the operating system does not provide is *registered* under a family name first, and `Font`
+then refers to it like any installed family:
+
+```csharp
+FontRegistry.Current.RegisterFromFile("Fonts/Inter-Regular.ttf", "Inter");   // a file
+FontRegistry.Current.Register("Inter", embeddedFontBytes);                   // or bytes
+
+var body = new Font("Inter", 13f);      // resolved from the registry, before Skia is asked
+```
+
+A registered family is resolved in this library before Skia is consulted, so a registered name can
+shadow a system family of the same name. `Unregister(name)` drops it again: a font already realized
+keeps the face it realized, and every font realized afterwards resolves without it - `Theme` rebuilds
+its own fonts when that happens, so a live tree follows. The registry keeps the bytes, so each
+realization builds and owns its own typeface and releases it when the realization is collected.
+
+A registered face is the same physical face on every platform, so `MeasureWidth`, `LineHeight`,
+`BaselineOffset`, wrapping and caret geometry measure the same on Windows, macOS and Linux - to a
+thousandth of a pixel. Its advances and the font's own vertical metrics are taken unhinted and linear
+(`LinearMetrics`, `Hinting = None`, `BaselineSnap = false`), which is what stops FreeType on Linux
+rounding advances to whole pixels when CoreText and DirectWrite do not; what is left is each backend's
+own fixed-point rounding, under 0.001 px on the demo face at 13 pt. Those three settings apply only to
+a face that came from the registry, so a font resolved by family name keeps exactly the numbers it
+had. That is what a test registers a `.ttf` for, and what a trimmed single-file application needs when
+it carries its brand in the executable. A family *name* gets none of that: the same name resolves to
+whatever face each desktop calls by that name, so a layout measured on one platform does not have to
+match another.
+
+`Register(family, bytes)` copies the bytes; `RegisterFromFile(path, family?)` reads the file and names
+it - after the family name inside it when no name is given. A path that does not exist throws
+`FileNotFoundException`; data that is not a font throws `FontFormatException`, and so does empty data.
+`FontFormatException` derives from `ArgumentException`, so a handler written against the old type
+still catches it. Nothing here is disposable, because a description owns nothing and a realization's
+handles are released when the last font that realized it is collected.
 
 **Fallback for text the face does not cover.** A face with no glyph for a character draws a box, and
 a control that draws a committed word from another script in the default face therefore shows a row of
@@ -3097,12 +3123,12 @@ string that needs several faces costs one shaping call per run - 0.6 µs per run
 string alternating scripts every few characters (201 runs) costs 118 µs the first time it is seen and
 103 ns thereafter. A sentence with a word of Japanese in it is three runs.
 
-A **loaded** face gets fallback too. A pinned Latin face promises its own advances, line height and
-baseline, not that it contains every script; text it does not cover is still drawn with a system face
-rather than as boxes, and the pinned face's layout settings are mirrored onto the face standing in for
-it so the two do not measure differently on this platform alone. Two promises, kept apart: a pinned
-face's *metrics* are identical on every platform, and the *fallback* face is whatever each platform
-covers that script with.
+A **registered** face gets fallback too. A registered Latin face promises its own advances, line height
+and baseline, not that it contains every script; text it does not cover is still drawn with a system
+face rather than as boxes, and the registered face's layout settings are mirrored onto the face
+standing in for it so the two do not measure differently on this platform alone. Two promises, kept
+apart: a registered face's *metrics* are identical on every platform, and the *fallback* face is
+whatever each platform covers that script with.
 
 Colour emoji is the platform's business, and it works: with SkiaSharp 4.154 on Windows, an emoji at 28 pt
 renders from `Segoe UI Emoji` with 533 of its 628 inked pixels chromatic, so `COLR`/`CBDT` colour
@@ -3110,59 +3136,60 @@ glyphs are drawn in colour rather than as a monochrome outline or a box. What th
 that every platform's emoji font behaves that way; where it does not, the glyphs are the platform's
 own.
 
-**A loaded font is one face.** `WithSize` keeps it, and a weight or italic that the data does not
-contain is satisfied by the same face: nothing is synthesised, so `Weight` and `Italic` describe the
-face actually used rather than what was asked for. Span formatting in `RichLabel` follows the
-same rule - a span that changes only weight, slant or size is derived from the label's own font, so
-a loaded face never falls back to a system family on a bold span. Load the bold file separately when
-an emphasis needs a real bold face.
+**A registered family holds the faces you gave it.** `WithSize` keeps the family, and a weight or
+italic that the family does not contain is served by the nearest face it does contain - a family
+registered with only a regular face serves 700 with that face - because nothing is synthesised. Span
+formatting in `RichLabel` follows the same rule: a span that changes only weight, slant or size is
+derived from the label's own font, so a registered family never falls back to a system family on a
+bold span. Register the bold file under the same name when an emphasis needs a real bold face - one
+family holds several faces, and the request reaches the right one.
 
-To make a face the application's font, say so once instead of per control:
+To make a registered family the application's font, name it in the theme once instead of per control:
 
 ```csharp
-Theme.UseFont(Font.FromFile("Fonts/Inter-Regular.ttf"));   // a file
-Theme.UseFont(Font.FromBytes(embeddedFontBytes));          // or an embedded resource
+FontRegistry.Current.RegisterFromFile("Fonts/Inter-Regular.ttf", "Inter");
+
+Theme.FontFamily = "Inter";
 ```
 
-It can be called at any point in the application's life, not only before the controls exist: a
+It can be assigned at any point in the application's life, not only before the controls exist: a
 control resolves its font when it measures and paints (see
 [Inherited appearance](#inherited-appearance)), so a live tree switches to the new face and lays
-itself out again on the next frame. The theme's fonts are rebuilt from that face at their own sizes,
-so `DefaultFont`, `CaptionFont`, `TitleFont`, `SectionFont` and `EmphasizedFont` all come from it;
-because one file is one face, the large and emphasized ones are that face at their sizes rather than
-a bold one. Assigning `Theme.FontFamily` goes back to a family name, and the existing
-`ApplicationOptions.FontFamily` path is unchanged - and, like `UseFont`, it can be assigned
-after the controls exist.
+itself out again on the next frame. `DefaultFont`, `CaptionFont`, `TitleFont`, `SectionFont` and
+`EmphasizedFont` are descriptions built from the theme's family, at their own sizes and weights, so
+they follow it - and because they are descriptions, the theme rebuilding them is arithmetic rather
+than a font load. An installed family and a registered one are named the same way; the registry is
+consulted first.
 
 This lives on `Theme` rather than growing `ApplicationOptions` on purpose. An option is
 read by `Application` at start-up - a type every application runs - so a font read there would
 be reachable from every published application rather than only from the one that asked for it. The
-loading path stays behind application code: `ApplicationOptions` gained no member.
+loading path stays behind application code: `ApplicationOptions` gained no member, and
+`ApplicationOptions.FontFamily` is unchanged.
 
-The measured cost is one image-alignment step and nothing that runs. The `Kolvir.Minimal` fixture
-publishes at 3,194,368 bytes on `win-x64` against 3,189,248 at `b83e6cd`, a difference of 5,120
-bytes (0.16%) that is the size of one alignment step on that image - the picture is quantised, so a
-change of this size cannot be resolved more finely. What is there on every app's behalf is the
-theme's font source (one static reference and one branch when the theme fonts are rebuilt) and one
-flag on `Font` saying that a face is a single face, which fits in padding the object already
-had: no new per-instance field and no startup work. The loaders themselves are only reachable from
-the application code that calls them, and `ApplicationOptions` keeps its old shape.
+The cost this adds to every application is not the registry, which is only reachable from the code that
+registers something, and not the loaders, which are only reachable from the code that calls them. It is
+the description and the pool behind it. Measured on the trimmed `Kolvir.Minimal` fixture, `win-x64`,
+with the Skia native library shipped loose rather than embedded, publishing at the commit before this
+change and after it: 3,886,080 -> 3,910,144 bytes, a difference of **+24,064 bytes (0.6%)**. For
+scale, holding the pool in an `ImmutableDictionary` instead of a copy-on-write dictionary cost another
+34,304 bytes on the same image, which is why it does not use one.
 
 The demo's font page - `--page fonts-from-a-file` - draws a label, a multi-line text box and a
 rich label with IBM Plex Sans Regular carried as an embedded resource (`../src/demo/Kolvir.Demo.App/Fonts`,
-OFL licensed), and prints the width and line height it measures against the system face's.
-`Kolvir.Tests`' `FontLoadingTests` asserts the same measurements and failure paths headlessly, so
-the identities that make a pinned face portable can be compared on every runner, and
-`--embedded-font` applies the face to the whole sample UI, including a `--render`, which is the
-application-wide path in one switch.
+OFL licensed), registered with `FontRegistry` under a name and then named like any family, and prints
+the width and line height it measures against the system face's. `Kolvir.Tests`' `FontLoadingTests`
+asserts the same measurements and failure paths headlessly, so the identities that make a registered
+face portable can be compared on every runner, and `--embedded-font` applies the face to the whole
+sample UI, including a `--render`, which is the application-wide path in one switch.
 
 ### Web fonts (WOFF)
 
-Skia reads TrueType and OpenType, and a `.ttf` or `.otf` is what `Font.FromFile` and its siblings take.
-What it does about **WOFF** and **WOFF 2** - the containers a web font is usually downloaded in - depends
-on the platform's font manager rather than on Skia: Windows reads neither, Linux reads WOFF 1.0, and the
-macOS build reads both. An application cannot rely on that, so `Kolvir.Feature.WoffFonts` makes the
-answer the same everywhere:
+Skia reads TrueType and OpenType, and OpenType is what `IFontLoader` produces on its own. What it does
+about **WOFF** and **WOFF 2** - the containers a web font is usually downloaded in - depends on the
+platform's font manager rather than on Skia: Windows reads neither, Linux reads WOFF 1.0, and the macOS
+build reads both. An application cannot rely on that, so `Kolvir.Feature.WoffFonts` makes the answer
+the same everywhere:
 
 ```csharp
 using var application = new Application(backend, new ApplicationOptions
@@ -3170,15 +3197,22 @@ using var application = new Application(backend, new ApplicationOptions
     ConfigureServices = services => services.AddWoffFonts(),
 });
 
-var fonts = application.Services.GetRequiredService<IFontLoader>();
+// After the application, which is what installed the loader that unwraps the container.
+FontRegistry.Current.RegisterFromFile("Fonts/Inter-Regular.woff2", "Inter");
 
-using var body = fonts.LoadFromPath("Fonts/Inter-Regular.woff2", 14f);
+var body = new Font("Inter", 14f);
 ```
 
-The point of the example is that the last line is **the same call for every format**. `IFontLoader` is
-the font counterpart of `IImageDataFactory`: an application does not decide which loader to use by
+Two things have to happen in that order. The provider is installed by the application, and the registry
+reads a registered file through that loader - so a `.woff2` registered before the application exists is
+refused, with a message that says so and names both fixes: construct the application first, or hand
+over the OpenType the container unwraps to.
+
+The point of the example is that the registration is **the same call for every format**. `FontRegistry`
+is the font counterpart of `IImageDataFactory`: an application does not decide which loader to use by
 format, it registers the formats it wants once and then hands bytes to one loader. A `.ttf`, a `.woff`
-and a `.woff2` all arrive at `LoadFromPath` and none of them needs a branch at the call site.
+and a `.woff2` all arrive at `RegisterFromFile` and none of them needs a branch at the call site - and
+what the loader produces is a `FontFace`, which is what the registry names.
 
 The seam is `IFontFormatProvider`, and its one job is to **unwrap a container**:
 
@@ -3236,8 +3270,9 @@ A font **collection** - `.ttc`, or a `ttcf` flavor - is refused by name rather t
 something that is not a font. Neither container's collection layout is implemented.
 
 The demo's font page - `--page fonts-from-a-file` - carries the same face twice, as a 200 KB `.ttf` and
-a 63 KB `.woff2`, and loads the second through `IFontLoader` on the page rather than through
-`Font.FromBytes`. That is the whole integration: the page asks a loader for a font and hands it bytes.
+a 63 KB `.woff2`, and registers the second from the file through `FontRegistry`, where the loader the
+application installed unwraps it. That is the whole integration: the page names a family and the
+library reads the container.
 
 ### Font dialog
 
@@ -3301,12 +3336,12 @@ through 900 in hundreds) round-trip exactly; anything between them snaps to the 
 platform has, because that is what the font panel can select. The same class holds the point/pixel
 conversion, so the arithmetic is unit-tested instead of being duplicated in three backends.
 
-The dialog lists the families the operating system has installed. A face loaded with
-`Font.FromFile`, `FromStream` or `FromBytes` is not a system font unless the application also
-registered it with the OS, so it does not appear - and if a loaded face is the current font, the
-dialog opens on the nearest installed family instead. That is documented rather than half-supported:
-a backend cannot tell an arbitrary loaded face from an installed one, and offering to add it would
-promise a system-wide result the platform does not give.
+The dialog lists the families the operating system has installed. A family registered with
+`FontRegistry` resolves in this library but is not a system font, so it does not appear in the list -
+and if a registered family is the current font, the dialog opens on the nearest installed family
+instead. That is documented rather than half-supported: a backend cannot tell an arbitrary registered
+face from an installed one, and offering to add it would promise a system-wide result the platform does
+not give.
 
 The demo's **Font dialog** page opens the chooser, then applies the result to a panel so the labels,
 a nested panel and a button all inherit it. It is appended after the colour picker's page: the

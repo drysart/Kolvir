@@ -19,6 +19,29 @@ namespace Kolvir;
 /// </remarks>
 public sealed class FontRegistry : IFontRegistry
 {
+    /// <summary>
+    /// The sentence a failure carries when there was no installed loader to read with.
+    /// </summary>
+    /// <remarks>
+    /// Without it, a container registered before the application existed reports only "the data is not
+    /// a font this build can read", and the two things a caller needs are missing: that the built-in
+    /// loader reads TrueType and OpenType and nothing else, and that a format provider reaches it only
+    /// through <see cref="Application"/>. Both fixes are named, because which one is right depends on
+    /// what the caller is holding.
+    /// </remarks>
+    private const string NoLoaderExplanation =
+        "No Application has been constructed yet, so no font format provider was installed and only " +
+        "TrueType and OpenType can be read: a container format such as WOFF or WOFF 2 needs the " +
+        "provider its feature adds - AddWoffFonts() in ApplicationOptions.ConfigureServices - which is " +
+        "composed into the loader when the Application is constructed. Construct the Application before " +
+        "registering a container, or register the OpenType bytes it unwraps to.";
+
+    /// <summary>
+    /// What a registration reads with when no application has installed a loader: the built-in
+    /// OpenType path and no format providers.
+    /// </summary>
+    private static readonly FontLoader FallbackLoader = new();
+
     private readonly object _gate = new();
     private readonly Dictionary<string, Dictionary<(int Weight, bool Italic), FontFace>> _families =
         new(StringComparer.Ordinal);
@@ -57,7 +80,7 @@ public sealed class FontRegistry : IFontRegistry
     public string Register(string family, ReadOnlySpan<byte> data)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(family);
-        return Register(family, Loader.LoadFromBytes(data));
+        return Register(family, LoadFace(data));
     }
 
     /// <inheritdoc />
@@ -87,7 +110,7 @@ public sealed class FontRegistry : IFontRegistry
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
 
-        var face = Loader.LoadFromPath(path);
+        var face = LoadFace(File.ReadAllBytes(path));
         return Register(string.IsNullOrWhiteSpace(family) ? face.FamilyName : family, face);
     }
 
@@ -117,24 +140,68 @@ public sealed class FontRegistry : IFontRegistry
         return removed;
     }
 
-    /// <summary>
-    /// The loader a registered file is read through, or a bare one for the built-in OpenType path.
-    /// </summary>
-    /// <remarks>
-    /// <see cref="Application"/> installs its container's <see cref="IFontLoader"/> here, which is what
-    /// makes a registered <c>.woff2</c> work: the format providers are composed from the features the
-    /// application declared, and the registry is a static that has no container of its own. Without an
-    /// application - a test, say - the built-in loader reads OpenType and nothing else.
-    /// </remarks>
-    private IFontLoader Loader => Volatile.Read(ref _loader) ?? new FontLoader();
-
     /// <summary>Installs the loader that registered files are read through.</summary>
     /// <param name="loader">The application's loader, which carries its format providers.</param>
+    /// <remarks>
+    /// <see cref="Application"/> installs its container's <see cref="IFontLoader"/>, which is what makes
+    /// a registered <c>.woff2</c> work: the format providers are composed from the features the
+    /// application declared, and the registry is a static that has no container of its own. Until one is
+    /// installed - and after it is cleared again - a registration reads through
+    /// <see cref="FallbackLoader"/> and a failure says why.
+    /// </remarks>
     internal void UseLoader(IFontLoader loader)
     {
         ArgumentNullException.ThrowIfNull(loader);
         Volatile.Write(ref _loader, loader);
     }
+
+    /// <summary>Drops the installed loader, so registrations read through the built-in one again.</summary>
+    /// <remarks>
+    /// Called when the application that installed it is torn down. The loader itself is not disposable
+    /// and would still work, but a registration made after the application is gone has no features
+    /// behind it, and saying so is better than resolving through a container that no longer exists.
+    /// </remarks>
+    internal void ClearLoader() => Volatile.Write(ref _loader, null);
+
+    /// <summary>
+    /// Reads a face from encoded data, explaining a container nothing could read when there was no
+    /// application to install a provider.
+    /// </summary>
+    /// <param name="data">The encoded font.</param>
+    /// <returns>The face the data holds.</returns>
+    /// <remarks>
+    /// The explanation is added only for the two WOFF signatures, which are the containers that reach
+    /// this fallback without being obviously broken: with no application there is no provider to
+    /// recognise them, so "this is not a font" is true and useless. For anything else - a truncated
+    /// OpenType file, a file that is not a font at all - the loader's own message is already the whole
+    /// answer and this adds nothing.
+    /// </remarks>
+    private FontFace LoadFace(ReadOnlySpan<byte> data)
+    {
+        if (Volatile.Read(ref _loader) is { } installed)
+        {
+            return installed.LoadFromBytes(data);
+        }
+
+        try
+        {
+            return FallbackLoader.LoadFromBytes(data);
+        }
+        catch (FontFormatException exception) when (exception.ProviderName.Length == 0 && IsContainer(data))
+        {
+            throw new FontFormatException(null, "data", exception, NoLoaderExplanation);
+        }
+    }
+
+    /// <summary>True when the data starts with a WOFF or WOFF 2 signature.</summary>
+    /// <param name="data">The data a load was handed.</param>
+    /// <returns>True when the data is one of the two containers.</returns>
+    private static bool IsContainer(ReadOnlySpan<byte> data) =>
+        data.Length >= 4 &&
+        data[0] == (byte)'w' &&
+        data[1] == (byte)'O' &&
+        data[2] == (byte)'F' &&
+        (data[3] == (byte)'F' || data[3] == (byte)'2');
 
     /// <summary>
     /// The face a description resolves to, or false when the family is not registered.

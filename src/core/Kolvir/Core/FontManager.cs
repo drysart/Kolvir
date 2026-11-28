@@ -37,6 +37,17 @@ namespace Kolvir;
 /// replaced the next time that description is realized.
 /// </para>
 /// <para>
+/// <b>A build that an invalidation overtakes is thrown away.</b> A realization is resolved before it is
+/// published, so an invalidation can run to completion while it is being built; the scan then finds
+/// nothing for a key that is not in the table yet, and publishing afterwards would install a
+/// pre-registration realization that the scan has already passed. Every later read would find it, and
+/// because the font that took it records the current epoch against it, the epoch compare would never
+/// fire again. So the epoch is captured under the lock before the build and checked again before the
+/// publish, and a build whose epoch moved is dropped and resolved again. The scan runs under the same
+/// lock, which covers the other half of the window: an invalidation that starts after the check either
+/// waits for the publish and then drops the entry, or is refused by the check.
+/// </para>
+/// <para>
 /// Everything else in the font subsystem - the fonts, the realizations and their caches - is
 /// UI-thread code, exactly as the controls are. The epoch is a plain read and the compare that uses
 /// it is a UI-thread compare; only this table is touched from a finalizer thread.
@@ -70,46 +81,70 @@ internal static class FontManager
     /// <summary>The shared realization for <paramref name="font"/>'s description.</summary>
     /// <param name="font">The description to realize.</param>
     /// <returns>The one realization for that description.</returns>
+    /// <remarks>
+    /// Loops only when an invalidation overtook the build, which is why the loop is unbounded: each pass
+    /// makes progress against a resolution that has stopped changing, and invalidation is a startup
+    /// event rather than something that happens per frame.
+    /// </remarks>
     internal static RealizedFont Realize(Font font)
     {
         var key = font.Key;
 
-        if (TryGet(key, out var existing))
+        while (true)
         {
-            return existing;
-        }
-
-        lock (Gate)
-        {
-            // Checked again under the lock: another thread may have realized this description between
-            // the first read and here.
-            if (TryGet(key, out existing))
+            if (TryGet(key, out var existing))
             {
                 return existing;
             }
 
-            var realized = new RealizedFont(key);
-            var reference = new WeakReference<RealizedFont>(realized);
-            realized.Attach(reference);
-
-            while (true)
+            lock (Gate)
             {
-                var table = Volatile.Read(ref _table);
-                if (table.TryGetValue(key, out var raced) && raced.TryGetTarget(out existing))
+                // Checked again under the lock: another thread may have realized this description
+                // between the first read and here.
+                if (TryGet(key, out existing))
                 {
-                    // A removal that landed between the check above and here took the entry away and
-                    // something else put one back; theirs is as good as ours.
                     return existing;
                 }
 
-                var copy = new Dictionary<FontKey, WeakReference<RealizedFont>>(table)
-                {
-                    [key] = reference,
-                };
+                // Captured before the resolution it describes and verified before that resolution is
+                // published. An invalidation that runs entirely in between drops nothing for this key -
+                // it is not in the table yet - so publishing here would put a pre-registration
+                // realization back for good, and the font that took it would record the new epoch
+                // against it, so the compare would never fire again.
+                var epoch = Epoch;
 
-                if (ReferenceEquals(Interlocked.CompareExchange(ref _table, copy, table), table))
+                var realized = new RealizedFont(key);
+                var reference = new WeakReference<RealizedFont>(realized);
+                realized.Attach(reference);
+
+                while (true)
                 {
-                    return realized;
+                    var table = Volatile.Read(ref _table);
+                    if (table.TryGetValue(key, out var raced) && raced.TryGetTarget(out existing))
+                    {
+                        // A removal that landed between the check above and here took the entry away
+                        // and something else put one back; theirs is as good as ours.
+                        return existing;
+                    }
+
+                    if (Epoch == epoch)
+                    {
+                        var copy = new Dictionary<FontKey, WeakReference<RealizedFont>>(table)
+                        {
+                            [key] = reference,
+                        };
+
+                        if (ReferenceEquals(Interlocked.CompareExchange(ref _table, copy, table), table))
+                        {
+                            return realized;
+                        }
+
+                        continue;
+                    }
+
+                    // Resolution changed while this was being built. The build is dropped rather than
+                    // published, and the pass starts again against what the registry holds now.
+                    break;
                 }
             }
         }
@@ -127,40 +162,55 @@ internal static class FontManager
     /// finding them is a scan of the table, which is acceptable because invalidation happens once per
     /// registered or unregistered family rather than per frame. The epoch is global because a
     /// per-family one would have to be recomputed per font against a set of changed families.
+    /// <para>
+    /// It is called with no other lock held, and the scan holds this type's lock while a realization
+    /// holds it across a registry lookup, so the order is always this one. <see cref="FontRegistry"/>
+    /// calls it after releasing its own lock for exactly that reason.
+    /// </para>
     /// </remarks>
     internal static void InvalidateFamily(string family)
     {
         ArgumentNullException.ThrowIfNull(family);
 
+        // The bump is outside the lock on purpose: a realization reads it before it builds and again
+        // before it publishes, and those two reads only mean something if an invalidation can land
+        // between them. What the lock covers is the scan, because the scan can find nothing - the
+        // description being built is not in the table yet - and then do nothing at all, while the
+        // build publishes a moment later. Serializing the scan against the publish is what closes
+        // that: either the scan sees the entry and drops it, or the build is not yet published and its
+        // own epoch check refuses it.
         Interlocked.Increment(ref _epoch);
 
-        while (true)
+        lock (Gate)
         {
-            var table = Volatile.Read(ref _table);
-
-            List<FontKey>? stale = null;
-            foreach (var entry in table)
+            while (true)
             {
-                if (string.Equals(entry.Key.Family, family, StringComparison.Ordinal))
+                var table = Volatile.Read(ref _table);
+
+                List<FontKey>? stale = null;
+                foreach (var entry in table)
                 {
-                    (stale ??= []).Add(entry.Key);
+                    if (string.Equals(entry.Key.Family, family, StringComparison.Ordinal))
+                    {
+                        (stale ??= []).Add(entry.Key);
+                    }
                 }
-            }
 
-            if (stale is null)
-            {
-                break;
-            }
+                if (stale is null)
+                {
+                    break;
+                }
 
-            var copy = new Dictionary<FontKey, WeakReference<RealizedFont>>(table);
-            foreach (var key in stale)
-            {
-                copy.Remove(key);
-            }
+                var copy = new Dictionary<FontKey, WeakReference<RealizedFont>>(table);
+                foreach (var key in stale)
+                {
+                    copy.Remove(key);
+                }
 
-            if (ReferenceEquals(Interlocked.CompareExchange(ref _table, copy, table), table))
-            {
-                break;
+                if (ReferenceEquals(Interlocked.CompareExchange(ref _table, copy, table), table))
+                {
+                    break;
+                }
             }
         }
 

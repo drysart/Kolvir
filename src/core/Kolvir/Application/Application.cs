@@ -1007,6 +1007,12 @@ public sealed partial class Application : IDisposable
 
         _provider.Dispose();
 
+        // The registry outlives the container, because a font realized with no services in sight still
+        // reads registered families from it. Its loader does not: the providers behind it were the
+        // container's. A registration made after this point reads through the built-in loader and, if
+        // the data is a container, is told that no provider is installed - which is the truth.
+        FontRegistry.Current.ClearLoader();
+
         if (ReferenceEquals(Current, this))
         {
             Current = null;

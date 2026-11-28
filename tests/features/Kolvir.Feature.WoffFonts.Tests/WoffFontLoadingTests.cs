@@ -133,6 +133,95 @@ public sealed class WoffFontLoadingTests
         }
     }
 
+    /// <summary>
+    /// The whole point of <c>RegisterFromFile</c>: a container an application enabled while declaring
+    /// its services is unwrapped by the loader the application installed, with nothing else asked to
+    /// decode it.
+    /// </summary>
+    /// <remarks>
+    /// The order is the demo's - add the format, construct the application, then register - because
+    /// the registry is a static and the loader reaches it from the container. What is measured here is
+    /// the same face as the one registered from bytes this test decoded itself, which is the only way
+    /// to tell "the loader read the container" from "the loader guessed at it".
+    /// </remarks>
+    [TestMethod]
+    public void ARegisteredContainerIsReadByTheApplicationsOwnLoader()
+    {
+        var path = Path.Combine(AppContext.BaseDirectory, "Fonts", "IBMPlexSans-Regular.woff2");
+
+        using var application = new Application(
+            new Kolvir.Backend.Headless.HeadlessApplicationBackend(),
+            new ApplicationOptions { ConfigureServices = services => services.AddWoffFonts() });
+
+        var registry = FontRegistry.Current;
+        string throughTheLoader = registry.RegisterFromFile(path, "Woff through the loader");
+
+        try
+        {
+            string decodedByHand = registry.Register(
+                "Woff decoded by hand", WoffFontFormatProvider.Shared.Decode(Woff2.Value).Span);
+
+            try
+            {
+                var loaded = new Font(throughTheLoader, 17f);
+                var hand = new Font(decodedByHand, 17f);
+
+                Assert.AreEqual(hand.LineHeight, loaded.LineHeight, 0.001f);
+                Assert.AreEqual(
+                    hand.MeasureWidth(GlyphSample),
+                    loaded.MeasureWidth(GlyphSample),
+                    0.001f,
+                    "the application's loader has to produce the face the file holds, not an approximation");
+            }
+            finally
+            {
+                registry.Unregister(decodedByHand);
+            }
+        }
+        finally
+        {
+            registry.Unregister(throughTheLoader);
+        }
+    }
+
+    /// <summary>
+    /// A container registered with nothing installed says why nothing could read it.
+    /// </summary>
+    /// <remarks>
+    /// Without an application there is no loader carrying a format provider, so the built-in path -
+    /// which reads TrueType and OpenType - refuses a WOFF container. "This is not a font" is true
+    /// there and useless: the cause is the registration order, and the two fixes are to construct the
+    /// application first or to hand over the OpenType the container unwraps to.
+    /// </remarks>
+    [TestMethod]
+    public void AContainerRegisteredBeforeAnyApplicationSaysWhatToDoAboutIt()
+    {
+        // Nothing is constructed here on purpose: this is the state an application's start-up is in
+        // when it registers a web font before creating the Application, which is the mistake the
+        // message exists for.
+        var path = Path.Combine(AppContext.BaseDirectory, "Fonts", "IBMPlexSans-Regular.woff2");
+
+        var fromFile = Assert.ThrowsExactly<FontFormatException>(
+            () => FontRegistry.Current.RegisterFromFile(path, "Woff before the application"));
+
+        var fromBytes = Assert.ThrowsExactly<FontFormatException>(
+            () => FontRegistry.Current.Register("Woff before the application", Woff2.Value.AsSpan()));
+
+        foreach (var exception in new[] { fromFile, fromBytes })
+        {
+            StringAssert.Contains(
+                exception.Message, "No Application", "the message names the cause, not just the symptom");
+            StringAssert.Contains(
+                exception.Message, "AddWoffFonts()", "and names the feature that would have read it");
+            StringAssert.Contains(
+                exception.Message, "OpenType", "and says how far the built-in loader gets");
+            StringAssert.Contains(
+                exception.Message,
+                "Construct the Application",
+                "and gives the fix, which is what the caller has to change");
+        }
+    }
+
     [TestMethod]
     public void TheLoaderReadsEveryFormatWithoutBeingToldWhichItHas()
     {
