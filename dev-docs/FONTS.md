@@ -273,7 +273,7 @@ public interface IFontRegistry
     string Register(string family, ReadOnlySpan<byte> data, int? weight = null, bool? italic = null);
     string Register(string family, FontFace face);
     string RegisterFromFile(string path, string? family = null);      // 4.7
-    bool Unregister(string family);                                   // 4.4
+    bool Unregister(string? family);                                  // 4.4
     IReadOnlyList<RegisteredFontFamily> Families { get; }             // 4.8
 }
 ```
@@ -436,11 +436,12 @@ that measure, because the version bump invalidates the window.
 
 ### 4.5 Validation, and what a name means
 
-- **A null, empty or whitespace family name is refused**, with an `ArgumentException` naming the
-  parameter and thrown by `Register` and by `Unregister`. This is not politeness: a null family means
-  "the platform's default" throughout the library, so it normalises to the one `FontKey` whose
-  resolution never reaches the registry at all (section 4.3, step 1) - a face stored under it would be
-  an entry no description can ever reach, and the call would look like it had worked.
+- **`Register` refuses a null, empty or whitespace family name**, with an `ArgumentException` naming
+  the parameter. This is not politeness: a null family means "the platform's default" throughout the
+  library, so it normalises to the one `FontKey` whose resolution never reaches the registry at all
+  (section 4.3, step 1) - a face stored under it would be an entry no description can ever reach, and
+  the call would look like it had worked. The call site is the mistake, it is a startup-time call, and
+  a throw is the right feedback.
 - **Same family, same weight and slant, registered twice: replace.** `Register` is idempotent by
   (family, weight, italic), and the later call wins. The alternative - refuse - makes correctness
   depend on call order, and a second registration from a second code path is not a mistake worth
@@ -462,12 +463,21 @@ that measure, because the version bump invalidates the window.
   `new Font(f.FamilyName, f.Size, f.Weight, f.Italic)` reproduces the same face - the round trip is
   the property the property is for.
 
-Unregistration takes a family name and removes every weight and slant of that family. It returns
-`bool`: `true` when something was registered under that name, `false` otherwise, and for a valid name
-that is unknown or already removed it never throws. **It is idempotent** - the second call returns
-`false` and does nothing, including no version bump when nothing changed. A family name that was never
-registered is not an error: an application that unregisters in a `finally` block is doing the right
-thing.
+Unregistration takes a family name and removes every weight and slant of that family. **It never
+throws.** It returns `bool`: `true` when something was registered under that name, `false` otherwise -
+for an unknown name, for one already removed, and for a null, empty or whitespace name, which is one
+more name nothing is registered under and therefore cannot remove anything. **It is idempotent** -
+the second call returns `false` and does nothing, including no version bump when nothing changed.
+
+That asymmetry between the two members is deliberate, and it is a rule rather than an oversight.
+`Register` is a call that has to be right: there is something to store, the name is part of what is
+stored, and a throw at startup is useful feedback. `Unregister` is a call that has to be safe: it is
+the cleanup half, and cleanup runs in `finally` blocks and error paths where the name may never have
+been produced. A `string? family = null; try { family = Register(...); } finally { Unregister(family); }`
+is exactly the shape that makes a symmetric rule wrong - if `Register` throws, the cleanup would throw
+again and mask the original failure. So the two members answer different questions - "store this" and
+"remove this" - and only the first refuses. That is also why `Unregister` takes `string?`: the cleanup
+call site should not need a null-forgiving operator to say "and if I never got a name, do nothing".
 
 Names compare `Ordinal`, like every other family-name comparison in the library.
 
@@ -803,6 +813,7 @@ removals the note argues are improvements.
 | Registering only before first use | Forbids the case registration exists for: an application shadowing the system family its theme already realized at startup (4.4). |
 | Per-family invalidation versions instead of one global epoch | Every control would have to record which families it used, which is the per-control font state this change removes (4.4). |
 | Refusing to unregister a family that has live realizations | Those realizations are valid and usable; blocking or disposing them would make unregistration a lifecycle protocol. They keep their face and resolution changes for later fonts (4.4). |
+| The same null-name refusal from `Unregister` as from `Register` | Symmetric, and wrong: `Unregister` is the cleanup half, so a throw there lands in a `finally` block and masks the failure that got it there. It returns `false` for a name that cannot be registered under anything (4.5). |
 | Two invalidation paths, one for register and one for unregister | They are the same event - "resolution of family X changed" - so one path with one bump (4.4). |
 | A per-family measure-cache version instead of `Theme.FontVersion` | Already written, already correct for the harder case, and precision would need the per-control family bookkeeping above (4.4). |
 | Face objects owned by the registry, disposed at unregister | Live realizations hold the typeface; disposing it at unregister is a use-after-free. Each realization builds its own typeface from the registered bytes, so nothing is shared to dispose (4.4, 4.5). |
