@@ -8,10 +8,11 @@ namespace Kolvir;
 /// <remarks>
 /// <para>
 /// A <see cref="Font"/> is cheap to create and cheap to throw away, which is what a Virtual DOM
-/// render needs: it builds one per text node per pass. Creating one calls nothing native. The
-/// heavyweight object - the typeface, the <c>SKFont</c>, the metrics and the measurement caches -
-/// is created the first time this font is asked to measure or draw, and is shared by every font
-/// with the same description.
+/// render needs: it builds one per text node per pass. Creating one calls nothing native - with one
+/// exception, the first font constructed without a family, which asks the platform for its default
+/// family name once and caches the answer for the process. The heavyweight object - the typeface, the
+/// <c>SKFont</c>, the metrics and the measurement caches - is created the first time this font is
+/// asked to measure or draw, and is shared by every font with the same description.
 /// </para>
 /// <para>
 /// Two fonts with the same family, size, weight and italic compare equal, and equal fonts draw
@@ -21,9 +22,12 @@ namespace Kolvir;
 /// </para>
 /// <para>
 /// The family name is the description's own name and is reported as it was given:
-/// <see cref="FamilyName"/> answers the empty string for a font with no family, and never the face
-/// the platform happened to resolve. <see cref="Weight"/> and <see cref="Italic"/> are likewise
-/// what was asked for, not what the resolved face contains.
+/// <see cref="FamilyName"/> never reports the face the platform happened to resolve. A description
+/// constructed with no family - null, empty or whitespace - names the platform's default
+/// <em>family</em> instead of staying blank, so it can ask for a weight or a slant like any other and
+/// so that it shares one realization with the same family named explicitly. Only a platform that
+/// reports no default family at all leaves the name empty. <see cref="Weight"/> and
+/// <see cref="Italic"/> are likewise what was asked for, not what the resolved face contains.
 /// </para>
 /// <para>
 /// A face that is not one the operating system provides is registered with
@@ -53,9 +57,10 @@ public sealed class Font : IEquatable<Font>
     /// <param name="bold">True to ask for weight 700 instead of 400.</param>
     /// <param name="italic">True to ask for an italic face.</param>
     /// <remarks>
-    /// The family is left to the platform, so the same call can draw with a different face on each
-    /// desktop. Pass a family name, or register a face with <see cref="FontRegistry"/> and name it,
-    /// when text has to look the same everywhere.
+    /// The family is the platform's default one, named rather than left unset: the same call can still
+    /// draw with a different face on each desktop, but "the default family, in bold" is something the
+    /// description can ask for and get. Pass a family name, or register a face with
+    /// <see cref="FontRegistry"/> and name it, when text has to look the same everywhere.
     /// </remarks>
     public Font(float size, bool bold = false, bool italic = false)
         : this(null, size, bold, italic)
@@ -67,8 +72,9 @@ public sealed class Font : IEquatable<Font>
     /// </summary>
     /// <param name="familyName">
     /// The family to resolve: one the platform has, or one an application registered with
-    /// <see cref="FontRegistry"/>. Null, empty or whitespace means the platform's default family.
-    /// A family nothing resolves falls back to the platform's default face rather than failing.
+    /// <see cref="FontRegistry"/>. Null, empty or whitespace means the platform's default family, which
+    /// is named here rather than left unset. A family nothing resolves falls back to the platform's
+    /// default face rather than failing.
     /// </param>
     /// <param name="size">The size to draw at, in logical pixels.</param>
     /// <param name="bold">True to ask for weight 700 instead of 400.</param>
@@ -107,8 +113,8 @@ public sealed class Font : IEquatable<Font>
     /// weight.
     /// </summary>
     /// <param name="familyName">
-    /// The family to resolve, or null to use the platform's default family. A family the platform
-    /// does not have also falls back to the default face.
+    /// The family to resolve, or null for the platform's default family, which is named rather than
+    /// left unset. A family the platform does not have also falls back to the default face.
     /// </param>
     /// <param name="size">The size to draw at, in logical pixels.</param>
     /// <param name="weight">
@@ -123,7 +129,15 @@ public sealed class Font : IEquatable<Font>
     /// </remarks>
     public Font(string? familyName, float size, int weight, bool italic = false)
     {
-        _familyName = string.IsNullOrWhiteSpace(familyName) ? string.Empty : familyName;
+        // A description always names a real family: "no family" means *the platform's default family*,
+        // and resolving it here rather than at realization is what makes `new Font(13f)` and
+        // `new Font(preferredFamily, 13f)` one key and therefore one realization, and what lets a
+        // weight be asked of a description that was never given a family. A platform that reports no
+        // default family leaves the description unnamed, which is the same behaviour as before the
+        // rule rather than a failure.
+        _familyName = string.IsNullOrWhiteSpace(familyName)
+            ? RealizedFont.DefaultFamilyName() ?? string.Empty
+            : familyName;
         Size = size;
         Weight = weight;
         Italic = italic;
@@ -150,14 +164,15 @@ public sealed class Font : IEquatable<Font>
     public bool Italic { get; }
 
     /// <summary>
-    /// The family name this font was created with, or the empty string when it was created without
-    /// one.
+    /// The family name this font was created with, or - when it was created without one - the name of
+    /// the platform's default family.
     /// </summary>
     /// <remarks>
-    /// An echo of the description rather than a report of the face: a font created without a family
-    /// answers the empty string, and a font naming a family the machine does not have answers that
-    /// name, even though both draw with the platform's default face. That is what makes
-    /// <c>new Font(f.FamilyName, f.Size, f.Weight, f.Italic)</c> reproduce the same font.
+    /// An echo of the description rather than a report of the face: a font naming a family the machine
+    /// does not have answers that name, even though it draws with the platform's default face. That is
+    /// what makes <c>new Font(f.FamilyName, f.Size, f.Weight, f.Italic)</c> reproduce the same font.
+    /// A description created without a family is named when it is constructed, so this reports a real
+    /// family rather than the empty string unless the platform reports no default family at all.
     /// </remarks>
     public string FamilyName => _familyName;
 
@@ -197,18 +212,15 @@ public sealed class Font : IEquatable<Font>
     /// <param name="italic">True to ask for an italic face.</param>
     /// <returns>A new description; this one is unchanged.</returns>
     /// <remarks>
-    /// This is description arithmetic except in one case. A description with no family can only be
-    /// realized at the style it was made with: SkiaSharp answers the default face whatever weight is
-    /// asked of a null family name, so "the default family, in bold" is not a thing an unnamed
-    /// description can express. A derived font that asks for a different weight or slant therefore
-    /// takes the platform's default <em>family</em> as its name first, and a derived font that only
-    /// changes size stays exactly as unnamed as it was. Without that, deriving is what a rich label's
-    /// bold span does, and the span would stop being bold.
+    /// Pure description arithmetic: the family is carried across as it is, because the constructor has
+    /// already resolved "no family" to the platform's default family name. This used to need a special
+    /// case - naming the default family only when the style changed - because a description with no
+    /// family could not express "the default family in bold"; resolving the name at construction makes
+    /// that unnecessary, and section 2.1 of the note records why the special case existed and what it
+    /// was hiding.
     /// </remarks>
     internal Font Derive(float size, int weight, bool italic) =>
-        _familyName.Length == 0 && (weight != Weight || italic != Italic)
-            ? new Font(RealizedFont.DefaultFamilyName(), size, weight, italic)
-            : new(_familyName, size, weight, italic);
+        new(_familyName, size, weight, italic);
 
     /// <summary>This description in the form the manager keys on.</summary>
     internal FontKey Key => new(_familyName, Size, Weight, Italic);

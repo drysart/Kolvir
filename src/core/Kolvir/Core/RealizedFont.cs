@@ -200,13 +200,30 @@ internal sealed class RealizedFont
     /// The family name the platform treats as its default, or null when it reports none.
     /// </summary>
     /// <remarks>
-    /// Asked for by <see cref="Font.Derive"/> and nowhere else. SkiaSharp ignores the requested weight
-    /// and slant when a typeface is asked for by a null family name - DirectWrite answers the default
-    /// face whatever style is asked for - so a description that has no family of its own cannot express
-    /// "the default family in bold". The name is what lets it.
+    /// <para>
+    /// Asked for by <see cref="Font"/>'s constructor when no family is given, and cached: the answer
+    /// cannot change while the process runs, and asking is one native call. SkiaSharp ignores the
+    /// requested weight and slant when a typeface is asked for by a null family name - DirectWrite
+    /// answers the default face whatever style is asked for - so a description that names the default
+    /// family is the only way it can express "the default family in bold", and naming it before the
+    /// key is built is what lets such a description share a realization with the same family named
+    /// explicitly.
+    /// </para>
+    /// <para>
+    /// Null is a real answer - a headless platform, or a font manager with nothing installed - and it
+    /// is cached like any other, so a description made without a family stays unnamed on such a
+    /// platform rather than re-asking per construction.
+    /// </para>
     /// </remarks>
     /// <returns>The platform's default family name, or null.</returns>
-    internal static string? DefaultFamilyName()
+    internal static string? DefaultFamilyName() => PlatformDefaultFamily.Value;
+
+    /// <summary>The one native lookup behind <see cref="DefaultFamilyName"/>.</summary>
+    private static readonly Lazy<string?> PlatformDefaultFamily = new(ComputeDefaultFamilyName);
+
+    /// <summary>Asks the platform for its default face and reports the family it belongs to.</summary>
+    /// <returns>The default family name, or null when the platform reports none.</returns>
+    private static string? ComputeDefaultFamilyName()
     {
         var typeface = SKTypeface.FromFamilyName(null, SKFontStyle.Normal);
 

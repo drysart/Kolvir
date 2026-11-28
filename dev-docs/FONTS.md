@@ -22,6 +22,11 @@ The names the note proposed are the names that shipped: `RealizedFont`, `FontKey
 `FontRegistry`, `IFontRegistry`, `FontFace`, `RegisteredFontFamily`, `NotifyFontsChanged`,
 `InvalidateFamily`. `FontOverride` is the one that does not exist yet, by design.
 
+Two decisions changed during the work and are recorded where they belong rather than here: **a
+description always names a real family** (section 2.1), which reverses the note's first draft and fixes
+every theme font on Windows silently drawing regular; and **width is not a style axis** (section 4.5),
+which is a limitation stated so it is not re-raised.
+
 ## What this layer landed, and what it cost
 
 | | before | after |
@@ -32,12 +37,14 @@ The names the note proposed are the names that shipped: `RealizedFont`, `FontKey
 | `new BareControl()` (a `Control` subclass) | 608.0 bytes | 608.0 bytes |
 | A cached `MeasureWidth`, 200,000 calls | 13.078-14.309 ms | 13.646-14.218 ms |
 | A wrapped layout, 350 characters at 420 px | 25.617-28.617 ms | 25.615-27.565 ms |
-| `Kolvir.Minimal`, win-x64, Skia loose | 3,886,080 bytes | 3,910,144 bytes |
+| `Kolvir.Minimal`, win-x64, Skia loose | 3,886,080 bytes | 3,914,752 bytes |
 
-The last row is the one cost every application pays: **24,064 bytes**, measured from build roots of
+The last row is the one cost every application pays: **28,672 bytes**, measured from build roots of
 equal length with `-p:EmbedSkiaSharpNative=false`, and reproducible (the baseline publishes at
 3,886,080 twice). It is not the manager's data structure - see open question 3, which the measurement
-settled: an `ImmutableDictionary` would have cost 34,304 bytes more.
+settled: an `ImmutableDictionary` would have cost 34,304 bytes more. Of the 28,672, **4,608** are the
+always-named-family decision (section 2.1): the cached default-family lookup and the branch in the
+constructor, which is the price of a description that can ask for a weight.
 
 The two timing rows have no result to report: every sample of both trees overlaps, so the epoch
 compare this layer adds in front of every `MeasureWidth` is below this method's resolution. Section 8
@@ -84,10 +91,11 @@ object.
 
 ### 2.1 `Font` becomes a description
 
-`Font` keeps only what describes a face: family name (nullable, meaning the platform's default),
-size, weight and italic. It holds no `SKTypeface`, no `SKFont`, no metrics and no caches. It is a
-class rather than a struct for one reason, and it is the reason the note records even though the
-shape is otherwise struct-like: it carries a field that is populated lazily, and a struct with a
+`Font` keeps only what describes a face: family name, size, weight and italic - four fields, and the
+name is always a real one because a description made without a family names the platform's default
+family at construction (section 2.1). It holds no `SKTypeface`, no `SKFont`, no metrics and no caches.
+It is a class rather than a struct for one reason, and it is the reason the note records even though
+the shape is otherwise struct-like: it carries a field that is populated lazily, and a struct with a
 lazily filled field is a copy hazard - a copy is made, the copy realizes, the original stays empty,
 and every `Font` that was copied out of a field now has two lives. A class gives one object with one
 lazy field, and copies are references to it.
@@ -95,46 +103,75 @@ lazy field, and copies are references to it.
 Two distinct instances with the same description compare equal (section 3).
 
 `Size`, `Weight` and `Italic` are data and answer without touching Skia. `FamilyName` **echoes the
-description**: the name the font was made with, and `string.Empty` when it was made with none. It
-never realizes, and it has to be an echo for two reasons. It is what the key is (section 2.3), so a
-property reporting the *resolved* face would disagree with the key that produced it. And section 4.5's
-round trip - `new Font(f.FamilyName, f.Size, f.Weight, f.Italic)` reproducing the same face - is only
-a property if the name is the one resolution uses.
+description**: the name the font was made with. It never realizes, and it has to be an echo for two
+reasons. It is what the key is (section 2.3), so a property reporting the *resolved* face would
+disagree with the key that produced it. And section 4.5's round trip -
+`new Font(f.FamilyName, f.Size, f.Weight, f.Italic)` reproducing the same face - is only a property if
+the name is the one resolution uses.
 
 That is a change from today. `FamilyName` is `_font.Typeface?.FamilyName ?? string.Empty`
 (`src/core/Kolvir/Core/Font.cs:273`), which is the face that resolved, and `ResolveFamilyFace`
 (`Font.cs:192`) falls back to `SKTypeface.Default` when the platform has no such family - so
 `new Font("NoSuchFamily", 13f).FamilyName` reports the platform default's family today and
-`"NoSuchFamily"` after the change, and `new Font(13f).FamilyName` reports the default today and
-`string.Empty` after. The property's own summary - "a report of the face rather than an echo of the
-constructor" - is wrong under the new rule and changes with it. Section 9 lists the behaviour change
-and its two observable consequences.
+`"NoSuchFamily"` after the change. The property's own summary - "a report of the face rather than an
+echo of the constructor" - is wrong under the new rule and changes with it. Section 9 lists the
+behaviour change and its observable consequences.
 
-`WithSize` and the internal `Derive` stay on `Font` and become description arithmetic, with one
-exception the implementation forced and section 9 records. Today `Derive` has a branch that reuses the
-`SKFont`'s typeface so a derived font keeps a loaded face; with no face in the description there is
-nothing to keep, and the branch disappears.
+`WithSize` and the internal `Derive` stay on `Font` and become description arithmetic. Today `Derive`
+has a branch that reuses the `SKFont`'s typeface so a derived font keeps a loaded face; with no face in
+the description there is nothing to keep, and the branch disappears.
 
-**The exception: a style asked of an unnamed description.** `Derive` is what a rich label's bold or
-italic span calls. A description with no family cannot express "the default family, in bold", because
-SkiaSharp answers the default *face* whatever weight is asked of a null family name - so a pure
-arithmetic derive would silently stop drawing bold spans in bold. It therefore names the platform's
-default family (`RealizedFont.DefaultFamilyName()`) when, and only when, the derived style differs
-from this font's; a derive that only changes the size stays exactly as unnamed as it was.
+**A description always names a real family.** Null, empty or whitespace does not mean "the platform's
+default" as a distinct thing to key on: it means the platform's default *family*, and it is resolved to
+that family's name when the description is constructed. `RealizedFont.DefaultFamilyName()` supplies the
+name, once per process, and a platform that reports no default family at all leaves the description
+unnamed so the degenerate case keeps working instead of throwing.
 
-The alternative - making resolution treat an unnamed family as "the default family, then the style" -
-is **decided against**, and not as a follow-up. It would change the face every theme font that asks
-for weight 600 or 700 draws with, on every page, for applications that never assign a family - and
-those are the only applications it could help, while such an application cannot express that intent
-anyway: a bold default is written by naming a family, which is what an application that wants bold does
-through `ApplicationOptions.FontFamily` or `Theme.FontFamily`. So `new Font(13f, bold: true)` keeps
-ignoring the style, as it does today.
+This is a decision taken during implementation, and it reverses the note's first draft, which had
+resolution honour a style for an unnamed description. The evidence is that the draft's alternative was
+not the status quo it was protecting:
 
-The two rules read asymmetrically on purpose: a constructor with no family ignores its weight, and a
-derive to a different style does not. The first is pre-existing behaviour being kept. The second is
-pre-existing behaviour that pure arithmetic would have broken - `Derive` names the default family today
-too, through the typeface it carried, and the only reason the name is now written explicitly is that
-there is no face left to carry it.
+- `ISystemTheme` has exactly one member, `bool IsDarkMode` (`src/core/Kolvir/Core/SystemTheme.cs:12`).
+  There is no font family in it.
+- The demo's Windows branch returns `null` from `PreferredFontFamily()`
+  (`src/demo/Kolvir.Demo.App/Program.cs`) with a comment claiming the Win32 backend installs an
+  `ISystemTheme` that the library reads the font from. That mechanism does not exist. `Theme.FontFamily`
+  is only ever assigned from a non-blank `ApplicationOptions.FontFamily`.
+- So on Windows **every theme font is unnamed**, and `FromFamilyName(null, style)` answers the regular
+  face whatever style is asked for. Measured on this machine:
+
+  | asked for | before (`null` family) | after (named family) |
+  | --- | --- | --- |
+  | w400 | `Segoe UI` w400 upright | `Segoe UI` w400 upright |
+  | w600 | `Segoe UI` w400 upright | `Segoe UI` w600 upright |
+  | w700 | `Segoe UI` w400 upright | `Segoe UI` w700 upright |
+  | w400 italic | `Segoe UI` w400 upright | `Segoe UI` w400 italic |
+  | w700 italic | `Segoe UI` w400 upright | `Segoe UI` w700 italic |
+
+  With the theme's own roles: `TitleFont` asks for w700 and `SectionFont` and `EmphasizedFont` for
+  w600, so on Windows the sample's titles, section headings, button labels and emphasis were all drawn
+  regular. That is the defect, and it is what the render comparison in section 8.2 sees. An application
+  that wants bold states a family, and naming the default family is how a description states the same
+  thing without a name from the caller.
+
+Naming it at construction rather than lazily in `ResolveFace` is the second half of the decision, and
+it is what keeps `Font` and `FontKey` honest: a description that kept an empty family and let
+realization substitute the default would be a *different key* from the same family named explicitly,
+so `new Font(13f)` and `new Font(defaultFamily, 13f)` would hold two realizations and two sets of
+measurement caches for the same face. Normalising before the key is built gives the sharing for free.
+
+The cost is stated rather than glossed: **creating a font calls nothing native, except the first one
+constructed without a family, which asks the platform for its default family name once and caches the
+answer for the process.** `Font`'s remarks say exactly that.
+
+`Derive` is therefore pure arithmetic again - `new Font(_familyName, size, weight, italic)` - and the
+special case the note's second draft added ("name the default family only when the style changes") is
+gone with the `DefaultFamilyName()` call site that was its only reason. That exception was worth
+recording rather than deleting from history: it existed because an unnamed description could not
+express "the default family in bold", it was the *fix* for the two sample pages that stopped drawing
+bold spans in bold, and the underlying defect it papered over was that a description with no family
+silently dropped every style asked of it. Resolving the name once at construction removes both the
+symptom and the cause.
 
 ### 2.2 `RealizedFont` becomes the heavyweight object
 
@@ -196,9 +233,10 @@ first proposed (open question 3).
 italic flag, with value equality over exactly those four fields. Family names compare `Ordinal`, which
 is the comparison the rest of the library uses for a family name (`RichLabel.ResolveFont` compares a
 span's family to `EffectiveFont.FamilyName` with `StringComparison.Ordinal`), and a null, empty or
-whitespace family all normalise to one unnamed key, so `new Font(null, 13f)`, `new Font("", 13f)` and
-`new Font("   ", 13f)` are one description rather than three - which is also what lets `FamilyName`
-answer `string.Empty` for all of them and still round-trip (section 2.1).
+whitespace family all normalise to the same thing - the platform's default family, named at
+construction - so `new Font(null, 13f)`, `new Font("", 13f)` and `new Font("   ", 13f)` are one
+description rather than three, and all three are the same description as
+`new Font(platformDefaultFamily, 13f)`, which is what lets them share one realization (section 2.1).
 
 The size is compared with exact `float` equality, not with a tolerance. A tolerance would merge two
 descriptions that measure differently, and the key's whole job is to say when two descriptions are
@@ -400,6 +438,12 @@ tolerated accident, and it is the reason resolution is ours rather than Skia's: 
 wants its own "Inter", or its own "Segoe UI", registers that name and gets its face everywhere,
 including in `Theme`'s fields, without changing a single `Font` in its code.
 
+**Step 1 is reached with a real name.** A description built without a family names the platform's
+default family before it is keyed (section 2.1), so it resolves through the registry like any other
+name - which is what lets an application register its own face under the platform's default family and
+have every theme font that was never given a family pick it up. Nothing with a blank family reaches
+resolution, which is why `Register` refuses one (4.5).
+
 **As built, a resolution also decides the layout settings, and that is load-bearing.** `RealizedFont`
 keeps the flag the old `Font` called `_fixedFace`, and it now means "this face came from the
 registry". A face from the registry gets `LinearMetrics = true`, `Hinting = None` and
@@ -415,6 +459,15 @@ Shadowing is worth more than it first looks for one reason: the family an applic
 `Theme.FontFamily` (`src/core/Kolvir/Application/Application.cs:746`). An application that registers
 that same name gets its face with no theme change at all. Note that the backends only *report* the
 preferred family; they do not assign the theme, whatever `FontFamily`'s own summary says.
+
+**Windows is the case where nothing is reported, and it is what did the damage.** The demo's Windows
+branch of `PreferredFontFamily()` returns `null`, so `ApplicationOptions.FontFamily` stays blank,
+`Theme.FontFamily` is never assigned, and every theme font is a description with no family - which,
+before the rule in section 2.1, meant all of them asked Skia for a style against a null family name
+and got the regular face back. That is the defect the section 2.1 evidence measures, and naming the
+default family at construction fixes it without the demo having to know a family name. Whether the
+desktop's chosen UI family should be *reportable* - `ISystemTheme` carries only `IsDarkMode` - is open
+question 6.
 
 Within a family the registry holds one face per (weight, italic). A description that asks for a weight
 the family does not have gets the nearest registered weight, preferring a matching slant, and a family
@@ -523,24 +576,37 @@ that measure, because the version bump invalidates the window.
 ### 4.5 Validation, and what a name means
 
 - **`Register` refuses a null, empty or whitespace family name**, with an `ArgumentException` naming
-  the parameter. This is not politeness: a null family means "the platform's default" throughout the
-  library, so it normalises to the one `FontKey` whose resolution never reaches the registry at all
-  (section 4.3, step 1) - a face stored under it would be an entry no description can ever reach, and
-  the call would look like it had worked. The call site is the mistake, it is a startup-time call, and
-  a throw is the right feedback.
+  the parameter. This is not politeness: a description made without a family is normalised to the
+  platform's default family *name* before it is keyed (section 2.1), so the blank name is not a key any
+  `Font` can ever hold - a face stored under it would be an entry no description can reach, and the
+  call would look like it had worked. The call site is the mistake, it is a startup-time call, and a
+  throw is the right feedback.
 - **Same family, same weight and slant, registered twice: replace.** `Register` is idempotent by
   (family, weight, italic), and the later call wins. The alternative - refuse - makes correctness
   depend on call order, and a second registration from a second code path is not a mistake worth
   failing the process over.
-- **Same family, different weight or slant: a second face of that family.** This is the reason the
-  registry holds a set per family rather than one face: registering a regular and a bold file under
-  one name is how an application gets real emphasis from its own faces. Today one file is one face
-  and no weight can be selected from it; this is a strict improvement and it is why `Theme.FontFamily`
-  plus a registered family can serve `EmphasizedFont` honestly if the application registers the
-  semibold file.
+- **Same family, different weight or slant: a second face of that family.** The registry holds a set of
+  faces per family name, keyed by `(Weight, Italic)`, and this is what that is for: register a regular,
+  a semibold, a bold and an italic file under one name and each lands in its own slot - (400, upright),
+  (600, upright), (700, upright) and (400, italic) for the four files - with the style read from each
+  file's own metadata rather than supplied by the caller (which is why `Register` has no style
+  overrides; open question 5). Resolution then answers a description with the nearest weight,
+  preferring a matching slant, so `new Font(family, 13f, 700)` draws the bold file and
+  `new Font(family, 14f, bold: true, italic: true)` draws the italic one at the nearest weight beside
+  it. It is also why `Theme.FontFamily` plus a registered family can serve `EmphasizedFont` honestly if
+  the application registers its semibold file. Today one file is one face and no weight can be selected
+  from it; this is a strict improvement.
+- **Width is not an axis.** The registry distinguishes faces by weight and slant only, so a family is
+  `(Weight, Italic)` and nothing else. A condensed face is registered under its own family name -
+  `Register("Brand Condensed", bytes)`, which is how foundries ship it - and the toolkit does not model
+  OpenType's third style axis (width; `usWidthClass` 1-9, `SKFontStyleWidth` in Skia). The consequence
+  is worth stating plainly because it reads as a bug otherwise: **two faces of one family registered
+  with the same weight and slant replace each other, and width does not distinguish them**, so
+  registering regular and condensed under a single name leaves the later registration in the (400,
+  upright) slot and the earlier one gone. Give a condensed face its own name.
 - **The same file registered twice** under the same name parses twice and replaces once. Idempotent
   in effect; the extra parse is the price of not hashing every face at registration, which is a
-  measurement to revisit rather than a rule to add now (open question 3).
+  measurement to revisit rather than a rule to add now (open question 4).
 - **A file whose internal family name differs from the name it is registered under: the registered
   name wins for resolution.** The file's internal name is kept in the registry entry, and reported by
   `RegisteredFontFamily`, for diagnostics. Two reasons: the application's reason to register is that
@@ -806,8 +872,9 @@ rather than per frame.
 ## 7. Diagnostics
 
 `Font.ToString` reports the description and never realizes: the family, the size, the weight and the
-italic flag, with an unnamed family spelled as `platform default` (`Font(platform default, 13, w400,
-upright)`) - which says what the description means, not which family the platform would pick. It is
+italic flag, with a description that has no family at all (only possible on a platform that reports no
+default family) spelled as `platform default` (`Font(platform default, 13, w400, upright)`) - which
+says what the description means, not which family the platform would pick. It is
 reached from debuggers, log lines and test failure messages, and a `ToString` that allocates native
 objects is a `ToString` that changes what it is observing.
 
@@ -897,9 +964,9 @@ characters), SDK 10.0.403.
 
 | | baseline | this layer | delta |
 | --- | --- | --- | --- |
-| win-x64 | 3,886,080 | 3,910,144 | 24,064 |
+| win-x64 | 3,886,080 | 3,914,752 | 28,672 |
 
-The baseline reproduces at 3,886,080 on a second publish, and 24,064 is 47 alignment steps, so the
+The baseline reproduces at 3,886,080 on a second publish, and 28,672 is 56 alignment steps, so the
 delta is the code rather than the 512-byte boundary. Only win-x64 could be weighed here: the fixture
 pins its own `TargetFramework` to the host OS, and the publish for another RID stops at
 `error : Cross-OS native compilation is not supported.` A linux-x64 and an osx-arm64 row need a
@@ -907,7 +974,9 @@ machine of that OS, which is what the policy already says about the publishing m
 
 The dependency question is settled by running both shapes. With
 `ImmutableDictionary<FontKey, WeakReference<RealizedFont>>` the image publishes at **3,944,448**;
-with the copy-on-write `Dictionary` it publishes at **3,910,144**. So `System.Collections.Immutable`
+with the copy-on-write `Dictionary` it publishes at **3,910,144** - 3,914,752 after the
+always-named-family decision of section 2.1, which is 4,608 bytes and belongs to `Font` rather than to
+the table. So `System.Collections.Immutable`
 would have cost 34,304 bytes - 67 alignment steps - and open question 3's fallback is what shipped.
 
 `-p:TrimmerSingleWarn=false` reported no IL2xxx or IL3xxx warning in either tree.
@@ -968,17 +1037,15 @@ The whole measurement harness is outside the repository - it compiles against ei
 `<ProjectReference>` on `$(KolvirRoot)` so the same source produces both columns - and it is not
 committed, because a harness that ships is a harness that rots.
 
-**6. The follow-up pass, re-measured.** The review that followed the first push required three things
+**6. The follow-up passes, re-measured.** The review that followed the first push required three things
 this note did not: an explanation on the failure a container registered before any `Application` gets
 (section 4.7), a test that drives `RegisterFromFile` through the application's own loader, and a fix
 for a build that an invalidation overtakes (section 6). None of them is on a measure or paint path, so
 the only number that could move is the publish size, and re-publishing the same fixture the same way
-gives **3,910,144 bytes** - identical to the number in the table above, so the delta against the
-baseline is still 24,064 and the follow-up's own cost is below one 512-byte step. The render check was
-re-run for the five pages of the sample whose content is about fonts (`fonts-from-a-file`,
-`inherited-appearance`, `font-dialog`, `rich-text`, `rich-label-markup`), against the first push's
-renders: all five are pixel-identical. That is what "the review pass changed no drawing" means as a
-measurement rather than as a claim.
+gave **3,910,144 bytes** - identical to the number in the table for that commit, so the review pass
+cost below one 512-byte step. The decision in section 2.1 came after it and does move the number:
+**3,914,752**, 4,608 bytes more, which is the cached platform-default-family lookup and the branch in
+the constructor. The table above is published from the tree that carries both.
 
 ### 8.2 Renders
 
@@ -994,7 +1061,8 @@ regressions. Equal PNG bytes are equal pixels because both builds encode with th
 differing file is decoded and compared pixel by pixel, and the number and bounding box below come from
 that comparison.
 
-**Result: 71 of 73 pages are pixel-identical.** The two that are not:
+**Result against the baseline, before the always-named-family decision: 71 of 73 pages were
+pixel-identical.** The two that were not:
 
 - **`fonts-from-a-file`**, 5,751 pixels in one 38-pixel band at (398,570)-(1243,608). That band is the
   web-font readout, whose text changed: it used to print the face's internal family name at the size
@@ -1017,8 +1085,33 @@ changed is only the value `Weight` reports, which is a number and not a glyph.
 
 **Two pages that moved and then stopped moving**, which is where the note was wrong: `rich-text` and
 `rich-label-markup` differed by a text band each, because a bold span in a font with no family stopped
-being bold. That is the `Derive` finding of section 2.1, and it is why a style-changing derive names the
-default family. With that rule in place both pages are identical to the baseline again.
+being bold. At that point the fix was the `Derive` exception of section 2.1's second draft. It is no
+longer: the family is named at construction, and the next subsection is what that does to the whole
+sample.
+
+**3. Every page, after the always-named-family decision.** This is the fix, not churn, and it is
+reported as one. All 73 pages differ from the previous push, 3,728 to 27,939 pixels each, 6,326 on
+average, 461,822 in total - 0.6% of the 73 frames' pixels. Every difference is text drawn at the weight
+that was asked for:
+
+- the two passes of the *same* build are identical on 71 pages (the two animation pages differ from
+  themselves by clock, as before), so nothing here is run-to-run noise;
+- the `Kolvir` title of every page is w700, the page's own heading is w700 and its section labels are
+  w600, so a page with nothing else bold still shows about 4 KB of differing pixels - which is the
+  floor of the range;
+- the two pages above the floor are the two whose emphasized text participates in *layout*.
+  `popups` (27,939) is a page of button rows: button labels draw at the theme's emphasized weight, so
+  the labels are genuinely semibold now, the buttons widened with them, and one row re-wrapped - "Tail
+  from the top edge" moved to the end of the last row. `wrap-panel` (17,089) is a wrapping panel of tag
+  chips, and two chips moved from the second row to the first for the same reason. Both were checked by
+  looking at the two frames, not inferred from the counts.
+- nothing changed shape, position or colour that is not a glyph's own ink or the re-wrap a wider label
+  causes. Those two frames were inspected to confirm it; the test suite covers the rest.
+
+`inherited-appearance` is the page to read if a single page is to be read: it assigns a registered
+family to a panel, and the family it registers is the one recorded inside the file, so the *only* thing
+that can change is the weight its children ask for - which is what the fix is about.
+
 
 ## 9. Migration
 
@@ -1094,21 +1187,19 @@ sites gained a `.Realize()`.
   style is reported by the registry entry and the realization.
 - **`Font.FamilyName` echoes the description, so a family that does not exist reports the name that
   was asked for.** Today it reports the face that resolved, which for a missing family is the
-  platform's default; after the change it reports the name. Two consequences, both small and neither
-  visible on screen. `RichLabel.ResolveFont` (`src/core/Kolvir/Controls/RichLabel.cs:1483`) compares a
-  span's requested family to `EffectiveFont.FamilyName` with `Ordinal` to decide whether the span
-  needs a derived font, so a span naming a missing family that the label's own font also names now
-  matches and skips the derive - the same default face is drawn either way, so what changes is one
-  fewer `Font` allocated and cached. And `Derive` (`Font.cs:772`) ends with
-  `new Font(FamilyName, size, weight, italic)`, so a font made with no family currently has its
-  `WithSize` result silently *named* with the resolved default family; after the change it stays
-  unnamed, so the derived font keeps the same description apart from its size instead of minting a
-  second name for the same face. **That last claim was wrong and the code disagrees with it:** the
-  name is not cosmetic on Windows, because `SKTypeface.FromFamilyName(null, weight)` ignores the weight
-  while `FromFamilyName("Segoe UI", weight)` honours it. Dropping the name therefore stopped bold and
-  italic spans on an unnamed font from being bold or italic - two sample pages moved and said so - so
-  a derive that changes the style still names the default family, and only a size-only derive stays
-  unnamed. Section 2.1 states the rule.
+  platform's default; after the change it reports the name. One consequence is not visible on screen:
+  `RichLabel.ResolveFont` (`src/core/Kolvir/Controls/RichLabel.cs:1483`) compares a span's requested
+  family to `EffectiveFont.FamilyName` with `Ordinal` to decide whether the span needs a derived font,
+  so a span naming a missing family that the label's own font also names now matches and skips the
+  derive - the same default face is drawn either way, so what changes is one fewer `Font` allocated and
+  cached. The second consequence is not this change at all but the decision in section 2.1: a
+  description made without a family now *reports* the platform's default family, because it was named
+  at construction, and that is what makes its weight and slant real. **The note first expected the
+  opposite** - that `new Font(13f).FamilyName` would become `string.Empty` - and the tree said
+  otherwise: `SKTypeface.FromFamilyName(null, weight)` ignores the weight while
+  `FromFamilyName("Segoe UI", weight)` honours it, so a description left unnamed silently drops every
+  style asked of it. Section 8.2 measures what that looked like on screen and section 2.1 records the
+  decision.
 - **`FontDialogOptions`'s remarks need one sentence** (4.8): registered families resolve but are not
   listed by the platform dialog.
 - **The prose that taught the removed API had to change, which the migration table did not count.**
@@ -1209,4 +1300,14 @@ reviewer can disagree with the reading rather than with a decision presented as 
    **Resolved: the overrides are gone.** Nothing in the tree needed them; a face's style is read from
    its file, and a second style of a family is a second face. The interface is the three `Register`
    forms and nothing else (section 4.2).
+6. **Should the desktop's chosen UI family be reportable?** `ISystemTheme` has one member,
+   `bool IsDarkMode`. The demo reports a preferred family from `AppKitSystemTheme` and
+   `Gtk4SystemTheme` as *static* helpers, and its Windows branch returns `null` because Win32 has no
+   equivalent helper - which is how the theme ended up with no family at all on Windows (section 4.3).
+   The reading to start from is that the library does not need it: a description with no family is the
+   platform's default family, named, so a theme is correct without being told anything. What a
+   `PreferredFontFamily` on `ISystemTheme` would add is the *shell's chosen* family rather than the
+   platform's default one - a real difference for an application that wants to match the rest of the
+   desktop's chrome, and a new member on a backend interface every backend implements. Not decided
+   here; the sample is corrected to stop claiming the seam exists.
 

@@ -83,21 +83,45 @@ public sealed class FontLoadingTests : HeadlessTestBase
     }
 
     [TestMethod]
-    public void AnUnnamedFamilyIsOneFontWhicheverBlankIsPassed()
+    public void AFontWithNoFamilyNamesThePlatformsDefaultFamily()
     {
         var fromNull = new Font(null, SampleSize);
         var fromEmpty = new Font(string.Empty, SampleSize);
         var fromSpaces = new Font("   ", SampleSize);
 
-        Assert.AreEqual(string.Empty, fromNull.FamilyName, "no family reports the empty string");
-        Assert.AreEqual(string.Empty, fromEmpty.FamilyName);
-        Assert.AreEqual(string.Empty, fromSpaces.FamilyName);
-        Assert.IsTrue(fromNull.Equals(fromEmpty) && fromEmpty.Equals(fromSpaces), "all three are the one unnamed font");
+        string defaultFamily = fromNull.FamilyName;
+
+        Assert.IsFalse(
+            string.IsNullOrEmpty(defaultFamily),
+            "a description is always named, so that it can ask for a weight or a slant");
+        Assert.AreEqual(defaultFamily, fromEmpty.FamilyName);
+        Assert.AreEqual(defaultFamily, fromSpaces.FamilyName);
+        Assert.IsTrue(fromNull.Equals(fromEmpty) && fromEmpty.Equals(fromSpaces), "all three are the one font");
+        Assert.IsTrue(
+            fromNull.Equals(new Font(defaultFamily, SampleSize)),
+            "and naming the default family explicitly is the same description, so the same realization");
         Assert.AreEqual(
             fromNull.MeasureWidth(SampleText),
             fromSpaces.MeasureWidth(SampleText),
             0.001f,
             "and they draw with the same face");
+    }
+
+    [TestMethod]
+    public void ABoldFontWithNoFamilyIsActuallyBold()
+    {
+        // The defect behind naming the default family at construction: DirectWrite ignores the
+        // requested style when a typeface is asked for by a null family name, so an unnamed
+        // description reported weight 700 and drew the regular face.
+        var regular = new Font(SampleSize);
+        var bold = new Font(SampleSize, bold: true);
+
+        Assert.AreEqual(regular.FamilyName, bold.FamilyName, "the same family, named");
+        Assert.AreEqual(
+            new Font(regular.FamilyName, SampleSize, 700).MeasureWidth(SampleText),
+            bold.MeasureWidth(SampleText),
+            0.001f,
+            "asking for bold reaches the face now that the family is named");
     }
 
     [TestMethod]
@@ -121,7 +145,9 @@ public sealed class FontLoadingTests : HeadlessTestBase
     [TestMethod]
     public void TheToStringReportsTheDescription()
     {
-        Assert.AreEqual("Font(platform default, 13, w400, upright)", new Font(13f).ToString());
+        string defaultFamily = new Font(13f).FamilyName;
+
+        Assert.AreEqual($"Font({defaultFamily}, 13, w400, upright)", new Font(13f).ToString());
         Assert.AreEqual("Font(Inter, 14, w700, italic)", new Font("Inter", 14f, bold: true, italic: true).ToString());
     }
 
@@ -165,29 +191,32 @@ public sealed class FontLoadingTests : HeadlessTestBase
     }
 
     [TestMethod]
-    public void AnUnnamedFontStaysUnnamedWhenItIsDerived()
+    public void ADerivedFontKeepsTheFamilyItWasGiven()
     {
+        // Including the family a description with no family of its own was given when it was made:
+        // deriving is arithmetic, and the naming happened once at construction.
         var derived = new Font(SampleSize).WithSize(20f);
 
-        Assert.AreEqual(string.Empty, derived.FamilyName, "a derived font does not gain a name it was never given");
+        Assert.AreEqual(new Font(SampleSize).FamilyName, derived.FamilyName, "the derived font keeps the family");
+        Assert.AreEqual(20f, derived.Size);
     }
 
     [TestMethod]
-    public void ADerivedStyleNamesTheDefaultFamily()
+    public void ADerivedStyleDoesNotRenameTheFamily()
     {
-        // What a rich label's bold span asks for. A description with no family cannot express "the
-        // default family, in bold", because the platform answers the default face whatever style is
-        // asked of a null family name, so the derive names the family first - which is the face the
-        // span drew before a font stopped carrying a resolved name.
+        // What a rich label's bold span asks for. Naming the default family used to happen here
+        // instead, and only when the style changed, because an unnamed description could not express
+        // "the default family in bold"; with the name resolved at construction this is arithmetic.
         var plain = new Font(SampleSize);
         var bold = plain.Derive(SampleSize, 700, false);
 
-        Assert.IsFalse(string.IsNullOrEmpty(bold.FamilyName), "the default family is named before a weight is asked of it");
+        Assert.AreEqual(plain.FamilyName, bold.FamilyName, "the family is carried across unchanged");
+        Assert.AreEqual(700, bold.Weight);
         Assert.AreEqual(
-            new Font(bold.FamilyName, SampleSize, 700).MeasureWidth(SampleText),
+            new Font(plain.FamilyName, SampleSize, 700).MeasureWidth(SampleText),
             bold.MeasureWidth(SampleText),
             0.001f,
-            "and the style is the family's, which is what an unnamed description cannot ask for");
+            "and the weight reaches the face");
     }
 
     [TestMethod]

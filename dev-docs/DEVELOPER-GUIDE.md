@@ -3065,8 +3065,12 @@ weight and italic share one. The pooling is what lets a control keep caching lay
 face's identity while a Virtual DOM pass rebuilds the same `Font` objects every frame.
 
 `FamilyName`, `Weight` and `Italic` report what the description asks for, not what the platform
-resolved: a font with no family answers the empty string, and a family with only a regular face
-answers `Weight` 700 while drawing with that face. Nothing is synthesized.
+resolved: a family with only a regular face answers `Weight` 700 while drawing with that face, and a
+font created with no family answers the name of the platform's *default* family rather than the empty
+string - which is what lets it ask for a weight or a slant at all. Nothing is synthesized. Reading a
+description calls nothing native, and creating one does not either: the first `Font` constructed
+without a family asks the platform for that default name once, and the answer is cached for the
+process.
 
 A face the operating system does not provide is *registered* under a family name first, and `Font`
 then refers to it like any installed family:
@@ -3171,7 +3175,8 @@ The cost this adds to every application is not the registry, which is only reach
 registers something, and not the loaders, which are only reachable from the code that calls them. It is
 the description and the pool behind it. Measured on the trimmed `Kolvir.Minimal` fixture, `win-x64`,
 with the Skia native library shipped loose rather than embedded, publishing at the commit before this
-change and after it: 3,886,080 -> 3,910,144 bytes, a difference of **+24,064 bytes (0.6%)**. For
+change and after it: 3,886,080 -> 3,914,752 bytes, a difference of **+28,672 bytes (0.74%)**, of which
+4,608 bytes are the cached default-family lookup that a description created without a family uses. For
 scale, holding the pool in an `ImmutableDictionary` instead of a copy-on-write dictionary cost another
 34,304 bytes on the same image, which is why it does not use one.
 
