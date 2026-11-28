@@ -58,11 +58,21 @@ lazy field, and copies are references to it.
 
 Two distinct instances with the same description compare equal (section 3).
 
-`Size`, `Weight` and `Italic` are data and answer without touching Skia. `FamilyName` is data when
-the description names a family, and a realization when it does not: `Font(null, 13f)` asks the
-platform for its default face, and only the platform can say which family that is. Today the property
-is documented as "a report of the face rather than an echo of the constructor", and that stays true -
-for a named family the name *is* the report, because the name is what resolution uses (section 4.2).
+`Size`, `Weight` and `Italic` are data and answer without touching Skia. `FamilyName` **echoes the
+description**: the name the font was made with, and `string.Empty` when it was made with none. It
+never realizes, and it has to be an echo for two reasons. It is what the key is (section 2.3), so a
+property reporting the *resolved* face would disagree with the key that produced it. And section 4.5's
+round trip - `new Font(f.FamilyName, f.Size, f.Weight, f.Italic)` reproducing the same face - is only
+a property if the name is the one resolution uses.
+
+That is a change from today. `FamilyName` is `_font.Typeface?.FamilyName ?? string.Empty`
+(`src/core/Kolvir/Core/Font.cs:273`), which is the face that resolved, and `ResolveFamilyFace`
+(`Font.cs:192`) falls back to `SKTypeface.Default` when the platform has no such family - so
+`new Font("NoSuchFamily", 13f).FamilyName` reports the platform default's family today and
+`"NoSuchFamily"` after the change, and `new Font(13f).FamilyName` reports the default today and
+`string.Empty` after. The property's own summary - "a report of the face rather than an echo of the
+constructor" - is wrong under the new rule and changes with it. Section 9 lists the behaviour change
+and its two observable consequences.
 
 `WithSize` and the internal `Derive` stay on `Font` and become pure description arithmetic. Today
 `Derive` has a branch that reuses the `SKFont`'s typeface so a derived font keeps a loaded face; with
@@ -79,7 +89,7 @@ typeface it resolved and the one it owns, the fallback `SKFont`s and their typef
 | `Size` | `Font` | `Font` (data) |
 | `Weight` | `Font`, read from the face for loaded faces | `Font` (data, the requested weight) |
 | `Italic` | `Font` | `Font` (data) |
-| `FamilyName` | `Font`, from the typeface | `Font` (data when named; realized when null) |
+| `FamilyName` | `Font`, from the typeface | `Font` (data, the description's name) |
 | `LineHeight` | `Font`, from `_font.Metrics` | `Font` forwards to `RealizedFont` |
 | `BaselineOffset` | same | same |
 | `MeasureWidth` | `Font` | `Font` forwards to `RealizedFont` |
@@ -119,8 +129,10 @@ question 2.
 `FontKey` is the description as a `readonly struct`: the family name, the size, the weight and the
 italic flag, with value equality over exactly those four fields. Family names compare `Ordinal`, which
 is the comparison the rest of the library uses for a family name (`RichLabel.ResolveFont` compares a
-span's family to `EffectiveFont.FamilyName` with `StringComparison.Ordinal`), and a null family
-normalises to null so the platform default is one key rather than several.
+span's family to `EffectiveFont.FamilyName` with `StringComparison.Ordinal`), and a null, empty or
+whitespace family all normalise to one unnamed key, so `new Font(null, 13f)`, `new Font("", 13f)` and
+`new Font("   ", 13f)` are one description rather than three - which is also what lets `FamilyName`
+answer `string.Empty` for all of them and still round-trip (section 2.1).
 
 The size is compared with exact `float` equality, not with a tolerance. A tolerance would merge two
 descriptions that measure differently, and the key's whole job is to say when two descriptions are
@@ -344,9 +356,12 @@ its own realization was made under.
 
 - increments the epoch, which is what makes every `Font` look again;
 - removes every entry whose `FontKey` names that family, which is what makes the look succeed at
-  something new rather than find the old entry. Removing only this family's entries is the one place
-  precision is free; the epoch is global and blunt because a per-family epoch would have to be
-  recomputed per `Font` against a set of changed families.
+  something new rather than find the old entry. Removing only this family's entries is free in
+  *correctness* and not in time: finding them is a scan of the table, and the immutable dictionary
+  rebuilds itself on the way out. That is acceptable because invalidation is startup-shaped - once per
+  registered or unregistered family, never per frame - and the table holds one entry per description
+  in use, which is a handful. The epoch itself is global and blunt because a per-family epoch would
+  have to be recomputed per `Font` against a set of changed families.
 
 **An existing realization keeps the face it already holds.** Unregistration does not reach into a
 `RealizedFont`, does not invalidate it, does not dispose it, and does not make it unusable. It stays
@@ -421,6 +436,11 @@ that measure, because the version bump invalidates the window.
 
 ### 4.5 Validation, and what a name means
 
+- **A null, empty or whitespace family name is refused**, with an `ArgumentException` naming the
+  parameter and thrown by `Register` and by `Unregister`. This is not politeness: a null family means
+  "the platform's default" throughout the library, so it normalises to the one `FontKey` whose
+  resolution never reaches the registry at all (section 4.3, step 1) - a face stored under it would be
+  an entry no description can ever reach, and the call would look like it had worked.
 - **Same family, same weight and slant, registered twice: replace.** `Register` is idempotent by
   (family, weight, italic), and the later call wins. The alternative - refuse - makes correctness
   depend on call order, and a second registration from a second code path is not a mistake worth
@@ -443,10 +463,11 @@ that measure, because the version bump invalidates the window.
   the property the property is for.
 
 Unregistration takes a family name and removes every weight and slant of that family. It returns
-`bool`: `true` when something was registered under that name, `false` otherwise, and it never throws
-for an unknown or already-removed family. **It is idempotent** - the second call returns `false` and
-does nothing, including no version bump when nothing changed. A family name that was never registered
-is not an error: an application that unregisters in a `finally` block is doing the right thing.
+`bool`: `true` when something was registered under that name, `false` otherwise, and for a valid name
+that is unknown or already removed it never throws. **It is idempotent** - the second call returns
+`false` and does nothing, including no version bump when nothing changed. A family name that was never
+registered is not an error: an application that unregisters in a `finally` block is doing the right
+thing.
 
 Names compare `Ordinal`, like every other family-name comparison in the library.
 
@@ -616,7 +637,8 @@ The rules for the manager:
 ## 7. Diagnostics
 
 `Font.ToString` reports the description and never realizes: the family, the size, the weight and the
-italic flag, with the null family spelled out (`Font(platform default, 13, w400, upright)`). It is
+italic flag, with an unnamed family spelled as `platform default` (`Font(platform default, 13, w400,
+upright)`) - which says what the description means, not which family the platform would pick. It is
 reached from debuggers, log lines and test failure messages, and a `ToString` that allocates native
 objects is a `ToString` that changes what it is observing.
 
@@ -742,6 +764,18 @@ factories and `Dispose` go.
   only a regular face, `new Font(family, 13f, bold: true)` reports 700 and draws the regular face -
   the same non-synthesis rule as today, now visible on a value that used to echo the file. The actual
   style is reported by the registry entry and the realization.
+- **`Font.FamilyName` echoes the description, so a family that does not exist reports the name that
+  was asked for.** Today it reports the face that resolved, which for a missing family is the
+  platform's default; after the change it reports the name. Two consequences, both small and neither
+  visible on screen. `RichLabel.ResolveFont` (`src/core/Kolvir/Controls/RichLabel.cs:1483`) compares a
+  span's requested family to `EffectiveFont.FamilyName` with `Ordinal` to decide whether the span
+  needs a derived font, so a span naming a missing family that the label's own font also names now
+  matches and skips the derive - the same default face is drawn either way, so what changes is one
+  fewer `Font` allocated and cached. And `Derive` (`Font.cs:772`) ends with
+  `new Font(FamilyName, size, weight, italic)`, so a font made with no family currently has its
+  `WithSize` result silently *named* with the resolved default family; after the change it stays
+  unnamed, so the derived font keeps the same description apart from its size instead of minting a
+  second name for the same face.
 - **`FontDialogOptions`'s remarks need one sentence** (4.8): registered families resolve but are not
   listed by the platform dialog.
 
