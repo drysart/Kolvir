@@ -68,6 +68,73 @@ public sealed class ImageSizingTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AnImageThatDoesNotAutoSizeNeverReportsItsPicturesSize()
+    {
+        // The principle behind the table bug: with auto-sizing off, nothing the control publishes
+        // through the layout protocol may vary with the picture, whatever SizeMode says.
+        using var data = ImageData.FromPicture(RecordPicture(4000, 3000));
+        var available = new SKSize(1000f, 1000f);
+
+        using var image = new Image { Size = new SKSize(40f, 30f) };
+
+        var withoutPicture = image.Measure(available);
+        image.Source = data;
+        var withPicture = image.Measure(available);
+
+        Assert.AreEqual(withoutPicture, withPicture, "the measurement is the control's chrome, not the picture");
+        Assert.AreEqual(SKSize.Empty, withPicture, "a control with no border or padding asks for nothing");
+
+        foreach (var mode in Enum.GetValues<SizeMode>())
+        {
+            image.SizeMode = mode;
+            Assert.AreEqual(withoutPicture, image.Measure(available), $"{mode}: no mode makes the picture its size");
+        }
+
+        image.AutoSize = true;
+        var autoSized = image.Measure(available);
+
+        Assert.AreEqual(4000f, autoSized.Width, "the opt-in reports the picture's width");
+        Assert.AreEqual(3000f, autoSized.Height, "and its height");
+    }
+
+    [TestMethod]
+    public void AnAutoSizeTrackHugsAnImageThatDoesNotAutoSizeRatherThanItsPicture()
+    {
+        // The reported case end to end: a fixed-size image in an AutoSize column and row, given a
+        // picture several times larger than its box. Both tracks stay at the control's own size.
+        using var data = ImageData.FromPicture(RecordPicture(400, 300));
+        using var table = AutoSizeTable();
+
+        var image = new Image
+        {
+            AutoSize = false,
+            Size = new SKSize(40f, 30f),
+            SizeMode = SizeMode.StretchImage,
+            TableColumn = 0,
+            TableRow = 0,
+        };
+
+        using var neighbour = new Panel { Dock = DockStyle.Fill, TableColumn = 1, TableRow = 1 };
+
+        table.Controls.Add(image);
+        table.Controls.Add(neighbour);
+
+        using var scene = HeadlessScene.Create(table, 200f, 100f);
+
+        Assert.AreEqual(40f, neighbour.Bounds.Left, "the column is the control's width, not the picture's");
+        Assert.AreEqual(30f, neighbour.Bounds.Top, "and the row is its height");
+
+        image.Source = data;
+        table.PerformLayout();
+        scene.Paint();
+
+        Assert.AreEqual(40f, neighbour.Bounds.Left, "assigning a larger picture leaves the column alone");
+        Assert.AreEqual(30f, neighbour.Bounds.Top, "and the row");
+        Assert.AreEqual(new SKSize(40f, 30f), image.Size, "the control keeps the size it was given");
+        Assert.AreEqual(SKColors.Red, scene.PixelAt(20, 15), "and StretchImage fills that box");
+    }
+
+    [TestMethod]
     public void AnAutoSizeTrackHugsAnAutoSizedImageToItsPicture()
     {
         // The opt-in still means what it says: an AutoSize image hands its natural size to the track.

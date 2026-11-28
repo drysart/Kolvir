@@ -4263,9 +4263,11 @@ provider seam hands its sources through it. `disposePictureWithData` is the owne
 matters: true gives the data the picture, and the source that produces it has to outlive every
 picture it hands out.
 
-`NaturalSize` is fixed for the source rather than measured from the current frame, and it is what
-`AutoSize` measures and every `SizeMode` scales from. An animation whose frames differ by a pixel
-therefore cannot make the layout twitch once a second.
+`NaturalSize` is fixed for the source rather than measured from the current frame. It is what an
+`AutoSize` control measures and the size every `SizeMode` treats as the picture's own; on a control
+that does not auto-size it is not exposed to layout at all, so a container measuring the control
+cannot grow around a picture the control is fitting into a smaller box. An animation whose frames
+differ by a pixel therefore cannot make the layout twitch once a second.
 
 **`Position` is computed, never accumulated.** `Play` records an anchor - a position and a
 `TimeProvider` timestamp - and every read is `anchor.Position + (now - anchor.Timestamp)`, wrapped
@@ -4459,8 +4461,12 @@ an extension method that has real work to do is a sign that the work belongs in 
 
 #### Sizing, and what `viewBox` means to `AutoSize`
 
-The picture's bounds are the document's natural size, and that is what `AutoSize` measures and what
-every `SizeMode` scales from:
+The picture's bounds are the document's natural size, and that is what an `AutoSize` image measures
+and what every `SizeMode` uses as the picture's own size. An image that does not auto-size reports
+none of it: the picture is fitted into the control's bounds and a container cannot see how large the
+document is.
+
+The natural size a document reports is:
 
 | Document | Natural size |
 | --- | --- |

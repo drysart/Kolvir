@@ -235,14 +235,34 @@ public class Image : Control
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
+    /// The picture's natural size is reported only while <see cref="Control.AutoSize"/> is on, which is
+    /// the only case where the picture can decide the control's size. With it off the control already
+    /// has a size, and <see cref="SizeMode"/> resolves the picture into that size - <see cref="SizeMode.Zoom"/>
+    /// and <see cref="SizeMode.StretchImage"/> scale into it, <see cref="SizeMode.Normal"/> and
+    /// <see cref="SizeMode.CenterImage"/> draw at natural size and clip. There is therefore no mode in
+    /// which the picture is a reason for the control to be larger, and reporting one would leak the
+    /// source's dimensions out of a control that cannot act on them: a container that mixes measurement
+    /// with bounds - an AutoSize table track takes <c>max(measurement, bounds)</c> - would inflate
+    /// around a picture the control is visibly not showing at that size.
+    /// </para>
+    /// <para>
+    /// Nothing varies with the picture while <see cref="Control.AutoSize"/> is off, so
+    /// <see cref="Control.Measure"/> answers the same for a thumbnail-sized source and a huge one.
+    /// <see cref="Control.MinimumSize"/> and <see cref="Control.MaximumSize"/> still apply, because
+    /// <see cref="Control.Measure"/> clamps whatever this returns.
+    /// </para>
+    /// <para>
     /// The answer is the source's own size, never the current frame's, so an animation whose frames
     /// differ by a pixel does not re-lay-out the window on every frame.
+    /// </para>
     /// </remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        // The source's own size, never the current frame's: an animation whose frames differ by a
-        // pixel would otherwise re-lay-out the window on every frame.
-        return _image is null ? SKSize.Empty : _image.NaturalSize;
+        // A source's own size, never the current frame's: an animation whose frames differ by a pixel
+        // would otherwise re-lay-out the window on every frame. It is only a reason to be that size
+        // while the control is allowed to size itself.
+        return !AutoSize || _image is null ? SKSize.Empty : _image.NaturalSize;
     }
 
     /// <summary>
