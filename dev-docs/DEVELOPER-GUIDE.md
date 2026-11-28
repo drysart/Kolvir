@@ -531,6 +531,11 @@ A container that decides a child's rectangle itself wins, the way an explicit wi
 a `Dock`ed child, a `SplitContainer` panel, a table cell and a `StackPanel` or `WrapPanel` child are
 all arranged by their parent, and a percentage on one of them is not consulted.
 
+A container that sizes itself to its children - an `AutoSize` `Panel` or `StackPanel` - measures
+them: a child that was given a size contributes that size, and one that never was contributes what
+it measures at. So a fixed-size child is held at the size it was given rather than at its content,
+and a child with `AutoSize = true` decides the container's size itself.
+
 ### Wrap panel
 
 `WrapPanel` lays its children out along one axis and starts a new line whenever the next one
@@ -661,7 +666,9 @@ stack.Controls.Add(new Button("Centred") { HorizontalAlignment = Alignment.Cente
 ```
 
 - A child with `AutoSize = false` keeps the size it was given along the stack, which is how a run of
-  fixed-height rows is built; it is still stretched across the stack unless it is aligned.
+  fixed-height rows is built; it is still stretched across the stack unless it is aligned. An
+  `AutoSize` stack measures such a child at that size, not at its content, so a fixed-size image does
+  not pull the stack out around its picture.
 - `Margin` still applies: it separates one child from the next along the stack and insets it from
   the edges across it, so `Spacing` is for the gap and `Margin` for a per-child adjustment.
 - A docked child is not part of the run. It takes its edge of the panel the way a docked child of
@@ -673,7 +680,8 @@ stack.Controls.Add(new Label("Header") { Dock = DockStyle.Top, AutoSize = false,
 
 - The run of children is the scrollable content, so `VerticalScroll = ScrollStyle.Automatic`
   scrolls a long stack; a docked header stays put while the rows scroll under it.
-- With `AutoSize = true` the stack is as long as the run and as wide as its widest child.
+- With `AutoSize = true` the stack is as long as the run and as wide as its widest child - measured
+  children by their content, children that were given a size by that size.
 - A child wider than the space across the stack is clipped to the panel rather than overflowing it,
   so `Center` and `Far` never push a child outside the control.
 

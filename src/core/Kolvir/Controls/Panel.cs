@@ -221,7 +221,12 @@ public class Panel : Control
     /// <summary>The zoom this panel applies to its children. Not the device pixel ratio.</summary>
     protected internal override float ChildScaleMultiplier => _scaleFactor;
 
-    /// <inheritdoc />
+    /// <summary>
+    /// An auto-sized panel measures its children, except for a child that has a size of its own: that
+    /// one contributes the size it was given. Measuring it would count a content size the child is
+    /// not going to be drawn at, and the panel would grow around it - or, for a child whose content
+    /// reports nothing to the layout, collapse instead.
+    /// </summary>
     /// <remarks>
     /// The children are measured in their own, zoomed space: the room they are offered is this
     /// panel's content space divided by <see cref="ScaleFactor"/>, and what they ask for is turned
@@ -250,7 +255,10 @@ public class Panel : Control
                 continue;
             }
 
-            var childSize = child.Measure(childSpace);
+            // A child that was given a size is drawn at that size, so that is what it asks the panel
+            // to hold. One that never was is still free to be fitted to the room, and a measurement
+            // is the only answer available for it.
+            var childSize = !child.AutoSize && child.HasOwnSize ? child.Size : child.Measure(childSpace);
             width = MathF.Max(width, childSize.Width + child.Margin.Horizontal);
             height += childSize.Height + child.Margin.Vertical;
         }
