@@ -874,6 +874,12 @@ rule the guide states - a class default is read every time, and a theme change n
 survives untouched. Without the cache a control with an override would allocate a `Font` per
 `EffectiveFont` read, and `ListView` and `ListBox` read it once per row per paint.
 
+**Every member is tested in isolation**, because the failure mode of a type like this is a member that
+exists on both `Font` and `FontOverride` and that `Compose` forgets: one test per member asserts that
+an override naming only that member changes that field and leaves the other three inherited, a fifth
+sets all four through one chain, and a sixth re-sets a member (`WithSize(20f).WithSize(14f)`) so the
+last value wins. A member added to `Font` later and not to the composition fails one of them.
+
 **`ToolStripItem.Font` widened too.** A menu item is a control that inherits, "a bit bigger here" is
 the same wish, and leaving the two properties different by accident would be worse than the union
 arity. The item composes onto `Owner?.EffectiveFont ?? Theme.DefaultFont` and does **not** cache: its

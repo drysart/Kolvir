@@ -258,6 +258,88 @@ public sealed class FontOverrideTests : HeadlessTestBase
         Assert.AreSame(stripFont, item.EffectiveFont, "and inheriting again restores the strip's font");
     }
 
+    [TestMethod]
+    public void AnOverrideThatSetsOnlyTheFamilyChangesOnlyTheFamily()
+    {
+        var inherited = new Font(TestFont.Family, 11f, 500, italic: true);
+
+        var composed = Compose(inherited, InheritedFont.WithFamily("Segoe UI"));
+
+        Assert.AreEqual("Segoe UI", composed.FamilyName, "the family is the member the override named");
+        Assert.AreEqual(inherited.Size, composed.Size, 0.01f);
+        Assert.AreEqual(inherited.Weight, composed.Weight);
+        Assert.AreEqual(inherited.Italic, composed.Italic);
+    }
+
+    [TestMethod]
+    public void AnOverrideThatSetsOnlyTheSizeChangesOnlyTheSize()
+    {
+        var inherited = new Font(TestFont.Family, 11f, 500, italic: true);
+
+        var composed = Compose(inherited, InheritedFont.WithSize(19f));
+
+        Assert.AreEqual(19f, composed.Size, 0.01f, "the size is the member the override named");
+        Assert.AreEqual(inherited.FamilyName, composed.FamilyName);
+        Assert.AreEqual(inherited.Weight, composed.Weight);
+        Assert.AreEqual(inherited.Italic, composed.Italic);
+    }
+
+    [TestMethod]
+    public void AnOverrideThatSetsOnlyTheWeightChangesOnlyTheWeight()
+    {
+        var inherited = new Font(TestFont.Family, 11f, 500, italic: true);
+
+        var composed = Compose(inherited, InheritedFont.WithWeight(300));
+
+        Assert.AreEqual(300, composed.Weight, "the weight is the member the override named");
+        Assert.AreEqual(inherited.FamilyName, composed.FamilyName);
+        Assert.AreEqual(inherited.Size, composed.Size, 0.01f);
+        Assert.AreEqual(inherited.Italic, composed.Italic);
+    }
+
+    [TestMethod]
+    public void AnOverrideThatSetsOnlyTheItalicChangesOnlyTheItalic()
+    {
+        var inherited = new Font(TestFont.Family, 11f, 500, italic: false);
+
+        var composed = Compose(inherited, InheritedFont.WithItalic(true));
+
+        Assert.IsTrue(composed.Italic, "the slant is the member the override named");
+        Assert.AreEqual(inherited.FamilyName, composed.FamilyName);
+        Assert.AreEqual(inherited.Size, composed.Size, 0.01f);
+        Assert.AreEqual(inherited.Weight, composed.Weight);
+    }
+
+    [TestMethod]
+    public void AChainThatSetsEveryMemberTakesEveryMemberFromTheOverride()
+    {
+        var inherited = new Font("Segoe UI", 9f, 400, italic: false);
+
+        var composed = Compose(
+            inherited,
+            InheritedFont.WithFamily(TestFont.Family).WithSize(14f).WithWeight(600).WithItalic(true));
+
+        // A new member on Font that the override does not compose would leave one of these inherited,
+        // which is the failure the four isolation tests above and this one exist to catch.
+        Assert.AreEqual(TestFont.Family, composed.FamilyName);
+        Assert.AreEqual(14f, composed.Size, 0.01f);
+        Assert.AreEqual(600, composed.Weight);
+        Assert.IsTrue(composed.Italic);
+        Assert.AreEqual(new Font(TestFont.Family, 14f, 600, italic: true), composed);
+    }
+
+    [TestMethod]
+    public void AMemberSetTwiceTakesTheLastValue()
+    {
+        var fontOverride = InheritedFont.WithSize(20f).WithSize(14f);
+
+        Assert.AreEqual(14f, fontOverride.Size!.Value, 0.01f, "the chain keeps the last value");
+
+        var composed = Compose(new Font(TestFont.Family, 9f), fontOverride);
+
+        Assert.AreEqual(14f, composed.Size, 0.01f, "and that is what composes");
+    }
+
     /// <summary>A label that counts how often its effective appearance was invalidated.</summary>
     private sealed class CountingLabel : Label
     {
@@ -271,5 +353,15 @@ public sealed class FontOverrideTests : HeadlessTestBase
 
         /// <inheritdoc />
         protected override void OnAppearanceChanged() => AppearanceChanges++;
+    }
+
+    /// <summary>The font a label resolves to when it inherits <paramref name="inherited"/> and overrides it.</summary>
+    private static Font Compose(Font inherited, FontOverride fontOverride)
+    {
+        var panel = new Panel { Font = inherited };
+        var label = new Label("x") { Font = fontOverride };
+        panel.Controls.Add(label);
+
+        return label.EffectiveFont;
     }
 }
