@@ -203,6 +203,101 @@ public sealed class Font : IEquatable<Font>
     /// <returns>A new description; this one is unchanged.</returns>
     public Font WithSize(float size) => Derive(size, Weight, Italic);
 
+    /// <summary>This font with the same size, weight and italic in <paramref name="familyName"/>.</summary>
+    /// <param name="familyName">
+    /// The family for the new font, or null for the platform's default family. An empty or
+    /// whitespace-only name also means the platform's default family.
+    /// </param>
+    /// <returns>A new description; this one is unchanged.</returns>
+    /// <remarks>
+    /// <para>
+    /// Null means the platform's default family because a <see cref="Font"/> always names a real
+    /// family: the constructor resolves the argument exactly as it does for
+    /// <c>new Font((string?)null, size)</c>.
+    /// </para>
+    /// <para>
+    /// That is the opposite of <see cref="FontOverride.WithFamily"/>, where null keeps the family
+    /// inherited, because a partial description can leave a member alone and a complete one has to
+    /// name it. <see cref="With"/> gives a supplied null the same meaning as this method, so keeping
+    /// this font's family is spelled by omitting the argument there.
+    /// </para>
+    /// </remarks>
+    public Font WithFamily(string? familyName) => new(familyName, Size, Weight, Italic);
+
+    /// <summary>This font with its weight replaced.</summary>
+    /// <param name="weight">
+    /// The weight to ask for, on the 1-1000 scale where 400 is regular and 700 is bold.
+    /// </param>
+    /// <returns>A new description; this one is unchanged.</returns>
+    /// <remarks>
+    /// As with the constructor, the family's nearest weight is used and none is synthesised, so
+    /// <see cref="Weight"/> reports what was asked for rather than what resolved.
+    /// </remarks>
+    public Font WithWeight(int weight) => Derive(Size, weight, Italic);
+
+    /// <summary>This font with its slant replaced.</summary>
+    /// <param name="italic">True to ask for an italic face, false to ask for an upright one.</param>
+    /// <returns>A new description; this one is unchanged.</returns>
+    /// <remarks>
+    /// No slant is synthesised: asking for italic in a family without an italic face draws the face
+    /// the family has, and <see cref="Italic"/> still reports the request.
+    /// </remarks>
+    public Font WithItalic(bool italic) => Derive(Size, Weight, italic);
+
+    /// <summary>This font with the named members replaced and the rest kept.</summary>
+    /// <param name="family">
+    /// The family for the new font. Passing <c>null</c> means the platform's default family, exactly
+    /// as the constructor's null does; omitting the argument keeps this font's family.
+    /// </param>
+    /// <param name="size">
+    /// The size for the new font, in logical pixels, or omitted to keep this font's size. A complete
+    /// description has no nullable size, so <c>size: null</c> does not compile.
+    /// </param>
+    /// <param name="weight">
+    /// The weight to ask for, on the 1-1000 scale, or omitted to keep this font's weight.
+    /// </param>
+    /// <param name="italic">
+    /// True to ask for an italic face, false to ask for an upright one, or omitted to keep this
+    /// font's slant.
+    /// </param>
+    /// <returns>
+    /// A new description, or this instance itself when every argument is omitted so a no-op neither
+    /// allocates nor changes identity.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Each parameter is an <see cref="Optional{T}"/>, which is how an omitted argument and an
+    /// explicit null stay different: the first leaves that member alone, the second is a value the
+    /// member takes. That is what makes <c>font.With(family: "Courier New", weight: 700)</c> compile
+    /// as written and keep the size and the slant.
+    /// </para>
+    /// <para>
+    /// Only the family can be null, because a <see cref="Font"/> describes every member: the style
+    /// parameters take <c>Optional&lt;float&gt;</c>, <c>Optional&lt;int&gt;</c> and
+    /// <c>Optional&lt;bool&gt;</c>, so <c>font.With(size: null)</c> fails to compile rather than
+    /// silently doing nothing. <see cref="FontOverride.With"/> takes
+    /// <see cref="Union{T1, T2}"/> parameters instead, because a partial description has an
+    /// inherited state to clear back to and a complete one has nothing to inherit.
+    /// </para>
+    /// </remarks>
+    public Font With(
+        Optional<string?> family = default,
+        Optional<float> size = default,
+        Optional<int> weight = default,
+        Optional<bool> italic = default)
+    {
+        if (!family.IsSpecified && !size.IsSpecified && !weight.IsSpecified && !italic.IsSpecified)
+        {
+            return this;
+        }
+
+        return new Font(
+            family.IsSpecified ? family.Value : _familyName,
+            size.IsSpecified ? size.Value : Size,
+            weight.IsSpecified ? weight.Value : Weight,
+            italic.IsSpecified ? italic.Value : Italic);
+    }
+
     /// <summary>
     /// A font with the same family at <paramref name="size"/>, <paramref name="weight"/> and
     /// <paramref name="italic"/> style.

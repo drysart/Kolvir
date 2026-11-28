@@ -16,7 +16,10 @@ namespace Kolvir.Analyzers;
 /// and parameterless <c>new Union&lt;...&gt;()</c>. A field or property that is merely never
 /// assigned needs dataflow and is deliberately out of scope, because a struct defaults silently
 /// everywhere. The one exception inside the union's own constructors - <c>this = default;</c> to
-/// zero the fields before assigning the case - is not a value that escapes and is skipped.
+/// zero the fields before assigning the case - is not a value that escapes and is skipped. So is a
+/// parameter's default value: <c>Union&lt;..., InheritedValue&gt; value = default</c> is the
+/// omitted-argument sentinel, and the callee checks <c>IsUnspecified</c> before reading a
+/// case, so diagnosing it would make the union unusable as an optional parameter.
 /// </remarks>
 [DiagnosticAnalyzer(LanguageNames.CSharp)]
 public sealed class DefaultUnionAnalyzer : DiagnosticAnalyzer
@@ -45,7 +48,7 @@ public sealed class DefaultUnionAnalyzer : DiagnosticAnalyzer
             return;
         }
 
-        if (IsZeroingThis(context.Node))
+        if (IsZeroingThis(context.Node) || IsParameterDefault(context.Node))
         {
             return;
         }
@@ -63,6 +66,22 @@ public sealed class DefaultUnionAnalyzer : DiagnosticAnalyzer
             Diagnostics.DefaultUnion,
             context.Node.GetLocation(),
             UnionSymbols.Format(type)));
+    }
+
+    /// <summary>
+    /// Whether the expression is a parameter's default value, which is the optional-argument
+    /// spelling of a union rather than a value the method reads without checking it.
+    /// </summary>
+    private static bool IsParameterDefault(SyntaxNode node)
+    {
+        var current = node;
+
+        while (current.Parent is ParenthesizedExpressionSyntax parenthesized)
+        {
+            current = parenthesized;
+        }
+
+        return current.Parent is EqualsValueClauseSyntax { Parent: ParameterSyntax };
     }
 
     /// <summary>

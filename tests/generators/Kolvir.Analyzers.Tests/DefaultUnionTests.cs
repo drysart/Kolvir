@@ -89,6 +89,27 @@ public sealed class DefaultUnionTests
     }
 
     [TestMethod]
+    public async Task AParameterDefaultIsLeftAlone()
+    {
+        // The union's unspecified default is how an optional argument says "not supplied". The
+        // callee checks IsUnspecified before reading a case, so this is the state, not a bug.
+        var diagnostics = await RunAsync("""
+            using Kolvir;
+
+            namespace TestApp;
+
+            public sealed class Settings
+            {
+                public Settings With(Union<string, int> value = default) => this;
+
+                public Settings Also(Union<string, int> value = default(Union<string, int>)) => this;
+            }
+            """);
+
+        Assert.AreEqual(0, diagnostics.Length, Describe(diagnostics));
+    }
+
+    [TestMethod]
     public async Task AnUninitialisedFieldIsLeftAlone()
     {
         // The rule has no dataflow. A struct defaults silently, and finding the field that was

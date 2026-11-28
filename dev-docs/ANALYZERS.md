@@ -50,7 +50,7 @@ Only explicit forms are diagnosed:
 - `default(Union<...>)`;
 - a parameterless `new Union<...>()`.
 
-Two boundaries are deliberate:
+Three boundaries are deliberate:
 
 - A field, property, local or parameter that is merely never assigned is **not** diagnosed. That
   needs dataflow, and a struct defaults silently everywhere; widening the rule to it would be a
@@ -60,8 +60,13 @@ Two boundaries are deliberate:
   struct-constructor idiom rather than a union value. The analyzer recognizes the assignment to
   `this` and skips it.
 
-The repository's production code has no other explicit default union. The intentional tests that
-create one - the refusal tests for fonts, colours, enabled, caret, toast, image, split container,
+- A parameter's **default value** is **not** diagnosed. `Union<string?, InheritedValue> family = default`
+  is how a union is spelled as an omitted optional argument, and `FontOverride.With`/`InheritedFont.With`
+  check `IsUnspecified` before reading a case. The analyzer recognizes the default clause and skips it;
+  diagnosing it would make the union unusable as the optional-argument sentinel it is defined to be.
+
+No other explicit default union appears in the repository's production code. The intentional tests
+that create one - the refusal tests for fonts, colours, enabled, caret, toast, image, split container,
 window chrome and text spans, plus the union's own default-values tests - carry a scoped
 `#pragma warning disable KOLVIR0002` with a comment saying the value is the thing under test.
 
