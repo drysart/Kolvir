@@ -1,22 +1,22 @@
 using System.Globalization;
-using System.Text;
 using Kolvir;
+using SkiaSharp;
 
 namespace Kolvir.Tests;
 
 /// <summary>
-/// The font loaders, ported from the demo application's <c>--font-check</c> harness.
+/// A font is a description: what one means, when two of them are the same font, what a shared
+/// realization buys, and what the theme does with a family the application registered.
 /// </summary>
 /// <remarks>
 /// <para>
-/// Every assertion here is about identity rather than about a particular number: two fonts from the
-/// same bytes measure the same, a derived font keeps its face, the theme adopts a loaded face. The
-/// one number that would differ between machines - the width of a string - is compared only with
-/// itself, which is what makes the suite portable.
+/// Every assertion here is about identity rather than about a particular number: two descriptions of
+/// the same face measure the same, an equal description is the same font, the theme adopts a
+/// registered family. The one number that would differ between machines - the width of a string - is
+/// compared only with itself, which is what makes the suite portable.
 /// </para>
 /// <para>
-/// The harness printed its numbers so a human could diff three platforms' reports. A test cannot
-/// print and have anyone read it, so the numbers are folded into the failure messages.
+/// The registry has tests of its own; this file is about the description and the pool behind it.
 /// </para>
 /// </remarks>
 [TestClass]
@@ -62,176 +62,285 @@ public sealed class FontLoadingTests : HeadlessTestBase
             Assert.AreEqual(sameFace.MeasureWidth(word), font.MeasureWidth(word), 0.001f, $"'{word}' matches a fresh font");
         }
     }
+
     private const string SampleText = "The quick brown fox jumps over the lazy dog";
     private const float SampleSize = 13f;
 
     [TestMethod]
-    public void TheBundledFaceIsNotTheSystemFace()
+    public void TwoDescriptionsOfOneFaceAreTheSameFont()
     {
-        using var loaded = Font.FromBytes(TestFont.Data);
-        using var system = new Font(SampleSize);
+        var first = new Font(TestFont.Family, SampleSize);
+        var second = new Font(TestFont.Family, SampleSize);
 
-        bool differentFace = !string.Equals(loaded.FamilyName, system.FamilyName, StringComparison.Ordinal);
-        bool differentWidth = loaded.MeasureWidth(SampleText) != system.MeasureWidth(SampleText);
+        Assert.AreNotSame(first, second, "they are two objects");
+        Assert.IsTrue(first.Equals(second), "and one font");
+        Assert.AreEqual(first.GetHashCode(), second.GetHashCode(), "equal fonts hash alike");
 
+        Assert.IsFalse(first.Equals(new Font(TestFont.Family, SampleSize + 1f)), "another size is another font");
+        Assert.IsFalse(first.Equals(new Font(TestFont.Family, SampleSize, bold: true)), "another weight is another font");
+        Assert.IsFalse(first.Equals(new Font(TestFont.Family, SampleSize, italic: true)), "a slant is another font");
+        Assert.IsFalse(first.Equals(new Font("Verdana", SampleSize)), "another family is another font");
+        Assert.IsFalse(first.Equals((Font?)null), "and a font is not null");
+    }
+
+    [TestMethod]
+    public void AFontWithNoFamilyNamesThePlatformsDefaultFamily()
+    {
+        var fromNull = new Font(null, SampleSize);
+        var fromEmpty = new Font(string.Empty, SampleSize);
+        var fromSpaces = new Font("   ", SampleSize);
+
+        string defaultFamily = fromNull.FamilyName;
+
+        Assert.IsFalse(
+            string.IsNullOrEmpty(defaultFamily),
+            "a description is always named, so that it can ask for a weight or a slant");
+        Assert.AreEqual(defaultFamily, fromEmpty.FamilyName);
+        Assert.AreEqual(defaultFamily, fromSpaces.FamilyName);
+        Assert.IsTrue(fromNull.Equals(fromEmpty) && fromEmpty.Equals(fromSpaces), "all three are the one font");
         Assert.IsTrue(
-            differentFace && differentWidth,
-            $"the bundled face should not be the machine's: {loaded.FamilyName} vs {system.FamilyName}, " +
-            $"{N(loaded.MeasureWidth(SampleText))} vs {N(system.MeasureWidth(SampleText))}");
+            fromNull.Equals(new Font(defaultFamily, SampleSize)),
+            "and naming the default family explicitly is the same description, so the same realization");
+        Assert.AreEqual(
+            fromNull.MeasureWidth(SampleText),
+            fromSpaces.MeasureWidth(SampleText),
+            0.001f,
+            "and they draw with the same face");
     }
 
     [TestMethod]
-    public void TwoFontsFromTheSameBytesMeasureIdentically()
+    public void ABoldFontWithNoFamilyIsActuallyBold()
     {
-        using var loaded = Font.FromBytes(TestFont.Data);
-        using var again = Font.FromBytes(TestFont.Data);
+        // The defect behind naming the default family at construction: DirectWrite ignores the
+        // requested style when a typeface is asked for by a null family name, so an unnamed
+        // description reported weight 700 and drew the regular face.
+        var regular = new Font(SampleSize);
+        var bold = new Font(SampleSize, bold: true);
 
-        Assert.AreEqual(loaded.MeasureWidth(SampleText), again.MeasureWidth(SampleText), "measure width");
-        Assert.AreEqual(loaded.LineHeight, again.LineHeight, "line height");
-        Assert.AreEqual(loaded.BaselineOffset, again.BaselineOffset, "baseline offset");
+        Assert.AreEqual(regular.FamilyName, bold.FamilyName, "the same family, named");
+
+        // The precondition is asked of the platform rather than of the descriptions, so that it does
+        // not depend on the thing being tested: which family the platform treats as its default, and
+        // whether that family has a bold instance at all.
+        string platformFamily = SKTypeface.FromFamilyName(null, SKFontStyle.Normal)?.FamilyName ?? string.Empty;
+
+        if (string.IsNullOrEmpty(platformFamily))
+        {
+            Assert.Inconclusive("this platform reports no default family, so there is no family to name");
+        }
+
+        Assert.AreEqual(
+            platformFamily,
+            regular.FamilyName,
+            "a description built without a family names the platform's default family");
+
+        // What has to be true is that bold reaches a *different face* than regular does. Comparing the
+        // two descriptions against each other would not say that - it holds when both draw regular,
+        // which is the very bug. A machine whose default family has no bold instance gets a skip
+        // rather than a green that proves nothing.
+        int regularFaceWeight = FaceWeight(platformFamily, 400);
+        int boldFaceWeight = FaceWeight(platformFamily, 700);
+
+        if (regularFaceWeight == boldFaceWeight)
+        {
+            Assert.Inconclusive(
+                $"'{platformFamily}' resolves to weight {regularFaceWeight} for both 400 and 700 on this " +
+                "machine, so asking for bold cannot reach another face here");
+        }
+
+        Assert.AreNotEqual(
+            regular.MeasureWidth(SampleText),
+            bold.MeasureWidth(SampleText),
+            "asking for bold reaches the bold face, which is a different face with different advances");
+    }
+
+    /// <summary>The weight of the face a family resolves to at <paramref name="weight"/>.</summary>
+    /// <param name="family">The family to ask the platform for.</param>
+    /// <param name="weight">The weight to ask for.</param>
+    /// <returns>The weight of the face that came back, or 0 when the platform answered with none.</returns>
+    private static int FaceWeight(string family, int weight)
+    {
+        using var typeface = SKTypeface.FromFamilyName(
+            family,
+            new SKFontStyle(weight, (int)SKFontStyleWidth.Normal, SKFontStyleSlant.Upright));
+
+        return typeface?.FontStyle.Weight ?? 0;
     }
 
     [TestMethod]
-    public void WithSizeKeepsTheLoadedFace()
+    public void TheFamilyNameEchoesTheDescriptionRatherThanTheResolvedFace()
     {
-        using var loaded = Font.FromBytes(TestFont.Data);
-        using var bigger = loaded.WithSize(26f);
+        const string missing = "NoSuchFamilyExistsOnAnyDesktop";
+
+        var font = new Font(missing, SampleSize);
+
+        Assert.AreEqual(missing, font.FamilyName, "a family the machine does not have answers the name it was given");
+        Assert.AreEqual(
+            new Font(SampleSize).MeasureWidth(SampleText),
+            font.MeasureWidth(SampleText),
+            0.001f,
+            "and still draws with the platform's default face");
+
+        var roundTrip = new Font(font.FamilyName, font.Size, font.Weight, font.Italic);
+        Assert.IsTrue(font.Equals(roundTrip), "which is what makes the round trip a property");
+    }
+
+    [TestMethod]
+    public void TheToStringReportsTheDescription()
+    {
+        string defaultFamily = new Font(13f).FamilyName;
+
+        Assert.AreEqual($"Font({defaultFamily}, 13, w400, upright)", new Font(13f).ToString());
+        Assert.AreEqual("Font(Inter, 14, w700, italic)", new Font("Inter", 14f, bold: true, italic: true).ToString());
+    }
+
+    [TestMethod]
+    public void EqualFontsShareOneRealization()
+    {
+        var first = new Font(TestFont.Family, SampleSize);
+        var second = new Font(TestFont.Family, SampleSize);
+
+        Assert.AreSame(first.Realize(), second.Realize(), "one description, one heavyweight object");
+
+        Assert.AreNotSame(
+            first.Realize(),
+            new Font(TestFont.Family, SampleSize + 1f).Realize(),
+            "and a different size is a different one");
+    }
+
+    [TestMethod]
+    public void MeasuringEmptyTextRealizesNothing()
+    {
+        var font = new Font(TestFont.Family, SampleSize);
+        int before = FontManager.ApproximateCount;
+
+        Assert.AreEqual(0f, font.MeasureWidth(string.Empty));
+        Assert.AreEqual(before, FontManager.ApproximateCount, "an empty string needs no face to measure");
+    }
+
+    [TestMethod]
+    public void WithSizeKeepsTheFamilyAndOnlyChangesTheSize()
+    {
+        var loaded = new Font(TestFont.Family, SampleSize);
+        var bigger = loaded.WithSize(26f);
 
         float small = loaded.MeasureWidth(SampleText);
         float large = bigger.MeasureWidth(SampleText);
         float ratio = small == 0f ? 0f : large / small;
 
-        Assert.AreEqual(loaded.FamilyName, bigger.FamilyName, "the derived font should keep the face");
+        Assert.AreEqual(loaded.FamilyName, bigger.FamilyName, "the derived font keeps the family");
+        Assert.AreEqual(26f, bigger.Size);
         Assert.IsTrue(ratio > 1.9f && ratio < 2.1f, $"doubling the size should double the width, ratio {N(ratio)}");
     }
 
     [TestMethod]
-    public void ADerivedFontOutlivesTheFontItCameFrom()
+    public void ADerivedFontKeepsTheFamilyItWasGiven()
     {
-        using var derived = Build();
+        // Including the family a description with no family of its own was given when it was made:
+        // deriving is arithmetic, and the naming happened once at construction.
+        var derived = new Font(SampleSize).WithSize(20f);
 
-        Assert.IsTrue(derived.MeasureWidth(SampleText) > 0f, "a derived font should measure after its original is disposed");
-
-        static Font Build()
-        {
-            var original = Font.FromBytes(TestFont.Data);
-            var child = original.WithSize(20f);
-            original.Dispose();
-            return child;
-        }
+        Assert.AreEqual(new Font(SampleSize).FamilyName, derived.FamilyName, "the derived font keeps the family");
+        Assert.AreEqual(20f, derived.Size);
     }
 
     [TestMethod]
-    public void DisposingAFontTwiceDoesNothing()
+    public void ADerivedStyleDoesNotRenameTheFamily()
     {
-        var twice = Font.FromBytes(TestFont.Data);
+        // What a rich label's bold span asks for. Naming the default family used to happen here
+        // instead, and only when the style changed, because an unnamed description could not express
+        // "the default family in bold"; with the name resolved at construction this is arithmetic.
+        var plain = new Font(SampleSize);
+        var bold = plain.Derive(SampleSize, 700, false);
 
-        twice.Dispose();
-        twice.Dispose();
+        Assert.AreEqual(plain.FamilyName, bold.FamilyName, "the family is carried across unchanged");
+        Assert.AreEqual(700, bold.Weight);
+        Assert.AreEqual(
+            new Font(plain.FamilyName, SampleSize, 700).MeasureWidth(SampleText),
+            bold.MeasureWidth(SampleText),
+            0.001f,
+            "and the weight reaches the face");
     }
 
     [TestMethod]
-    public void AFontKeepsNoTieToTheFileItCameFrom()
+    public void TheBundledFaceIsNotTheSystemFace()
     {
-        string path = Path.Combine(Path.GetTempPath(), $"kolvir-font-{Guid.NewGuid():N}.ttf");
-        File.WriteAllBytes(path, TestFont.Data);
+        var loaded = new Font(TestFont.Family, SampleSize);
+        var system = new Font(SampleSize);
+
+        bool differentWidth = loaded.MeasureWidth(SampleText) != system.MeasureWidth(SampleText);
+
+        Assert.IsTrue(
+            differentWidth,
+            $"the bundled face should measure differently from the machine's: " +
+            $"{N(loaded.MeasureWidth(SampleText))} vs {N(system.MeasureWidth(SampleText))}");
+    }
+
+    [TestMethod]
+    public void AssigningAnEqualFontLaysNothingOutAgain()
+    {
+        var font = new Font(TestFont.Family, SampleSize);
+        var label = new Label("x") { Font = font };
+
+        int epoch = Control.LayoutEpoch;
+
+        label.Font = new Font(TestFont.Family, SampleSize);
+
+        Assert.AreEqual(epoch, Control.LayoutEpoch, "an equal font is the same font, so nothing is laid out again");
+
+        label.Font = new Font(TestFont.Family, SampleSize + 1f);
+
+        Assert.AreNotEqual(epoch, Control.LayoutEpoch, "a font that is not equal is a layout change");
+    }
+
+    [TestMethod]
+    public void ARegisteredFamilyMakesTheThemeFontsThatFamily()
+    {
+        string family = TestFont.Register();
 
         try
         {
-            using var fromFile = Font.FromFile(path);
-            File.Delete(path);
+            Theme.FontFamily = family;
 
+            Assert.AreEqual(family, Theme.DefaultFont.FamilyName);
+            Assert.AreEqual(family, Theme.EmphasizedFont.FamilyName);
+            Assert.AreEqual(family, Theme.TitleFont.FamilyName);
+            Assert.AreEqual(11.5f, Theme.CaptionFont.Size);
+            Assert.AreEqual(24f, Theme.TitleFont.Size);
+
+            // The weight is what the description asked for. One file holds one face, so the tree is
+            // drawn in that face and the request is still reported honestly.
+            Assert.AreEqual(600, Theme.EmphasizedFont.Weight, "the request is reported, not the file's value");
             Assert.AreEqual(
-                fromFile.MeasureWidth(SampleText),
-                Font.FromBytes(TestFont.Data).MeasureWidth(SampleText),
-                "a font should keep the face's bytes, not the file it read them from");
+                new Font(family, 13f).MeasureWidth(SampleText),
+                Theme.EmphasizedFont.MeasureWidth(SampleText),
+                0.001f,
+                "and the face used is the only one the family has");
         }
         finally
         {
-            if (File.Exists(path))
-            {
-                File.Delete(path);
-            }
+            Theme.FontFamily = null;
         }
     }
 
     [TestMethod]
-    public void ANullOrEmptyPathIsRejected()
+    public void AssigningAFamilyNameLeavesTheRegisteredFace()
     {
-        Assert.ThrowsExactly<ArgumentException>(() => Font.FromFile(string.Empty));
-    }
+        string family = TestFont.Register();
 
-    [TestMethod]
-    public void AMissingFileReportsFileNotFoundException()
-    {
-        string path = Path.Combine(Path.GetTempPath(), $"kolvir-missing-{Guid.NewGuid():N}.ttf");
+        try
+        {
+            Theme.FontFamily = family;
+            string registered = Theme.DefaultFont.FamilyName;
 
-        Assert.ThrowsExactly<FileNotFoundException>(() => Font.FromFile(path));
-    }
+            Theme.FontFamily = null;
 
-    [TestMethod]
-    public void AStreamThatIsNotAFontIsRejected()
-    {
-        using var stream = new MemoryStream(Encoding.UTF8.GetBytes("This is not a font, it is a sentence."));
-
-        Assert.ThrowsExactly<FontFormatException>(() => Font.FromStream(stream));
-    }
-
-    [TestMethod]
-    public void AnEmptyStreamIsRejected()
-    {
-        using var stream = new MemoryStream();
-
-        Assert.ThrowsExactly<FontFormatException>(() => Font.FromStream(stream));
-    }
-
-    [TestMethod]
-    public void ATruncatedFontIsRejected()
-    {
-        var exception = Assert.ThrowsExactly<FontFormatException>(() => Font.FromBytes(TestFont.Data.AsSpan(0, 1024)));
-
-        // No provider claimed it, so the failure cannot name one: this is the built-in loader's
-        // answer, and it is the failure a caller handles for a file that is simply not a font.
-        Assert.AreEqual(string.Empty, exception.ProviderName);
-    }
-
-    [TestMethod]
-    public void ALoadedFaceMakesTheThemeFontsThatFace()
-    {
-        // Deliberately not disposed: the theme keeps the face for the rest of the process, which is
-        // the documented contract for a font handed to UseFont.
-        var loaded = Font.FromBytes(TestFont.Data);
-
-        Theme.UseFont(loaded);
-
-        bool sameFace =
-            string.Equals(Theme.DefaultFont.FamilyName, loaded.FamilyName, StringComparison.Ordinal) &&
-            string.Equals(Theme.EmphasizedFont.FamilyName, loaded.FamilyName, StringComparison.Ordinal) &&
-            string.Equals(Theme.TitleFont.FamilyName, loaded.FamilyName, StringComparison.Ordinal);
-
-        bool sizesKept = Theme.CaptionFont.Size == 11.5f && Theme.TitleFont.Size == 24f;
-
-        // A single file holds a single face, so a semibold theme font must not pretend to be one.
-        bool noFakeWeight =
-            Theme.EmphasizedFont.Weight == loaded.Weight &&
-            Theme.TitleFont.Weight == loaded.Weight;
-
-        Assert.IsTrue(
-            sameFace && sizesKept && noFakeWeight,
-            $"default {Theme.DefaultFont.FamilyName} {N(Theme.DefaultFont.Size)}, " +
-            $"emphasized weight {Theme.EmphasizedFont.Weight}, title {N(Theme.TitleFont.Size)}");
-    }
-
-    [TestMethod]
-    public void AssigningAFamilyNameDropsTheLoadedFace()
-    {
-        // Not disposed, for the same reason as above: the theme owns the face it was given.
-        Theme.UseFont(Font.FromBytes(TestFont.Data));
-        string loadedFace = Theme.DefaultFont.FamilyName;
-
-        Theme.FontFamily = null;
-
-        Assert.AreNotEqual(loadedFace, Theme.DefaultFont.FamilyName, "the theme should be back on the platform face");
+            Assert.AreNotEqual(registered, Theme.DefaultFont.FamilyName, "the theme should be back on the platform face");
+        }
+        finally
+        {
+            Theme.FontFamily = null;
+        }
     }
 
     /// <summary>Formats a metric so a failure message reads the same way on every machine.</summary>

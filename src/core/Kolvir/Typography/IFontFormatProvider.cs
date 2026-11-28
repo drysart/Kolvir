@@ -1,8 +1,8 @@
 namespace Kolvir;
 
 /// <summary>
-/// Turns font data in some other container into the bytes <see cref="Font"/> reads: the seam a format
-/// package plugs into <see cref="FontLoader"/> with.
+/// Turns font data in some other container into the OpenType bytes a <see cref="FontFace"/> reads: the
+/// seam a format package plugs into <see cref="FontLoader"/> with.
 /// </summary>
 /// <remarks>
 /// <para>

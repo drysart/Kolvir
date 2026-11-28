@@ -18,11 +18,12 @@ public sealed class FontLoaderTests
     [TestMethod]
     public void ALoaderWithNoProvidersReadsAPlainFont()
     {
-        using var loaded = new FontLoader().LoadFromBytes(TestFont.Data, 21f);
-        using var direct = Font.FromBytes(TestFont.Data, 21f);
+        var face = new FontLoader().LoadFromBytes(TestFont.Data);
 
-        Assert.AreEqual("IBM Plex Sans", loaded.FamilyName);
-        Assert.AreEqual(direct.MeasureWidth("Handgloves"), loaded.MeasureWidth("Handgloves"), 0.001f);
+        Assert.AreEqual("IBM Plex Sans", face.FamilyName);
+        Assert.AreEqual(400, face.Weight);
+        Assert.IsFalse(face.Italic);
+        CollectionAssert.AreEqual(TestFont.Data, face.Data.ToArray(), "the face keeps the bytes it was read from");
     }
 
     [TestMethod]
@@ -39,11 +40,11 @@ public sealed class FontLoaderTests
     {
         var provider = new FakeProvider("fake", priority: 0, canLoad: _ => true, decode: _ => TestFont.Data);
 
-        using var loaded = new FontLoader([provider]).LoadFromBytes(TestFont.Data);
+        var face = new FontLoader([provider]).LoadFromBytes(TestFont.Data);
 
         Assert.AreEqual(1, provider.ClaimCount, "the provider was asked, and claimed what it was given");
         Assert.AreEqual(1, provider.DecodeCount);
-        Assert.AreEqual("IBM Plex Sans", loaded.FamilyName);
+        Assert.AreEqual("IBM Plex Sans", face.FamilyName);
     }
 
     [TestMethod]
@@ -52,7 +53,7 @@ public sealed class FontLoaderTests
         var low = new FakeProvider("low", priority: 0, canLoad: _ => true, decode: _ => TestFont.Data);
         var high = new FakeProvider("high", priority: 5, canLoad: _ => true, decode: _ => TestFont.Data);
 
-        using var loaded = new FontLoader([low, high]).LoadFromBytes(TestFont.Data);
+        _ = new FontLoader([low, high]).LoadFromBytes(TestFont.Data);
 
         Assert.AreEqual(0, low.DecodeCount, "the stronger claim answers");
         Assert.AreEqual(1, high.DecodeCount);
@@ -68,7 +69,7 @@ public sealed class FontLoaderTests
 
         Assert.AreEqual("second", loader.Providers[0].Name, "the list is in the order the loader consults it");
 
-        using var loaded = loader.LoadFromBytes(TestFont.Data);
+        _ = loader.LoadFromBytes(TestFont.Data);
         Assert.AreEqual(0, first.DecodeCount);
         Assert.AreEqual(1, second.DecodeCount);
     }
@@ -80,9 +81,9 @@ public sealed class FontLoaderTests
             "broken", priority: 10, canLoad: _ => throw new InvalidOperationException("boom"), decode: _ => TestFont.Data);
         var working = new FakeProvider("working", priority: 0, canLoad: _ => true, decode: _ => TestFont.Data);
 
-        using var loaded = new FontLoader([broken, working]).LoadFromBytes(TestFont.Data);
+        var face = new FontLoader([broken, working]).LoadFromBytes(TestFont.Data);
 
-        Assert.AreEqual("IBM Plex Sans", loaded.FamilyName, "identifying a stream must not be able to fail a load");
+        Assert.AreEqual("IBM Plex Sans", face.FamilyName, "identifying a stream must not be able to fail a load");
         Assert.AreEqual(1, working.DecodeCount);
     }
 
@@ -142,11 +143,11 @@ public sealed class FontLoaderTests
         {
             var loader = new FontLoader();
 
-            using var fromPath = loader.LoadFromPath(path, 15f);
-            using var fromStream = loader.LoadFromStream(new MemoryStream(TestFont.Data), 15f);
+            var fromPath = loader.LoadFromPath(path);
+            var fromStream = loader.LoadFromStream(new MemoryStream(TestFont.Data));
 
             Assert.AreEqual(fromPath.FamilyName, fromStream.FamilyName);
-            Assert.AreEqual(15f, fromStream.Size, 0.001f);
+            CollectionAssert.AreEqual(fromPath.Data.ToArray(), fromStream.Data.ToArray(), "one face, two ways in");
         }
         finally
         {
@@ -158,6 +159,26 @@ public sealed class FontLoaderTests
     public void AnEmptyBufferIsAFailure()
     {
         Assert.ThrowsExactly<FontFormatException>(() => new FontLoader().LoadFromBytes([]));
+    }
+
+    [TestMethod]
+    public void AFaceWithNoSizeIsTheSameFaceAtEverySize()
+    {
+        // The reason a load produces a face rather than a font: the file has no size, so the caller
+        // picks one, and two sizes of the same family measure in proportion.
+        string family = FontRegistry.Current.Register("Loader face", new FontLoader().LoadFromBytes(TestFont.Data));
+
+        try
+        {
+            var small = new Font(family, 10f).MeasureWidth("Handgloves");
+            var large = new Font(family, 20f).MeasureWidth("Handgloves");
+
+            Assert.AreEqual(2f, large / small, 0.01f, "doubling the size doubles the width");
+        }
+        finally
+        {
+            FontRegistry.Current.Unregister(family);
+        }
     }
 
     /// <summary>A provider that answers from the test's own bytes and counts what it was asked.</summary>

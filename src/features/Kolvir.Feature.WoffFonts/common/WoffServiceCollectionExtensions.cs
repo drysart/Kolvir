@@ -23,6 +23,11 @@ namespace Kolvir.Feature.WoffFonts;
 /// A test that wants only this format composes its loader directly instead:
 /// <c>new FontLoader([WoffFontFormatProvider.Shared])</c>.
 /// </para>
+/// <para>
+/// The application has to exist before a container is registered, because the registry reads
+/// registered files through the loader the application installs. Registering one first is refused
+/// with a message that says so rather than with "this is not a font".
+/// </para>
 /// </remarks>
 /// <example>
 /// <code>
@@ -31,8 +36,10 @@ namespace Kolvir.Feature.WoffFonts;
 ///     ConfigureServices = services => services.AddWoffFonts(),
 /// });
 ///
-/// var fonts = application.Services.GetRequiredService&lt;IFontLoader&gt;();
-/// label.Font = fonts.LoadFromPath("Inter-Regular.woff2", 15f);
+/// // After the application, not before: this is the loader it installed that unwraps the file.
+/// FontRegistry.Current.RegisterFromFile("Inter-Regular.woff2", "Inter");
+///
+/// label.Font = new Font("Inter", 15f);
 /// </code>
 /// </example>
 public static class WoffServiceCollectionExtensions

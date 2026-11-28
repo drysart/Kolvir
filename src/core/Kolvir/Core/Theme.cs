@@ -249,7 +249,6 @@ public static class Theme
     }
 
     private static string? _fontFamily;
-    private static Font? _fontFace;
     private static int _fontVersion = 1;
     private static Font _defaultFont = new(size: 13f);
     private static Font _captionFont = new(size: 11.5f);
@@ -265,13 +264,14 @@ public static class Theme
     /// <para>
     /// It can be assigned at any time: the theme fonts are rebuilt, and because a control resolves
     /// its font when it measures or paints rather than when it is built, controls that already exist
-    /// pick the new face up - and re-lay out, since text at another face needs other room. The
-    /// previous font objects are left undisposed because a control may still be holding one from a
-    /// paint pass. A handful of fonts is a few bytes, and assigning one runs a handful of times.
+    /// pick the new face up - and re-lay out, since text at another face needs other room.
     /// </para>
     /// <para>
-    /// Assigning a family name also drops a face given to <see cref="UseFont"/>, so this is the way
-    /// back to a family the platform provides.
+    /// The name may be one the operating system provides, or one an application registered with
+    /// <see cref="IFontRegistry"/>. A registered name wins over a system family of the same name, so
+    /// assigning the name the platform's own UI family has - which is what a backend reports and what
+    /// an application passes in <see cref="ApplicationOptions.FontFamily"/> - is the way to draw an
+    /// application that looks like its desktop with a face the application supplies.
     /// </para>
     /// </remarks>
     public static string? FontFamily
@@ -279,13 +279,12 @@ public static class Theme
         get => _fontFamily;
         set
         {
-            if (string.Equals(_fontFamily, value, StringComparison.Ordinal) && _fontFace is null)
+            if (string.Equals(_fontFamily, value, StringComparison.Ordinal))
             {
                 return;
             }
 
             _fontFamily = value;
-            _fontFace = null;
             RebuildFonts();
 
             // A static event has no instance to name as the sender.
@@ -294,74 +293,41 @@ public static class Theme
     }
 
     /// <summary>
-    /// Draws every built-in control with <paramref name="face"/>, whichever desktop the application
-    /// runs on: one call instead of assigning a font to every control. This is how an application
-    /// says "use this font everywhere":
-    /// <c>Theme.UseFont(Font.FromFile("Fonts/Inter-Regular.ttf"))</c>.
-    /// </summary>
-    /// <param name="face">
-    /// A font built with <see cref="Font.FromFile"/>, <see cref="Font.FromStream"/> or
-    /// <see cref="Font.FromBytes"/>, or any <see cref="Font"/> whose face is the one to
-    /// use. The theme keeps it for the rest of the process and derives its fonts from it, so do not
-    /// dispose it afterwards.
-    /// </param>
-    /// <remarks>
-    /// The theme fonts are rebuilt from the face, so <see cref="TitleFont"/>,
-    /// <see cref="SectionFont"/> and <see cref="EmphasizedFont"/> become that face at their own sizes
-    /// rather than a bold or semibold one: a file holds one face, and no weight is synthesised. It
-    /// can be called after the controls exist, the way <see cref="FontFamily"/> can: the effective
-    /// font is resolved when it is used, so a live tree switches to the new face and re-lays out.
-    /// </remarks>
-    public static void UseFont(Font face)
-    {
-        ArgumentNullException.ThrowIfNull(face);
-
-        // The previous face is left undisposed for the same reason the previous theme fonts are: a
-        // control may still be painting with one of its fonts. Loading a font is a start-up only
-        // operation, so holding one face per assignment costs nothing worth reclaiming.
-        _fontFace = face;
-        _fontFamily = null;
-        RebuildFonts();
-
-        // A static event has no instance to name as the sender.
-        _changed?.Invoke(null!);
-    }
-
-    /// <summary>
     /// The font a control draws with when it does not name one: 13 logical pixels in
-    /// <see cref="FontFamily"/>, or the face given to <see cref="UseFont"/> at that size.
+    /// <see cref="FontFamily"/>, or in the platform's default family.
     /// </summary>
     /// <remarks>
-    /// The theme fonts are rebuilt whenever <see cref="FontFamily"/> or <see cref="UseFont"/> changes,
-    /// so read the property when measuring or painting rather than holding on to the value.
+    /// The theme fonts are rebuilt whenever <see cref="FontFamily"/> changes, so read the property
+    /// when measuring or painting rather than holding on to the value.
     /// </remarks>
     public static Font DefaultFont => _defaultFont;
 
     /// <summary>Font for small print: 11.5 logical pixels at weight 400.</summary>
     /// <remarks>
-    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
-    /// one file holds one face.
+    /// The weight is what the family is asked for. A family with only a regular face - a registered
+    /// one, or a platform family with no other weight - draws its regular face and still reports the
+    /// weight requested here.
     /// </remarks>
     public static Font CaptionFont => _captionFont;
 
     /// <summary>Font for body text that has to stand out: 13 logical pixels at weight 600.</summary>
     /// <remarks>
-    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
-    /// one file holds one face.
+    /// The weight is what the family is asked for, so a family that has a semibold face draws it,
+    /// and one that does not draws its nearest face.
     /// </remarks>
     public static Font EmphasizedFont => _emphasizedFont;
 
     /// <summary>Font for a window or dialog title: 24 logical pixels at weight 700.</summary>
     /// <remarks>
-    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
-    /// one file holds one face.
+    /// The weight is what the family is asked for, so a family that has a bold face draws it, and one
+    /// that does not draws its nearest face.
     /// </remarks>
     public static Font TitleFont => _titleFont;
 
     /// <summary>Font for a section heading: 15 logical pixels at weight 600.</summary>
     /// <remarks>
-    /// Under <see cref="UseFont"/> the size still applies but the weight cannot be selected, because
-    /// one file holds one face.
+    /// The weight is what the family is asked for, so a family that has a semibold face draws it,
+    /// and one that does not draws its nearest face.
     /// </remarks>
     public static Font SectionFont => _sectionFont;
 
@@ -387,12 +353,35 @@ public static class Theme
     }
 
     /// <summary>
-    /// One theme font at <paramref name="size"/>, from the loaded face when there is one. A face
-    /// loaded from data is a single face, so the weight is only meaningful on the family-name path;
-    /// asking the loaded face for semibold would otherwise silently fall back to the system default.
+    /// Reports that how a family resolves has changed, without the theme naming a different family.
     /// </summary>
-    private static Font ThemeFont(float size, int weight = 400) =>
-        _fontFace is { } face ? face.WithSize(size) : new Font(_fontFamily, size, weight);
+    /// <remarks>
+    /// <para>
+    /// Registering a face with <see cref="IFontRegistry"/>, or unregistering one, leaves every
+    /// description identical and changes the face behind a name. The mechanism that has to run
+    /// anyway - drop derived appearance caches, re-measure, repaint as one piece - is the one an
+    /// assignment to <see cref="FontFamily"/> already triggers, and a host is already subscribed to
+    /// it. So the registry bumps the same version through the same notify rather than a per-family
+    /// equivalent, which would need every control to remember which families it used.
+    /// </para>
+    /// <para>
+    /// Blunt rather than precise, and startup-shaped rather than per frame: it is one integer
+    /// increment on a path an application runs once per registered family.
+    /// </para>
+    /// </remarks>
+    internal static void NotifyFontsChanged()
+    {
+        _fontVersion++;
+
+        // A static event has no instance to name as the sender.
+        _changed?.Invoke(null!);
+    }
+
+    /// <summary>One theme font at <paramref name="size"/> from <see cref="FontFamily"/>.</summary>
+    /// <param name="size">The size to draw at, in logical pixels.</param>
+    /// <param name="weight">The weight to ask for, on the 1-1000 scale.</param>
+    /// <returns>A description; nothing native is created until text is measured with it.</returns>
+    private static Font ThemeFont(float size, int weight = 400) => new(_fontFamily, size, weight);
 
     private static void Assign(Palette palette)
     {

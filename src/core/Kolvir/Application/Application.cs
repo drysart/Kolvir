@@ -121,6 +121,12 @@ public sealed partial class Application : IDisposable
         services.AddSingleton<IFontLoader>(provider =>
             new FontLoader(provider.GetServices<IFontFormatProvider>()));
 
+        // The one registry of application-supplied faces. It is the process-wide instance rather than
+        // a new one, because realization happens with no control in sight - the theme fonts are
+        // realized by whatever measures text first - and a face registered before this point has to
+        // be the face a control resolves later.
+        services.AddSingleton<IFontRegistry>(FontRegistry.Current);
+
         _provider = services.BuildServiceProvider(new ServiceProviderOptions { ValidateScopes = ValidateScopes });
         Services = _provider;
 
@@ -295,7 +301,7 @@ public sealed partial class Application : IDisposable
         _windowClosed -= handler;
     }
 
-    /// <summary>Adds a handler that runs after <see cref="Theme.Palette"/>, <see cref="Theme.FontFamily"/> or <see cref="Theme.UseFont"/> changed.</summary>
+    /// <summary>Adds a handler that runs after <see cref="Theme.Palette"/> or <see cref="Theme.FontFamily"/> changed.</summary>
     public IDisposable AddThemeChangedHandler(Action<object> handler)
     {
         ArgumentNullException.ThrowIfNull(handler);
@@ -733,6 +739,15 @@ public sealed partial class Application : IDisposable
             Launcher.Current = launcher;
         }
 
+        // The registry reads registered files through the application's loader, so a format the
+        // application enabled while declaring its services - a WOFF provider, say - is what
+        // RegisterFromFile unwraps with. The registry is a static because realization happens with no
+        // services in sight, which is why this has to be pushed into it rather than resolved from it.
+        if (_provider.GetService<IFontLoader>() is { } fonts)
+        {
+            FontRegistry.Current.UseLoader(fonts);
+        }
+
         // A system theme only arrives from a backend. Without one there is no desktop preference
         // to follow, so the palette is left exactly as the application set it - which is what keeps
         // a headless render deterministic regardless of how the host machine is configured.
@@ -991,6 +1006,12 @@ public sealed partial class Application : IDisposable
         RaisePhase(ApplicationPhase.Disposed);
 
         _provider.Dispose();
+
+        // The registry outlives the container, because a font realized with no services in sight still
+        // reads registered families from it. Its loader does not: the providers behind it were the
+        // container's. A registration made after this point reads through the built-in loader and, if
+        // the data is a container, is told that no provider is installed - which is the truth.
+        FontRegistry.Current.ClearLoader();
 
         if (ReferenceEquals(Current, this))
         {

@@ -6,10 +6,9 @@ namespace Kolvir;
 /// </summary>
 /// <remarks>
 /// <para>
-/// It derives from <see cref="ArgumentException"/> because that is what
-/// <see cref="Font.FromBytes"/> has always thrown for bytes it cannot read, and a caller that
-/// catches the old type keeps working. What it adds is the provider's name, which is the one part of
-/// the failure a caller cannot work out for themselves.
+/// It derives from <see cref="ArgumentException"/> because that is what a font load has always thrown
+/// for bytes it cannot read, and a caller that catches the old type keeps working. What it adds is the
+/// provider's name, which is the one part of the failure a caller cannot work out for themselves.
 /// </para>
 /// <para>
 /// It is thrown from a load, not from a paint: the caller asked for the font, so the caller catches
@@ -23,23 +22,45 @@ public sealed class FontFormatException : ArgumentException
     /// <param name="providerName">The provider that claimed the data, or null when none did.</param>
     /// <param name="paramName">The parameter the caller passed the unusable data in.</param>
     /// <param name="inner">What the provider threw, or null when it returned nothing instead.</param>
+    /// <param name="explanation">
+    /// A sentence added to the message when the caller knows more about why nothing could read the
+    /// data than the provider name can say - such as a format provider that was never installed
+    /// because there was no application to install it. Null adds nothing.
+    /// </param>
     /// <remarks>
     /// The message says what went wrong rather than repeating <paramref name="paramName"/>, because
     /// the parameter's name is already on the exception and what a developer needs is the format.
     /// </remarks>
-    public FontFormatException(string? providerName, string paramName, Exception? inner = null)
+    public FontFormatException(
+        string? providerName,
+        string paramName,
+        Exception? inner = null,
+        string? explanation = null)
         : base(
-            string.IsNullOrEmpty(providerName)
-                ? inner is null
-                    ? "The data is not a font this build can read."
-                    : $"The data is not a font this build can read: {inner.Message}"
-                : inner is null
-                    ? $"The font format provider '{providerName}' claimed the data but produced nothing readable."
-                    : $"The font format provider '{providerName}' claimed the data but could not decode it: {inner.Message}",
+            Compose(providerName, inner, explanation),
             paramName,
             inner)
     {
         ProviderName = providerName ?? string.Empty;
+    }
+
+    private static string Compose(string? providerName, Exception? inner, string? explanation)
+    {
+        string message;
+        if (string.IsNullOrEmpty(providerName))
+        {
+            message = inner is null
+                ? "The data is not a font this build can read."
+                : $"The data is not a font this build can read: {inner.Message}";
+        }
+        else
+        {
+            message = inner is null
+                ? $"The font format provider '{providerName}' claimed the data but produced nothing readable."
+                : $"The font format provider '{providerName}' claimed the data but could not decode it: {inner.Message}";
+        }
+
+        return string.IsNullOrEmpty(explanation) ? message : $"{message} {explanation}";
     }
 
     /// <summary>

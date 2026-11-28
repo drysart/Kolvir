@@ -231,7 +231,7 @@ internal sealed class TextBoxSpanFeature : ITextBoxSpanFeature
         // in what is left of it after the gap, so a large marker is shrunk instead of pushed back
         // up into the letters.
         float halfWave = span.Amplitude;
-        float descentRoom = MathF.Abs(font.SkFont.Metrics.Descent) - gap;
+        float descentRoom = MathF.Abs(font.Realize().SkFont.Metrics.Descent) - gap;
         if (halfWave > 0f && halfWave * 2f > descentRoom)
         {
             halfWave = MathF.Max(0.25f, descentRoom * 0.5f);

@@ -1825,8 +1825,14 @@ public class Control : IDisposable
     /// configured still adopts it.
     /// </para>
     /// <para>
-    /// The font is not owned by the control: never dispose one that was inherited or that came from
-    /// <see cref="Theme"/>, and keep any font assigned here alive for as long as it is in use.
+    /// Assigning a font compares by value: a font that describes the same family, size, weight and
+    /// italic is the same font, even if it is a different object, so re-rendering does not invalidate
+    /// the subtree. What an application cannot do as a result is force a re-measure by assigning an
+    /// equal font; registering or unregistering a family is the way to make text resolve differently.
+    /// </para>
+    /// <para>
+    /// Nothing is owned: there is no disposable font, and a font assigned here may be a new object on
+    /// every render.
     /// </para>
     /// </remarks>
     /// <exception cref="ArgumentNullException">A null <see cref="Font"/> was assigned.</exception>
@@ -1839,7 +1845,7 @@ public class Control : IDisposable
             {
                 ArgumentNullException.ThrowIfNull(font);
 
-                if (_font.TryGetValue<Font>(out var current) && ReferenceEquals(current, font))
+                if (_font.TryGetValue<Font>(out var current) && font.Equals(current))
                 {
                     return;
                 }

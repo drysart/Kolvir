@@ -50,6 +50,13 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
     private List<TextLine>? _lines;
     private string? _linesText;
     private Font? _linesFont;
+
+    /// <summary>
+    /// The resolution epoch the line breaks were measured under. A registration or unregistration
+    /// changes what a description resolves to without changing the description, so the font alone is
+    /// not enough to say the cached lines are still right.
+    /// </summary>
+    private int _linesFontEpoch = -1;
     private char? _linesMask;
     private float _linesWidth = float.NaN;
     private bool _linesWrap;
@@ -272,7 +279,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         if (textBox.Text.Length == 0 && !string.IsNullOrEmpty(placeholderText))
         {
             paint.Color = Theme.Placeholder;
-            font.DrawText(
+            font.Realize().DrawText(
                 canvas,
                 placeholderText,
                 content.Left + offset.X,
@@ -297,7 +304,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
                     continue;
                 }
 
-                font.DrawText(
+                font.Realize().DrawText(
                     canvas,
                     display[line.Start..line.End],
                     content.Left + offset.X,
@@ -653,7 +660,8 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         bool current =
             _lines is not null &&
             ReferenceEquals(_linesText, _textBox.Text) &&
-            ReferenceEquals(_linesFont, font) &&
+            _linesFontEpoch == FontManager.Epoch &&
+            font.Equals(_linesFont) &&
             _linesMask == mask &&
             _linesWrap == _wordWrap &&
             MathF.Abs(_linesWidth - width) < 0.01f;
@@ -671,6 +679,7 @@ internal sealed class TextBoxMultiline : ITextBoxMultiline
         _lines = lines;
         _linesText = _textBox.Text;
         _linesFont = _textBox.EffectiveFont;
+        _linesFontEpoch = FontManager.Epoch;
         _linesMask = MaskOf();
         _linesWidth = width;
         _linesWrap = wrap;

@@ -15,7 +15,7 @@ namespace Kolvir.Tests;
 /// is the behaviour being asserted: nothing may be captured when a control is constructed.
 /// </para>
 /// <para>
-/// Fonts come from <see cref="Font.FromBytes"/> so the widths do not depend on which faces the
+/// Fonts are the family <see cref="TestFont"/> registers so the widths do not depend on which faces the
 /// machine has. The two tests that paint a pixel sample a solid fill, not text, which is what keeps
 /// them stable across the three platforms' rasterisers.
 /// </para>
@@ -36,7 +36,7 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
     {
         WithStage((root, _) =>
         {
-            using var outerFont = Font.FromBytes(TestFont.Data, 17f);
+            var outerFont = new Font(TestFont.Family, 17f);
 
             var outer = new Panel { Dock = DockStyle.Fill, Font = outerFont, ForeColor = AncestorColour };
             var middle = NoChrome();
@@ -66,8 +66,8 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
     {
         WithStage((root, _) =>
         {
-            using var outerFont = Font.FromBytes(TestFont.Data, 17f);
-            using var innerFont = Font.FromBytes(TestFont.Data, 11f);
+            var outerFont = new Font(TestFont.Family, 17f);
+            var innerFont = new Font(TestFont.Family, 11f);
 
             var outer = new Panel { Dock = DockStyle.Fill, Font = outerFont, ForeColor = AncestorColour };
             var middle = NoChrome();
@@ -171,8 +171,8 @@ public sealed class InheritedAppearanceTests : HeadlessTestBase
     {
         WithStage((root, _) =>
         {
-            using var small = Font.FromBytes(TestFont.Data, 9f);
-            using var large = Font.FromBytes(TestFont.Data, 26f);
+            var small = new Font(TestFont.Family, 9f);
+            var large = new Font(TestFont.Family, 26f);
 
             var stack = new StackPanel { Dock = DockStyle.Fill, Font = small };
             var label = new Label(Sample) { AutoSize = true };

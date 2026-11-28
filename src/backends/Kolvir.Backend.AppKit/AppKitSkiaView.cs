@@ -1942,7 +1942,7 @@ internal sealed class AppKitSkiaView : NSView, INSTextInputClient
             canvas.Clear(new SKColor(0x99, 0x00, 0x00));
             canvas.Restore();
 
-            using var font = new Font(13f);
+            var font = new Font(13f);
             TextRenderer.Draw(
                 canvas,
                 message,

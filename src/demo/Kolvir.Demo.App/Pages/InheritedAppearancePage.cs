@@ -23,7 +23,6 @@ internal sealed class InheritedAppearancePage : DemoPage
     private Label? _appearanceReadout;
     private Font? _appearanceSubtreeFont;
     private Font? _appearanceBigFont;
-    private Font? _appearanceFace;
 
     /// <summary>
     /// The inherited appearance page: one panel that assigns a font and a foreground, what its
@@ -33,11 +32,10 @@ internal sealed class InheritedAppearancePage : DemoPage
     /// </summary>
     private Panel Build()
     {
-        // The page owns these for the life of the window: a control never disposes a font it was
-        // handed, and the theme keeps the face it is given.
-        _appearanceSubtreeFont ??= Font.FromBytes(DemoFont.Data, 14f);
-        _appearanceBigFont ??= Font.FromBytes(DemoFont.Data, 21f);
-        _appearanceFace ??= Font.FromBytes(DemoFont.Data);
+        // The page names the bundled face's family, which the application registered; nothing here
+        // owns a font, so nothing here disposes one.
+        _appearanceSubtreeFont ??= new Font(DemoFont.Register(), 14f);
+        _appearanceBigFont ??= new Font(DemoFont.Register(), 21f);
 
         var card = Card();
         card.Controls.Add(Heading("Inherited appearance"));
@@ -78,7 +76,7 @@ internal sealed class InheritedAppearancePage : DemoPage
         };
         themeFace.AddClickHandler(_ =>
         {
-            Theme.UseFont(_appearanceFace);
+            Theme.FontFamily = DemoFont.Register();
             UpdateAppearanceReadout();
         });
 
@@ -233,9 +231,9 @@ internal sealed class InheritedAppearancePage : DemoPage
     /// <param name="bundled">True for the face the application carries, false for the platform's.</param>
     public void SetAppearanceDemoFace(bool bundled)
     {
-        if (bundled && _appearanceFace is not null)
+        if (bundled)
         {
-            Theme.UseFont(_appearanceFace);
+            Theme.FontFamily = DemoFont.Register();
         }
         else
         {

@@ -39,8 +39,8 @@ namespace Kolvir;
 /// <item>
 /// <b>No provider claims the data, and the built-in loader cannot read it.</b> The load throws a
 /// <see cref="FontFormatException"/> with no provider name, which is the one failure a caller has to
-/// handle: a font that is not going to be shown. It is the same failure <see cref="Font.FromBytes"/>
-/// throws, because it is the same answer.
+/// handle: a font that is not going to be shown. It is the same failure <see cref="FontFace"/>'s
+/// constructor throws, because it is the same answer.
 /// </item>
 /// <item>
 /// <b>A provider throws while being asked whether it claims the data.</b> It has answered "not mine":
@@ -49,14 +49,15 @@ namespace Kolvir;
 /// </item>
 /// <item>
 /// <b>What the built-in loader reads.</b> TrueType and OpenType, the same as
-/// <see cref="Font.FromBytes"/>: those are the formats Skia parses, and this loader does not add any.
+/// <see cref="FontFace"/>: those are the formats Skia parses, and this loader does not add any.
 /// </item>
 /// </list>
 /// <para>
-/// <b>Where a font comes from.</b> An application resolves <see cref="IFontLoader"/> from its services -
-/// the application registers one, composed from every format the application declared - and assigns
-/// the result where it wants the face. There is no static entry point that consults an ambient list,
-/// which is what makes "what can this application read" a question with exactly one answer.
+/// <b>Where a face goes.</b> An application resolves <see cref="IFontLoader"/> from its services - the
+/// application registers one, composed from every format the application declared - and hands the
+/// face it produces to <see cref="IFontRegistry"/>, which names it so a <see cref="Font"/> can refer to
+/// it. There is no static entry point that consults an ambient list, which is what makes "what can
+/// this application read" a question with exactly one answer.
 /// </para>
 /// </remarks>
 public sealed class FontLoader : IFontLoader
@@ -67,9 +68,6 @@ public sealed class FontLoader : IFontLoader
     /// matches <see cref="ImageDataFactory.HeaderLength"/> so the two seams read the same way.
     /// </remarks>
     public const int HeaderLength = 512;
-
-    /// <summary>The size a load uses when the caller does not choose one: the theme's default of 13.</summary>
-    public const float DefaultSize = 13f;
 
     private readonly IFontFormatProvider[] _providers;
 
@@ -127,27 +125,26 @@ public sealed class FontLoader : IFontLoader
     public IReadOnlyList<IFontFormatProvider> Providers => _providers;
 
     /// <inheritdoc />
-    public Font LoadFromPath(string path, float size = DefaultSize)
+    public FontFace LoadFromPath(string path)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(path);
-        return LoadFromBytes(File.ReadAllBytes(path), size);
+        return LoadFromBytes(File.ReadAllBytes(path));
     }
 
     /// <inheritdoc />
-    public Font LoadFromStream(Stream stream, float size = DefaultSize)
+    public FontFace LoadFromStream(Stream stream)
     {
         ArgumentNullException.ThrowIfNull(stream);
 
-        // The whole face is copied rather than streamed, for the same reason Font.FromStream copies:
-        // the caller is free to close the stream as soon as this returns, and a provider wants the
-        // whole thing anyway.
+        // The whole face is copied rather than streamed, because the caller is free to close the
+        // stream as soon as this returns, and a provider wants the whole thing anyway.
         using var buffer = new MemoryStream();
         stream.CopyTo(buffer);
-        return LoadFromBytes(buffer.ToArray(), size);
+        return LoadFromBytes(buffer.ToArray());
     }
 
     /// <inheritdoc />
-    public Font LoadFromBytes(ReadOnlySpan<byte> data, float size = DefaultSize)
+    public FontFace LoadFromBytes(ReadOnlySpan<byte> data)
     {
         if (data.IsEmpty)
         {
@@ -173,7 +170,7 @@ public sealed class FontLoader : IFontLoader
 
             try
             {
-                return Font.FromBytes(decoded.Span, size);
+                return new FontFace(decoded);
             }
             catch (FontFormatException exception)
             {
@@ -185,7 +182,7 @@ public sealed class FontLoader : IFontLoader
 
         // Nobody claimed it: the built-in path, which is the loader the library has always had. Its
         // failure is already the right one, down to the parameter name.
-        return Font.FromBytes(data, size);
+        return new FontFace(data.ToArray());
     }
 
     /// <summary>

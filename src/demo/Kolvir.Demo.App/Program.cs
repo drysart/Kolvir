@@ -169,7 +169,7 @@ internal static class Program
         // published application whether or not it loads a font.
         if (Array.IndexOf(args, "--embedded-font") >= 0)
         {
-            Theme.UseFont(Font.FromBytes(DemoFont.Data));
+            Theme.FontFamily = DemoFont.Register();
         }
 
         var demo = new DemoUi();
@@ -459,8 +459,12 @@ internal static class Program
 #if MACOS
         AppKitSystemTheme.PreferredFontFamily();
 #elif WINDOWS
-        // The Win32 backend installs its own ISystemTheme and the library reads the font from
-        // there, so there is nothing to pass.
+        // Nothing to pass, and no service to ask: the library names the platform's default family for
+        // a font created without one, so the theme fonts are that family at their sizes and weights
+        // rather than names that resolve to whatever the platform picks. Reading the shell's chosen UI
+        // font would need a seam that does not exist - ISystemTheme carries only the colour mode - so
+        // inventing one for the sample is recorded as an open question in FONTS.md rather than done
+        // here.
         null;
 #else
         // Reading this goes through Gtk.Settings, so the display has to be open already.
@@ -485,7 +489,7 @@ internal static class Program
         // before the sample builds its controls, so every page renders in the bundled face.
         if (Array.IndexOf(args, "--embedded-font") >= 0)
         {
-            Theme.UseFont(Font.FromBytes(DemoFont.Data));
+            Theme.FontFamily = DemoFont.Register();
         }
 
         ApplyAppearanceOverride(args);

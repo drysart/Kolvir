@@ -145,8 +145,8 @@ internal sealed class FontDialogPage : DemoPage
         card.Controls.Add(stage);
 
         card.Controls.Add(new Label(
-            "The dialog lists the families the operating system has installed. A face loaded with " +
-            "Font.FromFile is not a system font unless the OS knows it too, so it does not " +
+            "The dialog lists the families the operating system has installed. A family an " +
+            "application registered is not a system font unless the OS knows it too, so it does not " +
             "appear here; that is documented rather than half-supported.")
         {
             Dock = XDock.Fill,

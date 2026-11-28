@@ -49,6 +49,7 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\..\src\core\Kolvir\Kolvir.csproj" />
+    <ProjectReference Include="..\..\..\src\backends\Kolvir.Backend.Headless\Kolvir.Backend.Headless.csproj" />
     <ProjectReference Include="..\..\..\src\features\Kolvir.Feature.WoffFonts\Kolvir.Feature.WoffFonts.csproj" />
   </ItemGroup>
 

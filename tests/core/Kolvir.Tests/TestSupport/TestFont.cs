@@ -13,9 +13,10 @@ namespace Kolvir.Tests;
 /// auto-sized control's width the same number on Windows, macOS and Linux.
 /// </para>
 /// <para>
-/// The bytes are read once per process and handed to <see cref="Font.FromBytes"/> as often as a
-/// test needs a font; the theme itself is only changed through <see cref="Pin"/>, which every test
-/// can dispose to get the platform's default face back.
+/// The bytes are read once per process and registered under <see cref="Family"/>, so a test builds a
+/// font with <c>new Font(TestFont.Family, size)</c> and gets the same face at every size. Nothing is
+/// disposable; the theme is only changed through <see cref="Pin"/>, which every test can dispose to
+/// get the platform's default face back.
 /// </para>
 /// </remarks>
 internal static class TestFont
@@ -25,11 +26,18 @@ internal static class TestFont
 
     private static byte[]? _data;
 
+    /// <summary>The family name the embedded face is registered under.</summary>
+    internal const string Family = "IBM Plex Sans";
+
     /// <summary>The face's bytes.</summary>
     internal static byte[] Data => _data ??= Read();
 
-    /// <summary>A font at <paramref name="size"/> points from the embedded face.</summary>
-    internal static Font Create(float size = 13f) => Font.FromBytes(Data, size);
+    /// <summary>
+    /// Registers the embedded face under <see cref="Family"/> and returns the name, so a test can
+    /// build a font at whatever size it needs. Registering twice is idempotent.
+    /// </summary>
+    /// <returns>The family name to pass to a <see cref="Font"/>.</returns>
+    internal static string Register() => FontRegistry.Current.Register(Family, Data);
 
     /// <summary>
     /// Makes the embedded face the application's font for the lifetime of the returned value, and
@@ -37,7 +45,7 @@ internal static class TestFont
     /// </summary>
     internal static IDisposable Pin()
     {
-        Theme.UseFont(Create());
+        Theme.FontFamily = Register();
         return new Restore();
     }
 

@@ -20,7 +20,7 @@ enough to sit in a package instead of in the library.
 with `windows/`, `macos/` and `linux/` empty.
 
 Rung 1 and rung 2 would both have worked here, and that is stated plainly rather than argued. A
-container unwraps into the bytes `Font.FromBytes` already reads, so a provider registered inside
+container unwraps into the OpenType bytes `IFontLoader` already reads, so a provider registered inside
 `Kolvir` would cost an application one line that never runs and, for the great majority of desktop
 applications, nothing else. The package is chosen for the second reason section 4 allows: almost no
 desktop application loads a web font, so keeping it out of the base deliverable is worth more than the
@@ -80,15 +80,13 @@ design decision this document exists to record.
 ```csharp
 services.AddWoffFonts();                 // a feature package registers a format
 
-var fonts = application.Services.GetRequiredService<IFontLoader>();
-
-using var body = fonts.LoadFromPath("Fonts/Inter-Regular.woff2", 14f);
+FontRegistry.Current.RegisterFromFile("Fonts/Inter-Regular.woff2", "Inter");
 ```
 
-The last line is identical for a `.ttf`, a `.woff` and a `.woff2`. That is the point: an application does
+The second line is identical for a `.ttf`, a `.woff` and a `.woff2`. That is the point: an application does
 not choose a loader by format, it enables the formats it wants once and then hands bytes to one loader.
-`IFontLoader` is the counterpart of `IImageDataFactory`, with the same three entry points and the same
-rules, because an application that has learned one of them has learned both.
+`FontRegistry` is the counterpart of `IImageDataFactory`, with the same three entry points behind it and
+the same rules, because an application that has learned one of them has learned both.
 
 `IFontFormatProvider` is the whole of what a format package implements:
 
@@ -111,9 +109,11 @@ a buffer that decodes to something which is not a font counts as that provider's
 font here".
 
 Two smaller decisions follow from the seam. `FontFormatException` derives from `ArgumentException`, so
-code written against `Font.FromBytes`'s old contract still catches a bad font after this change. And the
-built-in path remains exactly `Font.FromBytes`, so an application that registers no provider gets no new
-behaviour and no new dependency.
+code written against a font load's old contract still catches a bad font. And the built-in path is
+exactly the OpenType reader, so an application that registers no provider gets no new behaviour and no
+new dependency - it also means a container registered before an `Application` exists is refused with a
+message naming the cause, which is the one failure this seam can produce that is about start-up order
+rather than about bytes.
 
 ## 4. What is refused
 

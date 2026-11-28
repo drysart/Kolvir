@@ -20,12 +20,25 @@ internal static class DemoFont
     private static byte[]? _data;
     private static byte[]? _woff;
 
+    /// <summary>
+    /// The family name the bundled face is registered under: the name recorded inside the file, so
+    /// text that draws with it reports the same family it always has.
+    /// </summary>
+    internal const string Family = "IBM Plex Sans";
+
     /// <summary>The face's bytes, read from the assembly's resources on first use.</summary>
     internal static byte[] Data => _data ??= Read(ResourceName);
 
     /// <summary>
-    /// The same face's bytes as a WOFF 2 file, which the sample loads through the application's
-    /// <see cref="IFontLoader"/> rather than through <see cref="Font.FromBytes"/>.
+    /// Registers the bundled face under <see cref="Family"/> and returns the name, so a page can
+    /// build a <see cref="Font"/> at whatever size it needs. Registering twice is idempotent.
+    /// </summary>
+    /// <returns>The family name to pass to a <see cref="Font"/>.</returns>
+    internal static string Register() => FontRegistry.Current.Register(Family, Data);
+
+    /// <summary>
+    /// The same face's bytes as a WOFF 2 file, which the sample registers through the application's
+    /// <see cref="IFontLoader"/> rather than by handing raw OpenType to the registry.
     /// </summary>
     /// <remarks>
     /// It is 63 KB against the 200 KB face above, which is the whole reason web fonts exist. It is

@@ -40,7 +40,7 @@ public sealed class FontFallbackTests
             Assert.Inconclusive("No installed face covers a Japanese character on this machine.");
         }
 
-        using var font = TestFont.Create();
+        var font = new Font(TestFont.Family, 13f);
 
         // A CJK ideograph advances about one em in every face that has one, and the Latin face's
         // missing-glyph box does not: three of them cannot be narrower than two and a half ems.
@@ -50,7 +50,7 @@ public sealed class FontFallbackTests
 
         Assert.AreEqual(
             1,
-            font.TextRunCount(Japanese),
+            font.Realize().TextRunCount(Japanese),
             "one face covers all three characters, so they are one run rather than three");
     }
 
@@ -62,9 +62,9 @@ public sealed class FontFallbackTests
             Assert.Inconclusive("No installed face covers a Japanese character on this machine.");
         }
 
-        using var font = TestFont.Create();
+        var font = new Font(TestFont.Family, 13f);
 
-        Assert.AreEqual(3, font.TextRunCount(Mixed), "Latin, Japanese, Latin");
+        Assert.AreEqual(3, font.Realize().TextRunCount(Mixed), "Latin, Japanese, Latin");
 
         // The width of the whole is the width of its runs, which is what keeps a caret or a wrap
         // point from landing inside a run that was measured with another face.
@@ -75,10 +75,10 @@ public sealed class FontFallbackTests
     [TestMethod]
     public void TextThePrimaryFaceCoversStaysOneRun()
     {
-        using var font = TestFont.Create();
+        var font = new Font(TestFont.Family, 13f);
 
-        Assert.AreEqual(1, font.TextRunCount("hello world"), "the common case allocates no split");
-        Assert.AreEqual(0, font.TextRunCount(string.Empty), "empty text has no runs");
+        Assert.AreEqual(1, font.Realize().TextRunCount("hello world"), "the common case allocates no split");
+        Assert.AreEqual(0, font.Realize().TextRunCount(string.Empty), "empty text has no runs");
     }
 
     [TestMethod]
@@ -89,7 +89,7 @@ public sealed class FontFallbackTests
             Assert.Inconclusive("No installed face covers a Japanese character on this machine.");
         }
 
-        using var font = TestFont.Create();
+        var font = new Font(TestFont.Family, 13f);
 
         // Caret placement is a prefix width, so a prefix that stops inside the Japanese run must
         // still measure through the fallback face rather than through the primary one.
@@ -112,7 +112,7 @@ public sealed class FontFallbackTests
             Assert.Inconclusive("No installed face covers a Japanese character on this machine.");
         }
 
-        using var font = TestFont.Create();
+        var font = new Font(TestFont.Family, 13f);
 
         // No spaces, so this is the hard-break path, which has to use the same run widths as drawing.
         const float maxWidth = 60f;
@@ -135,7 +135,7 @@ public sealed class FontFallbackTests
     [TestMethod]
     public void ACharacterNoInstalledFaceCoversStillMeasuresRatherThanThrowing()
     {
-        using var font = TestFont.Create();
+        var font = new Font(TestFont.Family, 13f);
 
         // U+10FFFD is a private-use code point, which no shipping text font is meant to have a glyph
         // for. macOS ships a face of last resort that answers for it anyway, so the assertion is not
@@ -146,7 +146,7 @@ public sealed class FontFallbackTests
         float width = font.MeasureWidth(unassigned);
         Assert.IsTrue(width > 0f, "an uncovered character still measures");
 
-        var runs = font.TextRuns(unassigned);
+        var runs = font.Realize().TextRuns(unassigned);
         Assert.IsTrue(runs.Length >= 1, "the string is covered by at least one run");
 
         int covered = 0;
@@ -167,12 +167,12 @@ public sealed class FontFallbackTests
             Assert.Inconclusive("No installed face covers a Japanese character on this machine.");
         }
 
-        using var font = TestFont.Create();
+        var font = new Font(TestFont.Family, 13f);
         using var surface = SKSurface.Create(new SKImageInfo(240, 40));
         using var paint = new SKPaint { Color = SKColors.Black, IsAntialias = true };
 
         surface.Canvas.Clear(SKColors.White);
-        font.DrawText(surface.Canvas, Mixed, 0f, 20f, paint);
+        font.Realize().DrawText(surface.Canvas, Mixed, 0f, 20f, paint);
         surface.Canvas.Flush();
 
         using var image = surface.Snapshot();
