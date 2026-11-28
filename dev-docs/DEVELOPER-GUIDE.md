@@ -124,7 +124,7 @@ has to read `--classic-menus` before it can build a backend.
 | `BackColor` | `BackColor` | The background a control assigned: a colour, a palette role, or inherit; a transparent class default paints nothing |
 | `UiHost` | the window/`Form` | Owns the root control, lays out, paints into an `SKCanvas`, routes input, tracks hover/capture/focus |
 | `Panel` | `Panel` | Docking layout, `None`/`Automatic`/`Always` scrolling per axis, and `ScaleFactor` to zoom the subtree. It paints no background and draws no border of its own - assign `BackColor` and `Border` for a card |
-| `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child |
+| `TableLayoutPanel` | `TableLayoutPanel` | Absolute / Percent / AutoSize rows and columns, `CellPadding`, per-cell positions and spans attached to the child, and a row style that can line its cells up on their text baselines |
 | `SplitContainer` | `SplitContainer` | Two panels with a draggable splitter, min/max sizes, and which of them a resize keeps |
 | `WrapPanel` | `FlowLayoutPanel` (wrapping) | Items flow along one axis and start a new line at the available size, with a gap between items and lines |
 | `GroupBox` | `GroupBox` | Labelled frame: the caption sits in a break in the top edge and the content is laid out below it. It is a `Panel` whose border is `SimpleBorder.Thin.WithCornerRadius(8f).WithControlText()` |
@@ -684,6 +684,43 @@ stack.Controls.Add(new Label("Header") { Dock = DockStyle.Top, AutoSize = false,
   children by their content, children that were given a size by that size.
 - A child wider than the space across the stack is clipped to the panel rather than overflowing it,
   so `Center` and `Far` never push a child outside the control.
+
+### Baseline alignment
+
+A row of controls at different text sizes only looks like a row if their *text* lines up; stretching
+each one across the stack puts the boxes in a row and the first lines wherever each font happens to
+put them. Two containers can line the text up instead, and they share the rule:
+
+```csharp
+var stack = new StackPanel { Orientation = StackOrientation.Horizontal, AlignBaselines = true };
+
+var table = new TableLayoutPanel
+{
+    AutoSize = true,
+    RowStyles = { new RowStyle { AlignBaselines = true } },
+};
+```
+
+| Container | Switch | Applies to |
+| --- | --- | --- |
+| `StackPanel` | `AlignBaselines` | a horizontal run |
+| `TableLayoutPanel` | `RowStyle.AlignBaselines` | one row |
+
+A control answers the question with `Control.TryGetBaseline(size, out baseline)`: `Label`,
+`RichLabel`, a single-line `TextBox`, `ToggleControl` (what a check box and a radio button are built
+on) and `Button` all do, and each takes the number from the same expression `TextRenderer` paints
+with. A control with nothing to line up - an empty label, a panel - answers that it has no baseline
+and keeps its ordinary place, so it neither takes part nor drags the row around. The shared baseline
+is the lowest one in the row, so nothing moves up: the one that was already lowest stays where it
+was and everything else moves down to meet it. An
+`AutoSize` row grows to hold what it moved, so nothing is clipped; a row of a fixed height does not,
+and a cell that no longer fits overflows it the way a cell taller than the row always has. A cell
+that spans rows takes no part, and neither does one whose box the row decides - a `DockStyle.Fill`
+or `DockStyle.Bottom` cell - because its baseline would be a function of the row height that its own
+height or top is a function of.
+
+[BASELINE-ALIGNMENT.md](BASELINE-ALIGNMENT.md) is the design: the shared helper's contract, how each
+panel fills it in, and why the two passes are not one.
 
 ### Scrolling
 

@@ -438,7 +438,7 @@ public class StackPanel : Panel
             rowCross = MathF.Max(rowCross, crossLength + margin.Vertical);
         }
 
-        float reference = BaselineReference(planned, rowCross);
+        var row = PlanBaselines(planned, rowCross);
 
         float right = content.Right;
         float bottom = content.Bottom;
@@ -452,7 +452,7 @@ public class StackPanel : Panel
             {
                 // The shared baseline is the lowest any child's own baseline wanted to be, so this
                 // is at or below where the child's alignment put it.
-                top = area.Top + reference - plan.Baseline;
+                top = area.Top + row.Reference - plan.Baseline;
             }
             else
             {
@@ -485,20 +485,25 @@ public class StackPanel : Panel
 
     /// <summary>
     /// Asks every child in the run for its baseline at the size it will get, records the answer on
-    /// its plan, and returns the lowest baseline all the participants have to share.
+    /// its plan, and collects the row they share.
     /// </summary>
+    /// <remarks>
+    /// The child's place in the row is its margin plus whatever its own
+    /// <see cref="Control.VerticalAlignment"/> says, which is what <see cref="AlignedTop"/> answers;
+    /// the rest of the rule is <see cref="BaselineRow"/>'s, so the table asks the same one.
+    /// </remarks>
     /// <param name="count">How many plans the run holds.</param>
     /// <param name="rowCross">
     /// The height of the run's own row box - the tallest child and its margins - which is what a
     /// participant's alignment is resolved in.
     /// </param>
     /// <returns>
-    /// The shared baseline in the run's own coordinates, or negative infinity when no child
-    /// declares one.
+    /// The row, with every participant that declared a baseline included. Its
+    /// <see cref="BaselineRow.Reference"/> is negative infinity when no child declares one.
     /// </returns>
-    private float BaselineReference(int count, float rowCross)
+    private BaselineRow PlanBaselines(int count, float rowCross)
     {
-        float reference = float.NegativeInfinity;
+        var row = new BaselineRow(rowCross);
 
         for (int i = 0; i < count; i++)
         {
@@ -513,10 +518,10 @@ public class StackPanel : Panel
             }
 
             float rowBox = MathF.Max(0f, rowCross - plan.Margin.Vertical);
-            reference = MathF.Max(reference, AlignedTop(plan, rowBox) + plan.Baseline);
+            row.Include(AlignedTop(plan, rowBox), plan.Baseline);
         }
 
-        return reference;
+        return row;
     }
 
     /// <summary>
@@ -533,27 +538,22 @@ public class StackPanel : Panel
     /// <returns>The height the run needs, never less than <paramref name="rowCross"/>.</returns>
     private float BaselineBreadth(int count, float rowCross)
     {
-        float reference = BaselineReference(count, rowCross);
-        if (float.IsNegativeInfinity(reference))
+        var row = PlanBaselines(count, rowCross);
+        if (row.IsEmpty)
         {
             return rowCross;
         }
 
-        float breadth = rowCross;
         for (int i = 0; i < count; i++)
         {
             ref var plan = ref _rowPlans[i];
-            if (!plan.Participates)
+            if (plan.Participates)
             {
-                continue;
+                row.Reserve(plan.Baseline, plan.CrossLength, plan.Margin.Bottom);
             }
-
-            breadth = MathF.Max(
-                breadth,
-                reference - plan.Baseline + plan.CrossLength + plan.Margin.Bottom);
         }
 
-        return breadth;
+        return row.NeededHeight;
     }
 
     /// <summary>

@@ -14,7 +14,8 @@ namespace Kolvir;
 /// </para>
 /// <para>
 /// Immutability is also what makes value equality sound here. Two styles of the same kind are equal
-/// when their <see cref="SizeType"/> and value agree, and a hash cannot disagree with an
+/// when their <see cref="SizeType"/> and value agree - and, for a row, when they agree about
+/// <see cref="RowStyle.AlignBaselines"/> - and a hash cannot disagree with an
 /// <c>Equals</c> computed before a mutation, because there is no mutation. A row style never equals
 /// a column style with the same numbers: one is a height and the other a width, and swapping them
 /// means something else.
@@ -84,7 +85,12 @@ public class RowOrColumnStyle : IEquatable<RowOrColumnStyle>
     /// True when both are the same concrete kind and agree on <see cref="SizeType"/> and
     /// <see cref="Value"/>. A row style and a column style are never equal.
     /// </returns>
-    public bool Equals(RowOrColumnStyle? other) =>
+    /// <remarks>
+    /// A derived style that carries more than a size overrides this and its hash together, because
+    /// the table compares sequences of styles with this equality to decide that an assignment says
+    /// nothing new - and a difference this did not see would be a difference the table dropped.
+    /// </remarks>
+    public virtual bool Equals(RowOrColumnStyle? other) =>
         other is not null
             && other.GetType() == GetType()
             && other.SizeType == SizeType
@@ -128,6 +134,43 @@ public sealed class RowStyle : RowOrColumnStyle
         : base(sizeType, value)
     {
     }
+
+    /// <summary>
+    /// When true, the cells of this row that declare a text baseline are arranged on one shared
+    /// baseline instead of each being placed at the top of its own cell. Defaults to false.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The same rule <see cref="StackPanel.AlignBaselines"/> applies to a horizontal run, applied to a
+    /// table row, and the two share it: the shared baseline is the lowest of the row's own baselines,
+    /// every participant moves down to meet it, and an AutoSize row grows so the moved cells still
+    /// fit. A cell takes part when its box is its own size rather than one the row decides - every
+    /// dock value except <see cref="DockStyle.Fill"/> and <see cref="DockStyle.Bottom"/>, whose height
+    /// or top is the row's - and when it spans one row, because a cell across several rows has no
+    /// single row to be aligned in.
+    /// </para>
+    /// <para>
+    /// A row of a fixed height (<see cref="SizeType.Absolute"/> or <see cref="SizeType.Percent"/>) is
+    /// not grown: its height is what the style says, so a shift can push a participant past the bottom
+    /// of the row, exactly as a cell taller than a fixed row already overflows it. A row of
+    /// <see cref="SizeType.AutoSize"/> is measured tall enough for the row it then arranges.
+    /// </para>
+    /// </remarks>
+    public bool AlignBaselines { get; init; }
+
+    /// <summary>
+    /// Answers whether another style sizes its row exactly the same way and aligns its cells the same.
+    /// </summary>
+    /// <param name="other">The style to compare with.</param>
+    /// <returns>
+    /// True when both are row styles that agree on <see cref="RowOrColumnStyle.SizeType"/>,
+    /// <see cref="RowOrColumnStyle.Value"/> and <see cref="AlignBaselines"/>.
+    /// </returns>
+    public override bool Equals(RowOrColumnStyle? other) =>
+        other is RowStyle row && base.Equals(other) && row.AlignBaselines == AlignBaselines;
+
+    /// <inheritdoc />
+    public override int GetHashCode() => HashCode.Combine(base.GetHashCode(), AlignBaselines);
 
     /// <summary>Creates a row of a fixed height in pixels.</summary>
     /// <param name="pixels">The height, in pixels. Negative values are clamped to zero.</param>

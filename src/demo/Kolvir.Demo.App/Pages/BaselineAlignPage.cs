@@ -7,11 +7,18 @@ namespace Kolvir.Demo;
 /// the difference between lining boxes up and lining their text up is one picture.
 /// </summary>
 /// <remarks>
+/// <para>
 /// The row is a horizontal <see cref="StackPanel"/> with <see cref="StackPanel.AlignBaselines"/> on,
 /// holding two ordinary labels at different sizes, a rich label whose first line mixes sizes, a
 /// text field, a check box and a button. A check box above it turns the property on and off live,
 /// and the second row below it is the same run with the property off, so a single render shows
 /// both states.
+/// </para>
+/// <para>
+/// The two tables below are the same demonstration for a table row, where the switch is
+/// <see cref="RowStyle.AlignBaselines"/>: one row with it on and one with it off, again in one
+/// picture.
+/// </para>
 /// </remarks>
 internal sealed class BaselineAlignPage : DemoPage
 {
@@ -61,6 +68,14 @@ internal sealed class BaselineAlignPage : DemoPage
 
         card.Controls.Add(ScrollCaption("AlignBaselines = false - the same row, aligned by box"));
         card.Controls.Add(BuildRow(alignBaselines: false));
+
+        card.Controls.Add(ScrollCaption(
+            "RowStyle.AlignBaselines = true - the same rule, for the cells of a table row"));
+        card.Controls.Add(BuildTable(alignBaselines: true));
+
+        card.Controls.Add(ScrollCaption(
+            "RowStyle.AlignBaselines = false - the same cells, each at the top of its own"));
+        card.Controls.Add(BuildTable(alignBaselines: false));
 
         _readout = new Label
         {
@@ -147,6 +162,50 @@ internal sealed class BaselineAlignPage : DemoPage
         }
 
         return row;
+    }
+
+    /// <summary>
+    /// One table row of the same kind of controls, with the row style's baseline alignment on or off.
+    /// </summary>
+    /// <param name="alignBaselines">Whether the row lines its cells up on their baselines.</param>
+    /// <returns>The table, framed and docked to the top.</returns>
+    /// <remarks>
+    /// A cell keeps its own size either way, so the difference is only where the text lands: with the
+    /// row flagged the smaller labels move down until their first lines meet the tallest one's, and
+    /// without it every cell sits at the top of its own.
+    /// </remarks>
+    private static TableLayoutPanel BuildTable(bool alignBaselines)
+    {
+        var table = new TableLayoutPanel
+        {
+            Dock = XDock.Top,
+            AutoSize = true,
+            Padding = new Thickness(12f, 6f),
+            CellPadding = new Thickness(0f, 0f, 18f, 0f),
+            Margin = new Thickness(0f, 0f, 0f, 10f),
+            Border = Framed(8f),
+            BackColor = ThemeColor.Surface,
+            RowStyles = { new RowStyle { AlignBaselines = alignBaselines } },
+        };
+
+        table.Add(Sized("12 px", 12f), 0, 0);
+        table.Add(Sized("21 px", 21f), 1, 0);
+        table.Add(Sized("16 px", 16f), 2, 0);
+
+        table.Add(new TextBox
+        {
+            Text = "Field",
+            Width = 96f,
+            Height = 30f,
+        }, 3, 0);
+
+        table.Add(new Button("Go")
+        {
+            AutoSize = true,
+            Style = ButtonStyle.Secondary,
+        }, 4, 0);
+
+        return table;
     }
 
     /// <summary>A label at <paramref name="size"/>, in the theme's own face.</summary>

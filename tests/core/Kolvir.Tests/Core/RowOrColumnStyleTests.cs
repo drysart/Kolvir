@@ -55,6 +55,34 @@ public sealed class RowOrColumnStyleTests
     }
 
     [TestMethod]
+    public void ARowThatAlignsItsBaselinesIsADifferentStyle()
+    {
+        var plain = new RowStyle(SizeType.AutoSize, 0f);
+        var aligned = new RowStyle(SizeType.AutoSize, 0f) { AlignBaselines = true };
+
+        // The table drops an assignment that says what it already says, so a difference this equality
+        // did not see would be a switch the table never applied.
+        Assert.AreNotEqual(plain, aligned);
+        Assert.AreNotEqual(plain.GetHashCode(), aligned.GetHashCode(), "and the hash agrees with it");
+        Assert.IsTrue(plain != aligned);
+        Assert.AreEqual(aligned, new RowStyle(SizeType.AutoSize, 0f) { AlignBaselines = true });
+    }
+
+    [TestMethod]
+    public void AssigningAnAlignedRowAfterAPlainOneIsAPass()
+    {
+        using var table = new CountingTable { Padding = Thickness.Empty, CellPadding = Thickness.Empty };
+        table.RowStyles = [new RowStyle(SizeType.AutoSize, 0f)];
+
+        int passes = table.Passes;
+
+        table.RowStyles = [new RowStyle(SizeType.AutoSize, 0f) { AlignBaselines = true }];
+
+        Assert.AreEqual(passes + 1, table.Passes, "turning the row's alignment on is a change");
+        Assert.IsTrue(table.RowStyles[0].AlignBaselines);
+    }
+
+    [TestMethod]
     public void ANullIsNotAStyle()
     {
         var style = new RowStyle(SizeType.Absolute, 40f);
@@ -72,6 +100,18 @@ public sealed class RowOrColumnStyleTests
         Assert.AreEqual(new RowStyle(SizeType.Absolute, 30f), RowStyle.Absolute(30f));
         Assert.AreEqual(new RowStyle(SizeType.Percent, 50f), RowStyle.Percent(50f));
         Assert.AreEqual(new ColumnStyle(SizeType.Absolute, 30f), ColumnStyle.Absolute(30f));
+    }
+
+    /// <summary>A table that counts the layout passes it runs.</summary>
+    private sealed class CountingTable : TableLayoutPanel
+    {
+        internal int Passes { get; private set; }
+
+        protected override void OnLayout()
+        {
+            Passes++;
+            base.OnLayout();
+        }
     }
 
     [TestMethod]
