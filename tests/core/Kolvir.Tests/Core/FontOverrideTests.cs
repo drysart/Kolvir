@@ -340,6 +340,105 @@ public sealed class FontOverrideTests : HeadlessTestBase
         Assert.AreEqual(14f, composed.Size, 0.01f, "and that is what composes");
     }
 
+    [TestMethod]
+    public void OverrideWithLeavesAnUnsetMemberUnsetAndASetMemberSet()
+    {
+        FontOverride fromUnset = InheritedFont.AsIs.With(size: 14f);
+
+        Assert.IsNull(fromUnset.FamilyName, "a member the receiver did not name stays unset");
+        Assert.AreEqual(14f, fromUnset.Size!.Value, 0.01f);
+        Assert.IsNull(fromUnset.Weight);
+        Assert.IsNull(fromUnset.Italic);
+
+        FontOverride fromSet = InheritedFont.WithFamily(TestFont.Family).WithSize(20f).With(weight: 700);
+
+        Assert.AreEqual(TestFont.Family, fromSet.FamilyName, "a member the receiver named keeps its value");
+        Assert.AreEqual(20f, fromSet.Size!.Value, 0.01f, "a null size keeps the one the override already names");
+        Assert.AreEqual(700, fromSet.Weight!.Value, "and the named weight is added");
+        Assert.IsNull(fromSet.Italic, "while the slant stays inherited");
+    }
+
+    [TestMethod]
+    public void OverrideWithCannotClearAMember()
+    {
+        FontOverride sized = InheritedFont.WithSize(20f);
+
+        Assert.AreEqual(
+            20f,
+            sized.With(size: null).Size!.Value,
+            0.01f,
+            "With's null leaves the set member set, so it cannot clear");
+
+        Assert.IsNull(sized.WithSize(null).Size, "clearing is the single-member method's null");
+    }
+
+    [TestMethod]
+    public void OverrideWithEveryArgumentNullReturnsThisOverride()
+    {
+        FontOverride sized = InheritedFont.WithSize(14f);
+
+        Assert.AreSame(sized, sized.With(), "a no-op allocates nothing and keeps identity");
+    }
+
+    [TestMethod]
+    public void InheritedFontWithEveryArgumentNullIsAsIs()
+    {
+        Assert.AreSame(InheritedFont.AsIs, InheritedFont.With(), "the neutral override is the starting point");
+
+        Assert.IsNull(InheritedFont.AsIs.FamilyName);
+        Assert.IsNull(InheritedFont.AsIs.Size);
+        Assert.IsNull(InheritedFont.AsIs.Weight);
+        Assert.IsNull(InheritedFont.AsIs.Italic);
+    }
+
+    [TestMethod]
+    public void InheritedFontWithSetsSeveralMembersInOneCall()
+    {
+        FontOverride oneCall = InheritedFont.With(family: TestFont.Family, size: 14f, weight: 700, italic: true);
+        FontOverride chain = InheritedFont
+            .WithFamily(TestFont.Family)
+            .WithSize(14f)
+            .WithWeight(700)
+            .WithItalic(true);
+
+        Assert.AreEqual(chain, oneCall, "With names the same members the chain names");
+        Assert.AreEqual(InheritedFont.WithSize(14f), InheritedFont.With(size: 14f), "and a single member agrees with its method");
+    }
+
+    [TestMethod]
+    public void AsIsComposedOntoAFontReturnsThatFont()
+    {
+        var inherited = new Font(TestFont.Family, 11f);
+
+        Assert.AreSame(inherited, Compose(inherited, InheritedFont.AsIs), "the identity composition returns the font itself");
+    }
+
+    [TestMethod]
+    public void AsIsWithSizeBehavesLikeInheritedFontWithSize()
+    {
+        Assert.AreEqual(
+            InheritedFont.WithSize(14f),
+            InheritedFont.AsIs.WithSize(14f),
+            "AsIs is the identity the factory starts from");
+
+        var inherited = new Font(TestFont.Family, 11f);
+        Assert.AreEqual(
+            Compose(inherited, InheritedFont.WithSize(14f)),
+            Compose(inherited, InheritedFont.AsIs.WithSize(14f)),
+            "and the composed font is the same description either way");
+    }
+
+    [TestMethod]
+    public void NullFamilyMeansTheInheritedFamilyOnAnOverride()
+    {
+        var inherited = new Font(TestFont.Family, 11f);
+
+        Font composed = Compose(inherited, InheritedFont.WithFamily(null));
+
+        Assert.AreEqual(TestFont.Family, composed.FamilyName, "null here keeps the family inherited, unlike Font.WithFamily");
+        Assert.AreSame(inherited, composed, "and an override that names nothing composes to the inherited font itself");
+    }
+
     /// <summary>A label that counts how often its effective appearance was invalidated.</summary>
     private sealed class CountingLabel : Label
     {

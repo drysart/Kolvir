@@ -826,12 +826,47 @@ the parent in hand.
 `FontOverride` is a sealed immutable class with `IEquatable<FontOverride>` over four nullable members
 - `FamilyName`, `Size`, `Weight`, `Italic` - and no measuring, drawing or realizing member. It has no
 public constructor: an override is written, not built. `InheritedFont` is a static class of four
-factories, because the name has to resolve at an assignment with only `using Kolvir;` in scope and
-only a type can do that; it is the one public name this note did not propose. The instance
-`With*` members chain (`InheritedFont.WithSize(14f).WithItalic(true)`), and a null argument leaves
-that member inherited, which is how a chain is narrowed back to the neutral override. `string.Empty`
-is the platform's default family and `0f` is a real size - the same values they are on `Font`, and the
-reason a null member cannot be spelled on the complete type.
+factories and the neutral value, because the name has to resolve at an assignment with only
+`using Kolvir;` in scope and only a type can do that; it is the one public name this note did not
+propose. The instance `With*` members chain (`InheritedFont.WithSize(14f).WithItalic(true)`), and a
+null argument leaves that member inherited, which is how a chain is narrowed back to the neutral
+override. `string.Empty` is the platform's default family and `0f` is a real size - the same values
+they are on `Font`, and the reason a null member cannot be spelled on the complete type.
+
+**The fluent surface, on both types.** `Font` and `FontOverride` carry the same four single-member
+modifiers - `WithFamily`, `WithSize`, `WithWeight`, `WithItalic` - and the same one-call `With(...)`,
+whose parameters are `family` (`string?`), `size` (`float?`), `weight` (`int?`) and `italic` (`bool?`),
+each null by default, so `font.With(family: "Courier New", weight: 700)` compiles as written. On both
+types null means "leave this member as the receiver has it", and every argument null returns the
+receiver itself - `InheritedFont.With()` returns `AsIs` - so a no-op neither allocates nor changes
+object identity. The third answer follows from what the receiver already has:
+
+| receiver | `With(size: 14f)` leaves family/weight/italic as |
+| --- | --- |
+| `Font` | this font's own values |
+| `FontOverride` | whatever the override says - unset (inherited) or previously set |
+| `InheritedFont` (and `AsIs`) | unset, because it starts from the neutral override |
+
+Two consequences follow from that rule rather than from an accident:
+
+- **`With()` cannot clear a member on an override.** `With(size: null)` is a no-op because null means
+  "keep", so clearing is `WithSize(null)` - or the other three single-member methods - and the
+  asymmetry is deliberate. A caller who expects `With(size: null)` to clear is reading the one-call
+  method as a setter when it is a filter.
+- **`WithFamily(null)` means opposite things on the two types.** On `Font` it names the platform's
+  default family, exactly as the constructor's null does, because a complete description has to name
+  something; on `FontOverride` it keeps the family inherited. Same name, same signature, opposite
+  meaning, and the one place the pair is not interchangeable. `With(family: null)` is not that case:
+  it follows the uniform rule on both types and leaves the receiver's family alone, so a `Font` keeps
+  its own name there and never falls to the platform default.
+
+**`InheritedFont.AsIs`** is the neutral override, public and documented rather than a private field.
+It is the identity - `AsIs.WithSize(14f)` is `InheritedFont.WithSize(14f)`, and composing `AsIs` onto
+a font returns that font object itself - and it is the member that names nothing. Its use beyond the
+name is in conditionals: `PropertyValue.Inherited` is a different arm of the property's union, so it
+is not a `FontOverride`, and a conditional whose branches both describe an override needs a
+`FontOverride` that changes nothing:
+`cond ? InheritedFont.WithSize(14f) : InheritedFont.AsIs`.
 
 **Class, not struct, and the numbers.** `Unsafe.SizeOf` on the closed union, measured in a harness
 that references the type from outside the library:
@@ -878,7 +913,10 @@ survives untouched. Without the cache a control with an override would allocate 
 exists on both `Font` and `FontOverride` and that `Compose` forgets: one test per member asserts that
 an override naming only that member changes that field and leaves the other three inherited, a fifth
 sets all four through one chain, and a sixth re-sets a member (`WithSize(20f).WithSize(14f)`) so the
-last value wins. A member added to `Font` later and not to the composition fails one of them.
+last value wins. A member added to `Font` later and not to the composition fails one of them. The
+fluent surface is pinned the same way: each of `Font`'s four `With*` methods changes exactly its field,
+`With` with every argument null returns the receiver itself on both types, `InheritedFont.With()` is
+`AsIs`, and the null-family pair is tested on both sides of the trap.
 
 **`ToolStripItem.Font` widened too.** A menu item is a control that inherits, "a bit bigger here" is
 the same wish, and leaving the two properties different by accident would be worse than the union
@@ -1254,6 +1292,21 @@ rendered twice first: the two passes of the same build differ on exactly the two
 (252,214)-(1243,723) are the three override labels, the readout line that names their resolved sizes
 and weights, and the re-wrap below them. **No other page moved, which is what an additive change
 should look like**: a page that moved without an override in it would be a finding, and there is none.
+
+**4. The fluent surface, as measured.** The same fixture and command against `57276fd`, published from
+two worktrees whose roots are both 67 characters: **3,916,288 bytes before and 3,916,288 after**, so
+the delta is **0** - below the 512-byte resolution of the method, which is the expected answer for
+description arithmetic that adds no reachable type. A publish with `-p:TrimmerSingleWarn=false`
+reported no IL2xxx or IL3xxx warning.
+
+All 73 pages, 1280x820, light appearance, were rendered twice in each tree by the method in 8.2.
+**The 70 pages that render deterministically in both trees are byte-identical to `57276fd`.** The three
+excluded pages all animate a GIF: `animated-gif` and `animated-webp` differ from themselves run to run
+as before, and `gif-out-of-view` did so once - one of the baseline's two passes caught a frame in which
+the moving square at (274,249)-(300,268) is green rather than red, 540 pixels - and twenty further
+renders in each tree, plus the other pass in each, produced one identical image on both sides. It is
+the same clock dependence, rarer, rather than a movement this change caused; no page moved for any
+other reason, and the demo was not changed.
 
 ## 9. Migration
 

@@ -2983,6 +2983,25 @@ composition happens and what it returns is a complete `Font`, so
 `control.EffectiveFont.WithSize(...)` remains the way to derive from a font that is in hand.
 Assigning compares by value, so a render that rebuilds the same override invalidates nothing.
 
+`With(...)` sets several members in one call, and `InheritedFont.AsIs` is the override that names
+none - the value to give the other branch of a conditional when both branches have to be a
+`FontOverride`:
+
+```csharp
+FontOverride heading = bold
+    ? InheritedFont.With(family: "Inter", size: 18f, weight: 700)
+    : InheritedFont.AsIs;
+
+Font smaller = title.With(size: 14f);       // a complete font: keeps family, weight and slant
+Font strong = smaller.With(weight: 800, italic: true);
+```
+
+On every type, null in `With(...)` means "keep the receiver's member", so `With(size: null)` is a
+no-op rather than a clear: `WithSize(null)` is how a member is removed from an override. The one trap
+is `WithFamily(null)`, which names the platform's default family on a `Font` (exactly as the
+constructor's null does) and keeps the inherited family on a `FontOverride`. `With(family: null)`
+does not have that trap: it leaves the receiver's family alone on both types.
+
 Assigning `PropertyValue.Inherited` is how a control goes back to inheriting; there are no
 `ClearFont`, `ClearForeground` or `ClearBackground` methods:
 

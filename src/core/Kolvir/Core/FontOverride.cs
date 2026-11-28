@@ -87,6 +87,12 @@ public sealed class FontOverride : IEquatable<FontOverride>
     /// means the platform's default family.
     /// </param>
     /// <returns>A new override; this one is unchanged.</returns>
+    /// <remarks>
+    /// Null keeps the inherited family, which is the opposite of <see cref="Font.WithFamily"/>: a
+    /// partial description leaves a member alone where a complete one has to name a value, so there
+    /// the same null asks for the platform's default family. The signature is identical and the
+    /// meaning is not.
+    /// </remarks>
     public FontOverride WithFamily(string? familyName) => new(familyName, Size, Weight, Italic);
 
     /// <summary>This override with its size replaced.</summary>
@@ -108,6 +114,56 @@ public sealed class FontOverride : IEquatable<FontOverride>
     /// </param>
     /// <returns>A new override; this one is unchanged.</returns>
     public FontOverride WithItalic(bool? italic) => new(FamilyName, Size, Weight, italic);
+
+    /// <summary>This override with the named members replaced and the rest left as they are.</summary>
+    /// <param name="family">
+    /// The family to ask for, or null to leave this override's family as it is: unset when it was
+    /// unset, and the value it already names when it was set. Empty or whitespace-only means the
+    /// platform's default family.
+    /// </param>
+    /// <param name="size">
+    /// The size to ask for, in logical pixels, or null to leave this override's size as it is.
+    /// </param>
+    /// <param name="weight">
+    /// The weight to ask for, on the 1-1000 scale, or null to leave this override's weight as it is.
+    /// </param>
+    /// <param name="italic">
+    /// True to ask for an italic face, false to ask for an upright one, or null to leave this
+    /// override's slant as it is.
+    /// </param>
+    /// <returns>
+    /// A new override, or this instance itself when every argument is null so a no-op neither
+    /// allocates nor changes identity.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// Null means "leave this member as the receiver has it", uniformly: an unset member stays unset
+    /// and a member the override already names keeps the value it names. The one-call form is
+    /// therefore additive - <c>InheritedFont.WithSize(14f).With(weight: 700)</c> names the size and
+    /// the weight and inherits the rest.
+    /// </para>
+    /// <para>
+    /// <b>It cannot clear a member.</b> A null argument is a no-op, so <c>With(size: null)</c> keeps
+    /// the size this override already names. Clearing is the single-member method:
+    /// <see cref="WithSize"/>(null) removes the size, and the other three do the same for their
+    /// member. That asymmetry is deliberate - one method asks for values, the other edits the
+    /// description's shape.
+    /// </para>
+    /// <para>
+    /// The family argument is the exception that looks like the rule: null leaves the family
+    /// inherited here, while a null <c>family</c> argument to <see cref="Font.With"/> keeps that
+    /// font's own family. Both mean "leave the receiver's family as it is"; the difference is what
+    /// the receiver's family is, unset on an override and concrete on a font.
+    /// </para>
+    /// </remarks>
+    public FontOverride With(
+        string? family = null,
+        float? size = null,
+        int? weight = null,
+        bool? italic = null) =>
+        family is null && size is null && weight is null && italic is null
+            ? this
+            : new(family ?? FamilyName, size ?? Size, weight ?? Weight, italic ?? Italic);
 
     /// <summary>
     /// <paramref name="inherited"/> with every member this override names replaced, and the rest kept.
@@ -208,7 +264,8 @@ public sealed class FontOverride : IEquatable<FontOverride>
 /// <para>
 /// The members chain, because each returns a <see cref="FontOverride"/>:
 /// <c>InheritedFont.WithSize(14f).WithItalic(true)</c>. A null argument leaves that member
-/// inherited, which is how a chain is narrowed back.
+/// inherited, which is how a chain is narrowed back. <see cref="With"/> sets several members in one
+/// call, and <see cref="AsIs"/> is the member that names none.
 /// </para>
 /// <para>
 /// This is a type rather than a value so the name resolves at an assignment with nothing but
@@ -217,7 +274,60 @@ public sealed class FontOverride : IEquatable<FontOverride>
 /// </remarks>
 public static class InheritedFont
 {
-    private static readonly FontOverride Empty = new();
+    /// <summary>
+    /// The override that names nothing: every member keeps the inherited value.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// It is the identity of this class. <c>AsIs.WithSize(14f)</c> names exactly what
+    /// <see cref="WithSize"/> does, and composing it onto a font returns that font object itself,
+    /// because nothing it names differs from it.
+    /// </para>
+    /// <para>
+    /// Its use beyond the rename is in conditionals. <see cref="PropertyValue.Inherited"/> is a
+    /// different arm of the property's union - it is not a <see cref="FontOverride"/> - so a
+    /// conditional whose two branches both describe an override cannot reach for it. With
+    /// <c>AsIs</c> both branches can be overrides:
+    /// <c>cond ? InheritedFont.WithSize(14f) : InheritedFont.AsIs</c>.
+    /// </para>
+    /// <para>
+    /// Assigning it is equivalent to assigning nothing: the property reports the override where an
+    /// unassigned property reports <see cref="PropertyValue.Inherited"/>, and the font it resolves to
+    /// is the same object either way.
+    /// </para>
+    /// </remarks>
+    public static readonly FontOverride AsIs = new();
+
+    /// <summary>
+    /// An override that names the given members and leaves the rest inherited.
+    /// </summary>
+    /// <param name="family">
+    /// The family to ask for, or null to leave the family inherited. Empty or whitespace-only means
+    /// the platform's default family.
+    /// </param>
+    /// <param name="size">The size to draw at, in logical pixels, or null to leave it inherited.</param>
+    /// <param name="weight">
+    /// The weight to ask for, on the 1-1000 scale where 400 is regular and 700 is bold, or null to
+    /// leave it inherited.
+    /// </param>
+    /// <param name="italic">
+    /// True to ask for an italic face, false to ask for an upright one, or null to leave the
+    /// inherited answer.
+    /// </param>
+    /// <returns>The override; with every argument null, <see cref="AsIs"/>.</returns>
+    /// <remarks>
+    /// This is <see cref="AsIs"/> with the named members replaced, so null means "leave that member
+    /// inherited". It starts from an override that names nothing, so unlike
+    /// <see cref="FontOverride.With"/> there is no previously set member for a null to keep: every
+    /// null member is unset. Setting several members in one call:
+    /// <c>InheritedFont.With(family: "Courier New", weight: 700)</c>.
+    /// </remarks>
+    public static FontOverride With(
+        string? family = null,
+        float? size = null,
+        int? weight = null,
+        bool? italic = null) =>
+        AsIs.With(family, size, weight, italic);
 
     /// <summary>
     /// An override that asks for <paramref name="familyName"/> and leaves the rest inherited.
@@ -227,12 +337,12 @@ public static class InheritedFont
     /// the platform's default family.
     /// </param>
     /// <returns>The override.</returns>
-    public static FontOverride WithFamily(string? familyName) => Empty.WithFamily(familyName);
+    public static FontOverride WithFamily(string? familyName) => AsIs.WithFamily(familyName);
 
     /// <summary>An override that asks for <paramref name="size"/> and leaves the rest inherited.</summary>
     /// <param name="size">The size to draw at, in logical pixels, or null to leave it inherited.</param>
     /// <returns>The override.</returns>
-    public static FontOverride WithSize(float? size) => Empty.WithSize(size);
+    public static FontOverride WithSize(float? size) => AsIs.WithSize(size);
 
     /// <summary>An override that asks for <paramref name="weight"/> and leaves the rest inherited.</summary>
     /// <param name="weight">
@@ -240,7 +350,7 @@ public static class InheritedFont
     /// leave it inherited.
     /// </param>
     /// <returns>The override.</returns>
-    public static FontOverride WithWeight(int? weight) => Empty.WithWeight(weight);
+    public static FontOverride WithWeight(int? weight) => AsIs.WithWeight(weight);
 
     /// <summary>An override that asks for a slant and leaves the rest inherited.</summary>
     /// <param name="italic">
@@ -248,5 +358,5 @@ public static class InheritedFont
     /// inherited answer.
     /// </param>
     /// <returns>The override.</returns>
-    public static FontOverride WithItalic(bool? italic) => Empty.WithItalic(italic);
+    public static FontOverride WithItalic(bool? italic) => AsIs.WithItalic(italic);
 }
