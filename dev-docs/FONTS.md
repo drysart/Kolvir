@@ -644,6 +644,16 @@ for the two WOFF signatures - so a genuinely damaged OpenType file still reports
 and an application that exists but never declared `AddWoffFonts()` gets the loader's own answer rather
 than advice about constructing something it already constructed.
 
+**The case only exists where the host refuses the container.** On macOS Skia's own font manager reads
+WOFF 2 through CoreText, so the same registration simply succeeds and there is nothing to explain;
+Windows reads neither container and Linux reads WOFF 1.0 only, so those two are where the failure
+happens. The platform difference is the one section 3 already records rather than a new one, and the
+test records both answers instead of asserting one platform's: it registers a container before any
+`Application` exists and then requires either that the registration was read (macOS) or that the
+failure carried the cause and both fixes. That is also the honest limit of the requirement this
+explanation came from - its premise, "a `.woff2` registered too early reports 'this is not a font'", is
+true on two of the three platforms.
+
 `Application.TearDown` clears the pushed loader, so a registration after the application is gone is
 told the same thing a registration before it existed is.
 
@@ -651,8 +661,8 @@ told the same thing a registration before it existed is.
 `ARegisteredContainerIsReadByTheApplicationsOwnLoader` registers a `.woff2` after constructing an
 `Application` whose `ConfigureServices` called `AddWoffFonts()`, and compares the measured width and
 line height against the same face registered from bytes the test decoded itself; and
-`AContainerRegisteredBeforeAnyApplicationSaysWhatToDoAboutIt` asserts the four claims in that message
-for both `RegisterFromFile` and `Register`.
+`AContainerRegisteredBeforeAnyApplicationSaysWhatToDoAboutIt` asserts the message - by signature, for
+the reason in the paragraph above - for both `RegisterFromFile` and `Register`.
 
 When `family` is null the registered name is the face's internal family name. A face decompressed from
 a WOFF file is stored exactly like a face read from a `.ttf`, because by the time it reaches the

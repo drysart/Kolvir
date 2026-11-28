@@ -199,27 +199,62 @@ public sealed class WoffFontLoadingTests
         // Nothing is constructed here on purpose: this is the state an application's start-up is in
         // when it registers a web font before creating the Application, which is the mistake the
         // message exists for.
-        var path = Path.Combine(AppContext.BaseDirectory, "Fonts", "IBMPlexSans-Regular.woff2");
-
-        var fromFile = Assert.ThrowsExactly<FontFormatException>(
-            () => FontRegistry.Current.RegisterFromFile(path, "Woff before the application"));
+        // A signature and nothing else: a container as far as the registry is concerned, and not one
+        // any font manager will read as a font, so this half of the test asks the same question on all
+        // three platforms.
+        var unrecognisable = new byte[512];
+        "wOF2"u8.CopyTo(unrecognisable);
 
         var fromBytes = Assert.ThrowsExactly<FontFormatException>(
-            () => FontRegistry.Current.Register("Woff before the application", Woff2.Value.AsSpan()));
+            () => FontRegistry.Current.Register("Woff before the application", unrecognisable.AsSpan()));
 
-        foreach (var exception in new[] { fromFile, fromBytes })
+        AssertSaysWhatToDo(fromBytes);
+
+        // The file half is the platform-dependent one, and which answer is right depends on the
+        // host's font manager: macOS reads WOFF 2 through CoreText, so registering the real file
+        // before an application works there and there is no failure to explain. Windows reads
+        // neither container and Linux reads WOFF 1.0 only, so those two get the explanation.
+        var path = Path.Combine(AppContext.BaseDirectory, "Fonts", "IBMPlexSans-Regular.woff2");
+        var registry = FontRegistry.Current;
+
+        string? registered = null;
+        try
         {
-            StringAssert.Contains(
-                exception.Message, "No Application", "the message names the cause, not just the symptom");
-            StringAssert.Contains(
-                exception.Message, "AddWoffFonts()", "and names the feature that would have read it");
-            StringAssert.Contains(
-                exception.Message, "OpenType", "and says how far the built-in loader gets");
-            StringAssert.Contains(
-                exception.Message,
-                "Construct the Application",
-                "and gives the fix, which is what the caller has to change");
+            registered = registry.RegisterFromFile(path, "Woff before the application");
         }
+        catch (FontFormatException exception)
+        {
+            AssertSaysWhatToDo(exception);
+            return;
+        }
+        finally
+        {
+            if (registered is not null)
+            {
+                registry.Unregister(registered);
+            }
+        }
+
+        Assert.AreEqual(
+            "IBM Plex Sans", new FontFace(Woff2.Value).FamilyName, "read by Skia itself, so nothing to explain");
+    }
+
+    /// <summary>
+    /// Asserts the four things the message has to say when nothing could read a container.
+    /// </summary>
+    /// <param name="exception">The failure a registration raised.</param>
+    private static void AssertSaysWhatToDo(FontFormatException exception)
+    {
+        StringAssert.Contains(
+            exception.Message, "No Application", "the message names the cause, not just the symptom");
+        StringAssert.Contains(
+            exception.Message, "AddWoffFonts()", "and names the feature that would have read it");
+        StringAssert.Contains(
+            exception.Message, "OpenType", "and says how far the built-in loader gets");
+        StringAssert.Contains(
+            exception.Message,
+            "Construct the Application",
+            "and gives the fix, which is what the caller has to change");
     }
 
     [TestMethod]

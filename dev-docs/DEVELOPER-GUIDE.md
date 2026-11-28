@@ -3206,7 +3206,9 @@ var body = new Font("Inter", 14f);
 Two things have to happen in that order. The provider is installed by the application, and the registry
 reads a registered file through that loader - so a `.woff2` registered before the application exists is
 refused, with a message that says so and names both fixes: construct the application first, or hand
-over the OpenType the container unwraps to.
+over the OpenType the container unwraps to. (On macOS the host's own font manager reads WOFF 2, so the
+same registration succeeds there and there is nothing to refuse; the message is what Windows and Linux
+get, where nothing else can read the container.)
 
 The point of the example is that the registration is **the same call for every format**. `FontRegistry`
 is the font counterpart of `IImageDataFactory`: an application does not decide which loader to use by
