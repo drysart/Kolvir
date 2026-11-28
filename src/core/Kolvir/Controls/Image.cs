@@ -28,6 +28,21 @@ namespace Kolvir;
 /// hidden, so showing it again shows the frame the clock says rather than the one it left on.
 /// </para>
 /// <para>
+/// <b>Sizing.</b> The control does not size itself to its source: <see cref="Control.AutoSize"/> is
+/// false by default, the same default WinForms' <c>PictureBox</c> has, so the picture is fitted into
+/// the bounds the control was given. Give it a size - <see cref="Control.Bounds"/>, <see cref="Control.Width"/>
+/// and <see cref="Control.Height"/>, or a dock that fills - and <see cref="SizeMode"/> decides how the
+/// picture meets it. An explicit <c>AutoSize = true</c> opts into the other behaviour, where the
+/// control takes the source's <see cref="ImageData.NaturalSize"/> and <see cref="SizeMode"/> has no
+/// room to act.
+/// </para>
+/// <para>
+/// <b>A control with no size renders nothing.</b> Bounds start at zero, as they do on every control
+/// in this library, so a bare <c>new Image { Source = picture }</c> placed free in a panel is a 0x0
+/// control. That is deliberate rather than a missing default size: a default here would change panel
+/// extents and scroll areas everywhere. Size the control, or ask it to auto-size.
+/// </para>
+/// <para>
 /// <b>Ownership.</b> The control draws the data and never disposes it - the same convention WinForms
 /// has for <c>PictureBox.Image</c>, and for the same reason: the same picture is often shown in more
 /// than one place, and an image that vanished because one control was closed would be a surprise no
@@ -47,12 +62,6 @@ public class Image : Control
     private SizeMode _sizeMode = SizeMode.Zoom;
     private Timer? _frameTimer;
     private Action<object>? _sourceChanged;
-
-    /// <summary>Creates an image control with no source that sizes itself to the picture it is given.</summary>
-    public Image()
-    {
-        AutoSize = true;
-    }
 
     /// <summary>
     /// Adds a handler that runs when <see cref="Source"/> is assigned a different value.
@@ -141,10 +150,19 @@ public class Image : Control
     /// How the picture is fitted into the content area. Defaults to <see cref="SizeMode.Zoom"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <see cref="SizeMode.Normal"/> and <see cref="SizeMode.CenterImage"/> draw at the picture's
     /// own size, while <see cref="SizeMode.StretchImage"/> and <see cref="SizeMode.Zoom"/> use the
     /// room available. Whatever the mode, the picture is placed in the content area according to
     /// <see cref="ImageAlign"/>.
+    /// </para>
+    /// <para>
+    /// The mode only has room to act while the control's size comes from somewhere other than the
+    /// picture. On a control sized to its source - <see cref="Control.AutoSize"/> with no explicit
+    /// bounds - the content area is exactly the picture's size, so <see cref="SizeMode.Zoom"/> and
+    /// <see cref="SizeMode.StretchImage"/> are indistinguishable, and a stretched picture is only
+    /// stretched in the literal sense of filling a box it already fits.
+    /// </para>
     /// </remarks>
     public SizeMode SizeMode
     {

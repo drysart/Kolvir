@@ -558,7 +558,7 @@ public sealed class WidgetTests : HeadlessTestBase
         using var picture = RecordPicture(30, 20);
         using var data = ImageData.FromPicture(picture);
 
-        var image = new Image { Source = data };
+        var image = new Image { AutoSize = true, Source = data };
         var host = new Panel { Padding = Thickness.Empty };
         host.Controls.Add(image);
 

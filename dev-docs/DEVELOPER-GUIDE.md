@@ -4190,9 +4190,17 @@ path - not a still path and an animation path that have to be kept in step. `Ima
 `ImageData` and does nothing else with it:
 
 ```csharp
-var image = new Image { SizeMode = SizeMode.Zoom };
+var image = new Image { SizeMode = SizeMode.Zoom, Dock = DockStyle.Fill };
 image.Source = factory.LoadFromStream(stream);    // a PNG is a zero-duration animation
 ```
+
+The control does not size itself to its source: `AutoSize` is false by default, the same default
+`PictureBox` has, and the picture is fitted into the bounds the control was given. Give it a size - a
+`Width` and `Height`, a `Bounds`, or a dock - and `SizeMode` decides how the picture meets it. A
+control left at zero size shows nothing, because every control here starts at zero and `Image` has no
+default of its own. `AutoSize = true` opts into the other behaviour, where the picture's natural size
+is the control's size and `SizeMode` has no room to act; that is what an AutoSize table track or stack
+hugs.
 
 The control's image surface is `Source`, `SizeMode`, `ImageAlign` and `PlaceholderColor`, which is a
 colour, a palette role, or `PropertyValue.Inherited` for none. It has no
@@ -4419,8 +4427,8 @@ Either way the package's contribution is one registered **format provider** - th
 section above describes - and after that nothing about the call site changes:
 
 ```csharp
-var icon = new Image { SizeMode = SizeMode.Zoom };
-icon.Image = factory.LoadFromPath("icons/star.svg");   // the same call that reads a PNG
+var icon = new Image { SizeMode = SizeMode.Zoom, Width = 24f, Height = 24f };
+icon.Source = factory.LoadFromPath("icons/star.svg");   // the same call that reads a PNG
 ```
 
 Referencing the package is not the opt-in; the `AddSvgImages()` call is. An application that
