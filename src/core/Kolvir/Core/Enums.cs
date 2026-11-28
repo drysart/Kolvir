@@ -174,6 +174,22 @@ public enum ContentAlignment
 }
 
 /// <summary>How an <see cref="Image"/> scales its picture inside its bounds.</summary>
+/// <remarks>
+/// <para>
+/// Every mode fits the picture into the bounds the control was given. <see cref="Normal"/> and
+/// <see cref="CenterImage"/> draw at the picture's natural size and clip what does not fit;
+/// <see cref="Zoom"/> and <see cref="StretchImage"/> use the room available. None of them is a reason
+/// for a control that is not <see cref="Control.AutoSize"/> to be larger than those bounds, and none
+/// of them talks about the picture's size to the layout at all.
+/// </para>
+/// <para>
+/// The modes differ only in how the picture meets the content area: <see cref="Zoom"/> and
+/// <see cref="StretchImage"/> both use the room available, and on an <see cref="Image"/> that is
+/// exactly the picture's size - one sized to its source rather than given bounds - that room is the
+/// picture itself, so the two are indistinguishable. Size the control, or leave
+/// <see cref="Control.AutoSize"/> on deliberately if matching the picture is what is wanted.
+/// </para>
+/// </remarks>
 public enum SizeMode
 {
     /// <summary>Draws the image at its natural size, anchored top-left.</summary>

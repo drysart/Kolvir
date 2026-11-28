@@ -28,6 +28,21 @@ namespace Kolvir;
 /// hidden, so showing it again shows the frame the clock says rather than the one it left on.
 /// </para>
 /// <para>
+/// <b>Sizing.</b> The control does not size itself to its source: <see cref="Control.AutoSize"/> is
+/// false by default, the same default WinForms' <c>PictureBox</c> has, so the picture is fitted into
+/// the bounds the control was given. Give it a size - <see cref="Control.Bounds"/>, <see cref="Control.Width"/>
+/// and <see cref="Control.Height"/>, or a dock that fills - and <see cref="SizeMode"/> decides how the
+/// picture meets it. An explicit <c>AutoSize = true</c> opts into the other behaviour, where the
+/// control takes the source's <see cref="ImageData.NaturalSize"/> and <see cref="SizeMode"/> has no
+/// room to act.
+/// </para>
+/// <para>
+/// <b>A control with no size renders nothing.</b> Bounds start at zero, as they do on every control
+/// in this library, so a bare <c>new Image { Source = picture }</c> placed free in a panel is a 0x0
+/// control. That is deliberate rather than a missing default size: a default here would change panel
+/// extents and scroll areas everywhere. Size the control, or ask it to auto-size.
+/// </para>
+/// <para>
 /// <b>Ownership.</b> The control draws the data and never disposes it - the same convention WinForms
 /// has for <c>PictureBox.Image</c>, and for the same reason: the same picture is often shown in more
 /// than one place, and an image that vanished because one control was closed would be a surprise no
@@ -48,10 +63,13 @@ public class Image : Control
     private Timer? _frameTimer;
     private Action<object>? _sourceChanged;
 
-    /// <summary>Creates an image control with no source that sizes itself to the picture it is given.</summary>
+    /// <summary>
+    /// Creates an image control with no source and no size. Give it bounds - <see cref="Control.Bounds"/>,
+    /// <see cref="Control.Width"/> and <see cref="Control.Height"/>, or a dock - or set
+    /// <see cref="Control.AutoSize"/> to have it take the size of the picture it is given.
+    /// </summary>
     public Image()
     {
-        AutoSize = true;
     }
 
     /// <summary>
@@ -141,10 +159,19 @@ public class Image : Control
     /// How the picture is fitted into the content area. Defaults to <see cref="SizeMode.Zoom"/>.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// <see cref="SizeMode.Normal"/> and <see cref="SizeMode.CenterImage"/> draw at the picture's
     /// own size, while <see cref="SizeMode.StretchImage"/> and <see cref="SizeMode.Zoom"/> use the
     /// room available. Whatever the mode, the picture is placed in the content area according to
     /// <see cref="ImageAlign"/>.
+    /// </para>
+    /// <para>
+    /// The mode only has room to act while the control's size comes from somewhere other than the
+    /// picture. On a control sized to its source - <see cref="Control.AutoSize"/> with no explicit
+    /// bounds - the content area is exactly the picture's size, so <see cref="SizeMode.Zoom"/> and
+    /// <see cref="SizeMode.StretchImage"/> are indistinguishable, and a stretched picture is only
+    /// stretched in the literal sense of filling a box it already fits.
+    /// </para>
     /// </remarks>
     public SizeMode SizeMode
     {
@@ -217,14 +244,34 @@ public class Image : Control
 
     /// <inheritdoc />
     /// <remarks>
+    /// <para>
+    /// The picture's natural size is reported only while <see cref="Control.AutoSize"/> is on, which is
+    /// the only case where the picture can decide the control's size. With it off the control already
+    /// has a size, and <see cref="SizeMode"/> resolves the picture into that size - <see cref="SizeMode.Zoom"/>
+    /// and <see cref="SizeMode.StretchImage"/> scale into it, <see cref="SizeMode.Normal"/> and
+    /// <see cref="SizeMode.CenterImage"/> draw at natural size and clip. There is therefore no mode in
+    /// which the picture is a reason for the control to be larger, and reporting one would leak the
+    /// source's dimensions out of a control that cannot act on them: a container that mixes measurement
+    /// with bounds - an AutoSize table track takes <c>max(measurement, bounds)</c> - would inflate
+    /// around a picture the control is visibly not showing at that size.
+    /// </para>
+    /// <para>
+    /// Nothing varies with the picture while <see cref="Control.AutoSize"/> is off, so
+    /// <see cref="Control.Measure"/> answers the same for a thumbnail-sized source and a huge one.
+    /// <see cref="Control.MinimumSize"/> and <see cref="Control.MaximumSize"/> still apply, because
+    /// <see cref="Control.Measure"/> clamps whatever this returns.
+    /// </para>
+    /// <para>
     /// The answer is the source's own size, never the current frame's, so an animation whose frames
     /// differ by a pixel does not re-lay-out the window on every frame.
+    /// </para>
     /// </remarks>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
-        // The source's own size, never the current frame's: an animation whose frames differ by a
-        // pixel would otherwise re-lay-out the window on every frame.
-        return _image is null ? SKSize.Empty : _image.NaturalSize;
+        // A source's own size, never the current frame's: an animation whose frames differ by a pixel
+        // would otherwise re-lay-out the window on every frame. It is only a reason to be that size
+        // while the control is allowed to size itself.
+        return !AutoSize || _image is null ? SKSize.Empty : _image.NaturalSize;
     }
 
     /// <summary>

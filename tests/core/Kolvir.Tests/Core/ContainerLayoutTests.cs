@@ -137,6 +137,82 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
     }
 
     [TestMethod]
+    public void AnAutoSizePanelHoldsAFixedImageAtItsOwnSize()
+    {
+        // The regression the default flip exposed: an AutoSize panel around a fixed-size image used
+        // to come out too big (the picture leaked into the measurement) and then empty (the picture
+        // stopped being reported). It measures the size the control was given.
+        using var data = ImageData.FromPicture(SolidPicture(400, 300));
+        var panel = new Panel { AutoSize = true, Padding = Thickness.Empty };
+        var image = new Image { Size = new SKSize(40f, 30f) };
+        panel.Controls.Add(image);
+
+        var available = new SKSize(200f, 100f);
+        Assert.AreEqual(new SKSize(40f, 30f), panel.Measure(available), "the panel is the size the image was given");
+
+        image.Source = data;
+        panel.Invalidate();
+
+        Assert.AreEqual(new SKSize(40f, 30f), panel.Measure(available), "a larger picture does not grow it");
+    }
+
+    [TestMethod]
+    [DataRow(StackOrientation.Vertical)]
+    [DataRow(StackOrientation.Horizontal)]
+    public void AnAutoSizeStackHoldsAFixedImageAtItsOwnSize(StackOrientation orientation)
+    {
+        // A stack measures its children on a code path of its own, so the panel's fix does not cover it.
+        using var data = ImageData.FromPicture(SolidPicture(400, 300));
+        var stack = new StackPanel { AutoSize = true, Orientation = orientation };
+        var image = new Image { Size = new SKSize(40f, 30f) };
+        stack.Controls.Add(image);
+
+        var available = new SKSize(200f, 100f);
+        Assert.AreEqual(new SKSize(40f, 30f), stack.Measure(available), $"{orientation}: the stack is the image's size");
+
+        image.Source = data;
+        stack.Invalidate();
+
+        Assert.AreEqual(new SKSize(40f, 30f), stack.Measure(available), $"{orientation}: a larger picture does not grow it");
+    }
+
+    [TestMethod]
+    public void AnAutoSizeContainerHoldsAFixedLabelAtItsOwnSize()
+    {
+        // A container bug rather than an image one: the same rule must hold for a control that has
+        // nothing to do with pictures.
+        var available = new SKSize(200f, 100f);
+
+        var panel = new Panel { AutoSize = true, Padding = Thickness.Empty };
+        panel.Controls.Add(new Label("a fixed-size label") { AutoSize = false, Size = new SKSize(60f, 24f) });
+        Assert.AreEqual(new SKSize(60f, 24f), panel.Measure(available), "the panel is the label's own size");
+
+        var stack = new StackPanel { AutoSize = true };
+        stack.Controls.Add(new Label("a fixed-size label") { AutoSize = false, Size = new SKSize(60f, 24f) });
+        Assert.AreEqual(new SKSize(60f, 24f), stack.Measure(available), "and so is the stack");
+    }
+
+    [TestMethod]
+    public void AnAutoSizeContainerStillMeasuresAChildThatHasNoSizeOfItsOwn()
+    {
+        // The other half of the rule: nobody said how big this child is, so its measurement is the
+        // only answer available, and an AutoSize child is still measured.
+        var available = new SKSize(200f, 100f);
+
+        var panel = new Panel { AutoSize = true, Padding = Thickness.Empty };
+        var unsized = new Label("measured, not sized") { AutoSize = false };
+        panel.Controls.Add(unsized);
+        var measured = unsized.Measure(available);
+        Assert.IsTrue(measured.Width > 0f, "the label has text, so its measurement is not empty");
+        Assert.AreEqual(measured, panel.Measure(available), "a child nobody sized contributes its measurement");
+
+        var stack = new StackPanel { AutoSize = true };
+        var autoSized = new Label("measured, not sized");
+        stack.Controls.Add(autoSized);
+        Assert.AreEqual(autoSized.Measure(available), stack.Measure(available), "an AutoSize child still grows the stack");
+    }
+
+    [TestMethod]
     public void TwoPercentColumnsSplitTheTableEvenly()
     {
         var table = PlainTable();
@@ -1085,6 +1161,16 @@ public sealed class ContainerLayoutTests : HeadlessTestBase
     {
         Padding = Thickness.Empty,
     };
+
+    /// <summary>A solid red picture drawn directly, with no bitmap behind it.</summary>
+    private static SKPicture SolidPicture(int width, int height)
+    {
+        using var recorder = new SKPictureRecorder();
+        var canvas = recorder.BeginRecording(new SKRect(0f, 0f, width, height));
+        using var paint = new SKPaint { Color = SKColors.Red };
+        canvas.DrawRect(new SKRect(0f, 0f, width, height), paint);
+        return recorder.EndRecording();
+    }
 
     private static TableLayoutPanel PlainTable() => new()
     {

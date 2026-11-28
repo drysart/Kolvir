@@ -531,6 +531,11 @@ A container that decides a child's rectangle itself wins, the way an explicit wi
 a `Dock`ed child, a `SplitContainer` panel, a table cell and a `StackPanel` or `WrapPanel` child are
 all arranged by their parent, and a percentage on one of them is not consulted.
 
+A container that sizes itself to its children - an `AutoSize` `Panel` or `StackPanel` - measures
+them: a child that was given a size contributes that size, and one that never was contributes what
+it measures at. So a fixed-size child is held at the size it was given rather than at its content,
+and a child with `AutoSize = true` decides the container's size itself.
+
 ### Wrap panel
 
 `WrapPanel` lays its children out along one axis and starts a new line whenever the next one
@@ -661,7 +666,9 @@ stack.Controls.Add(new Button("Centred") { HorizontalAlignment = Alignment.Cente
 ```
 
 - A child with `AutoSize = false` keeps the size it was given along the stack, which is how a run of
-  fixed-height rows is built; it is still stretched across the stack unless it is aligned.
+  fixed-height rows is built; it is still stretched across the stack unless it is aligned. An
+  `AutoSize` stack measures such a child at that size, not at its content, so a fixed-size image does
+  not pull the stack out around its picture.
 - `Margin` still applies: it separates one child from the next along the stack and insets it from
   the edges across it, so `Spacing` is for the gap and `Margin` for a per-child adjustment.
 - A docked child is not part of the run. It takes its edge of the panel the way a docked child of
@@ -673,7 +680,8 @@ stack.Controls.Add(new Label("Header") { Dock = DockStyle.Top, AutoSize = false,
 
 - The run of children is the scrollable content, so `VerticalScroll = ScrollStyle.Automatic`
   scrolls a long stack; a docked header stays put while the rows scroll under it.
-- With `AutoSize = true` the stack is as long as the run and as wide as its widest child.
+- With `AutoSize = true` the stack is as long as the run and as wide as its widest child - measured
+  children by their content, children that were given a size by that size.
 - A child wider than the space across the stack is clipped to the panel rather than overflowing it,
   so `Center` and `Far` never push a child outside the control.
 
@@ -4190,9 +4198,17 @@ path - not a still path and an animation path that have to be kept in step. `Ima
 `ImageData` and does nothing else with it:
 
 ```csharp
-var image = new Image { SizeMode = SizeMode.Zoom };
+var image = new Image { SizeMode = SizeMode.Zoom, Dock = DockStyle.Fill };
 image.Source = factory.LoadFromStream(stream);    // a PNG is a zero-duration animation
 ```
+
+The control does not size itself to its source: `AutoSize` is false by default, the same default
+`PictureBox` has, and the picture is fitted into the bounds the control was given. Give it a size - a
+`Width` and `Height`, a `Bounds`, or a dock - and `SizeMode` decides how the picture meets it. A
+control left at zero size shows nothing, because every control here starts at zero and `Image` has no
+default of its own. `AutoSize = true` opts into the other behaviour, where the picture's natural size
+is the control's size and `SizeMode` has no room to act; that is what an AutoSize table track or stack
+hugs.
 
 The control's image surface is `Source`, `SizeMode`, `ImageAlign` and `PlaceholderColor`, which is a
 colour, a palette role, or `PropertyValue.Inherited` for none. It has no
@@ -4255,9 +4271,11 @@ provider seam hands its sources through it. `disposePictureWithData` is the owne
 matters: true gives the data the picture, and the source that produces it has to outlive every
 picture it hands out.
 
-`NaturalSize` is fixed for the source rather than measured from the current frame, and it is what
-`AutoSize` measures and every `SizeMode` scales from. An animation whose frames differ by a pixel
-therefore cannot make the layout twitch once a second.
+`NaturalSize` is fixed for the source rather than measured from the current frame. It is what an
+`AutoSize` control measures and the size every `SizeMode` treats as the picture's own; on a control
+that does not auto-size it is not exposed to layout at all, so a container measuring the control
+cannot grow around a picture the control is fitting into a smaller box. An animation whose frames
+differ by a pixel therefore cannot make the layout twitch once a second.
 
 **`Position` is computed, never accumulated.** `Play` records an anchor - a position and a
 `TimeProvider` timestamp - and every read is `anchor.Position + (now - anchor.Timestamp)`, wrapped
@@ -4419,8 +4437,8 @@ Either way the package's contribution is one registered **format provider** - th
 section above describes - and after that nothing about the call site changes:
 
 ```csharp
-var icon = new Image { SizeMode = SizeMode.Zoom };
-icon.Image = factory.LoadFromPath("icons/star.svg");   // the same call that reads a PNG
+var icon = new Image { SizeMode = SizeMode.Zoom, Width = 24f, Height = 24f };
+icon.Source = factory.LoadFromPath("icons/star.svg");   // the same call that reads a PNG
 ```
 
 Referencing the package is not the opt-in; the `AddSvgImages()` call is. An application that
@@ -4451,8 +4469,12 @@ an extension method that has real work to do is a sign that the work belongs in 
 
 #### Sizing, and what `viewBox` means to `AutoSize`
 
-The picture's bounds are the document's natural size, and that is what `AutoSize` measures and what
-every `SizeMode` scales from:
+The picture's bounds are the document's natural size, and that is what an `AutoSize` image measures
+and what every `SizeMode` uses as the picture's own size. An image that does not auto-size reports
+none of it: the picture is fitted into the control's bounds and a container cannot see how large the
+document is.
+
+The natural size a document reports is:
 
 | Document | Natural size |
 | --- | --- |

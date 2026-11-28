@@ -94,7 +94,9 @@ public class StackPanel : Panel
 
     /// <summary>
     /// An auto-sized stack is as long as the run of its children and as wide (or tall) as the widest
-    /// of them. Docked children are left out: they would fill the panel instead.
+    /// of them. A child that was given a size contributes that size rather than a measurement, which
+    /// is the size it is drawn at; one that never was is measured, because that is the only answer
+    /// available for it. Docked children are left out: they would fill the panel instead.
     /// </summary>
     protected override SKSize MeasureContent(SKSize availableSize)
     {
@@ -110,7 +112,7 @@ public class StackPanel : Panel
                 continue;
             }
 
-            var size = child.Measure(availableSize);
+            var size = !child.AutoSize && child.HasOwnSize ? child.Size : child.Measure(availableSize);
             if (!first)
             {
                 length += Spacing;
@@ -151,6 +153,17 @@ public class StackPanel : Panel
 
         _run.Clear();
         _runValid = false;
+
+        // A stack nobody has sized yet has no room to place its run in, and a pass that runs anyway
+        // gives every child a zero-length slot. That would overwrite the bounds of a child that chose
+        // its own size with zeroes, and the measure that follows would then ask a 0x30 image what it
+        // is - which is exactly the size the application assigned, lost. Leave the children alone
+        // until there is room; the first pass that has any arranges the run.
+        if (area.Width <= 0f || area.Height <= 0f)
+        {
+            _runValid = true;
+            return MeasureExtent(content);
+        }
 
         if (!HasChildren)
         {
