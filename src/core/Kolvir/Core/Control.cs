@@ -79,7 +79,7 @@ public class Control : IDisposable
     private List<SKRect>? _selectionRects;
 
     // Appearance set on this control. InheritedValue means "not set here".
-    private Union<Font, InheritedValue> _font = PropertyValue.Inherited;
+    private Union<Font, FontOverride, InheritedValue> _font = PropertyValue.Inherited;
     private Union<SKColor, ThemeColor, InheritedValue> _backColor = PropertyValue.Inherited;
     private Union<SKColor, ThemeColor, InheritedValue> _foreColor = PropertyValue.Inherited;
 
@@ -87,6 +87,11 @@ public class Control : IDisposable
     // can change the answer - a value set on an ancestor, or a new parent - drops it.
     private bool _inheritedResolved;
     private Font? _inheritedFont;
+
+    // _font's override composed onto _inheritedFont, when there is an inherited font to compose it
+    // onto. Null when _font holds no override or when the base is the class default, which is read
+    // live so a class that varies it or a theme change is picked up without an invalidation.
+    private Font? _overrideFont;
     private Union<SKColor, ThemeColor>? _inheritedBackColor;
     private Union<SKColor, ThemeColor>? _inheritedForeColor;
 
@@ -1807,8 +1812,9 @@ public class Control : IDisposable
     }
 
     /// <summary>
-    /// The font assigned to this control: a <see cref="Font"/>, or
-    /// <see cref="PropertyValue.Inherited"/> to take the nearest ancestor's font instead.
+    /// The font assigned to this control: a <see cref="Font"/>, a <see cref="FontOverride"/> that
+    /// changes part of the inherited font, or <see cref="PropertyValue.Inherited"/> to take the
+    /// nearest ancestor's font instead.
     /// </summary>
     /// <remarks>
     /// <para>
@@ -1825,18 +1831,28 @@ public class Control : IDisposable
     /// configured still adopts it.
     /// </para>
     /// <para>
-    /// Assigning a font compares by value: a font that describes the same family, size, weight and
-    /// italic is the same font, even if it is a different object, so re-rendering does not invalidate
-    /// the subtree. What an application cannot do as a result is force a re-measure by assigning an
+    /// An override names only the members it changes, so a control can keep the family it inherits
+    /// and draw larger: <c>label.Font = InheritedFont.WithSize(14f)</c>. Overrides compose down the
+    /// tree, so an override on a parent answers for its children's base, and
+    /// <see cref="EffectiveFont"/> is where the composition happens. An override that names nothing
+    /// resolves to the inherited font itself, which makes it the same in effect as
+    /// <see cref="PropertyValue.Inherited"/> even though it is a different case.
+    /// </para>
+    /// <para>
+    /// Assigning a font compares by value: a font - or an override - that describes the same thing
+    /// is the same value, even if it is a different object, so re-rendering does not invalidate the
+    /// subtree. What an application cannot do as a result is force a re-measure by assigning an
     /// equal font; registering or unregistering a family is the way to make text resolve differently.
     /// </para>
     /// <para>
     /// Nothing is owned: there is no disposable font, and a font assigned here may be a new object on
-    /// every render.
+    /// every render. A <see cref="FontOverride"/> is a description rather than a font, and never
+    /// measures or draws: it is composed into a complete <see cref="Font"/> when the control's
+    /// effective font is read.
     /// </para>
     /// </remarks>
-    /// <exception cref="ArgumentNullException">A null <see cref="Font"/> was assigned.</exception>
-    public Union<Font, InheritedValue> Font
+    /// <exception cref="ArgumentNullException">A null <see cref="Font"/> or <see cref="FontOverride"/> was assigned.</exception>
+    public Union<Font, FontOverride, InheritedValue> Font
     {
         get => _font;
         set
@@ -1844,13 +1860,15 @@ public class Control : IDisposable
             if (value.TryGetValue<Font>(out var font))
             {
                 ArgumentNullException.ThrowIfNull(font);
-
-                if (_font.TryGetValue<Font>(out var current) && font.Equals(current))
-                {
-                    return;
-                }
             }
-            else if (value.TryGetValue<InheritedValue>(out _) && _font.TryGetValue<InheritedValue>(out _))
+            else if (value.TryGetValue<FontOverride>(out var fontOverride))
+            {
+                ArgumentNullException.ThrowIfNull(fontOverride);
+            }
+
+            // One comparison for all three cases: the union compares by case and then by value, so
+            // an equal-but-new font or override assigns nothing and invalidates nothing.
+            if (_font.Equals(value))
             {
                 return;
             }
@@ -1865,13 +1883,29 @@ public class Control : IDisposable
 
     /// <summary>
     /// The font this control actually draws with: its own assignment, else the nearest ancestor's,
-    /// else <see cref="DefaultFont"/>.
+    /// else <see cref="DefaultFont"/> - with an override composed onto whichever of those it
+    /// inherits.
     /// </summary>
     /// <remarks>
+    /// <para>
     /// What the parent chain contributes is cached: one walk up the chain the first time the font is
     /// needed, dropped when an ancestor assigns a font or the control changes parent. That keeps a
     /// glyph measurement to a field read plus one virtual call on the class default. The class
     /// default is read every time, so a theme font change needs no rebuild.
+    /// </para>
+    /// <para>
+    /// An override answers for the control it is assigned to and, through this property, for
+    /// everything under it: a child that assigns nothing inherits the composed font, and a child
+    /// that assigns its own override composes onto it, so overrides apply in order down the tree.
+    /// The composition is cached with the inherited font, and only when the base is that inherited
+    /// font - an override whose base is the class default is composed when it is read, so a class
+    /// that varies its default is still picked up immediately.
+    /// </para>
+    /// <para>
+    /// What this returns is a complete <see cref="Font"/>, and
+    /// <c>control.EffectiveFont.WithSize(...)</c> remains the way to derive from a font that is in
+    /// hand - including with no parent to inherit from.
+    /// </para>
     /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// <see cref="Font"/> was assigned <c>default</c>, so it holds no case.
@@ -1888,7 +1922,15 @@ public class Control : IDisposable
             }
 
             ResolveInheritedAppearance();
-            return _inheritedFont ?? DefaultFont;
+
+            if (_overrideFont is { } composed)
+            {
+                return composed;
+            }
+
+            return _font.TryGetValue<FontOverride>(out var fontOverride)
+                ? fontOverride.Compose(_inheritedFont ?? DefaultFont)
+                : _inheritedFont ?? DefaultFont;
         }
     }
 
@@ -2205,7 +2247,8 @@ public class Control : IDisposable
     /// <see cref="InvalidateAppearanceTree"/> drops it, so measuring a glyph costs a field read
     /// rather than a trip to the root. What is cached is only what an ancestor assigned; class
     /// defaults and palette roles are resolved when they are read, so a theme change never leaves a
-    /// stale answer here.
+    /// stale answer here. The one composed value cached here is this control's own override when it
+    /// composes onto an inherited font - the same value the walk caches - and it is dropped with it.
     /// </remarks>
     private void ResolveInheritedAppearance()
     {
@@ -2220,9 +2263,19 @@ public class Control : IDisposable
 
         for (var ancestor = _parent; ancestor is not null; ancestor = ancestor._parent)
         {
-            if (font is null && ancestor._font.TryGetValue<Font>(out var ancestorFont))
+            if (font is null)
             {
-                font = ancestorFont;
+                if (ancestor._font.TryGetValue<Font>(out var ancestorFont))
+                {
+                    font = ancestorFont;
+                }
+                else if (ancestor._font.TryGetValue<FontOverride>(out _))
+                {
+                    // The ancestor's own override composes onto what it inherits; its effective font
+                    // is therefore the complete description everything below it inherits, and the
+                    // stack of overrides composes in order down the tree.
+                    font = ancestor.EffectiveFont;
+                }
             }
 
             // An assigned colour answers for descendants, transparent included; an unassigned one
@@ -2252,6 +2305,13 @@ public class Control : IDisposable
         }
 
         _inheritedFont = font;
+
+        // Composed here rather than on every read, but only when the base is the inherited font:
+        // that is exactly what the invalidation below drops, so the cache cannot outlive its base.
+        _overrideFont = font is not null && _font.TryGetValue<FontOverride>(out var fontOverride)
+            ? fontOverride.Compose(font)
+            : null;
+
         _inheritedBackColor = background;
         _inheritedForeColor = foreground;
         _inheritedResolved = true;
@@ -2266,6 +2326,7 @@ public class Control : IDisposable
     {
         _inheritedResolved = false;
         _inheritedFont = null;
+        _overrideFont = null;
         _inheritedBackColor = null;
         _inheritedForeColor = null;
 

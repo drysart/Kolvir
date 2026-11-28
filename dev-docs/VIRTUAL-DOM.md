@@ -330,7 +330,12 @@ rest by not assigning them:
 | --- | --- | --- | --- |
 | `new VLabel { }` | absent | control keeps what its constructor gave it | restored to the pristine value |
 | `new VLabel { Text = "hi" }` | present, `"hi"` | set | set, if it differs from the previous node |
-| `new VLabel { Font = null }` | present, `null` | set to `null` ("no font, inherit") | set to `null` |
+| `new VLabel { Font = PropertyValue.Inherited }` | present, the Inherit case | set, which is how a font goes back to inheriting | set, if it differs from the previous node |
+
+A literal `null` is not a fourth spelling for a font: `Control.Font`'s setter refuses a null font
+payload, and with two reference-typed cases (`Font` and `FontOverride`) a bare `null` no longer
+converts to either of them, so it does not compile. `PropertyValue.Inherited` is the spelling for
+"no font here", as it is for every other inherited property.
 
 There is no fourth spelling for "put it back": not assigning the property already means that, so an
 explicit reset would be an alias for absence. The factory-based design carried a `Reset` member for
@@ -996,7 +1001,7 @@ published application:
 | --- | --- |
 | **A frame-starting handler's work is drawn by the frame it was raised for** | `FrameStartingTests` in the core suite: a control added from a frame-starting handler is measured and arranged by the paint that is already underway, and a handler is called once per frame and told which host is drawing. That is the property the whole deferral rests on. |
 | **No mirror drift** between a control and its generated node class | For every control the test manifest registers, a test enumerates the control's public instance settable properties and asserts the generated class exposes each one **with the same property type**. Types matter as much as names here: a node property typed `object` would compile and then fail at the assignment. The test fails on the day a property is added to a control without regenerating. |
-| **Omitted, set, and set to null stay distinct** | `new VLabel { Text = "" }` clears the text while `new VLabel { }` says nothing about it; a render that drops a property restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`); and `Font = null` arrives at the control as null rather than as absence. |
+| **Omitted, set, and set to null stay distinct** | `new VLabel { Text = "" }` clears the text while `new VLabel { }` says nothing about it; a render that drops a property restores the pristine value, asserted against properties whose pristine value is not `default(T)` (`Text` starts at `""`, `Name` at the type name, a control's `Dock` may start at `Fill`); and a nullable property given `null` receives `null` rather than absence. For a font the "no font here" spelling is `PropertyValue.Inherited`, because two of `Control.Font`'s cases are reference types and a bare `null` is ambiguous (section 6.1). |
 | **Patches instead of rebuilds** | Assertions on reference identity: the control instance is the same object across a render, and keyed reorders preserve specific state (a `RichLabel`'s layout is not rebuilt, a `Panel`'s scroll position is unchanged). |
 | **No handler leaks** | A re-render with the same delegate leaves the click count at one, proven by raising the event through `Control`'s own trigger. |
 | **Composition keeps the two halves apart** | `CompositionTests` holds the directions separately: a child's `SetState` raises the child's render count and leaves the parent's alone while the screen follows the frame, a parent's render leaves the child's count and its control identity untouched, a keyed reorder moves the children's controls by reference rather than rebuilding them, a different instance in the same slot leaves the replaced child with nothing to render, a mount disposed by an earlier render in the same batch renders nothing, and nesting three levels deep changes nothing (section 7.2). The seam takes the same treatment: `ComponentTests` mounts a component that implements `IComponent` directly, with no `Component` above it, and `CompositionTests` composes one as a child, so "the mount needs the interface and not the base class" is a test and not a claim (section 7.3). |

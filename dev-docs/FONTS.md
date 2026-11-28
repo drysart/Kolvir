@@ -1,9 +1,11 @@
 # Fonts - design note
 
-Status: **sections 1-4 and 6-9 are built.** Section 5 - inherited overrides - is not, and is layer 2 of
-a two-layer stack: this layer leaves `Control.Font` as `Union<Font, InheritedValue>` and
-`EffectiveFont` returning `Font` precisely so that change only adds a case. The note was written before
-the work started, on `develop` at `b8c39b2`; where a section says what the code does today it now
+Status: **sections 1-9 are built.** Section 5 - inherited overrides - is layer 2 of a two-layer
+stack: layer 1 (sections 1-4 and 6-9, `4a5b283` on `develop`) deliberately left `Control.Font` as
+`Union<Font, InheritedValue>` and `EffectiveFont` returning `Font` so that layer 2 only adds a case,
+and layer 2 landed on a branch stacked on it. Section 5 records what was built and where the built
+shape differs from this note's design. The note was written before the
+work started, on `develop` at `b8c39b2`; where a section says what the code does today it now
 describes the implementation, and every place the implementation disagreed with the design is recorded
 in section 9 with the reason.
 
@@ -20,7 +22,8 @@ type this layer added. The members they point at are now in `RealizedFont` (`src
 
 The names the note proposed are the names that shipped: `RealizedFont`, `FontKey`, `FontManager`,
 `FontRegistry`, `IFontRegistry`, `FontFace`, `RegisteredFontFamily`, `NotifyFontsChanged`,
-`InvalidateFamily`. `FontOverride` is the one that does not exist yet, by design.
+`InvalidateFamily`. `FontOverride` shipped with the name this note gave it; the static class that
+starts a chain is `InheritedFont`, a name the note did not have and that the user's own code supplied.
 
 Two decisions changed during the work and are recorded where they belong rather than here: **a
 description always names a real family** (section 2.1), which reverses the note's first draft and fixes
@@ -53,6 +56,9 @@ says why that is the expected answer and why it was measured anyway.
 The per-instance allocation is the change's headline: a description that is created and thrown away
 costs 48 bytes instead of 988, which is what a Virtual DOM pass that builds a font per text node per
 render does.
+
+Layer 2 (section 5, the inherited override) adds one row to that table and it is not in it: 1,536
+bytes on `Kolvir.Minimal` and 16 bytes on a `Control`, measured in section 8.3.
 
 A face that travels with the application is now named once and referred to like any other family.
 `Font.FromFile`, `Font.FromStream`, `Font.FromBytes`, `Font.Dispose` and `Theme.UseFont` are gone;
@@ -814,6 +820,107 @@ design has a clean answer for *how* it would work, and no answer for whether the
 worth it to an application that can already write `parent.EffectiveFont.WithSize(14f)` where it has
 the parent in hand.
 
+### 5.1 As built
+
+**The API.** `label.Font = InheritedFont.WithSize(14f)` compiles exactly as written.
+`FontOverride` is a sealed immutable class with `IEquatable<FontOverride>` over four nullable members
+- `FamilyName`, `Size`, `Weight`, `Italic` - and no measuring, drawing or realizing member. It has no
+public constructor: an override is written, not built. `InheritedFont` is a static class of four
+factories, because the name has to resolve at an assignment with only `using Kolvir;` in scope and
+only a type can do that; it is the one public name this note did not propose. The instance
+`With*` members chain (`InheritedFont.WithSize(14f).WithItalic(true)`), and a null argument leaves
+that member inherited, which is how a chain is narrowed back to the neutral override. `string.Empty`
+is the platform's default family and `0f` is a real size - the same values they are on `Font`, and the
+reason a null member cannot be spelled on the complete type.
+
+**Class, not struct, and the numbers.** `Unsafe.SizeOf` on the closed union, measured in a harness
+that references the type from outside the library:
+
+| shape | union | `new BareControl()` |
+| --- | --- | --- |
+| before (`Union<Font, InheritedValue>`) | 16 bytes | 600.01 bytes |
+| struct override (`Union<Font, StructOverride, InheritedValue>`, same four members) | 56 bytes | not built |
+| **class override, as shipped** | **24 bytes** | **616.01 bytes** |
+
+A struct of the same four members is 32 bytes, so a struct-in-union costs 32 more bytes in every
+`Control` than the reference does; the shipped shape costs 16, of which 8 are the wider union and 8
+are the cache described below. That is the whole cost of layer 2 per control, and it is why the type
+is a class: the note's alternative was 32 bytes per control for the same capability. `Unsafe.SizeOf`
+on `Control` itself answers 8 in both trees, because it reports the size of the reference - section
+8.1 recorded the same thing when it specified the measurement - so the allocation of constructing one
+is the number that means anything.
+
+**Value equality is what makes it free to use.** `Control.Font`'s setter compares with
+`_font.Equals(value)`, which is `Union.Equals` and therefore `EqualityComparer<T>.Default` on the
+payload, so an equal-but-new override assigns nothing and invalidates nothing. Two tests pin it: one
+in the core suite (the property still reports the first instance and the appearance-change count does
+not move) and one in the Virtual DOM suite (a re-render that builds `InheritedFont.WithSize(18f)`
+again patches nothing). Without it, every render pass that rebuilds an inline override would invalidate
+the subtree - the exact defect layer 1 removed from `Font`.
+
+**Where the composition happens, and what is cached.** `EffectiveFont` composes, as designed, and
+nothing else does: `FontOverride.Compose(Font)` is internal, and a partial description has no path to
+`FontManager` because it has no `Realize`. The rule that a partial description never reaches a
+realization is therefore a shape, not a convention.
+
+The walk up the chain now stops at the nearest ancestor that *has a case*: a `Font` case contributes
+that font, and a `FontOverride` case contributes `ancestor.EffectiveFont`, so overrides compose in
+order down the tree and an override answers for its whole subtree. One addition the note did not
+specify: **the composition is cached only when its base is cached.** When an ancestor assigned the
+font, the composed result is stored beside `_inheritedFont` and dropped by the same
+`InvalidateAppearanceTree` - which is why it costs a field and not just the wider union. When the base
+is the class default, the override is composed on every read against the live `DefaultFont`, so the
+rule the guide states - a class default is read every time, and a theme change needs no rebuild -
+survives untouched. Without the cache a control with an override would allocate a `Font` per
+`EffectiveFont` read, and `ListView` and `ListBox` read it once per row per paint.
+
+**`ToolStripItem.Font` widened too.** A menu item is a control that inherits, "a bit bigger here" is
+the same wish, and leaving the two properties different by accident would be worse than the union
+arity. The item composes onto `Owner?.EffectiveFont ?? Theme.DefaultFont` and does **not** cache: its
+base is the strip's live effective font, so a cache would need to be told when the strip's font
+changed, and a strip is a handful of items. The asymmetry is stated in the property's remarks rather
+than hidden.
+
+**The Virtual DOM needed no change, and that was verified rather than assumed.** The generator names
+no font type anywhere - `property.Type` comes from the control's own declaration, `Values.Unset`
+returns null unless `[VNodePropertyUnsetValue]` supplies a literal, and the pristine value is read
+from a constructed control. The emitted node for the widened property is:
+
+```csharp
+private static readonly Union<Font, FontOverride, InheritedValue> PristineFont = Pristine.Font;
+private Specified<Union<Font, FontOverride, InheritedValue>> _font;
+// patch:
+if (!_font.Equals(old._font))
+    target.Font = _font.IsSpecified ? _font.Value : PristineFont;
+```
+
+which is precisely the shape section 3 predicted, with the wider union threaded through it by
+`property.Type` alone. The mirror-drift test still passes because the node and control property types
+are equal by construction.
+
+**An override that names nothing** is *equivalent but not identical* to `InheritedValue`. It is a
+different case of the property - `TryGetValue<FontOverride>` is true where
+`TryGetValue<InheritedValue>` would be - so code that inspects the assignment sees a difference and
+the reconciler sees a property change; but `Compose` returns the inherited `Font` itself when nothing
+it names differs from it, so the effective font is the *same object*, and everything downstream that
+compares fonts behaves identically. That is the deliberate answer to the question the design left
+open: identical in effect, distinguishable in the property.
+
+**What the design left open, and how it was settled.** Three things section 5 does not say, decided
+here so they are not re-litigated:
+
+- *What an override composes onto when nothing is assigned above it, and when the class default is not
+  the theme's.* It composes onto the font the control would otherwise draw with - the nearest
+  ancestor's assignment, else its own class default - so a `Button` with `WithItalic(true)` and no
+  assignment above it is the emphasized font in italic, not the default font. A child of a control
+  that carries an override inherits the composed font and therefore no longer falls back to its own
+  class default, which is the ordinary rule that an assignment answers for the subtree.
+- *Whether the composition should be cached, and against what.* Cached exactly when the base is, as
+  described above; the class-default case is composed live. The alternative - always cache - would
+  have quietly changed the documented "a class default is read every time" behaviour.
+- *Whether a `ToolStripItem` caches too.* It does not, for the reason in its remarks: its base is the
+  strip's live effective font.
+
 ## 6. Threading
 
 `FontManager` is the only structure in the library touched from a finalizer thread. `Font`,
@@ -1113,6 +1220,35 @@ family to a panel, and the family it registers is the one recorded inside the fi
 that can change is the weight its children ask for - which is what the fix is about.
 
 
+### 8.3 The override layer, as measured
+
+**1. Publish size.** The same fixture and command as 8.1, and the same build root before and after
+(one worktree, so the roots are identical by construction), SDK 10.0.403:
+
+| | before (`4a5b283`) | after | delta |
+| --- | --- | --- | --- |
+| `Kolvir.Minimal`, win-x64 | 3,914,752 | 3,916,288 | 1,536 |
+
+The baseline reproduces at 3,914,752 and the new image at 3,916,288 on a second publish of each, and
+1,536 is three 512-byte alignment steps, so the delta is the code rather than the boundary. It is the
+public type, its four members and their comparers, the composition, the extra union arm and the
+`Control` field - and it is small because the arm is a reference to a small type rather than a second
+font implementation, and an application that never assigns an override never constructs one.
+
+**2. Per-instance cost.** `new BareControl()` allocates **616.01 bytes against 600.01** - 16 bytes,
+8 of them the wider union and 8 the cache of that composition. Section 5.1 has the rest of the table,
+including the 32 bytes a struct override would have cost instead.
+
+**3. Renders.** All 73 pages, 1280x820, light appearance, by the method in 8.2. Each build was
+rendered twice first: the two passes of the same build differ on exactly the two clock-dependent pages
+(`animated-gif`, `animated-webp`), so those are excluded from the cross-build claim.
+
+**70 of the 71 pages that can be compared are byte-identical to `4a5b283`.** The seventy-first is
+`inherited-appearance`, the page this change deliberately moved, where 85,496 pixels in one box at
+(252,214)-(1243,723) are the three override labels, the readout line that names their resolved sizes
+and weights, and the re-wrap below them. **No other page moved, which is what an additive change
+should look like**: a page that moved without an override in it would be a finding, and there is none.
+
 ## 9. Migration
 
 `Font`'s public surface today: four constructors, three static factories, `IDisposable`, and
@@ -1158,6 +1294,14 @@ sites gained a `.Realize()`.
 
 **What breaks for an application, and what it does instead:**
 
+- **`Control.Font` gains a case** (layer 2, section 5). `label.Font = someFont` still compiles, and so
+  does every read of `EffectiveFont`, because the property's type widened and the cases it had are
+  unchanged. What stops compiling is an exhaustive `Switch` or `Match` over `Control.Font` - it has to
+  name the `FontOverride` arm - and `label.Font = null`, which used to convert to the `Font` case and
+  which the setter then refused at run time; with two reference-typed cases the literal no longer
+  converts at all (CS0037, measured). The spelling for "no font here" has always been
+  `PropertyValue.Inherited`; the new one for a partial font is `InheritedFont.WithSize(...)`.
+  `ToolStripItem.Font` widens with it.
 - **`Font` stops being `IDisposable`.** A `using var font = Font.FromBytes(...)` stops compiling
   (CS1674), and `font.Dispose()` stops compiling (CS1061). The fix is deleting them, which is the
   point: nothing is owned and nothing needs releasing. The two tests that exist only because of
@@ -1218,7 +1362,9 @@ name ambiguity - a shim for `Font.FromBytes` would have to invent a family name,
 would end up with two names for one face and no way to tell them apart. The migration table above is
 the compatibility story: every break has a mechanical replacement of one to three lines, and the two
 things that are not mechanical - a disposable font and a reference comparison - are behaviour
-removals the note argues are improvements.
+removals the note argues are improvements. Layer 2's break is smaller than any row above: one union
+case to handle where the property is switched on exhaustively, and a `null` literal that was never
+usable on the property anyway.
 
 ## 10. The rejected alternatives, in one place
 
@@ -1261,10 +1407,14 @@ reviewer can disagree with the reading rather than with a decision presented as 
    second theme role. The reading to start from is to wait for that consumer and ship only the
    registry and the description/realization split, because every application pays for the union arity
    (a wider value, a case to test for on read) whether or not it uses an override.
-   **Resolved elsewhere: layer 2 builds it.** A consumer arrived - `label.Font =
-   InheritedFont.WithSize(14f)` - so the override type is being built on a branch stacked on this one.
-   Nothing here blocks it: this layer adds no case to `Control.Font` and leaves `EffectiveFont`
-   returning `Font`, which is exactly the shape section 5 needs.
+   **Resolved: layer 2 built it, with the shape this note proposed.** A consumer arrived -
+   `label.Font = InheritedFont.WithSize(14f)` - and section 5.1 is what shipped: `FontOverride` as a
+   sealed class with value equality, composed in `EffectiveFont`, never seen by realization,
+   `Control.Font` and `ToolStripItem.Font` at `Union<Font, FontOverride, InheritedValue>`, and
+   `InheritedFont` as the static class that starts a chain. The union arity every application pays for
+   is 8 bytes in a `Control` (16 with the cache of the composition, section 5.1) and 1,536 bytes on
+   `Kolvir.Minimal` (section 8.3), and no application that never assigns an override carries the type
+   at all.
 2. **Should an application be able to reach the realization?** `RealizedFont` is proposed internal,
    with `Font` as the whole surface. What an application cannot do today either - draw with a
    `Font` directly, or read `SKFont.Metrics.Descent` for its own layout - it still cannot do. The
@@ -1273,7 +1423,11 @@ reviewer can disagree with the reading rather than with a decision presented as 
    object which can be replaced under it needs the whole section 4.4 contract documented as public
    API.
    **Resolved as read: `RealizedFont`, `FontKey` and `FontManager` are all internal.** The same
-   argument covers all three; see section 2.5.
+   argument covers all three; see section 2.5. **Re-checked when layer 2 landed**: overrides add no
+   pressure at all, because what an override returns is an ordinary `Font` - the composition is
+   internal, and `EffectiveFont` hands back the same kind of description a complete assignment does.
+   There is nothing an override would let an application reach that the property did not already give
+   it.
 3. **`ImmutableDictionary`, or a swapped `Dictionary`?** The agreed shape is
    `ImmutableDictionary<FontKey, WeakReference<RealizedFont>>` read lock-free. It is the first use of
    `System.Collections.Immutable` in the core assembly, and since `Font` is always retained the
