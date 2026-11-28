@@ -1,5 +1,6 @@
 using System.Globalization;
 using Kolvir;
+using SkiaSharp;
 
 namespace Kolvir.Tests;
 
@@ -117,11 +118,53 @@ public sealed class FontLoadingTests : HeadlessTestBase
         var bold = new Font(SampleSize, bold: true);
 
         Assert.AreEqual(regular.FamilyName, bold.FamilyName, "the same family, named");
+
+        // The precondition is asked of the platform rather than of the descriptions, so that it does
+        // not depend on the thing being tested: which family the platform treats as its default, and
+        // whether that family has a bold instance at all.
+        string platformFamily = SKTypeface.FromFamilyName(null, SKFontStyle.Normal)?.FamilyName ?? string.Empty;
+
+        if (string.IsNullOrEmpty(platformFamily))
+        {
+            Assert.Inconclusive("this platform reports no default family, so there is no family to name");
+        }
+
         Assert.AreEqual(
-            new Font(regular.FamilyName, SampleSize, 700).MeasureWidth(SampleText),
+            platformFamily,
+            regular.FamilyName,
+            "a description built without a family names the platform's default family");
+
+        // What has to be true is that bold reaches a *different face* than regular does. Comparing the
+        // two descriptions against each other would not say that - it holds when both draw regular,
+        // which is the very bug. A machine whose default family has no bold instance gets a skip
+        // rather than a green that proves nothing.
+        int regularFaceWeight = FaceWeight(platformFamily, 400);
+        int boldFaceWeight = FaceWeight(platformFamily, 700);
+
+        if (regularFaceWeight == boldFaceWeight)
+        {
+            Assert.Inconclusive(
+                $"'{platformFamily}' resolves to weight {regularFaceWeight} for both 400 and 700 on this " +
+                "machine, so asking for bold cannot reach another face here");
+        }
+
+        Assert.AreNotEqual(
+            regular.MeasureWidth(SampleText),
             bold.MeasureWidth(SampleText),
-            0.001f,
-            "asking for bold reaches the face now that the family is named");
+            "asking for bold reaches the bold face, which is a different face with different advances");
+    }
+
+    /// <summary>The weight of the face a family resolves to at <paramref name="weight"/>.</summary>
+    /// <param name="family">The family to ask the platform for.</param>
+    /// <param name="weight">The weight to ask for.</param>
+    /// <returns>The weight of the face that came back, or 0 when the platform answered with none.</returns>
+    private static int FaceWeight(string family, int weight)
+    {
+        using var typeface = SKTypeface.FromFamilyName(
+            family,
+            new SKFontStyle(weight, (int)SKFontStyleWidth.Normal, SKFontStyleSlant.Upright));
+
+        return typeface?.FontStyle.Weight ?? 0;
     }
 
     [TestMethod]
