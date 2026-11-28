@@ -1,5 +1,6 @@
 using Microsoft.VisualStudio.TestTools.UnitTesting;
 using SkiaSharp;
+using System.Runtime.CompilerServices;
 
 namespace Kolvir.Tests;
 
@@ -379,6 +380,28 @@ public sealed class UnionTests
             _ = union.TryGetValue<SKColor>(out _);
         }
 
+        // The loop is measured twice and only the second window is asserted on. A one-off cost -
+        // a tier-up re-JIT, a first generic instantiation, PGO - can land inside the first window
+        // even after the warm-up above, and it is not boxing; the steady state is what this test is
+        // about, and taking the second window keeps the assertion at exactly zero instead of
+        // widening it to a tolerance that would hide real boxing. Do not collapse this back to one
+        // window.
+        _ = MatchingTryGetValueAllocation(union);
+        long allocated = MatchingTryGetValueAllocation(union);
+
+        Assert.AreEqual(0L, allocated, "a matching TryGetValue reinterprets the payload and must not box it");
+    }
+
+    /// <summary>
+    /// Runs the matching-case read a million times and reports the bytes it allocated on this
+    /// thread, so that a one-time cost is confined to the call it lands in rather than to whatever
+    /// the assertion happens to measure next.
+    /// </summary>
+    /// <param name="union">The union to read; the direct-colour case is set.</param>
+    /// <returns>The bytes allocated by the loop on this thread.</returns>
+    [MethodImpl(MethodImplOptions.NoInlining | MethodImplOptions.AggressiveOptimization)]
+    private static long MatchingTryGetValueAllocation(Union<SKColor, ThemeColor, InheritedValue> union)
+    {
         long before = GC.GetAllocatedBytesForCurrentThread();
 
         for (int i = 0; i < 1_000_000; i++)
@@ -386,8 +409,6 @@ public sealed class UnionTests
             _ = union.TryGetValue<SKColor>(out _);
         }
 
-        long allocated = GC.GetAllocatedBytesForCurrentThread() - before;
-
-        Assert.AreEqual(0L, allocated, "a matching TryGetValue reinterprets the payload and must not box it");
+        return GC.GetAllocatedBytesForCurrentThread() - before;
     }
 }
