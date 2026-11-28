@@ -684,6 +684,15 @@ applications that use nothing new, and it is the reason the size measurement is 
    the one place the change is expected to be a *win* on a number, and a win is still reported rather
    than assumed.
 
+A fifth number is not in the policy and should be taken with the same pull request, because it is the
+one cost the design adds to the path it is meant to speed up: **the epoch compare on the measure
+path.** `MeasureWidth` is called in binary searches over a line (`RichLabel.FitPrefix`,
+`TextRenderer.BuildTextLines`) and several times per line per pass, so a field read and a branch in
+front of every call is added to the hottest loop in the library. It is very likely invisible next to
+the dictionary probe and the native measurement behind it, but "very likely invisible" is the kind of
+claim this note has been refusing to make elsewhere, so it gets a before-and-after timing of one long
+wrapped paragraph rather than a sentence.
+
 No number is invented here. The pull request that implements the change carries the measurements, as
 the policy's status line asks of every change.
 
