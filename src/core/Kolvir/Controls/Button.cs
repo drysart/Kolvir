@@ -117,6 +117,42 @@ public class Button : Control
         TextRenderer.Draw(canvas, Text, EffectiveFont, textColor, content, ContentAlignment.MiddleCenter);
     }
 
+    /// <summary>
+    /// Reports where the button's centred label would sit at <paramref name="size"/>.
+    /// </summary>
+    /// <param name="size">The size the button is about to be arranged at.</param>
+    /// <param name="baseline">The label's first-line baseline, measured from the button's top edge.</param>
+    /// <returns>True when there is a label to align; false for a button with no text.</returns>
+    /// <remarks>
+    /// The label is centred in the padded box, so its baseline moves with the button's height; the
+    /// query therefore answers about the size the button is being arranged at rather than about
+    /// the box it happens to have now. A row that aligns a button by this baseline keeps its text
+    /// on the row's line, which is what a button beside a field is for.
+    /// </remarks>
+    internal override bool TryGetBaseline(SKSize size, out float baseline)
+    {
+        baseline = 0f;
+        if (string.IsNullOrEmpty(Text) || size.Height <= 0f)
+        {
+            return false;
+        }
+
+        var content = Geometry.Deflate(new SKRect(0f, 0f, size.Width, size.Height), Padding);
+        if (content.Width <= 0f || content.Height <= 0f)
+        {
+            return false;
+        }
+
+        var lines = TextRenderer.BuildTextLines(Text, EffectiveFont, content.Width, wrap: false);
+        if (lines.Count == 0)
+        {
+            return false;
+        }
+
+        baseline = TextRenderer.GetBlockBaseline(content, EffectiveFont, lines.Count, ContentAlignment.MiddleCenter);
+        return true;
+    }
+
     /// <summary>Takes the mouse capture and marks the button pressed on a left-button press.</summary>
     protected override void OnMouseDown(MouseEventArgs e)
     {

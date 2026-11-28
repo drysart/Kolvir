@@ -47,6 +47,37 @@ public class Label : Control
     }
 
     /// <summary>
+    /// Reports where the first line of the label's text would sit at <paramref name="size"/>, using
+    /// the same layout and alignment <see cref="OnPaint"/> draws with.
+    /// </summary>
+    /// <param name="size">The size the label is about to be arranged at.</param>
+    /// <param name="baseline">The first line's baseline, measured from the label's top edge.</param>
+    /// <returns>True when the label has text to align; false for an empty label.</returns>
+    internal override bool TryGetBaseline(SKSize size, out float baseline)
+    {
+        baseline = 0f;
+        if (string.IsNullOrEmpty(Text) || size.Height <= 0f)
+        {
+            return false;
+        }
+
+        var content = Geometry.Deflate(new SKRect(0f, 0f, size.Width, size.Height), Padding);
+        if (content.Width <= 0f || content.Height <= 0f)
+        {
+            return false;
+        }
+
+        var lines = BuildLines(content);
+        if (lines.Count == 0)
+        {
+            return false;
+        }
+
+        baseline = TextRenderer.GetBlockBaseline(content, EffectiveFont, lines.Count, TextAlign);
+        return true;
+    }
+
+    /// <summary>
     /// Draws the text inside the content area, aligned by <see cref="TextAlign"/> and wrapped at the
     /// content width when <see cref="WrapText"/> is set.
     /// </summary>

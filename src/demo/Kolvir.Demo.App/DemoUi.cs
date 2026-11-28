@@ -593,6 +593,7 @@ public sealed class DemoUi
         ("popups", "Popups", demo => new PopupPage(demo)),
         ("rich-label-markup", "Rich label markup", demo => new RichLabelMarkupPage(demo)),
         ("asset-loading", "Asset loading", demo => new AssetLoadingPage(demo)),
+        ("baseline-align", "Baseline alignment", demo => new BaselineAlignPage(demo)),
     };
 
     /// <summary>

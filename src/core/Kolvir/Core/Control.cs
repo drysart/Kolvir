@@ -2579,6 +2579,44 @@ public class Control : IDisposable
     /// </remarks>
     internal virtual bool WrapsToItsWidth => false;
 
+    /// <summary>
+    /// Answers where this control's first text baseline would sit if it were arranged at
+    /// <paramref name="size"/>, measured from the top of its border, so that a container can line
+    /// several controls up along their text.
+    /// </summary>
+    /// <param name="size">The size this control is about to be arranged at.</param>
+    /// <param name="baseline">
+    /// The distance from the control's top edge to the baseline of its first line of text. Zero when
+    /// the control declares no baseline.
+    /// </param>
+    /// <returns>
+    /// True when the control has a text baseline at that size; false when it has none, which is the
+    /// default because a control that draws no text has nothing to line up.
+    /// </returns>
+    /// <remarks>
+    /// <para>
+    /// This is a question about a size rather than about the control's current bounds: a container
+    /// asks before it arranges anything, so the answer has to be about the rectangle the control is
+    /// going to get. It is what lets a stretched or centred control answer correctly - the same
+    /// control at another height has its text somewhere else - instead of reporting a fixed number.
+    /// </para>
+    /// <para>
+    /// The answer is in the control's own coordinates and excludes <see cref="Margin"/>: the
+    /// container adds the margin itself when it positions the control. An override must agree with
+    /// where the control actually paints the text, which is why a control that lays text out through
+    /// <see cref="TextRenderer"/> should ask <see cref="TextRenderer.GetBlockBaseline"/>.
+    /// </para>
+    /// <para>
+    /// Only a baseline that is real is declared. Empty text answers false rather than zero, so a
+    /// blank label does not drag a row around; a control with several lines answers for its first.
+    /// </para>
+    /// </remarks>
+    internal virtual bool TryGetBaseline(SKSize size, out float baseline)
+    {
+        baseline = 0f;
+        return false;
+    }
+
     /// <summary>Arranges this control's children, unless layout is suspended.</summary>
     /// <remarks>
     /// Suspending is what makes adding many children at once affordable: every child added lays its

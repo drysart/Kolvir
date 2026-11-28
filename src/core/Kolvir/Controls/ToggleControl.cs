@@ -242,6 +242,46 @@ public abstract class ToggleControl : Control
     }
 
     /// <summary>
+    /// Reports where the toggle's label would sit at <paramref name="size"/>.
+    /// </summary>
+    /// <param name="size">The size the toggle is about to be arranged at.</param>
+    /// <param name="baseline">The label's first-line baseline, measured from the toggle's top edge.</param>
+    /// <returns>True when there is a label to align; false when the toggle has no text.</returns>
+    /// <remarks>
+    /// Only the text is reported. The glyph is centred in the control rather than tied to a
+    /// baseline, so a row that lines the label up with its neighbours keeps the glyph where the
+    /// toggle itself would have drawn it.
+    /// </remarks>
+    internal override bool TryGetBaseline(SKSize size, out float baseline)
+    {
+        baseline = 0f;
+        if (string.IsNullOrEmpty(Text) || size.Height <= 0f)
+        {
+            return false;
+        }
+
+        var label = new SKRect(
+            Padding.Left + _glyphSize + _glyphGap,
+            0f,
+            MathF.Max(Padding.Left + _glyphSize + _glyphGap, size.Width - Padding.Right),
+            size.Height);
+
+        if (label.Width <= 0f || label.Height <= 0f)
+        {
+            return false;
+        }
+
+        var lines = TextRenderer.BuildTextLines(Text, EffectiveFont, label.Width, wrap: false);
+        if (lines.Count == 0)
+        {
+            return false;
+        }
+
+        baseline = TextRenderer.GetBlockBaseline(label, EffectiveFont, lines.Count, _textAlign);
+        return true;
+    }
+
+    /// <summary>
     /// The border slot is used for the focus ring, which is drawn last so it sits above the glyph and
     /// the label it surrounds.
     /// </summary>

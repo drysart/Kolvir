@@ -38,6 +38,12 @@ public class StackPanel : Panel
 {
     private StackOrientation _orientation = StackOrientation.Vertical;
     private float _spacing;
+    private bool _alignBaselines;
+
+    // The plans for one pass over the run, kept between passes so a layout does not allocate once
+    // per child. Only the horizontal baseline path uses them, so a stack that never turns the
+    // feature on never touches the array.
+    private RowPlan[] _rowPlans = [];
 
     // The children of the run, by index, in the order the last arrange pass placed them. A run is
     // ordered along the stacking axis and does not overlap there, so hit testing and painting can
@@ -93,6 +99,47 @@ public class StackPanel : Panel
     }
 
     /// <summary>
+    /// When true, a horizontal stack lines up the children that declare a text baseline - labels,
+    /// rich labels, fields and buttons, among others - along that baseline. Defaults to false, and
+    /// does nothing to a vertical stack.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// A child that declares a baseline is not stretched across the stack: it keeps the height it
+    /// measured and is placed by its own <see cref="Control.VerticalAlignment"/> within the run's
+    /// own row box. That is what makes the answer knowable - a stretched child's baseline would be
+    /// a function of the panel's height, and the panel's height a function of its children - so a
+    /// row of labels at different sizes still resolves when the panel is auto-sized.
+    /// </para>
+    /// <para>
+    /// The baselines are then lined up on the lowest of them: the child whose baseline sits lowest
+    /// stays where it was placed, and every other participant moves down to meet it. Nothing moves
+    /// up, so a row never rises above the position its tallest-aligned child asked for. A child
+    /// that reports no baseline is arranged exactly as it always was, in the box the run grew to.
+    /// </para>
+    /// <para>
+    /// The row grows downwards to hold the shifted children, and <see cref="Control.Measure"/>
+    /// reports that grown height, so an auto-sized stack is measured tall enough for the row it
+    /// then arranges. Turning the property off restores the ordinary arrangement exactly.
+    /// </para>
+    /// </remarks>
+    public bool AlignBaselines
+    {
+        get => _alignBaselines;
+        set
+        {
+            if (_alignBaselines == value)
+            {
+                return;
+            }
+
+            _alignBaselines = value;
+            PerformLayout();
+            Invalidate();
+        }
+    }
+
+    /// <summary>
     /// An auto-sized stack is as long as the run of its children and as wide (or tall) as the widest
     /// of them. A child that was given a size contributes that size rather than a measurement, which
     /// is the size it is drawn at; one that never was is measured, because that is the only answer
@@ -101,9 +148,16 @@ public class StackPanel : Panel
     protected override SKSize MeasureContent(SKSize availableSize)
     {
         bool vertical = Orientation == StackOrientation.Vertical;
+        bool baselines = !vertical && AlignBaselines;
         float length = 0f;
         float breadth = 0f;
         bool first = true;
+        int planned = 0;
+
+        if (baselines && _rowPlans.Length < Controls.Count)
+        {
+            Array.Resize(ref _rowPlans, Controls.Count);
+        }
 
         foreach (var child in Controls)
         {
@@ -112,7 +166,18 @@ public class StackPanel : Panel
                 continue;
             }
 
-            var size = !child.AutoSize && child.HasOwnSize ? child.Size : child.Measure(availableSize);
+            SKSize measured;
+            SKSize size;
+            if (!child.AutoSize && child.HasOwnSize)
+            {
+                size = child.Size;
+                measured = baselines ? child.Measure(availableSize) : size;
+            }
+            else
+            {
+                measured = child.Measure(availableSize);
+                size = measured;
+            }
             if (!first)
             {
                 length += Spacing;
@@ -121,8 +186,36 @@ public class StackPanel : Panel
             first = false;
             length += (vertical ? size.Height : size.Width) +
                       (vertical ? child.Margin.Vertical : child.Margin.Horizontal);
-            breadth = MathF.Max(breadth, (vertical ? size.Width : size.Height) +
+
+            float cross = vertical ? size.Width : size.Height;
+            if (baselines)
+            {
+                // The arrange pass asks for the height the same way, so a child that opted out of
+                // auto-sizing without deciding a height of its own has the measurement stand in -
+                // a field given a width and nothing else, for one.
+                cross = BaselineCrossOf(child, measured);
+            }
+
+            breadth = MathF.Max(breadth, cross +
                                          (vertical ? child.Margin.Horizontal : child.Margin.Vertical));
+
+            if (baselines)
+            {
+                bool measuresMain = child.AutoSize || child.LengthIsMeasured(vertical: false);
+                _rowPlans[planned++] = new RowPlan
+                {
+                    Child = child,
+                    Margin = child.Margin,
+                    MainLength = MathF.Max(0f, measuresMain ? measured.Width : child.Size.Width),
+                    CrossLength = cross,
+                    Alignment = child.VerticalAlignment,
+                };
+            }
+        }
+
+        if (baselines && planned > 0)
+        {
+            breadth = MathF.Max(breadth, BaselineBreadth(planned, breadth));
         }
 
         var content = vertical ? new SKSize(breadth, length) : new SKSize(length, breadth);
@@ -172,6 +265,11 @@ public class StackPanel : Panel
         }
 
         bool vertical = Orientation == StackOrientation.Vertical;
+
+        if (!vertical && AlignBaselines)
+        {
+            return ArrangeHorizontalBaselines(area, content);
+        }
 
         float MainStart(SKRect rect) => vertical ? rect.Top : rect.Left;
         float CrossStart(SKRect rect) => vertical ? rect.Left : rect.Top;
@@ -264,6 +362,274 @@ public class StackPanel : Panel
 
         _runValid = true;
         return new SKSize(MathF.Max(0f, right - content.Left), MathF.Max(0f, bottom - content.Top));
+    }
+
+    /// <summary>
+    /// Arranges a horizontal run with <see cref="AlignBaselines"/> on: the children keep their own
+    /// widths along the run, the ones that declare a baseline are placed on a shared one, and the
+    /// rest are placed by their own alignment.
+    /// </summary>
+    /// <param name="area">The run's area, after the docked children took their edges.</param>
+    /// <param name="content">The panel's content area, which the extent is measured against.</param>
+    /// <returns>The size of what the run covers, in the same shape the ordinary pass reports.</returns>
+    /// <remarks>
+    /// The pass is two walks over the children. The first measures each one, remembers the
+    /// rectangle it would get and works out how tall the run's own row box is - the tallest child,
+    /// not the panel, so that a panel taller than its content cannot move the baselines. The second
+    /// uses that to ask each child for its baseline, picks the lowest as the one to share, and
+    /// places everything. Placing in the second walk rather than the first is what lets nothing
+    /// move up: the shared baseline is only known once every child has answered.
+    /// </remarks>
+    private SKSize ArrangeHorizontalBaselines(SKRect area, SKRect content)
+    {
+        if (_rowPlans.Length < Controls.Count)
+        {
+            Array.Resize(ref _rowPlans, Controls.Count);
+        }
+
+        float main = area.Left;
+        float crossAvailable = area.Height;
+        bool first = true;
+        int planned = 0;
+        float rowCross = 0f;
+
+        for (int i = 0; i < Controls.Count; i++)
+        {
+            var child = Controls[i];
+            if (!child.Visible || child.Dock != DockStyle.None)
+            {
+                continue;
+            }
+
+            var margin = child.Margin;
+            float crossBox = MathF.Max(0f, crossAvailable - margin.Vertical);
+            var available = new SKSize(area.Width, crossBox);
+
+            // Everything is measured, including a child that would have been stretched: whether it
+            // declares a baseline decides whether it is stretched at all, and only its own size can
+            // answer that question.
+            bool measuresMain = child.AutoSize || child.LengthIsMeasured(vertical: false);
+            var desired = child.Measure(available);
+            float mainLength = MathF.Max(0f, measuresMain ? desired.Width : child.Size.Width);
+            float ownCross = MathF.Max(0f, BaselineCrossOf(child, desired));
+
+            if (!first)
+            {
+                main += Spacing;
+            }
+
+            first = false;
+
+            float mainPosition = main + margin.Left;
+            main = mainPosition + mainLength + margin.Right;
+
+            float crossLength = MathF.Min(ownCross, crossBox);
+            _rowPlans[planned++] = new RowPlan
+            {
+                Child = child,
+                Index = i,
+                Margin = margin,
+                MainPosition = mainPosition,
+                MainLength = mainLength,
+                CrossLength = crossLength,
+                Alignment = child.VerticalAlignment,
+            };
+
+            rowCross = MathF.Max(rowCross, crossLength + margin.Vertical);
+        }
+
+        float reference = BaselineReference(planned, rowCross);
+
+        float right = content.Right;
+        float bottom = content.Bottom;
+
+        for (int i = 0; i < planned; i++)
+        {
+            ref var plan = ref _rowPlans[i];
+
+            float top;
+            if (plan.Participates)
+            {
+                // The shared baseline is the lowest any child's own baseline wanted to be, so this
+                // is at or below where the child's alignment put it.
+                top = area.Top + reference - plan.Baseline;
+            }
+            else
+            {
+                if (plan.Alignment == Alignment.Stretch)
+                {
+                    plan.CrossLength = MathF.Max(0f, crossAvailable - plan.Margin.Vertical);
+                }
+
+                float crossBox = MathF.Max(0f, crossAvailable - plan.Margin.Vertical);
+                top = area.Top + AlignedTop(plan, crossBox);
+            }
+
+            var slot = new SKRect(
+                plan.MainPosition,
+                top,
+                plan.MainPosition + plan.MainLength,
+                top + plan.CrossLength);
+
+            plan.Child.SetArrangedBounds(slot);
+            _run.Add(plan.Index);
+
+            var outer = Geometry.Inflate(slot, plan.Margin);
+            right = MathF.Max(right, outer.Right);
+            bottom = MathF.Max(bottom, outer.Bottom);
+        }
+
+        _runValid = true;
+        return new SKSize(MathF.Max(0f, right - content.Left), MathF.Max(0f, bottom - content.Top));
+    }
+
+    /// <summary>
+    /// Asks every child in the run for its baseline at the size it will get, records the answer on
+    /// its plan, and returns the lowest baseline all the participants have to share.
+    /// </summary>
+    /// <param name="count">How many plans the run holds.</param>
+    /// <param name="rowCross">
+    /// The height of the run's own row box - the tallest child and its margins - which is what a
+    /// participant's alignment is resolved in.
+    /// </param>
+    /// <returns>
+    /// The shared baseline in the run's own coordinates, or negative infinity when no child
+    /// declares one.
+    /// </returns>
+    private float BaselineReference(int count, float rowCross)
+    {
+        float reference = float.NegativeInfinity;
+
+        for (int i = 0; i < count; i++)
+        {
+            ref var plan = ref _rowPlans[i];
+            plan.Participates = plan.Child.TryGetBaseline(
+                new SKSize(plan.MainLength, plan.CrossLength),
+                out plan.Baseline);
+
+            if (!plan.Participates)
+            {
+                continue;
+            }
+
+            float rowBox = MathF.Max(0f, rowCross - plan.Margin.Vertical);
+            reference = MathF.Max(reference, AlignedTop(plan, rowBox) + plan.Baseline);
+        }
+
+        return reference;
+    }
+
+    /// <summary>
+    /// The height the run needs so that its children share a baseline, given the run's own row box.
+    /// </summary>
+    /// <remarks>
+    /// This is the measure half of the same rule the arrange pass applies: the shared baseline is
+    /// the lowest provisional one, and every participant's box reaches from it down by that child's
+    /// own descent plus its bottom margin. Using one rule in both passes is what keeps an
+    /// auto-sized panel from measuring short and clipping the arranged row.
+    /// </remarks>
+    /// <param name="count">How many plans the run holds.</param>
+    /// <param name="rowCross">The height of the run's own row box.</param>
+    /// <returns>The height the run needs, never less than <paramref name="rowCross"/>.</returns>
+    private float BaselineBreadth(int count, float rowCross)
+    {
+        float reference = BaselineReference(count, rowCross);
+        if (float.IsNegativeInfinity(reference))
+        {
+            return rowCross;
+        }
+
+        float breadth = rowCross;
+        for (int i = 0; i < count; i++)
+        {
+            ref var plan = ref _rowPlans[i];
+            if (!plan.Participates)
+            {
+                continue;
+            }
+
+            breadth = MathF.Max(
+                breadth,
+                reference - plan.Baseline + plan.CrossLength + plan.Margin.Bottom);
+        }
+
+        return breadth;
+    }
+
+    /// <summary>
+    /// The height a child contributes to a baseline row: its own when it has decided one, and the
+    /// height it measures at otherwise.
+    /// </summary>
+    /// <remarks>
+    /// A control that opted out of auto-sizing may still not have a height - a field given only a
+    /// width is the usual case - and a height of zero is the absence of a decision rather than a
+    /// request to collapse, so the measurement stands in for it. Without this the child would be
+    /// asked for its baseline at a zero-height size, answer that it has none, and be stretched
+    /// after all.
+    /// </remarks>
+    /// <param name="child">The child being planned.</param>
+    /// <param name="desired">What it measured at.</param>
+    /// <returns>The height its slot should have, before the run's own box caps it.</returns>
+    private static float BaselineCrossOf(Control child, SKSize desired) =>
+        !child.AutoSize && child.HasOwnSize && child.Size.Height > 0f
+            ? child.Size.Height
+            : desired.Height;
+
+    /// <summary>
+    /// The top of a child's box inside a box <paramref name="crossBox"/> tall, before the
+    /// baseline shift.
+    /// </summary>
+    /// <param name="plan">The child's plan.</param>
+    /// <param name="crossBox">The height the child has to be placed in.</param>
+    /// <returns>The distance from the top of that box to the child's top, margins included.</returns>
+    /// <remarks>
+    /// <see cref="Alignment.Stretch"/> reads as <see cref="Alignment.Near"/>: a child that reports a
+    /// baseline is precisely the one that is not stretched, so there is no larger box for it to fill.
+    /// </remarks>
+    private static float AlignedTop(in RowPlan plan, float crossBox)
+    {
+        float offset = plan.Alignment switch
+        {
+            Alignment.Center => (crossBox - plan.CrossLength) / 2f,
+            Alignment.Far => crossBox - plan.CrossLength,
+            _ => 0f,
+        };
+
+        return plan.Margin.Top + offset;
+    }
+
+    /// <summary>
+    /// One child's place in a horizontal baseline run: the rectangle along the run that it will
+    /// get, and what it answered about its baseline.
+    /// </summary>
+    private struct RowPlan
+    {
+        /// <summary>The child this plan arranges.</summary>
+        public Control Child;
+
+        /// <summary>Its index in <see cref="ControlCollection"/>, for the paint and hit-test cache.</summary>
+        public int Index;
+
+        /// <summary>Its margins, which the panel applies to the slot rather than to the child.</summary>
+        public Thickness Margin;
+
+        /// <summary>Where its slot starts along the run.</summary>
+        public float MainPosition;
+
+        /// <summary>How long its slot is along the run.</summary>
+        public float MainLength;
+
+        /// <summary>How tall its slot is, across the run.</summary>
+        public float CrossLength;
+
+        /// <summary>The alignment it asked for across the run.</summary>
+        public Alignment Alignment;
+
+        /// <summary>The baseline it reported, from the top of its own box, when it has one.</summary>
+        public float Baseline;
+
+        /// <summary>True when the child reported a baseline and takes part in the alignment.</summary>
+        public bool Participates;
     }
 
     /// <summary>Paints the children that can be seen, in the order they were declared.</summary>

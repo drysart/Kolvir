@@ -73,7 +73,7 @@ public static class TextRenderer
         }
 
         float lineHeight = font.LineHeight;
-        float top = GetBlockTop(bounds, font, lines.Count, alignment);
+        float blockBaseline = GetBlockBaseline(bounds, font, lines.Count, alignment);
 
         using var paint = new SKPaint
         {
@@ -86,10 +86,32 @@ public static class TextRenderer
         {
             var line = lines[i];
             float x = GetLineLeft(bounds, font, line.Text, alignment);
-            float baseline = top + (i * lineHeight) + font.BaselineOffset;
+            float baseline = blockBaseline + (i * lineHeight);
             font.Realize().DrawText(canvas, line.Text, x, baseline, paint);
         }
     }
+
+    /// <summary>
+    /// The distance from the top of <paramref name="bounds"/> to the baseline of the first line of a
+    /// block laid out in it, which is where <see cref="Draw"/> paints that line.
+    /// </summary>
+    /// <param name="bounds">The box the text is laid out and aligned in.</param>
+    /// <param name="font">The font the block is drawn with.</param>
+    /// <param name="lineCount">How many lines the block has been laid out into.</param>
+    /// <param name="alignment">
+    /// Where the block sits in the box, both horizontally and vertically. The default puts it against
+    /// the middle of the left edge.
+    /// </param>
+    /// <returns>The baseline of the first line, in the coordinates of <paramref name="bounds"/>.</returns>
+    /// <remarks>
+    /// <see cref="Draw"/> takes the first line's baseline from here and steps down by the font's line
+    /// height for each line after it, so a caller that asks this question gets the number the ink is
+    /// actually drawn at rather than a second piece of arithmetic that can drift from it. A control
+    /// that reports its baseline to a container uses this, which is what keeps a baseline-aligned row
+    /// aligned with the glyphs rather than with the box.
+    /// </remarks>
+    public static float GetBlockBaseline(SKRect bounds, Font font, int lineCount, ContentAlignment alignment) =>
+        GetBlockTop(bounds, font, lineCount, alignment) + font.BaselineOffset;
 
     /// <summary>Top of the text block inside <paramref name="bounds" /> for the given alignment.</summary>
     public static float GetBlockTop(SKRect bounds, Font font, int lineCount, ContentAlignment alignment)
