@@ -2946,8 +2946,8 @@ default.** `DefaultFont`, `DefaultForeColor` and `DefaultBackColor` are the clas
 
 | Member | Meaning |
 | --- | --- |
-| `Font` | The font assigned here, or `PropertyValue.Inherited` |
-| `EffectiveFont` | The resolved font: assigned here, else the nearest ancestor's, else `DefaultFont` |
+| `Font` | The font assigned here - a `Font`, a partial `FontOverride`, or `PropertyValue.Inherited` |
+| `EffectiveFont` | The resolved font: assigned here (with any override composed onto what it inherits), else the nearest ancestor's, else `DefaultFont` |
 | `DefaultFont` | The font a control of this class draws with when nothing else answers; the base control returns `Theme.DefaultFont`, a button and a group box `EmphasizedFont` |
 | `ForeColor` | The text colour assigned here: an `SKColor`, a `ThemeColor` role, or `PropertyValue.Inherited` |
 | `EffectiveForeColor` | The resolved text colour, as an `SKColor`; a role is read from the current palette |
@@ -2955,6 +2955,33 @@ default.** `DefaultFont`, `DefaultForeColor` and `DefaultBackColor` are the clas
 | `BackColor` | The background assigned here: an `SKColor`, a `ThemeColor` role, or `PropertyValue.Inherited` |
 | `EffectiveBackColor` | The resolved background colour, as an `SKColor`; `SKColors.Transparent` means nothing is painted |
 | `DefaultBackColor` | What a control of this class paints when nothing else answers; the base is `SKColors.Transparent`, a field `InputBackground`, a tab control or a panel that looks like a card `Surface` |
+
+A font can be assigned in part as well, which is the one thing a complete `Font` cannot express: a
+`Font` always names its family, so `Theme.DefaultFont.WithSize(14f)` stops inheriting the parent
+chain. `InheritedFont` starts a `FontOverride` - the members it names replace the inherited ones and
+the members it leaves alone keep them:
+
+```csharp
+var panel = new Panel { Font = new Font("Inter", 12f) };
+panel.Controls.Add(new Label("12 pt in Inter, inherited"));
+
+var section = new Panel { Font = InheritedFont.WithSize(18f) };       // Inter, at 18
+section.Controls.Add(new Label("18 pt in Inter"));
+
+var footer = new Label("18 pt and bold, in Inter")
+{
+    Font = InheritedFont.WithWeight(700),                              // the parent's 18, plus bold
+};
+section.Controls.Add(footer);
+```
+
+The members chain - `InheritedFont.WithSize(14f).WithItalic(true)` - and overrides compose down the
+tree, so each level keeps what it inherited and changes only what it names. A null argument leaves
+that member inherited and is how a chain is narrowed again; `string.Empty` is the platform's default
+family and `0f` is a real size, exactly as they are on a `Font`. `EffectiveFont` is where the
+composition happens and what it returns is a complete `Font`, so
+`control.EffectiveFont.WithSize(...)` remains the way to derive from a font that is in hand.
+Assigning compares by value, so a render that rebuilds the same override invalidates nothing.
 
 Assigning `PropertyValue.Inherited` is how a control goes back to inheriting; there are no
 `ClearFont`, `ClearForeground` or `ClearBackground` methods:
@@ -3040,11 +3067,12 @@ and properties they replace.
 
 The demo's appearance page - `--page inherited-appearance` - puts a panel that assigns a font, a
 foreground colour and a background role on screen, with what its children make of them, one label that
-overrides both, and a label that paints nothing in front of a panel that does. Its buttons change the
+overrides both, a chain of three partial font overrides that composes down the tree, and a label that
+paints nothing in front of a panel that does. Its buttons change the
 panel's font and the theme's face on a live tree; `--appearance-change` makes the same two changes
 before a `--render` writes the frame, so the page can be screenshotted before and after it.
-`Kolvir.Tests`' `InheritedAppearanceTests` runs the same resolution rules headlessly, one test per
-rule, through the headless backend.
+`Kolvir.Tests`' `InheritedAppearanceTests` and `FontOverrideTests` run the same resolution rules
+headlessly, one test per rule, through the headless backend.
 
 ### Fonts
 

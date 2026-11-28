@@ -13,9 +13,11 @@ colour-or-role pairs joined them: `TextSpan.ForeColor` / `HoverBackColor`, `Text
 `SimpleBorder`'s edges. The last single-property colours are unions too: `Toast.BarColor`,
 `SplitContainer.SplitterColor`, `Image.PlaceholderColor`, `Caret.Color`, `UiHost.ClearColor` and
 `Window.CaptionColor` / `BorderColor` - see section 12. `ColorPicker.Color` is deliberately not
-one: it is the colour the user picks, application data rather than a theme choice. The union
-types have Roslyn diagnostics for the invalid shapes the compiler accepts - see
-[ANALYZERS.md](ANALYZERS.md).
+one: it is the colour the user picks, application data rather than a theme choice. `Control.Font`
+and `ToolStripItem.Font` have since grown a third case, `FontOverride`, which makes the arity-3
+type the one those two use while every other appearance property stays arity 2 or 3 as listed in
+section 10. The union types have Roslyn diagnostics for the invalid shapes the compiler accepts -
+see [ANALYZERS.md](ANALYZERS.md).
 
 ---
 
@@ -181,10 +183,11 @@ in each case:
 
 | Property | Union |
 | --- | --- |
-| `Control.Font` | `Union<Font, InheritedValue>` |
+| `Control.Font` | `Union<Font, FontOverride, InheritedValue>` |
 | `Control.ForeColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
 | `Control.BackColor` | `Union<SKColor, ThemeColor, InheritedValue>` |
 | `Control.Enabled` | `Union<bool, InheritedValue>` |
+| `ToolStripItem.Font` | `Union<Font, FontOverride, InheritedValue>` |
 
 The property reports the assignment. The get-only `EffectiveFont` / `EffectiveForeColor` /
 `EffectiveBackColor` resolves it: the value assigned here, else the nearest ancestor that assigned
@@ -192,6 +195,13 @@ one, else the class default (`DefaultFont` / `DefaultForeColor` / `DefaultBackCo
 field is initialised to `PropertyValue.Inherited`, so "never assigned" reads back as Inherit; a
 `default` union is refused by `ThrowIfUnspecified()` in the `Effective*` getter rather than being
 treated as inherit.
+
+The font's middle case is a partial description (`FontOverride`), which is the one place a union
+case is not a complete value: it composes onto the inherited `Font` in `EffectiveFont` and returns a
+complete one. That is why the font properties carry an arity-3 union with two reference cases and
+the colour properties do not; section 5 of [FONTS.md](FONTS.md) is the design, and the note's
+section 9 is the one compatibility break - an exhaustive `Switch`/`Match` over `Control.Font` gains
+an arm.
 
 `Control.Enabled` is the same shape with one difference: `EffectiveEnabled` ANDs the local answer
 down the chain rather than taking the nearest assignment, because disabling a container disables

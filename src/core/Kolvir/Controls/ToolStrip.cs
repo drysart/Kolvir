@@ -21,7 +21,7 @@ public enum ToolStripItemAlignment
 public abstract class ToolStripItem
 {
     private string _text = string.Empty;
-    private Union<Font, InheritedValue> _font = PropertyValue.Inherited;
+    private Union<Font, FontOverride, InheritedValue> _font = PropertyValue.Inherited;
     private bool _enabled = true;
     private bool _visible = true;
     private bool _spring;
@@ -48,17 +48,20 @@ public abstract class ToolStripItem
     }
 
     /// <summary>
-    /// The font assigned to this item: a <see cref="Font"/>, or
-    /// <see cref="PropertyValue.Inherited"/> to take its strip's effective font.
+    /// The font assigned to this item: a <see cref="Font"/>, a <see cref="FontOverride"/> that changes
+    /// part of the inherited font, or <see cref="PropertyValue.Inherited"/> to take its strip's
+    /// effective font.
     /// </summary>
     /// <remarks>
     /// The item's font is resolved through the same chain a control's is, with the strip as the
     /// parent: its own assignment, then its strip's <see cref="Control.EffectiveFont"/>, then
     /// <see cref="Theme.DefaultFont"/>. Read <see cref="EffectiveFont"/> for that answer; this
-    /// property reports only what was assigned here.
+    /// property reports only what was assigned here. An override composes onto the strip's effective
+    /// font, so an item inherits what the strip resolved - overrides included - and changes what it
+    /// names. Assigning compares by value, so an equal-but-new override is a no-op.
     /// </remarks>
-    /// <exception cref="ArgumentNullException">A null <see cref="Font"/> was assigned.</exception>
-    public Union<Font, InheritedValue> Font
+    /// <exception cref="ArgumentNullException">A null <see cref="Font"/> or <see cref="FontOverride"/> was assigned.</exception>
+    public Union<Font, FontOverride, InheritedValue> Font
     {
         get => _font;
         set
@@ -66,6 +69,10 @@ public abstract class ToolStripItem
             if (value.TryGetValue<Font>(out var font))
             {
                 ArgumentNullException.ThrowIfNull(font);
+            }
+            else if (value.TryGetValue<FontOverride>(out var fontOverride))
+            {
+                ArgumentNullException.ThrowIfNull(fontOverride);
             }
 
             if (_font.Equals(value))
@@ -79,6 +86,12 @@ public abstract class ToolStripItem
     }
 
     /// <summary>The font this item draws with, after inheritance from its strip.</summary>
+    /// <remarks>
+    /// An override is composed when this is read rather than cached, because its base - the strip's
+    /// effective font - is itself read when this is read. A strip is a handful of items, so the one
+    /// small description per read is cheaper than a cache that would have to be told about the
+    /// strip's font changing.
+    /// </remarks>
     /// <exception cref="InvalidOperationException">
     /// <see cref="Font"/> was assigned <c>default</c>, so it holds no case.
     /// </exception>
@@ -88,9 +101,16 @@ public abstract class ToolStripItem
         {
             _font.ThrowIfUnspecified();
 
-            return _font.TryGetValue<Font>(out var local)
-                ? local
-                : Owner?.EffectiveFont ?? Theme.DefaultFont;
+            if (_font.TryGetValue<Font>(out var local))
+            {
+                return local;
+            }
+
+            var inherited = Owner?.EffectiveFont ?? Theme.DefaultFont;
+
+            return _font.TryGetValue<FontOverride>(out var fontOverride)
+                ? fontOverride.Compose(inherited)
+                : inherited;
         }
     }
 

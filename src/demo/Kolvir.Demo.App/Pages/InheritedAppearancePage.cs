@@ -21,14 +21,18 @@ internal sealed class InheritedAppearancePage : DemoPage
     private Label? _appearanceLabel;
     private Label? _appearanceOverrides;
     private Label? _appearanceReadout;
+    private Control? _appearanceChainSize;
+    private Control? _appearanceChainWeight;
+    private Control? _appearanceChainAgain;
     private Font? _appearanceSubtreeFont;
     private Font? _appearanceBigFont;
 
     /// <summary>
     /// The inherited appearance page: one panel that assigns a font and a foreground, what its
-    /// descendants make of it, one control that overrides both inside the subtree, and a label that
-    /// paints nothing on top of an ancestor that does. The buttons change the appearance of a live
-    /// tree - the panel's font, or the whole theme's face - and the text re-lays itself out.
+    /// descendants make of it, one control that overrides both inside the subtree, a chain of three
+    /// partial font overrides that compose down the tree, and a label that paints nothing on top of
+    /// an ancestor that does. The buttons change the appearance of a live tree - the panel's font,
+    /// or the whole theme's face - and the text re-lays itself out.
     /// </summary>
     private Panel Build()
     {
@@ -43,7 +47,9 @@ internal sealed class InheritedAppearancePage : DemoPage
             "Font, foreground and background are inherited down the tree, the way they are in WinForms. " +
             "A control that assigns one answers for itself and for everything inside it; one that " +
             "assigns none asks its parent and then falls back to its class default. Nothing is captured " +
-            "when a control is built, so changing the theme - or one panel's font - moves a live tree.")
+            "when a control is built, so changing the theme - or one panel's font - moves a live tree. " +
+            "A font can be assigned in part as well: InheritedFont.WithSize names one member and keeps " +
+            "the rest, which is how the panel's last three labels go 20, then 20 bold, then 12 bold.")
         {
             Dock = XDock.Top,
             AutoSize = false,
@@ -116,7 +122,7 @@ internal sealed class InheritedAppearancePage : DemoPage
         var stage = new SurfacePanel
         {
             Dock = XDock.Top,
-            Height = 214f,
+            Height = 268f,
             Padding = new Thickness(12f, 8f),
             Border = Framed(8f),
             Font = _appearanceSubtreeFont,
@@ -176,10 +182,49 @@ internal sealed class InheritedAppearancePage : DemoPage
             Margin = new Thickness(0f, 6f, 0f, 0f),
         };
 
+        // Three levels of override, each one nested inside the level above so it composes onto what
+        // that level resolved rather than onto the panel's 14 pt: 20 pt, then bold at 20 pt, then
+        // back to 12 pt and still bold. Nothing here names a family, so the panel's family and
+        // colour travel all the way down.
+        var first = new Panel { Dock = XDock.Top, Height = 78f, Padding = new Thickness(0f) };
+        first.Font = InheritedFont.WithSize(20f);
+        first.Controls.Add(new Label("InheritedFont.WithSize(20f) - 20 pt, the panel's family and colour")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 28f,
+        });
+        _appearanceChainSize = first;
+
+        var second = new Panel { Dock = XDock.Top, Height = 50f, Padding = new Thickness(0f) };
+        second.Font = InheritedFont.WithWeight(700);
+        second.Controls.Add(new Label("...then WithWeight(700) - still 20 pt, now bold")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 28f,
+        });
+        _appearanceChainWeight = second;
+
+        var third = new Label("...then WithSize(12f) - 12 pt and still bold")
+        {
+            Dock = XDock.Top,
+            AutoSize = false,
+            Height = 22f,
+        };
+        third.Font = InheritedFont.WithSize(12f);
+        _appearanceChainAgain = third;
+
+        // The chain is a control tree, not a list: the second level is inside the first, and the
+        // third is inside the second, which is what makes the composition go down the tree.
+        second.Controls.Add(third);
+        first.Controls.Add(second);
+
         stage.Controls.Add(inherited);
         stage.Controls.Add(nested);
         stage.Controls.Add(overrides);
         stage.Controls.Add(button);
+        stage.Controls.Add(first);
         card.Controls.Add(stage);
 
         card.Controls.Add(new Label(
@@ -188,12 +233,11 @@ internal sealed class InheritedAppearancePage : DemoPage
             "- a label, a plain panel - paints nothing wherever it sits, because that default stops " +
             "the walk rather than inheriting; an assigned transparent, by contrast, is an ordinary " +
             "colour and does answer for descendants.\n\n" +
-            "Nothing here is captured at construction. The effective font, text colour and background " +
-            "are read when the control is measured and painted; what the parent chain contributes is " +
-            "walked once and cached, and dropped when an ancestor assigns a value or a control changes " +
-            "parent. Palette roles are resolved when read, so a palette swap is still just a repaint - " +
-            "but a font is the size of the text, so a font change lays the tree out again before the " +
-            "next frame.")
+            "Nothing here is captured at construction: the effective font, colour and background are " +
+            "read when the control is measured and painted. What the parent chain contributes is walked " +
+            "once and cached, and dropped when an ancestor assigns a value or a control changes parent. " +
+            "Palette roles are resolved when they are read, so a palette swap is a repaint; a font " +
+            "change re-runs layout.")
         {
             Dock = XDock.Fill,
             AutoSize = false,
@@ -258,10 +302,17 @@ internal sealed class InheritedAppearancePage : DemoPage
             $"panel: {Describe(_appearanceStage)}   |   " +
             $"inherited label: {Describe(_appearanceInherited)}   |   " +
             $"nested panel: {Describe(_appearanceNested)}\n" +
-            $"label that paints nothing: {Describe(_appearanceLabel)}\n" +
-            $"override inside the subtree: {Describe(_appearanceOverrides)}   |   " +
+            $"label that paints nothing: {Describe(_appearanceLabel)}   |   " +
             $"inherited label text: {S(_appearanceInherited is { } label ? label.EffectiveFont.MeasureWidth(label.Text) : null)} px wide, " +
-            $"{S(_appearanceInherited?.EffectiveFont.LineHeight)} px line height";
+            $"{S(_appearanceInherited?.EffectiveFont.LineHeight)} px line height\n" +
+            $"override inside the subtree: {Describe(_appearanceOverrides)}   |   override chain: " +
+            $"{DescribeFont(_appearanceChainSize)} | {DescribeFont(_appearanceChainWeight)} | {DescribeFont(_appearanceChainAgain)}";
+
+        static string DescribeFont(Control? control) =>
+            control is null
+                ? "-"
+                : $"{control.EffectiveFont.Size:0.#} pt w{control.EffectiveFont.Weight}" +
+                  (control.EffectiveFont.Italic ? " italic" : string.Empty);
 
         static string Describe(Control? control)
         {

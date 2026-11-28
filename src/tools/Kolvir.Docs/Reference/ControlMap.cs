@@ -41,7 +41,7 @@ internal static class ControlMap
     /// <summary>Every page the reference generates.</summary>
     internal static IReadOnlyList<ControlEntry> Entries { get; } =
     [
-        new("Control", Demo: "relative-sizing"),
+        new("Control", Demo: "relative-sizing", Related: ["FontOverride", "InheritedFont"]),
         new("Panel", Demo: null),
         new("ToggleControl", "check-boxes-and-radios"),
         new("BusyIndicator", "busy-indicator-and-overlay"),
